@@ -29,6 +29,7 @@ export interface RecallQueryDemand {
 
 export interface CompileRecallQueryDemandOptions {
   readonly soughtFacets?: readonly string[];
+  readonly sourceExactLexicalTerms?: readonly string[];
 }
 
 export function compileRecallQueryDemand(
@@ -40,12 +41,43 @@ export function compileRecallQueryDemand(
     ...orderingAtoms(text),
     ...probes.date_terms.map((term) => demandAtom("temporal", normalize(term), "core")),
     ...lexicalDemandAtoms(probes),
+    ...sourceExactLexicalDemandAtoms(options.sourceExactLexicalTerms ?? []),
     ...structuralDemandAtoms(probes, options.soughtFacets ?? [])
   ];
+  return freezeDemand(atoms);
+}
+
+export function extendRecallQueryDemandWithSourceExactLexicalTerms(
+  demand: Readonly<RecallQueryDemand>,
+  terms: readonly string[]
+): Readonly<RecallQueryDemand> {
+  if (demand.schema_version !== 1) {
+    throw new Error("recall query demand schema mismatch");
+  }
+  return freezeDemand([
+    ...demand.atoms,
+    ...sourceExactLexicalDemandAtoms(terms)
+  ]);
+}
+
+function freezeDemand(
+  atoms: readonly Readonly<RecallQueryDemandAtom>[]
+): Readonly<RecallQueryDemand> {
   const unique = new Map(atoms.map((atom) => [atom.id, atom]));
   return Object.freeze({
     schema_version: 1,
     atoms: Object.freeze([...unique.values()])
+  });
+}
+
+function sourceExactLexicalDemandAtoms(
+  terms: readonly string[]
+): readonly RecallQueryDemandAtom[] {
+  return terms.flatMap((term) => {
+    const normalized = normalize(term);
+    return normalized.length === 0
+      ? []
+      : [demandAtom("lexical_term", normalized, "supporting")];
   });
 }
 

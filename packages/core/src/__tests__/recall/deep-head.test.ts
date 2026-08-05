@@ -95,7 +95,7 @@ function emptySupplementary(overrides: {
   return {
     queryProbes: compileRecallQueryProbes(null),
     embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
-    evidenceSemanticScoresByCandidateKey: new Map<string, number>(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     ftsRanks: overrides.ftsRanks ?? {},
     trigramFtsRanks: overrides.trigramFtsRanks ?? {},
     evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},
@@ -128,6 +128,15 @@ describe("deep head", () => {
     expect(trace.evidence_agreement).toBeCloseTo(0.5);
     expect(trace.resolved_evidence).toBeCloseTo(0.9);
     expect(trace.embedding_signal).toBeCloseTo(0.4);
+    expect(trace.activation).toMatchObject({
+      schema_version: 1,
+      operator_id: "candidate_semantic_max_v1",
+      state: "observed",
+      score: 0.4,
+      winner: { channel: "effective_factor", score: 0.4 },
+      missing_channel_policy: "no_op"
+    });
+    expect(trace.formula_operator_id).toBe("lightweight_deep_head_prob_or_v1");
     expect(trace.fusion_baseline_used).toBe(false);
     expect(trace.score_source).toBe("embedding_evidence");
     expect(trace.resolved_score).toBeCloseTo(0.94);
@@ -182,7 +191,7 @@ describe("deep head", () => {
       .toBe(trace.resolved_score);
   });
 
-  it("marks an inactive lightweight head without inventing a score", () => {
+  it("activates a source-bound field baseline without inventing embedding evidence", () => {
     const candidate = fusedCandidate({
       objectId: "inactive",
       fusedScore: 0.2,
@@ -196,9 +205,11 @@ describe("deep head", () => {
     });
     const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
 
-    expect(assessment.scores.size).toBe(0);
-    expect(trace.score_source).toBe("inactive");
-    expect(trace.resolved_score).toBeNull();
+    expect(assessment.scores.size).toBe(1);
+    expect(trace.score_source).toBe("field_baseline");
+    expect(trace.fusion_baseline_used).toBe(true);
+    expect(trace.embedding_signal).toBeNull();
+    expect(trace.resolved_score).toBeCloseTo(0.2);
   });
 
   it("scores every candidate in the already-pruned waist", () => {
@@ -591,9 +602,9 @@ describe("deep head", () => {
       .toEqual(["lexical-peer", "path-seed", "lexical-rescue", "conflict-only"]);
   });
 
-  it("is a no-op when emb and agreement are both cold (fused order binds)", () => {
-    // Without emb or corroboration the deep head has no signal orthogonal to
-    // fusion; rescoring would demote path-only candidates that fusion admitted.
+  it("keeps field-only baselines in the existing fused order", () => {
+    // A field baseline is now part of the shared composition. With no other
+    // channel it is an order-preserving identity, including path-only hits.
     const pathOnly = fusedCandidate({
       objectId: "path-only",
       fusedScore: 0.07,
@@ -616,7 +627,10 @@ describe("deep head", () => {
       [lexicalHead, pathOnly, lexicalTail],
       emptySupplementary()
     );
-    expect(scores.size).toBe(0);
+    expect(scores.size).toBe(3);
+    expect(scores.get(lexicalHead.fusion.candidate_key)).toBeCloseTo(0.09);
+    expect(scores.get(pathOnly.fusion.candidate_key)).toBeCloseTo(0.07);
+    expect(scores.get(lexicalTail.fusion.candidate_key)).toBeCloseTo(0.05);
 
     const result = applyDeliverySelection([lexicalHead, pathOnly, lexicalTail], scores, {
       replacePublicRelevance: false

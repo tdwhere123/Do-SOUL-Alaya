@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
   buildAttributedAssociativeFactKeyProjections,
   buildAssociativeFactKeyProjections,
+  evidenceFactFrameFormationCapturePreimage,
+  verifyEvidenceFactFrameFormationCapture,
   groundAssociativeFactFrame
 } from "../../soul/associative-fact-frame.js";
 
@@ -70,4 +74,38 @@ describe("associative fact frame", () => {
       ]
     }, "I often work on Fridays.")).toBeNull();
   });
+
+  it("binds a formation capture digest to status, source, producer, and slots", () => {
+    const body = {
+      schema_version: 1 as const,
+      operator_id: EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
+      status: "formed" as const,
+      producer_operator_id: "formation_parser_v1",
+      source_hash: "sha256:source",
+      fact_frame: {
+        schema_version: 1 as const,
+        slots: [
+          { role: "subject" as const, text: "I" },
+          { role: "relation" as const, text: "use" },
+          { role: "value" as const, text: "Atlas" }
+        ]
+      }
+    };
+    const capture = {
+      ...body,
+      capture_digest: `sha256:${sha256(
+        evidenceFactFrameFormationCapturePreimage(body)
+      )}`
+    };
+
+    expect(verifyEvidenceFactFrameFormationCapture(capture, sha256)).toEqual(capture);
+    expect(() => verifyEvidenceFactFrameFormationCapture({
+      ...capture,
+      source_hash: "sha256:other"
+    }, sha256)).toThrow(/digest mismatch/u);
+  });
 });
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}

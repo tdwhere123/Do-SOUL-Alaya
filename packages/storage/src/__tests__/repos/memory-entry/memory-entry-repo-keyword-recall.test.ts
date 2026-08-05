@@ -8,6 +8,7 @@ import {
   trackedDatabases
 } from "./memory-entry-repo-fixture.js";
 import { removeTempDirectorySync } from "../../temp-directory.js";
+import { StorageError } from "../../../shared/errors.js";
 
 const databases = trackedDatabases;
 
@@ -44,6 +45,75 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
         normalized_rank: 1
       })
     ]);
+  });
+
+  it("exposes stable field lane prefixes with an explicit truncation bound", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createMemoryEntry({
+      object_id: "66666666-1111-4111-8111-111111111111",
+      content: "Stable review evidence needs exact witness lines."
+    }));
+    await repo.create(createMemoryEntry({
+      object_id: "77777777-2222-4222-8222-222222222222",
+      content: "Stable review evidence matters more."
+    }));
+
+    const field = await repo.searchByKeywordField!("workspace-1", "stable", 1);
+    const lanes = field.lanes;
+    const porter = lanes.find((lane) => lane.lane === "porter");
+
+    expect(porter).toMatchObject({
+      status: "truncated",
+      depth: 1,
+      unseen_upper_bound: 1
+    });
+    expect(porter?.observations).toHaveLength(1);
+    expect(porter?.observations[0]?.rank).toBe(1);
+    expect(porter?.observations[0]?.normalized_rank).toBe(1);
+    expect(field.matches).toEqual(await repo.searchByKeyword("workspace-1", "stable", 1));
+    expect(lanes.find((lane) => lane.lane === "exact")?.status).toBe("ineligible");
+  });
+
+  it("derives deeper field levels from one ordered observation without widening base matches", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      content: "Identical refinement witness."
+    }));
+    await repo.create(createMemoryEntry({
+      object_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      content: "Identical refinement witness."
+    }));
+
+    const field = await repo.searchByKeywordField!(
+      "workspace-1", "identical", 1, {}, [2]
+    );
+    const basePorter = field.lanes.find(({ lane }) => lane === "porter")!;
+    const deeper = field.refinement_levels?.[0];
+    const deepPorter = deeper?.lanes.find(({ lane }) => lane === "porter");
+
+    expect(field.matches.map(({ object_id }) => object_id)).toEqual([
+      "11111111-1111-4111-8111-111111111111"
+    ]);
+    expect(deeper?.matches.map(({ object_id }) => object_id)).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+    expect(deepPorter?.observations.slice(0, 1).map(({ object_id }) => object_id))
+      .toEqual(basePorter.observations.map(({ object_id }) => object_id));
+    expect(basePorter.observations[0]?.normalized_rank).toBe(1);
+    expect(deepPorter?.observations[0]?.normalized_rank).toBe(0.75);
+  });
+
+  it("maps invalid field refinement depths to a validation storage error", async () => {
+    const { repo } = await createRepo();
+
+    await expect(repo.searchByKeywordField!("workspace-1", "identical", 1, {}, [1]))
+      .rejects.toMatchObject({
+        name: "StorageError",
+        code: "VALIDATION_FAILED"
+      } satisfies Partial<StorageError>);
   });
 
   it("normalizes bm25-ordered rows into a meaningful ordinal ladder", async () => {
@@ -156,6 +226,14 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
         normalized_rank: 1
       }
     ]);
+    await expect(repo.searchByKeywordField!("workspace-1", "go", 2, {
+      objectIds: ["99999999-9999-4999-8999-999999999999"]
+    })).resolves.toMatchObject({
+      matches: [{
+        object_id: "99999999-9999-4999-8999-999999999999",
+        normalized_rank: 1
+      }]
+    });
   });
 
   it("scopes keyword search by storage tier without an object-id list", async () => {
@@ -182,6 +260,13 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
     ).resolves.toEqual([
       expect.objectContaining({ object_id: "22222222-2222-4222-8222-222222222222" })
     ]);
+    await expect(repo.searchByKeywordField!("workspace-1", "needle", 5, {
+      tier: "warm"
+    })).resolves.toMatchObject({
+      matches: [expect.objectContaining({
+        object_id: "22222222-2222-4222-8222-222222222222"
+      })]
+    });
   });
 
   it("reopens tier-scoped long-token, short-token, and anchor searches", async () => {
@@ -210,6 +295,11 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
     await expect(
       repo.searchByAnchorWithinTier!("workspace-1", ["melanie"], ["needle"], 5, "warm")
     ).resolves.toEqual([expect.objectContaining({ object_id: memory.object_id })]);
+    await expect(repo.searchByAnchorField!(
+      "workspace-1", ["melanie"], ["needle"], 5, { tier: "warm" }
+    )).resolves.toMatchObject({
+      matches: [expect.objectContaining({ object_id: memory.object_id })]
+    });
 
     trackedDatabases.delete(database);
     removeTempDirectorySync(tempDir, [database]);

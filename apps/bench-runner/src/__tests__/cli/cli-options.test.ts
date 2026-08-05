@@ -40,13 +40,15 @@ describe("parseFlags", () => {
       "--extraction-cache-root=/tmp/cache",
       "--promotion-contract=/tmp/promotion.json",
       "--experiment",
+      "--backfill-missing-fact-frame-formations",
       "--r3-spend-approval=/tmp/r3-spend-approval.json",
       "--legacy-snapshot",
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
       `--legacy-dataset-sha256=${"b".repeat(64)}`,
       "--concurrency=4",
       "--extraction-initial-concurrency=8",
-      "--question-batch-limit=100"
+      "--question-batch-limit=100",
+      "--tolerate-provider-task-failures"
     ]);
 
     expect(parsed.embeddingMode).toBe("env");
@@ -62,6 +64,7 @@ describe("parseFlags", () => {
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
     expect(parsed.promotionContract).toBe("/tmp/promotion.json");
     expect(parsed.experiment).toBe(true);
+    expect(parsed.backfillMissingFactFrameFormations).toBe(true);
     expect(parsed.r3SpendApproval).toBe("/tmp/r3-spend-approval.json");
     expect(parsed.legacySnapshot).toBe(true);
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
@@ -69,6 +72,7 @@ describe("parseFlags", () => {
     expect(parsed.concurrency).toBe(4);
     expect(parsed.extractionInitialConcurrency).toBe(8);
     expect(parsed.questionBatchLimit).toBe(100);
+    expect(parsed.tolerateProviderTaskFailures).toBe(true);
   });
 
   it("rejects invalid enumerated options", () => {

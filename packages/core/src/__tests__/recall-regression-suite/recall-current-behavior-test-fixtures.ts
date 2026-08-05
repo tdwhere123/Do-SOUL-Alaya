@@ -16,6 +16,8 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import { fieldSearchFromScalar } from
+  "../recall/fixtures/keyword-field-fixture.js";
 
 export const WS = "workspace-regression";
 export const NOW = "2026-05-18T00:00:00.000Z";
@@ -121,6 +123,9 @@ export function deps(
         findByScopeClass: async (_workspaceId, scopeClass) =>
           memories.filter((entry) => entry.scope_class === scopeClass),
         searchByKeyword: options.searchByKeyword,
+        searchByKeywordField: options.searchByKeyword === undefined
+          ? undefined
+          : fieldSearchFromScalar(options.searchByKeyword),
         findByEvidenceRefs: async (_workspaceId, evidenceObjectIds) =>
           memories.filter((entry) =>
             entry.evidence_refs.some((ref) => evidenceObjectIds.includes(ref))
@@ -152,9 +157,19 @@ export function deps(
             }),
       embeddingRecallService: options.embeddingRecallService,
       pathExpansionPort: options.pathExpansionPort,
-      evidenceSearchPort: options.evidenceSearchPort
+      evidenceSearchPort: withEvidenceFieldPort(options.evidenceSearchPort)
     }
   };
+}
+
+function withEvidenceFieldPort(
+  port: RecallServiceDependencies["evidenceSearchPort"]
+): RecallServiceDependencies["evidenceSearchPort"] {
+  if (port === undefined || port.searchByKeywordField !== undefined) return port;
+  return Object.freeze({
+    ...port,
+    searchByKeywordField: fieldSearchFromScalar(port.searchByKeyword.bind(port))
+  });
 }
 
 export function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {

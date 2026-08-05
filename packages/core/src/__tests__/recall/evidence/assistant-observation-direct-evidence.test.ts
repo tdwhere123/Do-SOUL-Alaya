@@ -14,6 +14,11 @@ import {
   createDependencies,
   createTaskSurface
 } from "../recall-8factor-test-fixtures.js";
+import {
+  fieldSearchFromScalar,
+  keywordFieldResult,
+  keywordSearchMethods
+} from "../fixtures/keyword-field-fixture.js";
 
 const EVIDENCE_ID = "00000000-0000-4000-8000-000000000101";
 
@@ -51,7 +56,7 @@ describe("Assistant observation direct evidence", () => {
         findByIds: vi.fn(async () => [])
       },
       evidenceSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           {
             object_id: EVIDENCE_ID,
             normalized_rank: 0.95,
@@ -60,7 +65,7 @@ describe("Assistant observation direct evidence", () => {
               projection_kind: "assistant_observation"
             }
           }
-        ]),
+        ])),
         findRecallQualifiedByIds
       }
     });
@@ -119,10 +124,10 @@ describe("Assistant observation direct evidence", () => {
         findByIds: vi.fn(async () => [])
       },
       evidenceSearchPort: {
-        searchByKeyword: vi.fn(async () => [{
+        ...keywordSearchMethods(vi.fn(async () => [{
           object_id: EVIDENCE_ID,
           normalized_rank: 0.95
-        }]),
+        }])),
         findRecallQualifiedByIds: vi.fn(async () => [{
           capsule: evidence,
           verified_user_projection: false
@@ -162,22 +167,24 @@ describe("Assistant observation direct evidence", () => {
       }
     };
     const findRecallQualifiedByIds = vi.fn(async () => [qualified]);
-    const searchManyByKeyword = vi.fn(async (
+    const searchManyByKeywordField = vi.fn(async (
       _workspaceId: string,
       queries: readonly unknown[]
-    ) => queries.map((_query, index) => [{
-      object_id: EVIDENCE_ID,
-      normalized_rank: 0.95,
-      ...(index === 0 ? {} : {
-        matched_projection: {
-          projection_id: 1,
-          projection_kind: "assistant_observation" as const
-        }
-      })
-    }]));
+    ) => queries.map((_query, index) => keywordFieldResult([{
+        object_id: EVIDENCE_ID,
+        normalized_rank: 0.95,
+        ...(index === 0 ? {} : {
+          matched_projection: {
+            projection_id: 1,
+            projection_kind: "assistant_observation" as const
+          }
+        })
+      }])));
+    const scalarSearch = vi.fn(async () => []);
     const service = createEvidenceService({
-      searchByKeyword: vi.fn(async () => []),
-      searchManyByKeyword,
+      searchByKeyword: scalarSearch,
+      searchByKeywordField: fieldSearchFromScalar(scalarSearch),
+      searchManyByKeywordField,
       findRecallQualifiedByIds
     });
 
@@ -189,7 +196,7 @@ describe("Assistant observation direct evidence", () => {
       strategy: "build"
     });
 
-    expect(searchManyByKeyword.mock.calls[0]?.[1].length).toBeGreaterThan(1);
+    expect(searchManyByKeywordField.mock.calls[0]?.[1].length).toBeGreaterThan(1);
     expect(findRecallQualifiedByIds.mock.calls[0]?.[1]).toEqual([
       { object_id: EVIDENCE_ID },
       {
@@ -227,22 +234,24 @@ describe("Assistant observation direct evidence", () => {
             content: recommendation
           }
         }));
-    const searchManyByKeyword = vi.fn(async (
+    const searchManyByKeywordField = vi.fn(async (
       _workspaceId: string,
       queries: readonly unknown[]
-    ) => queries.map((_query, index) => [{
-      object_id: EVIDENCE_ID,
-      normalized_rank: index === 0 ? 0.96 : 0.95,
-      ...(index === 0 ? {} : {
-        matched_projection: {
-          projection_id: 1,
-          projection_kind: "assistant_observation" as const
-        }
-      })
-    }]));
+    ) => queries.map((_query, index) => keywordFieldResult([{
+        object_id: EVIDENCE_ID,
+        normalized_rank: index === 0 ? 0.96 : 0.95,
+        ...(index === 0 ? {} : {
+          matched_projection: {
+            projection_id: 1,
+            projection_kind: "assistant_observation" as const
+          }
+        })
+      }])));
+    const scalarSearch = vi.fn(async () => []);
     const service = createEvidenceService({
-      searchByKeyword: vi.fn(async () => []),
-      searchManyByKeyword,
+      searchByKeyword: scalarSearch,
+      searchByKeywordField: fieldSearchFromScalar(scalarSearch),
+      searchManyByKeywordField,
       findRecallQualifiedByIds
     });
 
@@ -274,14 +283,14 @@ describe("Assistant observation direct evidence", () => {
       throw new Error("fallback must not mask projection integrity");
     });
     const service = createEvidenceService({
-      searchByKeyword: vi.fn(async () => [{
+      ...keywordSearchMethods(vi.fn(async () => [{
         object_id: EVIDENCE_ID,
         normalized_rank: 1,
         matched_projection: {
           projection_id: 1,
           projection_kind: "assistant_observation"
         }
-      }]),
+      }])),
       findRecallQualifiedByIds: vi.fn(async () => {
         throw integrityError;
       })

@@ -3,6 +3,8 @@ import type {
   HealthJournalRecordPort,
   MemoryEntry
 } from "@do-soul/alaya-protocol";
+import type { RecallFiniteFieldChannelCapture } from
+  "../recall/field/finite-field-capture.js";
 
 export interface EmbeddingVectorRecord {
   readonly object_id: string;
@@ -242,10 +244,9 @@ export type EvidenceCandidateScoringFailureClass =
   | "service_error";
 
 export interface EvidenceCandidateScoringResult {
-  readonly scores: ReadonlyMap<string, number>;
-  readonly winnersByCandidateKey: ReadonlyMap<
+  readonly activationsByCandidateKey: ReadonlyMap<
     string,
-    Readonly<EvidenceCandidateScoringWinner>
+    Readonly<EvidenceCandidateScoringReceipt>
   >;
   readonly status: EvidenceCandidateScoringStatus;
   readonly expectedCount: number;
@@ -253,12 +254,24 @@ export interface EvidenceCandidateScoringResult {
   readonly inferenceCalls: number;
   readonly latencyMs: number;
   readonly failureClass: EvidenceCandidateScoringFailureClass | null;
+  readonly fieldChannelCapture?: Readonly<RecallFiniteFieldChannelCapture>;
 }
 
 export interface EvidenceCandidateScoringWinner {
   readonly score: number;
   readonly evidenceObjectId: string;
   readonly documentIdentity: string;
+}
+
+export interface EvidenceCandidateScoringReceipt {
+  readonly schema_version: 1;
+  readonly operator_id: "evidence_document_max_v1";
+  readonly state: "observed";
+  readonly score: number;
+  readonly winner: Readonly<EvidenceCandidateScoringWinner>;
+  readonly observations: readonly Readonly<EvidenceCandidateScoringWinner>[];
+  readonly observation_completeness: "complete";
+  readonly missing_channel_policy: "no_op";
 }
 
 export interface ScoreEvidenceCandidatesParams {
@@ -276,6 +289,7 @@ export interface EmbeddingRecallRequestScoreSnapshot {
   readonly poolScoresByObjectId: Readonly<Record<string, number>>;
   readonly scoringLatencyMs: number;
   readonly workspaceNeighbors: Readonly<EmbeddingWorkspaceNeighborResult>;
+  readonly fieldChannelCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly degradedReason: string | null;
 }
 

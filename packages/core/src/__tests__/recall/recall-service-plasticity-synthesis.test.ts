@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DYNAMICS_CONSTANTS, MemoryDimension, RecallContextEventType, ScopeClass, SynthesisStatus, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
 
 describe("RecallService", () => {
 it("emits soul.recall.completed after recall", async () => {
@@ -317,7 +318,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
         )
       },
       synthesisSearchPort: {
-        searchByKeyword: synthesisSearchByKeyword,
+        ...keywordSearchMethods(synthesisSearchByKeyword),
         findByIds: synthesisFindByIds
       }
     });
@@ -398,17 +399,17 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       memoryRepo: {
         ...dependencies.memoryRepo,
         findByIds,
-        searchByKeyword: vi.fn(async () =>
+        ...keywordSearchMethods(vi.fn(async () =>
           decoys.map((memory, index) => ({
             object_id: memory.object_id,
             normalized_rank: 1 - index * 0.05
           }))
-        )
+        ))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-router", normalized_rank: 1 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });
@@ -500,12 +501,12 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       memoryRepo: {
         ...dependencies.memoryRepo,
         findByIds,
-        searchByKeyword: vi.fn(async () => [])
+        ...keywordSearchMethods(vi.fn(async () => []))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-router", normalized_rank: 1 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });
@@ -583,12 +584,12 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
         findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           children.filter((child) => ids.includes(child.object_id))
         ),
-        searchByKeyword: vi.fn(async () => [])
+        ...keywordSearchMethods(vi.fn(async () => []))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-router", normalized_rank: 1 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });
@@ -664,12 +665,12 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
         findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           [...invalidChildren, ...validChildren].filter((child) => ids.includes(child.object_id))
         ),
-        searchByKeyword: vi.fn(async () => [])
+        ...keywordSearchMethods(vi.fn(async () => []))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-router", normalized_rank: 1 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });
@@ -735,14 +736,14 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "memory-1", normalized_rank: 1 }
-        ])
+        ]))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-1", normalized_rank: 0.25 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });

@@ -7,6 +7,12 @@ import type {
   IntegratedFloodCandidateDiagnostics,
   RecallCandidateDiagnostic
 } from "../../recall/runtime/recall-service-types.js";
+import {
+  captureRecallQueryEntities
+} from "../../recall/field/query-entity-attribution-producer.js";
+import {
+  materializeRecallRetrievalFieldCaptures
+} from "../../recall/field/finite-field-capture.js";
 
 const emptyQueryProbes = Object.freeze({
   normalized_query: "where did alice live",
@@ -30,7 +36,7 @@ const emptyQueryProbes = Object.freeze({
 });
 
 describe("recall diagnostics", () => {
-  it("preserves optional conformant axis and flood diagnostics in fusion breakdown", () => {
+  it("preserves optional conformant axis and flood diagnostics in fusion breakdown", async () => {
     const floodPotential: IntegratedFloodCandidateDiagnostics = Object.freeze({
       R_obj: 0.2,
       Slice: 1,
@@ -115,6 +121,8 @@ describe("recall diagnostics", () => {
 
     const diagnostics = buildRecallDiagnostics({
       queryProbes: emptyQueryProbes,
+      queryEntityExtraction: await captureRecallQueryEntities({ query_text: null }),
+      retrievalFieldCaptures: materializeRecallRetrievalFieldCaptures([]),
       answerShapePlan: compileRecallAnswerShapePlan(emptyQueryProbes),
       querySoughtFacets: ["location_place"],
       totalScanned: 1,
@@ -167,5 +175,7 @@ describe("recall diagnostics", () => {
       relation_terms: ["live"]
     });
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
+    expect(diagnostics.query_entity_extraction?.status).toBe("ineligible");
+    expect(diagnostics.retrieval_field_captures).toHaveLength(16);
   });
 });

@@ -26,6 +26,8 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 
 
 const databases = new Set<StorageDatabase>();
@@ -288,7 +290,7 @@ function buildRecallService(params: {
     }
   };
 
-  return new RecallService(deps);
+  return createFieldBackedRecallService(deps);
 }
 
 function buildWideOpenPolicy(recallService: RecallService): RecallPolicy {
@@ -297,6 +299,10 @@ function buildWideOpenPolicy(recallService: RecallService): RecallPolicy {
     ...base,
     coarse_filter: {
       ...base.coarse_filter,
+      semantic_supplement: {
+        ...base.coarse_filter.semantic_supplement,
+        max_supplement: 20
+      },
       deterministic_match: {
         scope_filter: null,
         dimension_filter: null,

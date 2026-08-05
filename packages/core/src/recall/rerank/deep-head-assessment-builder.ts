@@ -13,6 +13,15 @@ import type {
   RecallDeepHeadScoreSource,
   RecallDeepHeadTrace
 } from "./deep-head-types.js";
+import { createRecallRelevanceUpperBoundReceipt } from
+  "./relevance-upper-bound-receipt.js";
+
+const CROSS_ENCODER_OPERATOR_ID = "cross_encoder_passthrough_v1";
+const LIGHTWEIGHT_OPERATOR_ID = "lightweight_deep_head_prob_or_v1";
+const INDEPENDENT_EMBEDDING_OPERATOR_ID =
+  "counterfactual_independent_embedding_evidence_v1";
+const NONLEXICAL_OPERATOR_ID =
+  "counterfactual_nonlexical_unit_interval_composition_v1";
 
 export function hasObservedDeepHeadEmbedding(
   candidates: readonly DeliverySelectionCandidate[],
@@ -35,7 +44,11 @@ export function buildCrossEncoderAssessment(
     return Object.freeze({
       scores: params.answerRelevanceScores,
       traceByCandidateKey: new Map(),
-      embeddingObserved
+      embeddingObserved,
+      relevanceUpperBoundReceipt: createRecallRelevanceUpperBoundReceipt(
+        CROSS_ENCODER_OPERATOR_ID,
+        params.answerRelevanceScores
+      )
     });
   }
   return Object.freeze({
@@ -50,11 +63,16 @@ export function buildCrossEncoderAssessment(
           components,
           scored ? params.answerRelevanceScores.get(candidateKey)! : 0,
           scored ? "cross_encoder" : "cross_encoder_unscored",
-          false
+          false,
+          CROSS_ENCODER_OPERATOR_ID
         )
       ];
     })),
-    embeddingObserved
+    embeddingObserved,
+    relevanceUpperBoundReceipt: createRecallRelevanceUpperBoundReceipt(
+      CROSS_ENCODER_OPERATOR_ID,
+      params.answerRelevanceScores
+    )
   });
 }
 
@@ -70,41 +88,56 @@ export function buildComponentsDeepHeadAssessment(
   const embeddingObserved = components.some((item) => item.embedding !== null);
   const active = components.some((item) => formula.isActive(item));
   if (!includeTraces) {
+    const scores = active
+      ? new Map(candidates.map((candidate, index) => [
+          candidate.fusion.candidate_key,
+          formula.resolveScore(candidate, components[index]!, active)
+        ]))
+      : new Map<string, number>();
     return Object.freeze({
-      scores: active
-        ? new Map(candidates.map((candidate, index) => [
-            candidate.fusion.candidate_key,
-            formula.resolveScore(candidate, components[index]!, active)
-          ]))
-        : new Map(),
+      scores,
       traceByCandidateKey: new Map(),
-      embeddingObserved
+      embeddingObserved,
+      relevanceUpperBoundReceipt: active
+        ? createRecallRelevanceUpperBoundReceipt(formula.operatorId, scores)
+        : null
     });
   }
-  const traces = candidates.map((candidate, index) => [
-    candidate.fusion.candidate_key,
-    formula.buildTrace(candidate, components[index]!, active)
-  ] as const);
+  const traces = candidates.map((candidate, index) => {
+    const trace = formula.buildTrace(candidate, components[index]!, active);
+    return [
+      candidate.fusion.candidate_key,
+      sealFormulaOperator(trace, formula.operatorId)
+    ] as const;
+  });
+  const scores = active
+    ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
+    : new Map<string, number>();
   return Object.freeze({
-    scores: active
-      ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
-      : new Map(),
+    scores,
     traceByCandidateKey: new Map(traces),
-    embeddingObserved
+    embeddingObserved,
+    relevanceUpperBoundReceipt: active
+      ? createRecallRelevanceUpperBoundReceipt(formula.operatorId, scores)
+      : null
   });
 }
 
 export const lightweightDeepHeadFormula: DeepHeadAssessmentFormula = Object.freeze({
+  operatorId: LIGHTWEIGHT_OPERATOR_ID,
   isActive: (components) =>
-    components.embedding !== null || components.resolvedEvidence > 0,
+    components.embedding !== null ||
+    components.resolvedEvidence > 0 ||
+    components.fusionBaselineScore !== null,
   resolveScore: (candidate, components, active) =>
     active ? resolveLightweightScore(candidate, components)! : 0,
   buildTrace: (candidate, components, active) =>
-    buildLightweightTrace(candidate, components, active)
+    buildLightweightTrace(candidate, components, active, LIGHTWEIGHT_OPERATOR_ID)
 });
 
 export const independentEmbeddingEvidenceFormula: DeepHeadAssessmentFormula =
   Object.freeze({
+    operatorId: INDEPENDENT_EMBEDDING_OPERATOR_ID,
     isActive: (components) =>
       components.embedding !== null || components.resolvedEvidence > 0,
     resolveScore: (_candidate, components, active) =>
@@ -112,11 +145,16 @@ export const independentEmbeddingEvidenceFormula: DeepHeadAssessmentFormula =
         ? combineIndependentEmbeddingEvidence(components.embedding, components.resolvedEvidence)
         : 0,
     buildTrace: (_candidate, components, active) =>
-      buildIndependentEmbeddingEvidenceTrace(components, active)
+      buildIndependentEmbeddingEvidenceTrace(
+        components,
+        active,
+        INDEPENDENT_EMBEDDING_OPERATOR_ID
+      )
   });
 
 export const nonlexicalUnitIntervalCompositionFormula: DeepHeadAssessmentFormula =
   Object.freeze({
+    operatorId: NONLEXICAL_OPERATOR_ID,
     isActive: (components) =>
       components.embedding !== null || components.evidenceAgreement > 0,
     resolveScore: (_candidate, components, active) =>
@@ -127,7 +165,11 @@ export const nonlexicalUnitIntervalCompositionFormula: DeepHeadAssessmentFormula
         )
         : 0,
     buildTrace: (_candidate, components, active) =>
-      buildNonlexicalUnitIntervalCompositionTrace(components, active)
+      buildNonlexicalUnitIntervalCompositionTrace(
+        components,
+        active,
+        NONLEXICAL_OPERATOR_ID
+      )
   });
 
 export function combineIndependentEmbeddingEvidence(
@@ -148,26 +190,6 @@ export function combineNonlexicalUnitIntervalComposition(
     : evidenceAgreement;
 }
 
-export function lightweightDeepHeadScore(
-  candidate: DeliverySelectionCandidate,
-  supplementaryData: DeepHeadSupplementary
-): number {
-  return resolveLightweightScore(
-    candidate,
-    buildLightweightComponents(candidate, supplementaryData)
-  ) ?? 0;
-}
-
-export function coldEmbeddingDeepHeadScore(
-  candidate: DeliverySelectionCandidate,
-  supplementaryData: DeepHeadSupplementary
-): number {
-  return resolveLightweightScore(
-    candidate,
-    buildLightweightComponents(candidate, supplementaryData)
-  ) ?? 0;
-}
-
 function resolveLightweightScore(
   _candidate: DeliverySelectionCandidate,
   components: LightweightComponents
@@ -185,60 +207,68 @@ function resolveLightweightScore(
 function buildLightweightTrace(
   candidate: DeliverySelectionCandidate,
   components: LightweightComponents,
-  active: boolean
+  active: boolean,
+  operatorId: string
 ): RecallDeepHeadTrace {
   if (!active) {
-    return buildDeepHeadTrace(components, null, "inactive", false);
+    return buildDeepHeadTrace(components, null, "inactive", false, operatorId);
   }
   const fusionBaselineUsed = components.fusionBaselineScore !== null;
   const resolvedScore = resolveLightweightScore(candidate, components)!;
   const scoreSource: RecallDeepHeadScoreSource = components.embedding !== null
     ? fusionBaselineUsed ? "fusion_embedding_evidence" : "embedding_evidence"
-    : fusionBaselineUsed ? "fusion_evidence" : "evidence_only";
+    : fusionBaselineUsed
+      ? components.resolvedEvidence > 0 ? "fusion_evidence" : "field_baseline"
+      : "evidence_only";
   return buildDeepHeadTrace(
     components,
     resolvedScore,
     scoreSource,
-    fusionBaselineUsed
+    fusionBaselineUsed,
+    operatorId
   );
 }
 
 function buildIndependentEmbeddingEvidenceTrace(
   components: LightweightComponents,
-  active: boolean
+  active: boolean,
+  operatorId: string
 ): RecallDeepHeadTrace {
   if (!active) {
-    return buildDeepHeadTrace(components, null, "inactive", false);
+    return buildDeepHeadTrace(components, null, "inactive", false, operatorId);
   }
   if (components.embedding !== null) {
     return buildDeepHeadTrace(
       components,
-      combineIndependentEmbeddingEvidence(
+        combineIndependentEmbeddingEvidence(
         components.embedding,
         components.resolvedEvidence
       ),
       "embedding_evidence",
-      false
+      false,
+      operatorId
     );
   }
   return buildDeepHeadTrace(
     components,
     combineIndependentEmbeddingEvidence(null, components.resolvedEvidence),
     "evidence_only",
-    false
+    false,
+    operatorId
   );
 }
 
 function buildNonlexicalUnitIntervalCompositionTrace(
   components: LightweightComponents,
-  active: boolean
+  active: boolean,
+  operatorId: string
 ): RecallDeepHeadTrace {
   const nonlexical = Object.freeze({
     ...components,
     resolvedEvidence: components.evidenceAgreement
   });
   if (!active) {
-    return buildDeepHeadTrace(nonlexical, null, "inactive", false);
+    return buildDeepHeadTrace(nonlexical, null, "inactive", false, operatorId);
   }
   if (nonlexical.embedding !== null) {
     return buildDeepHeadTrace(
@@ -248,14 +278,16 @@ function buildNonlexicalUnitIntervalCompositionTrace(
         nonlexical.evidenceAgreement
       ),
       "embedding_evidence",
-      false
+      false,
+      operatorId
     );
   }
   return buildDeepHeadTrace(
     nonlexical,
     combineNonlexicalUnitIntervalComposition(null, nonlexical.evidenceAgreement),
     "evidence_only",
-    false
+    false,
+    operatorId
   );
 }
 
@@ -263,7 +295,8 @@ function buildDeepHeadTrace(
   components: LightweightComponents,
   resolvedScore: number | null,
   scoreSource: RecallDeepHeadScoreSource,
-  fusionBaselineUsed: boolean
+  fusionBaselineUsed: boolean,
+  formulaOperatorId: string
 ): RecallDeepHeadTrace {
   return Object.freeze({
     lexical_agreement: components.lexicalAgreement,
@@ -272,6 +305,19 @@ function buildDeepHeadTrace(
     embedding_signal: components.embedding,
     fusion_baseline_used: fusionBaselineUsed,
     resolved_score: resolvedScore,
-    score_source: scoreSource
+    score_source: scoreSource,
+    formula_operator_id: formulaOperatorId,
+    activation: components.activation,
+    evidence_semantic_activation: components.evidenceSemanticActivation
+  });
+}
+
+function sealFormulaOperator(
+  trace: RecallDeepHeadTrace,
+  operatorId: string
+): RecallDeepHeadTrace {
+  return Object.freeze({
+    ...trace,
+    formula_operator_id: operatorId
   });
 }

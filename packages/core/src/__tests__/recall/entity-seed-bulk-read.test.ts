@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { collectEntityDerivedSeeds } from "../../recall/expansion/structural-expansion.js";
+import { captureRecallQueryEntities } from
+  "../../recall/field/query-entity-attribution-producer.js";
 import { createDependencies, createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 describe("entity seed bulk parity", () => {
@@ -213,18 +215,19 @@ async function runEntitySeedCollection(options: EntitySeedFixtureOptions = {}) {
     ...(options.withBulk === true ? { searchManyByKeywordWithinObjectIds: bulkSearch } : {})
   };
   const warn = vi.fn();
+  const queryEntityExtraction = await captureRecallQueryEntities({
+    query_text: "entity query",
+    port: { extract: async () => buildEntities(options.surfaces) }
+  });
   const results = await collectEntityDerivedSeeds({
     workspaceId: "workspace-1",
-    queryText: "entity query",
+    queryEntityExtraction,
     byId: new Map(memories.map((memory) => [memory.object_id, memory])),
     addCandidate: (entry) => {
       admitted.push(entry.object_id);
       return true;
     },
     lexicalFtsRanks: new Map(),
-    entityExtractionPort: {
-      extract: async () => buildEntities(options.surfaces)
-    },
     memoryRepo,
     warn,
     entityExtractionMaxEntities: 8,

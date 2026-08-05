@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { expectFrozenPropertyWriteThrows } from "../../support/frozen-mutation.js";
 import { EvidenceHealthState } from "@do-soul/alaya-protocol";
+import { StorageError } from "../../../shared/errors.js";
 import {
   createEvidenceCapsule,
   createEvidenceCapsuleRepo as createRepo,
@@ -270,6 +271,80 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits.map((hit) => hit.object_id)).not.toContain("1f5c2a90-0000-4000-8000-000000000002");
   });
 
+  it("exposes source-qualified raw evidence lane observations", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createEvidenceCapsule({
+      object_id: "1f5c2a90-0000-4000-8000-000000000021",
+      gist: "The deployment pipeline rotates staging credentials.",
+      excerpt: "staging credentials"
+    }));
+
+    const field = await repo.searchByKeywordField!(
+      "workspace-1",
+      "deployment credentials",
+      10
+    );
+    const porter = field.lanes.find((lane) => lane.lane === "porter");
+
+    expect(porter?.status).toBe("complete");
+    expect(porter?.observations.some((observation) =>
+      observation.source_id.startsWith("owner:")
+    )).toBe(true);
+    expect(field.lanes.find((lane) => lane.lane === "exact")?.status).toBe("ineligible");
+    expect(field.matches).toEqual(await repo.searchByKeyword!(
+      "workspace-1",
+      "deployment credentials",
+      10
+    ));
+    const batch = await repo.searchManyByKeywordField!("workspace-1", [
+      { queryText: "deployment credentials", limit: 10 },
+      { queryText: "missing phrase", limit: 10 }
+    ]);
+    expect(batch).toEqual([
+      field,
+      expect.objectContaining({ matches: [] })
+    ]);
+  });
+
+  it("materializes evidence refinement levels from one transaction-bound row set", async () => {
+    const { repo } = await createRepo();
+    for (const [index, objectId] of [
+      "1f5c2a90-0000-4000-8000-000000000031",
+      "1f5c2a90-0000-4000-8000-000000000032"
+    ].entries()) {
+      await repo.create(createEvidenceCapsule({
+        object_id: objectId,
+        gist: "Identical evidence refinement witness.",
+        excerpt: "Identical evidence refinement witness.",
+        source_hash: `sha256:evidence-refinement-${index}`
+      }));
+    }
+
+    const field = await repo.searchByKeywordField!(
+      "workspace-1", "identical", 1, [2]
+    );
+    const basePorter = field.lanes.find(({ lane }) => lane === "porter")!;
+    const deeper = field.refinement_levels?.[0];
+    const deepPorter = deeper?.lanes.find(({ lane }) => lane === "porter");
+
+    expect(field.matches).toHaveLength(1);
+    expect(deeper?.matches).toHaveLength(2);
+    expect(deepPorter?.observations.slice(0, 1).map(({ source_id }) => source_id))
+      .toEqual(basePorter.observations.map(({ source_id }) => source_id));
+    expect(basePorter.observations[0]?.normalized_rank).toBe(1);
+    expect(deepPorter?.observations[0]?.normalized_rank).toBe(0.75);
+  });
+
+  it("maps invalid evidence refinement depths to a validation storage error", async () => {
+    const { repo } = await createRepo();
+
+    await expect(repo.searchByKeywordField!("workspace-1", "identical", 1, [1]))
+      .rejects.toMatchObject({
+        name: "StorageError",
+        code: "VALIDATION_FAILED"
+      } satisfies Partial<StorageError>);
+  });
+
   it("recalls atomic User search children and collapses them to their evidence owner", async () => {
     const { database, repo } = await createRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000010";
@@ -347,7 +422,10 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     );
 
     const hits = await repo.searchByKeyword!("workspace-1", "部署流水线", 10);
-    expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000001");
+    expect(hits).toContainEqual(expect.objectContaining({
+      object_id: "2f5c2a90-0000-4000-8000-000000000001",
+      matched_fts_lanes: ["trigram"]
+    }));
     expect(hits.map((hit) => hit.object_id)).not.toContain("2f5c2a90-0000-4000-8000-000000000002");
   });
 
@@ -362,7 +440,10 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     );
 
     const hits = await repo.searchByKeyword!("workspace-1", "部署", 10);
-    expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000003");
+    expect(hits).toContainEqual(expect.objectContaining({
+      object_id: "2f5c2a90-0000-4000-8000-000000000003",
+      matched_fts_lanes: ["porter"]
+    }));
   });
 
   it("recalls mixed-script evidence corpus by fanning out to both lanes", async () => {
@@ -370,13 +451,16 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(
       createEvidenceCapsule({
         object_id: "3f5c2a90-0000-4000-8000-000000000001",
-        gist: "The 部署 pipeline rotates 凭证 every night.",
+        gist: "The 部署流水线 pipeline rotates 凭证 every night.",
         excerpt: "pipeline rotates 凭证"
       })
     );
 
-    const hits = await repo.searchByKeyword!("workspace-1", "pipeline 凭证", 10);
-    expect(hits.map((hit) => hit.object_id)).toContain("3f5c2a90-0000-4000-8000-000000000001");
+    const hits = await repo.searchByKeyword!("workspace-1", "pipeline 部署流水线", 10);
+    expect(hits).toContainEqual(expect.objectContaining({
+      object_id: "3f5c2a90-0000-4000-8000-000000000001",
+      matched_fts_lanes: ["porter", "trigram"]
+    }));
   });
 
   it("ranks a strong match above a weak one across lanes", async () => {

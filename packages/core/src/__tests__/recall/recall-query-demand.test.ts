@@ -96,6 +96,20 @@ describe("compileRecallQueryDemand", () => {
     expect(Object.isFrozen(demand)).toBe(true);
     expect(Object.isFrozen(demand.atoms)).toBe(true);
   });
+
+  it("admits source-exact structured terms through the same canonical demand owner", () => {
+    const probes = compileRecallQueryProbes("How many playlists do I have on Spotify?");
+    const baseline = compileRecallQueryDemand(probes);
+    const structured = compileRecallQueryDemand(probes, {
+      sourceExactLexicalTerms: ["have", "have"]
+    });
+
+    expect(baseline.atoms).not.toContainEqual(
+      atom("lexical_term", "have", "supporting")
+    );
+    expect(structured.atoms.filter(({ id }) => id === "lexical_term:have"))
+      .toEqual([atom("lexical_term", "have", "supporting")]);
+  });
 });
 
 function compile(query: string) {

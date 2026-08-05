@@ -28,27 +28,31 @@ describe("RecallReadWorkerClient evidence batch alignment", () => {
     const fixture = await createFixture();
     try {
       const queries = [
-        { queryText: "worker shared", limit: 1 },
+        { queryText: "worker shared", limit: 1, refinement_depths: [2] },
         { queryText: "alphauniquekey", limit: 2 },
         { queryText: "absentuniquekey", limit: 4 },
         { queryText: "betauniquekey", limit: 3 }
       ] as const;
-      const scalarBatches = await loadScalarBatches(fixture.client, queries);
-      const batch = await fixture.client.evidenceSearchPort.searchManyByKeyword!(
+      const scalarFields = await loadScalarFields(fixture.client, queries);
+      const batch = await fixture.client.evidenceSearchPort.searchManyByKeywordField!(
         "workspace-1",
         queries
       );
 
-      expect(batch).toEqual(scalarBatches);
-      expect(batch[0]).toHaveLength(1);
-      expect(batch[1]).toEqual([
-        expect.objectContaining({ object_id: fixture.alphaEvidenceId })
+      expect(batch).toEqual(scalarFields);
+      expect(batch[0]?.matches).toHaveLength(1);
+      expect(batch[0]?.refinement_levels?.[0]?.matches).toHaveLength(2);
+      expect(batch[1]?.matches).toEqual([
+        expect.objectContaining({
+          object_id: fixture.alphaEvidenceId,
+          matched_fts_lanes: ["porter"]
+        })
       ]);
-      expect(batch[2]).toEqual([]);
-      expect(batch[3]).toEqual([
+      expect(batch[2]?.matches).toEqual([]);
+      expect(batch[3]?.matches).toEqual([
         expect.objectContaining({ object_id: fixture.betaEvidenceId })
       ]);
-      expect(batch[1]?.[0]?.object_id).not.toBe(batch[3]?.[0]?.object_id);
+      expect(batch[1]?.matches[0]?.object_id).not.toBe(batch[3]?.matches[0]?.object_id);
     } finally {
       await fixture.client.close();
       rmSync(fixture.directory, { recursive: true, force: true });
@@ -61,16 +65,16 @@ describe("RecallReadWorkerClient evidence batch validation", () => {
     const fixture = await createFixture();
     try {
       await expect(
-        fixture.client.evidenceSearchPort.searchManyByKeyword!("workspace-1", [
+        fixture.client.evidenceSearchPort.searchManyByKeywordField!("workspace-1", [
           { queryText: "worker", limit: 5 },
           { queryText: "invalid", limit: Number.NaN }
         ])
       ).rejects.toThrow("queries[1].limit must be a finite number");
-      const scalarHits = await fixture.client.evidenceSearchPort.searchByKeyword(
+      const scalarField = await fixture.client.evidenceSearchPort.searchByKeywordField!(
         "workspace-1", "worker", 5
       );
-      expect(scalarHits).toHaveLength(2);
-      expect(scalarHits).toEqual(expect.arrayContaining([
+      expect(scalarField.matches).toHaveLength(2);
+      expect(scalarField.matches).toEqual(expect.arrayContaining([
         expect.objectContaining({ object_id: fixture.alphaEvidenceId }),
         expect.objectContaining({ object_id: fixture.betaEvidenceId })
       ]));
@@ -117,14 +121,18 @@ async function createFixture(): Promise<Readonly<{
   return { directory, alphaEvidenceId, betaEvidenceId, client };
 }
 
-async function loadScalarBatches(
+async function loadScalarFields(
   client: RecallReadWorkerClient,
-  queries: readonly Readonly<{ readonly queryText: string; readonly limit: number }>[]
+  queries: readonly Readonly<{
+    readonly queryText: string;
+    readonly limit: number;
+    readonly refinement_depths?: readonly number[];
+  }>[]
 ) {
   const batches = [];
   for (const query of queries) {
-    batches.push(await client.evidenceSearchPort.searchByKeyword(
-      "workspace-1", query.queryText, query.limit
+    batches.push(await client.evidenceSearchPort.searchByKeywordField!(
+      "workspace-1", query.queryText, query.limit, query.refinement_depths
     ));
   }
   return batches;

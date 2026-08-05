@@ -1,10 +1,31 @@
 import type { FactFrameRetrofitReport } from "./fact-frame-retrofit.js";
+import type { FactFrameFormationBackfillReport } from
+  "./fact-frame-formation/backfill.js";
 
 export const EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION = 1;
 
 export interface EvidenceSearchProjectionKindCount {
   readonly projection_kind: string;
   readonly child_count: number;
+}
+
+export interface EvidenceFactFrameFormationStatusCount {
+  readonly status: string;
+  readonly capture_count: number;
+}
+
+export interface EvidenceFactFrameProducerCount {
+  readonly producer_operator_id: string | null;
+  readonly capture_count: number;
+}
+
+export interface EvidenceFactFrameFormationSummary {
+  readonly schema_version: 1;
+  readonly capture_count: number;
+  readonly source_bound_count: number;
+  readonly status_counts: readonly EvidenceFactFrameFormationStatusCount[];
+  readonly producer_operator_counts: readonly EvidenceFactFrameProducerCount[];
+  readonly capture_binding_sha256: string;
 }
 
 export interface EvidenceSearchProjectionRebuildReport {
@@ -22,6 +43,8 @@ export interface EvidenceSearchProjectionRebuildReport {
   readonly child_count: number;
   readonly projection_kind_counts: readonly EvidenceSearchProjectionKindCount[];
   readonly projection_content_sha256: string;
+  readonly fact_frame_formation?: EvidenceFactFrameFormationSummary;
+  readonly fact_frame_formation_backfill?: FactFrameFormationBackfillReport;
   readonly fact_frame_retrofit?: FactFrameRetrofitReport;
   readonly source_extraction_system_prompt_sha256?: string;
 }

@@ -36,7 +36,7 @@ import {
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
 
-import { createInspectorApp } from "../../../runtime/app.js";
+import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
 
 export const reviewerArgs = {
   proposal_id: "prop-1",

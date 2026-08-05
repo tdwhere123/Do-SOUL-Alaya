@@ -39,6 +39,7 @@ describe("Assistant observation projection FTS", () => {
       {
         object_id: objectId,
         normalized_rank: expect.any(Number),
+        matched_fts_lanes: ["porter"],
         matched_projection: {
           projection_id: 1,
           projection_kind: "assistant_observation"
@@ -49,6 +50,7 @@ describe("Assistant observation projection FTS", () => {
       {
         object_id: objectId,
         normalized_rank: expect.any(Number),
+        matched_fts_lanes: ["porter"],
         matched_projection: {
           projection_id: 1,
           projection_kind: "user_assertion"
@@ -84,6 +86,7 @@ describe("Assistant observation projection FTS", () => {
       {
         object_id: objectId,
         normalized_rank: expect.any(Number),
+        matched_fts_lanes: ["porter"],
         matched_projection: {
           projection_id: 1,
           projection_kind: "user_assertion"
@@ -120,6 +123,7 @@ describe("Assistant observation projection FTS", () => {
       {
         object_id: objectId,
         normalized_rank: 1,
+        matched_fts_lanes: ["porter"],
         matched_projection: {
           projection_id: 2,
           projection_kind: "assistant_observation"
@@ -187,7 +191,8 @@ describe("Assistant observation projection FTS", () => {
 
     expect(targetHit).toEqual({
       object_id: targetOwnerId,
-      normalized_rank: 1
+      normalized_rank: 1,
+      matched_fts_lanes: ["porter"]
     });
   });
 

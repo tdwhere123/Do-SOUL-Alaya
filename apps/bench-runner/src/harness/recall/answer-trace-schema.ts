@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  CandidateActivationReceiptSchema,
+  EvidenceSemanticActivationReceiptSchema
+} from "./answer-trace/semantic-activation-schema.js";
 
 const TRACE_EPSILON = 1e-9;
 const AGGREGATE_SHAPES = new Set(["count", "sum", "distinct_entities"]);
@@ -174,12 +178,17 @@ const RecallDeepHeadTraceFieldsSchema = z
     embedding_signal: z.number().min(0).max(1).nullable(),
     fusion_baseline_used: z.boolean(),
     resolved_score: z.number().min(0).max(1).nullable(),
+    formula_operator_id: z.string().min(1).optional(),
+    activation: CandidateActivationReceiptSchema.optional(),
+    evidence_semantic_activation:
+      EvidenceSemanticActivationReceiptSchema.nullable().optional(),
     score_source: z.enum([
       "cross_encoder",
       "cross_encoder_unscored",
       "embedding_evidence",
       "fusion_embedding_evidence",
       "fusion_evidence",
+      "field_baseline",
       "evidence_only",
       "inactive"
     ])
@@ -198,6 +207,7 @@ export const RecallDeepHeadTraceSchema = RecallDeepHeadTraceFieldsSchema
       addIssue(context, ["resolved_evidence"], "resolved evidence does not recompose");
     }
     validateDeepHeadSource(trace, context);
+    validateSemanticActivationLink(trace, context);
   })
   .readonly();
 
@@ -279,6 +289,25 @@ function validateDeepHeadSource(
   if (!valid) addIssue(context, ["score_source"], "deep-head source is inconsistent");
 }
 
+function validateSemanticActivationLink(
+  trace: DeepHeadTrace,
+  context: z.RefinementCtx
+): void {
+  if (trace.activation === undefined ||
+      trace.evidence_semantic_activation === undefined) return;
+  const channel = trace.activation.observations.find((observation) =>
+    observation.channel === "evidence_semantic"
+  );
+  const semantic = trace.evidence_semantic_activation;
+  const consistent = semantic === null
+    ? channel === undefined || channel.state !== "observed"
+    : channel?.state === "observed" &&
+      channel.score !== null && approximatelyEqual(channel.score, semantic.score);
+  if (!consistent) {
+    addIssue(context, ["evidence_semantic_activation"], "semantic receipt must match activation channel");
+  }
+}
+
 function validateLightweightSource(
   trace: DeepHeadTrace
 ): boolean {
@@ -296,6 +325,12 @@ function validateLightweightSource(
   }
   if (trace.score_source === "fusion_evidence") {
     return trace.embedding_signal === null && trace.fusion_baseline_used;
+  }
+  if (trace.score_source === "field_baseline") {
+    return trace.embedding_signal === null &&
+      trace.fusion_baseline_used &&
+      trace.resolved_evidence === 0 &&
+      trace.resolved_score > 0;
   }
   return trace.score_source === "evidence_only" &&
     trace.embedding_signal === null &&

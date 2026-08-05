@@ -40,6 +40,7 @@ import {
   type ExtractionCacheInventory
 } from "../../longmemeval/extraction/cache-audit/inventory.js";
 import {
+  EXTRACTION_REPLAY_FORMATION_POLICY,
   hashExtractionReplay,
   replayExtractionOccurrences,
   type ExtractionReplayResult
@@ -272,7 +273,10 @@ function finalIdentity(
     cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
     rawClosureSha256,
     parserSemanticsSha256: hashString(OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION),
-    formationSemanticsSha256: hashString(OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION),
+    formationSemanticsSha256: hashString([
+      OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+      JSON.stringify(EXTRACTION_REPLAY_FORMATION_POLICY)
+    ].join("\0")),
     temporalSchemaRevision: TEMPORAL_SCHEMA_REVISION
   };
 }
@@ -424,5 +428,10 @@ function renderRun(run: ExtractionCacheAuditRun): string {
     `  replay=${run.replaySha256} admitted=${run.replay.closure.admitted} ` +
     `deferred=${run.replay.closure.deferred} rejected=${run.replay.closure.rejected} ` +
     `invalid=${run.replay.closure.invalid}\n` +
+    `  fact_frames=formed:${run.replay.factFrameClosure.formed} ` +
+    `ineligible:${run.replay.factFrameClosure.ineligible} ` +
+    `unavailable:${run.replay.factFrameClosure.unavailable} ` +
+    `rejected:${run.replay.factFrameClosure.rejected} ` +
+    `fact_keys:${run.replay.factFrameClosure.factKeyProjectionCount}\n` +
     `  audit_output=${run.auditOutput}\n`;
 }

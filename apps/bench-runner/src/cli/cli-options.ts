@@ -57,11 +57,13 @@ export interface ParsedFlags {
   readonly concurrency?: number;
   readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
+  readonly tolerateProviderTaskFailures: boolean;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
+  readonly backfillMissingFactFrameFormations?: boolean;
   readonly warmDerivedSnapshotReceipt?: string;
   readonly factFrameRetrofitLedger?: string;
   readonly seedExtractionSystemPrompt?: string;
@@ -101,11 +103,13 @@ export interface ParsedFlagsState {
   concurrency?: number;
   extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
+  tolerateProviderTaskFailures: boolean;
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
   legacyDatasetSha256?: string;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
+  backfillMissingFactFrameFormations: boolean;
   warmDerivedSnapshotReceipt?: string;
   factFrameRetrofitLedger?: string;
   seedExtractionSystemPrompt?: string;
@@ -146,6 +150,8 @@ function createParsedFlagsState(): ParsedFlagsState {
     edgePlane: false,
     experiment: false,
     rebuildEvidenceSearchProjections: false,
+    backfillMissingFactFrameFormations: false,
+    tolerateProviderTaskFailures: false,
     legacySnapshot: false,
     shards: [],
     collectingShards: false
@@ -472,11 +478,13 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     concurrency: state.concurrency,
     extractionInitialConcurrency: state.extractionInitialConcurrency,
     questionBatchLimit: state.questionBatchLimit,
+    tolerateProviderTaskFailures: state.tolerateProviderTaskFailures,
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,
     legacyDatasetSha256: state.legacyDatasetSha256,
     experiment: state.experiment,
     rebuildEvidenceSearchProjections: state.rebuildEvidenceSearchProjections,
+    backfillMissingFactFrameFormations: state.backfillMissingFactFrameFormations,
     warmDerivedSnapshotReceipt: state.warmDerivedSnapshotReceipt,
     factFrameRetrofitLedger: state.factFrameRetrofitLedger,
     seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,

@@ -15,13 +15,34 @@ import {
 } from "./selection-boundary-json.js";
 import { completeFineAssessmentPreProjection } from
   "./pre-projection/observation.js";
+import {
+  assertEvidenceSemanticReceipts,
+  restoreSemanticActivations
+} from "./validation/evidence-semantic-receipt.js";
+import { assertEvidenceFtsReceipts } from
+  "./validation/evidence-fts-receipt.js";
+import {
+  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  throwSelectionBoundaryFidelityMismatch
+} from "./validation/fidelity-error.js";
+import { verifyRecallFiniteFieldSeal } from "../../field/finite-field-seal.js";
+import { verifyRecallRetrievalFieldRefinementReceipt } from
+  "../../field/refinement/field-refinement-receipt.js";
+import { verifyRecallQueryFieldAttributionReceipt } from
+  "../../field/query-attribution/query-field-attribution.js";
+import { verifyRecallQueryFactFrameExtractionCapture } from
+  "../../field/query-attribution/query-fact-frame-attribution-producer.js";
+import { verifyCoverageSelectionOperatorConfig } from
+  "../../field/facility/selection-objective.js";
+import { verifyRecallFieldRefinementStopCertificate } from
+  "../../field/refinement/field-refinement-stop-certificate.js";
+import { verifyRecallRelevanceUpperBoundReceipt } from
+  "../../rerank/relevance-upper-bound-receipt.js";
 
-export const SELECTION_BOUNDARY_FIDELITY_MISMATCH =
-  "selection boundary fidelity mismatch";
-
-export function throwSelectionBoundaryFidelityMismatch(): never {
-  throw new Error(SELECTION_BOUNDARY_FIDELITY_MISMATCH);
-}
+export {
+  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  throwSelectionBoundaryFidelityMismatch
+};
 
 export function validateSelectionBoundary(
   boundary: FineAssessmentSelectionBoundaryCase
@@ -47,10 +68,15 @@ export function validateSelectionBoundary(
   for (const entries of serializedSupplementaryMaps(boundary.input)) {
     assertUniqueEntryKeys(entries);
   }
-  assertEvidenceSemanticWinners(
-    boundary.input.supplementary_data.evidenceSemanticWinnersByCandidateKey,
-    boundary.input.supplementary_data.evidenceSemanticScoresByCandidateKey
-  );
+  assertEvidenceSemanticReceipts(boundary.input.supplementary_data);
+  assertEvidenceFtsReceipts(boundary.input.supplementary_data);
+  assertRetrievalFieldSeal(boundary.input.supplementary_data);
+  assertRetrievalFieldRefinements(boundary.input.supplementary_data);
+  assertQueryFactFrameExtraction(boundary.input.supplementary_data);
+  assertQueryFieldAttribution(boundary.input.supplementary_data);
+  assertCoverageObjectiveConfig(boundary.input);
+  assertCoverageRelevanceUpperBound(boundary.input);
+  assertFieldRefinementStopCertificate(boundary);
   assertFinalCandidateIdentity(boundary);
   if (boundary.expected.pre_projection !== undefined) {
     assertPreProjection(
@@ -60,63 +86,77 @@ export function validateSelectionBoundary(
   }
 }
 
-function assertEvidenceSemanticWinners(
-  entries: SerializedRecallSupplementaryData[
-    "evidenceSemanticWinnersByCandidateKey"
-  ],
-  scoreEntries: SelectionBoundaryNumberMap
+function assertCoverageRelevanceUpperBound(
+  input: FineAssessmentSelectionBoundaryInput
 ): void {
-  if (entries === undefined) {
-    if (scoreEntries.length !== 0) throwSelectionBoundaryFidelityMismatch();
-    return;
-  }
-  if (entries.length !== scoreEntries.length) {
+  if (input.coverage_relevance_upper_bound === undefined ||
+      input.coverage_relevance_upper_bound === null) return;
+  try {
+    verifyRecallRelevanceUpperBoundReceipt(input.coverage_relevance_upper_bound);
+  } catch {
     throwSelectionBoundaryFidelityMismatch();
-  }
-  const scores = new Map(scoreEntries);
-  for (const [candidateKey, winner] of entries) {
-    assertEvidenceSemanticWinner(candidateKey, winner, scores);
   }
 }
 
-function assertEvidenceSemanticWinner(
-  candidateKey: string,
-  winner: unknown,
-  scores: ReadonlyMap<string, number>
+function assertFieldRefinementStopCertificate(
+  boundary: FineAssessmentSelectionBoundaryCase
 ): void {
-  if (!isRecord(winner) ||
-      !isUnitNumber(winner.score) ||
-      scores.get(candidateKey) !== winner.score ||
-      !isNonEmptyString(winner.evidenceObjectId) ||
-      !isNonEmptyString(winner.documentIdentity)) {
+  const receipt = boundary.expected.field_refinement_stop_certificate;
+  if (receipt === undefined) return;
+  try {
+    verifyRecallFieldRefinementStopCertificate(receipt);
+  } catch {
     throwSelectionBoundaryFidelityMismatch();
   }
-  const projection = winner.projection;
-  if (projection === null) {
-    if (winner.documentIdentity.startsWith("fact_key:")) {
-      throwSelectionBoundaryFidelityMismatch();
-    }
-    return;
-  }
-  if (!isRecord(projection)) throwSelectionBoundaryFidelityMismatch();
-  assertEvidenceSemanticProjection(winner.documentIdentity, projection);
 }
 
-function assertEvidenceSemanticProjection(
-  documentIdentity: string,
-  projection: Record<string, unknown>
-): void {
-  const forms = projection.matched_fact_key_forms;
-  if (!Array.isArray(forms) || forms.some((form) => !isRecord(form))) {
+function assertCoverageObjectiveConfig(input: FineAssessmentSelectionBoundaryInput): void {
+  if (input.coverage_objective_config === undefined) return;
+  try {
+    verifyCoverageSelectionOperatorConfig(input.coverage_objective_config);
+  } catch {
     throwSelectionBoundaryFidelityMismatch();
   }
-  const kind = projection.projection_kind;
-  const id = projection.projection_id;
-  const ownerValid = kind === "owner" && id === null && forms.length === 0;
-  const factKeyValid = kind === "fact_key" &&
-    Number.isInteger(id) && (id as number) > 0 &&
-    documentIdentity === `fact_key:${String(id)}`;
-  if (!ownerValid && !factKeyValid) throwSelectionBoundaryFidelityMismatch();
+}
+
+function assertQueryFieldAttribution(data: SerializedRecallSupplementaryData): void {
+  if (data.queryFieldAttribution === undefined) return;
+  try {
+    verifyRecallQueryFieldAttributionReceipt(data.queryFieldAttribution);
+  } catch {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+}
+
+function assertQueryFactFrameExtraction(
+  data: SerializedRecallSupplementaryData
+): void {
+  if (data.queryFactFrameExtraction === undefined) return;
+  try {
+    verifyRecallQueryFactFrameExtractionCapture(data.queryFactFrameExtraction);
+  } catch {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+}
+
+function assertRetrievalFieldSeal(data: SerializedRecallSupplementaryData): void {
+  if (data.retrievalFieldSeal === undefined) return;
+  try {
+    verifyRecallFiniteFieldSeal(data.retrievalFieldSeal);
+  } catch {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+}
+
+function assertRetrievalFieldRefinements(data: SerializedRecallSupplementaryData): void {
+  if (data.retrievalFieldRefinementReceipts === undefined) return;
+  try {
+    data.retrievalFieldRefinementReceipts.forEach(
+      verifyRecallRetrievalFieldRefinementReceipt
+    );
+  } catch {
+    throwSelectionBoundaryFidelityMismatch();
+  }
 }
 
 export function restoreSelectionParams(
@@ -139,6 +179,12 @@ export function restoreSelectionParams(
       coverageRelevanceByCandidateKey: new Map(
         input.coverage_relevance_by_candidate_key
       )
+    }),
+    ...(input.coverage_relevance_upper_bound === undefined ? {} : {
+      coverageRelevanceUpperBound: input.coverage_relevance_upper_bound
+    }),
+    ...(input.coverage_objective_config === undefined ? {} : {
+      coverageObjectiveConfig: input.coverage_objective_config
     }),
     ...(input.final_order_after_coverage === undefined ? {} : {
       finalOrderAfterCoverage: input.final_order_after_coverage
@@ -166,7 +212,8 @@ export function restoreSupplementaryData(
   data: SerializedRecallSupplementaryData
 ): RecallSupplementaryData {
   const {
-    evidenceSemanticScoresByCandidateKey,
+    evidenceSemanticActivationsByCandidateKey,
+    evidenceSemanticScoresByCandidateKey: _evidenceSemanticScoresByCandidateKey,
     evidenceSemanticWinnersByCandidateKey,
     answerRelevanceScoresByCandidateKey,
     routingKeysByOwnerIdentity,
@@ -175,14 +222,10 @@ export function restoreSupplementaryData(
   } = data;
   return {
     ...plainData,
-    evidenceSemanticScoresByCandidateKey: new Map(
-      evidenceSemanticScoresByCandidateKey
+    evidenceSemanticActivationsByCandidateKey: restoreSemanticActivations(
+      evidenceSemanticActivationsByCandidateKey,
+      evidenceSemanticWinnersByCandidateKey
     ),
-    ...(evidenceSemanticWinnersByCandidateKey === undefined ? {} : {
-      evidenceSemanticWinnersByCandidateKey: new Map(
-        evidenceSemanticWinnersByCandidateKey
-      )
-    }),
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey: new Map(
         answerRelevanceScoresByCandidateKey
@@ -216,7 +259,9 @@ function serializedNumberMaps(
   return [
     input.token_estimates_by_content,
     input.rank_by_candidate_key,
-    input.supplementary_data.evidenceSemanticScoresByCandidateKey,
+    ...(input.supplementary_data.evidenceSemanticScoresByCandidateKey === undefined
+      ? []
+      : [input.supplementary_data.evidenceSemanticScoresByCandidateKey]),
     ...(input.supplementary_data.answerRelevanceScoresByCandidateKey === undefined
       ? []
       : [input.supplementary_data.answerRelevanceScoresByCandidateKey]),
@@ -236,6 +281,9 @@ function serializedSupplementaryMaps(
   input: FineAssessmentSelectionBoundaryInput
 ): readonly (readonly (readonly [string, unknown])[])[] {
   return [
+    ...(input.supplementary_data.evidenceSemanticActivationsByCandidateKey === undefined
+      ? []
+      : [input.supplementary_data.evidenceSemanticActivationsByCandidateKey]),
     ...(input.supplementary_data.evidenceSemanticWinnersByCandidateKey === undefined
       ? []
       : [input.supplementary_data.evidenceSemanticWinnersByCandidateKey]),

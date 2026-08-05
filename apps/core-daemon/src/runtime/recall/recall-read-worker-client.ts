@@ -106,8 +106,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly evidenceSearchPort: RecallServiceEvidenceSearchPort = {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
       await this.request("evidence.searchByKeyword", { workspaceId, queryText, limit }),
-    searchManyByKeyword: async (workspaceId, queries) =>
-      await this.request("evidence.searchManyByKeyword", { workspaceId, queries }),
+    searchByKeywordField: async (workspaceId, queryText, limit, refinementDepths) =>
+      await this.request("evidence.searchByKeywordField", {
+        workspaceId, queryText, limit,
+        ...(refinementDepths === undefined ? {} : { refinementDepths })
+      }),
+    searchManyByKeywordField: async (workspaceId, queries) =>
+      await this.request("evidence.searchManyByKeywordField", { workspaceId, queries }),
     findByIds: async (workspaceId, evidenceObjectIds) =>
       await this.request("evidence.findByIds", { workspaceId, evidenceObjectIds }),
     findRecallQualifiedByIds: async (workspaceId, matches) =>
@@ -124,6 +129,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly synthesisSearchPort: RecallServiceSynthesisSearchPort = {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
       await this.request("synthesis.searchByKeyword", { workspaceId, queryText, limit }),
+    searchByKeywordField: async (workspaceId, queryText, limit, refinementDepths) =>
+      await this.request("synthesis.searchByKeywordField", {
+        workspaceId, queryText, limit,
+        ...(refinementDepths === undefined ? {} : { refinementDepths })
+      }),
+    searchManyByKeywordField: async (workspaceId, queries) =>
+      await this.request("synthesis.searchManyByKeywordField", { workspaceId, queries }),
     findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
       await this.request("synthesis.findByIds", { workspaceId, objectIds })
   };

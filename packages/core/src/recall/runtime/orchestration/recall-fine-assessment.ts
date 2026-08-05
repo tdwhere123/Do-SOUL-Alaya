@@ -16,7 +16,7 @@ import type {
 import { shouldCaptureRecallAnswerFeatures } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
-import { attributeEvidenceSemanticWinners } from
+import { attributeEvidenceSemanticActivations } from
   "./evidence-semantic-candidates.js";
 import {
   asTimedSpan,
@@ -119,8 +119,9 @@ export function prepareLegacyReassessment(
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
     embeddingData.poolRescoreScores,
-    embeddingData.evidenceScoring.scores,
-    attributedEvidenceWinners(initial.supplementaryData, embeddingData)
+    attributedEvidenceActivations(initial.supplementaryData, embeddingData),
+    embeddingData.retrievalFieldSeal,
+    embeddingData.retrievalFieldRefinementReceipts
   );
   const reassessmentRequired = needsEmbeddingReassessment(embeddingData, coarse);
   return Object.freeze({
@@ -154,8 +155,9 @@ export function prepareSnapshotAssessment(
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
     embeddingData.poolRescoreScores,
-    embeddingData.evidenceScoring.scores,
-    attributedEvidenceWinners(base.supplementaryData, embeddingData)
+    attributedEvidenceActivations(base.supplementaryData, embeddingData),
+    embeddingData.retrievalFieldSeal,
+    embeddingData.retrievalFieldRefinementReceipts
   );
   return Object.freeze({
     supplementaryData,
@@ -169,18 +171,17 @@ export function prepareSnapshotAssessment(
   });
 }
 
-function attributedEvidenceWinners(
+function attributedEvidenceActivations(
   supplementaryData: FineAssessParams["supplementaryData"],
   embeddingData: EmbeddingAssessmentData
 ) {
-  const winners = embeddingData.evidenceScoring.winnersByCandidateKey;
-  if (winners.size === 0) return undefined;
-  const attributed = attributeEvidenceSemanticWinners({
-    winners,
+  const activations = embeddingData.evidenceScoring.activationsByCandidateKey;
+  if (activations.size === 0) return new Map();
+  return attributeEvidenceSemanticActivations({
+    activations,
     evidenceDocumentsByMemoryId:
       supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {}
   });
-  return attributed.size === 0 ? undefined : attributed;
 }
 
 export function deliverOrReuseAssessment(
@@ -242,6 +243,7 @@ function buildCoarseAssessmentParams(
     queryText: prepared.queryText,
     policy: prepared.policy,
     queryProbes: prepared.queryProbes,
+    queryEntityExtraction: prepared.queryEntityExtraction,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)
@@ -255,5 +257,5 @@ function needsEmbeddingReassessment(
   return Object.keys(embeddingData.supplement.similarityHintsByObjectId).length > 0 ||
     coarse.embeddingCoarseInjection.candidates.length > 0 ||
     Object.keys(embeddingData.poolRescoreScores).length > 0 ||
-    embeddingData.evidenceScoring.scores.size > 0;
+    embeddingData.evidenceScoring.activationsByCandidateKey.size > 0;
 }

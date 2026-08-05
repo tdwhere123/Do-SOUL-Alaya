@@ -344,7 +344,7 @@ function supplementary(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey: new Map(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

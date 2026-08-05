@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import {
+  createFieldBackedRecallService,
+  withKeywordFieldFixturePorts
+} from
+  "./fixtures/keyword-field-fixture.js";
 import { runCoarseFilter } from "../../recall/coarse-filter/coarse-filter.js";
 import {
   createDependencies,
@@ -11,7 +16,7 @@ import {
 
 describe("RecallService semantic supplement", () => {
   it("keeps the keyword supplement enabled for chat and analyze", () => {
-    const service = new RecallService(createDependencies([]).dependencies);
+    const service = createFieldBackedRecallService(createDependencies([]).dependencies);
     const expected = {
       enabled: true,
       max_supplement: 5,
@@ -49,7 +54,7 @@ describe("RecallService semantic supplement", () => {
       { object_id: "memory-2", normalized_rank: 1.0 }
     ]);
     dependencies.memoryRepo.searchByKeyword = searchByKeyword;
-    const service = new RecallService(dependencies);
+    const service = createFieldBackedRecallService(dependencies);
     const basePolicy = service.buildDefaultPolicy("build", createTaskSurface().runtime_id);
     const policy = overridePolicy(basePolicy, {
       coarse_filter: {
@@ -89,7 +94,7 @@ describe("RecallService semantic supplement", () => {
     const searchByKeywordWithinTier = vi.fn(async () => [
       { object_id: "memory-hot", normalized_rank: 1 }
     ]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -135,18 +140,18 @@ describe("RecallService semantic supplement", () => {
     const searchByKeywordWithinObjectIds = vi.fn(async () => [
       { object_id: valid.object_id, normalized_rank: 0.8 }
     ]);
-    const service = new RecallService(dependencies);
+    const service = createFieldBackedRecallService(dependencies);
     const policy = semanticPolicy(service);
 
     await runCoarseFilter({
-      dependencies: {
+      dependencies: withKeywordFieldFixturePorts({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
           searchByKeywordWithinTier,
           searchByKeywordWithinObjectIds
         }
-      },
+      }),
       warn: vi.fn()
     }, "workspace-1", policy.coarse_filter, "window needle", {
       timeFilter: { since: "2026-01-01T00:00:00.000Z" }
@@ -167,11 +172,11 @@ describe("RecallService semantic supplement", () => {
     const searchByKeywordWithinObjectIds = vi.fn(async () => [
       { object_id: valid.object_id, normalized_rank: 0.8 }
     ]);
-    const service = new RecallService(dependencies);
+    const service = createFieldBackedRecallService(dependencies);
     const policy = semanticPolicy(service);
 
     await runCoarseFilter({
-      dependencies: {
+      dependencies: withKeywordFieldFixturePorts({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
@@ -183,7 +188,7 @@ describe("RecallService semantic supplement", () => {
           searchByKeywordWithinTier,
           searchByKeywordWithinObjectIds
         }
-      },
+      }),
       warn: vi.fn()
     }, "workspace-1", policy.coarse_filter, "truncated needle");
 
@@ -195,7 +200,7 @@ describe("RecallService semantic supplement", () => {
 
   it("returns empty candidates for an empty workspace", async () => {
     const { dependencies } = createDependencies([]);
-    const result = await new RecallService(dependencies).recall({
+    const result = await createFieldBackedRecallService(dependencies).recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "chat"

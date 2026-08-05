@@ -76,13 +76,14 @@ describe("Gate-4 attached-agent MCP proof", () => {
 
     const runtime = await createAlayaDaemonRuntime();
     runtime.startBackgroundServices();
+    let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
         workspaceId: "workspace-1",
         runId: "run-1",
-        agentTarget: "codex",
-      sessionId: "attached-agent-mcp-proof-session",
+        agentTarget: activeAgentTarget,
+        sessionId: "attached-agent-mcp-proof-session",
         surfaceId: "gate4-attached-agent-proof"
       })
     });
@@ -199,6 +200,7 @@ describe("Gate-4 attached-agent MCP proof", () => {
       transcript.push({ step: "soul.propose_memory_update", evidence: proposal });
       expect(proposal.status).toBe("created");
 
+      activeAgentTarget = "cli";
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",

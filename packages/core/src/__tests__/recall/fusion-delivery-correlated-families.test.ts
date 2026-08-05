@@ -55,7 +55,7 @@ function supplementaryData(objectIds: readonly string[]): RecallSupplementaryDat
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey: new Map(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

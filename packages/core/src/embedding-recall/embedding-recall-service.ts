@@ -1,5 +1,6 @@
 export {
   DEFAULT_QUERY_TIMEOUT_MS,
+  EVIDENCE_DOCUMENT_MAX_OPERATOR_ID,
   EMBEDDING_WORKSPACE_SCAN_CAP,
   MAX_QUERY_TIMEOUT_MS,
   MIN_QUERY_TIMEOUT_MS
@@ -24,6 +25,7 @@ export type {
   EmbeddingVectorRecord,
   EvidenceCandidateScoringFailureClass,
   EvidenceCandidateScoringResult,
+  EvidenceCandidateScoringReceipt,
   EvidenceCandidateScoringStatus,
   EvidenceCandidateScoringWinner,
   EvidenceDocumentEmbeddingRecord,

@@ -1,4 +1,5 @@
 import { DELIVERY_BUDGET_LOSS_RANK } from "../miss/delivery-miss-taxonomy.js";
+import { z } from "zod";
 import type {
   BenchEmbeddingProviderState,
   LongMemEvalGoldDiagnostic,
@@ -20,6 +21,13 @@ import {
 import { RecallAnswerShapePlanSchema } from "../../../harness/recall/answer-trace-schema.js";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
+import {
+  RecallFieldRefinementStopCertificateSchema,
+  RecallFiniteFieldChannelCaptureSchema,
+  RecallQueryEntityExtractionCaptureSchema,
+  RecallQueryFactFrameExtractionCaptureSchema,
+  RecallRetrievalFieldRefinementReceiptSchema
+} from "../../../harness/recall/field-capture-schema.js";
 
 export { buildObjectIdentityKey };
 
@@ -39,15 +47,39 @@ export function readRecallDiagnostics(
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
   const queryProbes = readDiagnosticQueryProbes(record.query_probes);
+  const retrievalFieldCaptures = readRetrievalFieldCaptures(record.retrieval_field_captures);
+  const retrievalFieldRefinementReceipts = readRetrievalFieldRefinementReceipts(
+    record.retrieval_field_refinement_receipts
+  );
+  const fieldRefinementStopCertificate = readFieldRefinementStopCertificate(
+    record.field_refinement_stop_certificate
+  );
+  const queryEntityExtraction = readQueryEntityExtraction(record.query_entity_extraction);
+  const queryFactFrameExtraction = readQueryFactFrameExtraction(
+    record.query_fact_frame_extraction
+  );
   const answerShapePlan = readAnswerShapePlan(record.answer_shape_plan);
   const querySoughtFacets = readStringArray(record.query_sought_facets);
   if (record.query_probes !== undefined && queryProbes === null) return null;
+  if (record.retrieval_field_captures !== undefined && retrievalFieldCaptures === null) return null;
+  if (record.retrieval_field_refinement_receipts !== undefined &&
+      retrievalFieldRefinementReceipts === null) return null;
+  if (record.field_refinement_stop_certificate !== undefined &&
+      fieldRefinementStopCertificate === null) return null;
+  if (record.query_entity_extraction !== undefined && queryEntityExtraction === null) return null;
+  if (record.query_fact_frame_extraction !== undefined &&
+      queryFactFrameExtraction === null) return null;
   if (record.answer_shape_plan != null && answerShapePlan === null) return null;
   if (record.query_sought_facets !== undefined && querySoughtFacets === null) return null;
   const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
     queryProbes,
+    retrievalFieldCaptures,
+    retrievalFieldRefinementReceipts,
+    fieldRefinementStopCertificate,
+    queryEntityExtraction,
+    queryFactFrameExtraction,
     answerShapePlan,
     querySoughtFacets,
     ...buildNarrowCandidateEvidence(candidates),
@@ -88,6 +120,47 @@ export function readRecallDiagnostics(
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
     phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
   };
+}
+
+function readRetrievalFieldCaptures(
+  value: unknown
+): NarrowRecallDiagnostics["retrievalFieldCaptures"] {
+  if (value === undefined) return null;
+  const parsed = z.array(RecallFiniteFieldChannelCaptureSchema).readonly().safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readRetrievalFieldRefinementReceipts(
+  value: unknown
+): NarrowRecallDiagnostics["retrievalFieldRefinementReceipts"] {
+  if (value === undefined) return null;
+  const parsed = z.array(RecallRetrievalFieldRefinementReceiptSchema)
+    .readonly().safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readFieldRefinementStopCertificate(
+  value: unknown
+): NarrowRecallDiagnostics["fieldRefinementStopCertificate"] {
+  if (value === undefined) return null;
+  const parsed = RecallFieldRefinementStopCertificateSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readQueryEntityExtraction(
+  value: unknown
+): NarrowRecallDiagnostics["queryEntityExtraction"] {
+  if (value === undefined) return null;
+  const parsed = RecallQueryEntityExtractionCaptureSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readQueryFactFrameExtraction(
+  value: unknown
+): NarrowRecallDiagnostics["queryFactFrameExtraction"] {
+  if (value === undefined) return null;
+  const parsed = RecallQueryFactFrameExtractionCaptureSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function readPacketPlanTrace(

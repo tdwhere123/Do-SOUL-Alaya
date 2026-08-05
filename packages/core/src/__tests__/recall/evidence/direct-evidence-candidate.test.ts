@@ -6,6 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "../fixtures/keyword-field-fixture.js";
 import {
   selectExpansionSeedDrafts,
   selectPreferredExpansionSeedEntries
@@ -34,7 +36,7 @@ describe("direct evidence recall candidates", () => {
       async (_query: string, _passages: readonly string[]) => [0.9]
     );
     const { dependencies, countInboundSupports } = createDependencies([]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       answerRerankService: { score },
       memoryRepo: {
@@ -89,6 +91,67 @@ describe("direct evidence recall candidates", () => {
     });
   });
 
+  it("admits a qualified fact-key projection as direct evidence", async () => {
+    const evidence = createEvidenceCapsule({
+      excerpt: "I use Atlas for research.",
+      semantic_anchor: {
+        topic: "research tool",
+        keywords: ["Atlas", "research"],
+        summary: "I use Atlas for research."
+      }
+    });
+    const { dependencies } = createDependencies([]);
+    const service = createFieldBackedRecallService({
+      ...dependencies,
+      memoryRepo: {
+        ...dependencies.memoryRepo,
+        searchByKeyword: vi.fn(async () => []),
+        findByEvidenceRefs: vi.fn(async () => []),
+        findBoundEvidenceRefs: vi.fn(async () => []),
+        findByIds: vi.fn(async () => [])
+      },
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => [{
+          object_id: EVIDENCE_ID,
+          normalized_rank: 0.92,
+          matched_projection: {
+            projection_id: 1,
+            projection_kind: "fact_key" as const
+          }
+        }]),
+        findRecallQualifiedByIds: vi.fn(async () => [{
+          ...qualifyEvidence(evidence, true),
+          matched_projection: {
+            projection_id: 1,
+            projection_kind: "fact_key" as const,
+            content: "I use Atlas for research."
+          },
+          matched_fact_key_forms: [],
+          matched_fact_frame: undefined
+        }])
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface("Which research tool do I use?"),
+      workspaceId: "workspace-1",
+      strategy: "build",
+      diagnosticCapture: "answer_features"
+    });
+
+    const candidate = result.candidates.find((item) =>
+      item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
+    );
+    expect(candidate?.content_preview).toContain("I use Atlas for research.");
+    expect(candidate?.source_channels).toContain("evidence_fts_direct");
+    expect(result.diagnostics?.candidates.find((item) =>
+      item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
+    )?.answer_features?.answer_support_observations?.[0]).toMatchObject({
+      projection_kind: "turn_projection",
+      provenance_status: "verified_user_turn"
+    });
+  });
+
   it("does not duplicate evidence already bound to a memory entry", async () => {
     const memory = createMemoryEntry({
       object_id: "memory-bound",
@@ -96,7 +159,7 @@ describe("direct evidence recall candidates", () => {
       content: "The assistant recommended the blue option."
     });
     const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -134,7 +197,7 @@ describe("direct evidence recall candidates", () => {
     });
     const findByEvidenceRefs = vi.fn(async () => [memory]);
     const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -171,7 +234,7 @@ describe("direct evidence recall candidates", () => {
 
   it("fails closed when the complete binding authority port is unavailable", async () => {
     const { dependencies } = createDependencies([]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -196,7 +259,7 @@ describe("direct evidence recall candidates", () => {
 
   it("fails closed for ordinary unbound evidence without the source-turn authority prefix", async () => {
     const { dependencies } = createDependencies([]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -233,7 +296,7 @@ describe("direct evidence recall candidates", () => {
       evidence_refs: [SECOND_EVIDENCE_ID]
     });
     const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -267,7 +330,7 @@ describe("direct evidence recall candidates", () => {
       evidence_refs: [EVIDENCE_ID]
     });
     const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -298,7 +361,7 @@ describe("direct evidence recall candidates", () => {
   it("fails closed for a direct evidence id that collides with a workspace memory id", async () => {
     const collidingMemory = createMemoryEntry({ object_id: EVIDENCE_ID });
     const { dependencies } = createDependencies([collidingMemory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -338,7 +401,7 @@ describe("direct evidence recall candidates", () => {
       ...overrides
     });
     const { dependencies } = createDependencies([]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -373,7 +436,7 @@ describe("direct evidence recall candidates", () => {
       evidence_refs: [EVIDENCE_ID]
     });
     const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -412,7 +475,7 @@ describe("direct evidence recall candidates", () => {
     { source_hash: "sha256:unverified" }
   ])("rejects ineligible direct evidence: $evidence_kind $evidence_health_state $lifecycle_state", async (override) => {
     const { dependencies } = createDependencies([]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,

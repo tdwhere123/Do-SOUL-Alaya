@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RecallServiceEmbeddingRecallPort } from "../../../recall/runtime/recall-service-types.js";
 import { RecallService } from "../../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "../fixtures/keyword-field-fixture.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -65,7 +67,7 @@ describe("recall phase attribution", () => {
 async function verifySnapshotAttribution() {
   const memory = createMemoryEntry({ content: "Snapshot phase procedure" });
   const { dependencies } = createDependencies([memory]);
-  const service = new RecallService({
+  const service = createFieldBackedRecallService({
     ...dependencies,
     embeddingRecallService: createSnapshotPort(memory.object_id),
     answerRerankService: createCrossReranker(7),
@@ -84,7 +86,7 @@ async function verifySnapshotAttribution() {
 async function verifyCustomAttribution() {
   const memory = createMemoryEntry({ content: "Custom fallback procedure" });
   const { dependencies } = createDependencies([memory]);
-  const service = new RecallService({
+  const service = createFieldBackedRecallService({
     ...dependencies,
     embeddingRecallService: createCustomPort(memory.object_id),
     answerRerankService: createCrossReranker(7)
@@ -102,7 +104,7 @@ async function verifyCustomAttribution() {
 async function verifyLegacyAttribution() {
   const memory = createMemoryEntry({ content: "Legacy adapter procedure" });
   const { dependencies } = createDependencies([memory]);
-  const service = new RecallService({
+  const service = createFieldBackedRecallService({
     ...dependencies,
     embeddingRecallService: createLegacyPort(memory.object_id)
   });
@@ -123,7 +125,7 @@ async function verifyCoarseOwnership() {
     if (synthesisSearch.mock.calls.length === 1) clock.value += 13;
     return [];
   });
-  const service = new RecallService({
+  const service = createFieldBackedRecallService({
     ...dependencies,
     synthesisSearchPort: {
       searchByKeyword: synthesisSearch,

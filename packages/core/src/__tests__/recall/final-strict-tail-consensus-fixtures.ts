@@ -16,6 +16,8 @@ import {
   createSupplementaryData,
   rankMap
 } from "./fine-assessment-selection-fixtures.js";
+import { evidenceSemanticActivationsFromScores } from
+  "./fixtures/evidence-semantic-activation.js";
 
 export type SelectionResult = ReturnType<typeof selectFineAssessmentCandidates>;
 
@@ -60,8 +62,10 @@ export function select(
           candidate.entry.object_id === "challenger" ? 0.1 : 0.9
         ])
       ),
-      evidenceSemanticScoresByCandidateKey:
-        overrides.evidenceSemanticScoresByCandidateKey ?? new Map(),
+      evidenceSemanticActivationsByCandidateKey:
+        evidenceSemanticActivationsFromScores(
+          overrides.evidenceSemanticScoresByCandidateKey ?? new Map()
+        ),
       ...(overrides.pathInflowByTarget === undefined
         ? {}
         : {

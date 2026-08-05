@@ -6,7 +6,8 @@ import {
   ContextLensAssembler,
   GraphExploreService,
   RecallService,
-  RuleBasedEntityExtractor
+  RuleBasedEntityExtractor,
+  RuleBasedQueryFactFrameExtractor
 } from "@do-soul/alaya-core";
 import {
   findActiveConstraints,
@@ -261,6 +262,7 @@ function createRecallService(input: {
       ? {}
       : { defaultPolicyDecorator: input.embeddingRuntime.defaultPolicyDecorator }),
     entityExtractionPort: new RuleBasedEntityExtractor(),
+    queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn
   });

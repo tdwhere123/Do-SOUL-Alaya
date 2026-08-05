@@ -1,6 +1,8 @@
 import { copyFile, readFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
+import { materializeEvidenceFactFrameFormation } from "@do-soul/alaya-core";
 import {
+  initDatabase,
   readSchemaMigrationLedger,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -76,7 +78,15 @@ describe("receipt-v2 evidence search projection rebuild", () => {
         { projection_kind: "assistant_observation", child_count: 1 },
         { projection_kind: "user_assertion", child_count: 2 }
       ],
-      projection_content_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      projection_content_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      fact_frame_formation: {
+        schema_version: 1,
+        capture_count: 0,
+        source_bound_count: 0,
+        status_counts: [],
+        producer_operator_counts: [],
+        capture_binding_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }
     });
     expect(readSchemaMigrationLedger(fixture.sourceDbPath).at(-1)).toBe(108);
     expect(readSchemaMigrationLedger(workingDbPath).at(-1))
@@ -302,6 +312,50 @@ describe("receipt-v2 evidence search projection rebuild", () => {
     }]);
   });
 
+  it("replays a formed capture when replacing projections on a current schema", async () => {
+    const fixture = await createSourceFixture([{
+      signalId: "signal-formed-replay",
+      evidenceId: "30000000-0000-4000-8000-000000000004",
+      messages: [message("u1", "user", "I use Atlas.")]
+    }]);
+    const workingDbPath = join(fixture.root, "formed-replay.db");
+    await copyFile(fixture.sourceDbPath, workingDbPath);
+    await rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath });
+    seedFormedCapture(workingDbPath, fixture.evidenceIds[0]!);
+    const canonicalFactKeys = readProjectionRows(workingDbPath)
+      .filter(({ projection_kind: kind }) => kind === "fact_key");
+    tamperFactKeys(workingDbPath, fixture.evidenceIds[0]!);
+
+    const report = await rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath });
+
+    expect(report).toMatchObject({
+      child_count: 5,
+      projection_kind_counts: [
+        { projection_kind: "fact_key", child_count: 4 },
+        { projection_kind: "user_assertion", child_count: 1 }
+      ],
+      fact_frame_formation: {
+        capture_count: 1,
+        source_bound_count: 1,
+        status_counts: [{ status: "formed", capture_count: 1 }],
+        producer_operator_counts: [{
+          producer_operator_id: "test_current_schema_formation_v1",
+          capture_count: 1
+        }],
+        capture_binding_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }
+    });
+    const rebuiltFactKeys = readProjectionRows(workingDbPath)
+      .filter(({ projection_kind: kind }) => kind === "fact_key");
+    expect(rebuiltFactKeys).toEqual(canonicalFactKeys);
+    expect(rebuiltFactKeys.map(({ content }) => content)).toEqual([
+        "I use Atlas",
+        "use Atlas",
+        "I Atlas",
+        "I use"
+      ]);
+  });
+
   it("rejects a restore target that aliases the source snapshot", async () => {
     const fixture = await createSourceFixture([{
       signalId: "signal-alias",
@@ -351,3 +405,91 @@ describe("receipt-v2 evidence search projection rebuild", () => {
     await expect(readFile(aliasedSourcePath)).resolves.toBeInstanceOf(Buffer);
   });
 });
+
+function seedFormedCapture(dbPath: string, evidenceObjectId: string): void {
+  const db = initDatabase({ filename: dbPath, temporalMode: "candidate" });
+  try {
+    const owner = db.connection.prepare(`
+      SELECT workspace_id, source_hash, excerpt FROM evidence_capsules
+      WHERE object_id = ?
+    `).get(evidenceObjectId) as {
+      readonly workspace_id: string;
+      readonly source_hash: string;
+      readonly excerpt: string;
+    };
+    const formation = materializeEvidenceFactFrameFormation({
+      sourceAssertion: owner.excerpt,
+      sourceHash: owner.source_hash,
+      proposal: {
+        schema_version: 1,
+        producer_operator_id: "test_current_schema_formation_v1",
+        source_assertion: owner.excerpt,
+        fact_frame: {
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "use" },
+            { role: "value", text: "Atlas" }
+          ]
+        }
+      }
+    });
+    db.connection.transaction(() => {
+      insertFormation(db, evidenceObjectId, owner, formation);
+      insertFactKeys(db, evidenceObjectId, owner, formation.searchProjections);
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+function insertFormation(
+  db: StorageDatabase,
+  evidenceObjectId: string,
+  owner: Readonly<{ workspace_id: string; source_hash: string }>,
+  formation: ReturnType<typeof materializeEvidenceFactFrameFormation>
+): void {
+  const capture = formation.capture;
+  db.connection.prepare(`
+    INSERT INTO evidence_fact_frame_formations (
+      evidence_object_id, workspace_id, schema_version, operator_id, status,
+      producer_operator_id, source_hash, fact_frame_json, capture_digest
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    evidenceObjectId, owner.workspace_id, capture.schema_version, capture.operator_id,
+    capture.status, capture.producer_operator_id, capture.source_hash,
+    JSON.stringify(capture.fact_frame), capture.capture_digest
+  );
+}
+
+function insertFactKeys(
+  db: StorageDatabase,
+  evidenceObjectId: string,
+  owner: Readonly<{ workspace_id: string; source_hash: string }>,
+  projections: ReturnType<typeof materializeEvidenceFactFrameFormation>["searchProjections"]
+): void {
+  const insert = db.connection.prepare(`
+    INSERT INTO evidence_search_projections (
+      evidence_object_id, projection_id, projection_kind,
+      workspace_id, source_hash, content
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  for (const projection of projections) {
+    insert.run(
+      evidenceObjectId, projection.projection_id, projection.projection_kind,
+      owner.workspace_id, owner.source_hash, projection.content
+    );
+  }
+}
+
+function tamperFactKeys(dbPath: string, evidenceObjectId: string): void {
+  const db = initDatabase({ filename: dbPath, temporalMode: "candidate" });
+  try {
+    db.connection.prepare(`
+      UPDATE evidence_search_projections SET content = content || ' tampered'
+      WHERE evidence_object_id = ? AND projection_kind = 'fact_key'
+    `).run(evidenceObjectId);
+  } finally {
+    db.close();
+  }
+}

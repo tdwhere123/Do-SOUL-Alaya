@@ -5,12 +5,13 @@ import {
 } from "../fusion-delivery-families.js";
 import { resolveFineAssessmentDeepHead } from
   "../fine-assessment-deep-head.js";
+import { resolveCandidateCoverageReceipt } from
+  "../fine-assessment-selection/coverage-atoms.js";
 import { isWorkspaceMemoryCandidate } from
   "../../runtime/recall-service-helpers.js";
-import {
-  resolveCandidateSemanticActivation,
-  resolveCandidateSemanticActivationScope
-} from
+import { resolveRecallCandidateSemanticActivation } from
+  "../../scoring/activation/candidate-semantic-activation-context.js";
+import type { CandidateActivationReceipt } from
   "../../scoring/candidate-semantic-activation.js";
 import type {
   RecallDeepHeadTrace
@@ -99,11 +100,19 @@ function buildCandidateLedger(
   const objectId = candidate.entry.object_id;
   const candidateKey = candidate.fusion.candidate_key;
   const sources = buildSources(candidate, supplementaryData, eligible, objectId);
+  const evidenceSemanticActivation = supplementaryData
+    .evidenceSemanticActivationsByCandidateKey.get(candidateKey) ?? null;
+  const activation = resolveRecallCandidateSemanticActivation(
+    candidate,
+    supplementaryData
+  );
+  const coverage = resolveCandidateCoverageReceipt(candidate, supplementaryData);
   const selectedEmbedding = selectEmbeddingSource(
     candidate,
     sources,
     eligible,
-    supplementaryData
+    supplementaryData,
+    activation
   );
   const fusion = buildFusionSlice(candidate);
   const flood = buildFloodTerms(candidate.fusion.flood_potential);
@@ -111,6 +120,9 @@ function buildCandidateLedger(
     candidate_key: candidateKey,
     object_id: objectId,
     sources,
+    activation,
+    evidence_semantic_activation: evidenceSemanticActivation,
+    coverage,
     selected_embedding: selectedEmbedding,
     fusion,
     flood,
@@ -146,9 +158,9 @@ function buildSources(
   return Object.freeze({
     embedding_evidence_semantic: observeNumericSource(
       true,
-      supplementaryData.evidenceSemanticScoresByCandidateKey?.get(
+      supplementaryData.evidenceSemanticActivationsByCandidateKey.get(
         candidate.fusion.candidate_key
-      )
+      )?.score
     ),
     embedding_effective_factor: observeNumericSource(
       true,
@@ -189,35 +201,31 @@ function selectEmbeddingSource(
   candidate: FineAssessmentCandidate,
   sources: ComponentLedgerCandidate["sources"],
   eligible: boolean,
-  supplementaryData: RecallSupplementaryData
+  supplementaryData: RecallSupplementaryData,
+  activation: CandidateActivationReceipt
 ): ComponentLedgerCandidate["selected_embedding"] {
-  const activation = resolveCandidateSemanticActivation({
-    scope: resolveCandidateSemanticActivationScope({
-      originPlane: candidate.originPlane,
-      objectKind: candidate.objectKind,
-      workspaceMemoryEligible: eligible
-    }),
-    evidenceSemantic: observedRaw(sources.embedding_evidence_semantic),
-    effectiveEmbedding: observedRaw(sources.embedding_effective_factor),
-    objectEmbedding: observedRaw(sources.embedding_object_similarity)
-  });
-  if (activation.source !== null) {
-    const winner = activation.source === "evidence_semantic"
-      ? supplementaryData.evidenceSemanticWinnersByCandidateKey?.get(
+  const source = activation.winner?.channel;
+  if (isSelectedEmbeddingSource(source)) {
+    const winner = source === "evidence_semantic"
+      ? supplementaryData.evidenceSemanticActivationsByCandidateKey.get(
         candidate.fusion.candidate_key
-      )
+      )?.winner
       : undefined;
     return freezeSelected(
-      activation.source,
-      sourceObservation(sources, activation.source),
+      source,
+      sourceObservation(sources, source),
       winner?.score === activation.score ? winner : undefined
     );
   }
   return freezeSelected("none", unresolvedEmbeddingObservation(sources, eligible));
 }
 
-function observedRaw(observation: ComponentSourceObservation): number | undefined {
-  return isObservedSource(observation) ? observation.raw ?? undefined : undefined;
+function isSelectedEmbeddingSource(
+  source: string | undefined
+): source is Exclude<SelectedEmbeddingSource, "none"> {
+  return source === "evidence_semantic" ||
+    source === "effective_factor" ||
+    source === "object_embedding";
 }
 
 function sourceObservation(

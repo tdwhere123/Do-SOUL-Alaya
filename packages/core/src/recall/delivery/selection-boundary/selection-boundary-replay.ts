@@ -43,7 +43,8 @@ export function replayFineAssessmentSelectionBoundary(
     replayed,
     packetConsensus,
     boundary.input.capture_packet_plan_trace === true,
-    pending?.preProjection
+    pending?.preProjection,
+    boundary.expected.coverage_objective !== undefined
   );
   if (
     selectionBoundaryJsonSha256(actual) !==
@@ -54,6 +55,10 @@ export function replayFineAssessmentSelectionBoundary(
   if (boundary.input.capture_packet_plan_trace === true) return replayed;
   return Object.freeze({
     candidates: replayed.candidates,
-    diagnostics: replayed.diagnostics
+    diagnostics: replayed.diagnostics,
+    coverageSelectionObjective: replayed.coverageSelectionObjective,
+    ...(replayed.fieldRefinementStopCertificate === undefined ? {} : {
+      fieldRefinementStopCertificate: replayed.fieldRefinementStopCertificate
+    })
   });
 }

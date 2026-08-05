@@ -1,4 +1,6 @@
 import {
+  mergeFtsLaneIds,
+  readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import type {
@@ -29,30 +31,33 @@ interface QualifiedEvidenceCandidate {
   readonly verifiedUserSupportSource?: Readonly<RecallVerifiedUserSupportSource>;
 }
 
+interface QualifiedEvidenceLoad {
+  readonly candidates: readonly QualifiedEvidenceCandidate[];
+  readonly evidenceRankById: ReadonlyMap<string, number>;
+}
+
 export async function admitQualifiedEvidenceMatches(
   params: SemanticSupplementParams,
   evidenceMatches: readonly Readonly<KeywordSearchResult>[]
 ): Promise<void> {
   const evidenceRankById = buildEvidenceRankById(evidenceMatches);
-  const candidates = await loadQualifiedEvidenceOrFallback(
+  const loaded = await loadQualifiedEvidenceOrFallback(
     params,
     evidenceMatches,
     evidenceRankById
   );
-  if (candidates === null) return;
-  const direct = candidates.filter(({ capsule }) =>
+  if (loaded === null) return;
+  const direct = loaded.candidates.filter(({ capsule }) =>
     isDirectRecallEvidence(capsule, params.workspaceId)
   );
   const boundRefs = await loadBoundEvidenceRefsOrFallback(
-    params,
-    evidenceRankById,
-    direct
+    params, loaded.evidenceRankById, direct
   );
   if (boundRefs === null) return;
   const unbound = direct.filter(({ capsule }) => !boundRefs.has(capsule.object_id));
   const unboundIds = new Set(unbound.map(({ capsule }) => capsule.object_id));
   const ordinaryRanks = new Map(
-    [...evidenceRankById].filter(([objectId]) => !unboundIds.has(objectId))
+    [...loaded.evidenceRankById].filter(([objectId]) => !unboundIds.has(objectId))
   );
   await admitMemoryEvidenceMatches(params, ordinaryRanks);
   await admitDirectEvidenceMatches(params, unbound);
@@ -62,7 +67,7 @@ async function loadQualifiedEvidenceOrFallback(
   params: SemanticSupplementParams,
   evidenceMatches: readonly Readonly<KeywordSearchResult>[],
   evidenceRankById: ReadonlyMap<string, number>
-): Promise<readonly QualifiedEvidenceCandidate[] | null> {
+): Promise<Readonly<QualifiedEvidenceLoad> | null> {
   const findQualified =
     params.context.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
   if (findQualified === undefined) {
@@ -76,23 +81,7 @@ async function loadQualifiedEvidenceOrFallback(
       params.workspaceId,
       matches
     );
-    const ownerRankById = buildOwnerRankById(evidenceMatches);
-    const rankByProjection = buildProjectionRankByKey(evidenceMatches);
-    return selectQualifiedEvidenceCandidates(qualified.flatMap((result) => {
-      const rank = result.matched_projection === undefined
-        ? ownerRankById.get(result.capsule.object_id)
-        : rankByProjection.get(projectionMatchKey(
-          result.capsule.object_id,
-          result.matched_projection
-        ));
-      if (rank === undefined) return [];
-      recordQualifiedProjectionMatch(params, result, rank);
-      const candidate = projectQualifiedEvidenceCandidate(
-        result,
-        rank
-      );
-      return candidate === null ? [] : [candidate];
-    }));
+    return buildQualifiedEvidenceLoad(params, evidenceMatches, qualified);
   } catch (error) {
     if (isEvidenceProjectionIntegrityError(error)) throw error;
     await admitMemoryEvidenceMatches(params, evidenceRankById);
@@ -100,10 +89,60 @@ async function loadQualifiedEvidenceOrFallback(
   }
 }
 
+function buildQualifiedEvidenceLoad(
+  params: SemanticSupplementParams,
+  evidenceMatches: readonly Readonly<KeywordSearchResult>[],
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): Readonly<QualifiedEvidenceLoad> {
+  const ownerRankById = buildOwnerRankById(evidenceMatches);
+  const matchByProjection = buildProjectionMatchByKey(evidenceMatches);
+  const acceptedRanks = new Map<string, number>();
+  const resolvedIds = new Set(qualified.map(({ capsule }) => capsule.object_id));
+  const candidates = qualified.flatMap((result) => {
+    if (isVerifiedAssertionOwnerMatch(result)) return [];
+    const matchedSearch = result.matched_projection === undefined
+      ? undefined
+      : matchByProjection.get(projectionMatchKey(
+        result.capsule.object_id,
+        result.matched_projection
+      ));
+    const rank = result.matched_projection === undefined
+      ? ownerRankById.get(result.capsule.object_id)
+      : matchedSearch?.normalized_rank;
+    if (rank === undefined) return [];
+    acceptedRanks.set(
+      result.capsule.object_id,
+      Math.max(acceptedRanks.get(result.capsule.object_id) ?? 0, rank)
+    );
+    recordQualifiedProjectionMatch(
+      params, result, rank, matchedSearch?.matched_fts_lanes ?? []
+    );
+    const candidate = projectQualifiedEvidenceCandidate(result, rank);
+    return candidate === null ? [] : [candidate];
+  });
+  for (const [objectId, rank] of buildEvidenceRankById(evidenceMatches)) {
+    if (!resolvedIds.has(objectId)) acceptedRanks.set(objectId, rank);
+  }
+  return Object.freeze({
+    candidates: selectQualifiedEvidenceCandidates(candidates),
+    evidenceRankById: acceptedRanks
+  });
+}
+
+function isVerifiedAssertionOwnerMatch(
+  qualified: Readonly<RecallQualifiedEvidence>
+): boolean {
+  return qualified.matched_projection === undefined &&
+    readVerifiedUserAssertionSourceHashDigest(
+      qualified.capsule.source_hash
+    ) !== null;
+}
+
 function recordQualifiedProjectionMatch(
   params: SemanticSupplementParams,
   qualified: Readonly<RecallQualifiedEvidence>,
-  rank: number
+  rank: number,
+  matchedFtsLanes: NonNullable<KeywordSearchResult["matched_fts_lanes"]>
 ): void {
   const evidenceRef = qualified.capsule.object_id;
   const projection = qualified.matched_projection;
@@ -116,7 +155,15 @@ function recordQualifiedProjectionMatch(
     projection_kind: projectionKind,
     projection_id: projectionKind === "owner" ? null : projection?.projection_id ?? null,
     normalized_rank: rank,
-    fact_key_forms: Object.freeze([...(qualified.matched_fact_key_forms ?? [])])
+    ...(matchedFtsLanes.length === 0 ? {} : {
+      matched_fts_lanes: mergeFtsLaneIds(matchedFtsLanes)
+    }),
+    fact_key_forms: Object.freeze([...(qualified.matched_fact_key_forms ?? [])]),
+    ...(qualified.matched_fact_frame === undefined ? {} : {
+      fact_slots: Object.freeze(qualified.matched_fact_frame.slots.map((slot) =>
+        Object.freeze({ ...slot })
+      ))
+    })
   });
   const current = params.evidenceProjectionMatchesByRef.get(evidenceRef) ?? [];
   const identity = projectionMatchReceiptIdentity(receipt);
@@ -126,9 +173,19 @@ function recordQualifiedProjectionMatch(
   const existing = current.find((candidate) =>
     projectionMatchReceiptIdentity(candidate) === identity
   );
+  const preferred = existing !== undefined && existing.normalized_rank > rank
+    ? existing
+    : receipt;
+  const mergedLanes = mergeFtsLaneIds(
+    existing?.matched_fts_lanes ?? [],
+    receipt.matched_fts_lanes ?? []
+  );
   params.evidenceProjectionMatchesByRef.set(evidenceRef, [
     ...retained,
-    existing !== undefined && existing.normalized_rank > rank ? existing : receipt
+    Object.freeze({
+      ...preferred,
+      ...(mergedLanes.length === 0 ? {} : { matched_fts_lanes: mergedLanes })
+    })
   ]);
 }
 
@@ -173,16 +230,22 @@ function projectQualifiedEvidenceCandidate(
       sourceRole: "assistant"
     });
   }
+  if (qualified.matched_projection?.projection_kind === "fact_key") {
+    const verifiedUserSupportSource = buildVerifiedUserSupportSource(qualified);
+    return Object.freeze({
+      capsule: qualified.capsule,
+      rank,
+      documentIdentity:
+        `fact_key:${qualified.matched_projection.projection_id}`,
+      recallText: qualified.matched_projection.content,
+      ...(verifiedUserSupportSource === undefined ? {} : {
+        sourceRole: "user" as const,
+        verifiedUserSupportSource
+      })
+    });
+  }
   if (qualified.matched_projection !== undefined) return null;
-  const verifiedUserSupportSource = qualified.verified_user_projection
-    ? Object.freeze({
-      schema_version: 1 as const,
-      source_role: "user" as const,
-      projection_kind: "turn_projection" as const,
-      evidence_ref: qualified.capsule.object_id,
-      support_identity: null
-    })
-    : undefined;
+  const verifiedUserSupportSource = buildVerifiedUserSupportSource(qualified);
   return Object.freeze({
     capsule: qualified.capsule,
     rank,
@@ -192,6 +255,20 @@ function projectQualifiedEvidenceCandidate(
       ? {}
       : { verifiedUserSupportSource })
   });
+}
+
+function buildVerifiedUserSupportSource(
+  qualified: Readonly<RecallQualifiedEvidence>
+): Readonly<RecallVerifiedUserSupportSource> | undefined {
+  return qualified.verified_user_projection
+    ? Object.freeze({
+      schema_version: 1 as const,
+      source_role: "user" as const,
+      projection_kind: "turn_projection" as const,
+      evidence_ref: qualified.capsule.object_id,
+      support_identity: null
+    })
+    : undefined;
 }
 
 function buildEvidenceRankById(
@@ -215,16 +292,19 @@ function buildOwnerRankById(
   ));
 }
 
-function buildProjectionRankByKey(
+function buildProjectionMatchByKey(
   matches: readonly Readonly<KeywordSearchResult>[]
-): ReadonlyMap<string, number> {
-  const ranks = new Map<string, number>();
+): ReadonlyMap<string, Readonly<KeywordSearchResult>> {
+  const output = new Map<string, Readonly<KeywordSearchResult>>();
   for (const match of matches) {
     if (match.matched_projection === undefined) continue;
     const key = projectionMatchKey(match.object_id, match.matched_projection);
-    ranks.set(key, Math.max(ranks.get(key) ?? 0, match.normalized_rank));
+    const current = output.get(key);
+    if (current === undefined || current.normalized_rank < match.normalized_rank) {
+      output.set(key, match);
+    }
   }
-  return ranks;
+  return output;
 }
 
 function projectionMatchKey(

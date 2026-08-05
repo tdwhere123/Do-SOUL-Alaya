@@ -71,7 +71,9 @@ function buildRecallService(params: {
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
       findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
       searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
+      searchByKeywordField: memoryRepo.searchByKeywordField.bind(memoryRepo),
       searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
+      searchByAnchorField: memoryRepo.searchByAnchorField.bind(memoryRepo),
       findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
     },
     slotRepo: {
@@ -83,6 +85,8 @@ function buildRecallService(params: {
     },
     evidenceSearchPort: {
       searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
+      searchByKeywordField:
+        params.evidenceCapsuleRepo.searchByKeywordField.bind(params.evidenceCapsuleRepo),
       findByIds: (workspaceId: string, evidenceObjectIds: readonly string[]) =>
         params.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds)
     }

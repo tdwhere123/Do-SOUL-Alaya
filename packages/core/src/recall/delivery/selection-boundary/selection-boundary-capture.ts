@@ -159,6 +159,16 @@ function serializeOptionalSelectionInputs(
       coverage_relevance_by_candidate_key:
         stableNumberEntries(params.coverageRelevanceByCandidateKey)
     }),
+    ...(params.coverageRelevanceUpperBound === undefined ? {} : {
+      coverage_relevance_upper_bound: cloneSelectionBoundaryJson(
+        params.coverageRelevanceUpperBound
+      )
+    }),
+    ...(params.coverageObjectiveConfig === undefined ? {} : {
+      coverage_objective_config: cloneSelectionBoundaryJson(
+        params.coverageObjectiveConfig
+      )
+    }),
     ...(params.finalOrderAfterCoverage === undefined ? {} : {
       final_order_after_coverage: params.finalOrderAfterCoverage
     }),
@@ -187,9 +197,16 @@ export function buildSelectionBoundaryExpected(
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   packetPlanVisible = result.packetPlanObservation !== undefined,
-  preProjection?: FineAssessmentPreProjectionCapture
+  preProjection?: FineAssessmentPreProjectionCapture,
+  includeCoverageObjective = true
 ): FineAssessmentSelectionBoundaryExpected {
   return Object.freeze({
+    ...(includeCoverageObjective ? {
+      coverage_objective: result.coverageSelectionObjective
+    } : {}),
+    ...(result.fieldRefinementStopCertificate === undefined ? {} : {
+      field_refinement_stop_certificate: result.fieldRefinementStopCertificate
+    }),
     candidate_keys: packetConsensus.actual_candidate_keys,
     drop_tuples: Object.freeze(result.diagnostics.map((diagnostic) =>
       Object.freeze([
@@ -225,8 +242,7 @@ function serializeSupplementaryData(
 ): SerializedRecallSupplementaryData {
   const {
     evidenceSemanticDocumentsByMemoryId: _evidenceSemanticDocumentsByMemoryId,
-    evidenceSemanticScoresByCandidateKey,
-    evidenceSemanticWinnersByCandidateKey,
+    evidenceSemanticActivationsByCandidateKey,
     answerRelevanceScoresByCandidateKey,
     routingKeysByOwnerIdentity,
     keyActivationByOwnerIdentity,
@@ -234,13 +250,9 @@ function serializeSupplementaryData(
   } = data;
   return Object.freeze({
     ...cloneSelectionBoundaryJson(plainData),
-    evidenceSemanticScoresByCandidateKey:
-      stableNumberEntries(evidenceSemanticScoresByCandidateKey),
-    ...(evidenceSemanticWinnersByCandidateKey === undefined ||
-      evidenceSemanticWinnersByCandidateKey.size === 0 ? {} : {
-      evidenceSemanticWinnersByCandidateKey:
-        stableEntries(evidenceSemanticWinnersByCandidateKey)
-    }),
+    evidenceSemanticActivationsByCandidateKey: stableEntries(
+      evidenceSemanticActivationsByCandidateKey
+    ),
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey:
         stableNumberEntries(answerRelevanceScoresByCandidateKey)

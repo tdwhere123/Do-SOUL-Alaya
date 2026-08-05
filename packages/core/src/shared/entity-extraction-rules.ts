@@ -116,6 +116,8 @@ interface RuleHit {
  * candidate list itself.
  */
 export class RuleBasedEntityExtractor implements EntityExtractionPort {
+  public readonly operator_id = "rule_based_entity_extractor_v1";
+
   public async extract(
     query: string,
     options?: Readonly<{ readonly maxEntities?: number }>

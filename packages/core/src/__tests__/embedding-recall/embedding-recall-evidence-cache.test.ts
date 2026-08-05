@@ -41,7 +41,8 @@ describe("EmbeddingRecallService evidence document cache", () => {
     expect(embedTexts.mock.calls.map(([texts]) => texts.length)).toEqual([1, 31]);
     expect(first.inferenceCalls).toBe(2);
     expect(second.inferenceCalls).toBe(0);
-    expect([...second.scores]).toEqual([...first.scores]);
+    expect([...second.activationsByCandidateKey])
+      .toEqual([...first.activationsByCandidateKey]);
   });
 
   it("does not reuse a query vector as the document vector for identical text", async () => {
@@ -115,7 +116,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       ]
     });
 
-    expect([...result.scores]).toEqual([
+    expect([...activationScores(result)]).toEqual([
       ["evidence:beta", 0],
       ["evidence:alpha", 1]
     ]);
@@ -158,12 +159,68 @@ describe("EmbeddingRecallService evidence document cache", () => {
     });
 
     expect(result).toMatchObject({ expectedCount: 2, scoredCount: 2 });
-    expect([...result.scores]).toEqual([["memory:1", 1]]);
+    expect([...activationScores(result)]).toEqual([["memory:1", 1]]);
     expect(readWinningDocuments(result).get("memory:1")).toEqual({
       score: 1,
       evidenceObjectId: "evidence-strong",
       documentIdentity: "evidence-strong"
     });
+    expect(result.activationsByCandidateKey.get("memory:1")).toEqual({
+      schema_version: 1,
+      operator_id: "evidence_document_max_v1",
+      state: "observed",
+      score: 1,
+      winner: {
+        score: 1,
+        evidenceObjectId: "evidence-strong",
+        documentIdentity: "evidence-strong"
+      },
+      observations: [{
+        score: 1,
+        evidenceObjectId: "evidence-strong",
+        documentIdentity: "evidence-strong"
+      }, {
+        score: 0,
+        evidenceObjectId: "evidence-weak",
+        documentIdentity: "evidence-weak"
+      }],
+      observation_completeness: "complete",
+      missing_channel_policy: "no_op"
+    });
+    expect(result.fieldChannelCapture?.channel).toMatchObject({
+      channel_id: "evidence_semantic",
+      status: "complete",
+      depth: 1,
+      unseen_upper_bound: 0
+    });
+    expect(result.fieldChannelCapture?.channel.observations).toEqual([{
+      observation_id: "evidence_semantic:memory:1:evidence-strong:evidence-strong",
+      candidate_key: "memory:1",
+      rank: 1
+    }]);
+  });
+
+  it("collapses duplicate document identities to their strongest observation", async () => {
+    const result = await scoreEqualCandidates([
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "owner",
+        content: "duplicate-a"
+      },
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "owner",
+        content: "duplicate-b"
+      }
+    ]);
+
+    expect(result.activationsByCandidateKey.get("memory:1")?.observations).toEqual([{
+      score: 1,
+      evidenceObjectId: "evidence-1",
+      documentIdentity: "owner"
+    }]);
   });
 
   it("chooses the same attributed document on equal scores in either input order", async () => {
@@ -225,7 +282,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       }]
     });
 
-    expect([...result.scores]).toEqual([
+    expect([...activationScores(result)]).toEqual([
       ["workspace_local:memory_entry:memory-1", 1]
     ]);
     expect(upsertMany).toHaveBeenCalledWith([
@@ -272,7 +329,13 @@ describe("EmbeddingRecallService evidence document cache", () => {
       scoredCount: 0,
       inferenceCalls: 2
     });
-    expect(failed.scores.size).toBe(0);
+    expect(failed.activationsByCandidateKey.size).toBe(0);
+    expect(failed.fieldChannelCapture?.channel).toMatchObject({
+      channel_id: "evidence_semantic",
+      status: "unavailable",
+      depth: 0,
+      observations: []
+    });
     expect(retried).toMatchObject({ status: "returned", scoredCount: 1 });
     expect(embedTexts).toHaveBeenCalledTimes(3);
   });
@@ -316,7 +379,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       inferenceCalls: 1,
       failureClass: "candidate_embedding_failed"
     });
-    expect(result.scores.size).toBe(0);
+    expect(result.activationsByCandidateKey.size).toBe(0);
   });
 });
 
@@ -335,12 +398,25 @@ type ExpectedWinningDocument = Readonly<{
 function readWinningDocuments(
   result: unknown
 ): ReadonlyMap<string, ExpectedWinningDocument> {
-  return (result as {
-    readonly winnersByCandidateKey: ReadonlyMap<
-      string,
-      ExpectedWinningDocument
-    >;
-  }).winnersByCandidateKey;
+  const activations = (result as {
+    readonly activationsByCandidateKey: ReadonlyMap<string, Readonly<{
+      readonly winner: ExpectedWinningDocument;
+    }>>;
+  }).activationsByCandidateKey;
+  return new Map([...activations].map(([candidateKey, receipt]) =>
+    [candidateKey, receipt.winner] as const
+  ));
+}
+
+function activationScores(
+  result: Readonly<{ readonly activationsByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<{ readonly score: number }>
+  > }>
+): ReadonlyMap<string, number> {
+  return new Map([...result.activationsByCandidateKey].map(
+    ([candidateKey, receipt]) => [candidateKey, receipt.score] as const
+  ));
 }
 
 async function scoreEqualCandidates(

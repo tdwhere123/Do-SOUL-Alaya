@@ -2,6 +2,8 @@ import type { EvidenceEmbeddingCandidate } from
   "../../../embedding-recall/embedding-recall-service.js";
 import type { EvidenceCandidateScoringWinner } from
   "../../../embedding-recall/types.js";
+import type { EvidenceCandidateScoringReceipt } from
+  "../../../embedding-recall/types.js";
 import {
   buildRecallCandidateDedupeKey,
   isWorkspaceMemoryCandidate
@@ -9,6 +11,7 @@ import {
 import type { CoarseRecallCandidate } from "../recall-service-types.js";
 import type {
   RecallEvidenceSemanticDocument,
+  RecallEvidenceSemanticActivationReceipt,
   RecallEvidenceSemanticWinnerReceipt
 } from "../recall-service-types.js";
 
@@ -28,36 +31,57 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
   }));
 }
 
-export function attributeEvidenceSemanticWinners(params: Readonly<{
-  readonly winners: ReadonlyMap<string, Readonly<EvidenceCandidateScoringWinner>>;
+export function attributeEvidenceSemanticActivations(params: Readonly<{
+  readonly activations: ReadonlyMap<
+    string,
+    Readonly<EvidenceCandidateScoringReceipt>
+  >;
   readonly evidenceDocumentsByMemoryId: Readonly<
     Record<string, readonly Readonly<RecallEvidenceSemanticDocument>[]>
   >;
-}>): ReadonlyMap<string, Readonly<RecallEvidenceSemanticWinnerReceipt>> {
+}>): ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>> {
   const documents = new Map<string, Readonly<RecallEvidenceSemanticDocument>>();
   for (const entries of Object.values(params.evidenceDocumentsByMemoryId)) {
     for (const document of entries) {
       documents.set(documentLookupKey(document.evidenceRef, document.documentIdentity), document);
     }
   }
-  return new Map([...params.winners].flatMap(([candidateKey, winner]) => {
-    const projection = resolveWinnerProjection(winner, documents);
-    return [[candidateKey, Object.freeze({
-      ...winner,
-      projection
-    })] as const];
+  return new Map([...params.activations].map(([candidateKey, activation]) => {
+    const observations = Object.freeze(activation.observations.map((observation) =>
+      attributeObservation(observation, documents)
+    ));
+    const winner = observations.find((observation) =>
+      sameObservation(observation, activation.winner)
+    )!;
+    return [candidateKey, Object.freeze({
+      ...activation,
+      winner,
+      observations
+    })] as const;
   }));
 }
 
-function resolveWinnerProjection(
-  winner: Readonly<EvidenceCandidateScoringWinner>,
+function attributeObservation(
+  observation: Readonly<EvidenceCandidateScoringWinner>,
   documents: ReadonlyMap<string, Readonly<RecallEvidenceSemanticDocument>>
-) {
+): Readonly<RecallEvidenceSemanticWinnerReceipt> {
   const document = documents.get(documentLookupKey(
-    winner.evidenceObjectId,
-    winner.documentIdentity
+    observation.evidenceObjectId,
+    observation.documentIdentity
   ));
-  return document?.projection ?? null;
+  return Object.freeze({
+    ...observation,
+    projection: document?.projection ?? null
+  });
+}
+
+function sameObservation(
+  left: Readonly<RecallEvidenceSemanticWinnerReceipt>,
+  right: Readonly<EvidenceCandidateScoringWinner>
+): boolean {
+  return left.score === right.score &&
+    left.evidenceObjectId === right.evidenceObjectId &&
+    left.documentIdentity === right.documentIdentity;
 }
 
 function documentLookupKey(evidenceRef: string, documentIdentity: string): string {

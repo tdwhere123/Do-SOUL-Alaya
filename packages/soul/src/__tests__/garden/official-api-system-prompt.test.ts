@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "../../garden/compute-provider.js";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  resolveOfficialApiSystemPrompt
+} from "../../garden/compute-provider.js";
 
 describe("official API system prompt", () => {
   it("requires quote-first evidence before distillation", () => {
@@ -54,4 +58,21 @@ describe("official API system prompt", () => {
       'never a string label such as "high", "medium", or "low"'
     );
   });
+
+  it("resolves current and sealed historical prompt identities without a fallback", () => {
+    const currentSha256 = sha256(OFFICIAL_API_SYSTEM_PROMPT);
+    const historicalSha256 =
+      "5ec2740bd63923305b376b240d5a219383f3cbfe8a7d9198d504f7f8de542326";
+    const historical = resolveOfficialApiSystemPrompt(historicalSha256);
+
+    expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(historical).toBeDefined();
+    expect(sha256(historical!)).toBe(historicalSha256);
+    expect(historical).not.toContain('"fact_frame"');
+    expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
+  });
 });
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}

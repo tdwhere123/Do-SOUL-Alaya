@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID } from
+  "@do-soul/alaya-core";
+import { GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-soul";
 import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
+  EXTRACTION_REPLAY_FORMATION_POLICY,
   hashExtractionReplay,
   replayExtractionOccurrences,
   type ExtractionReplayAuditor
@@ -31,7 +35,7 @@ describe("extraction cache replay", () => {
       occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z"), occurrence("q-s1-r0", key, "2025-02-01T00:00:00.000Z")],
       audit: auditor((input) => {
         seen.push({ source: input.source_observed_at!, created: input.created_at, signalId: input.signal_id_for(0) });
-        return resultFor([{ index: 0, disposition: "admitted", stage: "formation", reason: "formed" }]);
+        return resultFor([admitted(0, formedSignal("source fact", "User: source fact"))]);
       })
     });
 
@@ -75,6 +79,25 @@ describe("extraction cache replay", () => {
     expect(result.closure).toMatchObject({ occurrenceCount: 1, accountedOccurrences: 1, elementCount: 0, invalid: 0 });
   });
 
+  it("fails closed when an admitted entry omits its formed signal", () => {
+    const root = cacheRoot();
+    const key = "f".repeat(64);
+    writeShard(root, key, validRaw());
+
+    expect(() => replayExtractionOccurrences({
+      cacheRoot: root,
+      model,
+      requestProfile,
+      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+      audit: auditor(() => resultFor([{
+        index: 0,
+        disposition: "admitted",
+        stage: "formation",
+        reason: "formed"
+      }]))
+    })).toThrow("admitted extraction signal missing fact-frame formation commitment");
+  });
+
   it("has a stable replay digest independent of occurrence input order", () => {
     const root = cacheRoot();
     const first = "a".repeat(64);
@@ -92,6 +115,13 @@ describe("extraction cache replay", () => {
     });
 
     expect(hashExtractionReplay(forward)).toBe(hashExtractionReplay(reversed));
+    expect(hashExtractionReplay(forward)).not.toBe(hashExtractionReplay({
+      ...forward,
+      factFramePolicy: {
+        ...forward.factFramePolicy,
+        fullTurnEvidence: !forward.factFramePolicy.fullTurnEvidence
+      }
+    }));
   });
 
   it("commits the final grounded assertion and formed content", () => {
@@ -121,6 +151,63 @@ describe("extraction cache replay", () => {
     });
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedAssertion));
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedContent));
+  });
+
+  it("closes every admitted signal through the production fact-frame formation states", () => {
+    const root = cacheRoot();
+    const key = "e".repeat(64);
+    writeShard(root, key, validRaw());
+    const result = replayExtractionOccurrences({
+      cacheRoot: root,
+      model,
+      requestProfile,
+      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+      audit: auditor(() => resultFor([
+        admitted(0, factFrameSignal("formed")),
+        admitted(1, factFrameSignal("rejected")),
+        admitted(2, factFrameSignal("unavailable")),
+        admitted(3, factFrameSignal("ineligible"))
+      ]))
+    });
+
+    expect(result.factFrameClosure).toEqual({
+      admittedSignalCount: 4,
+      accountedSignalCount: 4,
+      formed: 1,
+      ineligible: 1,
+      unavailable: 1,
+      rejected: 1,
+      factKeyProjectionCount: 4
+    });
+    expect(result.factFramePolicy).toEqual(EXTRACTION_REPLAY_FORMATION_POLICY);
+    expect(result.occurrences[0]?.entries.map(({ factFrameFormation }) =>
+      factFrameFormation)).toEqual([
+      {
+        status: "formed",
+        producerOperatorId: GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
+        factKeyProjectionCount: 4,
+        factKeyProjectionSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      },
+      {
+        status: "rejected",
+        producerOperatorId: GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
+        factKeyProjectionCount: 0,
+        factKeyProjectionSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      },
+      {
+        status: "unavailable",
+        producerOperatorId:
+          RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID,
+        factKeyProjectionCount: 0,
+        factKeyProjectionSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      },
+      {
+        status: "ineligible",
+        producerOperatorId: null,
+        factKeyProjectionCount: 0,
+        factKeyProjectionSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }
+    ]);
   });
 });
 
@@ -174,6 +261,10 @@ function resultFor(entries: readonly { index: number; disposition: "admitted" | 
   };
 }
 
+function admitted(index: number, signal: CandidateMemorySignal) {
+  return { index, disposition: "admitted" as const, stage: "formation", reason: "formed", signal };
+}
+
 function formedSignal(assertion: string, fullTurnContent: string): CandidateMemorySignal {
   return {
     signal_id: "signal-formed",
@@ -202,5 +293,48 @@ function formedSignal(assertion: string, fullTurnContent: string): CandidateMemo
       full_turn_content: fullTurnContent
     },
     created_at: "2025-01-01T00:00:00.000Z"
+  };
+}
+
+function factFrameSignal(
+  mode: "formed" | "ineligible" | "rejected" | "unavailable"
+): CandidateMemorySignal {
+  const assertion = mode === "unavailable" ? "I am the sole member." : "I use Atlas.";
+  const signal = formedSignal(assertion, `User: ${assertion}`);
+  if (mode === "ineligible") {
+    return { ...signal, signal_id: `signal-${mode}` };
+  }
+  const frame = {
+    schema_version: 1 as const,
+    slots: [
+      { role: "subject" as const, text: "I" },
+      { role: "relation" as const, text: "use" },
+      { role: "value" as const, text: mode === "rejected" ? "Nova" : "Atlas" }
+    ]
+  };
+  return {
+    ...signal,
+    signal_id: `signal-${mode}`,
+    raw_payload: {
+      ...signal.raw_payload,
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
+      },
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: assertion,
+        proposed_matched_text: assertion,
+        reasons: [],
+        ...(mode === "rejected" ? {
+          proposed_fact_frame: frame,
+          reasons: ["proposed_fact_frame_not_source_grounded"]
+        } : {})
+      },
+      ...(mode === "formed" ? { fact_frame: frame } : {})
+    }
   };
 }

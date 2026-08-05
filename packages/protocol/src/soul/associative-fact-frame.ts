@@ -44,6 +44,89 @@ export interface AttributedAssociativeFactKeyProjection {
   readonly forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }
 
+export const EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID =
+  "evidence_fact_frame_formation_v1";
+export const EvidenceFactFrameFormationStatusSchema = z.enum([
+  "formed",
+  "ineligible",
+  "unavailable",
+  "rejected"
+]);
+export const EvidenceFactFrameFormationProposalSchema = z.object({
+  schema_version: z.literal(1),
+  producer_operator_id: NonEmptyStringSchema.max(128),
+  source_assertion: NonEmptyStringSchema,
+  fact_frame: AssociativeFactFrameSchema
+}).strict().readonly();
+export const EvidenceFactFrameFormationCaptureSchema = z.object({
+  schema_version: z.literal(1),
+  operator_id: z.literal(EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID),
+  status: EvidenceFactFrameFormationStatusSchema,
+  producer_operator_id: NonEmptyStringSchema.max(128).nullable(),
+  source_hash: NonEmptyStringSchema.nullable(),
+  fact_frame: AssociativeFactFrameSchema.nullable(),
+  capture_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u)
+}).strict().superRefine((capture, context) => {
+  const formed = capture.status === "formed";
+  if (formed !== (capture.producer_operator_id !== null &&
+      capture.source_hash !== null && capture.fact_frame !== null)) {
+    context.addIssue({
+      code: "custom",
+      message: "formed fact-frame capture requires producer, source, and frame"
+    });
+  }
+  if (!formed && capture.fact_frame !== null) {
+    context.addIssue({
+      code: "custom",
+      message: "non-formed fact-frame capture cannot contain a frame"
+    });
+  }
+}).readonly();
+
+export type EvidenceFactFrameFormationStatus =
+  z.infer<typeof EvidenceFactFrameFormationStatusSchema>;
+export type EvidenceFactFrameFormationProposal =
+  z.infer<typeof EvidenceFactFrameFormationProposalSchema>;
+export type EvidenceFactFrameFormationCapture =
+  z.infer<typeof EvidenceFactFrameFormationCaptureSchema>;
+export type EvidenceFactFrameFormationCaptureBody = Omit<
+  EvidenceFactFrameFormationCapture,
+  "capture_digest"
+>;
+
+export function evidenceFactFrameFormationCapturePreimage(
+  capture: Readonly<EvidenceFactFrameFormationCaptureBody>
+): string {
+  return JSON.stringify([
+    capture.schema_version,
+    capture.operator_id,
+    capture.status,
+    capture.producer_operator_id,
+    capture.source_hash,
+    capture.fact_frame === null
+      ? null
+      : [
+          capture.fact_frame.schema_version,
+          capture.fact_frame.slots.map((slot) => [slot.role, slot.text])
+        ]
+  ]);
+}
+
+export function verifyEvidenceFactFrameFormationCapture(
+  value: unknown,
+  sha256: (preimage: string) => string
+): EvidenceFactFrameFormationCapture {
+  const capture = EvidenceFactFrameFormationCaptureSchema.parse(value);
+  const { capture_digest: _digest, ...body } = capture;
+  const expected = `sha256:${sha256(
+    evidenceFactFrameFormationCapturePreimage(body)
+  )}`;
+  if (capture.capture_digest !== expected) {
+    throw new Error("evidence fact-frame formation capture digest mismatch");
+  }
+  return capture;
+}
+
 const REQUIRED_ROLES: readonly AssociativeFactSlotRole[] = [
   "subject",
   "relation",

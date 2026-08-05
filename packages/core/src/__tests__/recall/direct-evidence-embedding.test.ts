@@ -15,6 +15,8 @@ import {
   type ScoreEvidenceCandidatesParams
 } from "../../embedding-recall/embedding-recall-service.js";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import {
   buildDirectEvidencePseudoMemoryEntry
 } from "../../recall/coarse-filter/evidence/direct-evidence-candidate.js";
@@ -260,7 +262,8 @@ describe("direct evidence transient embedding assessment", () => {
       }]
     });
 
-    expect(scores.scores.get(evidenceCandidateKey("snapshot-evidence"))).toBeCloseTo(1);
+    expect(scores.activationsByCandidateKey
+      .get(evidenceCandidateKey("snapshot-evidence"))?.score).toBeCloseTo(1);
     expect(scores).toMatchObject({
       status: "returned",
       expectedCount: 1,
@@ -323,7 +326,7 @@ function createRecallFixture(params: Readonly<{
       ? {}
       : { scoreEvidenceCandidates: params.scoreEvidenceCandidates })
   };
-  const service = new RecallService({
+  const service = createFieldBackedRecallService({
     ...dependencies,
     memoryRepo: {
       ...dependencies.memoryRepo,
@@ -486,16 +489,27 @@ function evidenceScores(
   status: EvidenceCandidateScoringResult["status"] = "returned"
 ): Readonly<EvidenceCandidateScoringResult> {
   const returned = status === "returned";
+  const activationsByCandidateKey = new Map(params.candidates.flatMap((candidate) => {
+    const score = scores.get(candidate.candidateKey);
+    if (score === undefined) return [];
+    const observation = Object.freeze({
+      score,
+      evidenceObjectId: candidate.evidenceObjectId,
+      documentIdentity: candidate.documentIdentity
+    });
+    return [[candidate.candidateKey, Object.freeze({
+      schema_version: 1 as const,
+      operator_id: "evidence_document_max_v1" as const,
+      state: "observed" as const,
+      score,
+      winner: observation,
+      observations: Object.freeze([observation]),
+      observation_completeness: "complete" as const,
+      missing_channel_policy: "no_op" as const
+    })] as const];
+  }));
   return Object.freeze({
-    scores,
-    winnersByCandidateKey: new Map(params.candidates.flatMap((candidate) => {
-      const score = scores.get(candidate.candidateKey);
-      return score === undefined ? [] : [[candidate.candidateKey, Object.freeze({
-        score,
-        evidenceObjectId: candidate.evidenceObjectId,
-        documentIdentity: candidate.documentIdentity
-      })] as const];
-    })),
+    activationsByCandidateKey,
     status,
     expectedCount: params.candidates.length,
     scoredCount: scores.size,

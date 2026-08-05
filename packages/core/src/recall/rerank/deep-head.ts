@@ -2,16 +2,10 @@ import type { DeliverySelectionCandidate } from "../delivery/delivery-selection.
 import {
   buildComponentsDeepHeadAssessment,
   buildCrossEncoderAssessment,
-  coldEmbeddingDeepHeadScore,
   independentEmbeddingEvidenceFormula,
   lightweightDeepHeadFormula,
-  lightweightDeepHeadScore,
   nonlexicalUnitIntervalCompositionFormula
 } from "./deep-head-assessment-builder.js";
-import {
-  answerEvidenceSignal,
-  embeddingSignal
-} from "./deep-head-signals.js";
 import type {
   DeepHeadAssessmentParams,
   DeepHeadSupplementary,
@@ -65,23 +59,12 @@ export function computeLightweightDeepHeadScores(
   candidates: readonly DeliverySelectionCandidate[],
   supplementaryData: DeepHeadSupplementary
 ): ReadonlyMap<string, number> {
-  const embeddingObserved = candidates.some(
-    (candidate) => embeddingSignal(candidate, supplementaryData) !== null
-  );
-  if (embeddingObserved) {
-    return new Map(candidates.map((candidate) => [
-      candidate.fusion.candidate_key,
-      lightweightDeepHeadScore(candidate, supplementaryData)
-    ]));
-  }
-  const agreementActive = candidates.some(
-    (candidate) => answerEvidenceSignal(candidate, supplementaryData) > 0
-  );
-  if (!agreementActive) return new Map();
-  return new Map(candidates.map((candidate) => [
-    candidate.fusion.candidate_key,
-    coldEmbeddingDeepHeadScore(candidate, supplementaryData)
-  ]));
+  return buildComponentsDeepHeadAssessment(
+    candidates,
+    supplementaryData,
+    lightweightDeepHeadFormula,
+    false
+  ).scores;
 }
 
 export function resolveIndependentEmbeddingEvidenceAssessment(

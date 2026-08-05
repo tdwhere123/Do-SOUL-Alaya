@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   EvidenceSearchProjectionSchema,
-  GARDEN_SOURCE_TURN_FALLBACK_ARTIFACT_PREFIX,
   GARDEN_SOURCE_TURN_FALLBACK_V2_SOURCE_HASH_PREFIX,
   formatGardenSourceTurnFallbackArtifactRef,
   formatGardenSourceTurnFallbackV2SourceHash,
@@ -27,6 +26,18 @@ import {
   applyFactFrameRetrofit,
   readFactFrameRetrofitLedger
 } from "./fact-frame-retrofit.js";
+import { replayStoredEvidenceFactFrameFormation } from
+  "./fact-frame-formation-replay.js";
+import {
+  readEvidenceProjectionOwners,
+  type EvidenceProjectionOwnerRow
+} from "./evidence-projection-owner-read.js";
+import {
+  emptyFactFrameFormationSummary,
+  summarizeFactFrameFormations
+} from "./fact-frame-formation-summary.js";
+import { backfillMissingFactFrameFormations } from
+  "./fact-frame-formation/backfill.js";
 import {
   EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION,
   type EvidenceSearchProjectionKindCount,
@@ -40,13 +51,6 @@ export type {
 } from "./evidence-search-projection-rebuild-report.js";
 
 const FIRST_EVIDENCE_PROJECTION_SCHEMA_VERSION = 109;
-
-interface EvidenceProjectionOwnerRow {
-  readonly object_id: string;
-  readonly workspace_id: string;
-  readonly source_hash: string | null;
-  readonly artifact_ref: string | null;
-}
 
 interface PlannedOwner {
   readonly owner: EvidenceProjectionVerifiedOwnerRow;
@@ -89,9 +93,14 @@ export class EvidenceSearchProjectionRebuildError extends Error {
 export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   readonly workingDbPath: string;
   readonly factFrameRetrofitLedgerPath?: string;
+  readonly backfillMissingFactFrameFormations?: boolean;
   readonly sourceExtractionSystemPromptSha256?: string;
 }): Promise<EvidenceSearchProjectionRebuildReport> {
   const inputDbSha256 = await sha256File(input.workingDbPath);
+  if (input.factFrameRetrofitLedgerPath !== undefined &&
+      input.backfillMissingFactFrameFormations === true) {
+    throw new Error("default fact-frame backfill cannot be combined with retrofit ledger");
+  }
   const sourceSchemaVersion = assertEligibleWorkingSchema(input.workingDbPath);
   const retrofitLedger = input.factFrameRetrofitLedgerPath === undefined
     ? null
@@ -104,14 +113,21 @@ export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   try {
     const workingSchemaVersion = assertCurrentProjectionSchema(db);
     report = db.connection.transaction(() => {
+      const backfill = input.backfillMissingFactFrameFormations === true
+        ? backfillMissingFactFrameFormations(db)
+        : null;
       const rebuilt = rebuildAllVerifiedOwners(
         db,
         sourceSchemaVersion,
         workingSchemaVersion
       );
-      if (retrofitLedger === null) return rebuilt;
-      return Object.freeze({
+      const withBackfill = backfill === null ? rebuilt : Object.freeze({
         ...rebuilt,
+        fact_frame_formation_backfill: backfill
+      });
+      if (retrofitLedger === null) return withBackfill;
+      return Object.freeze({
+        ...withBackfill,
         fact_frame_retrofit: applyFactFrameRetrofit(db, retrofitLedger)
       });
     }).immediate();
@@ -149,7 +165,7 @@ function rebuildAllVerifiedOwners(
   sourceSchemaVersion: number,
   workingSchemaVersion: number
 ): EvidenceSearchProjectionRebuildReportBody {
-  const owners = readCandidateOwners(db);
+  const owners = readEvidenceProjectionOwners(db);
   const signalRepo = new SqliteSignalRepo(db);
   const { resolved, rejected } = resolveCandidateOwners(signalRepo, owners);
   const qualifiedOwnerIds = readRuntimeQualifiedOwnerIds(db, resolved);
@@ -158,7 +174,7 @@ function rebuildAllVerifiedOwners(
       rejected.push(reject(owner.owner, "runtime qualification failed"));
       return [];
     }
-    const result = planResolvedOwner(owner);
+    const result = planResolvedOwner(db, owner);
     if ("reason" in result) {
       rejected.push(result);
       return [];
@@ -179,6 +195,7 @@ function rebuildAllVerifiedOwners(
   }
   replacePlannedOwners(db, planned);
   return buildReport(
+    db,
     sourceSchemaVersion,
     workingSchemaVersion,
     eligibleOwnerCount,
@@ -228,46 +245,27 @@ function readRuntimeQualifiedOwnerIds(
   return qualified;
 }
 
-function readCandidateOwners(
-  db: StorageDatabase
-): readonly EvidenceProjectionOwnerRow[] {
-  return db.connection.prepare(`
-    SELECT
-      object_id,
-      workspace_id,
-      source_hash,
-      CASE
-        WHEN json_valid(physical_anchor)
-          AND json_type(physical_anchor, '$.artifact_ref') = 'text'
-        THEN json_extract(physical_anchor, '$.artifact_ref')
-        ELSE NULL
-      END AS artifact_ref
-    FROM evidence_capsules
-    WHERE (
-      CASE
-        WHEN json_valid(physical_anchor)
-          AND json_type(physical_anchor, '$.artifact_ref') = 'text'
-        THEN substr(
-          json_extract(physical_anchor, '$.artifact_ref'),
-          1,
-          length(?)
-        ) = ?
-        ELSE 0
-      END
-    ) OR substr(COALESCE(source_hash, ''), 1, length(?)) = ?
-    ORDER BY object_id ASC
-  `).all(
-    GARDEN_SOURCE_TURN_FALLBACK_ARTIFACT_PREFIX,
-    GARDEN_SOURCE_TURN_FALLBACK_ARTIFACT_PREFIX,
-    GARDEN_SOURCE_TURN_FALLBACK_V2_SOURCE_HASH_PREFIX,
-    GARDEN_SOURCE_TURN_FALLBACK_V2_SOURCE_HASH_PREFIX
-  ) as EvidenceProjectionOwnerRow[];
-}
-
 function planResolvedOwner(
+  db: StorageDatabase,
   resolved: ResolvedV2Owner
 ): PlannedOwner | RejectedOwner {
-  const projections = buildGardenTurnEvidenceSearchProjections(resolved.signal)
+  let factKeys: readonly Readonly<EvidenceSearchProjection>[];
+  try {
+    factKeys = replayStoredEvidenceFactFrameFormation(db, {
+      objectId: resolved.owner.object_id,
+      workspaceId: resolved.owner.workspace_id,
+      sourceHash: resolved.owner.source_hash,
+      sourceAssertion: resolved.owner.excerpt
+    });
+  } catch (error) {
+    return reject(resolved.owner, `fact-frame formation replay failed: ${
+      error instanceof Error ? error.message : "unknown error"
+    }`);
+  }
+  const projections = [
+    ...buildGardenTurnEvidenceSearchProjections(resolved.signal),
+    ...factKeys
+  ]
     .map((projection) => EvidenceSearchProjectionSchema.parse(projection))
     .sort(compareProjections);
   if (new Set(projections.map(projectionIdentity)).size !==
@@ -353,6 +351,7 @@ function replacePlannedOwners(
 }
 
 function buildReport(
+  db: StorageDatabase,
   sourceSchemaVersion: number,
   workingSchemaVersion: number,
   eligibleOwnerCount: number,
@@ -374,7 +373,11 @@ function buildReport(
     nonzero_child_owner_count: planned.length - zeroChildOwnerCount,
     child_count: rows.length,
     projection_kind_counts: countProjectionKinds(rows),
-    projection_content_sha256: digestRows(rows)
+    projection_content_sha256: digestRows(rows),
+    fact_frame_formation: summarizeFactFrameFormations(
+      db,
+      planned.map(({ owner }) => owner.object_id)
+    )
   });
 }
 
@@ -396,7 +399,8 @@ function emptyReport(
     nonzero_child_owner_count: 0,
     child_count: 0,
     projection_kind_counts: Object.freeze([]),
-    projection_content_sha256: digestRows([])
+    projection_content_sha256: digestRows([]),
+    fact_frame_formation: emptyFactFrameFormationSummary()
   });
 }
 

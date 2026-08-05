@@ -2,8 +2,14 @@ import type {
   RecallDeepHeadScoreSource,
   RecallDeepHeadTrace
 } from "../../rerank/deep-head.js";
+import type { CandidateActivationReceipt } from
+  "../../scoring/candidate-semantic-activation.js";
+import type { CandidateCoverageReceipt } from
+  "../fine-assessment-selection/coverage-atoms.js";
 import type { RecallFusionFamilyId } from "../fusion-delivery-families.js";
 import type { RecallEvidenceSemanticProjectionReceipt } from
+  "../../runtime/recall-service-types.js";
+import type { RecallEvidenceSemanticActivationReceipt } from
   "../../runtime/recall-service-types.js";
 import type {
   FloodAxisInactiveReason,
@@ -98,6 +104,11 @@ export type ComponentLedgerFusionSlice = Readonly<{
 export type ComponentLedgerCandidate = Readonly<{
   readonly candidate_key: string;
   readonly object_id: string;
+  readonly activation: CandidateActivationReceipt;
+  readonly evidence_semantic_activation:
+    | Readonly<RecallEvidenceSemanticActivationReceipt>
+    | null;
+  readonly coverage: CandidateCoverageReceipt;
   readonly sources: Readonly<{
     readonly embedding_evidence_semantic: ComponentSourceObservation;
     readonly embedding_effective_factor: ComponentSourceObservation;
@@ -109,6 +120,7 @@ export type ComponentLedgerCandidate = Readonly<{
     readonly lexical_fts: ComponentSourceObservation;
     readonly trigram_fts: ComponentSourceObservation;
   }>;
+  /** Current-channel compatibility view; future operators are represented by `activation`. */
   readonly selected_embedding: Readonly<{
     readonly source: SelectedEmbeddingSource;
     readonly observation: ComponentSourceObservation;

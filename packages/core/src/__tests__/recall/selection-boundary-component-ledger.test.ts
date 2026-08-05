@@ -18,6 +18,8 @@ import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
 import { captureFineAssessmentSelectionBoundary } from
   "./selection-boundary-live-capture-fixture.js";
+import { evidenceSemanticActivation } from
+  "./fixtures/evidence-semantic-activation.js";
 
 describe("observeNumericSource", () => {
   it("distinguishes ineligible, absent, observed zero, positive, and invalid", () => {
@@ -67,6 +69,11 @@ describe("fine-assessment component ledger", () => {
     expect(first.sources.lexical_fts.state).toBe("observed_positive");
     expect(first.sources.trigram_fts.state).toBe("observed_positive");
     expect(first.sources.structural_supplementary.state).toBe("observed_positive");
+    expect(first.activation).toMatchObject({
+      schema_version: 1,
+      operator_id: "candidate_semantic_max_v1",
+      missing_channel_policy: "no_op"
+    });
     expect(first.lexical_agreement).toBeGreaterThan(0);
     expect(first.evidence_agreement).toBeGreaterThan(0);
     expect(first.duplicate_evidence.lexical_trigram_family_max_then_geometric)
@@ -124,7 +131,7 @@ describe("fine-assessment component ledger", () => {
           omitted_slot: { slot_index: 2, role: "value" }
         }]
       }
-    };
+    } as const;
     const lowerWinner = {
       score: 0.2,
       evidenceObjectId: "evidence-2",
@@ -134,7 +141,7 @@ describe("fine-assessment component ledger", () => {
         projection_kind: "owner",
         matched_fact_key_forms: []
       }
-    };
+    } as const;
     const candidates = baseline.input.ordered_candidates.map((candidate, index) => ({
       ...candidate,
       effectiveFactors: {
@@ -149,13 +156,9 @@ describe("fine-assessment component ledger", () => {
         ordered_candidates: candidates,
         supplementary_data: {
           ...baseline.input.supplementary_data,
-          evidenceSemanticScoresByCandidateKey: [
-            [firstKey!, 0.9],
-            [secondKey!, 0.2]
-          ],
-          evidenceSemanticWinnersByCandidateKey: [
-            [firstKey!, winner],
-            [secondKey!, lowerWinner]
+          evidenceSemanticActivationsByCandidateKey: [
+            [firstKey!, evidenceSemanticActivation(0.9, winner)],
+            [secondKey!, evidenceSemanticActivation(0.2, lowerWinner)]
           ]
         }
       }
@@ -193,6 +196,15 @@ describe("fine-assessment component ledger", () => {
       source: "effective_factor",
       winner: null
     });
+    const coverage = byKey.get(firstKey!)!.coverage;
+    expect(coverage.activation).toEqual(byKey.get(firstKey!)!.activation);
+    expect(coverage.atoms.map((atom) => atom.kind)).toEqual([
+      "logical_object",
+      "independent_evidence",
+      "fact_projection"
+    ]);
+    expect(coverage.atoms[1]!.independence_key)
+      .toBe(coverage.atoms[2]!.independence_key);
   });
 
   it("distinguishes absent evidence_fts from observed zero before ?? 0", () => {
@@ -316,7 +328,7 @@ function withEmbeddingSourceCases(
       supplementary_data: {
         ...boundary.input.supplementary_data,
         embeddingSimilarityScores: {},
-        evidenceSemanticScoresByCandidateKey: []
+        evidenceSemanticActivationsByCandidateKey: []
       }
     }
   };

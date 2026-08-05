@@ -7,6 +7,8 @@ import { compileRecallQueryProbes } from
 import type { FineAssessmentCandidate } from
   "../../recall/delivery/fine-assessment-selection.js";
 import { createCandidate } from "./fine-assessment-selection-fixtures.js";
+import { evidenceSemanticActivationsFromScores } from
+  "./fixtures/evidence-semantic-activation.js";
 
 describe("linked Evidence semantic selection", () => {
   it("inherits a linked Evidence observation when choosing the Memory leader", () => {
@@ -16,7 +18,9 @@ describe("linked Evidence semantic selection", () => {
     const selection = selectBoundedDirectEvidenceHead(
       candidates,
       compileRecallQueryProbes(null),
-      new Map([[linked.fusion.candidate_key, 1]]),
+      evidenceSemanticActivationsFromScores(new Map([
+        [linked.fusion.candidate_key, 1]
+      ])),
       new Map([
         [primary.fusion.candidate_key, 0.8],
         [linked.fusion.candidate_key, 0.1]
@@ -39,10 +43,10 @@ describe("linked Evidence semantic selection", () => {
     const selection = selectBoundedDirectEvidenceHead(
       [primary, linked],
       compileRecallQueryProbes(null),
-      new Map([
+      evidenceSemanticActivationsFromScores(new Map([
         [primary.fusion.candidate_key, 0.1],
         [linked.fusion.candidate_key, 0.4]
-      ]),
+      ])),
       new Map(),
       2,
       new Set(),
@@ -56,16 +60,15 @@ describe("linked Evidence semantic selection", () => {
     }]);
   });
 
-  it("ignores an invalid linked observation instead of poisoning Memory activation", () => {
+  it("keeps an absent linked observation from poisoning Memory activation", () => {
     const primary = withSemanticActivation(createCandidate("primary"), 0.8);
     const linked = withSemanticActivation(createCandidate("linked"), 0.2);
     const selection = selectBoundedDirectEvidenceHead(
       [primary, linked],
       compileRecallQueryProbes(null),
-      new Map([
-        [primary.fusion.candidate_key, Number.NaN],
+      evidenceSemanticActivationsFromScores(new Map([
         [linked.fusion.candidate_key, 0.4]
-      ]),
+      ])),
       new Map(),
       2,
       new Set(),

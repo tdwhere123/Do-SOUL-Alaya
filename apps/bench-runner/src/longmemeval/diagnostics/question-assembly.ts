@@ -84,6 +84,14 @@ export function assembleQuestionDiagnostic(
     degradation_reason: input.degradationReason,
     ...buildRecallTelemetryFields(input, parts, candidatePoolComplete),
     query_probes: parts.diagnostics?.queryProbes ?? null,
+    retrieval_field_captures: parts.diagnostics?.retrievalFieldCaptures ?? null,
+    retrieval_field_refinement_receipts:
+      parts.diagnostics?.retrievalFieldRefinementReceipts ?? null,
+    field_refinement_stop_certificate:
+      parts.diagnostics?.fieldRefinementStopCertificate ?? null,
+    query_entity_extraction: parts.diagnostics?.queryEntityExtraction ?? null,
+    query_fact_frame_extraction:
+      parts.diagnostics?.queryFactFrameExtraction ?? null,
     answer_shape_plan: parts.diagnostics?.answerShapePlan ?? null,
     query_sought_facets: parts.diagnostics?.querySoughtFacets ?? null,
     candidate_pool_count: parts.diagnostics?.candidatePoolCount ?? null,
@@ -281,7 +289,8 @@ function hasConsistentDeepHeadDecision(
   }
   if (
     trace.score_source !== "fusion_evidence" &&
-    trace.score_source !== "fusion_embedding_evidence"
+    trace.score_source !== "fusion_embedding_evidence" &&
+    trace.score_source !== "field_baseline"
   ) return true;
   if (candidate.fused_score === null || trace.resolved_score === null) return false;
   const resident = trace.score_source === "fusion_embedding_evidence"

@@ -35,7 +35,11 @@ export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
 export const PATH_PLASTICITY_WEIGHT = 0.15;
 
 
-export function buildRecallCandidateDedupeKey(candidate: Readonly<CoarseRecallCandidate>): string {
+export function buildRecallCandidateDedupeKey(candidate: Readonly<{
+  readonly entry: Readonly<{ readonly object_id: string }>;
+  readonly originPlane?: RecallOriginPlane;
+  readonly objectKind?: RecallCandidate["object_kind"];
+}>): string {
   return `${candidate.originPlane ?? "workspace_local"}:${candidate.objectKind ?? "memory_entry"}:${candidate.entry.object_id}`;
 }
 

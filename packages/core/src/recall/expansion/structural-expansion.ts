@@ -16,7 +16,7 @@ import {
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult
 } from "./graph-expansion.js";
-import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
+import { clamp01 } from "../runtime/recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -26,6 +26,8 @@ import {
   expandGraphFrontiersBySeed
 } from "./structural-expansion-graph-frontier.js";
 import { loadEntitySeedHitBatches } from "./entity-seed-bulk-read.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
 
 
 type EntitySeedDescriptor = Readonly<{
@@ -41,11 +43,10 @@ type EntitySeedLookup = Readonly<{
 
 export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly workspaceId: string;
-  readonly queryText: string | null;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly addCandidate: AddCoarseCandidate;
   readonly lexicalFtsRanks: ReadonlyMap<string, number>;
-  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
   readonly warn: RecallServiceWarnPort;
   readonly entityExtractionMaxEntities: number;
@@ -57,7 +58,10 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   if (shouldSkipEntitySeedCollection(params)) {
     return [];
   }
-  const entities = await extractSeedEntities(params);
+  const entities = params.queryEntityExtraction.candidates.slice(
+    0,
+    params.entityExtractionMaxEntities
+  );
   if (entities.length === 0) {
     return [];
   }
@@ -288,44 +292,13 @@ function incrementGraphExpansionHopCount(
 }
 
 function shouldSkipEntitySeedCollection(params: Readonly<{
-  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
-  readonly queryText: string | null;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
 }>): boolean {
   return (
-    params.entityExtractionPort === undefined ||
-    params.queryText === null ||
+    params.queryEntityExtraction.status !== "returned" ||
     params.byId.size === 0
   );
-}
-
-async function extractSeedEntities(params: Readonly<{
-  readonly workspaceId: string;
-  readonly queryText: string | null;
-  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
-  readonly warn: RecallServiceWarnPort;
-  readonly entityExtractionMaxEntities: number;
-}>): Promise<readonly Readonly<{
-  readonly surface: string;
-  readonly normalized: string;
-  readonly confidence: number;
-}>[]> {
-  const entityExtractionPort = params.entityExtractionPort;
-  const queryText = params.queryText;
-  if (entityExtractionPort === undefined || queryText === null) return [];
-  try {
-    return await entityExtractionPort.extract(queryText, {
-      maxEntities: params.entityExtractionMaxEntities
-    });
-  } catch (error) {
-    params.warn("entity extraction failed", {
-      workspace_id: params.workspaceId,
-      operation: "entity_extraction",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return [];
-  }
 }
 
 function buildEntitySeedLookups(

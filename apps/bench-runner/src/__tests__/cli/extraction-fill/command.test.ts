@@ -191,6 +191,25 @@ it("passes an explicit extraction initial concurrency to the fill runtime", asyn
   }));
 });
 
+it("passes explicit provider task failure isolation to the fill runtime", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_s",
+    tolerateProviderTaskFailures: true
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(0);
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({
+    tolerateProviderTaskFailures: true
+  }));
+});
+
 it.each([
   ["SIGINT", 130],
   ["SIGTERM", 143]

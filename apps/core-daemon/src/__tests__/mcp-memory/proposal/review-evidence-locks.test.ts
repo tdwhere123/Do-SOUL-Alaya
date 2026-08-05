@@ -10,7 +10,7 @@ import { ALAYA_MEMORY_TOOL_NAMES, listAlayaMemoryTools } from "../../../mcp-memo
 // file is not pure docs prose.
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = path.resolve(currentDirectory, "../../../../..");
+const repositoryRoot = path.resolve(currentDirectory, "../../../../../../");
 
 const expectedMemoryTools = [
   "soul.recall",

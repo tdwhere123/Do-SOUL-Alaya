@@ -117,6 +117,7 @@ interface TrustworthyLoopHarness {
   readonly database: StorageDatabase;
   readonly eventLogRepo: SqliteEventLogRepo;
   callTool<TOutput = unknown>(toolName: string, args: Record<string, unknown>): Promise<TOutput>;
+  useHumanReviewSurface(): void;
   close(): Promise<void>;
   enqueueGardenTask(taskId: string): void;
 }
@@ -161,10 +162,10 @@ async function createTrustworthyLoopHarness(
       return memory;
     }
   };
-  const context: McpMemoryToolCallContext = {
+  let activeAgentTarget = "codex";
+  const context: Omit<McpMemoryToolCallContext, "agentTarget"> = {
     workspaceId: "workspace-1",
     runId: "run-1",
-    agentTarget: "codex",
     sessionId: "trustworthy-loop-trace-session",
     surfaceId: "trustworthy-loop-trace"
   };
@@ -226,7 +227,7 @@ async function createTrustworthyLoopHarness(
   });
   const server = createAlayaMcpServer({
     memoryToolHandler: handler,
-    contextProvider: () => context
+    contextProvider: () => ({ ...context, agentTarget: activeAgentTarget })
   });
   const client = new Client(
     { name: "trustworthy-loop-trace-test", version: "test" },
@@ -249,6 +250,9 @@ async function createTrustworthyLoopHarness(
         | undefined;
       expect(structuredContent).toMatchObject({ ok: true });
       return structuredContent!.output;
+    },
+    useHumanReviewSurface(): void {
+      activeAgentTarget = "cli";
     },
     async close() {
       await client.close();
@@ -414,6 +418,7 @@ describe("trustworthy-loop-trace", () => {
       reason: "Multi-delivery trace test.",
       source_delivery_ids: sourceDeliveryIds
     });
+    harness.useHumanReviewSurface();
     await harness.callTool<SoulReviewMemoryProposalResponse>("soul.review_memory_proposal", {
       proposal_id: proposal.proposal_id,
       verdict: "reject",

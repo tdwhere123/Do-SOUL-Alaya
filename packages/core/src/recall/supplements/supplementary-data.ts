@@ -35,6 +35,13 @@ import {
   collectRoutingKeySupplement,
   type RoutingKeySupplement
 } from "./routing-key-supplement.js";
+import { compileRecallQueryDemand } from "../query/recall-query-demand.js";
+import {
+  captureRecallQueryEntities,
+  type RecallQueryEntityExtractionCapture
+} from "../field/query-entity-attribution-producer.js";
+import { collectQueryFieldAttribution } from
+  "./query/query-field-attribution.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
@@ -49,6 +56,7 @@ interface CollectSupplementaryDataParams {
     | "pathPlasticityPort"
     | "routingKeyProjectionPort"
     | "entityExtractionPort"
+    | "queryFactFrameExtractionPort"
   >;
   readonly warn: RecallServiceWarnPort;
   readonly candidates: readonly Readonly<MemoryEntry>[];
@@ -59,6 +67,7 @@ interface CollectSupplementaryDataParams {
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly policy: Readonly<RecallPolicy>;
   readonly coarseFtsRanks: Readonly<Record<string, number>>;
   readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
@@ -83,13 +92,40 @@ export async function collectSupplementaryData(
   params: CollectSupplementaryDataParams
 ): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
+  const queryEntityExtraction = params.queryEntityExtraction ??
+    await captureRecallQueryEntities({
+      query_text: params.queryText,
+      port: params.dependencies.entityExtractionPort,
+      on_failure: (error) => params.warn("routing query entity extraction failed", {
+        workspace_id: params.workspaceId,
+        operation: "routing_query_entity_extraction",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      })
+    });
+  const querySoughtFacets = deriveQuerySoughtFacets(params.queryProbes);
+  const queryFieldAttribution = collectQueryFieldAttribution({
+    queryText: params.queryText,
+    queryDemand: compileRecallQueryDemand(params.queryProbes, {
+      soughtFacets: querySoughtFacets
+    }),
+    entityCapture: queryEntityExtraction,
+    factFramePort: params.dependencies.queryFactFrameExtractionPort,
+    onFailure: (error) => params.warn("query field attribution failed", {
+      workspace_id: params.workspaceId,
+      operation: "query_field_attribution",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    })
+  });
   // graphMetrics is independent of budget+plasticity; evidence needs candidates only.
   const [
     graphMetrics,
     budgetPenaltyFactor,
     plasticityFactors,
     evidenceAndGovernance,
-    routingKeySupplement
+    routingKeySupplement,
+    resolvedQueryFieldAttribution
   ] =
     await Promise.all([
       collectGraphMetrics(params),
@@ -102,9 +138,10 @@ export async function collectSupplementaryData(
         workspaceId: params.workspaceId,
         ownerIds: params.routingKeyOwnerIds,
         asOfMs: params.routingKeyAsOfMs,
-        queryText: params.queryText,
-        queryProbes: params.queryProbes
-      })
+        queryProbes: params.queryProbes,
+        queryEntityExtraction
+      }),
+      queryFieldAttribution
     ]);
   const coldMetrics = computeColdGraphPathMetrics(
     params,
@@ -120,7 +157,9 @@ export async function collectSupplementaryData(
     plasticityFactors,
     coldMetrics,
     evidenceAndGovernance,
-    routingKeySupplement
+    routingKeySupplement,
+    querySoughtFacets,
+    resolvedQueryFieldAttribution
   );
 }
 
@@ -147,11 +186,17 @@ function freezeSupplementaryData(
     readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
     readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
   }>,
-  routingKeySupplement: Readonly<RoutingKeySupplement>
+  routingKeySupplement: Readonly<RoutingKeySupplement>,
+  querySoughtFacets: readonly string[],
+  queryFieldAttribution: Awaited<ReturnType<typeof collectQueryFieldAttribution>>
 ): RecallSupplementaryData {
   const queryTimeWindow = resolveQueryTimeWindow(params);
   return Object.freeze({
     queryProbes: params.queryProbes,
+    queryFactFrameExtraction: queryFieldAttribution.factFrameCapture,
+    ...(queryFieldAttribution.attribution === undefined
+      ? {}
+      : { queryFieldAttribution: queryFieldAttribution.attribution }),
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,
     queryRoutingKeys: routingKeySupplement.queryKeys,
@@ -170,7 +215,7 @@ function freezeSupplementaryData(
     pathExpansionScores: params.coarsePathExpansionScores,
     pathSuppressionScores: params.coarsePathSuppressionScores,
     embeddingSimilarityScores: Object.freeze({}),
-    evidenceSemanticScoresByCandidateKey: new Map(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: Object.freeze(graphSupportCounts),
     evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
     budgetPenaltyFactor,
@@ -186,7 +231,7 @@ function freezeSupplementaryData(
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
     pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
     pathInflowAvailability: evidenceAndGovernance.pathInflowAvailability,
-    querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
+    querySoughtFacets
   });
 }
 

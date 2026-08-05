@@ -34,6 +34,8 @@ export function writeExtractionCacheAuditBundle(
     { name: "replay-ledger.json", contents: renderJson({
       sha256: run.replaySha256,
       closure: run.replay.closure,
+      fact_frame_policy: run.replay.factFramePolicy,
+      fact_frame_closure: run.replay.factFrameClosure,
       occurrences: run.replay.occurrences.map((occurrence) => ({
         occurrence: renderOccurrence(occurrence.occurrence),
         raw_json_sha256: occurrence.rawJsonSha256,

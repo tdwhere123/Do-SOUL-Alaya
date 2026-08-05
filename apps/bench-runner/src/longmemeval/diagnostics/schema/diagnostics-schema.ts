@@ -12,6 +12,13 @@ import {
 } from "../../../harness/recall/answer-trace-schema.js";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
+import {
+  RecallFieldRefinementStopCertificateSchema,
+  RecallFiniteFieldChannelCaptureSchema,
+  RecallQueryEntityExtractionCaptureSchema,
+  RecallQueryFactFrameExtractionCaptureSchema,
+  RecallRetrievalFieldRefinementReceiptSchema
+} from "../../../harness/recall/field-capture-schema.js";
 import { RecallCandidateSelectorObservationSchema } from
   "../../../harness/recall/candidate-selector-observation-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
@@ -473,6 +480,14 @@ export const LongMemEvalQuestionDiagnosticSchema = z
       .readonly()
       .default([]),
     query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
+    retrieval_field_captures: z.array(RecallFiniteFieldChannelCaptureSchema).readonly().nullable().optional(),
+    retrieval_field_refinement_receipts:
+      z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly().nullable().optional(),
+    field_refinement_stop_certificate:
+      RecallFieldRefinementStopCertificateSchema.nullable().optional(),
+    query_entity_extraction: RecallQueryEntityExtractionCaptureSchema.nullable().optional(),
+    query_fact_frame_extraction:
+      RecallQueryFactFrameExtractionCaptureSchema.nullable().optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),

@@ -95,7 +95,12 @@ describe("candidate selector observation contract", () => {
       fact_key_forms: [{
         kind: "leave_one_slot_out",
         omitted_slot: { slot_index: 2, role: "value" }
-      }]
+      }],
+      fact_slots: [
+        { role: "subject", text: "Alice" },
+        { role: "relation", text: "works at" },
+        { role: "value", text: "Acme" }
+      ]
     }] as const;
 
     const question = buildQuestion({

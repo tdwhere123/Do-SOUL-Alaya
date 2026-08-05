@@ -94,7 +94,7 @@ function supplementary(): RecallSupplementaryData {
     sourceProximityScores: {}, sourceCohortKeys: {}, structuralScores: {},
     graphExpansionScores: {}, entitySeedScores: {}, pathExpansionScores: {},
     pathSuppressionScores: {}, embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey: new Map(), graphSupportCounts: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(), graphSupportCounts: {},
     budgetPenaltyFactor: 0, plasticityFactors: {}, graphAndPathColdScore: 0,
     recallsEdgeCount: 0, weightTransferAmount: 0, evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {}

@@ -183,6 +183,27 @@ describe("RecallReadWorkerClient", () => {
           evidence_object_id: workspaceEvidenceId,
           artifact_ref: "doc-s1-t10"
         }]);
+        const memoryField = await client.memoryRepo.searchByKeywordField!(
+          "workspace-1", "workspace", 1, {}, [2]
+        );
+        expect(new Set(memoryField.lanes.flatMap((lane) =>
+          lane.observations.map(({ object_id }) => object_id)
+        ))).toEqual(new Set([workspaceMemoryId]));
+        expect(memoryField.refinement_levels?.[0]?.requested_depth).toBe(2);
+        const evidenceField = await client.evidenceSearchPort.searchByKeywordField!(
+          "workspace-1", "worker", 1, [2]
+        );
+        expect(new Set(evidenceField.lanes.flatMap((lane) =>
+          lane.observations.map(({ object_id }) => object_id)
+        ))).toEqual(new Set([workspaceEvidenceId]));
+        expect(evidenceField.refinement_levels?.[0]?.requested_depth).toBe(2);
+        const synthesisField = await client.synthesisSearchPort.searchByKeywordField!(
+          "workspace-1", "synthesis", 1, [2]
+        );
+        expect(new Set(synthesisField.lanes.flatMap((lane) =>
+          lane.observations.map(({ object_id }) => object_id)
+        ))).toEqual(new Set([workspaceSynthesisId]));
+        expect(synthesisField.refinement_levels?.[0]?.requested_depth).toBe(2);
       } finally {
         await client.close();
       }

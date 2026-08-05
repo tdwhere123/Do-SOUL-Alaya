@@ -46,6 +46,10 @@ import {
   freezeCoarseStageResult,
   freezeLexicalCoarseWithWarm
 } from "./coarse/freeze-coarse-results.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
 
 export type CoarseFilterResult = Awaited<ReturnType<typeof runCoarseFilter>>;
 export type EmbeddingCoarseInjectionResult = Awaited<ReturnType<typeof collectEmbeddingCoarseInjection>>;
@@ -62,6 +66,8 @@ type CoarseFilterOptions = Readonly<{
   readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
   readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle?: Readonly<RecallRetrievalFieldBundle>;
 }>;
 
 export interface CoarseStageResult {
@@ -175,7 +181,9 @@ async function collectHotCoarseFilter(
     deliveryMaxEntries: prepared.policy.fine_assessment.budgets.max_entries,
     temporalCandidateBudget,
     referenceTime: prepared.referenceTime,
-    pathProjectionAsOf: prepared.temporalProjectionAsOf
+    pathProjectionAsOf: prepared.temporalProjectionAsOf,
+    queryEntityExtraction: prepared.queryEntityExtraction,
+    retrievalFieldBundle: prepared.retrievalFieldBundle
   });
 }
 
@@ -196,7 +204,8 @@ async function collectExpandedCoarseFilter(
         ...options,
         temporalCandidateBudget,
         referenceTime: prepared.referenceTime,
-        pathProjectionAsOf: prepared.temporalProjectionAsOf
+        pathProjectionAsOf: prepared.temporalProjectionAsOf,
+        retrievalFieldBundle: prepared.retrievalFieldBundle
       }
     ),
     projectMappingPort: context.dependencies.projectMappingPort,
@@ -207,6 +216,7 @@ async function collectExpandedCoarseFilter(
     fineAssessmentConfig: prepared.policy.fine_assessment,
     queryText: prepared.queryText,
     queryProbes: prepared.queryProbes,
+    queryEntityExtraction: prepared.queryEntityExtraction,
     hotCoarseFilter,
     hotCoarseCandidateCount: hotCoarseFilter.candidates.length,
     winnerMemoryIds: prepared.winnerMemoryIds,
@@ -280,6 +290,7 @@ async function collectSynthesisStage(
     queryText: prepared.queryText,
     queryProbes: prepared.queryProbes,
     policy: prepared.policy,
+    retrievalFieldBundle: prepared.retrievalFieldBundle,
     degradationReasons: context.degradationReasons
   });
 }

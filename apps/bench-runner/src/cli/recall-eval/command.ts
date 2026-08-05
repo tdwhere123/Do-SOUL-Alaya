@@ -58,6 +58,9 @@ export function buildRecallEvalOptions(
     ...(opts.rebuildEvidenceSearchProjections === true
       ? { derivedEvidenceProjectionRebuild: true }
       : {}),
+    ...(opts.backfillMissingFactFrameFormations === true
+      ? { backfillMissingFactFrameFormations: true }
+      : {}),
     ...(opts.warmDerivedSnapshotReceipt === undefined
       ? {}
       : { warmDerivedSnapshotReceiptPath: opts.warmDerivedSnapshotReceipt }),
@@ -90,6 +93,20 @@ function assertExperimentFlags(opts: ParsedFlags): void {
       opts.rebuildEvidenceSearchProjections !== true) {
     throw new Error(
       "--fact-frame-retrofit-ledger requires --rebuild-evidence-search-projections"
+    );
+  }
+  if (opts.backfillMissingFactFrameFormations === true &&
+      opts.rebuildEvidenceSearchProjections !== true) {
+    throw new Error(
+      "--backfill-missing-fact-frame-formations requires " +
+      "--rebuild-evidence-search-projections"
+    );
+  }
+  if (opts.backfillMissingFactFrameFormations === true &&
+      opts.factFrameRetrofitLedger !== undefined) {
+    throw new Error(
+      "--backfill-missing-fact-frame-formations cannot be combined with " +
+      "--fact-frame-retrofit-ledger"
     );
   }
   if (opts.rebuildEvidenceSearchProjections === true && opts.experiment !== true) {
@@ -128,6 +145,9 @@ function renderStart(opts: ParsedFlags): string {
       ? ""
       : " warm_derived_snapshot=true promotable=false") +
     (opts.factFrameRetrofitLedger === undefined ? "" : " fact_frame_retrofit=true") +
+    (opts.backfillMissingFactFrameFormations === true
+      ? " fact_frame_default_backfill=true"
+      : "") +
     (opts.seedExtractionSystemPrompt === undefined ? "" : " historical_prompt=true") +
     (opts.legacySnapshot ? " mode=legacy-v1-old-cache diagnostic_only=true" : "") +
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
@@ -156,5 +176,11 @@ function renderResult(result: RecallEvalResult, legacy: boolean): string {
       `  fact-frame-retrofit owners=${rebuild.fact_frame_retrofit.rebuilt_owner_count} ` +
       `projections=${rebuild.fact_frame_retrofit.projection_count} ` +
       `ledger_sha256=${rebuild.fact_frame_retrofit.ledger_sha256}\n`) +
+    (rebuild?.fact_frame_formation_backfill === undefined ? "" :
+      `  fact-frame-default-backfill owners=` +
+      `${rebuild.fact_frame_formation_backfill.backfilled_capture_count}/` +
+      `${rebuild.fact_frame_formation_backfill.eligible_owner_count} ` +
+      `formed=${rebuild.fact_frame_formation_backfill.formed_capture_count} ` +
+      `projections=${rebuild.fact_frame_formation_backfill.projection_count}\n`) +
     `  KPI: ${result.kpiPath}\n`;
 }

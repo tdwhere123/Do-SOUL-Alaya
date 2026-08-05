@@ -8,7 +8,10 @@ import {
   SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
+  readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule,
+  type EvidenceFactFrameFormationCapture,
+  type EvidenceFactFrameFormationProposal,
   type EvidenceSearchProjection,
   type EvidenceHealthState,
   type EventLogEntry,
@@ -16,6 +19,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
+import { materializeEvidenceFactFrameFormation } from
+  "./evidence-fact-frame-formation.js";
+import type { EvidenceFactFrameProposalNormalizer } from
+  "./fact-frame-formation/declarative-normalizer.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -41,7 +48,8 @@ export interface EvidenceListPageOptions {
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
   create(
     capsule: EvidenceCapsule,
-    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
   ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
@@ -101,6 +109,8 @@ export interface EvidenceServiceDependencies {
   readonly runtimeNotifier: EvidenceRuntimeNotifier;
   readonly karmaEmitter?: EvidenceServiceKarmaEmitterPort;
   readonly memoryRefLookup?: EvidenceServiceMemoryRefLookupPort;
+  readonly factFrameProposalNormalizer?:
+    Readonly<EvidenceFactFrameProposalNormalizer> | null;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
@@ -117,7 +127,8 @@ export class EvidenceService {
 
   public async create(
     input: EvidenceCapsuleInput,
-    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = []
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
+    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>
   ): Promise<Readonly<EvidenceCapsule>> {
     const timestamp = this.now();
     const evidence = parseEvidenceCapsule({
@@ -129,9 +140,27 @@ export class EvidenceService {
       created_at: timestamp,
       updated_at: timestamp
     });
-    const projections = Object.freeze(
-      searchProjections.map((projection) => EvidenceSearchProjectionSchema.parse(projection))
+    const suppliedProjections = searchProjections.map((projection) =>
+      EvidenceSearchProjectionSchema.parse(projection)
     );
+    if (suppliedProjections.some(({ projection_kind: kind }) => kind === "fact_key")) {
+      throw new CoreError(
+        "VALIDATION",
+        "Fact-key projections must come from canonical fact-frame formation"
+      );
+    }
+    const formation = materializeEvidenceFactFrameFormation({
+      sourceAssertion: evidence.excerpt,
+      sourceHash: evidence.source_hash,
+      normalizer: readVerifiedUserAssertionSourceHashDigest(evidence.source_hash) === null
+        ? null
+        : this.dependencies.factFrameProposalNormalizer,
+      ...(factFrameProposal === undefined ? {} : { proposal: factFrameProposal })
+    });
+    const projections = Object.freeze([
+      ...suppliedProjections,
+      ...formation.searchProjections
+    ]);
 
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
@@ -148,7 +177,11 @@ export class EvidenceService {
       })
     });
 
-    const created = await this.dependencies.evidenceCapsuleRepo.create(evidence, projections);
+    const created = await this.dependencies.evidenceCapsuleRepo.create(
+      evidence,
+      projections,
+      formation.capture
+    );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;
   }

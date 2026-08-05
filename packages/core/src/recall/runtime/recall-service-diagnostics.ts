@@ -7,6 +7,12 @@ import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import type { RecallCandidateSelectorObservation } from
   "./diagnostics/candidate-selector-observation.js";
+import type { RecallFiniteFieldChannelCapture } from
+  "../field/finite-field-capture.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
 
 export type RecallAdmissionPlane =
   | "activation"
@@ -433,6 +439,18 @@ export interface RecallDiagnostics {
     import("../query/recall-answer-shape-plan.js").RecallAnswerShapePlan
   >;
   readonly query_sought_facets: readonly string[];
+  readonly retrieval_field_captures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
+  readonly retrieval_field_refinement_receipts?: readonly Readonly<
+    import("../field/refinement/field-refinement-receipt.js")
+      .RecallRetrievalFieldRefinementReceipt
+  >[];
+  readonly field_refinement_stop_certificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
+  readonly query_entity_extraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly query_fact_frame_extraction?: Readonly<
+    import("../field/query-attribution/query-fact-frame-attribution-producer.js")
+      .RecallQueryFactFrameExtractionCapture
+  >;
   readonly total_scanned: number;
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;

@@ -33,6 +33,12 @@ import type { RecallPacketPlanObservation } from
   "./packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "./selection-boundary/selection-boundary-capture.js";
+import type { CoverageSelectionOperatorConfig } from
+  "../field/facility/selection-objective.js";
+import type { CoverageSelectionObjectiveReceipt } from
+  "./coverage-selection.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -45,6 +51,7 @@ export interface FineAssessParams {
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly finalAuthorityMaxHeadDrop?: number;
+  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
@@ -62,6 +69,9 @@ export type FineAssessmentPreparation = Readonly<{
 export function fineAssess(params: FineAssessParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
+  readonly fieldRefinementStopCertificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
   readonly prunedCandidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -134,6 +144,8 @@ export function deliverFineAssessment(
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
+    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
+    coverageObjectiveConfig: params.coverageObjectiveConfig,
     finalOrderAfterCoverage: branch.finalOrderAfterCoverage,
     maxHeadDropAfterCoverage: branch.maxHeadDropAfterCoverage,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,

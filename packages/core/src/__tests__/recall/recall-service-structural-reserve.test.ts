@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, SynthesisStatus, type MemoryEntry, type PathAnchorRef, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
@@ -86,14 +88,16 @@ const buildStructuralService = (params: {
         })),
         { object_id: "memory-gold", normalized_rank: 0.04 }
       ];
-      return new RecallService({
+      const scopedKeywordSearch = vi.fn(async (_workspaceId: string, query: string) =>
+        query.toLowerCase().includes("materializationrouter") ? withinObjectIdRows : []
+      );
+      return createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
           searchByKeyword: vi.fn(async () => lexicalRows),
-          searchByKeywordWithinObjectIds: vi.fn(async (_workspaceId: string, query: string) =>
-            query.toLowerCase().includes("materializationrouter") ? withinObjectIdRows : []
-          )
+          searchByKeywordWithinObjectIds: scopedKeywordSearch,
+          searchByKeywordWithinTier: scopedKeywordSearch
         },
         pathExpansionPort: { findByAnchors: params.findByAnchors },
         entityExtractionPort: {
@@ -287,7 +291,7 @@ it("does not deliver source-less synthesis rows when no structural candidate is 
       );
       const { dependencies } = createDependencies(memories);
       const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildCompositionSynthesis);
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,

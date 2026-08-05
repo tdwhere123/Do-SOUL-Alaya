@@ -73,6 +73,19 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--target-provider-url <url>");
   });
 
+  it("documents and dispatches the fact-frame formation audit", async () => {
+    expect(await runCli(["--help"])).toBe(0);
+    expect(stdoutBuf).toContain(
+      "fact-frame-formation-audit --snapshot <db> [--output <json>]"
+    );
+
+    stdoutBuf = "";
+    expect(await runCli(["fact-frame-formation-audit"])).toBe(2);
+    expect(stderrBuf).toContain(
+      "fact-frame-formation-audit: --snapshot <db> required"
+    );
+  });
+
   it("dispatches the extraction cache audit command", async () => {
     const exitCode = await runCli(["audit-extraction-cache"]);
 

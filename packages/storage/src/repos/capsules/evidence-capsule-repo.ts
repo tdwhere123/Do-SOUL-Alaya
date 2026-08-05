@@ -1,13 +1,16 @@
 import {
   type EvidenceCapsule,
+  type EvidenceFactFrameFormationCapture,
   type EvidenceSearchProjection,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
+import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
 import {
-  searchEvidenceByKeyword
+  searchEvidenceByKeyword,
+  searchEvidenceByKeywordField
 } from "./evidence-search/evidence-keyword-search.js";
 import type {
   EvidenceCapsuleKeywordHit,
@@ -28,8 +31,21 @@ import {
   type EvidenceCapsuleStatements
 } from "./evidence-capsule-statements.js";
 import { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
+import { prepareFactFrameFormationInsert } from
+  "./fact-frame-formation/capture-store.js";
 import { EvidenceProjectionIntegrityError } from
   "./qualification/qualified-evidence-projection.js";
+import type {
+  EvidenceCapsuleListPageOptions,
+  EvidenceCapsuleRepo,
+  EvidenceSourceAnchor
+} from "./evidence-capsule-repo-port.js";
+
+export type {
+  EvidenceCapsuleListPageOptions,
+  EvidenceCapsuleRepo,
+  EvidenceSourceAnchor
+} from "./evidence-capsule-repo-port.js";
 
 export type {
   EvidenceCapsuleKeywordHit,
@@ -37,11 +53,6 @@ export type {
   EvidenceSearchProjectionIdentity,
   RecallQualifiedEvidence
 } from "./evidence-recall-types.js";
-
-export interface EvidenceSourceAnchor {
-  readonly evidence_object_id: string;
-  readonly artifact_ref: string;
-}
 
 interface FactKeyProjectionIdentityRow {
   readonly object_id: string;
@@ -52,62 +63,6 @@ interface FactKeyProjectionIdentityRow {
 interface EvidenceSourceAnchorRow {
   readonly evidence_object_id: string;
   readonly artifact_ref: string | null;
-}
-
-export interface EvidenceCapsuleRepo {
-  create(
-    capsule: EvidenceCapsule,
-    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
-  ): Promise<Readonly<EvidenceCapsule>>;
-  deleteById(objectId: string): Promise<void>;
-  findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
-  findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findRecallQualifiedByIds(
-    workspaceId: string,
-    matches: readonly EvidenceSearchMatch[]
-  ): Promise<readonly RecallQualifiedEvidence[]>;
-  findRecallQualifiedFactKeysByIds(
-    workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): Promise<readonly RecallQualifiedEvidence[]>;
-  findSourceAnchorsByIds(
-    workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): Promise<readonly EvidenceSourceAnchor[]>;
-  findByRunIdPage?(
-    runId: string,
-    page: EvidenceCapsuleListPageOptions
-  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByRunIdAll?(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByWorkspaceIdPage?(
-    workspaceId: string,
-    page: EvidenceCapsuleListPageOptions
-  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByWorkspaceIdAll?(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByHealthPage?(
-    health: EvidenceHealthState,
-    page: EvidenceCapsuleListPageOptions
-  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByHealthAll?(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  updateHealth(
-    objectId: string,
-    health: EvidenceHealthState,
-    updatedAt: string
-  ): Promise<Readonly<EvidenceCapsule>>;
-  // see also: memory_content_fts — parallel raw FTS surface
-  searchByKeyword?(
-    workspaceId: string,
-    query: string,
-    limit: number
-  ): Promise<readonly EvidenceCapsuleKeywordHit[]>;
-}
-
-export interface EvidenceCapsuleListPageOptions {
-  readonly limit: number;
-  readonly offset: number;
 }
 
 // see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
@@ -146,11 +101,48 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
+  public async searchByKeywordField(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths: readonly number[] = []
+  ) {
+    try {
+      return this.activeConnection().transaction(() => searchEvidenceByKeywordField(
+        this.statements, workspaceId, queryText, limit, refinementDepths
+      ))();
+    } catch (error) {
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search evidence field for workspace ${workspaceId}.`
+      );
+    }
+  }
+
+  public async searchManyByKeywordField(
+    workspaceId: string,
+    queries: readonly Readonly<{
+      readonly queryText: string;
+      readonly limit: number;
+      readonly refinement_depths?: readonly number[];
+    }>[]
+  ) {
+    return await Promise.all(queries.map(({ queryText, limit, refinement_depths }) =>
+      this.searchByKeywordField(workspaceId, queryText, limit, refinement_depths)
+    ));
+  }
+
   public async create(
     capsule: EvidenceCapsule,
-    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = []
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
   ): Promise<Readonly<EvidenceCapsule>> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
+    const formationInsert = prepareFactFrameFormationInsert(
+      parsedCapsule,
+      searchProjections,
+      factFrameFormation
+    );
 
     try {
       this.db.connection.transaction(() => {
@@ -183,6 +175,9 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
             parsedCapsule.source_hash,
             projection.content
           );
+        }
+        if (formationInsert !== null) {
+          this.statements.createFactFrameFormationStatement.run(...formationInsert);
         }
       })();
     } catch (error) {

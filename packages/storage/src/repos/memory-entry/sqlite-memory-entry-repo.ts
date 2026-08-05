@@ -26,7 +26,12 @@ import {
   searchByKeywordWithinTier,
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
+import {
+  searchByAnchorField,
+  searchByKeywordField
+} from "./search/field-search.js";
 import { searchByAnchorWithinTier } from "./recall/tier-anchor-search-workflow.js";
+import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -181,6 +186,25 @@ export class SqliteMemoryEntryRepo
     return searchByKeyword.call(this, workspaceId, queryText, limit);
   }
 
+  public async searchByKeywordField(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
+    refinementDepths: readonly number[] = []
+  ) {
+    try {
+      return await searchByKeywordField.call(
+        this, workspaceId, queryText, limit, scope, refinementDepths
+      );
+    } catch (error) {
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search memory field for workspace ${workspaceId}.`
+      );
+    }
+  }
+
   public async searchByKeywordWithinObjectIds(
     workspaceId: string,
     queryText: string,
@@ -220,6 +244,26 @@ export class SqliteMemoryEntryRepo
       limit,
       objectIds
     );
+  }
+
+  public async searchByAnchorField(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
+    refinementDepths: readonly number[] = []
+  ) {
+    try {
+      return await searchByAnchorField.call(
+        this, workspaceId, anchorTokens, optionalTokens, limit, scope, refinementDepths
+      );
+    } catch (error) {
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search memory anchor field for workspace ${workspaceId}.`
+      );
+    }
   }
 
   public async searchByAnchorWithinTier(

@@ -11,6 +11,8 @@ import {
   type GraphExpansionCandidateSourceDiagnostic
 } from "../../expansion/graph-expansion.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../../field/query-entity-attribution-producer.js";
 import { buildRecallCandidateDedupeKey, type RecallTimeFilter } from "../recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -35,6 +37,7 @@ export type ExpandTierCascadeParams = Readonly<{
   readonly fineAssessmentConfig: Readonly<FineAssessmentConfig>;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly hotCoarseFilter: CoarseFilterResult;
   readonly hotCoarseCandidateCount: number;
   readonly winnerMemoryIds: ReadonlySet<string>;
@@ -76,6 +79,7 @@ export async function mergeTierCascadeStage(
       scoreMultiplier: params.scoreMultiplier,
       timeFilter: params.params.timeFilter,
       queryProbes: params.params.queryProbes,
+      queryEntityExtraction: params.params.queryEntityExtraction,
       winnerMemoryIds: params.params.winnerMemoryIds,
       deliveryMaxEntries: params.params.fineAssessmentConfig.budgets.max_entries
     }

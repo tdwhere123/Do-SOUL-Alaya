@@ -33,6 +33,14 @@ import {
   unwrapSettled,
   type Settled
 } from "../settle-parallel.js";
+import {
+  materializeRecallRetrievalFieldCaptures,
+  materializeRecallRetrievalFieldSeal,
+  type RecallFiniteFieldChannelCapture
+} from "../../field/finite-field-capture.js";
+import type { RecallFiniteFieldSeal } from "../../field/finite-field-seal.js";
+import type { RecallRetrievalFieldRefinementReceipt } from
+  "../../field/refinement/field-refinement-receipt.js";
 
 type PreparedQueryPromise = Promise<Settled<PreparedEmbeddingQuery>> | null;
 type EvidenceDocumentsByMemoryId = NonNullable<
@@ -44,6 +52,10 @@ export interface EmbeddingAssessmentData {
   readonly supplement: CollectedEmbeddingSupplementResult;
   readonly poolRescoreScores: Readonly<Record<string, number>>;
   readonly evidenceScoring: Readonly<EvidenceCandidateScoringResult>;
+  readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
+  readonly retrievalFieldSeal?: Readonly<RecallFiniteFieldSeal>;
+  readonly retrievalFieldRefinementReceipts:
+    readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
 }
 
 export function startEmbeddingAssessmentPreparation(
@@ -101,11 +113,21 @@ export async function collectLegacyEmbeddingAssessmentData(
     })
   ]);
   throwFirstRejected([supplementResult, poolResult]);
+  const fieldCaptures = materializeRecallRetrievalFieldCaptures([
+    ...prepared.retrievalFieldBundle.captures(),
+    ...(evidenceScoring.fieldChannelCapture === undefined
+      ? []
+      : [evidenceScoring.fieldChannelCapture])
+  ]);
   return Object.freeze({
     preparedEmbeddingQuery,
     supplement: unwrapSettled(supplementResult),
     poolRescoreScores: unwrapSettled(poolResult),
-    evidenceScoring
+    evidenceScoring,
+    retrievalFieldCaptures: fieldCaptures,
+    retrievalFieldSeal: materializeRecallRetrievalFieldSeal(fieldCaptures),
+    retrievalFieldRefinementReceipts:
+      prepared.retrievalFieldBundle.refinementReceipts()
   });
 }
 
@@ -162,7 +184,10 @@ export async function collectSnapshotEmbeddingAssessmentData(
     snapshot,
     localFineCandidates,
     supplement,
-    evidenceScoring
+    evidenceScoring,
+    retrievalFieldCaptures: prepared.retrievalFieldBundle.captures(),
+    retrievalFieldRefinementReceipts:
+      prepared.retrievalFieldBundle.refinementReceipts()
   });
 }
 
@@ -171,7 +196,17 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
   readonly localFineCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly supplement: Readonly<EmbeddingRecallSupplementResult>;
   readonly evidenceScoring: Readonly<EvidenceCandidateScoringResult>;
+  readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
+  readonly retrievalFieldRefinementReceipts:
+    readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
 }>): EmbeddingAssessmentData {
+  const fieldCaptures = materializeRecallRetrievalFieldCaptures([
+    ...params.retrievalFieldCaptures,
+    ...(params.snapshot.fieldChannelCaptures ?? []),
+    ...(params.evidenceScoring.fieldChannelCapture === undefined
+      ? []
+      : [params.evidenceScoring.fieldChannelCapture])
+  ]);
   return Object.freeze({
     preparedEmbeddingQuery: Object.freeze({
       handle: null,
@@ -189,7 +224,10 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
       params.snapshot.poolScoresByObjectId,
       params.localFineCandidates
     ),
-    evidenceScoring: params.evidenceScoring
+    evidenceScoring: params.evidenceScoring,
+    retrievalFieldCaptures: fieldCaptures,
+    retrievalFieldSeal: materializeRecallRetrievalFieldSeal(fieldCaptures),
+    retrievalFieldRefinementReceipts: params.retrievalFieldRefinementReceipts
   });
 }
 
@@ -243,8 +281,7 @@ function emptyEvidenceScoring(
   expectedCount: number
 ): Readonly<EvidenceCandidateScoringResult> {
   return Object.freeze({
-    scores: new Map(),
-    winnersByCandidateKey: new Map(),
+    activationsByCandidateKey: new Map(),
     status,
     expectedCount,
     scoredCount: 0,

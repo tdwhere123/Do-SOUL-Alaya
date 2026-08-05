@@ -280,7 +280,7 @@ function emptySupplementary(overrides: {
   return {
     queryProbes: compileRecallQueryProbes(null),
     embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
-    evidenceSemanticScoresByCandidateKey: new Map<string, number>(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     ftsRanks: overrides.ftsRanks ?? {},
     trigramFtsRanks: overrides.trigramFtsRanks ?? {},
     evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},

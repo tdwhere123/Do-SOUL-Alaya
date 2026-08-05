@@ -20,7 +20,15 @@ import {
   resolveEmbeddingProviderDegradationReason,
   resolveEmbeddingProviderStatus
 } from "./diagnostics.js";
-import { normalizeQueryText } from "./recall-service-helpers.js";
+import {
+  errorNameOf,
+  normalizeQueryText,
+  toErrorMessage
+} from "./recall-service-helpers.js";
+import { captureRecallQueryEntities } from
+  "../field/query-entity-attribution-producer.js";
+import { createRecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
 import type {
   CoarseRecallCandidate,
   RecallDegradationReason,
@@ -110,13 +118,45 @@ async function prepareRecallRequest(
     ? compileRecallAnswerShapePlan(queryProbes)
     : null;
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
-  const [slots, activeConstraints] = await Promise.all([
+  const retrievalFieldBundle = createRecallRetrievalFieldBundle({
+    workspaceId: params.workspaceId,
+    queryText,
+    memoryRepo: context.dependencies.memoryRepo,
+    evidenceSearchPort: context.dependencies.evidenceSearchPort,
+    synthesisSearchPort: context.dependencies.synthesisSearchPort,
+    refinementMaxDepth:
+      policy.coarse_filter.semantic_supplement.field_observation_max_depth,
+    onFailure: (operation, error) => context.warn("retrieval field query failed", {
+      workspace_id: params.workspaceId,
+      operation,
+      error: toErrorMessage(error)
+    }),
+    onBatchFailure: (operation, failure) => context.warn(
+      "retrieval field batch query failed; using scalar field queries",
+      {
+        workspace_id: params.workspaceId,
+        operation,
+        ...failure
+      }
+    )
+  });
+  const [slots, activeConstraints, queryEntityExtraction] = await Promise.all([
     context.dependencies.slotRepo.findByWorkspace(params.workspaceId),
     loadActiveConstraints({
       activeConstraintsPort: context.dependencies.activeConstraintsPort,
       workspaceId: params.workspaceId,
       cap: params.activeConstraintsCap ?? null,
       asOf: params.referenceTime
+    }),
+    captureRecallQueryEntities({
+      query_text: queryText,
+      port: context.dependencies.entityExtractionPort,
+      on_failure: (error) => context.warn("entity extraction failed", {
+        workspace_id: params.workspaceId,
+        operation: "entity_extraction",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      })
     })
   ]);
   return Object.freeze({
@@ -124,6 +164,8 @@ async function prepareRecallRequest(
     tokenEstimator,
     queryText,
     queryProbes,
+    queryEntityExtraction,
+    retrievalFieldBundle,
     answerShapePlan,
     referenceTime,
     temporalProjectionAsOf: params.referenceTime,
@@ -307,6 +349,7 @@ async function completeCandidateAssessment(
     embeddingProviderStatus: provider.status,
     embeddingSupplementStatus: embeddingData.supplement.collectionStatus,
     evidenceEmbeddingScoring: embeddingData.evidenceScoring,
+    retrievalFieldCaptures: embeddingData.retrievalFieldCaptures,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
     ...(packetPlanTrace === undefined ? {} : { packetPlanTrace }),

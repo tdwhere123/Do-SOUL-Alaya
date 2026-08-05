@@ -21,9 +21,26 @@ import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
+import type { RecallFiniteFieldChannelCapture } from
+  "../field/finite-field-capture.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallQueryFactFrameExtractionCapture } from
+  "../field/query-attribution/query-fact-frame-attribution-producer.js";
+import type { RecallRetrievalFieldRefinementReceipt } from
+  "../field/refinement/field-refinement-receipt.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly queryFactFrameExtraction?: Readonly<RecallQueryFactFrameExtractionCapture>;
+  readonly retrievalFieldCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
+  readonly retrievalFieldRefinementReceipts?:
+    readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
+  readonly fieldRefinementStopCertificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
@@ -52,6 +69,27 @@ export function buildRecallDiagnostics(
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),
+    ...(params.queryEntityExtraction === undefined
+      ? {}
+      : { query_entity_extraction: params.queryEntityExtraction }),
+    ...(params.queryFactFrameExtraction === undefined
+      ? {}
+      : { query_fact_frame_extraction: params.queryFactFrameExtraction }),
+    ...(params.retrievalFieldCaptures === undefined
+      ? {}
+      : { retrieval_field_captures: Object.freeze([...params.retrievalFieldCaptures]) }),
+    ...(params.retrievalFieldRefinementReceipts === undefined
+      ? {}
+      : {
+        retrieval_field_refinement_receipts:
+          Object.freeze([...params.retrievalFieldRefinementReceipts])
+      }),
+    ...(params.fieldRefinementStopCertificate === undefined
+      ? {}
+      : {
+        field_refinement_stop_certificate:
+          params.fieldRefinementStopCertificate
+      }),
     ...(params.answerShapePlan === undefined
       ? {}
       : { answer_shape_plan: params.answerShapePlan }),

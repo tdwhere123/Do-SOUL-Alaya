@@ -120,12 +120,25 @@ function createFixtureExtractor(fixtureMode) {
       }
       releasePeer();
       process.stdout.write("FIXTURE_READY\n");
-      return waitForAbort(input.abortSignal);
+      if (fixtureMode === "terminal") await waitForLeaseObservation();
+      return waitForAbort(input.abortSignal, () => {
+        process.stdout.write("FIXTURE_ARMED\n");
+      });
     }
   };
 }
 
-function waitForAbort(signal) {
+async function waitForLeaseObservation() {
+  process.stdin.setEncoding("utf8");
+  let received = "";
+  for await (const chunk of process.stdin) {
+    received += chunk;
+    if (received.includes("LEASE_OBSERVED")) return;
+  }
+  throw new Error("fixture parent closed before observing the extraction lease");
+}
+
+function waitForAbort(signal, onArmed) {
   return new Promise((_resolve, reject) => {
     if (signal?.aborted === true) {
       reject(signal.reason);
@@ -141,5 +154,6 @@ function waitForAbort(signal) {
       clearTimeout(timer);
       reject(signal.reason);
     }, { once: true });
+    onArmed();
   });
 }

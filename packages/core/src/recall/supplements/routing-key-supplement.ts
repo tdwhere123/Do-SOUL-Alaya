@@ -15,6 +15,8 @@ import {
 import type { SelectedSliceKeyV2 } from "../flood/slice-key-contract.js";
 import { deriveQuerySliceKeysV2 } from "../flood/slice-key-selector.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
 
 export interface RoutingKeySupplement {
   readonly keysByOwnerIdentity: ReadonlyMap<
@@ -31,27 +33,26 @@ export interface RoutingKeySupplement {
 interface CollectRoutingKeySupplementParams {
   readonly dependencies: Pick<
     RecallServiceDependencies,
-    "routingKeyProjectionPort" | "entityExtractionPort"
+    "routingKeyProjectionPort"
   >;
   readonly warn: RecallServiceWarnPort;
   readonly workspaceId: string;
   readonly ownerIds: readonly string[];
   readonly asOfMs: number;
-  readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
 }
 
 export async function collectRoutingKeySupplement(
   params: CollectRoutingKeySupplementParams
 ): Promise<Readonly<RoutingKeySupplement>> {
-  const [projections, queryEntities] = await Promise.all([
-    loadProjections(params),
-    extractQueryEntities(params)
-  ]);
+  const projections = await loadProjections(params);
   const queryKeys = deriveQuerySliceKeysV2({
     workspaceId: params.workspaceId,
     queryProbes: params.queryProbes,
-    queryEntities,
+    queryEntities: params.queryEntityExtraction.status === "returned"
+      ? params.queryEntityExtraction.candidates
+      : [],
     asOfMs: params.asOfMs,
     nowIso: new Date(params.asOfMs).toISOString()
   });
@@ -78,19 +79,6 @@ async function loadProjections(
     return await port.findByOwnerIds(params.workspaceId, params.ownerIds);
   } catch (error) {
     warn(params, "routing key projection lookup failed", "routing_key_projection_lookup", error);
-    return Object.freeze([]);
-  }
-}
-
-async function extractQueryEntities(
-  params: CollectRoutingKeySupplementParams
-): Promise<readonly Readonly<{ readonly normalized: string; readonly confidence: number }>[]> {
-  const extractor = params.dependencies.entityExtractionPort;
-  if (extractor === undefined || params.queryText === null) return Object.freeze([]);
-  try {
-    return await extractor.extract(params.queryText, { maxEntities: 24 });
-  } catch (error) {
-    warn(params, "routing query entity extraction failed", "routing_query_entity_extraction", error);
     return Object.freeze([]);
   }
 }

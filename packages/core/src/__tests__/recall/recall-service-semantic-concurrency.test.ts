@@ -7,6 +7,9 @@ import { addSemanticSupplementCandidates } from "../../recall/coarse-filter/coar
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { buildRecallPolicy } from "../../shared/recall-policy.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
+import { createRecallRetrievalFieldBundle } from
+  "../../recall/field/retrieval/retrieval-field-bundle.js";
+import { keywordFieldResult } from "./fixtures/keyword-field-fixture.js";
 
 describe("semantic supplement concurrency", () => {
   afterEach(() => {
@@ -75,7 +78,9 @@ describe("semantic supplement concurrency", () => {
       ftsRanks: new Map(),
       trigramFtsRanks: new Map(),
       evidenceFtsRanks: new Map(),
-      evidenceFtsRanksPerRef: new Map()
+      evidenceFtsRanksPerRef: new Map(),
+      evidenceProjectionMatchesByRef: new Map(),
+      retrievalFieldBundle: anchorFieldBundle(searchByAnchorWithinObjectIds)
     });
 
     await vi.waitFor(() => expect(searchByAnchorWithinObjectIds).toHaveBeenCalledTimes(2));
@@ -148,10 +153,29 @@ describe("semantic supplement concurrency", () => {
       ftsRanks: new Map(),
       trigramFtsRanks: new Map(),
       evidenceFtsRanks: new Map(),
-      evidenceFtsRanksPerRef: new Map()
+      evidenceFtsRanksPerRef: new Map(),
+      evidenceProjectionMatchesByRef: new Map(),
+      retrievalFieldBundle: anchorFieldBundle(searchByAnchorWithinObjectIds)
     })).rejects.toThrow("second anchor failed");
 
     expect(searchByAnchorWithinObjectIds).toHaveBeenCalledTimes(2);
     expect(admitted).toEqual([first.object_id]);
   });
 });
+
+function anchorFieldBundle(
+  search: (
+    workspaceId: string,
+    anchors: readonly string[]
+  ) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number }[]>
+) {
+  return createRecallRetrievalFieldBundle({
+    workspaceId: "workspace-1",
+    queryText: "first and second",
+    memoryRepo: {
+      searchByKeywordField: async () => keywordFieldResult([]),
+      searchByAnchorField: async (workspaceId, anchors) =>
+        keywordFieldResult(await search(workspaceId, anchors))
+    }
+  });
+}

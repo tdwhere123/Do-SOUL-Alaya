@@ -16,11 +16,16 @@ import type {
 } from "./types.js";
 import type { FineAssessmentPreProjectionCapture } from
   "../selection-boundary/selection-boundary-types.js";
+import type { CoverageSelectionObjectiveReceipt } from "../coverage-selection.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../../field/refinement/field-refinement-stop-certificate.js";
 
 export function buildSelectionResult(
   params: FineAssessmentSelectionParams,
   consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
   packet: ReturnType<typeof materializeFinalPacket>,
+  coverageSelectionObjective: CoverageSelectionObjectiveReceipt,
+  fieldRefinementStopCertificate?: Readonly<RecallFieldRefinementStopCertificate>,
   tokenEstimatesByContent?: ReadonlyMap<string, number>,
   preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionResult {
@@ -33,6 +38,10 @@ export function buildSelectionResult(
   const selectionResult = Object.freeze({
     candidates: packet.candidates,
     diagnostics: packet.diagnostics,
+    coverageSelectionObjective,
+    ...(fieldRefinementStopCertificate === undefined ? {} : {
+      fieldRefinementStopCertificate
+    }),
     ...(params.capturePacketPlanTrace === true
       ? { packetPlanObservation: packetConsensus }
       : {})

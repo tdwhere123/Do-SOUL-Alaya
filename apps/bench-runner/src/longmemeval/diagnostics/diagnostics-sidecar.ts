@@ -242,6 +242,11 @@ export function stripReplayCandidatePoolsForGateWrite(
       fine_pruned_count: null,
       fine_assessment_pruned_candidates: [],
       query_probes: null,
+      retrieval_field_captures: null,
+      retrieval_field_refinement_receipts: null,
+      field_refinement_stop_certificate: null,
+      query_entity_extraction: null,
+      query_fact_frame_extraction: null,
       query_sought_facets: null,
       ...(question.cohort_ledger === undefined
         ? {}

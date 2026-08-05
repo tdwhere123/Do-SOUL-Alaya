@@ -255,7 +255,12 @@ function semanticEvidenceDocuments(
               projection_kind: "fact_key" as const,
               matched_fact_key_forms: Object.freeze([
                 ...(qualified.matched_fact_key_forms ?? [])
-              ])
+              ]),
+              ...(qualified.matched_fact_frame === undefined ? {} : {
+                fact_slots: Object.freeze(qualified.matched_fact_frame.slots.map((slot) =>
+                  Object.freeze({ ...slot })
+                ))
+              })
             })
           })];
         });

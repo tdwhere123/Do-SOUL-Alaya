@@ -11,6 +11,10 @@ import {
   createMemoryEntry,
   createTaskSurface
 } from "./recall-8factor-test-fixtures.js";
+import {
+  fieldSearchFromScalar,
+  keywordFieldResult
+} from "./fixtures/keyword-field-fixture.js";
 
 describe("evidence search query construction", () => {
   it("keeps the shared legacy query list unchanged", () => {
@@ -145,11 +149,11 @@ describe("evidence batch failure fallback", () => {
     expect(fallback.candidateRanks).toEqual(reference.candidateRanks);
     expect(fallback.scalarSearch.mock.calls).toEqual(reference.scalarSearch.mock.calls);
     expect(fallback.warn).toHaveBeenCalledWith(
-      "evidence FTS batch lookup failed; using scalar lookups",
+      "retrieval field batch query failed; using scalar field queries",
       {
-        operation: "evidence_fts_batch_lookup",
-        failure_class: failureClass,
-        expected_count: fixture.queries.length,
+        workspace_id: "workspace-1",
+        operation: "evidence_field_batch",
+        failureClass,
         ...expectedBatchFailureDetails(failureMode, fixture.queries.length)
       }
     );
@@ -184,12 +188,12 @@ describe("evidence batch hit validation", () => {
     expect(fallback.candidateRanks).toEqual(reference.candidateRanks);
     expect(fallback.scalarSearch.mock.calls).toEqual(reference.scalarSearch.mock.calls);
     expect(fallback.warn).toHaveBeenCalledWith(
-      "evidence FTS batch lookup failed; using scalar lookups",
+      "retrieval field batch query failed; using scalar field queries",
       expect.objectContaining({
-        failure_class: "result_shape_mismatch",
-        returned_count: fixture.queries.length,
-        valid_batch_count: fixture.queries.length - 1,
-        invalid_index: 1
+        failureClass: "result_shape_mismatch",
+        returnedCount: fixture.queries.length,
+        validResultCount: 1,
+        invalidIndex: 1
       })
     );
   });
@@ -204,12 +208,12 @@ describe("evidence batch limit validation", () => {
     expect(fallback.candidateRanks).toEqual(reference.candidateRanks);
     expect(fallback.scalarSearch.mock.calls).toEqual(reference.scalarSearch.mock.calls);
     expect(fallback.warn).toHaveBeenCalledWith(
-      "evidence FTS batch lookup failed; using scalar lookups",
+      "retrieval field batch query failed; using scalar field queries",
       expect.objectContaining({
-        failure_class: "result_limit_exceeded",
-        returned_count: fixture.queries.length,
-        valid_batch_count: fixture.queries.length - 1,
-        invalid_index: 1
+        failureClass: "result_limit_exceeded",
+        returnedCount: fixture.queries.length,
+        validResultCount: 1,
+        invalidIndex: 1
       })
     );
   });
@@ -264,7 +268,10 @@ function createReferenceQuerySetFixture() {
       searchByKeyword: vi.fn(async () => []),
       findByEvidenceRefs: vi.fn(async () => [first, second])
     },
-    evidenceSearchPort: { searchByKeyword: evidenceSearch }
+    evidenceSearchPort: {
+      searchByKeyword: evidenceSearch,
+      searchByKeywordField: fieldSearchFromScalar(evidenceSearch)
+    }
   });
   return { evidenceSearch, rawQuery, service };
 }
@@ -319,7 +326,8 @@ async function runEvidenceBatchFixture(state: EvidenceBatchState, options: Evide
     },
     evidenceSearchPort: {
       searchByKeyword: scalarSearch,
-      ...(options.useBatch ? { searchManyByKeyword: batchSearch } : {})
+      searchByKeywordField: fieldSearchFromScalar(scalarSearch),
+      ...(options.useBatch ? { searchManyByKeywordField: batchSearch } : {})
     }
   });
   const recall = await service.recall({
@@ -349,19 +357,24 @@ function buildBatchResult(
 ) {
   if (options.failureMode === "throw") throw new Error("batch failed");
   const batches = lookups.map(({ queryText }) => state.hitsByQuery.get(queryText) ?? []);
-  if (options.failureMode === "count") return batches.slice(0, -1);
+  const fields = batches.map((batch) => keywordFieldResult(batch));
+  if (options.failureMode === "count") return fields.slice(0, -1);
   if (options.failureMode === "shape") {
-    return batches.map((batch, index) => index === 1 ? null : batch) as unknown as typeof batches;
+    return fields.map((field, index) => index === 1 ? null : field) as unknown as typeof fields;
   }
   if (options.failureMode === "limit") {
-    return batches.map((batch, index) =>
-      index === 1 ? buildOverLimitBatch(batch, lookups[index]!.limit) : batch
+    return fields.map((field, index) =>
+      index === 1
+        ? keywordFieldResult(buildOverLimitBatch(batches[index]!, lookups[index]!.limit))
+        : field
     );
   }
   if (options.malformedHit !== undefined) {
-    return batches.map((batch, index) => index === 1 ? [options.malformedHit] : batch) as unknown as typeof batches;
+    return fields.map((field, index) => index === 1
+      ? keywordFieldResult([options.malformedHit] as never)
+      : field);
   }
-  return batches;
+  return fields;
 }
 
 function buildOverLimitBatch(
@@ -375,26 +388,26 @@ function buildOverLimitBatch(
 function expectedBatchFailureDetails(failureMode: BatchFailureMode, expectedCount: number) {
   if (failureMode === "throw") {
     return {
-      returned_count: null,
-      valid_batch_count: null,
-      invalid_index: null,
+      returnedCount: null,
+      validResultCount: null,
+      invalidIndex: null,
       errorName: "Error",
       errorMessage: "batch failed"
     };
   }
   if (failureMode === "count") {
     return {
-      returned_count: expectedCount - 1,
-      valid_batch_count: null,
-      invalid_index: null,
+      returnedCount: expectedCount - 1,
+      validResultCount: null,
+      invalidIndex: null,
       errorName: null,
       errorMessage: null
     };
   }
   return {
-    returned_count: expectedCount,
-    valid_batch_count: expectedCount - 1,
-    invalid_index: 1,
+    returnedCount: expectedCount,
+    validResultCount: 1,
+    invalidIndex: 1,
     errorName: null,
     errorMessage: null
   };

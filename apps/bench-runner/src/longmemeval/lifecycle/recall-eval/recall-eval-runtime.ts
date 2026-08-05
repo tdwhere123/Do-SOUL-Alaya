@@ -398,6 +398,9 @@ async function prepareRecallEvalWorkingDb(
   }
   return rebuildEvidenceSearchProjectionsOnWorkingCopy({
     workingDbPath: dbPath,
+    ...(options.backfillMissingFactFrameFormations === true
+      ? { backfillMissingFactFrameFormations: true }
+      : {}),
     ...(options.factFrameRetrofitLedgerPath === undefined
       ? {}
       : { factFrameRetrofitLedgerPath: options.factFrameRetrofitLedgerPath }),

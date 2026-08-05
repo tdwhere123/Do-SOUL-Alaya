@@ -124,6 +124,10 @@ export function buildCompositionSelectionParams(
     rankByCandidateKey: delivery.rankByCandidateKey,
     finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
     coverageRelevanceByCandidateKey: deepHead.scores,
+    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
+    ...(input.coverage_objective_config === undefined ? {} : {
+      coverageObjectiveConfig: input.coverage_objective_config
+    }),
     finalOrderAfterCoverage: branch.finalOrderAfterCoverage,
     ...(branch.maxHeadDropAfterCoverage === undefined ? {} : {
       maxHeadDropAfterCoverage: branch.maxHeadDropAfterCoverage
@@ -161,6 +165,12 @@ function assertCompositionInputs(
     deepHead.scores,
     input.coverage_relevance_by_candidate_key
   );
+  if (selectionBoundaryJsonSha256(deepHead.relevanceUpperBoundReceipt) !==
+      selectionBoundaryJsonSha256(
+        input.coverage_relevance_upper_bound ?? null
+      )) {
+    throwCompositionMismatch();
+  }
   if (branch.finalOrderAfterCoverage !== input.final_order_after_coverage) {
     throwCompositionMismatch();
   }

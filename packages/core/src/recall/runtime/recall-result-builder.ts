@@ -34,6 +34,14 @@ export function buildRecallResult(
     working_projection: null,
     diagnostics: buildRecallDiagnostics({
       queryProbes: prepared.queryProbes,
+      queryEntityExtraction: prepared.queryEntityExtraction,
+      queryFactFrameExtraction:
+        assessment.supplementaryData.queryFactFrameExtraction,
+      retrievalFieldCaptures: assessment.retrievalFieldCaptures,
+      retrievalFieldRefinementReceipts:
+        assessment.supplementaryData.retrievalFieldRefinementReceipts,
+      fieldRefinementStopCertificate:
+        assessment.finalAssessment.fieldRefinementStopCertificate,
       ...(prepared.answerShapePlan === null
         ? {}
         : { answerShapePlan: prepared.answerShapePlan }),

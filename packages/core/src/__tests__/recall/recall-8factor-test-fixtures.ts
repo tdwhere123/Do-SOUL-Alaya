@@ -17,6 +17,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { RecallServiceDependencies } from "../../recall/recall-service.js";
 import { PATH_PLASTICITY_WEIGHT } from "../../recall/runtime/recall-service-helpers.js";
+import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
 
 export function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
   return {
@@ -155,7 +156,7 @@ export function createDependencies(
       findByWorkspaceId: vi.fn(async () => memories),
       findByDimension: vi.fn(async () => memories),
       findByScopeClass: vi.fn(async () => memories),
-      searchByKeyword
+      ...keywordSearchMethods(searchByKeyword)
     },
     slotRepo: {
       findByWorkspace: vi.fn(async () => slots)

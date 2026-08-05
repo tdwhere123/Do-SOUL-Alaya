@@ -26,7 +26,7 @@ function emptySupplementaryData(query: string): RecallSupplementaryData {
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey: new Map(),
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

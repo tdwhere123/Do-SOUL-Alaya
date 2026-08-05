@@ -1,10 +1,9 @@
-import type BetterSqlite3 from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildAnchorScopedFtsMatch,
   buildFtsMatchExpression,
   buildWorkspaceScopedFtsMatch,
-  queryFtsLane
+  queryFtsLaneRows
 } from "../../../repos/shared/fts-lane-routing.js";
 
 describe("buildFtsMatchExpression", () => {
@@ -50,16 +49,16 @@ describe("buildAnchorScopedFtsMatch", () => {
   });
 });
 
-describe("queryFtsLane", () => {
-  it("executes a workspace-scoped MATCH and returns ranked lane rows", () => {
+describe("queryFtsLaneRows", () => {
+  it("executes a workspace-scoped MATCH and returns raw lane rows", () => {
     const statement = {
       all: vi.fn(() => [
         { object_id: "first", raw_rank: -10 },
         { object_id: "second", raw_rank: -5 }
       ])
-    } as unknown as BetterSqlite3.Statement;
+    };
 
-    const result = queryFtsLane(statement, "workspace-1", ["alpha"], 2);
+    const result = queryFtsLaneRows(statement, "workspace-1", ["alpha"], 2);
 
     expect(statement.all).toHaveBeenCalledWith(
       "workspace-1",
@@ -67,8 +66,8 @@ describe("queryFtsLane", () => {
       2
     );
     expect(result).toEqual([
-      { object_id: "first", normalized_rank: 1 },
-      { object_id: "second", normalized_rank: 0.5 }
+      { object_id: "first", raw_rank: -10 },
+      { object_id: "second", raw_rank: -5 }
     ]);
   });
 });

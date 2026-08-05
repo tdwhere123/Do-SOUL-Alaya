@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto";
-import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
+import {
+  PRODUCT_FORMATION_DEFAULTS,
+  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
+  RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID,
+  materializeEvidenceFactFrameFormation
+} from "@do-soul/alaya-core";
+import type { EvidenceFactFrameFormationStatus } from "@do-soul/alaya-protocol";
+import {
+  auditOfficialApiSignalFormation,
+  buildEvidenceInput,
+  buildFactFrameFormationProposal
+} from "@do-soul/alaya-soul";
 import {
   inspectCachedExtraction,
   type CachedExtractionInspection
@@ -8,6 +19,25 @@ import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-see
 import type { ExtractionOccurrence } from "./occurrence-index.js";
 
 export type ExtractionReplayDisposition = "admitted" | "deferred" | "rejected" | "invalid";
+export const EXTRACTION_REPLAY_FORMATION_SEMANTICS_VERSION =
+  "extraction-replay-fact-frame-formation-v2";
+export interface ExtractionReplayFormationPolicy {
+  readonly semanticsVersion: string;
+  readonly fullTurnEvidence: boolean;
+  readonly normalizerOperatorId: string;
+}
+export const EXTRACTION_REPLAY_FORMATION_POLICY: Readonly<ExtractionReplayFormationPolicy> = Object.freeze({
+  semanticsVersion: EXTRACTION_REPLAY_FORMATION_SEMANTICS_VERSION,
+  fullTurnEvidence: PRODUCT_FORMATION_DEFAULTS.fullTurnEvidence,
+  normalizerOperatorId: RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID
+});
+
+export interface ExtractionReplayFactFrameFormation {
+  readonly status: EvidenceFactFrameFormationStatus;
+  readonly producerOperatorId: string | null;
+  readonly factKeyProjectionCount: number;
+  readonly factKeyProjectionSha256: string;
+}
 
 export interface ExtractionReplayEntry {
   readonly index: number;
@@ -16,6 +46,7 @@ export interface ExtractionReplayEntry {
   readonly reason: string;
   readonly sourceAssertion?: string;
   readonly formedContentSha256?: string;
+  readonly factFrameFormation?: Readonly<ExtractionReplayFactFrameFormation>;
 }
 
 export interface ExtractionReplayOccurrence {
@@ -26,6 +57,7 @@ export interface ExtractionReplayOccurrence {
 
 export interface ExtractionReplayResult {
   readonly occurrences: readonly ExtractionReplayOccurrence[];
+  readonly factFramePolicy: Readonly<ExtractionReplayFormationPolicy>;
   readonly closure: Readonly<{
     occurrenceCount: number;
     accountedOccurrences: number;
@@ -36,6 +68,15 @@ export interface ExtractionReplayResult {
     rejected: number;
     invalid: number;
     ledgerSha256: string;
+  }>;
+  readonly factFrameClosure: Readonly<{
+    admittedSignalCount: number;
+    accountedSignalCount: number;
+    formed: number;
+    ineligible: number;
+    unavailable: number;
+    rejected: number;
+    factKeyProjectionCount: number;
   }>;
 }
 
@@ -54,17 +95,26 @@ export function replayExtractionOccurrences(input: {
 }): ExtractionReplayResult {
   const cached = new Map<string, CachedExtractionInspection>();
   const audit = input.audit ?? auditOfficialApiSignalFormation;
+  const factFramePolicy = EXTRACTION_REPLAY_FORMATION_POLICY;
   const occurrences = input.occurrences.map((occurrence) => replayOccurrence({
     ...input, occurrence, cached, audit
   })).sort(compareReplayOccurrences);
-  return Object.freeze({ occurrences: Object.freeze(occurrences), closure: closeReplay(occurrences) });
+  return Object.freeze({
+    occurrences: Object.freeze(occurrences),
+    factFramePolicy,
+    closure: closeReplay(occurrences, factFramePolicy),
+    factFrameClosure: closeFactFrameFormations(occurrences)
+  });
 }
 
 export function hashExtractionReplay(result: ExtractionReplayResult): string {
-  return hashReplayOccurrences(result.occurrences);
+  return hashReplayOccurrences(result.occurrences, result.factFramePolicy);
 }
 
-function hashReplayOccurrences(occurrences: readonly ExtractionReplayOccurrence[]): string {
+function hashReplayOccurrences(
+  occurrences: readonly ExtractionReplayOccurrence[],
+  factFramePolicy: ExtractionReplayResult["factFramePolicy"]
+): string {
   const canonical = occurrences.map((occurrence) => ({
     occurrence_id: occurrence.occurrence.id,
     cache_key: occurrence.occurrence.cacheKey,
@@ -72,7 +122,14 @@ function hashReplayOccurrences(occurrences: readonly ExtractionReplayOccurrence[
     raw_json_sha256: occurrence.rawJsonSha256,
     entries: occurrence.entries
   }));
-  return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+  return createHash("sha256").update(JSON.stringify({
+    fact_frame_policy: {
+      semantics_version: factFramePolicy.semanticsVersion,
+      full_turn_evidence: factFramePolicy.fullTurnEvidence,
+      normalizer_operator_id: factFramePolicy.normalizerOperatorId
+    },
+    occurrences: canonical
+  }), "utf8").digest("hex");
 }
 
 function replayOccurrence(input: {
@@ -112,7 +169,10 @@ function replayOccurrence(input: {
 
 function formationCommitment(
   signal: ReturnType<typeof auditOfficialApiSignalFormation>["entries"][number]["signal"]
-): Pick<ExtractionReplayEntry, "sourceAssertion" | "formedContentSha256"> {
+): Pick<
+  ExtractionReplayEntry,
+  "sourceAssertion" | "formedContentSha256" | "factFrameFormation"
+> {
   if (signal === undefined) return {};
   const raw = signal.raw_payload;
   const sourceAssertion = typeof raw.source_assertion === "string"
@@ -128,8 +188,30 @@ function formationCommitment(
     ...(sourceAssertion === undefined ? {} : { sourceAssertion }),
     formedContentSha256: createHash("sha256")
       .update(JSON.stringify(content), "utf8")
-      .digest("hex")
+      .digest("hex"),
+    factFrameFormation: formFactFrameCommitment(signal)
   };
+}
+
+function formFactFrameCommitment(
+  signal: NonNullable<Parameters<typeof formationCommitment>[0]>
+): Readonly<ExtractionReplayFactFrameFormation> {
+  const evidence = buildEvidenceInput(signal, undefined, {
+    fullTurnExcerpt: EXTRACTION_REPLAY_FORMATION_POLICY.fullTurnEvidence
+  });
+  const proposal = buildFactFrameFormationProposal(signal.raw_payload);
+  const formation = materializeEvidenceFactFrameFormation({
+    sourceAssertion: evidence.excerpt,
+    sourceHash: evidence.source_hash,
+    normalizer: RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
+    ...(proposal === undefined ? {} : { proposal })
+  });
+  return Object.freeze({
+    status: formation.capture.status,
+    producerOperatorId: formation.capture.producer_operator_id,
+    factKeyProjectionCount: formation.searchProjections.length,
+    factKeyProjectionSha256: hashText(JSON.stringify(formation.searchProjections))
+  });
 }
 
 function cachedExtraction(input: Parameters<typeof replayOccurrence>[0]): CachedExtractionInspection {
@@ -160,7 +242,8 @@ function unavailableOccurrence(
 }
 
 function closeReplay(
-  occurrences: readonly ExtractionReplayOccurrence[]
+  occurrences: readonly ExtractionReplayOccurrence[],
+  factFramePolicy: ExtractionReplayResult["factFramePolicy"]
 ): ExtractionReplayResult["closure"] {
   const entries = occurrences.flatMap((occurrence) => occurrence.entries);
   const count = (disposition: ExtractionReplayDisposition) =>
@@ -174,7 +257,37 @@ function closeReplay(
     deferred: count("deferred"),
     rejected: count("rejected"),
     invalid: count("invalid"),
-    ledgerSha256: hashReplayOccurrences(occurrences)
+    ledgerSha256: hashReplayOccurrences(occurrences, factFramePolicy)
+  });
+}
+
+function closeFactFrameFormations(
+  occurrences: readonly ExtractionReplayOccurrence[]
+): ExtractionReplayResult["factFrameClosure"] {
+  const entries = occurrences.flatMap((occurrence) => occurrence.entries);
+  const admitted = entries.filter(({ disposition }) => disposition === "admitted");
+  const formations = admitted.flatMap((entry) =>
+    entry.factFrameFormation === undefined ? [] : [entry.factFrameFormation]);
+  if (formations.length !== admitted.length) {
+    throw new Error("admitted extraction signal missing fact-frame formation commitment");
+  }
+  if (entries.some((entry) =>
+    entry.disposition !== "admitted" && entry.factFrameFormation !== undefined)) {
+    throw new Error("non-admitted extraction entry carries fact-frame formation commitment");
+  }
+  const count = (status: EvidenceFactFrameFormationStatus) =>
+    formations.filter((formation) => formation.status === status).length;
+  return Object.freeze({
+    admittedSignalCount: admitted.length,
+    accountedSignalCount: formations.length,
+    formed: count("formed"),
+    ineligible: count("ineligible"),
+    unavailable: count("unavailable"),
+    rejected: count("rejected"),
+    factKeyProjectionCount: formations.reduce(
+      (total, formation) => total + formation.factKeyProjectionCount,
+      0
+    )
   });
 }
 
@@ -187,4 +300,8 @@ function compareReplayOccurrences(
   right: ExtractionReplayOccurrence
 ): number {
   return left.occurrence.id.localeCompare(right.occurrence.id);
+}
+
+function hashText(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }

@@ -1,4 +1,5 @@
 import {
+  mergeFtsLaneIds,
   type MemoryEntry,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
@@ -19,13 +20,16 @@ import {
 } from "./coarse-candidates.js";
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
-import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 import {
   admitQualifiedEvidenceMatches,
   isEvidenceProjectionIntegrityError
 } from
   "./evidence/qualified-evidence-admission.js";
+import type {
+  RecallMemoryFieldVariant,
+  RecallRetrievalFieldBundle
+} from "../field/retrieval/retrieval-field-bundle.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -47,32 +51,22 @@ export interface SemanticSupplementParams {
     string,
     RecallEvidenceProjectionMatchReceipt[]
   >;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
 }
 
 export async function addSemanticSupplementCandidates(params: SemanticSupplementParams): Promise<void> {
   if (
     !params.config.semantic_supplement.enabled ||
     params.config.semantic_supplement.max_supplement <= 0 ||
-    params.queryText === null ||
-    (params.context.dependencies.memoryRepo.searchByKeywordWithinTier === undefined &&
-      params.context.dependencies.memoryRepo.searchByKeywordWithinObjectIds === undefined &&
-      params.context.dependencies.memoryRepo.searchByKeyword === undefined)
+    params.queryText === null
   ) {
     return;
   }
 
-  const memoryRepo = params.context.dependencies.memoryRepo;
-  const searchWithinTier = memoryRepo.searchByKeywordWithinTier?.bind(memoryRepo);
-  const searchWithinObjectIds = memoryRepo.searchByKeywordWithinObjectIds?.bind(memoryRepo);
-  const searchByKeywordFn = memoryRepo.searchByKeyword?.bind(memoryRepo);
   const objectIds = [...params.byId.keys()];
-  const searchScoped = createScopedKeywordSearch(params, {
-    searchWithinTier,
-    searchWithinObjectIds,
-    searchByKeyword: searchByKeywordFn,
-    objectIds
-  });
+  const searchScoped = createScopedKeywordSearch(params, objectIds);
   const supplement = await searchScoped(
+    "lexical_relaxed",
     params.queryText,
     params.config.semantic_supplement.max_supplement
   );
@@ -92,6 +86,7 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
 }
 
 type ScopedKeywordSearch = (
+  variant: RecallMemoryFieldVariant,
   queryText: string,
   limit: number
 ) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
@@ -99,39 +94,18 @@ type ScopedKeywordSearchResult = Awaited<ReturnType<ScopedKeywordSearch>>;
 
 function createScopedKeywordSearch(
   params: SemanticSupplementParams,
-  ports: Readonly<{
-    readonly searchWithinTier?: (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      tier: MemoryEntry["storage_tier"]
-    ) => Promise<ScopedKeywordSearchResult>;
-    readonly searchWithinObjectIds?: (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      objectIds: readonly string[]
-    ) => Promise<ScopedKeywordSearchResult>;
-    readonly searchByKeyword?: (
-      workspaceId: string,
-      queryText: string,
-      limit: number
-    ) => Promise<ScopedKeywordSearchResult>;
-    readonly objectIds: readonly string[];
-  }>
+  objectIds: readonly string[]
 ): ScopedKeywordSearch {
-  if (params.tierScopedSearchEligible && ports.searchWithinTier !== undefined) {
-    return async (queryText, limit) =>
-      await ports.searchWithinTier!(params.workspaceId, queryText, limit, params.tier);
-  }
-  if (ports.searchWithinObjectIds !== undefined) {
-    return async (queryText, limit) =>
-      await ports.searchWithinObjectIds!(params.workspaceId, queryText, limit, ports.objectIds);
-  }
-  return async (queryText, limit) =>
-    ports.searchByKeyword === undefined
-      ? []
-      : await ports.searchByKeyword(params.workspaceId, queryText, limit);
+  const scope = params.tierScopedSearchEligible
+    ? Object.freeze({ tier: params.tier })
+    : Object.freeze({ objectIds: Object.freeze([...objectIds]) });
+  return async (variant, queryText, limit) =>
+    await params.retrievalFieldBundle.searchMemoryKeyword({
+      variant,
+      queryText,
+      limit,
+      scope
+    });
 }
 
 const MAX_SUBQUERY_ANCHORS = 4;
@@ -181,19 +155,20 @@ async function addAnchorLaneCandidates(
 }
 
 function resolveAnchorSearch(params: SemanticSupplementParams): AnchorSearchFn | undefined {
-  const memoryRepo = params.context.dependencies.memoryRepo;
-  const searchByAnchorWithinTier = memoryRepo.searchByAnchorWithinTier?.bind(memoryRepo);
-  const searchByAnchorWithinIds = memoryRepo.searchByAnchorWithinObjectIds?.bind(memoryRepo);
-  return !params.tierScopedSearchEligible || searchByAnchorWithinTier === undefined
-    ? searchByAnchorWithinIds
-    : async (
-        workspaceId: string,
-        anchorTokens: readonly string[],
-        optionalTokens: readonly string[],
-        limit: number
-      ) => await searchByAnchorWithinTier(
-        workspaceId, anchorTokens, optionalTokens, limit, params.tier
-      );
+  return async (
+    _workspaceId,
+    anchorTokens,
+    optionalTokens,
+    limit,
+    objectIds
+  ) => await params.retrievalFieldBundle.searchMemoryAnchor({
+    anchorTokens,
+    optionalTokens,
+    limit,
+    scope: params.tierScopedSearchEligible
+      ? Object.freeze({ tier: params.tier })
+      : Object.freeze({ objectIds: Object.freeze([...objectIds]) })
+  });
 }
 
 async function addSplitAnchorLaneCandidates(
@@ -255,6 +230,7 @@ async function addExpandedKeywordCandidates(
     return;
   }
   const expandedSupplement = await searchScoped(
+    "lexical_expanded",
     expandedQuery,
     params.config.semantic_supplement.max_supplement
   );
@@ -277,7 +253,6 @@ async function addExpandedKeywordCandidates(
 
 async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promise<void> {
   if (
-    params.context.dependencies.evidenceSearchPort === undefined ||
     params.queryText === null
   ) {
     return;
@@ -286,11 +261,8 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
   const limit = params.config.semantic_supplement.max_supplement;
   let evidenceHitBatches: readonly (readonly KeywordSearchResult[])[];
   try {
-    evidenceHitBatches = await loadEvidenceSearchHitBatches({
-      workspaceId: params.workspaceId,
-      queries: evidenceQueries.map((queryText) => ({ queryText, limit })),
-      searchPort: params.context.dependencies.evidenceSearchPort,
-      warn: params.context.warn
+    evidenceHitBatches = await params.retrievalFieldBundle.searchEvidenceKeywords({
+      queries: evidenceQueries.map((queryText) => ({ queryText, limit }))
     });
   } catch (error) {
     recordEvidenceFtsFailure(params, error);
@@ -305,9 +277,12 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
       });
       const key = evidenceMatchKey(rankedMatch);
       const current = evidenceMatchByKey.get(key);
-      if (current === undefined || isPreferredEvidenceMatch(rankedMatch, current)) {
-        evidenceMatchByKey.set(key, rankedMatch);
-      }
+      evidenceMatchByKey.set(
+        key,
+        current === undefined
+          ? rankedMatch
+          : mergeEvidenceMatchProvenance(rankedMatch, current)
+      );
     }
   }
   try {
@@ -316,6 +291,21 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
     if (isEvidenceProjectionIntegrityError(error)) throw error;
     recordEvidenceFtsFailure(params, error);
   }
+}
+
+function mergeEvidenceMatchProvenance(
+  candidate: Readonly<KeywordSearchResult>,
+  current: Readonly<KeywordSearchResult>
+): Readonly<KeywordSearchResult> {
+  const preferred = isPreferredEvidenceMatch(candidate, current) ? candidate : current;
+  const lanes = mergeFtsLaneIds(
+    current.matched_fts_lanes ?? [],
+    candidate.matched_fts_lanes ?? []
+  );
+  return Object.freeze({
+    ...preferred,
+    ...(lanes.length === 0 ? {} : { matched_fts_lanes: lanes })
+  });
 }
 
 function recordEvidenceFtsFailure(

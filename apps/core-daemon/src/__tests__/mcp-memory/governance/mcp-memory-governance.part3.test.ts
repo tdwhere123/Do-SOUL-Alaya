@@ -236,7 +236,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
           reviewer_identity: "user:payload",
           reviewer_token: "review-token"
         },
-        { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
+        { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });
     expect(updateCalls).toBe(0);
@@ -249,7 +249,7 @@ describe("mcp memory governance — soul.list_pending_proposals (A1)", () => {
         reviewer_identity: "user:server-reviewer",
         reviewer_token: "review-token"
       },
-      { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "session-1" }
+      { workspaceId: "ws1", runId: "run1", agentTarget: "cli", sessionId: "session-1" }
     );
 
     expect(captureReviewerIdentity).toBe("user:server-reviewer");

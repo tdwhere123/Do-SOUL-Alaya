@@ -5,6 +5,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type {
   KeywordSearchBatchQuery,
+  KeywordSearchLaneScope,
   RecallMemoryListPageOptions,
   RecallServiceMemoryRepoPort
 } from "@do-soul/alaya-core";
@@ -31,6 +32,7 @@ type MemoryLookupReads = Pick<
 type MemoryKeywordReads = Pick<
   RecallServiceMemoryRepoPort,
   | "searchByKeyword"
+  | "searchByKeywordField"
   | "searchByKeywordWithinObjectIds"
   | "searchByKeywordWithinTier"
   | "searchManyByKeywordWithinObjectIds"
@@ -38,7 +40,7 @@ type MemoryKeywordReads = Pick<
 
 type MemoryAnchorReads = Pick<
   RecallServiceMemoryRepoPort,
-  "searchByAnchorWithinObjectIds" | "searchByAnchorWithinTier"
+  "searchByAnchorWithinObjectIds" | "searchByAnchorWithinTier" | "searchByAnchorField"
 >;
 
 export function createWorkerMemoryRepo(input: Readonly<{
@@ -79,6 +81,16 @@ function createWorkerMemoryKeywordReads(request: WorkerRequest): MemoryKeywordRe
   return {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
       await request("memory.searchByKeyword", { workspaceId, queryText, limit }),
+    searchByKeywordField: async (
+      workspaceId: string,
+      queryText: string,
+      limit: number,
+      scope?: Readonly<KeywordSearchLaneScope>,
+      refinementDepths?: readonly number[]
+    ) => await request("memory.searchByKeywordField", {
+      workspaceId, queryText, limit, scope,
+      ...(refinementDepths === undefined ? {} : { refinementDepths })
+    }),
     searchByKeywordWithinObjectIds: async (
       workspaceId: string,
       queryText: string,
@@ -129,6 +141,20 @@ function createWorkerMemoryAnchorReads(request: WorkerRequest): MemoryAnchorRead
     ) => await request(
       "memory.searchByAnchorWithinTier",
       { workspaceId, anchorTokens, optionalTokens, limit, tier }
+    ),
+    searchByAnchorField: async (
+      workspaceId: string,
+      anchorTokens: readonly string[],
+      optionalTokens: readonly string[],
+      limit: number,
+      scope?: Readonly<KeywordSearchLaneScope>,
+      refinementDepths?: readonly number[]
+    ) => await request(
+      "memory.searchByAnchorField",
+      {
+        workspaceId, anchorTokens, optionalTokens, limit, scope,
+        ...(refinementDepths === undefined ? {} : { refinementDepths })
+      }
     )
   };
 }

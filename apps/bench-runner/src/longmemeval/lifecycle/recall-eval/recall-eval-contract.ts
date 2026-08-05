@@ -36,6 +36,7 @@ export interface RecallEvalOptions {
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly derivedEvidenceProjectionRebuild?: boolean;
+  readonly backfillMissingFactFrameFormations?: boolean;
   readonly warmDerivedSnapshotReceiptPath?: string;
   readonly factFrameRetrofitLedgerPath?: string;
   readonly seedExtractionSystemPromptPath?: string;

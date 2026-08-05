@@ -153,6 +153,9 @@ export async function collectSynthesisCoarseCandidates(params: {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly policy: Readonly<RecallPolicy>;
+  readonly retrievalFieldBundle: Readonly<
+    import("../field/retrieval/retrieval-field-bundle.js").RecallRetrievalFieldBundle
+  >;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }): Promise<Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -173,6 +176,7 @@ export async function collectSynthesisCoarseCandidates(params: {
       queryText: params.queryText,
       queryProbes: params.queryProbes,
       synthesisSearchPort,
+      retrievalFieldBundle: params.retrievalFieldBundle,
       limit
     });
   } catch (error) {

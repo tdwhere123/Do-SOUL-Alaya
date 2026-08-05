@@ -17,6 +17,11 @@ import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
   KeywordSearchBatchQuery,
+  KeywordSearchLaneScope,
+  KeywordSearchLaneId,
+  KeywordSearchLaneStatus,
+  KeywordSearchLaneObservation,
+  KeywordSearchLaneReceipt,
   KeywordSearchResult,
   RecallMemoryListPageOptions,
   RecallCandidate,

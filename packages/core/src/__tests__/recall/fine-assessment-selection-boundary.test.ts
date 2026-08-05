@@ -30,6 +30,16 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 import type { FineAssessmentPreProjectionObservation } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
+import {
+  createRecallFiniteFieldChannelCapture,
+  materializeRecallRetrievalFieldSeal
+} from "../../recall/field/finite-field-capture.js";
+import type { CoverageSelectionOperatorConfig } from
+  "../../recall/field/facility/selection-objective.js";
+import { createRecallRetrievalFieldRefinementReceipt } from
+  "../../recall/field/refinement/field-refinement-receipt.js";
+import { captureRecallQueryFactFrames } from
+  "../../recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 
 describe("fine-assessment selection boundary fidelity", () => {
   it("omits optional undefined object properties without shifting arrays", () => {
@@ -60,9 +70,78 @@ describe("fine-assessment selection boundary fidelity", () => {
   it("stores only the complete visible-result digest", () => {
     const boundary = captureBoundary();
     expect(boundary.schema_version).toBe(2);
+    expect(boundary.expected.coverage_objective).toEqual({
+      schema_version: 1,
+      operator_id: "duplicate_gist_penalty_v1",
+      mathematical_class: null,
+      configuration_digest: null
+    });
     expect(boundary.expected.visible_result_sha256)
       .toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(boundary.expected).not.toHaveProperty("visible_result");
+  });
+
+  it("replays legacy boundaries without an objective receipt and rejects receipt drift", () => {
+    const boundary = captureBoundary();
+    const { coverage_objective: _coverageObjective, ...legacyExpected } =
+      boundary.expected;
+    const legacy = { ...boundary, expected: legacyExpected } as
+      FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(legacy)).not.toThrow();
+
+    const tampered = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        coverage_objective: {
+          ...boundary.expected.coverage_objective!,
+          operator_id: "attributed_facility_location_v1"
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("round-trips an explicit facility objective through the live selector", () => {
+    const config: CoverageSelectionOperatorConfig = {
+      operator_id: "attributed_facility_location_v1",
+      base_relevance_weight: 1,
+      demand_weights: {
+        entity: 1,
+        relation: 1,
+        time: 1,
+        logical_object: 1,
+        independent_evidence: 1
+      }
+    };
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    const result = selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData(), config);
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.input.coverage_objective_config).toEqual(config);
+    expect(boundary.expected.coverage_objective?.operator_id)
+      .toBe("attributed_facility_location_v1");
+    expect(boundary.expected.coverage_objective?.configuration_digest)
+      .toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(result.coverageSelectionObjective)
+      .toEqual(boundary.expected.coverage_objective);
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const invalid = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        coverage_objective_config: {
+          ...config,
+          base_relevance_weight: -1
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(invalid))
+      .toThrow(/selection boundary fidelity mismatch/u);
   });
 
   it("round-trips attributed routing maps as deterministic JSON entries", () => {
@@ -79,6 +158,230 @@ describe("fine-assessment selection boundary fidelity", () => {
     expect(boundary.input.supplementary_data.routingKeysByOwnerIdentity).toEqual([]);
     expect(boundary.input.supplementary_data.keyActivationByOwnerIdentity).toEqual([]);
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+  });
+
+  it("round-trips the retrieval field seal and rejects a tampered digest", () => {
+    const capture = createRecallFiniteFieldChannelCapture({
+      source_snapshot_digest: `sha256:${"a".repeat(64)}`,
+      channel: {
+        channel_id: "object_embedding_pool",
+        status: "complete",
+        depth: 1,
+        unseen_upper_bound: 0,
+        observations: [{
+          observation_id: "pool:candidate-1",
+          candidate_key: "candidate-1",
+          rank: 1
+        }]
+      }
+    });
+    const retrievalFieldSeal = materializeRecallRetrievalFieldSeal([capture]);
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData({ retrievalFieldSeal }));
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.input.supplementary_data.retrievalFieldSeal)
+      .toEqual(retrievalFieldSeal);
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const tampered = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        supplementary_data: {
+          ...boundary.input.supplementary_data,
+          retrievalFieldSeal: {
+            ...retrievalFieldSeal,
+            seal_digest: `sha256:${"b".repeat(64)}`
+          }
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("round-trips field refinement receipts and rejects a tampered digest", () => {
+    const receipt = createRecallRetrievalFieldRefinementReceipt({
+      request_digest: `sha256:${"c".repeat(64)}`,
+      requested_depth: 1,
+      object_kind: "memory_entry",
+      result: {
+        matches: [{ object_id: "memory-1", normalized_rank: 1 }],
+        lanes: [
+          fieldLane("exact"),
+          fieldLane("porter", "memory-1"),
+          fieldLane("trigram")
+        ]
+      }
+    });
+    if (receipt === null) throw new Error("refinement receipt was not created");
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData({
+      retrievalFieldRefinementReceipts: [receipt]
+    }));
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.input.supplementary_data.retrievalFieldRefinementReceipts)
+      .toEqual([receipt]);
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const tampered = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        supplementary_data: {
+          ...boundary.input.supplementary_data,
+          retrievalFieldRefinementReceipts: [{
+            ...receipt,
+            receipt_digest: `sha256:${"d".repeat(64)}`
+          }]
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("round-trips query fact-frame capture and rejects a tampered digest", async () => {
+    const capture = await captureRecallQueryFactFrames({
+      query_text: "I buy a desk",
+      port: {
+        operator_id: "structured_query_frame_v1",
+        extract: async () => [{
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "buy" },
+            { role: "value", text: "desk" }
+          ]
+        }]
+      }
+    });
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData({
+      queryFactFrameExtraction: capture
+    }));
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.input.supplementary_data.queryFactFrameExtraction)
+      .toEqual(capture);
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const tampered = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        supplementary_data: {
+          ...boundary.input.supplementary_data,
+          queryFactFrameExtraction: {
+            ...capture,
+            capture_digest: `sha256:${"0".repeat(64)}`
+          }
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("recomputes the field refinement stop certificate during replay", () => {
+    const receipt = createRecallRetrievalFieldRefinementReceipt({
+      request_digest: `sha256:${"e".repeat(64)}`,
+      requested_depth: 1,
+      object_kind: "memory_entry",
+      result: {
+        matches: [{ object_id: "memory-1", normalized_rank: 1 }],
+        lanes: [
+          fieldLane("exact"),
+          fieldLane("porter", "memory-1"),
+          fieldLane("trigram")
+        ]
+      }
+    });
+    if (receipt === null) throw new Error("refinement receipt was not created");
+    const capture = createRecallFiniteFieldChannelCapture({
+      source_snapshot_digest: `sha256:${"f".repeat(64)}`,
+      channel: {
+        channel_id: "object_embedding_pool",
+        status: "complete",
+        depth: 0,
+        unseen_upper_bound: 0,
+        observations: []
+      }
+    });
+    const retrievalFieldSeal = materializeRecallRetrievalFieldSeal([capture]);
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData({
+      retrievalFieldSeal,
+      retrievalFieldRefinementReceipts: [receipt]
+    }));
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.expected.field_refinement_stop_certificate?.reason)
+      .toBe("source_unavailable");
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const certificate = boundary.expected.field_refinement_stop_certificate!;
+    const tampered = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        field_refinement_stop_certificate: {
+          ...certificate,
+          receipt_digest: `sha256:${"0".repeat(64)}`
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("round-trips canonical FTS lanes and rejects reordered provenance", () => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    const supplementary = createSupplementaryData({
+      evidenceProjectionMatchesByRef: {
+        "evidence-1": [{
+          evidence_ref: "evidence-1",
+          projection_kind: "fact_key",
+          projection_id: 7,
+          normalized_rank: 0.8,
+          matched_fts_lanes: ["porter", "trigram"],
+          fact_key_forms: [{ kind: "complete" }]
+        }]
+      }
+    });
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, supplementary);
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const receipt = boundary.input.supplementary_data
+      .evidenceProjectionMatchesByRef?.["evidence-1"]?.[0];
+    const tampered = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        supplementary_data: {
+          ...boundary.input.supplementary_data,
+          evidenceProjectionMatchesByRef: {
+            "evidence-1": [{ ...receipt, matched_fts_lanes: ["trigram", "porter"] }]
+          }
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
   });
 
   it("captures the settled pre-projection sequence and admission actions", () => {
@@ -247,15 +550,19 @@ describe("fine-assessment selection boundary fidelity", () => {
     if (boundary === undefined) throw new Error("selection boundary was not observed");
     const candidate = visibleResult.candidates[0]!;
     const diagnostic = visibleResult.diagnostics[0]!;
+    const {
+      coverageSelectionObjective: _coverageSelectionObjective,
+      ...visiblePayload
+    } = visibleResult;
     const candidateDrift = {
-      ...visibleResult,
+      ...visiblePayload,
       candidates: [
         { ...candidate, token_estimate: candidate.token_estimate + 1 },
         ...visibleResult.candidates.slice(1)
       ]
     };
     const diagnosticDrift = {
-      ...visibleResult,
+      ...visiblePayload,
       diagnostics: [
         {
           ...diagnostic,
@@ -268,7 +575,7 @@ describe("fine-assessment selection boundary fidelity", () => {
       ]
     };
 
-    expect(selectionBoundaryJsonSha256(visibleResult))
+    expect(selectionBoundaryJsonSha256(visiblePayload))
       .toBe(boundary.expected.visible_result_sha256);
     expect(selectionBoundaryJsonSha256(candidateDrift))
       .not.toBe(boundary.expected.visible_result_sha256);
@@ -450,12 +757,29 @@ function readPreProjection(
   return boundary.expected.pre_projection;
 }
 
+function fieldLane(
+  lane: "exact" | "porter" | "trigram",
+  objectId?: string
+) {
+  const observations = objectId === undefined
+    ? []
+    : [{ object_id: objectId, rank: 1, normalized_rank: 1 }];
+  return {
+    lane,
+    status: objectId === undefined ? "ineligible" as const : "complete" as const,
+    depth: observations.length,
+    observations,
+    unseen_upper_bound: objectId === undefined ? null : 0
+  };
+}
+
 function selectFixture(
   observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
   estimator = vi.fn((_content: string) => 5),
   captureAnswerFeatures = observer !== undefined,
   reverseFinalOrder = false,
-  supplementaryData = createSupplementaryData()
+  supplementaryData = createSupplementaryData(),
+  coverageObjectiveConfig?: CoverageSelectionOperatorConfig
 ) {
   const candidates = fixtureCandidates();
   const finalRelevanceByCandidateKey = new Map(candidates.map(
@@ -475,6 +799,7 @@ function selectFixture(
       candidate.fusion.candidate_key,
       candidate.fusion.fused_score
     ])),
+    coverageObjectiveConfig,
     finalOrderAfterCoverage: "public_relevance",
     captureAnswerFeatures,
     capturePacketPlanTrace: true,

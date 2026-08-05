@@ -4,6 +4,7 @@ import {
   createCosineBatchScorer,
   toErrorMessage
 } from "../helpers.js";
+import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../constants.js";
 import {
   EvidenceDocumentEmbeddingError,
   type EvidenceDocumentEmbeddingEngine
@@ -12,11 +13,14 @@ import type { QueryEmbeddingEngine } from "../query-embedding-engine.js";
 import type {
   EmbeddingProviderPort,
   EvidenceCandidateScoringFailureClass,
+  EvidenceCandidateScoringReceipt,
   EvidenceCandidateScoringResult,
   EvidenceCandidateScoringWinner,
   PreparedEmbeddingQueryHandle,
   ScoreEvidenceCandidatesParams
 } from "../types.js";
+import { buildEvidenceSemanticFieldCapture } from
+  "../../recall/field/evidence-semantic-field-capture.js";
 
 export interface EvidenceCandidateScoringDependencies {
   readonly provider: EmbeddingProviderPort;
@@ -27,6 +31,21 @@ export interface EvidenceCandidateScoringDependencies {
 }
 
 export async function scoreTransientEvidenceCandidates(
+  params: ScoreEvidenceCandidatesParams,
+  dependencies: EvidenceCandidateScoringDependencies
+): Promise<EvidenceCandidateScoringResult> {
+  const result = await scoreEvidenceCandidates(params, dependencies);
+  return Object.freeze({
+    ...result,
+    fieldChannelCapture: buildEvidenceSemanticFieldCapture({
+      request: params,
+      provider: dependencies.provider,
+      result
+    })
+  });
+}
+
+async function scoreEvidenceCandidates(
   params: ScoreEvidenceCandidatesParams,
   dependencies: EvidenceCandidateScoringDependencies
 ): Promise<EvidenceCandidateScoringResult> {
@@ -61,9 +80,10 @@ export async function scoreTransientEvidenceCandidates(
     const embeddings = documentBatch.embeddings;
     assertValidEmbeddingBatch(embeddings, candidates.length);
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
-    const winners = aggregateCandidateScores(candidates, embeddings, scoreCosine);
-    const scores = new Map(
-      [...winners].map(([candidateKey, winner]) => [candidateKey, winner.score])
+    const activations = aggregateCandidateActivations(
+      candidates,
+      embeddings,
+      scoreCosine
     );
     return scoringResult(
       "returned",
@@ -72,8 +92,7 @@ export async function scoreTransientEvidenceCandidates(
       inferenceCalls,
       startedAt,
       null,
-      scores,
-      winners
+      activations
     );
   } catch (error) {
     if (error instanceof EvidenceDocumentEmbeddingError) {
@@ -85,25 +104,49 @@ export async function scoreTransientEvidenceCandidates(
   }
 }
 
-function aggregateCandidateScores(
+function aggregateCandidateActivations(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
   embeddings: readonly Float32Array[],
   scoreCosine: (embedding: Float32Array) => number
-): ReadonlyMap<string, Readonly<EvidenceCandidateScoringWinner>> {
-  const winners = new Map<string, Readonly<EvidenceCandidateScoringWinner>>();
+): ReadonlyMap<string, Readonly<EvidenceCandidateScoringReceipt>> {
+  const observations = new Map<
+    string,
+    Map<string, Readonly<EvidenceCandidateScoringWinner>>
+  >();
   candidates.forEach((candidate, index) => {
-    const score = clamp01(scoreCosine(embeddings[index]!));
-    const winner = Object.freeze({
-      score,
+    const observation = Object.freeze({
+      score: clamp01(scoreCosine(embeddings[index]!)),
       evidenceObjectId: candidate.evidenceObjectId,
       documentIdentity: candidate.documentIdentity
     });
-    const current = winners.get(candidate.candidateKey);
-    if (current === undefined || compareWinners(winner, current) < 0) {
-      winners.set(candidate.candidateKey, winner);
+    const byIdentity = observations.get(candidate.candidateKey) ?? new Map();
+    const identity = observationIdentity(observation);
+    const current = byIdentity.get(identity);
+    if (current === undefined || observation.score > current.score) {
+      byIdentity.set(identity, observation);
     }
+    observations.set(candidate.candidateKey, byIdentity);
   });
-  return winners;
+  return new Map([...observations].map(([candidateKey, byIdentity]) => {
+    const ranked = Object.freeze([...byIdentity.values()].sort(compareWinners));
+    const winner = ranked[0]!;
+    return [candidateKey, Object.freeze({
+      schema_version: 1,
+      operator_id: EVIDENCE_DOCUMENT_MAX_OPERATOR_ID,
+      state: "observed",
+      score: winner.score,
+      winner,
+      observations: ranked,
+      observation_completeness: "complete",
+      missing_channel_policy: "no_op"
+    })] as const;
+  }));
+}
+
+function observationIdentity(
+  observation: Readonly<EvidenceCandidateScoringWinner>
+): string {
+  return `${observation.evidenceObjectId}\u0000${observation.documentIdentity}`;
 }
 
 function compareWinners(
@@ -163,15 +206,13 @@ function scoringResult(
   inferenceCalls: number,
   startedAt: number,
   failureClass: EvidenceCandidateScoringFailureClass | null = null,
-  scores: ReadonlyMap<string, number> = new Map(),
-  winnersByCandidateKey: ReadonlyMap<
+  activationsByCandidateKey: ReadonlyMap<
     string,
-    Readonly<EvidenceCandidateScoringWinner>
+    Readonly<EvidenceCandidateScoringReceipt>
   > = new Map()
 ): EvidenceCandidateScoringResult {
   return Object.freeze({
-    scores,
-    winnersByCandidateKey,
+    activationsByCandidateKey,
     status,
     expectedCount,
     scoredCount,

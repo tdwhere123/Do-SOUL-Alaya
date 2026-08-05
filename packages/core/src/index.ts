@@ -43,6 +43,8 @@ export * from "./shared/errors.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";
 export * from "./memory/evidence-service.js";
+export * from "./memory/evidence-fact-frame-formation.js";
+export * from "./memory/fact-frame-formation/declarative-normalizer.js";
 export * from "./tooling/extension-registry-service.js";
 export * from "./shared/file-path.js";
 export * from "./recall/runtime/global-memory-recall-port.js";
@@ -115,6 +117,64 @@ export {
 export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
+export {
+  resolveCandidateSemanticActivation,
+  resolveCandidateSemanticActivationScope,
+  type CandidateActivationObservation,
+  type CandidateActivationOperatorId,
+  type CandidateActivationReceipt,
+  type CandidateActivationState,
+  type CandidateActivationWinner,
+  type CandidateSemanticActivation,
+  type CandidateSemanticActivationInput,
+  type CandidateSemanticActivationScope,
+  type CandidateSemanticActivationScopeInput,
+  type CandidateSemanticActivationSource
+} from "./recall/scoring/candidate-semantic-activation.js";
+export {
+  DUPLICATE_GIST_COVERAGE_OPERATOR_ID,
+  materializeCoverageSelectionCandidateStates,
+  orderCoverageSelectionCandidateStatesByMarginalGain,
+  orderByCoverageMarginalGain,
+  resolveCoverageIdentity,
+  type CoverageIdentity,
+  type CoverageMarginalObservation,
+  type CoverageSelectableCandidate,
+  type CoverageSelectionCandidateState,
+  type DuplicateGistCoverageState,
+  type CoverageSelectionObjective,
+  type CoverageSelectionSupplementary
+} from "./recall/delivery/coverage-selection.js";
+export {
+  COVERAGE_ATOM_OPERATOR_ID,
+  buildCoverageProjectionFormKey,
+  type CandidateCoverageAtom,
+  type CandidateCoverageReceipt,
+  type CoverageDemandRole,
+  type CoverageObservationChannel
+} from "./recall/delivery/fine-assessment-selection/coverage-atoms.js";
+export * from "./recall/field/field-identity.js";
+export * from "./recall/field/finite-field-seal.js";
+export * from "./recall/field/finite-field-capture.js";
+export * from "./recall/field/refinement/field-refinement-receipt.js";
+export * from "./recall/field/refinement/field-refinement-stop-certificate.js";
+export * from "./recall/field/object-embedding-field-capture.js";
+export * from "./recall/field/evidence-semantic-field-capture.js";
+export * from "./recall/field/retrieval/retrieval-field-bundle.js";
+export * from "./recall/field/family-rank-base.js";
+export * from "./recall/field/independent-corroboration.js";
+export * from "./recall/field/facility-objective.js";
+export * from "./recall/field/facility/match-materialization.js";
+export * from "./recall/field/facility/cardinality-solvers.js";
+export * from "./recall/field/facility/selection-objective.js";
+export * from "./recall/field/query-facility-demand.js";
+export * from "./recall/field/query-attribution/query-field-attribution.js";
+export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
+export * from "./shared/query-fact-frame-extraction-port.js";
+export * from "./shared/query-fact-frame-extraction-rules.js";
+export * from "./recall/rerank/relevance-upper-bound-receipt.js";
+export * from "./recall/field/query-entity-attribution-producer.js";
+export * from "./recall/field/safe-dominance.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, SynthesisStatus, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
 
 describe("RecallService", () => {
 it("merges synthesis-child metadata into a memory_entry when object ids collide", async () => {
@@ -40,14 +41,14 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
         findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           memories.filter((memory) => ids.includes(memory.object_id))
         ),
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: sharedObjectId, normalized_rank: 1 }
-        ])
+        ]))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: sharedObjectId, normalized_rank: 1 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => [synthesis])
       }
     });
@@ -143,19 +144,19 @@ it("does not reserve tail delivery slots for source-less synthesis capsules", as
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        searchByKeyword: vi.fn(async () =>
+        ...keywordSearchMethods(vi.fn(async () =>
           memories.map((memory, index) => ({
             object_id: memory.object_id,
             normalized_rank: 1 - index * 0.05
           }))
-        )
+        ))
       },
       synthesisSearchPort: {
-        searchByKeyword: vi.fn(async () => [
+        ...keywordSearchMethods(vi.fn(async () => [
           { object_id: "synthesis-1", normalized_rank: 1 },
           { object_id: "synthesis-2", normalized_rank: 0.8 },
           { object_id: "synthesis-3", normalized_rank: 0.2 }
-        ]),
+        ])),
         findByIds: vi.fn(async () => synthesisRows)
       }
     });

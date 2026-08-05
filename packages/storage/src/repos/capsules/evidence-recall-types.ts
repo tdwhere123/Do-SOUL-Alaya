@@ -1,7 +1,9 @@
 import type {
+  AssociativeFactFrame,
   AssociativeFactKeyProjectionForm,
   EvidenceCapsule,
-  EvidenceSearchProjection
+  EvidenceSearchProjection,
+  FtsLaneId
 } from "@do-soul/alaya-protocol";
 
 export type EvidenceSearchProjectionIdentity = Readonly<
@@ -11,7 +13,26 @@ export type EvidenceSearchProjectionIdentity = Readonly<
 export interface EvidenceCapsuleKeywordHit {
   readonly object_id: string;
   readonly normalized_rank: number;
+  readonly matched_fts_lanes: readonly FtsLaneId[];
   readonly matched_projection?: EvidenceSearchProjectionIdentity;
+}
+
+export interface EvidenceKeywordFieldResult {
+  readonly matches: readonly Readonly<EvidenceCapsuleKeywordHit>[];
+  readonly lanes: readonly Readonly<{
+    readonly lane: FtsLaneId;
+    readonly status: "complete" | "truncated" | "unavailable" | "ineligible";
+    readonly depth: number;
+    readonly observations: readonly Readonly<
+      EvidenceCapsuleKeywordHit & { readonly rank: number; readonly source_id: string }
+    >[];
+    readonly unseen_upper_bound: number | null;
+  }>[];
+  readonly refinement_levels?: readonly Readonly<{
+    readonly requested_depth: number;
+    readonly matches: readonly Readonly<EvidenceCapsuleKeywordHit>[];
+    readonly lanes: EvidenceKeywordFieldResult["lanes"];
+  }>[];
 }
 
 export interface EvidenceSearchMatch {
@@ -24,4 +45,5 @@ export interface RecallQualifiedEvidence {
   readonly verified_user_projection: boolean;
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
+  readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
 }

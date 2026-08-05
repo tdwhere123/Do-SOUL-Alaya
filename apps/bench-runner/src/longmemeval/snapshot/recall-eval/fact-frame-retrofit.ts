@@ -1,14 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   AssociativeFactFrameSchema,
-  BoundedJsonObjectSchema,
-  buildAssociativeFactKeyProjections,
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash,
-  groundAssociativeFactFrame,
-  type CandidateMemorySignal,
+  type EvidenceFactFrameFormationCapture,
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
+import { materializeEvidenceFactFrameFormation } from "@do-soul/alaya-core";
+import type BetterSqlite3 from "better-sqlite3";
 import {
   RecallQualifiedEvidenceReader,
   SqliteSignalRepo,
@@ -16,11 +13,17 @@ import {
 } from "@do-soul/alaya-storage";
 import { z } from "zod";
 import { readRegularFileNoFollow, sha256Buffer } from "../bound-file.js";
+import {
+  resolveVerifiedAssertionAuthority,
+  type VerifiedAssertionOwnerRow
+} from "./fact-frame-formation/verified-assertion-authority.js";
 
 const FACT_FRAME_RETROFIT_SCHEMA_VERSION = 1;
 const MAX_LEDGER_BYTES = 256 * 1024 * 1024;
 const RETROFIT_BATCH_SIZE = 512;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const RETROFIT_FACT_FRAME_PRODUCER_OPERATOR_ID =
+  "sealed_fact_frame_retrofit_ledger_v1";
 
 const FactFrameRetrofitLedgerRecordSchema = z.object({
   schema_version: z.literal(FACT_FRAME_RETROFIT_SCHEMA_VERSION),
@@ -37,6 +40,9 @@ export interface FactFrameRetrofitReport {
   readonly rejected_record_count: 0;
   readonly projection_count: number;
   readonly projection_content_sha256: string;
+  readonly formation_operator_id?: string;
+  readonly formation_capture_count?: number;
+  readonly formation_capture_sha256?: string;
 }
 
 export interface FactFrameRetrofitLedger {
@@ -48,25 +54,10 @@ type FactFrameRetrofitLedgerRecord = z.infer<
   typeof FactFrameRetrofitLedgerRecordSchema
 >;
 
-interface AssertionOwnerRow {
-  readonly object_id: string;
-  readonly workspace_id: string;
-  readonly run_id: string;
-  readonly surface_id: string | null;
-  readonly created_by: string;
-  readonly lifecycle_state: string;
-  readonly evidence_kind: string;
-  readonly evidence_health_state: string;
-  readonly gist: string;
-  readonly excerpt: string | null;
-  readonly source_hash: string | null;
-}
-
 interface RetrofitPlan {
   readonly record: FactFrameRetrofitLedgerRecord;
-  readonly signal: Readonly<CandidateMemorySignal>;
-  readonly owner: AssertionOwnerRow & { readonly source_hash: string };
-  readonly rawPayload: Readonly<Record<string, unknown>>;
+  readonly owner: VerifiedAssertionOwnerRow & { readonly source_hash: string };
+  readonly capture: Readonly<EvidenceFactFrameFormationCapture>;
   readonly projections: readonly Readonly<EvidenceSearchProjection>[];
 }
 
@@ -106,8 +97,12 @@ export function applyFactFrameRetrofit(
     expectedProjectionCount += applyPlans(db, plans);
   }
   const persisted = summarizePersistedProjectionRows(db);
+  const formations = summarizePersistedFormationRows(db);
   if (persisted.count !== expectedProjectionCount) {
     throw new Error("fact-frame retrofit persisted projection count mismatch");
+  }
+  if (formations.count !== ledger.records.length) {
+    throw new Error("fact-frame retrofit persisted formation count mismatch");
   }
   return Object.freeze({
     schema_version: FACT_FRAME_RETROFIT_SCHEMA_VERSION,
@@ -116,7 +111,10 @@ export function applyFactFrameRetrofit(
     rebuilt_owner_count: ledger.records.length,
     rejected_record_count: 0,
     projection_count: persisted.count,
-    projection_content_sha256: persisted.sha256
+    projection_content_sha256: persisted.sha256,
+    formation_operator_id: RETROFIT_FACT_FRAME_PRODUCER_OPERATOR_ID,
+    formation_capture_count: formations.count,
+    formation_capture_sha256: formations.sha256
   });
 }
 
@@ -173,96 +171,35 @@ function planRecord(
   signalRepo: SqliteSignalRepo,
   record: FactFrameRetrofitLedgerRecord
 ): RetrofitPlan {
-  const signal = signalRepo.getByIdInCurrentTransaction(record.signal_id);
-  if (signal === null) throw recordError(record, "signal missing");
-  const assertion = assertSignalAuthority(signal, record);
-  const owner = readAssertionOwner(db, record.signal_id);
-  assertOwnerAuthority(owner, signal, assertion, record);
-  const frame = groundAssociativeFactFrame(record.fact_frame, assertion);
-  if (frame === null) throw recordError(record, "fact_frame is not source-exact");
-  const rawPayload = BoundedJsonObjectSchema.parse({
-    ...signal.raw_payload,
-    fact_frame: frame
-  });
-  return Object.freeze({
-    record,
-    signal,
-    owner: owner as AssertionOwnerRow & { readonly source_hash: string },
-    rawPayload,
-    projections: buildAssociativeFactKeyProjections(frame)
-  });
-}
-
-function assertSignalAuthority(
-  signal: Readonly<CandidateMemorySignal>,
-  record: FactFrameRetrofitLedgerRecord
-): string {
-  if (signal.source !== "garden_compile" || signal.signal_state !== "materialized") {
-    throw recordError(record, "signal is not a materialized garden assertion");
-  }
-  const assertion = readNonEmptyString(signal.raw_payload.source_assertion);
-  if (assertion === null || assertion !== assertion.trim()) {
-    throw recordError(record, "source_assertion missing or non-canonical");
-  }
+  const authority = resolveVerifiedAssertionAuthority(db, signalRepo, record.signal_id);
+  const assertion = authority.sourceAssertion;
   if (digestText(assertion) !== record.source_assertion_sha256) {
     throw recordError(record, "source_assertion_sha256 mismatch");
   }
-  const grounding = readObject(signal.raw_payload.source_grounding);
-  if (grounding?.status !== "grounded" ||
-      grounding.content_basis !== "source_assertion" ||
-      grounding.source_assertion !== assertion) {
-    throw recordError(record, "source_grounding authority mismatch");
-  }
-  return assertion;
-}
-
-function assertOwnerAuthority(
-  owner: AssertionOwnerRow,
-  signal: Readonly<CandidateMemorySignal>,
-  assertion: string,
-  record: FactFrameRetrofitLedgerRecord
-): void {
-  if (owner.created_by !== "garden_compile" || owner.lifecycle_state !== "active" ||
-      owner.evidence_kind !== "conversation_excerpt" ||
-      owner.evidence_health_state !== "verified") {
-    throw recordError(record, "evidence owner is not active verified Garden evidence");
-  }
-  if (owner.workspace_id !== signal.workspace_id || owner.run_id !== signal.run_id ||
-      owner.surface_id !== signal.surface_id || owner.excerpt !== assertion) {
-    throw recordError(record, "evidence owner envelope mismatch");
-  }
-  if (readNonEmptyString(signal.raw_payload.full_turn_content) !== owner.gist) {
-    throw recordError(record, "source corpus mismatch");
-  }
-  if (owner.source_hash !== expectedSourceHash(owner, assertion)) {
-    throw recordError(record, "verified assertion receipt mismatch");
-  }
-}
-
-function expectedSourceHash(owner: AssertionOwnerRow, assertion: string): string {
-  return formatVerifiedUserAssertionSourceHash(digestText(
-    buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: owner.workspace_id,
-      run_id: owner.run_id,
-      surface_id: owner.surface_id,
+  const formation = materializeEvidenceFactFrameFormation({
+    sourceAssertion: assertion,
+    sourceHash: authority.sourceHash,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: RETROFIT_FACT_FRAME_PRODUCER_OPERATOR_ID,
       source_assertion: assertion,
-      source_corpus: owner.gist
-    })
-  ));
-}
-
-function readAssertionOwner(db: StorageDatabase, signalId: string): AssertionOwnerRow {
-  const rows = db.connection.prepare(ASSERTION_OWNER_SQL).all(signalId) as AssertionOwnerRow[];
-  if (rows.length !== 1) {
-    throw new Error(
-      `fact-frame retrofit ${signalId}: expected one verified assertion owner, found ${rows.length}`
-    );
+      fact_frame: record.fact_frame
+    }
+  });
+  if (formation.capture.status !== "formed") {
+    throw recordError(record, "canonical fact-frame formation rejected the proposal");
   }
-  return rows[0]!;
+  return Object.freeze({
+    record,
+    owner: authority.owner,
+    capture: formation.capture,
+    projections: formation.searchProjections
+  });
 }
 
 function initializeRetrofitOwnerLedger(db: StorageDatabase): void {
   db.connection.exec(`
+    DROP TABLE IF EXISTS temp.p170_fact_frame_retrofit_owners;
     CREATE TEMP TABLE p170_fact_frame_retrofit_owners (
       evidence_object_id TEXT PRIMARY KEY
     ) WITHOUT ROWID
@@ -291,9 +228,6 @@ function assertRuntimeQualifiedOwners(
 }
 
 function applyPlans(db: StorageDatabase, plans: readonly RetrofitPlan[]): number {
-  const updateSignal = db.connection.prepare(
-    "UPDATE signals SET raw_payload_json = ? WHERE signal_id = ?"
-  );
   const recordOwner = db.connection.prepare(
     "INSERT OR IGNORE INTO p170_fact_frame_retrofit_owners (evidence_object_id) VALUES (?)"
   );
@@ -302,13 +236,16 @@ function applyPlans(db: StorageDatabase, plans: readonly RetrofitPlan[]): number
      WHERE evidence_object_id = ? AND projection_kind = 'fact_key'
   `);
   const insert = db.connection.prepare(INSERT_PROJECTION_SQL);
+  const insertFormation = db.connection.prepare(INSERT_FORMATION_SQL);
+  const readFormation = db.connection.prepare(
+    "SELECT capture_digest FROM evidence_fact_frame_formations WHERE evidence_object_id = ?"
+  );
   let projectionCount = 0;
   for (const plan of plans) {
     if (recordOwner.run(plan.owner.object_id).changes !== 1) {
       throw recordError(plan.record, "multiple signals resolve to one evidence owner");
     }
-    const updated = updateSignal.run(JSON.stringify(plan.rawPayload), plan.signal.signal_id);
-    if (updated.changes !== 1) throw recordError(plan.record, "signal update failed");
+    persistFormation(insertFormation, readFormation, plan);
     remove.run(plan.owner.object_id);
     for (const projection of plan.projections) {
       insert.run(
@@ -323,6 +260,31 @@ function applyPlans(db: StorageDatabase, plans: readonly RetrofitPlan[]): number
     }
   }
   return projectionCount;
+}
+
+function persistFormation(
+  insert: BetterSqlite3.Statement,
+  read: BetterSqlite3.Statement,
+  plan: RetrofitPlan
+): void {
+  const capture = plan.capture;
+  const result = insert.run(
+    plan.owner.object_id,
+    plan.owner.workspace_id,
+    capture.schema_version,
+    capture.operator_id,
+    capture.status,
+    capture.producer_operator_id,
+    capture.source_hash,
+    capture.fact_frame === null ? null : JSON.stringify(capture.fact_frame),
+    capture.capture_digest
+  );
+  if (result.changes === 1) return;
+  const existing = read.get(plan.owner.object_id) as
+    { readonly capture_digest: string } | undefined;
+  if (existing?.capture_digest !== capture.capture_digest) {
+    throw recordError(plan.record, "existing fact-frame formation capture conflicts");
+  }
 }
 
 function summarizePersistedProjectionRows(
@@ -342,14 +304,17 @@ function summarizePersistedProjectionRows(
   return Object.freeze({ count, sha256: digest.digest("hex") });
 }
 
-function readNonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readObject(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
+function summarizePersistedFormationRows(
+  db: StorageDatabase
+): Readonly<{ count: number; sha256: string }> {
+  const rows = db.connection.prepare(READ_FORMATION_SQL).all() as ReadonlyArray<Readonly<{
+    evidence_object_id: string;
+    capture_digest: string;
+  }>>;
+  return Object.freeze({
+    count: rows.length,
+    sha256: digestText(JSON.stringify(rows))
+  });
 }
 
 function recordError(record: FactFrameRetrofitLedgerRecord, reason: string): Error {
@@ -360,26 +325,28 @@ function digestText(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-const ASSERTION_OWNER_SQL = `
-  SELECT capsule.object_id, capsule.workspace_id, capsule.run_id,
-         capsule.surface_id, capsule.created_by, capsule.lifecycle_state,
-         capsule.evidence_kind, capsule.evidence_health_state, capsule.gist,
-         capsule.excerpt, capsule.source_hash
-    FROM recall_routing_key_owners AS owner
-    JOIN evidence_capsules AS capsule
-      ON capsule.workspace_id = owner.workspace_id
-     AND capsule.object_id = owner.owner_id
-   WHERE owner.owner_kind = 'evidence_capsule'
-     AND owner.signal_id = ?
-     AND capsule.source_hash LIKE 'sha256:garden-verified-user-assertion-v1:%'
-   ORDER BY capsule.object_id ASC
-`;
-
 const INSERT_PROJECTION_SQL = `
   INSERT INTO evidence_search_projections (
     evidence_object_id, projection_id, projection_kind,
     workspace_id, source_hash, content
   ) VALUES (?, ?, ?, ?, ?, ?)
+`;
+
+const INSERT_FORMATION_SQL = `
+  INSERT INTO evidence_fact_frame_formations (
+    evidence_object_id, workspace_id, schema_version, operator_id, status,
+    producer_operator_id, source_hash, fact_frame_json, capture_digest
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(evidence_object_id) DO UPDATE SET
+    workspace_id = excluded.workspace_id,
+    schema_version = excluded.schema_version,
+    operator_id = excluded.operator_id,
+    status = excluded.status,
+    producer_operator_id = excluded.producer_operator_id,
+    source_hash = excluded.source_hash,
+    fact_frame_json = excluded.fact_frame_json,
+    capture_digest = excluded.capture_digest
+  WHERE evidence_fact_frame_formations.status != 'formed'
 `;
 
 const READ_PROJECTION_SQL = `
@@ -391,4 +358,12 @@ const READ_PROJECTION_SQL = `
       ON projection.evidence_object_id = owner.evidence_object_id
    WHERE projection.projection_kind = 'fact_key'
    ORDER BY projection.evidence_object_id ASC, projection.projection_id ASC
+`;
+
+const READ_FORMATION_SQL = `
+  SELECT formation.evidence_object_id, formation.capture_digest
+  FROM p170_fact_frame_retrofit_owners AS owner
+  JOIN evidence_fact_frame_formations AS formation
+    ON formation.evidence_object_id = owner.evidence_object_id
+  ORDER BY formation.evidence_object_id ASC
 `;

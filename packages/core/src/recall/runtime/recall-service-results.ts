@@ -1,5 +1,7 @@
 import type {
+  AssociativeFactSlot,
   AssociativeFactKeyProjectionForm,
+  FtsLaneId,
   ManifestationState,
   MemoryEntry,
   PathAnchorRef,
@@ -10,6 +12,9 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { SelectedSliceKeyV2 } from "../flood/slice-key-contract.js";
 import type { AttributedKeyActivationV1 } from "../flood/attributed-key-activation.js";
+import type { RecallFiniteFieldSeal } from "../field/finite-field-seal.js";
+import type { RecallQueryFieldAttributionReceipt } from
+  "../field/query-attribution/query-field-attribution.js";
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
@@ -39,13 +44,19 @@ export interface RecallEvidenceProjectionMatchReceipt {
   readonly projection_kind: "owner" | "assistant_observation" | "fact_key";
   readonly projection_id: number | null;
   readonly normalized_rank: number;
+  /** Absent only in legacy traces; live FTS producers bind their source lanes. */
+  readonly matched_fts_lanes?: readonly FtsLaneId[];
   readonly fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
+  /** Present only for source-grounded Fact-Key projections; absent in legacy traces. */
+  readonly fact_slots?: readonly Readonly<AssociativeFactSlot>[];
 }
 
 export interface RecallEvidenceSemanticProjectionReceipt {
   readonly projection_id: number | null;
   readonly projection_kind: "owner" | "fact_key";
   readonly matched_fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
+  /** Present only for source-grounded Fact-Key projections; absent in legacy traces. */
+  readonly fact_slots?: readonly Readonly<AssociativeFactSlot>[];
 }
 
 export interface RecallEvidenceSemanticDocument {
@@ -62,6 +73,17 @@ export interface RecallEvidenceSemanticWinnerReceipt {
   readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt> | null;
 }
 
+export interface RecallEvidenceSemanticActivationReceipt {
+  readonly schema_version: 1;
+  readonly operator_id: "evidence_document_max_v1";
+  readonly state: "observed";
+  readonly score: number;
+  readonly winner: Readonly<RecallEvidenceSemanticWinnerReceipt>;
+  readonly observations: readonly Readonly<RecallEvidenceSemanticWinnerReceipt>[];
+  readonly observation_completeness: "complete" | "winner_only_legacy";
+  readonly missing_channel_policy: "no_op";
+}
+
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -76,6 +98,16 @@ export interface RecallResult {
 
 export interface RecallSupplementaryData {
   readonly queryProbes: Readonly<import("../query/recall-query-probes.js").RecallQueryProbes>;
+  readonly retrievalFieldSeal?: Readonly<RecallFiniteFieldSeal>;
+  readonly retrievalFieldRefinementReceipts?: readonly Readonly<
+    import("../field/refinement/field-refinement-receipt.js")
+      .RecallRetrievalFieldRefinementReceipt
+  >[];
+  readonly queryFieldAttribution?: Readonly<RecallQueryFieldAttributionReceipt>;
+  readonly queryFactFrameExtraction?: Readonly<
+    import("../field/query-attribution/query-fact-frame-attribution-producer.js")
+      .RecallQueryFactFrameExtractionCapture
+  >;
   readonly queryTimeWindow?: Readonly<import("../scoring/temporal-fusion-scoring.js").QueryTimeWindow>;
   readonly routingKeysByOwnerIdentity?: ReadonlyMap<
     string,
@@ -123,10 +155,9 @@ export interface RecallSupplementaryData {
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   // Transient evidence previews are keyed by full candidate identity so a
   // colliding memory object id cannot inherit their semantic signal.
-  readonly evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>;
-  readonly evidenceSemanticWinnersByCandidateKey?: ReadonlyMap<
+  readonly evidenceSemanticActivationsByCandidateKey: ReadonlyMap<
     string,
-    Readonly<RecallEvidenceSemanticWinnerReceipt>
+    Readonly<RecallEvidenceSemanticActivationReceipt>
   >;
   // Optional final query-to-candidate relevance owned by a local reranker.
   // Candidate-key identity preserves distinct provenance projections.

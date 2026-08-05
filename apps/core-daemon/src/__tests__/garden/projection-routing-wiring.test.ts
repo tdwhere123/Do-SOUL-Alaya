@@ -201,7 +201,6 @@ describe("projection routing daemon wiring", () => {
         throw new Error("persisted verified answer missing");
       }
       await seedHigherRankedFillers(harness.memoryRepo, answer);
-
       const result = await createRecallService(
         harness.memoryRepo,
         harness.evidenceRepo
@@ -395,8 +394,12 @@ function createRecallService(
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
       findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
       searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
+      searchByKeywordField: memoryRepo.searchByKeywordField.bind(memoryRepo),
+      searchByAnchorField: memoryRepo.searchByAnchorField.bind(memoryRepo),
       searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
-      findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
+      findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo),
+      findBoundEvidenceRefs: memoryRepo.findBoundEvidenceRefs.bind(memoryRepo),
+      findByIds: memoryRepo.findByIds.bind(memoryRepo)
     },
     slotRepo: { findByWorkspace: async () => [] },
     eventLogRepo: {
@@ -410,7 +413,13 @@ function createRecallService(
     },
     evidenceSearchPort: {
       searchByKeyword: evidenceRepo.searchByKeyword.bind(evidenceRepo),
-      findByIds: evidenceRepo.findByIds.bind(evidenceRepo)
+      searchByKeywordField: evidenceRepo.searchByKeywordField.bind(evidenceRepo),
+      searchManyByKeywordField: evidenceRepo.searchManyByKeywordField.bind(evidenceRepo),
+      findByIds: evidenceRepo.findByIds.bind(evidenceRepo),
+      findRecallQualifiedByIds: evidenceRepo.findRecallQualifiedByIds.bind(evidenceRepo),
+      findRecallQualifiedFactKeysByIds:
+        evidenceRepo.findRecallQualifiedFactKeysByIds.bind(evidenceRepo),
+      findSourceAnchorsByIds: evidenceRepo.findSourceAnchorsByIds.bind(evidenceRepo)
     }
   };
   return new RecallService(dependencies);

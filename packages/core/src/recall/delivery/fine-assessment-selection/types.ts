@@ -6,6 +6,13 @@ import type { RecallDeepHeadTrace } from "../../rerank/deep-head.js";
 import { materializeFinalPacket } from "../final-order/final-packet-order.js";
 import type { RecallPacketPlanObservation } from "../packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "../selection-boundary/selection-boundary-capture.js";
+import type { CoverageSelectionObjectiveReceipt } from "../coverage-selection.js";
+import type { CoverageSelectionOperatorConfig } from
+  "../../field/facility/selection-objective.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../../field/refinement/field-refinement-stop-certificate.js";
+import type { RecallRelevanceUpperBoundReceipt } from
+  "../../rerank/relevance-upper-bound-receipt.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -63,6 +70,9 @@ export interface FineAssessmentSelectionContext {
   readonly tokenEstimator: TokenEstimator;
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
   readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly coverageRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly coverageRelevanceUpperBound:
+    Readonly<RecallRelevanceUpperBoundReceipt> | null;
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures: boolean;
   readonly answerSupportByCandidateKey: ReadonlyMap<
@@ -76,6 +86,7 @@ export interface FineAssessmentSelectionContext {
   readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly coverageMarginalGainByCandidateKey: Map<string, number>;
   readonly tokenEstimateByCandidateKey: Map<string, number>;
+  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
 }
 
 export interface FineAssessmentAdmission {
@@ -93,6 +104,9 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
+  readonly coverageRelevanceUpperBound?:
+    Readonly<RecallRelevanceUpperBoundReceipt> | null;
+  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly maxHeadDropAfterCoverage?: number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
@@ -105,5 +119,8 @@ export type FineAssessmentSelectionParams = Readonly<{
 }>;
 
 export type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPacket> & Readonly<{
+  readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
+  readonly fieldRefinementStopCertificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
 }>;

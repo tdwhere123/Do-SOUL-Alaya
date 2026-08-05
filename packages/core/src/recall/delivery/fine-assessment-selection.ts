@@ -37,6 +37,8 @@ import type {
 } from "./fine-assessment-selection/types.js";
 import type { RecallAdmissionDiagnosticPass } from
   "../runtime/recall-service-diagnostics.js";
+import { createRecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
 
 export type {
   FineAssessmentAdmissionReceipt,
@@ -52,11 +54,12 @@ export function selectFineAssessmentCandidates(
   const boundaryCapture = createSelectionBoundary(params);
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
-  const coverageOrdered = prepareCoverageSelection(selectionParams, context);
+  const coverageSelection = prepareCoverageSelection(selectionParams, context);
+  const coverageOrdered = coverageSelection.candidates;
   const excludedCandidateKeys = new Set<string>();
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
-    context.supplementaryData.evidenceSemanticScoresByCandidateKey,
+    context.supplementaryData.evidenceSemanticActivationsByCandidateKey,
     context.finalRelevanceByCandidateKey,
     context.config.budgets.max_entries, excludedCandidateKeys,
     (candidates) => collectAdmittedCandidates(candidates, context),
@@ -65,7 +68,7 @@ export function selectFineAssessmentCandidates(
   );
   const selection = resolveAdmissionAwareFinalSelection(
     selectionParams,
-    coverageOrdered,
+    evidenceHead.candidates,
     context,
     evidenceHead.protections
   );
@@ -81,13 +84,45 @@ export function selectFineAssessmentCandidates(
     finalAccumulator,
     context
   );
+  const refinementStopCertificate = buildRefinementStopCertificate(
+    delivered.candidates,
+    coverageSelection.preparedSelection,
+    context
+  );
   return buildSelectionResult(
     selectionParams,
     selection.consensus,
     delivered,
+    coverageSelection.objective,
+    refinementStopCertificate,
     boundaryCapture?.tokenEstimatesByContent,
     preProjection
   );
+}
+
+function buildRefinementStopCertificate(
+  delivered: ReturnType<typeof materializeFineAssessmentDelivery>["candidates"],
+  preparedSelection: ReturnType<typeof prepareCoverageSelection>["preparedSelection"],
+  context: FineAssessmentSelectionContext
+) {
+  const fieldSeal = context.supplementaryData.retrievalFieldSeal;
+  const refinementReceipts =
+    context.supplementaryData.retrievalFieldRefinementReceipts;
+  if (fieldSeal === undefined || refinementReceipts === undefined ||
+      refinementReceipts.length === 0) return undefined;
+  return createRecallFieldRefinementStopCertificate({
+    fieldSeal,
+    refinementReceipts,
+    preparedSelection,
+    selectedCandidateKeys: delivered.map((candidate) =>
+      buildRecallCandidateDedupeKey({
+        entry: { object_id: candidate.object_id },
+        originPlane: candidate.origin_plane,
+        objectKind: candidate.object_kind
+      })),
+    supplementaryData: context.supplementaryData,
+    relevanceUpperBound: context.coverageRelevanceUpperBound
+  });
 }
 
 function resolveAdmissionAwareFinalSelection(

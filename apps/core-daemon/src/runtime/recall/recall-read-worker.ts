@@ -38,6 +38,18 @@ import {
 } from "../recall-read-worker/protocol-validation.js";
 import { enqueueRecallReadRequest } from "../recall-read-worker/request-queue.js";
 import { attachRecallReadRequestListener } from "../recall-read-worker/unexpected-queue-failure.js";
+import {
+  asPayload,
+  readNumber,
+  readPositiveIntegerArray,
+  readString,
+  readStringArray
+} from "../recall-read-worker/payload-readers.js";
+import {
+  runEvidenceFieldOperation,
+  runMemoryFieldOperation,
+  runSynthesisFieldOperation
+} from "../recall-read-worker/field-operations.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -64,6 +76,7 @@ let closed = false;
 type WorkerKeywordSearchQuery = Readonly<{
   readonly queryText: string;
   readonly limit: number;
+  readonly refinement_depths?: readonly number[];
 }>;
 
 attachRecallReadRequestListener(parentPort, handleRequest, enqueueRecallReadRequest);
@@ -116,23 +129,28 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "memory.findByDimension":
     case "memory.findByScopeClass":
     case "memory.searchByKeyword":
+    case "memory.searchByKeywordField":
     case "memory.searchByKeywordWithinObjectIds":
     case "memory.searchByKeywordWithinTier":
     case "memory.searchManyByKeywordWithinObjectIds":
     case "memory.searchByAnchorWithinObjectIds":
     case "memory.searchByAnchorWithinTier":
+    case "memory.searchByAnchorField":
     case "memory.findByEvidenceRefs":
     case "memory.findBoundEvidenceRefs":
     case "memory.findByIds":
       return await runMemoryOperation(request.operation, payload);
     case "evidence.searchByKeyword":
-    case "evidence.searchManyByKeyword":
+    case "evidence.searchByKeywordField":
+    case "evidence.searchManyByKeywordField":
     case "evidence.findByIds":
     case "evidence.findRecallQualifiedByIds":
     case "evidence.findRecallQualifiedFactKeysByIds":
     case "evidence.findSourceAnchorsByIds":
       return await runEvidenceOperation(request.operation, payload);
     case "synthesis.searchByKeyword":
+    case "synthesis.searchByKeywordField":
+    case "synthesis.searchManyByKeywordField":
     case "synthesis.findByIds":
       return await runSynthesisOperation(request.operation, payload);
     case "path.findByAnchors":
@@ -158,6 +176,9 @@ async function runMemoryOperation(
   payload: Record<string, unknown>
 ) {
   switch (operation) {
+    case "memory.searchByKeywordField":
+    case "memory.searchByAnchorField":
+      return await runMemoryFieldOperation(memoryEntryRepo, operation, payload);
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
     case "memory.searchByKeywordWithinTier":
@@ -286,14 +307,20 @@ async function runEvidenceOperation(
   operation: Extract<RecallReadWorkerRequest["operation"], `evidence.${string}`>,
   payload: Record<string, unknown>
 ) {
-  if (operation === "evidence.searchManyByKeyword") {
-    return searchManyEvidenceKeywords(payload);
-  }
   if (operation === "evidence.searchByKeyword") {
     return await evidenceCapsuleRepo.searchByKeyword(
       readString(payload.workspaceId, "workspaceId"),
       readString(payload.queryText, "queryText"),
       readNumber(payload.limit, "limit")
+    );
+  }
+  if (operation === "evidence.searchByKeywordField") {
+    return await runEvidenceFieldOperation(evidenceCapsuleRepo, payload);
+  }
+  if (operation === "evidence.searchManyByKeywordField") {
+    return await evidenceCapsuleRepo.searchManyByKeywordField(
+      readString(payload.workspaceId, "workspaceId"),
+      readKeywordSearchBatchQueries(payload.queries)
     );
   }
 
@@ -322,15 +349,6 @@ async function runEvidenceOperation(
   );
 }
 
-async function searchManyEvidenceKeywords(
-  payload: Record<string, unknown>
-) {
-  const workspaceId = readString(payload.workspaceId, "workspaceId");
-  const queries = readKeywordSearchBatchQueries(payload.queries);
-  return runOrderedKeywordSearchBatch(queries, (query) =>
-    evidenceCapsuleRepo.searchByKeyword(workspaceId, query.queryText, query.limit));
-}
-
 async function runOrderedKeywordSearchBatch<Result>(
   queries: readonly WorkerKeywordSearchQuery[],
   searchOne: (query: WorkerKeywordSearchQuery) => Promise<readonly Result[]>
@@ -349,6 +367,15 @@ async function runSynthesisOperation(
       readString(payload.workspaceId, "workspaceId"),
       readString(payload.queryText, "queryText"),
       readNumber(payload.limit, "limit")
+    );
+  }
+  if (operation === "synthesis.searchByKeywordField") {
+    return await runSynthesisFieldOperation(synthesisCapsuleRepo, payload);
+  }
+  if (operation === "synthesis.searchManyByKeywordField") {
+    return await synthesisCapsuleRepo.searchManyByKeywordField(
+      readString(payload.workspaceId, "workspaceId"),
+      readKeywordSearchBatchQueries(payload.queries)
     );
   }
 
@@ -406,7 +433,6 @@ function readTemporalProjectionSelected(value: unknown): boolean {
   }
   return selected;
 }
-
 function readPathProjectionReadOptions(
   payload: Record<string, unknown>
 ): RecallPathProjectionReadOptions {
@@ -414,34 +440,6 @@ function readPathProjectionReadOptions(
     return Object.freeze({});
   }
   return Object.freeze({ asOf: readString(payload.asOf, "asOf") });
-}
-
-function asPayload(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("worker payload must be an object");
-  }
-  return value as Record<string, unknown>;
-}
-
-function readString(value: unknown, name: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`worker payload ${name} must be a string`);
-  }
-  return value;
-}
-
-function readNumber(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`worker payload ${name} must be a finite number`);
-  }
-  return value;
-}
-
-function readStringArray(value: unknown, name: string): readonly string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`worker payload ${name} must be a string array`);
-  }
-  return value;
 }
 
 function readKeywordSearchBatchQueries(
@@ -454,7 +452,13 @@ function readKeywordSearchBatchQueries(
     const query = asPayload(item);
     return {
       queryText: readString(query.queryText, `queries[${index}].queryText`),
-      limit: readNumber(query.limit, `queries[${index}].limit`)
+      limit: readNumber(query.limit, `queries[${index}].limit`),
+      ...(query.refinement_depths === undefined ? {} : {
+        refinement_depths: readPositiveIntegerArray(
+          query.refinement_depths,
+          `queries[${index}].refinement_depths`
+        )
+      })
     };
   });
 }

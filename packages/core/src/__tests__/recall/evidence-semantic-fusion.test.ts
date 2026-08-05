@@ -7,6 +7,8 @@ import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes
 import { buildRecallCandidateDedupeKey } from "../../recall/runtime/recall-service-helpers.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
+import { evidenceSemanticActivationsFromScores } from
+  "./fixtures/evidence-semantic-activation.js";
 
 function candidate(
   objectId: string,
@@ -48,7 +50,8 @@ function supplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey,
+    evidenceSemanticActivationsByCandidateKey:
+      evidenceSemanticActivationsFromScores(evidenceSemanticScoresByCandidateKey),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

@@ -28,6 +28,12 @@ import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "../delivery/selection-boundary/selection-boundary-capture.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
+import type { RecallFiniteFieldChannelCapture } from
+  "../field/finite-field-capture.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -79,6 +85,8 @@ export interface PreparedRecallRequest {
   readonly tokenEstimator: TokenEstimator;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly answerShapePlan: Readonly<RecallAnswerShapePlan> | null;
   readonly referenceTime: string;
   // Only an explicit caller value selects a historical projection. The normal
@@ -98,6 +106,7 @@ export interface RecallAssessmentStageResult {
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
   readonly evidenceEmbeddingScoring: Readonly<EvidenceCandidateScoringResult>;
+  readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;

@@ -47,6 +47,15 @@ import {
   sessionRouteEnabled,
   withRoutedSurfaceIds
 } from "./session-route.js";
+import {
+  captureRecallQueryEntities,
+  type RecallQueryEntityExtractionCapture
+} from "../field/query-entity-attribution-producer.js";
+import {
+  createRecallRetrievalFieldBundle,
+  type RecallRetrievalFieldBundle
+} from
+  "../field/retrieval/retrieval-field-bundle.js";
 
 export interface RunCoarseFilterContext {
   readonly dependencies: RecallServiceDependencies;
@@ -66,6 +75,8 @@ export interface RunCoarseFilterOptions {
   readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
   readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle?: Readonly<RecallRetrievalFieldBundle>;
 }
 
 interface CoarseFilterInput {
@@ -343,7 +354,40 @@ export async function runCoarseFilter(
   options: Readonly<RunCoarseFilterOptions> = {}
 ): Promise<CoarseFilterRunResult> {
   const input = await loadCoarseFilterInput(context, workspaceId, config, queryText, options);
+  const queryEntityExtraction = options.queryEntityExtraction ??
+    await captureRecallQueryEntities({
+      query_text: queryText,
+      port: context.dependencies.entityExtractionPort,
+      on_failure: (error) => context.warn("entity extraction failed", {
+        workspace_id: workspaceId,
+        operation: "entity_extraction",
+        error: toErrorMessage(error)
+      })
+    });
   const queryProbes = routeQueryToSession(input.tierMemories, input.queryProbes);
+  const retrievalFieldBundle = options.retrievalFieldBundle ??
+    createRecallRetrievalFieldBundle({
+      workspaceId,
+      queryText,
+      memoryRepo: context.dependencies.memoryRepo,
+      evidenceSearchPort: context.dependencies.evidenceSearchPort,
+      synthesisSearchPort: context.dependencies.synthesisSearchPort,
+      refinementMaxDepth:
+        config.semantic_supplement.field_observation_max_depth,
+      onFailure: (operation, error) => context.warn("retrieval field query failed", {
+        workspace_id: workspaceId,
+        operation,
+        error: toErrorMessage(error)
+      }),
+      onBatchFailure: (operation, failure) => context.warn(
+        "retrieval field batch query failed; using scalar field queries",
+        {
+          workspace_id: workspaceId,
+          operation,
+          ...failure
+        }
+      )
+    });
   const state = createCoarseFilterState({ config, winnerMemoryIds: input.winnerMemoryIds });
   admitInitialCoarseCandidates({
     tierMemories: input.tierMemories,
@@ -367,6 +411,8 @@ export async function runCoarseFilter(
       createTemporalWindowCandidateBudget(options.deliveryMaxEntries),
     referenceTime: options.referenceTime,
     pathProjectionAsOf: options.pathProjectionAsOf,
+    queryEntityExtraction,
+    retrievalFieldBundle,
     state
   });
   return buildCoarseFilterRunResult({

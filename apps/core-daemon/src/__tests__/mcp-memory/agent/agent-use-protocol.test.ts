@@ -100,12 +100,13 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
 
     const runtime = await createAlayaDaemonRuntime();
     runtime.startBackgroundServices();
+    let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
         workspaceId: "workspace-1",
         runId: "run-1",
-        agentTarget: "codex",
+        agentTarget: activeAgentTarget,
         sessionId: "phase6-session-1",
         surfaceId: "phase6-agent-use-proof"
       })
@@ -245,6 +246,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       expect(cliPendingBefore.exitCode).toBe(0);
       expect(cliPendingBeforeIds).toEqual(mcpPendingBefore.proposals.map((row) => row.proposal_id));
 
+      activeAgentTarget = "cli";
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "accept",

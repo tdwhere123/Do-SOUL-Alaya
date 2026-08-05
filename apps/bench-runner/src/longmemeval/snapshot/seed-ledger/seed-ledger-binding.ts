@@ -5,7 +5,7 @@ import {
   isCacheOnlySeedExtractionPath,
   type SeedExtractionPath
 } from "@do-soul/alaya-eval";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -76,8 +76,9 @@ export function assertSnapshotSeedLedgerBinding(input: {
   readonly closureAuthority: SnapshotSeedLedgerClosureAuthority;
   readonly systemPrompt?: string;
 }): void {
-  const systemPrompt = input.systemPrompt ?? OFFICIAL_API_SYSTEM_PROMPT;
-  const extraction = requireCompleteExtraction(input.extraction, systemPrompt);
+  const resolved = requireCompleteExtraction(input.extraction, input.systemPrompt);
+  const extraction = resolved.extraction;
+  const systemPrompt = resolved.systemPrompt;
   const totals = emptyTotals();
   const closure = new Map<string, ExtractionContentClosureEntry>();
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
@@ -103,17 +104,27 @@ export function assertSnapshotSeedLedgerBinding(input: {
 
 function requireCompleteExtraction(
   value: SnapshotExtractionProvenance | null,
-  systemPrompt: string
-): CompleteExtraction {
+  requiredSystemPrompt: string | undefined
+): Readonly<{
+  readonly extraction: CompleteExtraction;
+  readonly systemPrompt: string;
+}> {
   if (value?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
       value.fill_status !== "complete" || value.content_closure_sha256 === undefined ||
       value.expected_turns === undefined || value.expected_key_set_sha256 === undefined ||
       value.request_profile === undefined ||
-      value.cache_key_algo !== EXTRACTION_CACHE_KEY_ALGO ||
-      value.system_prompt_sha256 !== sha256(systemPrompt)) {
+      value.cache_key_algo !== EXTRACTION_CACHE_KEY_ALGO) {
     throw new Error("promotion snapshot extraction closure is incomplete or drifted");
   }
-  return value as CompleteExtraction;
+  const systemPrompt = requiredSystemPrompt ??
+    resolveOfficialApiSystemPrompt(value.system_prompt_sha256);
+  if (systemPrompt === undefined || value.system_prompt_sha256 !== sha256(systemPrompt)) {
+    throw new Error("promotion snapshot extraction closure is incomplete or drifted");
+  }
+  return Object.freeze({
+    extraction: value as CompleteExtraction,
+    systemPrompt
+  });
 }
 
 function assertQuestionLedger(

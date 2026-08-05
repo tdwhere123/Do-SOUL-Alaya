@@ -12,31 +12,55 @@ export type CandidateSemanticActivationScope =
   | "global"
   | "ineligible";
 
-export type CandidateSemanticActivation = Readonly<{
+export type CandidateActivationState =
+  | "observed"
+  | "absent"
+  | "ineligible"
+  | "invalid";
+
+export type CandidateActivationOperatorId = "candidate_semantic_max_v1";
+
+export type CandidateActivationObservation = Readonly<{
+  readonly channel: string;
+  readonly state: CandidateActivationState;
   readonly score: number | null;
-  readonly source: CandidateSemanticActivationSource | null;
 }>;
 
-type SemanticActivationInput = Readonly<{
+export type CandidateActivationWinner = Readonly<{
+  readonly channel: string;
+  readonly score: number;
+}>;
+
+export type CandidateActivationReceipt = Readonly<{
+  readonly schema_version: 1;
+  readonly operator_id: CandidateActivationOperatorId;
+  readonly state: CandidateActivationState;
+  readonly score: number | null;
+  readonly winner: CandidateActivationWinner | null;
+  readonly observations: readonly CandidateActivationObservation[];
+  readonly missing_channel_policy: "no_op";
+}>;
+
+export type CandidateSemanticActivation = CandidateActivationReceipt;
+
+export type CandidateSemanticActivationInput = Readonly<{
   readonly scope: CandidateSemanticActivationScope;
   readonly evidenceSemantic?: number;
   readonly effectiveEmbedding?: number;
   readonly objectEmbedding?: number;
 }>;
 
-type SemanticActivationScopeInput = Readonly<{
+export type CandidateSemanticActivationScopeInput = Readonly<{
   readonly originPlane: RecallOriginPlane | undefined;
   readonly objectKind: RecallCandidate["object_kind"] | undefined;
   readonly workspaceMemoryEligible: boolean;
 }>;
 
-const INACTIVE_ACTIVATION: CandidateSemanticActivation = Object.freeze({
-  score: null,
-  source: null
-});
+const OPERATOR_ID = "candidate_semantic_max_v1" as const;
+const MISSING_CHANNEL_POLICY = "no_op" as const;
 
 export function resolveCandidateSemanticActivationScope(
-  input: SemanticActivationScopeInput
+  input: CandidateSemanticActivationScopeInput
 ): CandidateSemanticActivationScope {
   if (input.originPlane === "global") return "global";
   if (input.workspaceMemoryEligible) return "workspace_memory";
@@ -46,35 +70,71 @@ export function resolveCandidateSemanticActivationScope(
 }
 
 export function resolveCandidateSemanticActivation(
-  input: SemanticActivationInput
-): CandidateSemanticActivation {
-  let score: number | null = null;
-  let source: CandidateSemanticActivationSource | null = null;
-  if (input.scope === "workspace_memory" || input.scope === "evidence_capsule") {
-    score = normalizeObservedScore(input.evidenceSemantic);
-    if (score !== null) source = "evidence_semantic";
-  }
-  if (input.scope === "workspace_memory" || input.scope === "global") {
-    const effective = normalizeObservedScore(input.effectiveEmbedding);
-    if (effective !== null && (score === null || effective > score)) {
-      score = effective;
-      source = "effective_factor";
+  input: CandidateSemanticActivationInput
+): CandidateActivationReceipt {
+  const observations = [
+    observeChannel(
+      "evidence_semantic",
+      input.evidenceSemantic,
+      input.scope === "workspace_memory" || input.scope === "evidence_capsule"
+    ),
+    observeChannel(
+      "effective_factor",
+      input.effectiveEmbedding,
+      input.scope === "workspace_memory" || input.scope === "global"
+    ),
+    observeChannel(
+      "object_embedding",
+      input.objectEmbedding,
+      input.scope === "workspace_memory"
+    )
+  ] as const;
+  let winner: CandidateActivationWinner | null = null;
+  for (const observation of observations) {
+    if (observation.state !== "observed" || observation.score === null) continue;
+    if (winner === null || observation.score > winner.score) {
+      winner = { channel: observation.channel, score: observation.score };
     }
   }
-  if (input.scope === "workspace_memory") {
-    const object = normalizeObservedScore(input.objectEmbedding);
-    if (object !== null && (score === null || object > score)) {
-      score = object;
-      source = "object_embedding";
-    }
-  }
-  return score === null || source === null
-    ? INACTIVE_ACTIVATION
-    : Object.freeze({ score, source });
+  const state: CandidateActivationState = input.scope === "ineligible"
+    ? "ineligible"
+    : winner !== null
+      ? "observed"
+      : observations.some((observation) => observation.state === "invalid")
+        ? "invalid"
+        : "absent";
+  return freezeReceipt(state, winner, observations);
 }
 
-function normalizeObservedScore(value: number | undefined): number | null {
-  return value === undefined || !Number.isFinite(value) || value < 0
-    ? null
-    : clamp01(value);
+function observeChannel(
+  channel: CandidateSemanticActivationSource,
+  value: number | undefined,
+  eligible: boolean
+): CandidateActivationObservation {
+  if (!eligible) {
+    return Object.freeze({ channel, state: "ineligible", score: null });
+  }
+  if (value === undefined) {
+    return Object.freeze({ channel, state: "absent", score: null });
+  }
+  if (!Number.isFinite(value) || value < 0) {
+    return Object.freeze({ channel, state: "invalid", score: null });
+  }
+  return Object.freeze({ channel, state: "observed", score: clamp01(value) });
+}
+
+function freezeReceipt(
+  state: CandidateActivationState,
+  winner: CandidateActivationWinner | null,
+  observations: readonly CandidateActivationObservation[]
+): CandidateActivationReceipt {
+  return Object.freeze({
+    schema_version: 1,
+    operator_id: OPERATOR_ID,
+    state,
+    score: winner?.score ?? null,
+    winner: winner === null ? null : Object.freeze(winner),
+    observations: Object.freeze([...observations]),
+    missing_channel_policy: MISSING_CHANNEL_POLICY
+  });
 }

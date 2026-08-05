@@ -53,6 +53,9 @@ describe("audit-extraction-cache command", () => {
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout.join("")).toContain("Extraction cache compatibility=rebuild");
+    expect(stdout.join("")).toContain(
+      "fact_frames=formed:0 ineligible:0 unavailable:0 rejected:0 fact_keys:0"
+    );
     expect(receipt.kind).toBe("longmemeval_extraction_cache_compatibility_decision");
     expect(receipt.decision.reasons).toEqual(expect.arrayContaining([
       "parser_semantics_mismatch",
@@ -65,6 +68,26 @@ describe("audit-extraction-cache command", () => {
     expect(existsSync(join(fixture.auditOutput, "raw-inventory.json"))).toBe(true);
     expect(existsSync(join(fixture.auditOutput, "occurrence-index.json"))).toBe(true);
     expect(existsSync(join(fixture.auditOutput, "replay-ledger.json"))).toBe(true);
+    const replayLedger = JSON.parse(
+      readFileSync(join(fixture.auditOutput, "replay-ledger.json"), "utf8")
+    ) as {
+      readonly fact_frame_policy: unknown;
+      readonly fact_frame_closure: unknown;
+    };
+    expect(replayLedger.fact_frame_policy).toEqual({
+      semanticsVersion: "extraction-replay-fact-frame-formation-v2",
+      fullTurnEvidence: true,
+      normalizerOperatorId: "rule_based_evidence_fact_frame_normalizer_v1"
+    });
+    expect(replayLedger.fact_frame_closure).toEqual({
+      admittedSignalCount: 0,
+      accountedSignalCount: 0,
+      formed: 0,
+      ineligible: 0,
+      unavailable: 0,
+      rejected: 0,
+      factKeyProjectionCount: 0
+    });
   });
 
   it("refuses any scope other than the authorized offline 100Q replay", async () => {

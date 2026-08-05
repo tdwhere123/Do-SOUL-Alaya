@@ -7,38 +7,8 @@ import {
   type EvidenceCapsule,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { EvidenceService, type EvidenceCapsuleInput } from "../../memory/evidence-service.js";
-
-function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): EvidenceCapsuleInput {
-  return {
-    created_by: "user_action",
-    evidence_kind: "tool_output",
-    semantic_anchor: {
-      topic: "build",
-      keywords: ["pnpm", "build"],
-      summary: "Build output"
-    },
-    event_anchor: {
-      event_type: "engine.response.received",
-      event_id: "evt_1",
-      occurred_at: "2026-03-20T00:00:00.000Z"
-    },
-    physical_anchor: {
-      file_path: "packages/core/src/memory/evidence-service.ts",
-      line_range: { start: 1, end: 20 },
-      symbol_name: "EvidenceService",
-      artifact_ref: null
-    },
-    evidence_health_state: EvidenceHealthState.VERIFIED,
-    gist: "Evidence gist",
-    excerpt: "Evidence excerpt",
-    source_hash: "sha256:abc",
-    run_id: "run-1",
-    workspace_id: "workspace-1",
-    surface_id: null,
-    ...overrides
-  };
-}
+import { EvidenceService } from "../../memory/evidence-service.js";
+import { createEvidenceInput } from "./evidence-service-fixture.js";
 
 describe("EvidenceService", () => {
   it("writes soul.evidence.created before persistence and runtime notification", async () => {
@@ -95,7 +65,11 @@ describe("EvidenceService", () => {
 
     expect(order).toEqual(["event_log", "repo_create", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
-    expect(create).toHaveBeenCalledWith(expect.any(Object), [projection]);
+    expect(create).toHaveBeenCalledWith(
+      expect.any(Object),
+      [projection],
+      expect.objectContaining({ status: "unavailable" })
+    );
     expect(appendedEvents[0]).toMatchObject({
       event_type: "soul.evidence.created",
       entity_type: "evidence_capsule",

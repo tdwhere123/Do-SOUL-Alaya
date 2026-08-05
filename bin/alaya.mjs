@@ -9,7 +9,7 @@ import {
   runAlayaCli,
   SOFTWARE_EXIT_FALLBACK,
   resolveAlayaCliDistPaths
-} from "../apps/core-daemon/dist/cli/module-loader.js";
+} from "../apps/core-daemon/dist/cli/support/module-loader.js";
 
 export {
   createAlayaCliModuleLoaders,

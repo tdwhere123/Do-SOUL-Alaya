@@ -72,6 +72,26 @@ export interface MemoryEntryKeywordSearchResult {
   readonly trigram_rank?: number;
 }
 
+export interface MemoryEntryKeywordLaneReceipt {
+  readonly lane: "exact" | "porter" | "trigram";
+  readonly status: "complete" | "truncated" | "unavailable" | "ineligible";
+  readonly depth: number;
+  readonly observations: readonly Readonly<
+    MemoryEntryKeywordSearchResult & { readonly rank: number; readonly source_id?: string }
+  >[];
+  readonly unseen_upper_bound: number | null;
+}
+
+export interface MemoryEntryKeywordFieldResult {
+  readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
+  readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
+  readonly refinement_levels?: readonly Readonly<{
+    readonly requested_depth: number;
+    readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
+    readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
+  }>[];
+}
+
 export interface MemoryEntryRepo {
   create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>>;
   // invariant: callbacks and row insert share one synchronous SQLite transaction.
@@ -169,6 +189,13 @@ export interface MemoryEntryRepo {
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,
     queryText: string,
@@ -195,6 +222,14 @@ export interface MemoryEntryRepo {
     limit: number,
     tier: StorageTier
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByAnchorField?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
   // see also: packages/storage/src/migrations/005-evidence-capsules.sql
   // see also: packages/storage/src/migrations/068-evidence-capsule-fts.sql
   findByEvidenceRefs?(

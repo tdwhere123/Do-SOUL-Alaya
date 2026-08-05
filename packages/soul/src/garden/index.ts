@@ -39,6 +39,7 @@ export {
   OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
+  resolveOfficialApiSystemPrompt,
   OfficialApiGardenProvider,
   auditOfficialApiSignalFormation,
   parseOfficialApiSignals,
@@ -76,6 +77,10 @@ export {
   resolveGardenSignalGrounding,
   type GardenSignalGrounding
 } from "./grounding/signal-source-grounding.js";
+export {
+  GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
+  buildFactFrameFormationProposal
+} from "./grounding/fact-frame/search-projections.js";
 export {
   SignalExtractorError,
   createPiMonoExtractor,
@@ -153,6 +158,7 @@ export {
 export {
   MaterializationRouter,
   DISTILLED_FACT_MAX_CHARS,
+  buildEvidenceInput,
   SIGNAL_REF_SEED_SPECS,
   MaterializationPartialFailureError,
   isMaterializationFailure,

@@ -61,6 +61,9 @@ export async function runExtractionFillCommand(
         ...(opts.questionBatchLimit === undefined ? {} : {
           questionBatchLimit: opts.questionBatchLimit
         }),
+        ...(opts.tolerateProviderTaskFailures
+          ? { tolerateProviderTaskFailures: true }
+          : {}),
         ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
         ...(opts.extractionCacheRoot === undefined ? {} : {
           cacheRoot: opts.extractionCacheRoot
@@ -98,6 +101,8 @@ function renderStart(opts: ParsedFlags): string {
       ? ` initial_concurrency=${opts.extractionInitialConcurrency}` : "") +
     (opts.questionBatchLimit !== undefined
       ? ` question_batch_limit=${opts.questionBatchLimit}` : "") +
+    (opts.tolerateProviderTaskFailures
+      ? " provider_failure_isolation=on" : "") +
     "...\n";
 }
 

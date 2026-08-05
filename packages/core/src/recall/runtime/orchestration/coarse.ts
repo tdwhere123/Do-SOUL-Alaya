@@ -24,6 +24,8 @@ import type {
   TokenEstimator
 } from "../recall-service-types.js";
 import type { GraphExpansionCandidateSourceDiagnostic } from "../../expansion/graph-expansion.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../../field/query-entity-attribution-producer.js";
 
 export type CoarseFilterResult = Readonly<{
   readonly total_scanned: number;
@@ -58,6 +60,7 @@ export type CoarseFilterOptions = Readonly<{
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
 }>;
 
 export type CoarseFilterRunner = (
@@ -83,6 +86,7 @@ export type AssessCoarseFilterParams = Readonly<{
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;
@@ -114,6 +118,7 @@ export async function collectCoarseFilterSupplementaryData(
     runId: params.runId,
     queryText: params.queryText,
     queryProbes: params.queryProbes,
+    queryEntityExtraction: params.queryEntityExtraction,
     policy: params.policy,
     coarseFtsRanks: params.coarseFilter.ftsRanks,
     coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,

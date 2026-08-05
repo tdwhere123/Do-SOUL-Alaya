@@ -6,6 +6,7 @@ export type SqliteStatement = BetterSqlite3.Statement;
 
 export interface EvidenceCapsuleStatements {
   readonly createStatement: SqliteStatement;
+  readonly createFactFrameFormationStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
   readonly findByArtifactRefStatement: SqliteStatement;
   readonly findByIdsStatement: SqliteStatement;
@@ -28,6 +29,9 @@ export interface EvidenceCapsuleStatements {
 export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceCapsuleStatements {
   return {
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
+    createFactFrameFormationStatement: db.connection.prepare(
+      CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL
+    ),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
     findByArtifactRefStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL),
     findByIdsStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULES_BY_IDS_SQL),
@@ -104,6 +108,20 @@ const CREATE_EVIDENCE_CAPSULE_SQL = `
         workspace_id,
         surface_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+const CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL = `
+      INSERT INTO evidence_fact_frame_formations (
+        evidence_object_id,
+        workspace_id,
+        schema_version,
+        operator_id,
+        status,
+        producer_operator_id,
+        source_hash,
+        fact_frame_json,
+        capture_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_EVIDENCE_HEALTH_SQL = `

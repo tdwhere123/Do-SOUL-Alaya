@@ -13,6 +13,7 @@ import {
 import { buildDistilledFact, buildEvidenceInput, buildSynthesisInput, readStringPayload } from "./inputs.js";
 import { materializationFailure, materializationSuccess } from "./materialization-results.js";
 import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
+import { createSignalEvidence } from "./evidence/create-signal-evidence.js";
 
 export class MaterializationRouterRouteHandlers extends MaterializationRouterMemoryRoutes {
   protected async materializeSynthesis(
@@ -46,7 +47,11 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       );
 
       const evidences = await Promise.all(
-        evidenceInputs.map(async (evidenceInput) => await this.dependencies.evidenceService.create(evidenceInput))
+        evidenceInputs.map(async (evidenceInput) => await createSignalEvidence(
+          this.dependencies.evidenceService,
+          signal,
+          evidenceInput
+        ))
       );
 
       const evidenceIds = evidences.map((evidence) => evidence.object_id);
@@ -154,10 +159,14 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
         if (context.source_event_anchor === null) {
           return this.materializeDeferred(signal, target, context);
         }
-        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
-          fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
-          context
-        }));
+        const evidence = await createSignalEvidence(
+          this.dependencies.evidenceService,
+          signal,
+          buildEvidenceInput(signal, undefined, {
+            fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+            context
+          })
+        );
         const created = await this.createTimeConcernPathRelationProposal(
           targetObjectId,
           evidence.object_id,
@@ -255,14 +264,19 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   ): Promise<MaterializationResult> {
     try {
       const fallback = isGardenTurnEvidenceFallback(signal);
-      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: signal.signal_kind === "potential_evidence_anchor" ||
-          this.dependencies.fullTurnEvidenceExcerpt,
-        artifactRef: fallback
-          ? buildGardenTurnEvidenceArtifactRef(signal.signal_id)
-          : undefined,
-        context
-      }), fallback ? buildGardenTurnEvidenceSearchProjections(signal) : undefined);
+      const evidence = await createSignalEvidence(
+        this.dependencies.evidenceService,
+        signal,
+        buildEvidenceInput(signal, undefined, {
+          fullTurnExcerpt: signal.signal_kind === "potential_evidence_anchor" ||
+            this.dependencies.fullTurnEvidenceExcerpt,
+          artifactRef: fallback
+            ? buildGardenTurnEvidenceArtifactRef(signal.signal_id)
+            : undefined,
+          context
+        }),
+        fallback ? buildGardenTurnEvidenceSearchProjections(signal) : undefined
+      );
 
       return materializationSuccess({
         signal_id: signal.signal_id,

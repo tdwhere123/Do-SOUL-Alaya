@@ -12,6 +12,8 @@ import type {
   RecallFusionStreamContributions
 } from "../../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";
+import { evidenceSemanticActivationsFromScores } from
+  "../fixtures/evidence-semantic-activation.js";
 
 describe("deep-head query-evidence contract", () => {
   it("preserves a global candidate's own query evidence in an embedding-active pool", () => {
@@ -121,7 +123,8 @@ function supplementary(
   return {
     queryProbes: compileRecallQueryProbes(queryText),
     embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey,
+    evidenceSemanticActivationsByCandidateKey:
+      evidenceSemanticActivationsFromScores(evidenceSemanticScoresByCandidateKey),
     ftsRanks: {},
     trigramFtsRanks: {},
     evidenceFtsRanks: {},

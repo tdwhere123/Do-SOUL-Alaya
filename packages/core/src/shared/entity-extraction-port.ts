@@ -35,6 +35,8 @@ export interface EntityCandidate {
 }
 
 export interface EntityExtractionPort {
+  /** Stable producer identity required before output may become typed field demand. */
+  readonly operator_id?: string;
   extract(
     query: string,
     options?: Readonly<{ readonly maxEntities?: number }>

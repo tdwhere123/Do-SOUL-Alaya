@@ -11,6 +11,8 @@ import {
 } from "../../query/recall-query-probes.js";
 import { compileRecallQueryDemand } from
   "../../query/recall-query-demand.js";
+import { collectRelationDemandTermsFromFactFrameCapture } from
+  "../../field/query-attribution/query-fact-frame-attribution-producer.js";
 import type {
   PathInflowEdge,
   RecallSelectorDemandAtom,
@@ -53,7 +55,13 @@ function buildDemandObservation(
 ): RecallCandidateSelectorObservation["demand"] {
   const probes = context.supplementaryData.queryProbes;
   const atoms = compileRecallQueryDemand(probes, {
-    soughtFacets: context.supplementaryData.querySoughtFacets
+    soughtFacets: context.supplementaryData.querySoughtFacets,
+    sourceExactLexicalTerms:
+      context.supplementaryData.queryFactFrameExtraction === undefined
+        ? []
+        : collectRelationDemandTermsFromFactFrameCapture(
+            context.supplementaryData.queryFactFrameExtraction
+          )
   }).atoms;
   const content = candidate.entry.content.toLocaleLowerCase();
   const contentTokens = new Set(splitLexicalTokens(candidate.entry.content));

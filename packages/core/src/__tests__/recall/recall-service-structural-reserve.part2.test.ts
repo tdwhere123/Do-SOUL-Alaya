@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
@@ -121,22 +123,25 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
         "memory-anchor": 0.9,
         ...(params.extraLexicalRanks ?? {})
       };
-      const service = new RecallService({
+      const scopedKeywordSearch = vi.fn(
+        async (_workspaceId: string, query: string, limit: number, candidateIds?: readonly string[]) =>
+          query.toLowerCase().includes("materializationrouter")
+            ? Object.entries(lexicalRanks)
+                .filter(
+                  ([object_id]) => candidateIds === undefined || candidateIds.includes(object_id)
+                )
+                .map(([object_id, normalized_rank]) => ({ object_id, normalized_rank }))
+                .sort((left, right) => right.normalized_rank - left.normalized_rank)
+                .slice(0, limit)
+            : []
+      );
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds: vi.fn(
-            async (_workspaceId: string, query: string, limit: number, candidateIds?: readonly string[]) =>
-              query.toLowerCase().includes("materializationrouter")
-                ? Object.entries(lexicalRanks)
-                    .filter(
-                      ([object_id]) => candidateIds === undefined || candidateIds.includes(object_id)
-                    )
-                    .map(([object_id, normalized_rank]) => ({ object_id, normalized_rank }))
-                    .sort((left, right) => right.normalized_rank - left.normalized_rank)
-                    .slice(0, limit)
-                : []
-          )
+          searchByKeywordWithinObjectIds: scopedKeywordSearch,
+          searchByKeywordWithinTier: async (workspaceId, query, limit) =>
+            await scopedKeywordSearch(workspaceId, query, limit)
         },
         pathExpansionPort: { findByAnchors },
         entityExtractionPort: {

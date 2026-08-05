@@ -25,6 +25,10 @@ import type {
   PreparedEmbeddingQuerySnapshot
 } from "../types.js";
 import { selectTopNeighborHits } from "./neighbor-top-k.js";
+import {
+  buildObjectEmbeddingFieldCaptures,
+  type ObjectEmbeddingFieldWorkspaceSnapshot
+} from "../../recall/field/object-embedding-field-capture.js";
 
 interface RequestScoreSnapshotDependencies {
   readonly provider: EmbeddingProviderPort;
@@ -36,14 +40,8 @@ interface RequestScoreSnapshotDependencies {
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }
 
-interface WorkspaceScan {
-  readonly records: readonly Readonly<EmbeddingVectorRecord>[];
+interface WorkspaceScan extends ObjectEmbeddingFieldWorkspaceSnapshot {
   readonly objectIds: ReadonlySet<string>;
-  readonly cap: number;
-  readonly returned: number;
-  readonly truncated: boolean;
-  readonly attempted: boolean;
-  readonly failed: boolean;
 }
 
 interface QueryResolution {
@@ -58,6 +56,7 @@ interface QueryResolution {
 interface ScoredLedger {
   readonly poolScores: Readonly<Record<string, number>>;
   readonly neighbors: readonly Readonly<EmbeddingNeighborHit>[];
+  readonly workspaceFieldHits: readonly Readonly<EmbeddingNeighborHit>[];
   readonly scoringLatencyMs: number;
 }
 
@@ -211,6 +210,7 @@ export class RequestScoreSnapshotBuilder {
     const poolMemories = new Map(params.poolMemories.map((memory) => [memory.object_id, memory] as const));
     const poolScores: Record<string, number> = {};
     const neighbors: EmbeddingNeighborHit[] = [];
+    const workspaceFieldHits: EmbeddingNeighborHit[] = [];
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
     for (const record of ledger.values()) {
       if (!isUsableEmbeddingRecordVector(record, queryEmbedding.length)) {
@@ -224,19 +224,27 @@ export class RequestScoreSnapshotBuilder {
         continue;
       }
       const similarity = clamp01(scoreCosine(record.embedding));
+      const hit = Object.freeze({
+        object_id: record.object_id,
+        normalized_similarity: similarity,
+        content_hash: record.content_hash
+      });
+      if (similarity > 0 && workspaceObjectIds.has(record.object_id)) {
+        workspaceFieldHits.push(hit);
+      }
       if (poolMemory !== undefined) {
         poolScores[record.object_id] = similarity;
       } else if (similarity > 0 && workspaceObjectIds.has(record.object_id)) {
-        neighbors.push(Object.freeze({
-          object_id: record.object_id,
-          normalized_similarity: similarity,
-          content_hash: record.content_hash
-        }));
+        neighbors.push(hit);
       }
     }
     return Object.freeze({
       poolScores: Object.freeze(poolScores),
       neighbors: selectTopNeighborHits(neighbors, params.maxNeighbors),
+      workspaceFieldHits: selectTopNeighborHits(
+        workspaceFieldHits,
+        workspaceFieldHits.length
+      ),
       scoringLatencyMs: elapsedMs(this.deps.nowEpochMs(), startedAtEpochMs)
     });
   }
@@ -256,6 +264,16 @@ export class RequestScoreSnapshotBuilder {
       poolScoresByObjectId: scored.poolScores,
       scoringLatencyMs: scored.scoringLatencyMs,
       workspaceNeighbors: buildNeighborResult(scan, query, scored.neighbors, this.deps.provider),
+      fieldChannelCaptures: buildObjectEmbeddingFieldCaptures({
+        ...params,
+        provider: this.deps.provider,
+        queryStatus: query.status,
+        queryEmbedding: query.embedding,
+        scan,
+        exactLookupFailed,
+        poolScores: scored.poolScores,
+        workspaceHits: scored.workspaceFieldHits
+      }),
       degradedReason: resolveDegradationReason(
         scan,
         query.degradationReason,
@@ -279,6 +297,16 @@ export class RequestScoreSnapshotBuilder {
       poolScoresByObjectId: Object.freeze({}),
       scoringLatencyMs: 0,
       workspaceNeighbors: buildNeighborResult(scan, query, Object.freeze([]), this.deps.provider),
+      fieldChannelCaptures: buildObjectEmbeddingFieldCaptures({
+        ...params,
+        provider: this.deps.provider,
+        queryStatus: query.status,
+        queryEmbedding: query.embedding,
+        scan,
+        exactLookupFailed,
+        poolScores: Object.freeze({}),
+        workspaceHits: Object.freeze([])
+      }),
       degradedReason: resolveDegradationReason(scan, null, exactLookupFailed, reportNoStoredVectors)
     });
   }
@@ -301,6 +329,7 @@ function emptyScoredLedger(): ScoredLedger {
   return Object.freeze({
     poolScores: Object.freeze({}),
     neighbors: Object.freeze([]),
+    workspaceFieldHits: Object.freeze([]),
     scoringLatencyMs: 0
   });
 }

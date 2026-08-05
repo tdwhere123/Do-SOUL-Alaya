@@ -11,8 +11,14 @@ export function consumeBooleanFlags(
   if (token === "--edge-plane") state.edgePlane = true;
   if (token === "--legacy-snapshot") state.legacySnapshot = true;
   if (token === "--experiment") state.experiment = true;
+  if (token === "--tolerate-provider-task-failures") {
+    state.tolerateProviderTaskFailures = true;
+  }
   if (token === "--rebuild-evidence-search-projections") {
     state.rebuildEvidenceSearchProjections = true;
+  }
+  if (token === "--backfill-missing-fact-frame-formations") {
+    state.backfillMissingFactFrameFormations = true;
   }
   if (token === "--source") {
     state.source = args[index + 1];

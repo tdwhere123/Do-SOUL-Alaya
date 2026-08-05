@@ -32,7 +32,7 @@ vi.mock("../../recall/delivery/fine-assessment.js", async (importOriginal) => {
       return actual.fineAssess(...args);
     },
     prepareFineAssessment: (...args: Parameters<typeof actual.prepareFineAssessment>) => {
-      completeAssessmentCalls();
+      completeAssessmentCalls(...args);
       return actual.prepareFineAssessment(...args);
     },
     deliverFineAssessment: (...args: Parameters<typeof actual.deliverFineAssessment>) => {
@@ -126,6 +126,11 @@ describe("RecallService embedding request score snapshot", () => {
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(result.candidates.find((candidate) => candidate.object_id === memory.object_id)
       ?.score_factors?.embedding_similarity).toBeCloseTo(1, 5);
+    const finalPreparation = completeAssessmentCalls.mock.calls.at(-1)?.[0];
+    expect(finalPreparation?.supplementaryData.retrievalFieldSeal?.channels.find(
+      ({ channel_id }: { readonly channel_id: string }) =>
+        channel_id === "object_embedding_pool"
+    )).toMatchObject({ status: "complete", depth: 1 });
   });
 
   it("propagates only a valid non-positive vector as observed zero into deep-head ranking", async () => {

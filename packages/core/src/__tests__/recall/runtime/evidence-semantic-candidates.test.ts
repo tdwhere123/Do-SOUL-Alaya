@@ -1,7 +1,7 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import {
-  attributeEvidenceSemanticWinners,
+  attributeEvidenceSemanticActivations,
   buildEvidenceSemanticCandidates
 } from
   "../../../recall/runtime/orchestration/evidence-semantic-candidates.js";
@@ -62,24 +62,45 @@ describe("evidence semantic candidate projection", () => {
     }]);
   });
 
-  it("retains unresolved winners and attributes resolved owner documents", () => {
-    const unresolved = {
-      score: 0.8,
-      evidenceObjectId: "evidence-missing",
-      documentIdentity: "fact_key:9"
+  it("attributes every scored document and retains the same deterministic winner", () => {
+    const factKey = {
+      projection_id: 5,
+      projection_kind: "fact_key" as const,
+      matched_fact_key_forms: Object.freeze([{
+        kind: "leave_one_slot_out" as const,
+        omitted_slot: Object.freeze({ slot_index: 2, role: "value" as const })
+      }])
     };
-    const owner = {
+    const winner = Object.freeze({
+      score: 0.8,
+      evidenceObjectId: "evidence-fact",
+      documentIdentity: "fact_key:5"
+    });
+    const owner = Object.freeze({
       score: 0.7,
       evidenceObjectId: "evidence-owner",
       documentIdentity: "owner"
-    };
+    });
+    const activation = Object.freeze({
+      schema_version: 1 as const,
+      operator_id: "evidence_document_max_v1" as const,
+      state: "observed" as const,
+      score: winner.score,
+      winner,
+      observations: Object.freeze([winner, owner]),
+      observation_completeness: "complete" as const,
+      missing_channel_policy: "no_op" as const
+    });
 
-    expect([...attributeEvidenceSemanticWinners({
-      winners: new Map([
-        ["candidate:unresolved", unresolved],
-        ["candidate:owner", owner]
-      ]),
+    expect([...attributeEvidenceSemanticActivations({
+      activations: new Map([["candidate:memory", activation]]),
       evidenceDocumentsByMemoryId: {
+        "memory-fact": [{
+          evidenceRef: "evidence-fact",
+          documentIdentity: "fact_key:5",
+          content: "grounded fact projection",
+          projection: factKey
+        }],
         "memory-owner": [{
           evidenceRef: "evidence-owner",
           documentIdentity: "owner",
@@ -87,10 +108,14 @@ describe("evidence semantic candidate projection", () => {
           projection: OWNER_PROJECTION
         }]
       }
-    })]).toEqual([
-      ["candidate:unresolved", { ...unresolved, projection: null }],
-      ["candidate:owner", { ...owner, projection: OWNER_PROJECTION }]
-    ]);
+    })]).toEqual([["candidate:memory", {
+      ...activation,
+      winner: { ...winner, projection: factKey },
+      observations: [
+        { ...winner, projection: factKey },
+        { ...owner, projection: OWNER_PROJECTION }
+      ]
+    }]]);
   });
 });
 

@@ -3,20 +3,23 @@ import type { EmbeddingRecallSupplementResult } from
 import type { RecallSupplementaryData } from
   "../../runtime/recall-service-types.js";
 import { clamp01 } from "../../runtime/recall-service-helpers.js";
+import type { RecallFiniteFieldSeal } from "../../field/finite-field-seal.js";
+import type { RecallRetrievalFieldRefinementReceipt } from
+  "../../field/refinement/field-refinement-receipt.js";
 
 export function withEmbeddingSimilarityScores(
   supplementaryData: RecallSupplementaryData,
   hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
   injectedSimilarityScores: Readonly<Record<string, number>>,
   poolRescoreScores: Readonly<Record<string, number>> = {},
-  evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number> =
-    supplementaryData.evidenceSemanticScoresByCandidateKey,
-  evidenceSemanticWinnersByCandidateKey =
-    supplementaryData.evidenceSemanticWinnersByCandidateKey
+  evidenceSemanticActivationsByCandidateKey =
+    supplementaryData.evidenceSemanticActivationsByCandidateKey,
+  retrievalFieldSeal: Readonly<RecallFiniteFieldSeal> | undefined =
+    supplementaryData.retrievalFieldSeal,
+  retrievalFieldRefinementReceipts:
+    readonly Readonly<RecallRetrievalFieldRefinementReceipt>[] | undefined =
+      supplementaryData.retrievalFieldRefinementReceipts
 ): RecallSupplementaryData {
-  const attributedWinners = evidenceSemanticWinnersByCandidateKey?.size === 0
-    ? undefined
-    : evidenceSemanticWinnersByCandidateKey;
   const merged = mergeEmbeddingScores(
     hintsByObjectId,
     injectedSimilarityScores,
@@ -24,8 +27,10 @@ export function withEmbeddingSimilarityScores(
   );
   if (
     merged.size === 0 &&
-    evidenceSemanticScoresByCandidateKey.size === 0 &&
-    attributedWinners === undefined
+    evidenceSemanticActivationsByCandidateKey.size === 0 &&
+    retrievalFieldSeal === supplementaryData.retrievalFieldSeal &&
+    retrievalFieldRefinementReceipts ===
+      supplementaryData.retrievalFieldRefinementReceipts
   ) {
     return supplementaryData;
   }
@@ -35,10 +40,13 @@ export function withEmbeddingSimilarityScores(
     embeddingSimilarityScores: merged.size === 0
       ? supplementaryData.embeddingSimilarityScores
       : Object.freeze(Object.fromEntries(merged)),
-    evidenceSemanticScoresByCandidateKey: new Map(evidenceSemanticScoresByCandidateKey),
-    ...(attributedWinners === undefined ? {} : {
-      evidenceSemanticWinnersByCandidateKey: new Map(attributedWinners)
-    })
+    evidenceSemanticActivationsByCandidateKey: new Map(
+      evidenceSemanticActivationsByCandidateKey
+    ),
+    ...(retrievalFieldSeal === undefined ? {} : { retrievalFieldSeal }),
+    ...(retrievalFieldRefinementReceipts === undefined
+      ? {}
+      : { retrievalFieldRefinementReceipts })
   });
 }
 

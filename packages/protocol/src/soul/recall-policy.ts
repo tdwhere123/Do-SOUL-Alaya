@@ -31,6 +31,8 @@ export const SemanticSupplementConfigSchema = z
   .object({
     enabled: z.boolean(),
     max_supplement: NonNegativeIntSchema,
+    // Optional shadow observation ceiling. Admission remains at max_supplement.
+    field_observation_max_depth: NonNegativeIntSchema.optional(),
     embedding_enabled: z.boolean().optional(),
     // Pure-semantic coarse-injection cap (pool-external, zero-lexical-overlap
     // neighbors the embedding stream injects) and the cosine floor gating them.

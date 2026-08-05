@@ -3,9 +3,18 @@ import type { RecallPacketPlanObservation } from
   "../packet-plan/packet-plan-observation.js";
 import type {
   RecallCandidateDropReason,
+  RecallEvidenceSemanticActivationReceipt,
+  RecallEvidenceSemanticWinnerReceipt,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
 import type { RecallDeepHeadTrace } from "../../rerank/deep-head.js";
+import type { CoverageSelectionObjectiveReceipt } from "../coverage-selection.js";
+import type { CoverageSelectionOperatorConfig } from
+  "../../field/facility/selection-objective.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../../field/refinement/field-refinement-stop-certificate.js";
+import type { RecallRelevanceUpperBoundReceipt } from
+  "../../rerank/relevance-upper-bound-receipt.js";
 import type {
   FineAssessmentAdmissionReceipt,
   FineAssessmentCandidate
@@ -74,6 +83,9 @@ export type FineAssessmentSelectionBoundaryInput = Readonly<{
   readonly rank_by_candidate_key: SelectionBoundaryNumberMap;
   readonly final_relevance_by_candidate_key?: SelectionBoundaryNumberMap;
   readonly coverage_relevance_by_candidate_key?: SelectionBoundaryNumberMap;
+  readonly coverage_relevance_upper_bound?:
+    Readonly<RecallRelevanceUpperBoundReceipt> | null;
+  readonly coverage_objective_config?: CoverageSelectionOperatorConfig;
   readonly final_order_after_coverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly max_head_drop_after_coverage?: number;
   readonly answer_relevance_rank_by_candidate_key?: SelectionBoundaryNumberMap;
@@ -88,17 +100,19 @@ export type SerializedRecallSupplementaryData = Readonly<
   Omit<
     RecallSupplementaryData,
     "evidenceSemanticDocumentsByMemoryId" |
-    "evidenceSemanticScoresByCandidateKey" |
-    "evidenceSemanticWinnersByCandidateKey" |
+    "evidenceSemanticActivationsByCandidateKey" |
     "answerRelevanceScoresByCandidateKey" |
     "routingKeysByOwnerIdentity" |
     "keyActivationByOwnerIdentity"
   > & {
-    readonly evidenceSemanticScoresByCandidateKey: SelectionBoundaryNumberMap;
+    readonly evidenceSemanticActivationsByCandidateKey?: SelectionBoundaryMap<
+      Readonly<RecallEvidenceSemanticActivationReceipt>
+    >;
+    /** Legacy selection boundaries are normalized into winner-only receipts. */
+    readonly evidenceSemanticScoresByCandidateKey?: SelectionBoundaryNumberMap;
+    /** Legacy selection boundaries are normalized into winner-only receipts. */
     readonly evidenceSemanticWinnersByCandidateKey?: SelectionBoundaryMap<
-      MapValue<NonNullable<
-        RecallSupplementaryData["evidenceSemanticWinnersByCandidateKey"]
-      >>
+      Readonly<RecallEvidenceSemanticWinnerReceipt>
     >;
     readonly answerRelevanceScoresByCandidateKey?: SelectionBoundaryNumberMap;
     readonly routingKeysByOwnerIdentity?: SelectionBoundaryMap<
@@ -111,6 +125,9 @@ export type SerializedRecallSupplementaryData = Readonly<
 >;
 
 export type FineAssessmentSelectionBoundaryExpected = Readonly<{
+  readonly coverage_objective?: CoverageSelectionObjectiveReceipt;
+  readonly field_refinement_stop_certificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
   readonly candidate_keys: readonly string[];
   readonly drop_tuples: readonly (
     readonly [candidateKey: string, reason: RecallCandidateDropReason | null]

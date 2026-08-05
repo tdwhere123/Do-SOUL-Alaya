@@ -1,15 +1,14 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
-  buildRecallCandidateDedupeKey,
   clamp01,
   isSynthesisChildCandidate,
   normalizeActivationScore,
   normalizeGraphSupport
 } from "../runtime/recall-service-helpers.js";
 import { normalizeEvidenceText } from "../scoring/query-evidence-scoring.js";
-import { resolveCandidateSemanticActivation } from
-  "../scoring/candidate-semantic-activation.js";
+import { resolveRecallCandidateSemanticActivation } from
+  "../scoring/activation/candidate-semantic-activation-context.js";
 import { scorePreferenceProfileAlignment } from "../scoring/preference-fusion-scoring.js";
 import {
   parseQueryTimeWindow,
@@ -23,7 +22,8 @@ export function scoreRecallFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   if (candidate.objectKind === "synthesis_capsule") {
     return scoreSynthesisCapsuleFusionStream(candidate, stream, supplementaryData);
@@ -33,18 +33,26 @@ export function scoreRecallFusionStream(
       return clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0);
     }
     if (stream === "embedding_similarity") {
-      return resolveSemanticFusionActivation(
-        candidate,
-        supplementaryData,
-        "evidence_capsule"
-      );
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
     }
     return 0;
   }
   if (candidate.originPlane === "global") {
-    return scoreGlobalFusionStream(candidate, stream, supplementaryData, nowIso);
+    return scoreGlobalFusionStream(
+      candidate,
+      stream,
+      supplementaryData,
+      nowIso,
+      candidateKey
+    );
   }
-  return scoreWorkspaceLocalFusionStream(candidate, stream, supplementaryData, nowIso);
+  return scoreWorkspaceLocalFusionStream(
+    candidate,
+    stream,
+    supplementaryData,
+    nowIso,
+    candidateKey
+  );
 }
 function scoreSynthesisCapsuleFusionStream(
   candidate: RecallFusionCandidateInput,
@@ -74,7 +82,8 @@ function scoreGlobalFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   switch (stream) {
     case "subject_alignment":
@@ -84,7 +93,7 @@ function scoreGlobalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return resolveSemanticFusionActivation(candidate, supplementaryData, "global");
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
     case "temporal_recency":
       return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
@@ -98,7 +107,8 @@ function scoreWorkspaceLocalFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   const objectId = candidate.entry.object_id;
   switch (stream) {
@@ -125,11 +135,7 @@ function scoreWorkspaceLocalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return resolveSemanticFusionActivation(
-        candidate,
-        supplementaryData,
-        "workspace_memory"
-      );
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
     case "graph_expansion":
       return clamp01(Math.max(
         supplementaryData.graphExpansionScores[objectId] ?? 0,
@@ -151,17 +157,13 @@ function scoreWorkspaceLocalFusionStream(
 function resolveSemanticFusionActivation(
   candidate: RecallFusionCandidateInput,
   supplementaryData: RecallSupplementaryData,
-  scope: "workspace_memory" | "evidence_capsule" | "global"
+  candidateKey?: string
 ): number {
-  const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  return resolveCandidateSemanticActivation({
-    scope,
-    evidenceSemantic:
-      supplementaryData.evidenceSemanticScoresByCandidateKey.get(candidateKey),
-    effectiveEmbedding: candidate.effectiveFactors.embedding_similarity,
-    objectEmbedding:
-      supplementaryData.embeddingSimilarityScores[candidate.entry.object_id]
-  }).score ?? 0;
+  return resolveRecallCandidateSemanticActivation(
+    candidate,
+    supplementaryData,
+    candidateKey
+  ).score ?? 0;
 }
 
 function scoreFacetOverlap(

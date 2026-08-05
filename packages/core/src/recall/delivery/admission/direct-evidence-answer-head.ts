@@ -4,6 +4,8 @@ import {
   buildRecallCandidateDedupeKey,
   isWorkspaceMemoryCandidate
 } from "../../runtime/recall-service-helpers.js";
+import type { RecallEvidenceSemanticActivationReceipt } from
+  "../../runtime/recall-service-types.js";
 import {
   addAnswerHeadProtection,
   selectSemanticMemoryRefinement,
@@ -17,6 +19,8 @@ import {
   retainBoundedAnswerHeads,
   type AnswerHeadSourceCandidate
 } from "./answer-head/answer-head-retention.js";
+import { retainBehaviorAuthorityAnswerHead } from
+  "./answer-head/behavior-authority-answer-head.js";
 
 const DIRECT_EVIDENCE_HEAD_LIMIT = 5;
 const DIRECT_EVIDENCE_FTS_RANK_LIMIT = 25;
@@ -42,52 +46,76 @@ export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T>;
 export { retainBoundedAnswerHeads };
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
-type BlocksEvidenceHead<T> = (candidate: T) => boolean;
+type IsBehaviorEligible<T> = (candidate: T) => boolean;
 
 export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   queryProbes: Readonly<RecallQueryProbes>,
-  evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>,
+  evidenceSemanticActivationsByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<RecallEvidenceSemanticActivationReceipt>
+  >,
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   maxEntries: number,
   excludedCandidateKeys: ReadonlySet<string>,
   selectDelivered: SelectDelivered<T>,
-  blocksEvidenceHead: BlocksEvidenceHead<T>
+  isBehaviorEligible: IsBehaviorEligible<T>
 ): DirectEvidenceHeadSelection<T> {
   const baseline = selectDelivered(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
   if (headLimit <= 0) return unchangedSelection(candidates);
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
   const semanticLeader = selectUniqueSemanticLeader(
-    candidates, evidence, evidenceSemanticScoresByCandidateKey
+    candidates, evidence, evidenceSemanticActivationsByCandidateKey
   );
   const evidenceSelection = selectEvidenceHead(
     candidates, baseline, evidence, semanticLeader, headLimit,
-    publicRelevanceByCandidateKey, queryProbes, selectDelivered, blocksEvidenceHead
+    publicRelevanceByCandidateKey, queryProbes, selectDelivered, isBehaviorEligible
   );
   const refinement = resolveSemanticMemoryRefinementPlan(
     candidates, baseline, evidenceSelection, semanticLeader, headLimit, selectDelivered
   );
-  return refinement === undefined
-    ? evidenceSelection
-    : selectSemanticMemoryRefinement({
-        evidenceSelection,
-        leader: refinement.leader,
-        headLimit,
-        replacementProtectedCandidateKeys:
-          refinement.replacementProtectedCandidateKeys,
-        publicRelevanceByCandidateKey,
-        selectDelivered,
-        keyOf: candidateKey,
-        evidencePermitsVictim: (selection, victim) =>
-          protectedEvidencePermitsVictim(selection, victim, queryProbes),
-        protectionsAreFeasible: (trial, protections, sourceCandidates) =>
-          protectionsAreFeasible(
-            trial, protections, publicRelevanceByCandidateKey,
-            queryProbes, sourceCandidates, blocksEvidenceHead
-          ),
-        resolveSingleReplacement
-      });
+  const semanticSelection = applySemanticRefinement({
+    evidenceSelection, refinement, headLimit, publicRelevanceByCandidateKey,
+    queryProbes, selectDelivered, isBehaviorEligible
+  });
+  return retainBehaviorAuthorityAnswerHead({
+    selection: semanticSelection,
+    rankLimit: headLimit,
+    selectDelivered,
+    keyOf: candidateKey,
+    isBehaviorEligible
+  });
+}
+
+function applySemanticRefinement<T extends DirectEvidenceHeadCandidate>(params: Readonly<{
+  readonly evidenceSelection: AnswerHeadSelection<T>;
+  readonly refinement: SemanticMemoryRefinementPlan<T> | undefined;
+  readonly headLimit: number;
+  readonly publicRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly selectDelivered: SelectDelivered<T>;
+  readonly isBehaviorEligible: IsBehaviorEligible<T>;
+}>): AnswerHeadSelection<T> {
+  if (params.refinement === undefined) return params.evidenceSelection;
+  return selectSemanticMemoryRefinement({
+    evidenceSelection: params.evidenceSelection,
+    leader: params.refinement.leader,
+    headLimit: params.headLimit,
+    replacementProtectedCandidateKeys:
+      params.refinement.replacementProtectedCandidateKeys,
+    publicRelevanceByCandidateKey: params.publicRelevanceByCandidateKey,
+    selectDelivered: params.selectDelivered,
+    keyOf: candidateKey,
+    evidencePermitsVictim: (selection, victim) =>
+      protectedEvidencePermitsVictim(selection, victim, params.queryProbes),
+    protectionsAreFeasible: (trial, protections, sourceCandidates) =>
+      protectionsAreFeasible(
+        trial, protections, params.publicRelevanceByCandidateKey,
+        params.queryProbes, sourceCandidates, params.isBehaviorEligible
+      ),
+    resolveSingleReplacement
+  });
 }
 
 function resolveSemanticMemoryRefinementPlan<T extends DirectEvidenceHeadCandidate>(
@@ -127,7 +155,7 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   queryProbes: Readonly<RecallQueryProbes>,
   selectDelivered: SelectDelivered<T>,
-  blocksEvidenceHead: BlocksEvidenceHead<T>
+  isBehaviorEligible: IsBehaviorEligible<T>
 ): DirectEvidenceHeadSelection<T> {
   const scored = evidence
     .filter((row) => row.queryScore >= DIRECT_EVIDENCE_SCORE_FLOOR)
@@ -143,7 +171,7 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
     }
     const admission = tryAdmissionPromotion(
       candidates, baseline, baseline[headLimit - 1]!,
-      contender, queryProbes, selectDelivered, blocksEvidenceHead
+      contender, queryProbes, selectDelivered, isBehaviorEligible
     );
     if (admission === undefined) continue;
     const rankLimit = resolveEvidenceProtectionRank(
@@ -162,7 +190,7 @@ function tryAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
   promoted: ScoredDirectEvidence<T>,
   queryProbes: Readonly<RecallQueryProbes>,
   selectDelivered: SelectDelivered<T>,
-  blocksEvidenceHead: BlocksEvidenceHead<T>
+  isBehaviorEligible: IsBehaviorEligible<T>
 ): DirectEvidenceAdmission<T> | undefined {
   const trialOrder = moveBefore(candidates, promoted.candidate, insertionTarget);
   const delivered = selectDelivered(trialOrder);
@@ -170,7 +198,7 @@ function tryAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
     baseline, delivered, promoted.candidateKey
   );
   return replacement !== undefined &&
-    !blocksEvidenceHead(replacement) &&
+    !isBehaviorEligible(replacement) &&
     hasRequiredQueryMargin(promoted.queryScore, replacement.entry, queryProbes)
     ? Object.freeze({ candidateOrder: trialOrder, delivered })
     : undefined;
@@ -221,7 +249,7 @@ function protectionsAreFeasible<T extends DirectEvidenceHeadCandidate>(
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   queryProbes: Readonly<RecallQueryProbes>,
   sourceCandidates: readonly T[],
-  blocksEvidenceHead: BlocksEvidenceHead<T>
+  isBehaviorEligible: IsBehaviorEligible<T>
 ): boolean {
   const publicOrder = [...trial].sort((left, right) =>
     comparePublicRelevance(left, right, publicRelevanceByCandidateKey)
@@ -230,7 +258,7 @@ function protectionsAreFeasible<T extends DirectEvidenceHeadCandidate>(
     publicOrder, protections, candidateKey, queryProbes, sourceCandidates,
     (key) => {
       const candidate = findAnswerHeadSourceCandidate(sourceCandidates, key);
-      return candidate !== undefined && blocksEvidenceHead(candidate);
+      return candidate !== undefined && isBehaviorEligible(candidate);
     }
   );
   return protections.every((protection) => {
@@ -327,14 +355,17 @@ function collectEvidenceCandidates<T extends DirectEvidenceHeadCandidate>(
 function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   evidence: readonly ScoredDirectEvidence<T>[],
-  evidenceScores: ReadonlyMap<string, number>
+  evidenceActivations: ReadonlyMap<
+    string,
+    Readonly<RecallEvidenceSemanticActivationReceipt>
+  >
 ): SemanticHeadCandidate<T> | undefined {
   const evidenceByKey = new Map(evidence.map((row) => [row.candidateKey, row]));
   const ranked = candidates.flatMap((candidate, index) => {
     const candidateKey = buildRecallCandidateDedupeKey(candidate);
     const evidenceCandidate = evidenceByKey.get(candidateKey);
     const score = resolveSemanticActivation(
-      candidate, candidateKey, evidenceCandidate, evidenceScores
+      candidate, candidateKey, evidenceCandidate, evidenceActivations
     );
     return score !== undefined && Number.isFinite(score) && score > 0
       ? [{ candidate, candidateKey, index, score, evidenceCandidate }]
@@ -356,9 +387,14 @@ function resolveSemanticActivation<T extends DirectEvidenceHeadCandidate>(
   candidate: T,
   candidateKey: string,
   evidenceCandidate: ScoredDirectEvidence<T> | undefined,
-  evidenceScores: ReadonlyMap<string, number>
+  evidenceActivations: ReadonlyMap<
+    string,
+    Readonly<RecallEvidenceSemanticActivationReceipt>
+  >
 ): number | undefined {
-  const linkedEvidenceScore = validSemanticActivation(evidenceScores.get(candidateKey));
+  const linkedEvidenceScore = validSemanticActivation(
+    evidenceActivations.get(candidateKey)?.score
+  );
   if (candidate.objectKind === "evidence_capsule") {
     return evidenceCandidate === undefined ? undefined : linkedEvidenceScore;
   }

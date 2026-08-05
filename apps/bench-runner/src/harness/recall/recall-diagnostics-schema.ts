@@ -29,6 +29,13 @@ import {
   RecallAdmissionAttemptDiagnosticSchema,
   RecallEvidenceProjectionMatchReceiptSchema
 } from "./candidate-projection-diagnostics-schema.js";
+import {
+  RecallFieldRefinementStopCertificateSchema,
+  RecallFiniteFieldChannelCaptureSchema,
+  RecallQueryEntityExtractionCaptureSchema,
+  RecallQueryFactFrameExtractionCaptureSchema,
+  RecallRetrievalFieldRefinementReceiptSchema
+} from "./field-capture-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -322,6 +329,14 @@ export const BenchRecallDiagnosticsSchema = z
       })
       .strict()
       .readonly(),
+    retrieval_field_captures: z.array(RecallFiniteFieldChannelCaptureSchema).readonly().optional(),
+    retrieval_field_refinement_receipts:
+      z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly().optional(),
+    field_refinement_stop_certificate:
+      RecallFieldRefinementStopCertificateSchema.optional(),
+    query_entity_extraction: RecallQueryEntityExtractionCaptureSchema.optional(),
+    query_fact_frame_extraction:
+      RecallQueryFactFrameExtractionCaptureSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),

@@ -23,8 +23,7 @@ import {
   readPartialFailureCreatedObjects
 } from "./materialization-results.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
-import { buildFactKeySearchProjections } from
-  "../grounding/fact-frame/search-projections.js";
+import { createSignalEvidence } from "./evidence/create-signal-evidence.js";
 
 type MemoryEntryMaterialization = {
   readonly evidence: MaterializationCreatedObject;
@@ -163,10 +162,11 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
       context
     });
-    const factKeys = buildFactKeySearchProjections(signal.raw_payload);
-    const evidence = factKeys.length === 0
-      ? await this.dependencies.evidenceService.create(evidenceInput)
-      : await this.dependencies.evidenceService.create(evidenceInput, factKeys);
+    const evidence = await createSignalEvidence(
+      this.dependencies.evidenceService,
+      signal,
+      evidenceInput
+    );
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
     let memory: MemoryMaterializationCreatedObject;
@@ -308,7 +308,9 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     if (state.evidenceId !== undefined) {
       return state.evidenceId;
     }
-    const evidence = await this.dependencies.evidenceService.create(
+    const evidence = await createSignalEvidence(
+      this.dependencies.evidenceService,
+      signal,
       buildEvidenceInput(signal, undefined, {
         fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
         context

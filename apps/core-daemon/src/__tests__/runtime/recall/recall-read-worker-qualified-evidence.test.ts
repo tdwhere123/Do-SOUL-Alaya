@@ -18,6 +18,9 @@ import {
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
 import {
+  materializeEvidenceFactFrameFormation
+} from "@do-soul/alaya-core";
+import {
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceSearchProjections,
@@ -39,6 +42,15 @@ const createdAt = "2026-07-27T12:00:00.000Z";
 const userStatement = "I commute by bicycle.";
 const assistantObservation = "Use the TrailShell pack because its roll-top keeps a laptop dry.";
 const assertion = "I bought my bookshelf from IKEA.";
+const assertionFactFrame = {
+  schema_version: 1 as const,
+  slots: [
+    { role: "subject" as const, text: "I" },
+    { role: "relation" as const, text: "bought" },
+    { role: "value" as const, text: "my bookshelf" },
+    { role: "qualifier" as const, text: "from IKEA" }
+  ]
+};
 
 beforeAll(() => {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
@@ -90,15 +102,35 @@ describe("RecallReadWorkerClient qualified evidence", () => {
       const findFactKeys = client.evidenceSearchPort.findRecallQualifiedFactKeysByIds;
       if (findFactKeys === undefined) throw new Error("qualified fact-key reader is unavailable");
 
-      await expect(findFactKeys("workspace-1", [fixture.capsule.object_id])).resolves.toEqual([{
-        capsule: fixture.capsule,
-        verified_user_projection: false,
-        matched_projection: fixture.projection,
-        matched_fact_key_forms: [{
-          kind: "leave_one_slot_out",
-          omitted_slot: { slot_index: 3, role: "qualifier" }
-        }]
-      }]);
+      const factKeys = await findFactKeys("workspace-1", [fixture.capsule.object_id]);
+
+      expect(factKeys).toHaveLength(5);
+      for (const factKey of factKeys) {
+        expect(factKey).toMatchObject({
+          capsule: fixture.capsule,
+          verified_user_projection: false,
+          matched_fact_frame: assertionFactFrame
+        });
+      }
+      expect(factKeys.map((factKey) => ({
+        projection_id: factKey.matched_projection?.projection_id,
+        content: factKey.matched_projection?.content,
+        forms: factKey.matched_fact_key_forms
+      }))).toEqual([
+        { projection_id: 1, content: "I bought my bookshelf from IKEA", forms: [{ kind: "complete" }] },
+        { projection_id: 2, content: "bought my bookshelf from IKEA", forms: [{
+          kind: "leave_one_slot_out", omitted_slot: { slot_index: 0, role: "subject" }
+        }] },
+        { projection_id: 3, content: "I my bookshelf from IKEA", forms: [{
+          kind: "leave_one_slot_out", omitted_slot: { slot_index: 1, role: "relation" }
+        }] },
+        { projection_id: 4, content: "I bought from IKEA", forms: [{
+          kind: "leave_one_slot_out", omitted_slot: { slot_index: 2, role: "value" }
+        }] },
+        { projection_id: 5, content: "I bought my bookshelf", forms: [{
+          kind: "leave_one_slot_out", omitted_slot: { slot_index: 3, role: "qualifier" }
+        }] }
+      ]);
     } finally {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
@@ -127,23 +159,29 @@ async function seedQualifiedEvidence(databasePath: string): Promise<Readonly<{
 
 async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
   readonly capsule: Readonly<EvidenceCapsule>;
-  readonly projection: Readonly<EvidenceSearchProjection>;
 }>> {
   const database = initDatabase({ filename: databasePath });
   try {
     await seedWorkspaceAndRun(database);
     const signal = await seedAssertionSignal(database);
-    const projection = Object.freeze({
-      projection_id: 5,
-      projection_kind: "fact_key" as const,
-      content: "I bought my bookshelf"
+    const capsuleInput = buildAssertionCapsule(signal);
+    const formation = materializeEvidenceFactFrameFormation({
+      sourceAssertion: assertion,
+      sourceHash: capsuleInput.source_hash,
+      proposal: {
+        schema_version: 1,
+        producer_operator_id: "qualified_evidence_worker_fixture_v1",
+        source_assertion: assertion,
+        fact_frame: assertionFactFrame
+      }
     });
     const capsule = await new SqliteEvidenceCapsuleRepo(database).create(
-      buildAssertionCapsule(signal),
-      [projection]
+      capsuleInput,
+      formation.searchProjections,
+      formation.capture
     );
     appendMaterializationEvent(database, signal, capsule);
-    return { capsule, projection };
+    return { capsule };
   } finally {
     database.close();
   }
@@ -179,15 +217,7 @@ async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMem
         proposed_matched_text: assertion,
         reasons: []
       },
-      fact_frame: {
-        schema_version: 1,
-        slots: [
-          { role: "subject", text: "I" },
-          { role: "relation", text: "bought" },
-          { role: "value", text: "my bookshelf" },
-          { role: "qualifier", text: "from IKEA" }
-        ]
-      }
+      fact_frame: assertionFactFrame
     },
     created_at: createdAt
   } as const satisfies CandidateMemorySignal;

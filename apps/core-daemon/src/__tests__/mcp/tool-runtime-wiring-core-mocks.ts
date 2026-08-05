@@ -360,6 +360,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     RuleBasedEntityExtractor: makeClass({
       extract: vi.fn(async () => [])
     }),
+    RuleBasedQueryFactFrameExtractor: makeClass({
+      extract: vi.fn(async () => [])
+    }),
     RuntimeEventNormalizer: makeClass(),
     RunHotStateService: makeClass(),
     RunService: makeClass({

@@ -82,7 +82,9 @@ it("adds FTS supplement candidates and treats direct FTS rank as lexical structu
       policyOverride: policy
     });
 
-    expect(searchByKeyword).toHaveBeenCalledWith("workspace-1", "zulu omega", 5);
+    expect(searchByKeyword).toHaveBeenCalledWith(
+      "workspace-1", "zulu omega", 5, { tier: "hot" }
+    );
     expect(countInboundSupports).toHaveBeenCalledWith("memory-2", "workspace-1");
     expect(getSnapshot).toHaveBeenCalledWith("run-1");
     const ftsCandidate = result.candidates.find((candidate) => candidate.object_id === "memory-2");

@@ -1,9 +1,7 @@
 import type {
-  AssociativeFactKeyProjectionForm,
   BudgetSnapshot,
   EventLogEntry,
   EvidenceCapsule,
-  EvidenceSearchProjection,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
   PathAnchorRef,
@@ -37,35 +35,34 @@ import type {
 } from "./global-memory-recall-port.js";
 import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox.js";
 import type { RecallRoutingKeyProjectionPort } from "./routing-key-projection-port.js";
+import type {
+  KeywordSearchBatchQuery,
+  KeywordSearchFieldRefinementLevel,
+  KeywordSearchFieldResult,
+  KeywordSearchLaneId,
+  KeywordSearchLaneObservation,
+  KeywordSearchLaneReceipt,
+  KeywordSearchLaneScope,
+  KeywordSearchLaneStatus,
+  KeywordSearchResult,
+  RecallEvidenceSearchMatch,
+  RecallQualifiedEvidence
+} from "./recall-search-port-types.js";
 
-export interface KeywordSearchResult {
-  readonly object_id: string;
-  readonly normalized_rank: number;
-  // Trigram-lane ordinal score, present only for substring/CJK trigram hits; feeds trigram_fts. Absent for exact/porter-only hits.
-  readonly trigram_rank?: number;
-  readonly matched_projection?: RecallEvidenceSearchProjectionIdentity;
-}
-
-export interface KeywordSearchBatchQuery {
-  readonly queryText: string;
-  readonly limit: number;
-}
-
-export type RecallEvidenceSearchProjectionIdentity = Readonly<
-  Pick<EvidenceSearchProjection, "projection_id" | "projection_kind">
->;
-
-export type RecallEvidenceSearchMatch = Readonly<{
-  readonly object_id: string;
-  readonly matched_projection?: RecallEvidenceSearchProjectionIdentity;
-}>;
-
-export type RecallQualifiedEvidence = Readonly<{
-  readonly capsule: Readonly<EvidenceCapsule>;
-  readonly verified_user_projection: boolean;
-  readonly matched_projection?: Readonly<EvidenceSearchProjection>;
-  readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
-}>;
+export type {
+  KeywordSearchBatchQuery,
+  KeywordSearchFieldRefinementLevel,
+  KeywordSearchFieldResult,
+  KeywordSearchLaneId,
+  KeywordSearchLaneObservation,
+  KeywordSearchLaneReceipt,
+  KeywordSearchLaneScope,
+  KeywordSearchLaneStatus,
+  KeywordSearchResult,
+  RecallEvidenceSearchMatch,
+  RecallEvidenceSearchProjectionIdentity,
+  RecallQualifiedEvidence
+} from "./recall-search-port-types.js";
 
 export interface RecallMemoryListPageOptions {
   readonly limit: number;
@@ -114,6 +111,13 @@ export interface RecallServiceMemoryRepoPort {
   findByDimension(workspaceId: string, dimension: MemoryDimensionType): Promise<readonly Readonly<MemoryEntry>[]>;
   findByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<readonly Readonly<MemoryEntry>[]>;
   searchByKeyword?(workspaceId: string, queryText: string, limit: number): Promise<readonly KeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope?: Readonly<KeywordSearchLaneScope>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,
     queryText: string,
@@ -145,6 +149,14 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     tier: StorageTierType
   ): Promise<readonly KeywordSearchResult[]>;
+  searchByAnchorField?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope?: Readonly<KeywordSearchLaneScope>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
   // Admits memories whose distilled content lost keywords but whose EvidenceCapsule.gist still matches. see also: 068-evidence-capsule-fts.sql.
   findByEvidenceRefs?(
     workspaceId: string,
@@ -166,13 +178,19 @@ export interface RecallServiceEvidenceSearchPort {
   searchByKeyword(
     workspaceId: string,
     queryText: string,
-    limit: number
+    limit: number,
+    refinementDepths?: readonly number[]
   ): Promise<readonly KeywordSearchResult[]>;
-  /** Result batch at index i corresponds to the query at index i. */
-  searchManyByKeyword?(
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
+  searchManyByKeywordField?(
     workspaceId: string,
     queries: readonly Readonly<KeywordSearchBatchQuery>[]
-  ): Promise<readonly (readonly KeywordSearchResult[])[]>;
+  ): Promise<readonly Readonly<KeywordSearchFieldResult>[]>;
   findByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
@@ -196,8 +214,19 @@ export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(
     workspaceId: string,
     queryText: string,
-    limit: number
+    limit: number,
+    refinementDepths?: readonly number[]
   ): Promise<readonly KeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
+  searchManyByKeywordField?(
+    workspaceId: string,
+    queries: readonly Readonly<KeywordSearchBatchQuery>[]
+  ): Promise<readonly Readonly<KeywordSearchFieldResult>[]>;
   findByIds(
     workspaceId: string,
     objectIds: readonly string[]
@@ -461,6 +490,9 @@ export interface RecallServiceDependencies {
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
   // see also: shared/entity-extraction-port.ts, shared/entity-extraction-rules.ts RuleBasedEntityExtractor.
   readonly entityExtractionPort?: import("../../shared/entity-extraction-port.js").EntityExtractionPort;
+  // Optional read-only structured query parser; absent means relation demand is unavailable.
+  readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js")
+    .QueryFactFrameExtractionPort;
   // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora. Default off.
   readonly robustSourceRefParsing?: boolean;
   readonly generateRuntimeId?: () => string;

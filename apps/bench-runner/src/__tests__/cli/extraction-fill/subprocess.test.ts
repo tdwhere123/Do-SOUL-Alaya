@@ -64,11 +64,12 @@ async function runFixture(
       ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:E0_SUBPROCESS_GARDEN_KEY",
       E0_SUBPROCESS_GARDEN_KEY: "test-key"
     },
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: [mode === "terminal" ? "pipe" : "ignore", "pipe", "pipe"]
   });
   let stdout = "";
   let stderr = "";
   let ready = false;
+  let armed = false;
   let readyAt: number | null = null;
   let settledAt: number | null = null;
   let leaseSeenAtReady = false;
@@ -82,6 +83,10 @@ async function runFixture(
       ready = true;
       readyAt = Date.now();
       leaseSeenAtReady = existsSync(join(root, "cache", ".extraction-fill.lock"));
+      if (mode === "terminal") child.stdin?.end("LEASE_OBSERVED\n");
+    }
+    if (!armed && stdout.includes("FIXTURE_ARMED")) {
+      armed = true;
       onReady?.(child);
     }
     if (settledAt === null && stdout.includes("FIXTURE_SETTLED")) {

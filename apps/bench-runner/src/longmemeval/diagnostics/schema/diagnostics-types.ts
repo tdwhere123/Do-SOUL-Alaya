@@ -347,6 +347,16 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
 export interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
   readonly queryProbes: DiagnosticQueryProbes | null;
+  readonly retrievalFieldCaptures:
+    NonNullable<BenchRecallDiagnostics["retrieval_field_captures"]> | null;
+  readonly retrievalFieldRefinementReceipts:
+    NonNullable<BenchRecallDiagnostics["retrieval_field_refinement_receipts"]> | null;
+  readonly fieldRefinementStopCertificate:
+    NonNullable<BenchRecallDiagnostics["field_refinement_stop_certificate"]> | null;
+  readonly queryEntityExtraction:
+    NonNullable<BenchRecallDiagnostics["query_entity_extraction"]> | null;
+  readonly queryFactFrameExtraction:
+    NonNullable<BenchRecallDiagnostics["query_fact_frame_extraction"]> | null;
   readonly answerShapePlan: DiagnosticAnswerShapePlan | null;
   readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;

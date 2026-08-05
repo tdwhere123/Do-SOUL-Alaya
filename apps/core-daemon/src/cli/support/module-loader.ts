@@ -5,7 +5,7 @@ import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-r
 import { writeCliFailure } from "../errors/error-reporting.js";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(scriptDirectory, "..", "..", "..", "..");
+const repoRoot = resolve(scriptDirectory, "..", "..", "..", "..", "..");
 const bridgeDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/bridge.js");
 const registerDistPath = resolve(repoRoot, "apps/core-daemon/dist/cli/register.js");
 const daemonDistPath = resolve(repoRoot, "apps/core-daemon/dist/index.js");

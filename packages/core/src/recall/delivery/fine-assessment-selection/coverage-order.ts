@@ -1,4 +1,10 @@
-import { orderByCoverageMarginalGain } from "../coverage-selection.js";
+import {
+  materializeCoverageSelectionObjectiveReceipt,
+  orderCoverageSelectionCandidateStatesByMarginalGain,
+  type CoverageSelectionObjectiveReceipt
+} from "../coverage-selection.js";
+import { materializeConfiguredCoverageSelection } from
+  "../../field/facility/selection-objective.js";
 import { buildFineAssessmentAnswerSupportContext } from
   "../answer-support/answer-support-context.js";
 import {
@@ -28,6 +34,10 @@ export function createSelectionContext(
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: params.rankByCandidateKey,
     finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
+    coverageRelevanceByCandidateKey:
+      params.coverageRelevanceByCandidateKey ??
+      params.finalRelevanceByCandidateKey ?? new Map(),
+    coverageRelevanceUpperBound: params.coverageRelevanceUpperBound ?? null,
     answerRelevanceRankByCandidateKey,
     captureAnswerFeatures,
     answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
@@ -37,34 +47,52 @@ export function createSelectionContext(
       ? params.deepHeadTraceByCandidateKey ?? new Map()
       : new Map(),
     coverageMarginalGainByCandidateKey: new Map(),
-    tokenEstimateByCandidateKey: new Map()
+    tokenEstimateByCandidateKey: new Map(),
+    coverageObjectiveConfig: params.coverageObjectiveConfig
   });
 }
 
 export function prepareCoverageSelection(
   params: FineAssessmentSelectionParams,
   context: FineAssessmentSelectionContext
-): readonly FineAssessmentCandidate[] {
-  const coverageRelevance =
-    params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
-  return orderFineAssessmentByCoverage(
-    params.orderedCandidates,
+): Readonly<{
+  readonly candidates: readonly FineAssessmentCandidate[];
+  readonly objective: CoverageSelectionObjectiveReceipt;
+  readonly preparedSelection: ReturnType<
+    typeof materializeConfiguredCoverageSelection<FineAssessmentCandidate>
+  >;
+}> {
+  const preparedSelection = materializeConfiguredCoverageSelection({
+    candidates: params.orderedCandidates,
+    relevanceByCandidateKey: context.coverageRelevanceByCandidateKey,
+    supplementaryData: context.supplementaryData,
+    config: context.coverageObjectiveConfig
+  });
+  const candidates = orderFineAssessmentByCoverage(
+    preparedSelection,
     context,
-    coverageRelevance,
     context.captureAnswerFeatures
   );
+  return Object.freeze({
+    candidates,
+    objective: materializeCoverageSelectionObjectiveReceipt(
+      preparedSelection.objective
+    ),
+    preparedSelection
+  });
 }
 
 function orderFineAssessmentByCoverage(
-  candidates: readonly FineAssessmentCandidate[],
+  prepared: ReturnType<
+    typeof materializeConfiguredCoverageSelection<FineAssessmentCandidate>
+  >,
   context: FineAssessmentSelectionContext,
-  relevanceByCandidateKey: ReadonlyMap<string, number>,
-  captureMarginalGain = false
+  captureMarginalGain: boolean
 ): readonly FineAssessmentCandidate[] {
   const admission = createAdmissionState();
-  return orderByCoverageMarginalGain({
-    candidates,
-    relevanceByCandidateKey,
+  return Object.freeze(orderCoverageSelectionCandidateStatesByMarginalGain({
+    candidates: prepared.candidateStates,
+    objective: prepared.objective,
     supplementaryData: context.supplementaryData,
     advancesCoverage: (candidate) => tryRecordAcceptedAdmission(
       admission,
@@ -77,5 +105,5 @@ function orderFineAssessmentByCoverage(
           observation.marginal_gain
         )
       : undefined
-  });
+  }).map(({ candidate }) => candidate));
 }

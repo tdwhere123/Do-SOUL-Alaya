@@ -172,6 +172,58 @@ describe("collectSupplementaryData", () => {
     )?.proposal_activation).toBeCloseTo(0.675);
   });
 
+  it("aggregates source-exact entity and relation producers into one query receipt", async () => {
+    const queryText = "Where did I buy a desk from IKEA?";
+    const result = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText,
+      entityExtractionPort: {
+        operator_id: "test_entity_parser_v1",
+        extract: async () => [{
+          surface: "IKEA",
+          normalized: "ikea",
+          kind: "proper_noun",
+          confidence: 0.9,
+          source_offset: [28, 32]
+        }]
+      },
+      queryFactFrameExtractionPort: {
+        operator_id: "test_query_frame_parser_v1",
+        extract: async () => [{
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "buy" },
+            { role: "value", text: "desk" },
+            { role: "qualifier", text: "IKEA" }
+          ]
+        }]
+      }
+    });
+
+    expect(result.queryFieldAttribution?.contributions).toHaveLength(2);
+    expect(result.queryFactFrameExtraction?.status).toBe("returned");
+    expect(result.queryFieldAttribution?.attributions).toEqual([
+      { query_atom_id: "lexical_term:buy", role: "relation" },
+      { query_atom_id: "lexical_term:ikea", role: "entity" }
+    ]);
+  });
+
+  it("keeps missing relation parsing capability explicit", async () => {
+    const result = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "Where did I buy a desk?"
+    });
+
+    expect(result.queryFactFrameExtraction).toEqual(expect.objectContaining({
+      status: "unavailable",
+      producer_operator_id: null,
+      frames: []
+    }));
+  });
+
   it("derives a unique User assertion receipt from the loaded evidence capsule", async () => {
     const content = "Over a year of uncertainty was really tough.";
     const evidence = createEvidenceCapsule({
@@ -589,6 +641,8 @@ async function collectWith(params: {
   readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
   readonly routingKeyProjectionPort?: RecallServiceDependencies["routingKeyProjectionPort"];
   readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
+  readonly queryFactFrameExtractionPort?:
+    RecallServiceDependencies["queryFactFrameExtractionPort"];
   readonly queryText?: string | null;
   readonly budgetPenaltyPort?: RecallServiceDependencies["budgetPenaltyPort"];
   readonly pathPlasticityPort?: RecallServiceDependencies["pathPlasticityPort"];
@@ -606,6 +660,7 @@ async function collectWith(params: {
       evidenceSearchPort: params.evidenceSearchPort,
       routingKeyProjectionPort: params.routingKeyProjectionPort,
       entityExtractionPort: params.entityExtractionPort,
+      queryFactFrameExtractionPort: params.queryFactFrameExtractionPort,
       ...(params.budgetPenaltyPort === undefined
         ? {}
         : { budgetPenaltyPort: params.budgetPenaltyPort }),

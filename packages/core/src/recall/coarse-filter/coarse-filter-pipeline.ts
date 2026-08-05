@@ -40,6 +40,10 @@ import {
   type TemporalWindowCandidateBudget
 } from
   "./temporal/temporal-window-candidates.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
@@ -138,6 +142,8 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
   readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
   await admitSemanticAndContentCandidates(params);
@@ -243,7 +249,8 @@ async function admitSemanticAndContentCandidates(
     trigramFtsRanks: params.state.trigramFtsRanks,
     evidenceFtsRanks: params.state.evidenceFtsRanks,
     evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef,
-    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef
+    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef,
+    retrievalFieldBundle: params.retrievalFieldBundle
   });
   addContentDerivedExpansionCandidates({
     tierMemories: params.tierMemories,
@@ -275,11 +282,10 @@ async function collectGraphExpansionSeedIds(
 ): Promise<readonly string[]> {
   const entityDerivedSeeds = await collectEntityDerivedSeeds({
     workspaceId: params.workspaceId,
-    queryText: params.queryText,
+    queryEntityExtraction: params.queryEntityExtraction,
     byId: params.byId,
     addCandidate: params.state.addCandidate,
     lexicalFtsRanks: params.state.ftsRanks,
-    entityExtractionPort: params.context.dependencies.entityExtractionPort,
     memoryRepo: params.context.dependencies.memoryRepo,
     warn: params.context.warn,
     entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,

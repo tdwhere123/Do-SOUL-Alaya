@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
 import {
+  EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
   SignalEventType,
   SignalState,
   SoulSignalMaterializedPayloadSchema,
+  buildAssociativeFactKeyProjections,
   buildVerifiedUserAssertionReceiptPreimage,
+  evidenceFactFrameFormationCapturePreimage,
   formatVerifiedUserAssertionSourceHash,
+  type AssociativeFactFrame,
   type CandidateMemorySignal,
-  type EvidenceCapsule
+  type EvidenceCapsule,
+  type EvidenceFactFrameFormationCapture,
+  type EvidenceFactFrameFormationCaptureBody
 } from "@do-soul/alaya-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
@@ -24,6 +30,15 @@ import {
 
 const ASSERTION = "I bought my bookshelf from IKEA.";
 const SOURCE_CORPUS = `User: ${ASSERTION}`;
+const FACT_FRAME = Object.freeze({
+  schema_version: 1 as const,
+  slots: Object.freeze([
+    Object.freeze({ role: "subject" as const, text: "I" }),
+    Object.freeze({ role: "relation" as const, text: "bought" }),
+    Object.freeze({ role: "value" as const, text: "my bookshelf" }),
+    Object.freeze({ role: "qualifier" as const, text: "from IKEA" })
+  ])
+}) satisfies Readonly<AssociativeFactFrame>;
 
 afterEach(() => {
   for (const database of evidenceCapsuleDatabases) database.close();
@@ -117,16 +132,21 @@ describe("verified assertion evidence qualification", () => {
     );
   });
 
-  it("rederives a fact key from its materialized grounded Signal", async () => {
+  it("rederives a fact key from its persisted canonical formation", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa");
-    const signal = await persistAssertionSignal(database);
-    await repo.create(capsule, [{
-      projection_id: 5,
-      projection_kind: "fact_key",
-      content: "I bought my bookshelf"
-    }]);
-    insertMaterializationEvent(database, signal, capsule);
+    await repo.create(
+      capsule,
+      buildAssociativeFactKeyProjections(FACT_FRAME),
+      factFrameFormationCapture(capsule)
+    );
+    expect(database.connection.prepare(`
+      SELECT status, source_hash FROM evidence_fact_frame_formations
+      WHERE evidence_object_id = ?
+    `).get(capsule.object_id)).toEqual({
+      status: "formed",
+      source_hash: capsule.source_hash
+    });
 
     await expect(repo.findRecallQualifiedByIds("workspace-1", [{
       object_id: capsule.object_id,
@@ -142,33 +162,100 @@ describe("verified assertion evidence qualification", () => {
       matched_fact_key_forms: [{
         kind: "leave_one_slot_out",
         omitted_slot: { slot_index: 3, role: "qualifier" }
-      }]
+      }],
+      matched_fact_frame: FACT_FRAME
     }]);
-    await expect(repo.findRecallQualifiedFactKeysByIds(
+    const allFactKeys = await repo.findRecallQualifiedFactKeysByIds(
       "workspace-1",
       [capsule.object_id]
-    )).resolves.toEqual([expect.objectContaining({
-      matched_projection: expect.objectContaining({ projection_kind: "fact_key" })
-    })]);
+    );
+    expect(allFactKeys).toHaveLength(5);
+    expect(allFactKeys.every(({ matched_projection: projection }) =>
+      projection?.projection_kind === "fact_key"
+    )).toBe(true);
   });
 
-  it("fails closed when a stored fact key differs from its grounded frame", async () => {
+  it("keeps pre-formation fact keys readable through the historical Signal fallback", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa");
     const signal = await persistAssertionSignal(database);
-    await repo.create(capsule, [{
-      projection_id: 5,
-      projection_kind: "fact_key",
-      content: "I bought my desk from"
-    }]);
+    await repo.create(capsule);
+    database.connection.prepare(`
+      INSERT INTO evidence_search_projections (
+        evidence_object_id, projection_id, projection_kind,
+        workspace_id, source_hash, content
+      ) VALUES (?, 5, 'fact_key', ?, ?, 'I bought my bookshelf')
+    `).run(capsule.object_id, capsule.workspace_id, capsule.source_hash);
     insertMaterializationEvent(database, signal, capsule);
 
     await expect(repo.findRecallQualifiedByIds("workspace-1", [{
       object_id: capsule.object_id,
       matched_projection: { projection_id: 5, projection_kind: "fact_key" }
-    }])).rejects.toThrow("requested fact key does not match its grounded Signal");
+    }])).resolves.toEqual([expect.objectContaining({
+      matched_fact_frame: FACT_FRAME,
+      matched_projection: expect.objectContaining({ content: "I bought my bookshelf" })
+    })]);
+  });
+
+  it("fails closed when a stored fact key differs from its canonical formation", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa");
+    await repo.create(
+      capsule,
+      buildAssociativeFactKeyProjections(FACT_FRAME),
+      factFrameFormationCapture(capsule)
+    );
+    database.connection.prepare(`
+      UPDATE evidence_search_projections SET content = 'tampered fact key'
+      WHERE evidence_object_id = ? AND projection_id = 5
+    `).run(capsule.object_id);
+
+    await expect(repo.findRecallQualifiedByIds("workspace-1", [{
+      object_id: capsule.object_id,
+      matched_projection: { projection_id: 5, projection_kind: "fact_key" }
+    }])).rejects.toThrow("requested fact key does not match its canonical formation");
+  });
+
+  it("rejects a source-drifted formation without partially writing Evidence", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa");
+    const driftedCapture = factFrameFormationCapture({
+      ...capsule,
+      source_hash: "sha256:drifted"
+    });
+
+    await expect(repo.create(
+      capsule,
+      buildAssociativeFactKeyProjections(FACT_FRAME),
+      driftedCapture
+    )).rejects.toThrow("source hash does not match");
+    await expect(repo.findById(capsule.object_id)).resolves.toBeNull();
+    expect(database.connection.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM evidence_search_projections) AS projections,
+        (SELECT COUNT(*) FROM evidence_fact_frame_formations) AS formations
+    `).get()).toEqual({ projections: 0, formations: 0 });
   });
 });
+
+function factFrameFormationCapture(
+  capsule: Readonly<EvidenceCapsule>
+): EvidenceFactFrameFormationCapture {
+  const body: EvidenceFactFrameFormationCaptureBody = {
+    schema_version: 1,
+    operator_id: EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
+    status: "formed",
+    producer_operator_id: "test_grounded_fact_frame_v1",
+    source_hash: capsule.source_hash,
+    fact_frame: FACT_FRAME
+  };
+  return {
+    ...body,
+    capture_digest: `sha256:${createHash("sha256")
+      .update(evidenceFactFrameFormationCapturePreimage(body), "utf8")
+      .digest("hex")}`
+  };
+}
 
 async function persistAssertionSignal(database: StorageDatabase): Promise<CandidateMemorySignal> {
   const signal = {
