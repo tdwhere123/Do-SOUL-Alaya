@@ -297,9 +297,7 @@ function comparePublicRelevance(
   const rightKey = candidateKey(right);
   const leftScore = relevanceByCandidateKey.get(leftKey) ?? left.fusion.fused_score;
   const rightScore = relevanceByCandidateKey.get(rightKey) ?? right.fusion.fused_score;
-  return rightScore - leftScore ||
-    compareEvidenceSourceIdentity(left, right) ||
-    leftKey.localeCompare(rightKey);
+  return rightScore - leftScore || compareStableCandidateIdentity(left, right);
 }
 
 function resolveSingleReplacement<T extends DirectEvidenceHeadCandidate>(
@@ -471,9 +469,7 @@ function compareSemanticHeadCandidates<T extends DirectEvidenceHeadCandidate>(
   left: Readonly<{ readonly candidate: T; readonly candidateKey: string }>,
   right: Readonly<{ readonly candidate: T; readonly candidateKey: string }>
 ): number {
-  return compareMemorySemanticIdentity(left.candidate.entry, right.candidate.entry) ||
-    compareEvidenceSourceIdentity(left.candidate, right.candidate) ||
-    left.candidateKey.localeCompare(right.candidateKey);
+  return compareStableCandidateIdentity(left.candidate, right.candidate);
 }
 
 function compareScoredEvidence<T extends DirectEvidenceHeadCandidate>(
@@ -482,8 +478,16 @@ function compareScoredEvidence<T extends DirectEvidenceHeadCandidate>(
 ): number {
   return right.queryScore - left.queryScore ||
     left.evidenceFtsRank - right.evidenceFtsRank ||
-    compareEvidenceSourceIdentity(left.candidate, right.candidate) ||
-    left.candidateKey.localeCompare(right.candidateKey);
+    compareStableCandidateIdentity(left.candidate, right.candidate);
+}
+
+function compareStableCandidateIdentity(
+  left: DirectEvidenceHeadCandidate,
+  right: DirectEvidenceHeadCandidate
+): number {
+  return compareMemorySemanticIdentity(left.entry, right.entry) ||
+    compareEvidenceSourceIdentity(left, right) ||
+    candidateKey(left).localeCompare(candidateKey(right));
 }
 
 function compareEvidenceSourceIdentity(

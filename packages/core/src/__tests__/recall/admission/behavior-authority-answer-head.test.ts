@@ -137,6 +137,14 @@ describe("behavior authority answer head", () => {
     expect(first).toBe(replay);
     expect(first).toBe("sha256:source-alpha");
   });
+
+  it("uses semantic identity before replay-local IDs within one evidence source", () => {
+    const first = promotedEvidenceContent({ alphaId: "z-alpha", zebraId: "a-zebra" });
+    const replay = promotedEvidenceContent({ alphaId: "a-alpha", zebraId: "z-zebra" });
+
+    expect(first).toBe(replay);
+    expect(first).toBe("Use cobalt storage for alpha cache entries.");
+  });
 });
 
 function promotedEvidenceSource(params: Readonly<{
@@ -162,10 +170,45 @@ function promotedEvidenceSource(params: Readonly<{
   return selection.candidates[0]?.evidenceSourceIdentity;
 }
 
-function directEvidenceCandidate(objectId: string, evidenceSourceIdentity: string) {
+function promotedEvidenceContent(params: Readonly<{
+  readonly alphaId: string;
+  readonly zebraId: string;
+}>): string | undefined {
+  const baseline = createCandidate("baseline", { content: "Unrelated note." });
+  const candidates = [
+    baseline,
+    directEvidenceCandidate(
+      params.alphaId,
+      "sha256:source-shared",
+      "Use cobalt storage for alpha cache entries."
+    ),
+    directEvidenceCandidate(
+      params.zebraId,
+      "sha256:source-shared",
+      "Use cobalt storage for zebra cache entries."
+    )
+  ];
+  const selection = selectBoundedDirectEvidenceHead(
+    candidates,
+    compileRecallQueryProbes("cobalt storage"),
+    new Map(),
+    new Map(),
+    1,
+    new Set(),
+    (ordered) => ordered.slice(0, 1),
+    () => false
+  );
+  return selection.candidates[0]?.entry.content;
+}
+
+function directEvidenceCandidate(
+  objectId: string,
+  evidenceSourceIdentity: string,
+  content = "I use cobalt storage for replay artifacts."
+) {
   const candidate = createCandidate(
     objectId,
-    { content: "I use cobalt storage for replay artifacts." },
+    { content },
     "evidence_capsule"
   );
   return {
