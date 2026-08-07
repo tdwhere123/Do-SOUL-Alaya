@@ -129,7 +129,58 @@ describe("behavior authority answer head", () => {
     });
     expect(selection.candidates).toEqual(candidates);
   });
+
+  it("uses source identity before replay-local IDs for tied direct evidence promotion", () => {
+    const first = promotedEvidenceSource({ alphaId: "z-alpha", zebraId: "a-zebra" });
+    const replay = promotedEvidenceSource({ alphaId: "a-alpha", zebraId: "z-zebra" });
+
+    expect(first).toBe(replay);
+    expect(first).toBe("sha256:source-alpha");
+  });
 });
+
+function promotedEvidenceSource(params: Readonly<{
+  readonly alphaId: string;
+  readonly zebraId: string;
+}>): string | undefined {
+  const baseline = createCandidate("baseline", { content: "Unrelated note." });
+  const candidates = [
+    baseline,
+    directEvidenceCandidate(params.alphaId, "sha256:source-alpha"),
+    directEvidenceCandidate(params.zebraId, "sha256:source-zebra")
+  ];
+  const selection = selectBoundedDirectEvidenceHead(
+    candidates,
+    compileRecallQueryProbes("cobalt storage"),
+    new Map(),
+    new Map(),
+    1,
+    new Set(),
+    (ordered) => ordered.slice(0, 1),
+    () => false
+  );
+  return selection.candidates[0]?.evidenceSourceIdentity;
+}
+
+function directEvidenceCandidate(objectId: string, evidenceSourceIdentity: string) {
+  const candidate = createCandidate(
+    objectId,
+    { content: "I use cobalt storage for replay artifacts." },
+    "evidence_capsule"
+  );
+  return {
+    ...candidate,
+    evidenceSourceIdentity,
+    fusion: {
+      ...candidate.fusion,
+      candidate_key: `workspace_local:evidence_capsule:${objectId}`,
+      per_stream_rank: {
+        ...candidate.fusion.per_stream_rank,
+        evidence_fts: 1
+      }
+    }
+  };
+}
 
 function simpleSelection(candidates: readonly string[]) {
   return Object.freeze({

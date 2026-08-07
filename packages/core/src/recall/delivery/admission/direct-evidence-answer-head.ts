@@ -294,7 +294,9 @@ function comparePublicRelevance(
   const rightKey = candidateKey(right);
   const leftScore = relevanceByCandidateKey.get(leftKey) ?? left.fusion.fused_score;
   const rightScore = relevanceByCandidateKey.get(rightKey) ?? right.fusion.fused_score;
-  return rightScore - leftScore || leftKey.localeCompare(rightKey);
+  return rightScore - leftScore ||
+    compareEvidenceSourceIdentity(left, right) ||
+    leftKey.localeCompare(rightKey);
 }
 
 function resolveSingleReplacement<T extends DirectEvidenceHeadCandidate>(
@@ -450,13 +452,21 @@ function selectUniqueSemanticMemoryLeader<T extends DirectEvidenceHeadCandidate>
     : undefined;
 }
 
-function compareScoredEvidence<T>(
+function compareScoredEvidence<T extends DirectEvidenceHeadCandidate>(
   left: ScoredDirectEvidence<T>,
   right: ScoredDirectEvidence<T>
 ): number {
   return right.queryScore - left.queryScore ||
     left.evidenceFtsRank - right.evidenceFtsRank ||
+    compareEvidenceSourceIdentity(left.candidate, right.candidate) ||
     left.candidateKey.localeCompare(right.candidateKey);
+}
+
+function compareEvidenceSourceIdentity(
+  left: DirectEvidenceHeadCandidate,
+  right: DirectEvidenceHeadCandidate
+): number {
+  return (left.evidenceSourceIdentity ?? "").localeCompare(right.evidenceSourceIdentity ?? "");
 }
 
 function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSelection<T> {
