@@ -24,7 +24,7 @@ type SemanticMemoryRefinementParams<T extends SemanticRefinementCandidate> = Rea
   readonly leader: SemanticHeadCandidate<T>;
   readonly headLimit: number;
   readonly replacementProtectedCandidateKeys?: readonly string[];
-  readonly publicRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly comparePublicRelevance: (left: T, right: T) => number;
   readonly selectDelivered: (candidates: readonly T[]) => readonly T[];
   readonly keyOf: (candidate: T) => string;
   readonly evidencePermitsVictim: (
@@ -138,9 +138,7 @@ function semanticReplacementProtectedKeys<T extends SemanticRefinementCandidate>
     ...(params.replacementProtectedCandidateKeys ?? [])
   ].filter((key) => baselineKeys.has(key)));
   const protectedTarget = Math.max(0, params.headLimit - 1);
-  const publicOrder = [...baseline].sort((left, right) =>
-    comparePublicRelevance(params, left, right)
-  );
+  const publicOrder = [...baseline].sort(params.comparePublicRelevance);
   for (const candidate of publicOrder) {
     if (protectedKeys.size >= protectedTarget) break;
     protectedKeys.add(params.keyOf(candidate));
@@ -155,21 +153,7 @@ function weakestUnprotectedCandidate<T extends SemanticRefinementCandidate>(
 ): T | undefined {
   return [...baseline]
     .filter((candidate) => !protectedKeys.has(params.keyOf(candidate)))
-    .sort((left, right) => comparePublicRelevance(params, right, left))[0];
-}
-
-function comparePublicRelevance<T extends SemanticRefinementCandidate>(
-  params: SemanticMemoryRefinementParams<T>,
-  left: T,
-  right: T
-): number {
-  const leftKey = params.keyOf(left);
-  const rightKey = params.keyOf(right);
-  const leftScore =
-    params.publicRelevanceByCandidateKey.get(leftKey) ?? left.fusion.fused_score;
-  const rightScore =
-    params.publicRelevanceByCandidateKey.get(rightKey) ?? right.fusion.fused_score;
-  return rightScore - leftScore || leftKey.localeCompare(rightKey);
+    .sort((left, right) => params.comparePublicRelevance(right, left))[0];
 }
 
 function replaceCandidateOrder<T>(

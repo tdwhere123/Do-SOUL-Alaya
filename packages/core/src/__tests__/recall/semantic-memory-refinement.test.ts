@@ -6,12 +6,14 @@ import {
 
 type Candidate = Readonly<{
   readonly id: string;
+  readonly semantic: string;
   readonly fusion: Readonly<{ readonly fused_score: number }>;
 }>;
 
-function candidate(id: string, fusedScore: number): Candidate {
+function candidate(id: string, fusedScore: number, semantic = id): Candidate {
   return Object.freeze({
     id,
+    semantic,
     fusion: Object.freeze({ fused_score: fusedScore })
   });
 }
@@ -31,13 +33,13 @@ describe("semantic memory refinement", () => {
 
     const result = selectSemanticMemoryRefinement({
       evidenceSelection,
-      leader: Object.freeze({
-        candidate: leader,
-        candidateKey: leader.id,
-        index: 2
-      }),
-      headLimit: 2,
-      publicRelevanceByCandidateKey: new Map(),
+        leader: Object.freeze({
+          candidate: leader,
+          candidateKey: leader.id,
+          index: 2
+        }),
+        headLimit: 2,
+        comparePublicRelevance: (left, right) => left.semantic.localeCompare(right.semantic),
       selectDelivered: (candidates) => candidates.slice(0, 2),
       keyOf: (item) => item.id,
       evidencePermitsVictim: () => true,
@@ -48,5 +50,35 @@ describe("semantic memory refinement", () => {
     expect(result.candidates).toBe(evidenceSelection.candidates);
     expect(result.protections).toBe(evidenceSelection.protections);
     expect(result.rejectedCandidateKeys).toEqual(["semantic-leader"]);
+  });
+
+  it("uses the caller's stable public-relevance tie order", () => {
+    const select = (alphaId: string, zebraId: string) => {
+      const alpha = candidate(alphaId, 0.5, "alpha");
+      const zebra = candidate(zebraId, 0.5, "zebra");
+      const leader = candidate("leader", 0.2, "leader");
+      const result = selectSemanticMemoryRefinement({
+        evidenceSelection: Object.freeze({
+          candidates: Object.freeze([alpha, zebra, leader]),
+          protections: Object.freeze([]),
+          rejectedCandidateKeys: Object.freeze([])
+        }),
+        leader: Object.freeze({ candidate: leader, candidateKey: leader.id, index: 2 }),
+        headLimit: 2,
+        comparePublicRelevance: (left, right) =>
+          left.semantic.localeCompare(right.semantic),
+        selectDelivered: (candidates) => candidates.slice(0, 2),
+        keyOf: (item) => item.id,
+        evidencePermitsVictim: () => true,
+        protectionsAreFeasible: () => true,
+        resolveSingleReplacement: (baseline, trial) => baseline.find(
+          (candidate) => !trial.includes(candidate)
+        )
+      });
+      return result.candidates.map((candidate) => candidate.semantic);
+    };
+
+    expect(select("z-alpha", "a-zebra")).toEqual(["leader", "alpha", "zebra"]);
+    expect(select("a-alpha", "z-zebra")).toEqual(["leader", "alpha", "zebra"]);
   });
 });

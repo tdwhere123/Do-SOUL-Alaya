@@ -104,7 +104,8 @@ function applySemanticRefinement<T extends DirectEvidenceHeadCandidate>(params: 
     headLimit: params.headLimit,
     replacementProtectedCandidateKeys:
       params.refinement.replacementProtectedCandidateKeys,
-    publicRelevanceByCandidateKey: params.publicRelevanceByCandidateKey,
+    comparePublicRelevance: (left, right) =>
+      comparePublicRelevance(left, right, params.publicRelevanceByCandidateKey),
     selectDelivered: params.selectDelivered,
     keyOf: candidateKey,
     evidencePermitsVictim: (selection, victim) =>
