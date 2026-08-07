@@ -87,6 +87,7 @@ export class RelationAssertionService {
     admission: PreparedAdmission["admission"]
   ): EventPublisherDecision<RelationAssertionAdmissionResult> {
     assertSameAdmission(existing, admission);
+    this.assertFormationInputs(existing);
     const projection = this.buildProjectionInCurrentTransaction(this.now());
     return {
       eventInputs: [],
@@ -102,11 +103,7 @@ export class RelationAssertionService {
     prepared: PreparedAdmission
   ): EventPublisherDecision<RelationAssertionAdmissionResult> {
     const { admission, identityKey } = prepared;
-    this.dependencies.repo.assertEvidenceAnchorsInCurrentTransaction({
-      workspaceId: admission.workspace_id,
-      evidenceIds: admission.evidence_ids,
-      sourceAnchor: request.sourceEventAnchor
-    });
+    this.assertFormationInputs(admission);
     return {
       eventInputs: [createAdmissionEventInput(request, admission)],
       apply: (entries) => {
@@ -223,6 +220,16 @@ export class RelationAssertionService {
     return this.dependencies.repo.readActiveProjectionGenerationInCurrentTransaction?.();
   }
 
+  private assertFormationInputs(
+    assertion: Pick<RelationAssertion, "workspace_id" | "evidence_receipts" | "formation_receipt">
+  ): void {
+    this.dependencies.repo.assertFormationInputsInCurrentTransaction({
+      workspaceId: assertion.workspace_id,
+      evidenceReceipts: assertion.evidence_receipts,
+      formationReceipt: assertion.formation_receipt
+    });
+  }
+
   private buildProjectionInCurrentTransaction(asOf: string): RelationAssertionProjectionResult {
     const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
     const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
@@ -243,6 +250,7 @@ export class RelationAssertionService {
       resolution
     ]));
     for (const assertion of assertions) {
+      this.assertFormationInputs(assertion);
       const events = await this.dependencies.eventHistory.queryByEntity(
         RELATION_ASSERTION_ENTITY_TYPE,
         assertion.assertion_id
@@ -271,14 +279,16 @@ function assertSameAdmission(
 ): void {
   const expected = stableStringify({
     workspace_id: incoming.workspace_id,
-    evidence_ids: [...incoming.evidence_ids].sort(),
+    evidence_receipts: sortEvidenceReceipts(incoming.evidence_receipts),
+    formation_receipt: incoming.formation_receipt,
     anchors: incoming.anchors,
     relation_kind: incoming.relation_kind,
     validity: incoming.validity
   });
   const actual = stableStringify({
     workspace_id: existing.workspace_id,
-    evidence_ids: [...existing.evidence_ids].sort(),
+    evidence_receipts: sortEvidenceReceipts(existing.evidence_receipts),
+    formation_receipt: existing.formation_receipt,
     anchors: existing.anchors,
     relation_kind: existing.relation_kind,
     validity: existing.validity
@@ -286,6 +296,12 @@ function assertSameAdmission(
   if (actual !== expected) {
     throw new Error(`Relation assertion replay conflicts with immutable assertion ${existing.assertion_id}.`);
   }
+}
+
+function sortEvidenceReceipts(
+  receipts: RelationAssertion["evidence_receipts"]
+): RelationAssertion["evidence_receipts"] {
+  return [...receipts].sort((left, right) => left.evidence_id.localeCompare(right.evidence_id));
 }
 
 function assertReplayIdentity(
@@ -325,7 +341,8 @@ function verifyAdmissionEvent(
   const expected = RelationAssertionAdmissionSchema.parse({
     assertion_id: assertion.assertion_id,
     workspace_id: assertion.workspace_id,
-    evidence_ids: assertion.evidence_ids,
+    evidence_receipts: assertion.evidence_receipts,
+    formation_receipt: assertion.formation_receipt,
     anchors: assertion.anchors,
     relation_kind: assertion.relation_kind,
     validity: assertion.validity,

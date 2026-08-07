@@ -179,6 +179,10 @@ function queryOwnerAndProjectionRows(
 interface ProjectionRankRow extends FtsLaneRankRow {
   readonly projection_id: number;
   readonly projection_kind: EvidenceSearchProjectionIdentity["projection_kind"];
+  readonly projection_content: string;
+  readonly owner_content: string;
+  readonly owner_gist: string;
+  readonly source_hash: string;
 }
 
 function buildEvidenceLaneHits(
@@ -242,16 +246,25 @@ function selectProjectionRepresentatives(
 
 function compareProjectionRows(left: ProjectionRankRow, right: ProjectionRankRow): number {
   return left.raw_rank - right.raw_rank ||
-    projectionKindPriority(left.projection_kind) -
-    projectionKindPriority(right.projection_kind) ||
+    compareProjectionContent(left, right) ||
+    left.source_hash.localeCompare(right.source_hash) ||
     left.projection_id - right.projection_id;
 }
 
 function compareProjectionRanks(left: ProjectionRankRow, right: ProjectionRankRow): number {
   return left.raw_rank - right.raw_rank ||
-    left.object_id.localeCompare(right.object_id) ||
-    left.projection_kind.localeCompare(right.projection_kind) ||
-    left.projection_id - right.projection_id;
+    left.owner_content.localeCompare(right.owner_content) ||
+    left.owner_gist.localeCompare(right.owner_gist) ||
+    left.source_hash.localeCompare(right.source_hash) ||
+    compareProjectionContent(left, right) ||
+    left.projection_id - right.projection_id ||
+    left.object_id.localeCompare(right.object_id);
+}
+
+function compareProjectionContent(left: ProjectionRankRow, right: ProjectionRankRow): number {
+  return projectionKindPriority(left.projection_kind) -
+    projectionKindPriority(right.projection_kind) ||
+    left.projection_content.localeCompare(right.projection_content);
 }
 
 function mergeEvidenceHits(

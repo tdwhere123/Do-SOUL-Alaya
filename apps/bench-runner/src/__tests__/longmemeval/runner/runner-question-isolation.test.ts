@@ -28,10 +28,9 @@ const spools: LongMemEvalDiagnosticsSpool[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.startDaemon.mockImplementation(async (options: { dataDirRoot: string }) => ({
-    dataDir: options.dataDirRoot,
-    shutdown: vi.fn(async () => undefined)
-  }));
+  mocks.startDaemon.mockImplementation(async (options: { dataDirRoot: string }) =>
+    daemonHandle(options.dataDirRoot, "rule_only")
+  );
   mocks.runQuestion.mockImplementation(async ({ question }: { question: { question_id: string } }) => ({
     questionId: question.question_id,
     hitAt5: true,
@@ -94,6 +93,33 @@ describe("ordinary LongMemEval question isolation", () => {
     });
   });
 
+  it("seals and reports the daemon-selected reconciliation basis", async () => {
+    const context = await runContext(await ownedRoot(), ["first", "second"]);
+    const sealedContext: LongMemEvalRunContext = {
+      ...context,
+      opts: { ...context.opts, expectedReconciliationBasis: "rule_only" }
+    };
+
+    const result = await executeLongMemEvalRun(sealedContext);
+
+    expect(result.reconciliationBasis).toBe("rule_only");
+    for (const [options] of mocks.startDaemon.mock.calls) {
+      expect(options).toMatchObject({ expectedReconciliationBasis: "rule_only" });
+    }
+  });
+
+  it("rejects inconsistent reconciliation bases across isolated daemons", async () => {
+    mocks.startDaemon
+      .mockImplementationOnce(async (options: { dataDirRoot: string }) =>
+        daemonHandle(options.dataDirRoot, "rule_only"))
+      .mockImplementationOnce(async (options: { dataDirRoot: string }) =>
+        daemonHandle(options.dataDirRoot, "garden_llm"));
+
+    await expect(executeLongMemEvalRun(
+      await runContext(await ownedRoot(), ["first", "second"])
+    )).rejects.toThrow("reconciliation basis changed across isolated daemons");
+  });
+
   it("preserves the single-question worker result", async () => {
     const result = await executeLongMemEvalRun(
       await runContext(await ownedRoot(), ["solo"])
@@ -106,6 +132,27 @@ describe("ordinary LongMemEval question isolation", () => {
       diagnostics: expect.objectContaining({ candidates: [] })
     })]);
   });
+  it("retains isolated databases with treatment-neutral formation", async () => {
+    const context = await runContext(await ownedRoot(), ["first", "second"]);
+    const materializationContext: LongMemEvalRunContext = {
+      ...context,
+      opts: { ...context.opts, materializeQuestionDbs: true },
+      removeSeedDataDirRoot: false
+    };
+
+    await executeLongMemEvalRun(materializationContext);
+    const dataRoots = mocks.startDaemon.mock.calls.map(([options]) => options.dataDirRoot);
+
+    await Promise.all(dataRoots.map(async (root) =>
+      expect(access(root)).resolves.toBeUndefined()
+    ));
+    for (const [input] of mocks.runQuestion.mock.calls) {
+      expect(input).toEqual(expect.objectContaining({
+        seedFormationMode: "treatment_neutral"
+      }));
+    }
+  });
+
 });
 
 async function ownedRoot(): Promise<string> {
@@ -154,5 +201,17 @@ async function runContext(
     seedDataDirRoot,
     removeSeedDataDirRoot: true,
     diagnosticsSpool
+  };
+}
+
+function daemonHandle(dataDir: string, basis: "rule_only" | "garden_llm") {
+  return {
+    dataDir,
+    runtime: {
+      services: {
+        reconciliationBasisStatus: { enabled: true as const, basis }
+      }
+    },
+    shutdown: vi.fn(async () => undefined)
   };
 }

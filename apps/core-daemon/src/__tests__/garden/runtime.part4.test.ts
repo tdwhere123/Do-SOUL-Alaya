@@ -458,8 +458,8 @@ describe("garden runtime targeted embedding backfill pass", () => {
     await expect(runtime.runEmbeddingBackfillPass("workspace-1")).resolves.toBeUndefined();
 
     expect(warn.mock.calls.map((call) => call[1]?.phase)).toEqual([
-      "coherence",
       "answers_with",
+      "coherence",
       "completion"
     ]);
     expect(scheduler.completions).toContainEqual(

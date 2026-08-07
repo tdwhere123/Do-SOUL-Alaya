@@ -192,12 +192,8 @@ describe("RecallService embedding request score snapshot", () => {
     expect(candidates.get(invalid.object_id)?.score_factors?.embedding_similarity).toBeUndefined();
     expect(candidates.get(degenerate.object_id)?.score_factors?.embedding_similarity)
       .toBeUndefined();
-    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
-    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
-      deliveredIds.indexOf(invalid.object_id)
-    );
-    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
-      deliveredIds.indexOf(degenerate.object_id)
+    expect(new Set(result.candidates.map((candidate) => candidate.relevance_score))).toEqual(
+      new Set([result.candidates[0]!.relevance_score])
     );
   });
 

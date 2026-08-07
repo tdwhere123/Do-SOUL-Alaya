@@ -89,6 +89,7 @@ export interface LongMemEvalQuestionRunInput {
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly captureSnapshot: boolean;
+  readonly seedFormationMode: "treatment_neutral" | "diagnostic_warmup";
   readonly qaChat?: QaChatFn;
   readonly qaJudgeChat?: QaChatFn;
 }
@@ -185,9 +186,7 @@ async function prepareLongMemEvalQuestionInWorkspace(
       question: input.question,
       seedRunner: input.seedRunner,
       qaChat: input.qaChat,
-      seedFormationMode: input.captureSnapshot
-        ? "treatment_neutral"
-        : "diagnostic_warmup"
+      seedFormationMode: input.seedFormationMode
     })
   );
   const { embeddingWarmup, queryEmbeddingWarmup } = await runQuestionPhase(
@@ -348,7 +347,7 @@ export async function runAnswersWithEdges(
   console.error(
     `[answers-with-edges] q=${questionId} ` +
       `co_relevant=${summary.coRelevantPairs} kept=${summary.keptPairs} ` +
-      `minted=${summary.minted}`
+      `admitted=${summary.admitted}`
   );
 }
 

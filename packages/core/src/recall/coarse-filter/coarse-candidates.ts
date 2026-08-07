@@ -1,6 +1,10 @@
 import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers.js";
+import {
+  clamp01,
+  compareMemoryEntries,
+  compareMemoryEntriesForActivationAdmission
+} from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallAdmissionPlane,
@@ -383,7 +387,7 @@ export function selectSourceProximitySeedDrafts(
       if (strengthDelta !== 0) {
         return strengthDelta;
       }
-      return compareMemoryEntries(left.draft.entry, right.draft.entry);
+      return compareMemoryEntriesForActivationAdmission(left.draft.entry, right.draft.entry);
     })
     .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP);
 

@@ -1,4 +1,9 @@
-import type { AnswerCoRelevancePairSourcePort } from "./answers-with-edge-producer-service.js";
+import { createHash } from "node:crypto";
+import type {
+  AnswerCoRelevancePairSourcePort,
+  AnswerCoRelevancePairWitness
+} from "./answers-with-edge-producer-service.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
 
 // Default min shared content-token count for an answers_with edge; bench-tunable.
 export const DEFAULT_ANSWER_OVERLAP_BAR = 3;
@@ -32,6 +37,14 @@ const CJK_STOPWORD_BIGRAMS: ReadonlySet<string> = new Set([
   "什么", "为什", "时候", "如何", "怎么", "怎样", "何时", "为何",
   "哪里", "哪个", "哪些", "是否", "多少", "几个", "可以", "能否"
 ]);
+
+export const ANSWER_OVERLAP_POLICY_ID = "hq_answer_overlap_v1";
+export const ANSWER_OVERLAP_POLICY_SHA256 = sha256(JSON.stringify({
+  policy_id: ANSWER_OVERLAP_POLICY_ID,
+  latin_stopwords: [...HQ_STOPWORDS].sort(),
+  cjk_stopword_bigrams: [...CJK_STOPWORD_BIGRAMS].sort(),
+  segmentation: "unicode-word-runs-and-cjk-bigrams-v1"
+}));
 
 // Pool a memory's HQ list into one normalized content-token set. Latin/other word
 // runs split on punctuation/whitespace (byte-identical to non-CJK pre-N1 behavior);
@@ -85,65 +98,129 @@ function addCjkBigrams(run: string, tokens: Set<string>): void {
   }
 }
 
-function sharedTokenCount(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+function sharedTokens(a: ReadonlySet<string>, b: ReadonlySet<string>): readonly string[] {
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];
-  let shared = 0;
-  for (const token of small) {
-    if (large.has(token)) {
-      shared += 1;
-    }
-  }
-  return shared;
+  return Object.freeze([...small].filter((token) => large.has(token)).sort());
 }
 
-// Pairs of objects whose pooled HQ content-token sets share >= bar tokens, as
-// canonical `${low}|${high}` keys. Objects without HQ never pair. O(n^2) over the
-// candidate batch (same shape as coherentPairKeys), fine for per-question/backfill sizes.
-export function answerCoRelevantPairKeysFromHq(
-  hqByObjectId: ReadonlyMap<string, readonly string[]>,
+export function answerCoRelevantPairWitnessesFromHq(
+  observationByObjectId: ReadonlyMap<string, Readonly<MemoryHqObservation>>,
   objectIds: readonly string[],
   bar: number
-): ReadonlySet<string> {
+): readonly AnswerCoRelevancePairWitness[] {
   const tokenSets = new Map<string, ReadonlySet<string>>();
   for (const objectId of objectIds) {
-    const hqs = hqByObjectId.get(objectId);
-    if (hqs !== undefined && hqs.length > 0) {
-      tokenSets.set(objectId, normalizeHqTokens(hqs));
+    const observation = observationByObjectId.get(objectId);
+    if (observation !== undefined && observation.hqs.length > 0) {
+      tokenSets.set(objectId, normalizeHqTokens(observation.hqs));
     }
   }
   const withTokens = [...tokenSets.keys()];
-  const pairs = new Set<string>();
-  for (let i = 0; i < withTokens.length; i += 1) {
-    for (let j = i + 1; j < withTokens.length; j += 1) {
-      const a = withTokens[i]!;
-      const b = withTokens[j]!;
-      if (sharedTokenCount(tokenSets.get(a)!, tokenSets.get(b)!) >= bar) {
-        const [low, high] = a < b ? [a, b] : [b, a];
-        pairs.add(`${low}|${high}`);
-      }
+  const witnesses: AnswerCoRelevancePairWitness[] = [];
+  for (let leftIndex = 0; leftIndex < withTokens.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < withTokens.length; rightIndex += 1) {
+      const leftId = withTokens[leftIndex]!;
+      const rightId = withTokens[rightIndex]!;
+      const shared = sharedTokens(tokenSets.get(leftId)!, tokenSets.get(rightId)!);
+      if (shared.length < bar) continue;
+      const left = observationByObjectId.get(leftId)!;
+      const right = observationByObjectId.get(rightId)!;
+      witnesses.push(buildPairWitness(left, right, bar, shared));
     }
   }
-  return pairs;
+  return Object.freeze(witnesses);
+}
+
+export interface MemoryHqObservation {
+  readonly observation_id: string;
+  readonly object_id: string;
+  readonly workspace_id: string;
+  readonly hqs: readonly string[];
+  readonly evidence_receipt: AnswerCoRelevancePairWitness["evidenceReceipts"][number];
+  readonly hq_content_sha256: string;
+  readonly observation_sha256: string;
 }
 
 export interface MemoryHqReadPort {
-  getHqByObjectIds(
+  getObservationsByObjectIds(
     objectIds: readonly string[]
-  ): Promise<ReadonlyMap<string, readonly string[]>>;
+  ): Promise<ReadonlyMap<string, Readonly<MemoryHqObservation>>>;
 }
 
-// AnswerCoRelevancePairSourcePort backed by the memory_hq store: read HQ then run
-// the pure overlap metric. Truth-boundary producers depend only on the port.
 export class HqAnswerOverlapPairSource implements AnswerCoRelevancePairSourcePort {
   public constructor(private readonly hqRepo: MemoryHqReadPort) {}
 
-  public async answerCoRelevantPairKeys(params: {
+  public async answerCoRelevantPairs(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly objectIds: readonly string[];
     readonly bar: number;
-  }): Promise<ReadonlySet<string>> {
-    const hqByObjectId = await this.hqRepo.getHqByObjectIds(params.objectIds);
-    return answerCoRelevantPairKeysFromHq(hqByObjectId, params.objectIds, params.bar);
+  }): Promise<readonly AnswerCoRelevancePairWitness[]> {
+    const observations = await this.hqRepo.getObservationsByObjectIds(params.objectIds);
+    for (const observation of observations.values()) {
+      if (observation.workspace_id !== params.workspaceId) {
+        throw new Error(`HQ observation ${observation.observation_id} belongs to another workspace.`);
+      }
+    }
+    return answerCoRelevantPairWitnessesFromHq(observations, params.objectIds, params.bar);
   }
+}
+
+function buildPairWitness(
+  left: Readonly<MemoryHqObservation>,
+  right: Readonly<MemoryHqObservation>,
+  bar: number,
+  shared: readonly string[]
+): AnswerCoRelevancePairWitness {
+  const [source, target] = left.object_id < right.object_id ? [left, right] : [right, left];
+  const evidenceReceipts = uniqueEvidenceReceipts([source.evidence_receipt, target.evidence_receipt]);
+  const sourceObservations = [source, target]
+    .map((observation) => ({
+      source_kind: "memory_hq_observation" as const,
+      source_id: observation.observation_id,
+      source_sha256: observation.observation_sha256
+    }))
+    .sort((a, b) => a.source_id.localeCompare(b.source_id));
+  const parameters = { bar };
+  const decision = {
+    shared_token_count: shared.length,
+    shared_token_sha256: sha256(JSON.stringify(shared))
+  };
+  return Object.freeze({
+    pair: Object.freeze([source.object_id, target.object_id] as const),
+    evidenceReceipts,
+    formationReceipt: {
+      operator_id: ANSWER_OVERLAP_POLICY_ID,
+      operator_sha256: ANSWER_OVERLAP_POLICY_SHA256,
+      parameters,
+      parameter_sha256: sha256(stableStringify(parameters)),
+      source_observations: sourceObservations,
+      decision,
+      decision_sha256: sha256(stableStringify(decision))
+    },
+    validFrom: evidenceReceipts.reduce(
+      (latest, receipt) => latest < receipt.source_event_anchor.occurred_at
+        ? receipt.source_event_anchor.occurred_at
+        : latest,
+      evidenceReceipts[0]!.source_event_anchor.occurred_at
+    )
+  });
+}
+
+function uniqueEvidenceReceipts(
+  receipts: readonly AnswerCoRelevancePairWitness["evidenceReceipts"][number][]
+): AnswerCoRelevancePairWitness["evidenceReceipts"] {
+  const byId = new Map<string, AnswerCoRelevancePairWitness["evidenceReceipts"][number]>();
+  for (const receipt of receipts) {
+    const existing = byId.get(receipt.evidence_id);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(receipt)) {
+      throw new Error(`Evidence ${receipt.evidence_id} has conflicting HQ source events.`);
+    }
+    byId.set(receipt.evidence_id, receipt);
+  }
+  return Object.freeze([...byId.values()].sort((a, b) => a.evidence_id.localeCompare(b.evidence_id)));
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }

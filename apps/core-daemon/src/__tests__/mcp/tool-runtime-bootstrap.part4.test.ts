@@ -188,7 +188,7 @@ describe("daemon tool runtime bootstrap", () => {
       providerWarmup.resolve("failed");
       await runtimePromise.catch(() => undefined);
     }
-  });
+  }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("logs unexpected embedding warmup observer failures without blocking boot", async () => {
     const warn = await installWarnLoggerSpy();

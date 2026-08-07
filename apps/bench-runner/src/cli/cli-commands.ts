@@ -117,6 +117,10 @@ function renderLongMemEvalStart(
     (qaOption !== undefined ? " qa=on" : "") +
     (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
     (opts.snapshotOut !== undefined ? " mode=snapshot-materialize" : "") +
+    (opts.materializeQuestionDbs ? " mode=question-db-materialize" : "") +
+    (opts.expectedReconciliationBasis === undefined
+      ? ""
+      : ` expected_reconciliation_basis=${opts.expectedReconciliationBasis}`) +
     "...\n";
 }
 
@@ -142,9 +146,13 @@ function buildLongMemEvalRunOptions(
     ...(qaOption === undefined ? {} : { qa: qaOption }),
     ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
+    ...(opts.materializeQuestionDbs ? { materializeQuestionDbs: true } : {}),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.extractionCacheRoot === undefined ? {} : { extractionCacheRoot: opts.extractionCacheRoot }),
     ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+    ...(opts.expectedReconciliationBasis === undefined
+      ? {}
+      : { expectedReconciliationBasis: opts.expectedReconciliationBasis }),
     ...(expansionCapability === undefined ? {} : { expansionCapability }),
     ...(opts.promotionContract === undefined
       ? {}

@@ -7,11 +7,13 @@ import {
 import {
   assertActivationWeightsSumToOne,
   buildRecallLogicalObjectKey,
+  compareMemoryEntriesForActivationAdmission,
   estimateTokens,
   isSynthesisChildCandidate,
   mapBudgetPenalty,
   resolveActivationWeights
 } from "../../recall/runtime/recall-service-helpers.js";
+import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import { makeTokenEstimator } from "../../recall/runtime/recall-service-types.js";
 
 function snapshot(overrides: Partial<BudgetSnapshot> = {}): BudgetSnapshot {
@@ -87,4 +89,19 @@ describe("recall service helpers", () => {
     expect(isSynthesisChildCandidate({ sourceChannels: ["synthesis_fts"] })).toBe(false);
     expect(isSynthesisChildCandidate({})).toBe(false);
   });
+  it("treats replay-local activation jitter as a semantic tie", () => {
+    const alpha = createMemoryEntry({
+      object_id: "memory-alpha",
+      content: "alpha",
+      activation_score: 0.9324999723600726
+    });
+    const beta = createMemoryEntry({
+      object_id: "memory-beta",
+      content: "beta",
+      activation_score: 0.9324999994735418
+    });
+
+    expect(compareMemoryEntriesForActivationAdmission(alpha, beta)).toBeLessThan(0);
+  });
+
 });

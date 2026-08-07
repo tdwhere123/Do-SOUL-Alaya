@@ -25,6 +25,10 @@ export {
   type RelationAssertionRepo
 } from "./relation-assertion-repo.js";
 export {
+  digestRelationFormationEventSource,
+  type RelationFormationEventSource
+} from "./relation-assertion/source-digest.js";
+export {
   SqliteTemporalPathProjectionReader,
   type TemporalProjectionReadOptions
 } from "./temporal-path-projection-reader.js";

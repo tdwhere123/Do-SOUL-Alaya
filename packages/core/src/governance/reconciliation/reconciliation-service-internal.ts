@@ -26,6 +26,7 @@ export interface ReconciliationInput {
   readonly runId: string;
   readonly signalId: string;
   readonly incomingContent: string;
+  readonly incomingDimension: MemoryEntry["dimension"];
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
   readonly incomingFacetTags?: MemoryEntry["facet_tags"];
@@ -305,4 +306,26 @@ export function errorMessage(error: unknown): string {
     return cause === undefined ? error.message : `${error.message}: ${errorMessage(cause)}`;
   }
   return String(error);
+}
+
+export function compareCandidateContent(
+  leftContent: string,
+  rightContent: string,
+  leftObjectId?: string,
+  rightObjectId?: string
+): number {
+  const leftNormalized = normalizeForIdentity(leftContent);
+  const rightNormalized = normalizeForIdentity(rightContent);
+  const normalizedDiff = leftNormalized.localeCompare(rightNormalized);
+  if (normalizedDiff !== 0) {
+    return normalizedDiff;
+  }
+  const rawDiff = leftContent.localeCompare(rightContent);
+  if (rawDiff !== 0) {
+    return rawDiff;
+  }
+  if (leftObjectId !== undefined && rightObjectId !== undefined) {
+    return leftObjectId.localeCompare(rightObjectId);
+  }
+  return 0;
 }

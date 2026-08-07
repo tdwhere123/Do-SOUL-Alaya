@@ -3,7 +3,8 @@ import { buildEvidenceSearchQueries } from "../../coarse-filter/coarse-candidate
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import {
   clamp01,
-  compareMemoryEntries
+  compareMemoryEntries,
+  compareMemorySemanticIdentity
 } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -189,7 +190,10 @@ function compareSynthesisChildCandidates(
   right: SynthesisChildCandidate
 ): number {
   const delta = right.synthesisRank - left.synthesisRank;
-  return delta !== 0 ? delta : compareMemoryEntries(left.candidate.entry, right.candidate.entry);
+  return delta !== 0
+    ? delta
+    : compareMemorySemanticIdentity(left.candidate.entry, right.candidate.entry) ||
+      compareMemoryEntries(left.candidate.entry, right.candidate.entry);
 }
 
 function buildSynthesisChildFtsRanks(

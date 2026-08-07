@@ -16,8 +16,9 @@ export type AssertionRow = Readonly<{
   readonly anchors_json: string;
   readonly relation_kind: string;
   readonly validity_json: string;
+  readonly formation_receipt_json: string;
   readonly admitted_at: string;
-  readonly evidence_ids_json: string;
+  readonly evidence_receipts_json: string;
 }>;
 
 export type ResolutionRow = Readonly<{
@@ -35,13 +36,17 @@ export function parseAssertionRow(row: AssertionRow): Readonly<RelationAssertion
     assertion_id: row.assertion_id,
     workspace_id: row.workspace_id,
     admission_event_id: row.admission_event_id,
-    evidence_ids: parseRelationAssertionJsonArray(
-      row.evidence_ids_json,
-      "relation assertion evidence"
+    evidence_receipts: parseRelationAssertionJsonArray(
+      row.evidence_receipts_json,
+      "relation assertion evidence receipts"
     ),
     anchors: parseRelationAssertionJson(row.anchors_json, "relation assertion anchors"),
     relation_kind: row.relation_kind,
     validity: parseRelationAssertionJson(row.validity_json, "relation assertion validity"),
+    formation_receipt: parseRelationAssertionJson(
+      row.formation_receipt_json,
+      "relation assertion formation receipt"
+    ),
     admitted_at: row.admitted_at
   });
 }

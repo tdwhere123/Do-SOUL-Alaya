@@ -60,41 +60,93 @@ function seedWorkspace(db: SqliteConnection): void {
 }
 
 function insertEligibleAnswersWith(db: SqliteConnection): void {
-  db.prepare(`INSERT INTO path_relations (
-    path_id, workspace_id, anchors_json, constitution_json, effect_vector_json,
-    plasticity_state_json, lifecycle_json, legitimacy_json, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    "path-answers-with",
-    "longmemeval-q-1",
-    JSON.stringify({
+  const generation = "fixture-answers-with";
+  const asOf = "2026-07-30T00:00:00.000Z";
+  const digest = "e".repeat(64);
+  db.prepare(`INSERT INTO temporal_projection_generations (
+    generation, assertion_schema_generation, assertion_event_contract_generation,
+    projection_schema_generation, projection_policy_id, projection_policy_sha256,
+    history_digest, as_of, projection_count, projection_digest, status,
+    created_at, verified_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'verified', ?, ?)`).run(
+    generation,
+    "relation_assertion_v2",
+    "relation_assertion_event_v2",
+    "relation_path_projection_v1",
+    "relation-path-projection-v1",
+    digest,
+    digest,
+    asOf,
+    digest,
+    asOf,
+    asOf
+  );
+  const path = {
+    path_id: "path-answers-with",
+    workspace_id: "longmemeval-q-1",
+    anchors: {
       source_anchor: { kind: "object", object_id: "memory-a" },
       target_anchor: { kind: "object", object_id: "memory-b" }
-    }),
-    JSON.stringify({
+    },
+    constitution: {
       relation_kind: "answers_with",
       why_this_relation_exists: ["answer overlap"]
-    }),
-    JSON.stringify({
+    },
+    effect_vector: {
       salience: 1,
       recall_bias: 1,
       verification_bias: 0,
       unfinishedness_bias: 0,
       default_manifestation_preference: "lens_entry"
-    }),
-    JSON.stringify({
+    },
+    plasticity_state: {
       strength: 1,
       direction_bias: "source_to_target",
       stability_class: "stable",
       support_events_count: 1,
       contradiction_events_count: 0
-    }),
-    JSON.stringify({ status: "active", retirement_rule: "manual" }),
-    JSON.stringify({
+    },
+    lifecycle: { status: "active", retirement_rule: "manual" },
+    legitimacy: {
       evidence_basis: ["answer overlap"],
       governance_class: "recall_allowed"
-    }),
-    "2026-07-30T00:00:00.000Z",
-    "2026-07-30T00:00:00.000Z"
+    },
+    created_at: asOf,
+    updated_at: asOf
+  };
+  db.prepare(`INSERT INTO relation_assertions (
+    assertion_id, workspace_id, admission_event_id, identity_key,
+    anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    "assertion-answers-with",
+    path.workspace_id,
+    "admission-answers-with",
+    "identity-answers-with",
+    JSON.stringify(path.anchors),
+    path.constitution.relation_kind,
+    JSON.stringify({ kind: "open", valid_from: asOf }),
+    JSON.stringify({}),
+    asOf
+  );
+  db.prepare(`INSERT INTO relation_path_projections (
+    generation, path_id, assertion_id, workspace_id, projection_json
+  ) VALUES (?, ?, ?, ?, ?)`).run(
+    generation,
+    path.path_id,
+    "assertion-answers-with",
+    path.workspace_id,
+    JSON.stringify(path)
+  );
+  db.prepare(`UPDATE temporal_schema_state
+    SET active_projection_generation = ?, active_as_of = ?,
+        history_digest = ?, projection_count = 1, projection_digest = ?,
+        status = 'ready', updated_at = ?
+    WHERE state_id = 1`).run(
+    generation,
+    asOf,
+    digest,
+    digest,
+    asOf
   );
 }
 

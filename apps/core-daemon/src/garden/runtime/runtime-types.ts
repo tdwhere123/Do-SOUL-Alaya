@@ -126,12 +126,12 @@ export interface BulkEnrichEdgeProducerPort {
   }): Promise<void>;
 }
 
-export interface BulkEmbeddingCoherencePort {
+export interface BulkFormationFollowUpPort {
   crystallizeForBackfill(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly objectIds: readonly string[];
-  }): Promise<{ readonly minted: number }>;
+  }): Promise<void>;
 }
 
 export interface BulkEnrichSourceSignalLookupPort {
@@ -194,8 +194,8 @@ export type CreateGardenRuntimeInput = {
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
-  readonly coherenceEdgeProducerPort?: BulkEmbeddingCoherencePort;
-  readonly answersWithEdgeProducerPort?: BulkEmbeddingCoherencePort;
+  readonly coherenceEdgeProducerPort?: BulkFormationFollowUpPort;
+  readonly answersWithEdgeProducerPort?: BulkFormationFollowUpPort;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;

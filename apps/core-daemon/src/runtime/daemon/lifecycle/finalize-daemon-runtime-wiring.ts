@@ -225,9 +225,12 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
   };
 }
 
-function createAnswersWithPairSourceExport(input: FinalizeDaemonRuntimeWiringInput) {
+function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
   const hqRepo = createOptionalMemoryHqRepo(input.database);
-  return hqRepo === null ? {} : { answersWithPairSource: new HqAnswerOverlapPairSource(hqRepo) };
+  return hqRepo === null ? {} : {
+    answersWithPairSource: new HqAnswerOverlapPairSource(hqRepo),
+    memoryHqWriter: hqRepo
+  };
 }
 
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
@@ -239,14 +242,16 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     ...(input.embeddingRecallService === undefined
       ? {}
       : { embeddingRecallService: input.embeddingRecallService }),
-    ...createAnswersWithPairSourceExport(input),
+    ...createMemoryHqExports(input),
     graphHealthService: input.graphHealthService,
     configService: input.configService,
     recallService: input.recallService,
     signalService: input.signalService,
     synthesisService: input.synthesisService,
     pathRelationProposalService: input.pathRelationProposalService,
+    relationAssertionService: input.relationAssertionService,
     recallUtilizationService: input.recallUtilizationService,
+    reconciliationBasisStatus: input.reconciliationBasisStatus,
     runService: input.runService,
     trustStateRecorder: input.trustStateRecorder,
     workspaceService: input.securedWorkspaceService,

@@ -13,7 +13,7 @@ describe("answers-with edges", () => {
     const accrueAnswersWithCoRelevance = vi.fn(async () => ({
       coRelevantPairs: 1,
       keptPairs: 1,
-      minted: 1
+      admitted: 1
     }));
     const members = [
       { memoryId: "memory-a", sessionId: "session-a", formationKey: "formation-a" },

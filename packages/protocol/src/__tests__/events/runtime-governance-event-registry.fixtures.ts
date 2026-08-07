@@ -78,7 +78,27 @@ export const stanceResolutionPayload = {
 export const relationAssertionAdmittedPayload = {
       assertion_id: "assertion-1",
       workspace_id: "workspace-1",
-      evidence_ids: ["evidence-1"],
+      evidence_receipts: [{
+        evidence_id: "evidence-1",
+        source_event_anchor: {
+          event_type: "soul.signal.emitted",
+          event_id: "event-1",
+          occurred_at: validTimestamp
+        }
+      }],
+      formation_receipt: {
+        operator_id: "operator-1",
+        operator_sha256: "a".repeat(64),
+        parameters: { bar: 3 },
+        parameter_sha256: "b".repeat(64),
+        source_observations: [{
+          source_kind: "event_log_entry",
+          source_id: "event-1",
+          source_sha256: "c".repeat(64)
+        }],
+        decision: { accepted: true },
+        decision_sha256: "d".repeat(64)
+      },
       anchors: {
         source_anchor: { kind: "object", object_id: "object-1" },
         target_anchor: { kind: "object", object_id: "object-2" }

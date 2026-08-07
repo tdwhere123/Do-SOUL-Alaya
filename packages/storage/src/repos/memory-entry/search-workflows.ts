@@ -18,6 +18,10 @@ import {
   type FtsKeywordSearchRow,
   type ObjectIdFilterColumn
 } from "./keyword-search.js";
+import {
+  compareMemoryEntrySemanticTie,
+  MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL
+} from "./semantic-tie-order.js";
 import type { SqliteAllStatement } from "./statement-types.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import { freezeKeywordSearchResults } from "./search/freeze-keyword-results.js";
@@ -34,6 +38,8 @@ interface KeywordLaneTokens {
   readonly trigram: readonly string[];
   readonly porter: readonly string[];
 }
+
+type RankedExactKeywordSearchRow = ExactKeywordSearchRow & ExactKeywordCandidateRow;
 export async function searchByKeyword(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
@@ -174,7 +180,7 @@ export function searchMemoryFtsLaneRows(
       AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
       ${tierPredicate}
       ${objectIdFilter.sql}
-    ORDER BY raw_rank ASC, ${table}.object_id ASC
+    ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, ${table}.object_id ASC
     LIMIT ?
   `).all(
     workspaceId,
@@ -261,7 +267,7 @@ export function searchExactKeywordRows(
 
   const tokenMatchers = tokens.map((token) => createShortKeywordMatcher(token));
   const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds);
-  const rows: ExactKeywordSearchRow[] = [];
+  const rows: RankedExactKeywordSearchRow[] = [];
   let lastObjectId: string | null = null;
 
   while (true) {
@@ -287,7 +293,11 @@ export function searchExactKeywordRows(
 
   return rows
     .sort(compareExactKeywordRows)
-    .slice(0, limit);
+    .slice(0, limit)
+    .map(({ object_id, matched_token_count }) => Object.freeze({
+      object_id,
+      matched_token_count
+    }));
 }
 
 function readExactKeywordCandidateBatch(
@@ -300,7 +310,21 @@ function readExactKeywordCandidateBatch(
   const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
   const tierPredicate = tier === undefined ? "" : "AND storage_tier = ?";
   return this.activeConnection().prepare(`
-    SELECT object_id, content
+    SELECT
+      object_id,
+      content,
+      dimension,
+      source_kind,
+      formation_kind,
+      scope_class,
+      event_time_start,
+      event_time_end,
+      valid_from,
+      valid_to,
+      time_precision,
+      time_source,
+      canonical_entities,
+      facet_tags
     FROM memory_entries
     WHERE workspace_id = ?
     AND COALESCE(retention_state, '') != 'tombstoned'
@@ -322,23 +346,28 @@ function readExactKeywordCandidateBatch(
 function matchExactKeywordRows(
   batch: readonly ExactKeywordCandidateRow[],
   tokenMatchers: readonly ((content: string) => boolean)[]
-): readonly ExactKeywordSearchRow[] {
+): readonly RankedExactKeywordSearchRow[] {
   return batch.flatMap((row) => {
     const matchedTokenCount = tokenMatchers.reduce(
       (count, matcher) => count + (matcher(row.content) ? 1 : 0),
       0
     );
     return matchedTokenCount > 0
-      ? [Object.freeze({ object_id: row.object_id, matched_token_count: matchedTokenCount })]
+      ? [Object.freeze({
+        ...row,
+        matched_token_count: matchedTokenCount
+      })]
       : [];
   });
 }
 
 function compareExactKeywordRows(
-  left: ExactKeywordSearchRow,
-  right: ExactKeywordSearchRow
+  left: RankedExactKeywordSearchRow,
+  right: RankedExactKeywordSearchRow
 ): number {
-  return right.matched_token_count - left.matched_token_count || left.object_id.localeCompare(right.object_id);
+  return right.matched_token_count - left.matched_token_count ||
+    compareMemoryEntrySemanticTie(left, right) ||
+    left.object_id.localeCompare(right.object_id);
 }
 
 function searchTrigramKeywordRowsWithinObjectIds(

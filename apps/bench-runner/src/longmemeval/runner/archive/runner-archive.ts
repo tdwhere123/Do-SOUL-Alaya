@@ -1,3 +1,4 @@
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type {
   BenchPolicyShape,
   BenchSimulateReportMode
@@ -41,6 +42,7 @@ export async function finalizeLongMemEvalRun(input: {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<LongMemEvalRunResult> {
   logLongMemEvalExtractionStats(input.extractionStats);
@@ -63,6 +65,7 @@ export async function finalizeLongMemEvalRun(input: {
     runAt: input.runAt,
     questionFailures: input.questionFailures,
     failedQuestionIds: input.failedQuestionIds,
+    reconciliationBasis: input.reconciliationBasis,
     collectedLength: input.collected.length,
     diagnosticsSpool: input.diagnosticsSpool
   });

@@ -132,7 +132,7 @@ async function seedSessionRoutedCorpus(memoryEntryRepo: SqliteMemoryEntryRepo): 
   const goldId = "00000000-0000-4000-8000-000000000001";
   await memoryEntryRepo.create(createMemoryEntry({
     object_id: goldId,
-    content: "The staging release pipeline rotates the database credentials nightly.",
+    content: "A staging release pipeline rotates the database credentials nightly.",
     surface_id: ANCHOR_SURFACE,
     activation_score: 0.3
   }));
@@ -152,7 +152,7 @@ async function seedSessionRoutedCorpus(memoryEntryRepo: SqliteMemoryEntryRepo): 
       activation_score: 0.35
     }));
   }
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     await memoryEntryRepo.create(createMemoryEntry({
       object_id: `00000000-0000-4000-8000-0000000000${String(index + 30).padStart(2, "0")}`,
       content: `Staging release database credentials note from another session number ${index}.`,

@@ -87,21 +87,24 @@ describe("LongMemEval run provenance", () => {
         effective_model_id: "Xenova/reranker",
         model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
       },
+      reconciliation_basis: "rule_only",
       paired_env: {
-        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
         ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
         ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
         ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "cached-family",
+        ALAYA_CONFLICT_DETECTION_ENABLED: "0",
         ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
+        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
+        ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
         ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
         ALAYA_LOCAL_ONNX_THREADS: "2",
-        OFFICIAL_API_GARDEN_MODEL: "cached-model",
+        ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
+        ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset",
         ALAYA_RECALL_ANSWERS_WITH: "1",
         ALAYA_RECALL_FACET_TAGS: "1",
         ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
-        ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
-        ALAYA_CONFLICT_DETECTION_ENABLED: "0",
-        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"
+        OFFICIAL_API_GARDEN_MODEL: "cached-model"
       }
     });
     expect(provenance.runtime.paired_env).not.toHaveProperty("ALAYA_RECALL_AUTH_HEADER");
@@ -136,10 +139,15 @@ describe("LongMemEval run provenance", () => {
     const legacyRuntime = { ...provenance.runtime };
     delete (legacyRuntime as { answer_rerank?: unknown }).answer_rerank;
     delete (legacyRuntime as { embedding_supplement?: unknown }).embedding_supplement;
+    delete (legacyRuntime as { reconciliation_basis?: unknown }).reconciliation_basis;
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       runtime: legacyRuntime
     }).success).toBe(true);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      runtime: { ...provenance.runtime, reconciliation_basis: "hybrid" }
+    }).success).toBe(false);
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       runtime: {

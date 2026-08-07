@@ -29,6 +29,7 @@ describe("snapshot graph preflight", () => {
     seedHqEndpoint(database.connection, "missing-direction-target");
     seedHqEndpoint(database.connection, "missing-source-kind-source");
     seedHqEndpoint(database.connection, "missing-source-kind-target");
+    seedProjectionState(database.connection, 12);
     insertPath(database.connection, "eligible");
     insertPath(database.connection, "inactive", { status: "dormant" });
     insertPath(database.connection, "non-positive", { recallBias: 0 });
@@ -148,31 +149,28 @@ function insertPath(
     omitSourceKind?: boolean;
   }> = {}
 ): void {
-  db.prepare(`INSERT INTO path_relations (
-    path_id, workspace_id, anchors_json, constitution_json, effect_vector_json,
-    plasticity_state_json, lifecycle_json, legitimacy_json, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    pathId,
-    "workspace-graph",
-    JSON.stringify({
+  const path = {
+    path_id: pathId,
+    workspace_id: "workspace-graph",
+    anchors: {
       source_anchor: {
         ...(!overrides.omitSourceKind ? { kind: "object" } : {}),
         object_id: `${pathId}-source`
       },
       target_anchor: { kind: "object", object_id: `${pathId}-target` }
-    }),
-    JSON.stringify({
+    },
+    constitution: {
       relation_kind: overrides.relationKind ?? "answers_with",
       why_this_relation_exists: ["graph preflight fixture"]
-    }),
-    JSON.stringify({
+    },
+    effect_vector: {
       salience: 1,
       recall_bias: overrides.recallBias ?? 1,
       verification_bias: 0,
       unfinishedness_bias: 0,
       default_manifestation_preference: "lens_entry"
-    }),
-    JSON.stringify({
+    },
+    plasticity_state: {
       strength: 1,
       ...(!overrides.omitDirection
         ? { direction_bias: "source_to_target" }
@@ -180,19 +178,82 @@ function insertPath(
       stability_class: "stable",
       support_events_count: 1,
       contradiction_events_count: 0
-    }),
-    JSON.stringify({
+    },
+    lifecycle: {
       status: overrides.status ?? "active",
       retirement_rule: "manual"
-    }),
-    JSON.stringify({
+    },
+    legitimacy: {
       evidence_basis: overrides.evidenceBasis ?? ["graph preflight fixture"],
       ...(!overrides.omitGovernance
         ? { governance_class: overrides.governance ?? "recall_allowed" }
         : {})
-    }),
-    "2026-07-30T00:00:00.000Z",
-    "2026-07-30T00:00:00.000Z"
+    },
+    created_at: "2026-07-30T00:00:00.000Z",
+    updated_at: "2026-07-30T00:00:00.000Z"
+  };
+  db.prepare(`INSERT INTO relation_assertions (
+    assertion_id, workspace_id, admission_event_id, identity_key,
+    anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    `assertion-${pathId}`,
+    path.workspace_id,
+    `admission-${pathId}`,
+    `identity-${pathId}`,
+    JSON.stringify(path.anchors),
+    path.constitution.relation_kind,
+    JSON.stringify({ kind: "open", valid_from: path.created_at }),
+    JSON.stringify({}),
+    path.created_at
+  );
+  db.prepare(`INSERT INTO relation_path_projections (
+    generation, path_id, assertion_id, workspace_id, projection_json
+  ) VALUES (?, ?, ?, ?, ?)`).run(
+    "fixture-graph-preflight",
+    path.path_id,
+    `assertion-${pathId}`,
+    path.workspace_id,
+    JSON.stringify(path)
+  );
+}
+
+function seedProjectionState(
+  db: SqliteConnection,
+  projectionCount: number
+): void {
+  const generation = "fixture-graph-preflight";
+  const asOf = "2026-07-30T00:00:00.000Z";
+  const digest = "f".repeat(64);
+  db.prepare(`INSERT INTO temporal_projection_generations (
+    generation, assertion_schema_generation, assertion_event_contract_generation,
+    projection_schema_generation, projection_policy_id, projection_policy_sha256,
+    history_digest, as_of, projection_count, projection_digest, status,
+    created_at, verified_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', ?, ?)`).run(
+    generation,
+    "relation_assertion_v2",
+    "relation_assertion_event_v2",
+    "relation_path_projection_v1",
+    "relation-path-projection-v1",
+    digest,
+    digest,
+    asOf,
+    projectionCount,
+    digest,
+    asOf,
+    asOf
+  );
+  db.prepare(`UPDATE temporal_schema_state
+    SET active_projection_generation = ?, active_as_of = ?,
+        history_digest = ?, projection_count = ?, projection_digest = ?,
+        status = 'ready', updated_at = ?
+    WHERE state_id = 1`).run(
+    generation,
+    asOf,
+    digest,
+    projectionCount,
+    digest,
+    asOf
   );
 }
 

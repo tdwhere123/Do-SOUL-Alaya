@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   MemoryGovernanceEventType,
@@ -12,12 +12,17 @@ import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PathRelationProposalService,
   RelationAssertionService,
-  scheduleAuditedAsyncSideEffect
+  scheduleAuditedAsyncSideEffect,
+  stableStringify
 } from "@do-soul/alaya-core";
 import type {
   PathRelationProposalPayload,
   TemporalRelationAssertionPort as SoulTemporalRelationAssertionPort
 } from "@do-soul/alaya-soul";
+import {
+  digestRelationFormationEventSource,
+  type RelationFormationEventSource
+} from "@do-soul/alaya-storage";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 export type PathRelationProposalPort = {
@@ -51,11 +56,17 @@ type PathRelationRuntimeInput = Pick<
 
 export function createPathRelationRuntime(input: PathRelationRuntimeInput): Readonly<{
   readonly pathRelationProposalService: PathRelationProposalService;
+  readonly relationAssertionService: RelationAssertionService;
   readonly pathRelationProposalPort: PathRelationProposalPort;
   readonly temporalRelationAssertionPort: TemporalRelationAssertionPort;
   readonly pathRelationEvictionTimer: NodeJS.Timeout;
 }> {
   const runtimeConfig = readPathRelationRuntimeConfig();
+  const relationAssertionService = new RelationAssertionService({
+    repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher,
+    eventHistory: input.eventLogRepo
+  });
   const pathRelationProposalService = createPathRelationProposalService(input, runtimeConfig);
   const pathRelationEvictionTimer = createPathRelationEvictionTimer(
     input,
@@ -63,9 +74,13 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
     runtimeConfig.counterTtlMs
   );
   const pathRelationProposalPort = createPathRelationProposalPort(input);
-  const temporalRelationAssertionPort = createTemporalRelationAssertionPort(input);
+  const temporalRelationAssertionPort = createTemporalRelationAssertionPort(
+    input,
+    relationAssertionService
+  );
   return Object.freeze({
     pathRelationProposalService,
+    relationAssertionService,
     pathRelationProposalPort,
     temporalRelationAssertionPort,
     pathRelationEvictionTimer
@@ -73,28 +88,49 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
 }
 
 function createTemporalRelationAssertionPort(
-  input: Pick<PathRelationRuntimeInput, "eventLogRepo" | "eventPublisher" | "relationAssertionRepo">
+  input: Pick<PathRelationRuntimeInput, "eventLogRepo">,
+  service: RelationAssertionService
 ): TemporalRelationAssertionPort {
-  const service = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  });
   return {
     admit: async (admission) => {
+      const sourceEventAnchor = {
+        event_type: admission.sourceEventAnchor.event_type,
+        event_id: admission.sourceEventAnchor.event_id,
+        occurred_at: admission.sourceEventAnchor.occurred_at
+      };
+      const sourceEvent = (await input.eventLogRepo.queryByEntity(
+        "candidate_memory_signal",
+        admission.sourceSignalId
+      )).find((event) => event.event_id === sourceEventAnchor.event_id);
+      if (
+        sourceEvent === undefined ||
+        sourceEvent.event_type !== sourceEventAnchor.event_type ||
+        sourceEvent.entity_type !== "candidate_memory_signal" ||
+        sourceEvent.entity_id !== admission.sourceSignalId ||
+        sourceEvent.workspace_id !== admission.workspaceId
+      ) {
+        throw new Error(`Relation source event ${sourceEventAnchor.event_id} does not match its anchor.`);
+      }
+      const evidenceReceipts = admission.evidenceIds.map((evidenceId) => ({
+        evidence_id: evidenceId,
+        source_event_anchor: sourceEventAnchor
+      }));
+      const formationReceipt = buildSignalFormationReceipt({
+        sourceEvent,
+        evidenceReceipts,
+        anchors: admission.anchors,
+        relationKind: admission.relationKind,
+        validity: admission.validity
+      });
       const result = await service.admit({
         workspaceId: admission.workspaceId,
         runId: admission.runId,
         causedBy: "garden",
-        evidenceIds: admission.evidenceIds,
+        evidenceReceipts,
+        formationReceipt,
         anchors: admission.anchors,
         relationKind: admission.relationKind,
-        validity: admission.validity,
-        sourceEventAnchor: {
-          eventType: admission.sourceEventAnchor.event_type,
-          eventId: admission.sourceEventAnchor.event_id,
-          occurredAt: admission.sourceEventAnchor.occurred_at
-        }
+        validity: admission.validity
       });
       return {
         object_kind: "relation_assertion",
@@ -102,6 +138,42 @@ function createTemporalRelationAssertionPort(
       };
     }
   };
+}
+
+function buildSignalFormationReceipt(input: Readonly<{
+  readonly sourceEvent: Readonly<RelationFormationEventSource>;
+  readonly evidenceReceipts: readonly Readonly<unknown>[];
+  readonly anchors: Readonly<unknown>;
+  readonly relationKind: string;
+  readonly validity: Readonly<unknown>;
+}>) {
+  const eventSha256 = digestRelationFormationEventSource(input.sourceEvent);
+  const operatorId = "signal_relation_assertion_admission_v1";
+  const parameters = { relation_kind: input.relationKind };
+  const decision = {
+    event_sha256: eventSha256,
+    evidence_receipts: input.evidenceReceipts,
+    anchors: input.anchors,
+    relation_kind: input.relationKind,
+    validity: input.validity
+  };
+  return {
+    operator_id: operatorId,
+    operator_sha256: sha256(`${operatorId}:verified-event-and-evidence-receipts`),
+    parameters,
+    parameter_sha256: sha256(stableStringify(parameters)),
+    source_observations: [{
+      source_kind: "event_log_entry" as const,
+      source_id: input.sourceEvent.event_id,
+      source_sha256: eventSha256
+    }],
+    decision,
+    decision_sha256: sha256(stableStringify(decision))
+  };
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function readPositiveNumberEnv(name: string): number | undefined {

@@ -1,12 +1,21 @@
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildLongMemEvalWorkerCliArgs,
   buildLongMemEvalWorkerEnvOverrides,
   buildLongMemEvalWorkerShardPlans,
   freezeProcessEnvForWorkers,
-  validateLongMemEvalConcurrency
+  validateLongMemEvalConcurrency,
+  resolveDefaultBenchRunnerCliPath,
 } from "../../../longmemeval/runner/runner-concurrency.js";
+
+describe("resolveDefaultBenchRunnerCliPath", () => {
+  it("resolves the checked-in bin entrypoint", () => {
+    expect(existsSync(resolveDefaultBenchRunnerCliPath())).toBe(true);
+  });
+});
 
 describe("buildLongMemEvalWorkerEnvOverrides", () => {
   it("adds shared ONNX single-flight env when concurrency>1 and embeddingMode=env", () => {
@@ -56,6 +65,24 @@ describe("buildLongMemEvalWorkerEnvOverrides", () => {
     });
     expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBe("1");
     expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toContain("local-onnx-inference.lock");
+  });
+});
+
+describe("buildLongMemEvalWorkerCliArgs", () => {
+  it("transports the expected reconciliation basis to every worker", () => {
+    const args = buildLongMemEvalWorkerCliArgs({
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/history",
+      expectedReconciliationBasis: "rule_only"
+    }, {
+      shardIndex: 0,
+      offset: 0,
+      limit: 1,
+      historyRoot: "/tmp/history/shard-0"
+    });
+
+    expect(args).toContain("--expected-reconciliation-basis");
+    expect(args[args.indexOf("--expected-reconciliation-basis") + 1]).toBe("rule_only");
   });
 });
 

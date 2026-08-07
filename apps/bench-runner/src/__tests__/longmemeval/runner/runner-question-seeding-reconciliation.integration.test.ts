@@ -151,8 +151,7 @@ describe("LongMemEval reconciliation provenance integration", () => {
         .get(state.seedRounds[0]!.memoryObjectIds[0]!) as { readonly hqs_json: string };
       expect(JSON.parse(hq.hqs_json)).toEqual([
         "Which drink was preferred?",
-        "I prefer tea.",
-        "What beverage did the user choose?"
+        "I prefer tea."
       ]);
     } finally {
       db.close();

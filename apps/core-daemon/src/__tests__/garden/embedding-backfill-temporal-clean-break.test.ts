@@ -26,7 +26,13 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
   const rejectionPort = createGardenLegacyPathCandidateRejectionPort(warn);
   const submitCandidate = vi.fn(rejectionPort.submitCandidate);
   const coherentPairKeys = vi.fn(async () => new Set(["memory-1|memory-2"]));
-  const answerCoRelevantPairKeys = vi.fn(async () => new Set(["memory-1|memory-2"]));
+  const answerCoRelevantPairs = vi.fn(async () => [answerWitness()]);
+  const admit = vi.fn(async () => ({
+    status: "admitted" as const,
+    assertion: {} as never,
+    activeProjectionCount: 1,
+    projectionGeneration: "test-generation"
+  }));
   const objects = [
     { objectId: "memory-1", sessionId: "run-1", formationKey: "2026-07-17T00:00:00.000Z" },
     { objectId: "memory-2", sessionId: "run-2", formationKey: "2026-07-17T00:01:00.000Z" }
@@ -37,8 +43,8 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
     warn
   });
   const answersWith = new AnswersWithEdgeProducerService({
-    pairSource: { answerCoRelevantPairKeys },
-    mintPort: { submitCandidate },
+    pairSource: { answerCoRelevantPairs },
+    assertionPort: { admit },
     warn
   });
   const completions: unknown[] = [];
@@ -51,7 +57,7 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
     },
     legacyTopologyMutationsEnabled,
     coherenceEdgeProducerPort: {
-      crystallizeForBackfill: async ({ workspaceId, runId }) =>
+      crystallizeForBackfill: async ({ workspaceId, runId }: { workspaceId: string; runId: string | null }) => {
         await coherence.crystallize({
           workspaceId,
           runId,
@@ -59,10 +65,11 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
           floor: 0.6,
           capPerNode: 3,
           crossSessionOnly: false
-        })
+        });
+      }
     },
     answersWithEdgeProducerPort: {
-      crystallizeForBackfill: async ({ workspaceId, runId }) =>
+      crystallizeForBackfill: async ({ workspaceId, runId }: { workspaceId: string; runId: string | null }) => {
         await answersWith.crystallize({
           workspaceId,
           runId,
@@ -70,7 +77,8 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
           bar: 0.1,
           capPerNode: 3,
           crossSessionOnly: false
-        })
+        });
+      }
     },
     gardenScheduler: {
       enqueue: vi.fn(),
@@ -86,7 +94,8 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
     warn,
     submitCandidate,
     coherentPairKeys,
-    answerCoRelevantPairKeys
+    answerCoRelevantPairs,
+    admit
   };
 }
 
@@ -109,12 +118,13 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
       expect(harness.completions).toHaveLength(1);
       expect(relations).toEqual([]);
       expect(harness.coherentPairKeys).not.toHaveBeenCalled();
-      expect(harness.answerCoRelevantPairKeys).not.toHaveBeenCalled();
+      expect(harness.answerCoRelevantPairs).toHaveBeenCalledOnce();
+      expect(harness.admit).toHaveBeenCalledOnce();
       expect(harness.submitCandidate).not.toHaveBeenCalled();
       expect(harness.warn).not.toHaveBeenCalled();
       expect(outcome.auditEntries).toEqual([
         "embedding_backfill:2",
-        "embedding_backfill_path_follow_up_deferred:temporal_assertion_provenance_required"
+        "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required"
       ]);
       expect(harness.completions).toContainEqual(expect.objectContaining({
         audit_entries: outcome.auditEntries
@@ -124,15 +134,45 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
     }
   });
 
-  it("executes both legacy follow-ups only when explicitly enabled", async () => {
+  it("executes witnessed answers_with plus opted-in legacy coherence", async () => {
     const harness = createHarness(true);
 
     const outcome = await harness.support.runEmbeddingBackfillTask(BACKFILL_TASK);
 
     expect(harness.coherentPairKeys).toHaveBeenCalledOnce();
-    expect(harness.answerCoRelevantPairKeys).toHaveBeenCalledOnce();
-    expect(harness.submitCandidate).toHaveBeenCalledTimes(2);
-    expect(harness.warn).toHaveBeenCalledTimes(2);
+    expect(harness.answerCoRelevantPairs).toHaveBeenCalledOnce();
+    expect(harness.admit).toHaveBeenCalledOnce();
+    expect(harness.submitCandidate).toHaveBeenCalledOnce();
+    expect(harness.warn).toHaveBeenCalledOnce();
     expect(outcome.auditEntries).toEqual(["embedding_backfill:2"]);
   });
 });
+
+function answerWitness() {
+  const observedAt = "2026-07-17T00:00:00.000Z";
+  return {
+    pair: ["memory-1", "memory-2"] as const,
+    evidenceReceipts: [{
+      evidence_id: "evidence-1",
+      source_event_anchor: {
+        event_type: "soul.signal.emitted",
+        event_id: "event-1",
+        occurred_at: observedAt
+      }
+    }],
+    formationReceipt: {
+      operator_id: "test_answers_with_v1",
+      operator_sha256: "a".repeat(64),
+      parameters: { bar: 1 },
+      parameter_sha256: "b".repeat(64),
+      source_observations: [{
+        source_kind: "memory_hq_observation",
+        source_id: "hq-1",
+        source_sha256: "c".repeat(64)
+      }],
+      decision: { shared_token_count: 1 },
+      decision_sha256: "d".repeat(64)
+    },
+    validFrom: observedAt
+  };
+}

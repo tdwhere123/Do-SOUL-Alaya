@@ -408,11 +408,11 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
   };
 }
 
-function resolveDefaultBenchRunnerCliPath(): string {
+export function resolveDefaultBenchRunnerCliPath(): string {
   const fromEnv = process.env.ALAYA_BENCH_RUNNER_CLI?.trim();
   if (fromEnv !== undefined && fromEnv.length > 0) {
     return resolve(fromEnv);
   }
   const here = fileURLToPath(import.meta.url);
-  return resolve(here, "../../../bin/alaya-bench-runner.mjs");
+  return resolve(dirname(here), "../../../bin/alaya-bench-runner.mjs");
 }

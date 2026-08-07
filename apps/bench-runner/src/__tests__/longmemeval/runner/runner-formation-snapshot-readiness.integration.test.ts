@@ -4,6 +4,13 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  initDatabase,
+  SqliteEvidenceCapsuleRepo,
+  SqliteEventLogRepo,
+  SqliteMemoryHqRepo
+} from "@do-soul/alaya-storage";
+import type { EvidenceCapsule } from "@do-soul/alaya-protocol";
+import {
   startBenchDaemon,
   type BenchDaemonHandle,
   type BenchEdgeFormationMember
@@ -36,7 +43,7 @@ describe("embedding-disabled runner formation to snapshot readiness", () => {
     });
     const dbPath = join(daemon.dataDir, "alaya.db");
     const workspaceId = daemon.workspaceId;
-    const members = seedEndpoints(dbPath, workspaceId, daemon.runId);
+    const members = await seedEndpoints(dbPath, workspaceId, daemon.runId);
 
     await runAnswersWithEdges("q-embedding-disabled-formation", daemon, members);
     await runAnswersWithEdges("q-embedding-disabled-formation", daemon, members);
@@ -46,10 +53,14 @@ describe("embedding-disabled runner formation to snapshot readiness", () => {
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       const rows = db.prepare(`
-        SELECT anchors_json, constitution_json, effect_vector_json,
-               lifecycle_json, legitimacy_json
-          FROM path_relations
+        SELECT projection_json
+          FROM relation_path_projections
          WHERE workspace_id = ?
+           AND generation = (
+             SELECT active_projection_generation
+               FROM temporal_schema_state
+              WHERE state_id = 1 AND status = 'ready'
+           )
       `).all(workspaceId) as unknown as RelationRow[];
       expect(rows).toHaveLength(1);
       expect(parseRelation(rows[0]!)).toMatchObject({
@@ -78,28 +89,25 @@ describe("embedding-disabled runner formation to snapshot readiness", () => {
 });
 
 interface RelationRow {
-  readonly anchors_json: string;
-  readonly constitution_json: string;
-  readonly effect_vector_json: string;
-  readonly lifecycle_json: string;
-  readonly legitimacy_json: string;
+  readonly projection_json: string;
 }
 
 function parseRelation(row: RelationRow) {
+  const projection = JSON.parse(row.projection_json) as Record<string, unknown>;
   return {
-    anchors: JSON.parse(row.anchors_json),
-    constitution: JSON.parse(row.constitution_json),
-    effect: JSON.parse(row.effect_vector_json),
-    lifecycle: JSON.parse(row.lifecycle_json),
-    legitimacy: JSON.parse(row.legitimacy_json)
+    anchors: projection.anchors,
+    constitution: projection.constitution,
+    effect: projection.effect_vector,
+    lifecycle: projection.lifecycle,
+    legitimacy: projection.legitimacy
   };
 }
 
-function seedEndpoints(
+async function seedEndpoints(
   dbPath: string,
   workspaceId: string,
   runId: string
-): readonly BenchEdgeFormationMember[] {
+): Promise<readonly BenchEdgeFormationMember[]> {
   const members = [
     {
       memoryId: "00000000-0000-4000-8000-000000000101",
@@ -112,41 +120,88 @@ function seedEndpoints(
       formationKey: "2026-05-01T00:00:00.000Z|0001"
     }
   ] satisfies readonly BenchEdgeFormationMember[];
-  const db = new DatabaseSync(dbPath);
-  try {
-    const insertMemory = db.prepare(`INSERT INTO memory_entries (
+  const database = initDatabase({ filename: dbPath });
+  const eventLog = new SqliteEventLogRepo(database);
+  const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
+  const hqRepo = new SqliteMemoryHqRepo(database);
+  const insertMemory = database.connection.prepare(`INSERT INTO memory_entries (
       object_id, created_at, updated_at, created_by, dimension, source_kind,
       formation_kind, scope_class, content, workspace_id, run_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    const insertHq = db.prepare(`INSERT INTO memory_hq (
-      object_id, workspace_id, hqs_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?)`);
-    for (const member of members) {
-      insertMemory.run(
-        member.memoryId,
-        "2026-07-30T00:00:00.000Z",
-        "2026-07-30T00:00:00.000Z",
-        "system",
-        "procedure",
-        "user",
-        "explicit",
-        "project",
-        `Answer memory ${member.memoryId}`,
-        workspaceId,
-        runId
-      );
-      insertHq.run(
-        member.memoryId,
-        workspaceId,
-        JSON.stringify([
-          "Which European capital did the user visit during spring?"
-        ]),
-        "2026-07-30T00:00:00.000Z",
-        "2026-07-30T00:00:00.000Z"
-      );
-    }
-  } finally {
-    db.close();
+  for (const [index, member] of members.entries()) {
+    insertMemory.run(
+      member.memoryId,
+      "2026-07-30T00:00:00.000Z",
+      "2026-07-30T00:00:00.000Z",
+      "system",
+      "procedure",
+      "user",
+      "explicit",
+      "project",
+      `Answer memory ${member.memoryId}`,
+      workspaceId,
+      runId
+    );
+    const sourceEvent = await eventLog.append({
+      event_type: "engine.response.received",
+      entity_type: "engine_response",
+      entity_id: member.memoryId,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: "test",
+      payload_json: { source: "formation-fixture" }
+    });
+    const evidenceId = `00000000-0000-4000-8000-00000000020${index + 1}`;
+    await evidenceRepo.create(evidenceCapsule({
+      object_id: evidenceId,
+      workspace_id: workspaceId,
+      run_id: runId,
+      event_anchor: {
+        event_type: sourceEvent.event_type,
+        event_id: sourceEvent.event_id,
+        occurred_at: sourceEvent.created_at
+      },
+      source_hash: `sha256:${evidenceId}`,
+      gist: `Answer evidence ${member.memoryId}`,
+      excerpt: `Answer evidence ${member.memoryId}`
+    }));
+    await hqRepo.upsertFromEvidence({
+      object_id: member.memoryId,
+      workspace_id: workspaceId,
+      hqs: ["Which European capital did the user visit during spring?"],
+      evidence_id: evidenceId,
+      producer_id: "formation_fixture_hq_v1",
+      created_at: sourceEvent.created_at,
+      updated_at: sourceEvent.created_at
+    });
   }
   return members;
+}
+
+function evidenceCapsule(overrides: Partial<EvidenceCapsule>): EvidenceCapsule {
+  return {
+    object_id: "00000000-0000-4000-8000-000000000201",
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-07-30T00:00:00.000Z",
+    updated_at: "2026-07-30T00:00:00.000Z",
+    created_by: "bench_fixture",
+    evidence_kind: "conversation_excerpt",
+    semantic_anchor: {
+      topic: "formation fixture",
+      keywords: ["capital"],
+      summary: "Answer evidence"
+    },
+    event_anchor: null,
+    physical_anchor: null,
+    evidence_health_state: "verified",
+    gist: "Answer evidence",
+    excerpt: "Answer evidence",
+    source_hash: "sha256:formation-fixture",
+    run_id: "longmemeval-formation-ready-run",
+    workspace_id: "longmemeval-formation-ready",
+    surface_id: null,
+    ...overrides
+  };
 }

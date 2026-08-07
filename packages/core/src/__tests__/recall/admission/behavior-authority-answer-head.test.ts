@@ -81,6 +81,54 @@ describe("behavior authority answer head", () => {
 
     expect(selection.protections).toEqual([]);
   });
+
+  it("does not protect evidence against a weaker admission victim than the public head victim", () => {
+    const memories = [
+      ...Array.from({ length: 4 }, (_, index) => createCandidate(`head-${index + 1}`)),
+      createCandidate("gold", { content: "I currently use Acme shampoo brand." }),
+      ...Array.from({ length: 4 }, (_, index) => createCandidate(`tail-${index + 1}`)),
+      createCandidate("admission-victim", { content: "Unrelated deployment note." })
+    ];
+    const evidenceBase = createCandidate(
+      "evidence",
+      { content: "What do creatures currently use?" },
+      "evidence_capsule"
+    );
+    const evidence = {
+      ...evidenceBase,
+      fusion: {
+        ...evidenceBase.fusion,
+        candidate_key: "workspace_local:evidence_capsule:evidence",
+        per_stream_rank: {
+          ...evidenceBase.fusion.per_stream_rank,
+          evidence_fts: 5
+        }
+      }
+    };
+    const candidates = [...memories, evidence];
+    const publicRelevance = new Map(candidates.map((candidate, index) => [
+      candidate.fusion.candidate_key,
+      candidate.entry.object_id === "gold" ? 0.6 : Math.max(0.1, 1 - index * 0.1)
+    ]));
+    publicRelevance.set(evidence.fusion.candidate_key, 0.1);
+
+    const selection = selectBoundedDirectEvidenceHead(
+      candidates,
+      compileRecallQueryProbes("What brand of shampoo do I currently use?"),
+      new Map(),
+      publicRelevance,
+      10,
+      new Set(),
+      (ordered) => ordered.slice(0, 10),
+      () => false
+    );
+
+    expect(selection.protections).not.toContainEqual({
+      candidateKey: evidence.fusion.candidate_key,
+      rankLimit: 5
+    });
+    expect(selection.candidates).toEqual(candidates);
+  });
 });
 
 function simpleSelection(candidates: readonly string[]) {

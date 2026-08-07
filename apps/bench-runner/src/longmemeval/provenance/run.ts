@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
@@ -100,6 +101,7 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     onnx_model_artifact_sha256: Sha256Schema.optional(),
     embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
     answer_rerank: AnswerRerankRuntimeProvenanceSchema.optional(),
+    reconciliation_basis: z.enum(["rule_only", "garden_llm"]).optional(),
     paired_env: z.record(z.string(), z.string())
   }).strict(),
   execution: z.object({
@@ -152,6 +154,7 @@ export async function buildLongMemEvalRunProvenance(input: {
   readonly computeExecutedDistIdentity?: () => Promise<unknown>;
   readonly datasetSha256?: string;
   readonly selection?: LongMemEvalSelectionContractIdentity;
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
 }): Promise<LongMemEvalRunProvenance> {
   const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
   const [executedDist, frozenCode] = await Promise.all([
@@ -289,6 +292,9 @@ async function buildRuntimeIdentity(
       : {}),
     embedding_supplement: embeddingSupplement,
     answer_rerank: answerRerank,
+    ...(input.reconciliationBasis === undefined
+      ? {}
+      : { reconciliation_basis: input.reconciliationBasis }),
     paired_env: collectPairedEnvironment(input.env)
   };
 }

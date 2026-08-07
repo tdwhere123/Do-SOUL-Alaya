@@ -222,7 +222,7 @@ function downgradeProjectionSchema(db: StorageDatabase): void {
     DROP TABLE IF EXISTS evidence_search_projection_fts_trigram;
     DROP TABLE IF EXISTS evidence_search_projections;
     DROP TABLE IF EXISTS evidence_fact_frame_formations;
-    DELETE FROM schema_version WHERE version >= 109;
+    DELETE FROM schema_version WHERE version BETWEEN 109 AND 116;
   `);
 }
 

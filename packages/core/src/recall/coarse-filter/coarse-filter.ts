@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
-  compareMemoryEntries,
+  compareMemoryEntriesForActivationAdmission,
   filterMemoriesByTimeWindow,
   matchesDeterministicFilter,
   matchesPrecomputedRankFilter,
@@ -468,7 +468,7 @@ async function loadCoarseFilterInput(
     rankedMatches: selectBoundedTopK(
       deterministicMatches.filter((entry) => matchesPrecomputedRankFilter(entry, config)),
       config.precomputed_rank.max_candidates,
-      compareMemoryEntries
+      compareMemoryEntriesForActivationAdmission
     )
   });
 }

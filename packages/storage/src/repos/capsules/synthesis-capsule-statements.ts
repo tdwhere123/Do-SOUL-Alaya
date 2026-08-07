@@ -122,7 +122,8 @@ const SEARCH_SYNTHESIS_KEYWORD_SQL = `
         synthesis_capsule_fts.workspace_id = ?
         AND synthesis_capsule_fts MATCH ?
         AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, synthesis_capsule_fts.object_id ASC
+      ORDER BY raw_rank ASC, synthesis_capsules.summary ASC,
+        synthesis_capsules.topic_key ASC, synthesis_capsule_fts.object_id ASC
       LIMIT ?
 `;
 
@@ -137,6 +138,7 @@ const SEARCH_SYNTHESIS_KEYWORD_TRIGRAM_SQL = `
         synthesis_capsule_fts_trigram.workspace_id = ?
         AND synthesis_capsule_fts_trigram MATCH ?
         AND COALESCE(synthesis_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, synthesis_capsule_fts_trigram.object_id ASC
+      ORDER BY raw_rank ASC, synthesis_capsules.summary ASC,
+        synthesis_capsules.topic_key ASC, synthesis_capsule_fts_trigram.object_id ASC
       LIMIT ?
 `;

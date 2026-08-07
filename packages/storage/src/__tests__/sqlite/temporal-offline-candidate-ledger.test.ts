@@ -9,6 +9,7 @@ import { prepareTemporalCandidate } from "../../sqlite/temporal-offline-candidat
 
 const MIGRATIONS_DIRECTORY = fileURLToPath(new URL("../../migrations", import.meta.url));
 const temporaryDirectories: string[] = [];
+const TEMPORAL_CANDIDATE_TIMEOUT_MS = 15_000;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -30,7 +31,7 @@ describe("prepareTemporalCandidate migration ledger", () => {
     expect(result.candidate.schemaVersions).toEqual(knownVersions);
     expect(readSchemaMigrationLedger(fixture.candidateFilename)).toEqual(knownVersions);
     closeCachedDatabase(fixture.candidateFilename);
-  });
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
 
   it("rejects a legacy ledger with a missing known migration", async () => {
     const fixture = createFixture();
@@ -45,7 +46,7 @@ describe("prepareTemporalCandidate migration ledger", () => {
     await expect(prepareTemporalCandidate(fixture)).rejects.toThrow(
       /complete known pre-temporal migration ledger/
     );
-  });
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
 });
 
 function createFixture(): {

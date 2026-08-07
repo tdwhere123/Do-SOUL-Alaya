@@ -191,7 +191,8 @@ const SEARCH_EVIDENCE_KEYWORD_SQL = `
         evidence_capsule_fts.workspace_id = ?
         AND evidence_capsule_fts MATCH ?
         AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, evidence_capsule_fts.object_id ASC
+      ORDER BY raw_rank ASC, COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) ASC,
+        evidence_capsules.gist ASC, evidence_capsule_fts.object_id ASC
       LIMIT ?
 `;
 
@@ -206,7 +207,8 @@ const SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL = `
         evidence_capsule_fts_trigram.workspace_id = ?
         AND evidence_capsule_fts_trigram MATCH ?
         AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
-      ORDER BY raw_rank ASC, evidence_capsule_fts_trigram.object_id ASC
+      ORDER BY raw_rank ASC, COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) ASC,
+        evidence_capsules.gist ASC, evidence_capsule_fts_trigram.object_id ASC
       LIMIT ?
 `;
 
@@ -216,6 +218,10 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL = `
           evidence_search_projection_fts.evidence_object_id AS object_id,
           evidence_search_projections.projection_id,
           evidence_search_projections.projection_kind,
+          evidence_search_projections.content AS projection_content,
+          COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) AS owner_content,
+          evidence_capsules.gist AS owner_gist,
+          evidence_search_projections.source_hash AS source_hash,
           bm25(evidence_search_projection_fts) AS raw_rank
         FROM evidence_search_projection_fts
         JOIN evidence_search_projections
@@ -230,10 +236,11 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL = `
           AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
       ),
       selected_owners AS MATERIALIZED (
-        SELECT object_id, MIN(raw_rank) AS owner_raw_rank
+        SELECT object_id, owner_content, owner_gist, source_hash, MIN(raw_rank) AS owner_raw_rank
         FROM projection_hits
-        GROUP BY object_id
-        ORDER BY owner_raw_rank ASC, object_id ASC
+        GROUP BY object_id, owner_content, owner_gist, source_hash
+        ORDER BY owner_raw_rank ASC, owner_content ASC, owner_gist ASC, source_hash ASC,
+          object_id ASC
         LIMIT ?
       ),
       ranked_projection_hits AS (
@@ -241,7 +248,7 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL = `
           projection_hits.*,
           ROW_NUMBER() OVER (
             PARTITION BY object_id, projection_kind
-            ORDER BY raw_rank ASC, projection_id ASC
+            ORDER BY raw_rank ASC, projection_content ASC, projection_id ASC
           ) AS kind_rank
         FROM projection_hits
         JOIN selected_owners USING (object_id)
@@ -250,10 +257,15 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL = `
         object_id,
         projection_id,
         projection_kind,
-        raw_rank
+        raw_rank,
+        projection_content,
+        owner_content,
+        owner_gist,
+        source_hash
       FROM ranked_projection_hits
       WHERE kind_rank = 1
-      ORDER BY raw_rank ASC, object_id ASC, projection_kind ASC, projection_id ASC
+      ORDER BY raw_rank ASC, owner_content ASC, owner_gist ASC, source_hash ASC,
+        projection_kind ASC, projection_content ASC, projection_id ASC, object_id ASC
 `;
 
 const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
@@ -262,6 +274,10 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
           evidence_search_projection_fts_trigram.evidence_object_id AS object_id,
           evidence_search_projections.projection_id,
           evidence_search_projections.projection_kind,
+          evidence_search_projections.content AS projection_content,
+          COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) AS owner_content,
+          evidence_capsules.gist AS owner_gist,
+          evidence_search_projections.source_hash AS source_hash,
           bm25(evidence_search_projection_fts_trigram) AS raw_rank
         FROM evidence_search_projection_fts_trigram
         JOIN evidence_search_projections
@@ -278,10 +294,11 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
           AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
       ),
       selected_owners AS MATERIALIZED (
-        SELECT object_id, MIN(raw_rank) AS owner_raw_rank
+        SELECT object_id, owner_content, owner_gist, source_hash, MIN(raw_rank) AS owner_raw_rank
         FROM projection_hits
-        GROUP BY object_id
-        ORDER BY owner_raw_rank ASC, object_id ASC
+        GROUP BY object_id, owner_content, owner_gist, source_hash
+        ORDER BY owner_raw_rank ASC, owner_content ASC, owner_gist ASC, source_hash ASC,
+          object_id ASC
         LIMIT ?
       ),
       ranked_projection_hits AS (
@@ -289,7 +306,7 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
           projection_hits.*,
           ROW_NUMBER() OVER (
             PARTITION BY object_id, projection_kind
-            ORDER BY raw_rank ASC, projection_id ASC
+            ORDER BY raw_rank ASC, projection_content ASC, projection_id ASC
           ) AS kind_rank
         FROM projection_hits
         JOIN selected_owners USING (object_id)
@@ -298,8 +315,13 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
         object_id,
         projection_id,
         projection_kind,
-        raw_rank
+        raw_rank,
+        projection_content,
+        owner_content,
+        owner_gist,
+        source_hash
       FROM ranked_projection_hits
       WHERE kind_rank = 1
-      ORDER BY raw_rank ASC, object_id ASC, projection_kind ASC, projection_id ASC
+      ORDER BY raw_rank ASC, owner_content ASC, owner_gist ASC, source_hash ASC,
+        projection_kind ASC, projection_content ASC, projection_id ASC, object_id ASC
 `;

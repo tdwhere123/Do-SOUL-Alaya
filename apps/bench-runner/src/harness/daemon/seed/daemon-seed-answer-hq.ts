@@ -1,27 +1,29 @@
-import { join } from "node:path";
-import { initDatabase, SqliteMemoryHqRepo } from "@do-soul/alaya-storage";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
 import type { BenchSignalSeedInput } from "./daemon-seed-types.js";
 
 const BENCH_ANSWER_HQ_MAX = 5;
+const BENCH_HQ_PRODUCER_ID = "bench_compile_hq_v1";
 
 export async function persistBenchAnswerHq(
   input: CreateBenchSeedOpsInput,
   memoryId: string,
+  evidenceId: string,
   signalInput: BenchSignalSeedInput
 ): Promise<void> {
+  if (signalInput.sourceObservedAt === undefined) return;
   const hqs = collectBenchAnswerHqs(signalInput);
   if (hqs.length === 0) return;
-  const repo = new SqliteMemoryHqRepo(
-    initDatabase({ filename: join(input.dataDir, "alaya.db") })
-  );
-  const existing = (await repo.getHqByObjectIds([memoryId])).get(memoryId) ?? [];
-  const merged = [...new Set([...existing, ...hqs])].slice(0, BENCH_ANSWER_HQ_MAX);
+  const writer = input.activeRuntime.services.memoryHqWriter;
+  if (writer === undefined) {
+    throw new Error("Bench HQ persistence requires the runtime HQ writer.");
+  }
   const now = new Date().toISOString();
-  await repo.upsert({
+  await writer.upsertFromEvidence({
     object_id: memoryId,
     workspace_id: input.activeContext.workspaceId,
-    hqs: merged,
+    hqs,
+    evidence_id: evidenceId,
+    producer_id: BENCH_HQ_PRODUCER_ID,
     created_at: now,
     updated_at: now
   });

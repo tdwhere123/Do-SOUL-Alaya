@@ -45,7 +45,7 @@ describe("fact-frame formation audit", () => {
       schema_version: 1,
       report_kind: "evidence_fact_frame_formation_audit",
       promotable: false,
-      working_schema_version: 116,
+      working_schema_version: 117,
       integrity_valid: true,
       formation_complete: true,
       evidence_owner_count: 3,

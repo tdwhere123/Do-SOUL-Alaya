@@ -79,7 +79,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       accrueAnswersWithCoRelevance: vi.fn(async () => ({
         coRelevantPairs: 0,
         keptPairs: 0,
-        minted: 0
+        admitted: 0
       })),
       proposeSynthesis: vi.fn(async () => ({ synthesisId: null })),
       recall: vi.fn(async () => buildRecallResult("delivery-1", ["memory-decoy-1"])),
@@ -134,6 +134,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       embeddingMode: "disabled",
       embeddingProviderKind: "openai",
       captureSnapshot: true,
+      seedFormationMode: "treatment_neutral",
       qaChat: answerChat,
       qaJudgeChat: judgeChat
     });

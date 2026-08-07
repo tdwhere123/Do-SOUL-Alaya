@@ -260,7 +260,7 @@ describe("Garden production temporal clean break", () => {
           objects_affected: ["memory-1", "memory-2"],
           audit_entries: [
             "embedding_backfill:2",
-            "embedding_backfill_path_follow_up_deferred:temporal_assertion_provenance_required"
+            "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required"
           ]
         })
       );

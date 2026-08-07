@@ -18,6 +18,8 @@ export {
 } from "./memory-embedding-repo.js";
 export {
   SqliteMemoryHqRepo,
+  type MemoryHqEvidenceRecord,
+  type MemoryHqObservationRecord,
   type MemoryHqRecord,
   type MemoryHqRepo
 } from "./memory-hq-repo.js";

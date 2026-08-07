@@ -168,9 +168,11 @@ export {
   type PathRelationRepo
 } from "./repos/path/index.js";
 export {
+  digestRelationFormationEventSource,
   SqliteRelationAssertionRepo,
   type RelationAssertionProjectionGeneration,
-  type RelationAssertionRepo
+  type RelationAssertionRepo,
+  type RelationFormationEventSource
 } from "./repos/path/index.js";
 export {
   SqliteTemporalPathProjectionReader,
@@ -287,6 +289,8 @@ export {
 } from "./repos/memory/index.js";
 export {
   SqliteMemoryHqRepo,
+  type MemoryHqEvidenceRecord,
+  type MemoryHqObservationRecord,
   type MemoryHqRecord,
   type MemoryHqRepo
 } from "./repos/memory/index.js";

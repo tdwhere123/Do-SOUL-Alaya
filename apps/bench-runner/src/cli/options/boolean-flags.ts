@@ -10,6 +10,7 @@ export function consumeBooleanFlags(
   if (token === "--qa" || token === "--answer-judge") state.qa = true;
   if (token === "--edge-plane") state.edgePlane = true;
   if (token === "--legacy-snapshot") state.legacySnapshot = true;
+  if (token === "--materialize-question-dbs") state.materializeQuestionDbs = true;
   if (token === "--experiment") state.experiment = true;
   if (token === "--tolerate-provider-task-failures") {
     state.tolerateProviderTaskFailures = true;

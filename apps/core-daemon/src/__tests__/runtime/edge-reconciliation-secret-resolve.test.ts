@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// invariant: when canResolveOfficialGardenProvider passes the gate but the
-// SECOND secret-ref resolution at port-build time throws (a TOCTOU race:
-// credentials configured, readable at the gate, unreadable at use), the
-// port builders must warn ALAYA_GARDEN_LLM_SECRET_RESOLVE_FAILED and return
-// null (degrade to no-LLM / rule-only) — never swallow the failure silently.
-// see also: apps/core-daemon/src/runtime/recall-materialization-edge-reconciliation.ts
+// A provider gate cannot attest Garden execution when credential resolution
+// fails at port construction; the runtime must fall back visibly.
 
 const supportMock = vi.hoisted(() => ({
   resolveGardenSecretRefValue: vi.fn(() => {

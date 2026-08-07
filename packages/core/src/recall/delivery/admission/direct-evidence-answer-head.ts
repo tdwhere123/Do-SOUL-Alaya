@@ -164,9 +164,10 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   for (const contender of scored) {
     if (baselineKeys.has(contender.candidateKey)) {
       const rankLimit = resolveEvidenceProtectionRank(
-        contender, semanticLeader, baseline,
+        contender, semanticLeader, baseline, headLimit,
         publicRelevanceByCandidateKey, queryProbes
       );
+      if (rankLimit === undefined) continue;
       return protectedSelection(candidates, contender, rankLimit);
     }
     const admission = tryAdmissionPromotion(
@@ -175,9 +176,10 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
     );
     if (admission === undefined) continue;
     const rankLimit = resolveEvidenceProtectionRank(
-      contender, semanticLeader, admission.delivered,
+      contender, semanticLeader, admission.delivered, headLimit,
       publicRelevanceByCandidateKey, queryProbes
     );
+    if (rankLimit === undefined) continue;
     return protectedSelection(admission.candidateOrder, contender, rankLimit);
   }
   return unchangedSelection(candidates);
@@ -208,20 +210,34 @@ function resolveEvidenceProtectionRank<T extends DirectEvidenceHeadCandidate>(
   contender: ScoredDirectEvidence<T>,
   semanticLeader: SemanticHeadCandidate<T> | undefined,
   delivered: readonly T[],
+  headLimit: number,
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   queryProbes: Readonly<RecallQueryProbes>
-): number {
-  if (contender.candidateKey !== semanticLeader?.candidateKey) {
-    return DIRECT_EVIDENCE_HEAD_LIMIT;
-  }
-  const publicHead = [...delivered].sort((left, right) =>
+): number | undefined {
+  const publicOrder = [...delivered].sort((left, right) =>
     comparePublicRelevance(left, right, publicRelevanceByCandidateKey)
-  )[0];
-  return publicHead !== undefined &&
-    candidateKey(publicHead) !== contender.candidateKey &&
-    hasRequiredQueryMargin(contender.queryScore, publicHead.entry, queryProbes)
-    ? 1
-    : DIRECT_EVIDENCE_HEAD_LIMIT;
+  );
+  if (
+    contender.candidateKey === semanticLeader?.candidateKey &&
+    protectionPermitsPublicVictim(contender, publicOrder, 1, queryProbes)
+  ) return 1;
+  return protectionPermitsPublicVictim(
+    contender, publicOrder, headLimit, queryProbes
+  ) ? headLimit : undefined;
+}
+
+function protectionPermitsPublicVictim<T extends DirectEvidenceHeadCandidate>(
+  contender: ScoredDirectEvidence<T>,
+  publicOrder: readonly T[],
+  rankLimit: number,
+  queryProbes: Readonly<RecallQueryProbes>
+): boolean {
+  const contenderIndex = publicOrder.findIndex((candidate) =>
+    candidateKey(candidate) === contender.candidateKey);
+  if (contenderIndex >= 0 && contenderIndex < rankLimit) return true;
+  const victim = publicOrder[rankLimit - 1];
+  return victim !== undefined &&
+    hasRequiredQueryMargin(contender.queryScore, victim.entry, queryProbes);
 }
 
 function protectedEvidencePermitsVictim<T extends DirectEvidenceHeadCandidate>(

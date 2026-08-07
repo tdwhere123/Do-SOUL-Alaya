@@ -127,6 +127,11 @@ function pushOptionalArgs(args: string[], opts: LongMemEvalRunOptions): void {
   pushOptionalArg(args, "--pinned-meta-root", opts.pinnedMetaRoot);
   pushOptionalArg(args, "--extraction-cache-root", opts.extractionCacheRoot);
   pushOptionalArg(args, "--promotion-contract", opts.promotionContractPath);
+  pushOptionalArg(
+    args,
+    "--expected-reconciliation-basis",
+    opts.expectedReconciliationBasis
+  );
 }
 
 function pushOptionalArg(

@@ -932,7 +932,9 @@ describe("LongMemEval evidence contract", () => {
       ALAYA_RECALL_CONF_RHO_PATH: "0.5",
       UNRELATED_SECRET: "not-recorded"
     })).toEqual({
-      ALAYA_RECALL_CONF_RHO_PATH: "0.5"
+      ALAYA_RECALL_CONF_RHO_PATH: "0.5",
+      ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
+      ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset"
     });
   });
 });

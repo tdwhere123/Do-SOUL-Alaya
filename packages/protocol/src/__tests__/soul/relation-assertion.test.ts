@@ -13,7 +13,27 @@ function assertionWith(validity: unknown) {
     assertion_id: "assertion-1",
     workspace_id: "workspace-1",
     admission_event_id: "event-1",
-    evidence_ids: ["evidence-1"],
+    evidence_receipts: [{
+      evidence_id: "evidence-1",
+      source_event_anchor: {
+        event_type: "soul.signal.emitted",
+        event_id: "source-event-1",
+        occurred_at: "2026-07-16T23:59:00.000Z"
+      }
+    }],
+    formation_receipt: {
+      operator_id: "test_relation_operator_v1",
+      operator_sha256: "a".repeat(64),
+      parameters: { threshold: 3 },
+      parameter_sha256: "b".repeat(64),
+      source_observations: [{
+        source_kind: "event_log_entry",
+        source_id: "observation-1",
+        source_sha256: "c".repeat(64)
+      }],
+      decision: { matched: true },
+      decision_sha256: "d".repeat(64)
+    },
     anchors: {
       source_anchor: { kind: "object", object_id: "object-1" },
       target_anchor: { kind: "object", object_id: "object-2" }
@@ -62,13 +82,24 @@ describe("RelationAssertion temporal contract", () => {
     );
 
     expect(assertion.admission_event_id).toBe("event-1");
-    expect(assertion.evidence_ids).toEqual(["evidence-1"]);
+    expect(assertion.evidence_receipts).toEqual([expect.objectContaining({ evidence_id: "evidence-1" })]);
     expect(() =>
       RelationAssertionSchema.parse({
         ...assertionWith({ kind: "timeless", governance_policy_id: "timeless-policy-1" }),
-        evidence_ids: []
+        evidence_receipts: []
       })
     ).toThrow();
+    expect(() => RelationAssertionSchema.parse({
+      ...assertionWith({ kind: "open", valid_from: "2026-07-01T00:00:00.000Z" }),
+      formation_receipt: {
+        ...assertionWith({ kind: "open", valid_from: "2026-07-01T00:00:00.000Z" }).formation_receipt,
+        source_observations: [{
+          source_kind: "unverified_source",
+          source_id: "observation-1",
+          source_sha256: "c".repeat(64)
+        }]
+      }
+    })).toThrow();
   });
 
   it("uses [from,to), open, and timeless semantics for an as_of projection", () => {

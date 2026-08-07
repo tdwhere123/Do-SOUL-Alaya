@@ -63,6 +63,11 @@ beforeEach(() => {
   mocks.events.length = 0;
   mocks.startDaemon.mockImplementation(async () => ({
     dataDir: "/tmp/runner-snapshot-order",
+    runtime: {
+      services: {
+        reconciliationBasisStatus: { enabled: false }
+      }
+    },
     shutdown: vi.fn(async () => mocks.events.push("shutdown"))
   }));
   mocks.prepare.mockImplementation(async ({ question }) => {

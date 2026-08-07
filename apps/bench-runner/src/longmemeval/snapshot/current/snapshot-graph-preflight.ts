@@ -17,14 +17,7 @@ type ClassifiedReason = SnapshotGraphRejectionReason | "eligible";
 interface PathRelationRow {
   readonly path_id: string;
   readonly workspace_id: string;
-  readonly anchors_json: string;
-  readonly constitution_json: string;
-  readonly effect_vector_json: string;
-  readonly plasticity_state_json: string;
-  readonly lifecycle_json: string;
-  readonly legitimacy_json: string;
-  readonly created_at: string;
-  readonly updated_at: string;
+  readonly projection_json: string;
 }
 
 interface ClassifiedPath {
@@ -50,10 +43,13 @@ export function inspectSnapshotGraphPreflight(
 
 function readPathRows(db: DatabaseSync): readonly PathRelationRow[] {
   return db.prepare(`
-    SELECT path_id, workspace_id, anchors_json, constitution_json,
-      effect_vector_json, plasticity_state_json, lifecycle_json,
-      legitimacy_json, created_at, updated_at
-    FROM path_relations
+    SELECT path_id, workspace_id, projection_json
+    FROM relation_path_projections
+    WHERE generation = (
+      SELECT active_projection_generation
+      FROM temporal_schema_state
+      WHERE state_id = 1 AND status = 'ready'
+    )
     ORDER BY path_id
   `).all() as unknown as readonly PathRelationRow[];
 }
@@ -92,28 +88,15 @@ function decodePath(
   row: PathRelationRow
 ): { readonly path: PathRelation; readonly reason?: never } |
    { readonly path?: never; readonly reason: "invalid_json" | "invalid_shape" } {
-  let parsedFields: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    parsedFields = {
-      anchors: JSON.parse(row.anchors_json),
-      constitution: JSON.parse(row.constitution_json),
-      effect_vector: JSON.parse(row.effect_vector_json),
-      plasticity_state: JSON.parse(row.plasticity_state_json),
-      lifecycle: JSON.parse(row.lifecycle_json),
-      legitimacy: JSON.parse(row.legitimacy_json)
-    };
+    parsed = JSON.parse(row.projection_json);
   } catch {
     return { reason: "invalid_json" };
   }
-  const parsed = PathRelationSchema.safeParse({
-    path_id: row.path_id,
-    workspace_id: row.workspace_id,
-    ...parsedFields,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  });
-  return parsed.success
-    ? { path: parsed.data }
+  const result = PathRelationSchema.safeParse(parsed);
+  return result.success
+    ? { path: result.data }
     : { reason: "invalid_shape" };
 }
 

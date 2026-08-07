@@ -256,6 +256,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     context: MaterializationContext
   ) {
     const incomingContent = buildDistilledFact(signal);
+    const incomingMemory = buildMemoryInput(signal, [], this.enrichmentIntent(signal));
     const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
       incomingContent,
       this.dependencies.deriveFacetTags === true
@@ -266,10 +267,9 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         runId: signal.run_id,
         signalId: signal.signal_id,
         incomingContent,
+        incomingDimension: incomingMemory.dimension,
         incomingDomainTags: signal.domain_tags,
-        incomingProjectionFields: readReconciliationProjectionFields(
-          buildMemoryInput(signal, [], this.enrichmentIntent(signal))
-        ),
+        incomingProjectionFields: readReconciliationProjectionFields(incomingMemory),
         ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state, context)

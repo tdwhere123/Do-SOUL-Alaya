@@ -1,3 +1,4 @@
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalSelectionContractIdentity } from
   "../../selection/contract.js";
 import type { LongMemEvalRunOptions } from "../../runner.js";
@@ -37,6 +38,7 @@ export async function buildArchiveRunProvenanceBundle(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly datasetSha256: string;
   readonly selection: LongMemEvalSelectionContractIdentity;
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
 }): Promise<ArchiveRunProvenanceBundle> {
   const full = await buildLongMemEvalRunProvenance(input);
   const fullContents = renderLongMemEvalRunProvenance(full);

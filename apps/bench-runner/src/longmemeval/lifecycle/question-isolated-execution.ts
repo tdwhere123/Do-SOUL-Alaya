@@ -13,6 +13,7 @@ export interface IsolatedQuestionSequenceInput<Question, Daemon, Result, Invento
   readonly questions: readonly Question[];
   readonly rootParent?: string;
   readonly rootPrefix: string;
+  readonly retainSuccessfulRoots?: boolean;
   readonly initialAggregate: Aggregate;
   readonly mergeAggregate: (aggregate: Aggregate, inventory: Inventory) => Aggregate;
   readonly start: (
@@ -87,6 +88,7 @@ async function runOneQuestion<Question, Daemon, Result, Inventory, Aggregate>(
   const cleanupError = await captureCleanupError(
     root,
     succeeded,
+    input.retainSuccessfulRoots === true,
     input.failureLabel?.(question, index)
   );
   throwLifecycleErrors("LongMemEval question lifecycle failed", [
@@ -113,9 +115,11 @@ async function captureShutdownError<Daemon>(
 async function captureCleanupError(
   root: IsolatedQuestionRoot,
   succeeded: boolean,
+  retainSuccessfulRoot: boolean,
   failureLabel: string | undefined
 ): Promise<unknown> {
   try {
+    if (succeeded && retainSuccessfulRoot) return undefined;
     await finalizeOwnedTempRoot(root, succeeded);
     if (!succeeded && failureLabel !== undefined) {
       await writeFile(join(root.path, "FAILED_QUESTION.txt"), `${failureLabel}\n`, "utf8");

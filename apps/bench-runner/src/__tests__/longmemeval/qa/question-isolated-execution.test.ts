@@ -87,6 +87,26 @@ describe("question-isolated execution", () => {
     }
   });
 
+  it("retains successful question databases only when explicitly requested", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "alaya-question-materialize-test-"));
+    let questionRoot: string | undefined;
+    try {
+      await runIsolatedQuestionSequence({
+        ...fixtureInput(["only"], [], {
+          onStart: (root) => { questionRoot = root; }
+        }),
+        rootParent: parent,
+        retainSuccessfulRoots: true
+      });
+
+      expect(questionRoot).toBeDefined();
+      await expect(access(join(questionRoot ?? "missing", "question.db")))
+        .resolves.toBeUndefined();
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a root prefix that escapes its parent", async () => {
     const input = fixtureInput(["only"], []);
 

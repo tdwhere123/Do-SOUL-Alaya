@@ -20,6 +20,8 @@ import {
 } from "../garden-wiring/garden-compute-support.js";
 import { resolveEdgeClassifyWiring } from "../daemon/lifecycle/daemon-runtime-support.js";
 import { createGardenLegacyPathCandidateRejectionPort } from "../garden-wiring/garden-legacy-path-admission.js";
+import type { ReconciliationBasisStatus } from
+  "../daemon/lifecycle/daemon-runtime-types.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 type EdgeRuntimeWiring = Pick<
@@ -50,6 +52,7 @@ export async function createEdgeAndReconciliationRuntime(
   readonly edgeAutoProducerService: EdgeAutoProducerService;
   readonly conflictDetectionService: ConflictDetectionService | null;
   readonly reconciliationService: ReconciliationService | null;
+  readonly reconciliationBasisStatus: ReconciliationBasisStatus;
   readonly edgeClassifyQueueRepoHolder: {
     current:
       | {
@@ -69,12 +72,13 @@ export async function createEdgeAndReconciliationRuntime(
     edgeClassifyRuntime.edgeAutoProducerLlmPort
   );
   const conflictDetectionService = createConflictDetectionRuntime(wiring, pathCandidatePort);
-  const reconciliationService = await createReconciliationRuntime(wiring);
+  const reconciliationRuntime = await createReconciliationRuntime(wiring);
 
   return Object.freeze({
     edgeAutoProducerService,
     conflictDetectionService,
-    reconciliationService,
+    reconciliationService: reconciliationRuntime.reconciliationService,
+    reconciliationBasisStatus: reconciliationRuntime.reconciliationBasisStatus,
     edgeClassifyQueueRepoHolder: edgeClassifyRuntime.edgeClassifyQueueRepoHolder
   });
 }
@@ -146,16 +150,22 @@ function createConflictDetectionRuntime(
 
 async function createReconciliationRuntime(
   input: ReconciliationRuntimeWiring
-): Promise<ReconciliationService | null> {
+): Promise<{
+  readonly reconciliationService: ReconciliationService | null;
+  readonly reconciliationBasisStatus: ReconciliationBasisStatus;
+}> {
   const ingestReconciliationEnabled = readEnabledEnv(
     "ALAYA_INGEST_RECONCILIATION_ENABLED",
     PRODUCT_FORMATION_DEFAULTS.ingestReconciliationEnabled
   );
   if (!ingestReconciliationEnabled) {
-    return null;
+    return { reconciliationService: null, reconciliationBasisStatus: { enabled: false } };
   }
   const gardenComputeConfig = await input.rawConfigService.getRuntimeGardenComputeConfig();
   const llmDecisionPort = createReconciliationLlmPortFromConfig(gardenComputeConfig);
+  const basisStatus: ReconciliationBasisStatus = llmDecisionPort !== null
+    ? { enabled: true, basis: "garden_llm" }
+    : { enabled: true, basis: "rule_only" };
   const preWriteRecall = new PreWriteRecallService({
     lexicalSearch: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
@@ -170,7 +180,7 @@ async function createReconciliationRuntime(
     limit: 8,
     warn: input.warn
   });
-  return new ReconciliationService({
+  const reconciliationService = new ReconciliationService({
     preWriteRecall,
     memoryRepo: {
       findByIds: async (workspaceId, objectIds) =>
@@ -188,6 +198,7 @@ async function createReconciliationRuntime(
     lease: input.reconciliationLeaseRepo,
     warn: input.warn
   });
+  return { reconciliationService, reconciliationBasisStatus: basisStatus };
 }
 
 function createReconciliationLlmPortFromConfig(

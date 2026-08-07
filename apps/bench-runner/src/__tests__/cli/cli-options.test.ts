@@ -35,6 +35,7 @@ describe("parseFlags", () => {
       "--snapshot=/tmp/snapshot.db",
       "--snapshot-out=/tmp/out.db",
       "--data-dir-root=/tmp/data-dir",
+      "--materialize-question-dbs",
       "--pinned-meta-root=/tmp/pinned",
       "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
@@ -46,6 +47,7 @@ describe("parseFlags", () => {
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
       `--legacy-dataset-sha256=${"b".repeat(64)}`,
       "--concurrency=4",
+      "--expected-reconciliation-basis=rule_only",
       "--extraction-initial-concurrency=8",
       "--question-batch-limit=100",
       "--tolerate-provider-task-failures"
@@ -59,6 +61,7 @@ describe("parseFlags", () => {
     expect(parsed.snapshot).toBe("/tmp/snapshot.db");
     expect(parsed.snapshotOut).toBe("/tmp/out.db");
     expect(parsed.dataDirRoot).toBe("/tmp/data-dir");
+    expect(parsed.materializeQuestionDbs).toBe(true);
     expect(parsed.pinnedMetaRoot).toBe("/tmp/pinned");
     expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
@@ -70,6 +73,10 @@ describe("parseFlags", () => {
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
     expect(parsed.legacyDatasetSha256).toBe("b".repeat(64));
     expect(parsed.concurrency).toBe(4);
+    expect(parsed.expectedReconciliationBasis).toBe("rule_only");
+    expect(parseFlags([
+      "--expected-reconciliation-basis", "garden_llm"
+    ]).expectedReconciliationBasis).toBe("garden_llm");
     expect(parsed.extractionInitialConcurrency).toBe(8);
     expect(parsed.questionBatchLimit).toBe(100);
     expect(parsed.tolerateProviderTaskFailures).toBe(true);
@@ -84,6 +91,12 @@ describe("parseFlags", () => {
     );
     expect(() => parseFlags(["--simulate-report", "goldish"])).toThrow(
       "--simulate-report must be one of: none, always-used, gold-only, mixed"
+    );
+    expect(() => parseFlags(["--expected-reconciliation-basis", "hybrid"])).toThrow(
+      "--expected-reconciliation-basis must be one of: rule_only, garden_llm"
+    );
+    expect(() => parseFlags(["--expected-reconciliation-basis"])).toThrow(
+      "--expected-reconciliation-basis requires a value"
     );
     expect(() => parseFlags(["--question-manifest"])).toThrow(
       "--question-manifest requires a path"

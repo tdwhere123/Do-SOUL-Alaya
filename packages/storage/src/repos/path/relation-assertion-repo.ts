@@ -1,14 +1,18 @@
 import {
   RelationAssertionResolutionSchema,
   RelationAssertionSchema,
+  RelationFormationSourceKind,
   type PathRelation,
   type RelationAssertion,
-  type RelationAssertionResolution
+  type RelationAssertionEvidenceReceipt,
+  type RelationAssertionResolution,
+  type RelationFormationReceipt,
+  type RelationFormationSourceObservation
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseEventLogEntryRow, type EventLogRow } from "../runtime/event-log-rows.js";
 import {
-  parseRelationAssertionJson,
   requireUniqueRelationAssertionEvidenceIds,
   wrapRelationAssertionStorageError
 } from "./relation-assertion-repo-support.js";
@@ -20,6 +24,7 @@ import {
 } from "./relation-assertion/projection-reader.js";
 import type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
 import { writeProjectionGeneration } from "./relation-assertion/projection-writer.js";
+import { digestRelationFormationEventSource } from "./relation-assertion/source-digest.js";
 import {
   parseAssertionRow,
   parseResolutionRow,
@@ -29,11 +34,22 @@ import {
 
 export type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
 
-export type RelationAssertionEvidenceAnchor = Readonly<{
-  readonly eventType: string;
-  readonly eventId: string;
-  readonly occurredAt: string;
-}>;
+interface EvidenceReceiptVerificationRow {
+  readonly evidence_id: string;
+  readonly workspace_id: string | null;
+  readonly event_anchor: string | null;
+  readonly verified_source_event_id: string | null;
+}
+
+interface HqFormationSourceRow {
+  readonly observation_id: string;
+  readonly workspace_id: string;
+  readonly evidence_id: string;
+  readonly source_event_type: string;
+  readonly source_event_id: string;
+  readonly source_occurred_at: string;
+  readonly observation_sha256: string;
+}
 
 export interface RelationAssertionRepo {
   getStorageConnectionIdentity(): object;
@@ -44,10 +60,10 @@ export interface RelationAssertionRepo {
     readonly assertion: RelationAssertion;
     readonly identityKey: string;
   }): Readonly<RelationAssertion>;
-  assertEvidenceAnchorsInCurrentTransaction(input: {
+  assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
-    readonly evidenceIds: readonly string[];
-    readonly sourceAnchor: RelationAssertionEvidenceAnchor;
+    readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
+    readonly formationReceipt: RelationFormationReceipt;
   }): void;
   getCurrentResolutionInCurrentTransaction(
     assertionId: string
@@ -71,13 +87,41 @@ export interface RelationAssertionRepo {
   ): Promise<readonly Readonly<PathRelation>[] | null>;
 }
 export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
-  private readonly assertEvidenceAnchorsStatement;
+  private readonly assertEvidenceReceiptsStatement;
+  private readonly findEventFormationSourceStatement;
+  private readonly findHqFormationSourceStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.assertEvidenceAnchorsStatement = db.connection.prepare(`
-      SELECT object_id, workspace_id, event_anchor
-      FROM evidence_capsules
-      WHERE object_id IN (SELECT value FROM json_each(?))
+    this.assertEvidenceReceiptsStatement = db.connection.prepare(`
+      WITH receipts AS (
+        SELECT json_extract(value, '$.evidence_id') AS evidence_id,
+               json_extract(value, '$.source_event_anchor.event_type') AS source_event_type,
+               json_extract(value, '$.source_event_anchor.event_id') AS source_event_id
+        FROM json_each(?)
+      )
+      SELECT receipt.evidence_id, evidence.workspace_id, evidence.event_anchor,
+             source.event_id AS verified_source_event_id
+      FROM receipts AS receipt
+      LEFT JOIN evidence_capsules AS evidence
+        ON evidence.object_id = receipt.evidence_id
+      LEFT JOIN event_log AS source
+        ON source.event_id = receipt.source_event_id
+       AND source.event_type = receipt.source_event_type
+       AND source.workspace_id = evidence.workspace_id
+    `);
+    this.findEventFormationSourceStatement = db.connection.prepare(`
+      SELECT event_id, event_type, entity_type, entity_id, workspace_id, run_id,
+             caused_by, revision, payload_json, created_at
+      FROM event_log
+      WHERE event_id = ?
+      LIMIT 1
+    `);
+    this.findHqFormationSourceStatement = db.connection.prepare(`
+      SELECT observation_id, workspace_id, evidence_id, source_event_type,
+             source_event_id, source_occurred_at, observation_sha256
+      FROM memory_hq_observations
+      WHERE observation_id = ?
+      LIMIT 1
     `);
   }
 
@@ -93,11 +137,21 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     try {
       const row = this.db.connection.prepare(`
         SELECT assertion_id, workspace_id, admission_event_id, anchors_json, relation_kind,
-               validity_json, admitted_at,
-               (SELECT json_group_array(evidence_id)
-                  FROM relation_assertion_evidence
-                 WHERE assertion_id = relation_assertions.assertion_id
-                 ORDER BY evidence_id ASC) AS evidence_ids_json
+               validity_json, formation_receipt_json, admitted_at,
+               (SELECT json_group_array(json(receipt_json))
+                  FROM (
+                    SELECT json_object(
+                      'evidence_id', evidence_id,
+                      'source_event_anchor', json_object(
+                        'event_type', source_event_type,
+                        'event_id', source_event_id,
+                        'occurred_at', source_occurred_at
+                      )
+                    ) AS receipt_json
+                    FROM relation_assertion_evidence
+                    WHERE assertion_id = relation_assertions.assertion_id
+                    ORDER BY evidence_id ASC
+                  )) AS evidence_receipts_json
         FROM relation_assertions
         WHERE assertion_id = ?
         LIMIT 1
@@ -111,11 +165,21 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     try {
       const row = this.db.connection.prepare(`
         SELECT assertion_id, workspace_id, admission_event_id, anchors_json, relation_kind,
-               validity_json, admitted_at,
-               (SELECT json_group_array(evidence_id)
-                  FROM relation_assertion_evidence
-                 WHERE assertion_id = relation_assertions.assertion_id
-                 ORDER BY evidence_id ASC) AS evidence_ids_json
+               validity_json, formation_receipt_json, admitted_at,
+               (SELECT json_group_array(json(receipt_json))
+                  FROM (
+                    SELECT json_object(
+                      'evidence_id', evidence_id,
+                      'source_event_anchor', json_object(
+                        'event_type', source_event_type,
+                        'event_id', source_event_id,
+                        'occurred_at', source_occurred_at
+                      )
+                    ) AS receipt_json
+                    FROM relation_assertion_evidence
+                    WHERE assertion_id = relation_assertions.assertion_id
+                    ORDER BY evidence_id ASC
+                  )) AS evidence_receipts_json
         FROM relation_assertions
         WHERE identity_key = ?
         LIMIT 1
@@ -130,13 +194,15 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     readonly identityKey: string;
   }): Readonly<RelationAssertion> {
     const assertion = RelationAssertionSchema.parse(input.assertion);
-    const evidenceIds = requireUniqueRelationAssertionEvidenceIds(assertion.evidence_ids);
+    requireUniqueRelationAssertionEvidenceIds(
+      assertion.evidence_receipts.map((receipt) => receipt.evidence_id)
+    );
     try {
       this.db.connection.prepare(`
         INSERT INTO relation_assertions (
           assertion_id, workspace_id, admission_event_id, identity_key,
-          anchors_json, relation_kind, validity_json, admitted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         assertion.assertion_id,
         assertion.workspace_id,
@@ -145,14 +211,22 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
         JSON.stringify(assertion.anchors),
         assertion.relation_kind,
         JSON.stringify(assertion.validity),
+        JSON.stringify(assertion.formation_receipt),
         assertion.admitted_at
       );
       const insertEvidence = this.db.connection.prepare(`
-        INSERT INTO relation_assertion_evidence (assertion_id, evidence_id)
-        VALUES (?, ?)
+        INSERT INTO relation_assertion_evidence (
+          assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
+        ) VALUES (?, ?, ?, ?, ?)
       `);
-      for (const evidenceId of evidenceIds) {
-        insertEvidence.run(assertion.assertion_id, evidenceId);
+      for (const receipt of assertion.evidence_receipts) {
+        insertEvidence.run(
+          assertion.assertion_id,
+          receipt.evidence_id,
+          receipt.source_event_anchor.event_type,
+          receipt.source_event_anchor.event_id,
+          receipt.source_event_anchor.occurred_at
+        );
       }
       const persisted = this.getByIdInCurrentTransaction(assertion.assertion_id);
       if (persisted === null) {
@@ -165,40 +239,77 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     }
   }
 
-  public assertEvidenceAnchorsInCurrentTransaction(input: {
+  public assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
-    readonly evidenceIds: readonly string[];
-    readonly sourceAnchor: RelationAssertionEvidenceAnchor;
+    readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
+    readonly formationReceipt: RelationFormationReceipt;
   }): void {
-    const evidenceIds = requireUniqueRelationAssertionEvidenceIds(input.evidenceIds);
+    this.verifyEvidenceReceipts(input.workspaceId, input.evidenceReceipts);
+    this.verifyFormationSources(input.workspaceId, input.evidenceReceipts, input.formationReceipt);
+  }
+
+  private verifyEvidenceReceipts(
+    workspaceId: string,
+    evidenceReceipts: readonly RelationAssertionEvidenceReceipt[]
+  ): void {
+    requireUniqueRelationAssertionEvidenceIds(evidenceReceipts.map((receipt) => receipt.evidence_id));
     try {
-      const rows = this.assertEvidenceAnchorsStatement.all(JSON.stringify(evidenceIds)) as ReadonlyArray<
-        Readonly<{ readonly object_id: string; readonly workspace_id: string; readonly event_anchor: string | null }>
-      >;
-      const rowByEvidenceId = new Map(rows.map((row) => [row.object_id, row]));
-      for (const evidenceId of evidenceIds) {
-        const row = rowByEvidenceId.get(evidenceId);
-        if (row === undefined || row.workspace_id !== input.workspaceId) {
-          throw new StorageError("NOT_FOUND", `Evidence ${evidenceId} is not available in the assertion workspace.`);
-        }
-        const eventAnchor = row.event_anchor === null
-          ? null
-          : parseRelationAssertionJson(row.event_anchor, "evidence event anchor") as Record<string, unknown>;
-        if (
-          eventAnchor === null ||
-          eventAnchor.event_type !== input.sourceAnchor.eventType ||
-          eventAnchor.event_id !== input.sourceAnchor.eventId ||
-          eventAnchor.occurred_at !== input.sourceAnchor.occurredAt
-        ) {
-          throw new StorageError(
-            "CONFLICT",
-            `Evidence ${evidenceId} is not anchored to the admitted source EventLog observation.`
-          );
-        }
+      const rows = this.assertEvidenceReceiptsStatement.all(
+        JSON.stringify(evidenceReceipts)
+      ) as readonly EvidenceReceiptVerificationRow[];
+      const rowByEvidenceId = new Map(rows.map((row) => [row.evidence_id, row]));
+      for (const receipt of evidenceReceipts) {
+        verifyEvidenceReceipt(workspaceId, receipt, rowByEvidenceId.get(receipt.evidence_id));
       }
     } catch (error) {
       if (error instanceof StorageError) throw error;
-      throw wrapRelationAssertionStorageError("verify relation assertion evidence anchors", error);
+      throw wrapRelationAssertionStorageError("verify relation assertion evidence receipts", error);
+    }
+  }
+
+  private verifyFormationSources(
+    workspaceId: string,
+    evidenceReceipts: readonly RelationAssertionEvidenceReceipt[],
+    formationReceipt: RelationFormationReceipt
+  ): void {
+    const receiptByEvidenceId = new Map(evidenceReceipts.map((receipt) => [receipt.evidence_id, receipt]));
+    for (const source of formationReceipt.source_observations) {
+      if (source.source_kind === RelationFormationSourceKind.EVENT_LOG_ENTRY) {
+        this.verifyEventFormationSource(workspaceId, source);
+      } else {
+        this.verifyHqFormationSource(workspaceId, source, receiptByEvidenceId);
+      }
+    }
+  }
+
+  private verifyEventFormationSource(
+    workspaceId: string,
+    source: RelationFormationSourceObservation
+  ): void {
+    const row = this.findEventFormationSourceStatement.get(source.source_id) as EventLogRow | undefined;
+    if (row === undefined || row.workspace_id !== workspaceId) {
+      throw new StorageError("NOT_FOUND", `Formation EventLog source ${source.source_id} is unavailable.`);
+    }
+    if (digestRelationFormationEventSource(parseEventLogEntryRow(row)) !== source.source_sha256) {
+      throw new StorageError("CONFLICT", `Formation EventLog source ${source.source_id} digest does not match.`);
+    }
+  }
+
+  private verifyHqFormationSource(
+    workspaceId: string,
+    source: RelationFormationSourceObservation,
+    receiptByEvidenceId: ReadonlyMap<string, RelationAssertionEvidenceReceipt>
+  ): void {
+    const row = this.findHqFormationSourceStatement.get(source.source_id) as HqFormationSourceRow | undefined;
+    if (row === undefined || row.workspace_id !== workspaceId) {
+      throw new StorageError("NOT_FOUND", `Formation HQ source ${source.source_id} is unavailable.`);
+    }
+    if (row.observation_sha256 !== source.source_sha256) {
+      throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} digest does not match.`);
+    }
+    const receipt = receiptByEvidenceId.get(row.evidence_id);
+    if (receipt === undefined || !matchesHqSourceReceipt(row, receipt)) {
+      throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} is not bound to admitted Evidence.`);
     }
   }
 
@@ -253,11 +364,21 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
     try {
       const rows = this.db.connection.prepare(`
         SELECT assertion_id, workspace_id, admission_event_id, anchors_json, relation_kind,
-               validity_json, admitted_at,
-               (SELECT json_group_array(evidence_id)
-                  FROM relation_assertion_evidence
-                 WHERE assertion_id = relation_assertions.assertion_id
-                 ORDER BY evidence_id ASC) AS evidence_ids_json
+               validity_json, formation_receipt_json, admitted_at,
+               (SELECT json_group_array(json(receipt_json))
+                  FROM (
+                    SELECT json_object(
+                      'evidence_id', evidence_id,
+                      'source_event_anchor', json_object(
+                        'event_type', source_event_type,
+                        'event_id', source_event_id,
+                        'occurred_at', source_occurred_at
+                      )
+                    ) AS receipt_json
+                    FROM relation_assertion_evidence
+                    WHERE assertion_id = relation_assertions.assertion_id
+                    ORDER BY evidence_id ASC
+                  )) AS evidence_receipts_json
         FROM relation_assertions
         ORDER BY admitted_at ASC, assertion_id ASC
       `).all() as AssertionRow[];
@@ -304,4 +425,56 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   ): Promise<readonly Readonly<PathRelation>[] | null> {
     return await findProjectionByWorkspaceAtAsOf(this.db, workspaceId, asOf);
   }
+}
+
+function verifyEvidenceReceipt(
+  workspaceId: string,
+  receipt: RelationAssertionEvidenceReceipt,
+  row: EvidenceReceiptVerificationRow | undefined
+): void {
+  if (row === undefined || row.workspace_id !== workspaceId) {
+    throw new StorageError(
+      "NOT_FOUND",
+      `Evidence ${receipt.evidence_id} is not available in the assertion workspace.`
+    );
+  }
+  if (row.verified_source_event_id === null) {
+    throw new StorageError(
+      "NOT_FOUND",
+      `Evidence ${receipt.evidence_id} source EventLog entry is unavailable.`
+    );
+  }
+  const eventAnchor = parsePersistedEventAnchor(row.event_anchor);
+  const expected = receipt.source_event_anchor;
+  if (
+    eventAnchor === null ||
+    eventAnchor.event_type !== expected.event_type ||
+    eventAnchor.event_id !== expected.event_id ||
+    eventAnchor.occurred_at !== expected.occurred_at
+  ) {
+    throw new StorageError(
+      "CONFLICT",
+      `Evidence ${receipt.evidence_id} is not anchored to its admitted source EventLog observation.`
+    );
+  }
+}
+
+function parsePersistedEventAnchor(raw: string | null): Record<string, unknown> | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function matchesHqSourceReceipt(
+  source: HqFormationSourceRow,
+  receipt: RelationAssertionEvidenceReceipt
+): boolean {
+  const anchor = receipt.source_event_anchor;
+  return source.source_event_type === anchor.event_type &&
+    source.source_event_id === anchor.event_id &&
+    source.source_occurred_at === anchor.occurred_at;
 }

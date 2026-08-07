@@ -58,7 +58,8 @@ export async function createRunProvenanceFixture(roots: string[]) {
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
     datasetSha256: authority.manifest.dataset_sha256,
-    selection: authority.selection
+    selection: authority.selection,
+    reconciliationBasis: "rule_only"
   });
 
   return { ...paths, ...authority, provenance };
@@ -176,7 +177,8 @@ export async function buildFixtureRunProvenanceSidecar(
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
     datasetSha256: fixture.manifest.dataset_sha256,
-    selection: fixture.selection
+    selection: fixture.selection,
+    reconciliationBasis: "rule_only"
   });
 }
 
@@ -202,7 +204,7 @@ function createRunProvenanceEnvironment(
     ALAYA_RECALL_ANSWERS_WITH: "1",
     ALAYA_RECALL_FACET_TAGS: "1",
     ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
-    ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
+    ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
     ALAYA_CONFLICT_DETECTION_ENABLED: "0",
     ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
     ...(includeRedactionInputs ? {

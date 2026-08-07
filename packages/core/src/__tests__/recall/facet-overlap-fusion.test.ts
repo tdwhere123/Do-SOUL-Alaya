@@ -131,8 +131,8 @@ describe("facet_overlap fusion stream", () => {
     expect(gold?.facet_overlap).toBe(2);
     expect(distractor?.facet_overlap).toBe(1);
     expect(distractor?.fused_score).toBe(gold?.fused_score);
-    expect(distractor?.fused_rank).toBe(2);
-    expect(gold?.fused_rank).toBe(1);
+    expect(distractor?.fused_rank).toBe(1);
+    expect(gold?.fused_rank).toBe(2);
   });
 
   it("ranks the stronger fused score after facet evidence enters fusion", () => {
@@ -182,7 +182,7 @@ describe("facet_overlap fusion stream", () => {
     expect(fusion.get(weakKey)?.fused_rank).toBe(2);
   });
 
-  it("uses deterministic candidate identity when fused_score ties", () => {
+  it("uses deterministic semantic identity when fused_score ties", () => {
     const highOverlap = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Later memory with two answer facets.",
@@ -203,7 +203,7 @@ describe("facet_overlap fusion stream", () => {
       { entry: lowOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 }, fusion: distractorFusion }
     );
     expect(Math.sign(comparison)).toBe(Math.sign(
-      goldFusion.candidate_key.localeCompare(distractorFusion.candidate_key)
+      highOverlap.content.localeCompare(lowOverlap.content)
     ));
   });
 

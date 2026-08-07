@@ -132,6 +132,37 @@ describe("Assistant observation projection FTS", () => {
     ]);
   });
 
+  it("orders equal-ranked projection owners by semantic content before random ids", async () => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const zebraId = "00000000-0000-4000-8000-000000000001";
+    const alphaId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+
+    await repo.create(createEvidenceCapsule({
+      object_id: zebraId,
+      gist: "Zebra owner metadata.",
+      excerpt: "Zebra owner metadata.",
+      source_hash: "sha256:garden-source-turn-fallback-v2:projection-zebra"
+    }), [{
+      projection_id: 1,
+      projection_kind: "assistant_observation",
+      content: "Zebra Flintmark replay witness."
+    }]);
+    await repo.create(createEvidenceCapsule({
+      object_id: alphaId,
+      gist: "Alpha owner metadata.",
+      excerpt: "Alpha owner metadata.",
+      source_hash: "sha256:garden-source-turn-fallback-v2:projection-alpha"
+    }), [{
+      projection_id: 1,
+      projection_kind: "assistant_observation",
+      content: "Alpha Flintmark replay witness."
+    }]);
+
+    const hits = await repo.searchByKeyword!("workspace-1", "Flintmark", 2);
+
+    expect(hits.map(({ object_id }) => object_id)).toEqual([alphaId, zebraId]);
+  });
+
   it("uses Assistant kind when owner and child normalized ranks tie", async () => {
     const { repo } = await createEvidenceCapsuleRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000012";

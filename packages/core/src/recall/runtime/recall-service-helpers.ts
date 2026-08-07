@@ -79,20 +79,90 @@ export function parseEmbeddingPrecheckReason(error: unknown): string | null {
     ? error.reason
     : null;
 }
+const RECALL_RANK_SCORE_SCALE = 1e8;
+// Admission cutoffs must ignore sub-micro drift from replay-local lifecycle timing.
+const ACTIVATION_ADMISSION_SCORE_SCALE = 1e6;
 
-export function compareMemoryEntries(left: Readonly<MemoryEntry>, right: Readonly<MemoryEntry>): number {
-  const activationDelta = normalizeActivationScore(right.activation_score) - normalizeActivationScore(left.activation_score);
+export function normalizeRecallRankingScore(score: number): number {
+  return Math.round(score * RECALL_RANK_SCORE_SCALE) / RECALL_RANK_SCORE_SCALE;
+}
 
+export function normalizeActivationAdmissionScore(score: number | null): number {
+  return Math.round(normalizeActivationScore(score) * ACTIVATION_ADMISSION_SCORE_SCALE) /
+    ACTIVATION_ADMISSION_SCORE_SCALE;
+}
+
+export function compareMemorySemanticIdentity(
+  left: Readonly<MemoryEntry>,
+  right: Readonly<MemoryEntry>
+): number {
+  return left.content.localeCompare(right.content) ||
+    left.dimension.localeCompare(right.dimension) ||
+    left.scope_class.localeCompare(right.scope_class) ||
+    left.source_kind.localeCompare(right.source_kind) ||
+    left.formation_kind.localeCompare(right.formation_kind) ||
+    compareOptionalString(left.event_time_start, right.event_time_start) ||
+    compareOptionalString(left.event_time_end, right.event_time_end) ||
+    compareOptionalString(left.valid_from, right.valid_from) ||
+    compareOptionalString(left.valid_to, right.valid_to) ||
+    compareStringLists(left.canonical_entities, right.canonical_entities) ||
+    compareFacetTags(left.facet_tags, right.facet_tags);
+}
+
+export function compareMemoryEntriesForActivationAdmission(
+  left: Readonly<MemoryEntry>,
+  right: Readonly<MemoryEntry>
+): number {
+  const activationDelta = normalizeActivationAdmissionScore(right.activation_score) -
+    normalizeActivationAdmissionScore(left.activation_score);
   if (activationDelta !== 0) {
     return activationDelta;
   }
+  // Replay-local timestamps and IDs must not decide which equal-score memory crosses the admission cut.
+  return compareMemorySemanticIdentity(left, right) || left.object_id.localeCompare(right.object_id);
+}
 
-  const createdAtComparison = left.created_at.localeCompare(right.created_at);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
+function compareOptionalString(
+  left: string | null | undefined,
+  right: string | null | undefined
+): number {
+  return (left ?? "").localeCompare(right ?? "");
+}
+
+function compareStringLists(
+  left: readonly string[] | null | undefined,
+  right: readonly string[] | null | undefined
+): number {
+  const sharedLength = Math.min(left?.length ?? 0, right?.length ?? 0);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const comparison = left![index]!.localeCompare(right![index]!);
+    if (comparison !== 0) return comparison;
   }
+  return (left?.length ?? 0) - (right?.length ?? 0);
+}
 
-  return left.object_id.localeCompare(right.object_id);
+function compareFacetTags(
+  left: MemoryEntry["facet_tags"],
+  right: MemoryEntry["facet_tags"]
+): number {
+  const sharedLength = Math.min(left?.length ?? 0, right?.length ?? 0);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const leftTag = left![index]!;
+    const rightTag = right![index]!;
+    const comparison = leftTag.facet.localeCompare(rightTag.facet) ||
+      compareOptionalString(leftTag.value, rightTag.value);
+    if (comparison !== 0) return comparison;
+  }
+  return (left?.length ?? 0) - (right?.length ?? 0);
+}
+
+
+export function compareMemoryEntries(left: Readonly<MemoryEntry>, right: Readonly<MemoryEntry>): number {
+  const activationDelta = normalizeActivationScore(right.activation_score) - normalizeActivationScore(left.activation_score);
+  if (activationDelta !== 0) {
+    return activationDelta;
+  }
+  return compareMemorySemanticIdentity(left, right) || left.object_id.localeCompare(right.object_id);
 }
 
 export function compareEffectiveScores(

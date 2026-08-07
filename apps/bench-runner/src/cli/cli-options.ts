@@ -9,6 +9,7 @@ import {
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind
 } from "../harness/daemon/daemon-types.js";
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalVariant } from "../longmemeval/ingestion/dataset.js";
 import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
 import {
@@ -42,6 +43,7 @@ export interface ParsedFlags {
   readonly snapshot?: string;
   readonly snapshotOut?: string;
   readonly dataDirRoot?: string;
+  readonly materializeQuestionDbs: boolean;
   readonly pinnedMetaRoot?: string;
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
@@ -72,6 +74,7 @@ export interface ParsedFlags {
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
   // modes only). Default off keeps embedding ON/OFF corpora comparable.
   readonly edgePlane: boolean;
+  readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
 }
 
 export interface ParsedFlagsState {
@@ -91,6 +94,7 @@ export interface ParsedFlagsState {
   snapshot?: string;
   snapshotOut?: string;
   dataDirRoot?: string;
+  materializeQuestionDbs: boolean;
   pinnedMetaRoot?: string;
   questionManifest?: string;
   extractionCacheRoot?: string;
@@ -115,6 +119,7 @@ export interface ParsedFlagsState {
   seedExtractionSystemPrompt?: string;
   qa: boolean;
   edgePlane: boolean;
+  expectedReconciliationBasis?: EffectiveReconciliationBasis;
   shards: string[];
   collectingShards: boolean;
 }
@@ -148,6 +153,7 @@ function createParsedFlagsState(): ParsedFlagsState {
     force: false,
     qa: false,
     edgePlane: false,
+    materializeQuestionDbs: false,
     experiment: false,
     rebuildEvidenceSearchProjections: false,
     backfillMissingFactFrameFormations: false,
@@ -219,6 +225,18 @@ function consumeExtendedFlagToken(
   if (matchFlagToken(token, "--policy-shape")) {
     state.policyShape = parsePolicyShape(
       readFlagValue(args, index, token, "--policy-shape", "stress") ?? "stress"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--expected-reconciliation-basis")) {
+    state.expectedReconciliationBasis = parseExpectedReconciliationBasis(
+      readRequiredFlagValue(
+        args,
+        index,
+        token,
+        "--expected-reconciliation-basis",
+        "--expected-reconciliation-basis requires a value"
+      )
     );
     return nextIndex(index, token);
   }
@@ -425,6 +443,15 @@ function parsePolicyShape(raw: string): BenchPolicyShape {
   return raw;
 }
 
+function parseExpectedReconciliationBasis(raw: string): EffectiveReconciliationBasis {
+  if (raw !== "rule_only" && raw !== "garden_llm") {
+    throw new Error(
+      "--expected-reconciliation-basis must be one of: rule_only, garden_llm"
+    );
+  }
+  return raw;
+}
+
 function parseSimulateReport(raw: string): BenchSimulateReportMode {
   if (
     raw !== "none" &&
@@ -466,6 +493,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     snapshot: state.snapshot,
     snapshotOut: state.snapshotOut,
     dataDirRoot: state.dataDirRoot,
+    materializeQuestionDbs: state.materializeQuestionDbs,
     pinnedMetaRoot: state.pinnedMetaRoot,
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
@@ -489,6 +517,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     factFrameRetrofitLedger: state.factFrameRetrofitLedger,
     seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,
     qa: state.qa,
-    edgePlane: state.edgePlane
+    edgePlane: state.edgePlane,
+    expectedReconciliationBasis: state.expectedReconciliationBasis
   };
 }

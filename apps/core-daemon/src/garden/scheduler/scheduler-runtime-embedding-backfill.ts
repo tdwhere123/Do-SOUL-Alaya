@@ -15,7 +15,7 @@ const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 const ERROR_MESSAGE_MAX_LENGTH = 240;
 const ERROR_CAUSE_MAX_DEPTH = 3;
 const PATH_FOLLOW_UP_DEFERRED_AUDIT =
-  "embedding_backfill_path_follow_up_deferred:temporal_assertion_provenance_required";
+  "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required";
 
 interface SafeCausalError {
   readonly name: string;
@@ -148,11 +148,11 @@ async function runEmbeddingPathFollowUps(
   if (objectsAffected.length < 2) {
     return [];
   }
+  await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
   if (input.legacyTopologyMutationsEnabled !== true) {
     return [PATH_FOLLOW_UP_DEFERRED_AUDIT];
   }
   await runEmbeddingCoherenceFollowUp(input, task, objectsAffected);
-  await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
   return [];
 }
 

@@ -77,14 +77,14 @@ export async function accrueAnswersWithCoRelevance(
     readonly capPerNode: number;
     readonly crossSessionOnly: boolean;
   }
-): Promise<{ readonly coRelevantPairs: number; readonly keptPairs: number; readonly minted: number }> {
+): Promise<{ readonly coRelevantPairs: number; readonly keptPairs: number; readonly admitted: number }> {
   const pairSource = input.activeRuntime.services.answersWithPairSource;
   if (pairSource === undefined || members.length < 2) {
-    return { coRelevantPairs: 0, keptPairs: 0, minted: 0 };
+    return { coRelevantPairs: 0, keptPairs: 0, admitted: 0 };
   }
   return new AnswersWithEdgeProducerService({
     pairSource,
-    mintPort: input.activeRuntime.services.pathRelationProposalService,
+    assertionPort: input.activeRuntime.services.relationAssertionService,
     warn: (message, meta) => console.error(`[answers-with] ${message}`, meta)
   }).crystallize({
     workspaceId: input.activeContext.workspaceId,

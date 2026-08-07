@@ -1,3 +1,7 @@
+import type {
+  EffectiveReconciliationBasis,
+  ReconciliationBasisStatus
+} from "@do-soul/alaya";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
@@ -43,6 +47,7 @@ export interface LongMemEvalExecutionResult {
   readonly collected: readonly LongMemEvalWorkerResult[];
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
   readonly seedFuelInventory: Awaited<
     ReturnType<typeof collectBenchSeedFuelInventory>
   >;
@@ -66,7 +71,7 @@ async function executeSnapshotCompatibleLongMemEvalRun(
   const execution = createExecutionState();
   try {
     assertSnapshotProducerExecutionPolicy(context);
-    daemon = await startLongMemEvalDaemon(context);
+    daemon = await startObservedLongMemEvalDaemon(context, execution);
     result = await runSnapshotCompatiblePhases(context, daemon, execution);
     succeeded = execution.questionFailures === 0;
   } catch (error) {
@@ -107,7 +112,8 @@ async function runSnapshotCompatiblePhases(
   await awaitLongMemEvalSnapshotQuiescence();
   await writeLongMemEvalSnapshotIfRequested(
     context,
-    prepared.map((row) => row.prepared.snapshotQuestion)
+    prepared.map((row) => row.prepared.snapshotQuestion),
+    enabledReconciliationBasis(execution.reconciliationBasisStatus)
   );
   return buildExecutionResult(execution, emptySeedFuelInventory());
 }
@@ -130,14 +136,15 @@ async function executeQuestionIsolatedLongMemEvalRun(
       questions: context.window,
       rootParent: context.seedDataDirRoot,
       rootPrefix: "question-",
+      retainSuccessfulRoots: context.opts.materializeQuestionDbs === true,
       initialAggregate: emptySeedFuelInventory(),
       mergeAggregate: (aggregate, inventory) =>
         mergeSeedFuelInventories([aggregate, inventory]),
-      start: async (root) => startLongMemEvalDaemon({
+      start: async (root) => startObservedLongMemEvalDaemon({
         ...context,
         seedDataDirRoot: root.path,
         removeSeedDataDirRoot: false
-      }),
+      }, execution),
       run: async (daemon, question, index) =>
         runLongMemEvalQuestionSafely(context, daemon, execution, index, question),
       collect: async (daemon) => collectBenchSeedFuelInventory(daemon.dataDir),
@@ -164,6 +171,9 @@ function buildExecutionResult(
     collected: execution.collected,
     questionFailures: execution.questionFailures,
     failedQuestionIds: execution.failedQuestionIds,
+    ...(enabledReconciliationBasis(execution.reconciliationBasisStatus) === undefined
+      ? {}
+      : { reconciliationBasis: enabledReconciliationBasis(execution.reconciliationBasisStatus) }),
     seedFuelInventory
   };
 }
@@ -184,12 +194,53 @@ function createExecutionState(): {
   readonly collected: LongMemEvalWorkerResult[];
   questionFailures: number;
   readonly failedQuestionIds: string[];
+  reconciliationBasisStatus?: ReconciliationBasisStatus;
 } {
   return {
     collected: [],
     questionFailures: 0,
     failedQuestionIds: []
   };
+}
+
+async function startObservedLongMemEvalDaemon(
+  context: LongMemEvalRunContext,
+  execution: ReturnType<typeof createExecutionState>
+): Promise<BenchDaemonHandle> {
+  const daemon = await startLongMemEvalDaemon(context);
+  try {
+    observeReconciliationBasis(execution, daemon);
+    return daemon;
+  } catch (error) {
+    await daemon.shutdown();
+    throw error;
+  }
+}
+
+function observeReconciliationBasis(
+  execution: ReturnType<typeof createExecutionState>,
+  daemon: BenchDaemonHandle
+): void {
+  const observed = daemon.runtime.services.reconciliationBasisStatus;
+  const previous = execution.reconciliationBasisStatus;
+  if (previous !== undefined && !sameReconciliationStatus(previous, observed)) {
+    throw new Error("reconciliation basis changed across isolated daemons");
+  }
+  execution.reconciliationBasisStatus = observed;
+}
+
+function sameReconciliationStatus(
+  left: ReconciliationBasisStatus,
+  right: ReconciliationBasisStatus
+): boolean {
+  if (left.enabled !== right.enabled) return false;
+  return !left.enabled || (right.enabled && left.basis === right.basis);
+}
+
+function enabledReconciliationBasis(
+  status: ReconciliationBasisStatus | undefined
+): EffectiveReconciliationBasis | undefined {
+  return status?.enabled === true ? status.basis : undefined;
 }
 
 async function startLongMemEvalDaemon(
@@ -206,7 +257,10 @@ async function startLongMemEvalDaemon(
     ...(context.seedDataDirRoot === undefined
       ? {}
       : { dataDirRoot: context.seedDataDirRoot }),
-    recallWeightOverrides: context.recallWeightOverrides
+    recallWeightOverrides: context.recallWeightOverrides,
+    ...(context.opts.expectedReconciliationBasis === undefined
+      ? {}
+      : { expectedReconciliationBasis: context.opts.expectedReconciliationBasis })
   });
 }
 
@@ -291,6 +345,9 @@ function buildQuestionRunInput(
     embeddingProviderKind: context.opts.embeddingProviderKind ??
       DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
     captureSnapshot: context.captureSnapshot,
+    seedFormationMode: context.captureSnapshot || context.opts.materializeQuestionDbs === true
+      ? "treatment_neutral"
+      : "diagnostic_warmup",
     ...(context.opts.qa === undefined ? {} : buildQaOptions(context.opts.qa))
   };
 }
@@ -372,7 +429,8 @@ function writeLongMemEvalQuestionFailure(
 
 async function writeLongMemEvalSnapshotIfRequested(
   context: LongMemEvalRunContext,
-  snapshotQuestions: readonly LongMemEvalSnapshotQuestion[]
+  snapshotQuestions: readonly LongMemEvalSnapshotQuestion[],
+  reconciliationBasis: EffectiveReconciliationBasis | undefined
 ): Promise<void> {
   if (context.opts.snapshotOut === undefined || context.seedDataDirRoot === undefined) {
     return;
@@ -385,7 +443,8 @@ async function writeLongMemEvalSnapshotIfRequested(
     env: process.env,
     recallOptions: context.recallOptions,
     datasetSha256: context.datasetSha256,
-    selection: selectionContractIdentity(context.selectionContract)
+    selection: selectionContractIdentity(context.selectionContract),
+    ...(reconciliationBasis === undefined ? {} : { reconciliationBasis })
   });
   await writeRecallEvalSnapshot({
     snapshotOut: context.opts.snapshotOut,

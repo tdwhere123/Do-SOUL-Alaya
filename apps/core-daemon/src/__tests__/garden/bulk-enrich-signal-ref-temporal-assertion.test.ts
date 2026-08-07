@@ -221,7 +221,8 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       expect(assertions).toHaveLength(1);
       expect(assertions[0]).toMatchObject({
         workspace_id: WORKSPACE_ID,
-        evidence_ids: [EVIDENCE_ID],
+        evidence_receipts: [expect.objectContaining({ evidence_id: EVIDENCE_ID })],
+        formation_receipt: expect.objectContaining({ operator_id: "signal_relation_assertion_admission_v1" }),
         relation_kind: "derives_from",
         anchors: {
           source_anchor: { kind: "object", object_id: SOURCE_MEMORY_ID },

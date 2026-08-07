@@ -1,5 +1,5 @@
 import type { RecallAdmissionPlane } from "../runtime/recall-service-types.js";
-import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
+import { compareMemoryEntriesForActivationAdmission } from "../runtime/recall-service-helpers.js";
 import { sessionRouteEnabled } from "./session-route.js";
 import type { CoarseCandidateDraft } from "./coarse-candidates.js";
 
@@ -15,7 +15,7 @@ export function rankCoarseCandidateDrafts(
     if (structuralDelta !== 0) {
       return structuralDelta;
     }
-    return compareMemoryEntries(left.entry, right.entry);
+    return compareMemoryEntriesForActivationAdmission(left.entry, right.entry);
   });
 }
 

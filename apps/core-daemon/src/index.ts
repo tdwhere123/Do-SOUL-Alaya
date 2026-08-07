@@ -39,7 +39,9 @@ export type {
   AlayaDaemonRuntime,
   AlayaDaemonRuntimeServices,
   AlayaDaemonServer,
-  DaemonStartupStepRecord
+  DaemonStartupStepRecord,
+  EffectiveReconciliationBasis,
+  ReconciliationBasisStatus
 } from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
 export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export { resolveSecretRef } from "./secrets/index.js";
@@ -204,6 +206,7 @@ async function buildGardenWiring(
     pathRelationRepo: repositories.pathRelationRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
+    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
     configService: runtimeWiring.coreWiring.configService,
     officialGardenProvider: runtimeWiring.coreWiring.officialGardenProvider,
     localHeuristicsProvider: runtimeWiring.coreWiring.localHeuristicsProvider,
@@ -295,6 +298,7 @@ function buildFinalizeSurfaceRuntimeInput(
     memoryEntryRepo: repositories.memoryEntryRepo,
     evidenceService: foundation.evidenceService,
     pathRelationProposalService: runtimeWiring.recallWiring.pathRelationProposalService,
+    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
     signalService: runtimeWiring.recallWiring.signalService,
     graphExploreService: foundation.graphExploreService,
     edgeProposalService: foundation.edgeProposalService,
@@ -357,6 +361,7 @@ function buildFinalizeOperationsRuntimeInput(
     slotService: foundation.slotService,
     arbitrationService: foundation.arbitrationService,
     recallUtilizationService: runtimeWiring.recallWiring.recallUtilizationService,
+    reconciliationBasisStatus: runtimeWiring.recallWiring.reconciliationBasisStatus,
     singleUsedAnchorEmitter: runtimeWiring.recallWiring.singleUsedAnchorEmitter,
     deliveryAnchorReader: runtimeWiring.recallWiring.deliveryAnchorReader,
     taskSurfaceBuilder: foundation.taskSurfaceBuilder,

@@ -51,11 +51,9 @@ describe("LongMemEval product formation policy", () => {
     expect(JSON.stringify(paired)).not.toContain("never-persist");
   });
 
-  it("records the H1 experiment switch in paired provenance", () => {
+  it("omits the removed H1 experiment switch from paired provenance", () => {
     expect(collectPairedEnvironment({
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
-    })).toMatchObject({
-      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
-    });
+    })).not.toHaveProperty("ALAYA_RECALL_CONF_H1_MAX_PRODUCT");
   });
 });

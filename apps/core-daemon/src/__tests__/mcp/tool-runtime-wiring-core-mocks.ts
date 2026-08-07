@@ -116,10 +116,10 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       admit: vi.fn(async () => ({ assertion: { assertion_id: "relation-assertion-1" } }))
     }),
     AnswersWithEdgeProducerService: makeClass({
-      crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, minted: 0 }))
+      crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, admitted: 0 }))
     }),
     HqAnswerOverlapPairSource: makeClass({
-      answerCoRelevantPairKeys: vi.fn(async () => new Set())
+      answerCoRelevantPairs: vi.fn(async () => [])
     }),
     DEFAULT_ANSWER_OVERLAP_BAR: 3,
     PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {

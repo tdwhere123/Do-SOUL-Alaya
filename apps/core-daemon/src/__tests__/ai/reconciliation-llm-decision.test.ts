@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createReconciliationLlmDecisionPort } from "../../ai/reconciliation-llm-decision.js";
+import { createReconciliationLlmDecisionPort, computeReconciliationRequestKeyForTest } from "../../ai/reconciliation-llm-decision.js";
 
 // invariant: covers the disk-cached garden-LLM reconciliation decision
 // port — the null-credentials disable, the decision cache round trip,
@@ -189,7 +189,7 @@ describe("createReconciliationLlmDecisionPort", () => {
       candidates
     });
     expect(first.kind).toBe("update");
-    expect(first.targetObjectId).toBe("memory-a");
+    expect(first.targetObjectId).toBeUndefined();
 
     // Re-run: same incoming + same candidate contents → cache hit. The
     // stored content hash now matches BOTH candidate rows; the target is
@@ -247,6 +247,71 @@ describe("createReconciliationLlmDecisionPort", () => {
     );
     // corrupt read → cache miss → the LLM was called a second time
     expect(llmComplete).toHaveBeenCalledTimes(2);
+  });
+
+  it("request key binds version and system prompt contract so prompt or version changes yield different keys", () => {
+    const baseInput = {
+      model: "gpt-4o-mini",
+      incomingContent: "works in Munich",
+      candidates: [
+        { objectId: "memory-a", content: "Zebra lives in savanna" },
+        { objectId: "memory-b", content: "Apple lives in orchard" }
+      ]
+    };
+    const baseKey = computeReconciliationRequestKeyForTest(baseInput);
+
+    const permutedKey = computeReconciliationRequestKeyForTest({
+      ...baseInput,
+      candidates: [baseInput.candidates[1]!, baseInput.candidates[0]!]
+    });
+    expect(permutedKey).toBe(baseKey);
+
+    const differentVersionKey = computeReconciliationRequestKeyForTest({
+      ...baseInput,
+      version: "v2"
+    });
+    expect(differentVersionKey).not.toBe(baseKey);
+
+    const differentPromptKey = computeReconciliationRequestKeyForTest({
+      ...baseInput,
+      systemPrompt: "Different system prompt"
+    });
+    expect(differentPromptKey).not.toBe(baseKey);
+  });
+
+  it("Garden prompt and cache behavior are invariant to candidate input permutation", async () => {
+    const promptsReceived: string[] = [];
+    const llmComplete = vi.fn(async (prompt: string) => {
+      promptsReceived.push(prompt);
+      return JSON.stringify({ kind: "add", reason: "distinct" });
+    });
+    const port1 = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot: join(cacheRoot, "run1"),
+      llmComplete
+    });
+    const port2 = createReconciliationLlmDecisionPort({
+      config: baseConfig,
+      cacheRoot: join(cacheRoot, "run2"),
+      llmComplete
+    });
+
+    const candA = { objectId: "memory-a", content: "Zebra lives in savanna" };
+    const candB = { objectId: "memory-b", content: "Apple lives in orchard" };
+
+    const res1 = await port1!.decide({
+      incomingContent: "lives in orchard",
+      candidates: [candA, candB]
+    });
+
+    const res2 = await port2!.decide({
+      incomingContent: "lives in orchard",
+      candidates: [candB, candA]
+    });
+
+    expect(res1).toEqual(res2);
+    expect(promptsReceived).toHaveLength(2);
+    expect(promptsReceived[0]).toBe(promptsReceived[1]);
   });
 });
 

@@ -24,7 +24,7 @@ import type {
 } from "./runtime-types.js";
 
 export type {
-  BulkEmbeddingCoherencePort,
+  BulkFormationFollowUpPort,
   BulkEnrichConflictDetectionPort,
   BulkEnrichEdgeProducerPort,
   BulkEnrichMemoryLookupPort,

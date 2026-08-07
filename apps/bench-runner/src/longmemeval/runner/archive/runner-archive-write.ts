@@ -58,6 +58,7 @@ import {
   createLongMemEvalHistoryLayout,
   resolveLongMemEvalEvidenceContext
 } from "../../history/evidence-context.js";
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 
@@ -75,6 +76,7 @@ export async function writeLongMemEvalRunArchive(input: {
   readonly runAt: Date;
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
   readonly collectedLength: number;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<LongMemEvalRunResult> {
@@ -158,6 +160,7 @@ type ArchiveSidecarBuildInput = Readonly<{
   readonly commitInfo: BenchCommitInfo;
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
   readonly collectedLength: number;
   readonly payload: KpiPayload;
   readonly layout: HistoryLayout;
@@ -289,7 +292,10 @@ function buildArchiveRunProvenance(input: ArchiveSidecarBuildInput) {
     embeddingProviderLabel: input.payload.embedding_provider,
     env: process.env,
     datasetSha256: input.datasetSha256,
-    selection: selectionContractIdentity(input.selectionContract)
+    selection: selectionContractIdentity(input.selectionContract),
+    ...(input.reconciliationBasis === undefined
+      ? {}
+      : { reconciliationBasis: input.reconciliationBasis })
   });
 }
 

@@ -1,12 +1,12 @@
+import type { MemoryEntrySemanticTieRow } from "./semantic-tie-order.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
 } from "../shared/cjk-segmentation.js";
 
-export interface ExactKeywordCandidateRow {
+export interface ExactKeywordCandidateRow extends MemoryEntrySemanticTieRow {
   readonly object_id: string;
-  readonly content: string;
 }
 
 export interface ExactKeywordSearchRow {

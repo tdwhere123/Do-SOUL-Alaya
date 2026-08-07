@@ -124,6 +124,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           distilledFact: "Mira uses oat milk in coffee.",
           turnContent: "Mira uses oat milk in coffee.",
           evidenceRef: "answers-with-hq-q0",
+          sourceObservedAt: "2026-07-29T00:00:00.000Z",
           turnSeedIndex: 1,
           extractionProvider: "official_api_compile",
           productionRawPayload: {

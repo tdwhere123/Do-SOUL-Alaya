@@ -1,4 +1,5 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import { MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL } from "../semantic-tie-order.js";
 import {
   prepareStatementGroup,
   type SqlDefinitionMap,
@@ -22,7 +23,7 @@ const MEMORY_ENTRY_SEARCH_SQL: SqlDefinitionMap<MemoryEntrySearchStatements> = {
         AND memory_content_fts MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
         AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-      ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
+      ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, memory_content_fts.object_id ASC
       LIMIT ?
     `,
   searchByKeywordPorterStatement: `
@@ -36,7 +37,7 @@ const MEMORY_ENTRY_SEARCH_SQL: SqlDefinitionMap<MemoryEntrySearchStatements> = {
         AND memory_content_fts_porter MATCH ?
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
         AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-      ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
+      ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, memory_content_fts_porter.object_id ASC
       LIMIT ?
     `
 };

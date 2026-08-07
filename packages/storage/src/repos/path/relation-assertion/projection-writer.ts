@@ -20,10 +20,22 @@ export function writeProjectionGeneration(
   try {
     ensureProjectionGeneration(db, generation, projections);
     if (options.activate) activateProjectionGeneration(db, generation, projections.length);
+    pruneUnreadableProjectionHistories(db, generation.historyDigest);
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw wrapRelationAssertionStorageError("replace active relation projection", error);
   }
+}
+
+function pruneUnreadableProjectionHistories(
+  db: StorageDatabase,
+  currentHistoryDigest: string
+): void {
+  // Readers reject generations from any superseded assertion history.
+  db.connection.prepare(`
+    DELETE FROM temporal_projection_generations
+    WHERE history_digest <> ?
+  `).run(currentHistoryDigest);
 }
 
 function ensureProjectionGeneration(

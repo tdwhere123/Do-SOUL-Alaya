@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
 
+export type CredentialStateMarker = "unset" | "empty" | "configured";
+
+export function resolveCredentialStateMarker(
+  value: string | undefined
+): CredentialStateMarker {
+  if (value === undefined) return "unset";
+  return value.trim().length === 0 ? "empty" : "configured";
+}
+
 const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION",
   "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE",
@@ -10,6 +19,7 @@ const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_CONFLICT_RULE_ENABLED",
   "ALAYA_EMBEDDING_PROVIDER",
   "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
+  "ALAYA_ENABLE_GARDEN_OFFICIAL",
   "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
   "ALAYA_EDGE_CLASSIFY_HOST_WORKER",
   "ALAYA_EDGE_PRODUCER_LLM_ENABLED",
@@ -35,7 +45,6 @@ const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_RECALL_CONF_EVIDENCE_BETA",
   "ALAYA_RECALL_CONF_FLOOD_CAP",
   "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
-  "ALAYA_RECALL_CONF_H1_MAX_PRODUCT",
   "ALAYA_RECALL_CONF_RHO_EVIDENCE",
   "ALAYA_RECALL_CONF_RHO_PATH",
   "ALAYA_RECALL_CONF_W_PATH",
@@ -45,16 +54,28 @@ const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP",
   "ALAYA_RECALL_SOURCE_REF_ROBUST",
   "ALAYA_RETAIN_UNROUTED_FACTS",
-  "OFFICIAL_API_GARDEN_MODEL"
+  "OFFICIAL_API_GARDEN_MODEL",
+  "OFFICIAL_API_GARDEN_PROVIDER_URL"
 ]);
 
 export function collectPairedEnvironment(
   env: Readonly<Record<string, string | undefined>>
 ): Readonly<Record<string, string>> {
-  const entries = Object.entries(env)
+  const entries: [string, string][] = Object.entries(env)
     .filter(([key, value]) => value !== undefined && PAIRED_ENV_ALLOWLIST.has(key))
-    .map(([key, value]) => [key, redactProvenanceUrl(value!)] as const)
-    .sort(([left], [right]) => left.localeCompare(right));
+    .map(([key, value]) => [key, redactProvenanceUrl(value!)] as [string, string]);
+
+  // Raw credential values cannot enter provenance; markers remain launch diagnostics only.
+  entries.push([
+    "ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE",
+    resolveCredentialStateMarker(env.ALAYA_OFFICIAL_GARDEN_SECRET_REF)
+  ]);
+  entries.push([
+    "ALAYA_OFFICIAL_GARDEN_API_KEY_STATE",
+    resolveCredentialStateMarker(env.ALAYA_OFFICIAL_GARDEN_API_KEY)
+  ]);
+
+  entries.sort(([left], [right]) => left.localeCompare(right));
   return Object.fromEntries(entries) as Readonly<Record<string, string>>;
 }
 

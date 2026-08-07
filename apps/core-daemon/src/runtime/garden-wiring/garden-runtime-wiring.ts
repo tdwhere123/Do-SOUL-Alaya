@@ -92,6 +92,7 @@ type GardenRuntimeWiringInput = Readonly<{
     | "embeddingRecallService"
     | "conflictDetectionService"
     | "edgeClassifyQueueRepoHolder"
+    | "relationAssertionService"
   >;
 
 export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput) {
@@ -108,7 +109,7 @@ export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput)
   });
   const legacyPathCandidateRejectionPort = createGardenLegacyPathCandidateRejectionPort(input.warnLogger.warn);
   const coherenceCrystallizer = createCoherenceCrystallizer(input, legacyPathCandidateRejectionPort);
-  const answersWithCrystallizer = createAnswersWithCrystallizer(input, legacyPathCandidateRejectionPort);
+  const answersWithCrystallizer = createAnswersWithCrystallizer(input);
   const gardenRuntime = createGardenSchedulerRuntime(
     input,
     gardenDataPorts,
@@ -189,18 +190,15 @@ function createCoherenceCrystallizer(
 }
 
 // invariant: answers_with crystallizer is always-on when the HQ repo is
-// present; null hqRepo → undefined → no mint.
-function createAnswersWithCrystallizer(
-  input: GardenRuntimeWiringInput,
-  mintPort: ReturnType<typeof createGardenLegacyPathCandidateRejectionPort>
-) {
+// present; null hqRepo means no assertion admission.
+function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
   const hqRepo = createOptionalMemoryHqRepo(input.database);
   if (hqRepo === null) {
     return undefined;
   }
   return new AnswersWithEdgeProducerService({
     pairSource: new HqAnswerOverlapPairSource(hqRepo),
-    mintPort,
+    assertionPort: input.relationAssertionService,
     warn: input.warnLogger.warn
   });
 }
@@ -342,7 +340,7 @@ function createCoherenceEdgeProducerPort(
         params.workspaceId,
         params.objectIds
       );
-      return await coherenceCrystallizer.crystallize({
+      await coherenceCrystallizer.crystallize({
         workspaceId: params.workspaceId,
         runId: params.runId,
         objects,
@@ -373,7 +371,7 @@ function createAnswersWithEdgeProducerPort(
         params.workspaceId,
         params.objectIds
       );
-      return await answersWithCrystallizer.crystallize({
+      await answersWithCrystallizer.crystallize({
         workspaceId: params.workspaceId,
         runId: params.runId,
         objects,

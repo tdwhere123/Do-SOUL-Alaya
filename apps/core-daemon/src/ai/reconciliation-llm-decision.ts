@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
+import { compareCandidateContent, type ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
 import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
 import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-cache.js";
 
@@ -41,6 +41,8 @@ const RECONCILIATION_DECISION_CACHE_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets/reconciliation-decisions"
 );
+
+const RECONCILIATION_DECISION_REQUEST_VERSION = "v1";
 
 const DECISION_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -135,7 +137,10 @@ function buildDecisionPrompt(
   incomingContent: string,
   candidates: readonly { readonly objectId: string; readonly content: string }[]
 ): string {
-  const candidateLines = candidates
+  const sortedCandidates = [...candidates].sort((left, right) =>
+    compareCandidateContent(left.content, right.content, left.objectId, right.objectId)
+  );
+  const candidateLines = sortedCandidates
     .map((candidate, index) => `[${index}] id=${candidate.objectId}: ${candidate.content}`)
     .join("\n");
   return [
@@ -199,18 +204,53 @@ async function requestAndCacheReconciliationDecision(
     parsed.targetObjectId === undefined
       ? undefined
       : candidates.find((candidate) => candidate.objectId === parsed.targetObjectId)?.content;
+  const targetContentHash = targetContent === undefined ? null : hashContent(targetContent);
+  const resolvedTargetObjectId =
+    targetContentHash === null
+      ? undefined
+      : resolveTargetByContentHash(targetContentHash, candidates);
+
   await writeCachedDecision(cacheRoot, requestKey, {
     model: config.model,
     request_hash: requestKey,
     kind: parsed.kind,
-    target_content_hash: targetContent === undefined ? null : hashContent(targetContent),
+    target_content_hash: targetContentHash,
     reason: parsed.reason ?? "",
     decided_at: new Date().toISOString()
   });
   return {
-    ...parsed,
+    kind: parsed.kind,
+    ...(resolvedTargetObjectId === undefined ? {} : { targetObjectId: resolvedTargetObjectId }),
     reason: parsed.reason ?? ""
   };
+}
+
+export function computeReconciliationRequestKeyForTest(options: {
+  readonly model: string;
+  readonly incomingContent: string;
+  readonly candidates: readonly { readonly objectId: string; readonly content: string }[];
+  readonly version?: string;
+  readonly systemPrompt?: string;
+}): string {
+  const version = options.version ?? RECONCILIATION_DECISION_REQUEST_VERSION;
+  const systemPrompt = options.systemPrompt ?? DECISION_SYSTEM_PROMPT;
+  const sortedCandidates = [...options.candidates].sort((left, right) =>
+    compareCandidateContent(left.content, right.content, left.objectId, right.objectId)
+  );
+  const FIELD_SEPARATOR = "\u001f";
+  const hash = createHash("sha256");
+  hash.update(version, "utf8");
+  hash.update(FIELD_SEPARATOR, "utf8");
+  hash.update(options.model, "utf8");
+  hash.update(FIELD_SEPARATOR, "utf8");
+  hash.update(systemPrompt, "utf8");
+  hash.update(FIELD_SEPARATOR, "utf8");
+  hash.update(options.incomingContent, "utf8");
+  for (const candidate of sortedCandidates) {
+    hash.update(FIELD_SEPARATOR, "utf8");
+    hash.update(candidate.content, "utf8");
+  }
+  return hash.digest("hex");
 }
 
 function computeRequestKey(
@@ -218,30 +258,7 @@ function computeRequestKey(
   incomingContent: string,
   candidates: readonly { readonly objectId: string; readonly content: string }[]
 ): string {
-  // Keyed on candidate CONTENT only, not object_id: the LLM judges
-  // refines-vs-distinct purely from the text, so two ingest events with
-  // the same incoming fact + same neighbor contents reuse one cached
-  // decision even if the neighbor rows were re-materialized under fresh
-  // ids. The decision target is content-anchored and resolved back to a
-  // current object_id on a hit (see decide / resolveTargetByContentHash),
-  // so dropping the id from the key cannot serve a stale target.
-  // Sorted so FTS row ordering does not change the key.
-  const sortedCandidates = [...candidates]
-    .map((candidate) => candidate.content)
-    .sort();
-  // A real field delimiter (0x1f unit separator — it cannot occur in a
-  // model id or in distilled-fact text) between the hashed parts so that
-  // e.g. ("ab","c") and ("a","bc") cannot hash to the same cache key.
-  const FIELD_SEPARATOR = "\u001f";
-  const hash = createHash("sha256");
-  hash.update(model, "utf8");
-  hash.update(FIELD_SEPARATOR, "utf8");
-  hash.update(incomingContent, "utf8");
-  for (const candidate of sortedCandidates) {
-    hash.update(FIELD_SEPARATOR, "utf8");
-    hash.update(candidate, "utf8");
-  }
-  return hash.digest("hex");
+  return computeReconciliationRequestKeyForTest({ model, incomingContent, candidates });
 }
 
 async function readCachedDecision(

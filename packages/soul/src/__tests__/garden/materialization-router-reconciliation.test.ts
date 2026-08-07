@@ -6,7 +6,9 @@ import {
   type MockPathRelationProposalFn,
   createDeps,
   createPathRelationProposalPort,
-  createSignal} from "./materialization-router-fixture.js";
+  createSignal,
+  fakeReconciliationPort
+} from "./materialization-router-fixture.js";
 
 describe("MaterializationRouter ingest reconciliation", () => {
   function factSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
@@ -33,6 +35,22 @@ describe("MaterializationRouter ingest reconciliation", () => {
       object_kind: "memory_entry",
       object_id: "memory-1"
     });
+  });
+
+  it("passes the materialized memory dimension to reconciliation", async () => {
+    const deps = createDeps();
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const router = new MaterializationRouter({ ...deps, reconciliationPort });
+
+    await router.materializeSignal(factSignal());
+
+    expect(reconciliationPort.runWithDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        incomingContent: "The user lives in Berlin.",
+        incomingDimension: "fact"
+      }),
+      expect.any(Function)
+    );
   });
 
 

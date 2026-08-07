@@ -3,7 +3,10 @@ import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
   SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
-import type { AlayaDaemonRuntime } from "@do-soul/alaya";
+import type {
+  AlayaDaemonRuntime,
+  EffectiveReconciliationBasis
+} from "@do-soul/alaya";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
 import type { CoRecallWarmupSummary } from "../embedding/co-recall-warmup.js";
 import type { BenchRecallWeightOverrides } from "../recall/recall-weight-overrides.js";
@@ -59,6 +62,7 @@ export interface BenchDaemonOptions {
   // when embeddingMode === "env". OpenAI is explicit opt-in; the local ONNX
   // provider is the product default. Ignored when embeddingMode is "disabled".
   readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
+  readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly reviewerIdentity?: string;
   readonly reviewerToken?: string;
@@ -292,7 +296,7 @@ export interface BenchDaemonHandle {
     readonly minted: number;
   }>;
   /**
-   * Mints sparse answer-relation edges among seeded memory_entry ids whose
+   * Admits sparse answer-relation assertions among seeded memory_entry ids whose
    * pooled HQ content-token sets overlap. Requires memory_hq to be pre-filled.
    *
    * see also: packages/core/src/path-graph/hq-answer-overlap.ts
@@ -307,7 +311,7 @@ export interface BenchDaemonHandle {
   ): Promise<{
     readonly coRelevantPairs: number;
     readonly keptPairs: number;
-    readonly minted: number;
+    readonly admitted: number;
   }>;
   /**
    * @anchor queryTokenMetrics — event-sourced token-economy reader.

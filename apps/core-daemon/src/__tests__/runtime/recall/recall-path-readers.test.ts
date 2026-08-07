@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { SignalEventType, type PathRelation } from "@do-soul/alaya-protocol";
-import { EventPublisher, RelationAssertionService } from "@do-soul/alaya-core";
+import { SignalEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
+import { EventPublisher, RelationAssertionService, stableStringify } from "@do-soul/alaya-core";
 import {
   initDatabase,
+  digestRelationFormationEventSource,
   SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
   SqliteRelationAssertionRepo,
@@ -238,7 +240,7 @@ describe("createRecallPathReadPorts", () => {
         run_state: "idle",
         current_surface_id: null
       });
-      const sourceEvent = eventLogRepo.append({
+      const sourceEvent = await eventLogRepo.append({
         event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
         entity_type: "candidate_memory_signal",
         entity_id: "signal-temporal-direct",
@@ -276,18 +278,18 @@ describe("createRecallPathReadPorts", () => {
         workspaceId,
         runId: "run-temporal-direct",
         causedBy: "garden",
-        evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
+        ...relationReceipt(
+          "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+          sourceEvent,
+          "supports",
+          "2026-07-17T01:00:00.000Z"
+        ),
         anchors: {
           source_anchor: { kind: "object", object_id: "memory-a" },
           target_anchor: { kind: "object", object_id: "memory-b" }
         },
         relationKind: "supports",
         validity: { kind: "open", valid_from: "2026-07-17T01:00:00.000Z" },
-        sourceEventAnchor: {
-          eventType: SignalEventType.SOUL_SIGNAL_EMITTED,
-          eventId: sourceEvent.event_id,
-          occurredAt: "2026-07-17T01:00:00.000Z"
-        },
         admittedAt: "2026-07-17T01:00:00.000Z"
       });
       await relationAssertionService.resolve({
@@ -325,18 +327,18 @@ describe("createRecallPathReadPorts", () => {
         workspaceId,
         runId: "run-temporal-direct",
         causedBy: "garden",
-        evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
+        ...relationReceipt(
+          "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+          sourceEvent,
+          "time_concern",
+          "2026-07-17T01:00:00.000Z"
+        ),
         anchors: path.anchors,
         relationKind: "time_concern",
         validity: {
           kind: "bounded",
           valid_from: "2026-07-17T02:00:00.000Z",
           valid_to: "2026-07-17T03:00:00.000Z"
-        },
-        sourceEventAnchor: {
-          eventType: SignalEventType.SOUL_SIGNAL_EMITTED,
-          eventId: sourceEvent.event_id,
-          occurredAt: "2026-07-17T01:00:00.000Z"
         },
         admittedAt: "2026-07-17T02:00:00.000Z"
       });
@@ -356,6 +358,43 @@ describe("createRecallPathReadPorts", () => {
     }
   });
 });
+
+function relationReceipt(
+  evidenceId: string,
+  event: Readonly<EventLogEntry>,
+  relationKind: string,
+  occurredAt: string
+) {
+  const parameters = { relation_kind: relationKind };
+  const decision = { evidence_id: evidenceId, source_event_id: event.event_id };
+  return {
+    evidenceReceipts: [{
+      evidence_id: evidenceId,
+      source_event_anchor: {
+        event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+        event_id: event.event_id,
+        occurred_at: occurredAt
+      }
+    }],
+    formationReceipt: {
+      operator_id: "temporal_reader_test_v1",
+      operator_sha256: "a".repeat(64),
+      parameters,
+      parameter_sha256: relationDigest(parameters),
+      source_observations: [{
+        source_kind: "event_log_entry",
+        source_id: event.event_id,
+        source_sha256: digestRelationFormationEventSource(event)
+      }],
+      decision,
+      decision_sha256: relationDigest(decision)
+    }
+  };
+}
+
+function relationDigest(value: unknown): string {
+  return createHash("sha256").update(stableStringify(value), "utf8").digest("hex");
+}
 
 function createPathRelation(overrides: Partial<PathRelation> = {}): PathRelation {
   return {

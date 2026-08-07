@@ -378,4 +378,50 @@ describe("effective bench daemon environment", () => {
       restoreEnvironment(savedCoreEnv, POST_LAUNCH_ENV_DRIFT_KEYS);
     }
   });
+
+  it("attests the effective rule-only reconciliation basis", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "bench-reconciliation-basis-"));
+    roots.push(dataDir);
+    const launch = createRuleOnlyLaunch(dataDir);
+
+    daemon = await startBenchDaemon({
+      dataDirRoot: dataDir,
+      embeddingMode: "disabled",
+      embeddingProviderKind: "local_onnx",
+      expectedReconciliationBasis: "rule_only"
+    }, launch);
+
+    expect(daemon).toBeDefined();
+  });
+
+  it("closes startup before workload when the expected reconciliation basis mismatches", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "bench-reconciliation-mismatch-"));
+    roots.push(dataDir);
+    const launch = createRuleOnlyLaunch(dataDir);
+
+    await expect(startBenchDaemon({
+      dataDirRoot: dataDir,
+      embeddingMode: "disabled",
+      embeddingProviderKind: "local_onnx",
+      expectedReconciliationBasis: "garden_llm"
+    }, launch)).rejects.toThrow(
+      "expected reconciliation basis garden_llm but daemon selected rule_only"
+    );
+    await expect(access(launch.configDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
+
+function createRuleOnlyLaunch(dataDir: string) {
+  return createBenchDaemonLaunchConfig({
+    dataDir,
+    embeddingMode: "disabled",
+    embeddingProviderKind: "local_onnx",
+    ambientEnv: {
+      ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
+      ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
+      ALAYA_OFFICIAL_GARDEN_SECRET_REF: "",
+      ALAYA_OFFICIAL_GARDEN_API_KEY: ""
+    },
+    tokenFactory: () => "test-review-token"
+  });
+}

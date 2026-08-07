@@ -11,8 +11,8 @@ export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 108;
 
 export type TemporalDatabaseMode = "runtime" | "fresh-bootstrap" | "candidate";
 
-const TEMPORAL_ASSERTION_SCHEMA_GENERATION = "relation_assertion_v1";
-const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v1";
+const TEMPORAL_ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
+const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
 const TEMPORAL_PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
 const TEMPORAL_BOOTSTRAP_GENERATION = "temporal-bootstrap-empty-v1";
 const TEMPORAL_PROJECTION_POLICY_ID = "relation-path-projection-v1";

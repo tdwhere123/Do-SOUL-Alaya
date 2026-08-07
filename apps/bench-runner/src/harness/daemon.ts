@@ -80,6 +80,7 @@ interface BenchDaemonState {
   readonly activeContext: { workspaceId: string; runId: string };
   readonly embeddingMode: NonNullable<BenchDaemonOptions["embeddingMode"]>;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
+  readonly expectedReconciliationBasis: BenchDaemonOptions["expectedReconciliationBasis"];
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
   readonly dataDir: string;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
@@ -98,6 +99,7 @@ async function createBenchDaemonState(
   const defaultRunId = opts.runId ?? "bench-run-1";
   const activeContext = { workspaceId: defaultWorkspaceId, runId: defaultRunId };
   const recallWeightOverrides = opts.recallWeightOverrides;
+  const expectedReconciliationBasis = opts.expectedReconciliationBasis;
   const dataDir = opts.dataDirRoot ??
     preparedLaunch?.dataDir ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
   const embeddingMode = opts.embeddingMode ?? preparedLaunch?.embeddingMode ?? "disabled";
@@ -120,6 +122,7 @@ async function createBenchDaemonState(
     activeContext,
     embeddingMode,
     embeddingProviderKind,
+    expectedReconciliationBasis,
     recallWeightOverrides,
     dataDir,
     savedEnv,
@@ -154,6 +157,7 @@ async function bootBenchDaemon(
     defaultRunId: state.defaultRunId,
     activeContext: state.activeContext,
     launch: state.launch,
+    expectedReconciliationBasis: state.expectedReconciliationBasis,
     configDirectory: state.configDirectory,
     managedEnvKeys: state.managedEnvKeys,
     createManagedWorkspaceRoot: state.workspaceManager.createManagedWorkspaceRoot

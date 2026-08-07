@@ -13,11 +13,13 @@ import type {
   EmbeddingRecallService,
   PathRelationProposalService,
   RecallService,
+  RelationAssertionService,
   RunService,
   SignalService,
   SynthesisService,
   WorkspaceService
 } from "@do-soul/alaya-core";
+import type { MemoryHqRepo } from "@do-soul/alaya-storage";
 
 export type StartupStep =
   | "database"
@@ -58,7 +60,15 @@ export interface AlayaDaemonRuntime {
   shutdown(): Promise<void>;
 }
 
+
+export type EffectiveReconciliationBasis = "rule_only" | "garden_llm";
+
+export type ReconciliationBasisStatus =
+  | { readonly enabled: false }
+  | { readonly enabled: true; readonly basis: EffectiveReconciliationBasis };
+
 export interface AlayaDaemonRuntimeServices {
+  readonly reconciliationBasisStatus: ReconciliationBasisStatus;
   readonly conversationToolCatalog: Readonly<{
     getSpecs(): readonly Readonly<{ readonly tool_id: string; readonly description: string }>[];
     hasToolName(toolName: string): boolean;
@@ -79,6 +89,7 @@ export interface AlayaDaemonRuntimeServices {
   // invariant: answers_with crystallizer is always-on when the HQ repo is
   // present; null hqRepo → no mint.
   readonly answersWithPairSource?: AnswerCoRelevancePairSourcePort;
+  readonly memoryHqWriter?: Pick<MemoryHqRepo, "upsertFromEvidence">;
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
@@ -116,6 +127,7 @@ export interface AlayaDaemonRuntimeServices {
     PathRelationProposalService,
     "submitCandidate" | "onCoUsage" | "onCoRecall" | "counterSize"
   >;
+  readonly relationAssertionService: Pick<RelationAssertionService, "admit">;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

@@ -384,6 +384,7 @@ export interface ReconciliationPort {
       readonly runId: string;
       readonly signalId: string;
       readonly incomingContent: string;
+      readonly incomingDimension: MemoryMaterializationInput["dimension"];
       readonly incomingDomainTags: readonly string[];
       readonly incomingProjectionFields?: ReconciliationProjectionFields;
       // content-derived; refreshes the survivor's facet_tags on an in-place UPDATE.

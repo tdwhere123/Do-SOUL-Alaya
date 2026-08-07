@@ -1,33 +1,38 @@
-import type { PathMintOutcome, SubmitCandidateInput } from "../edge-proposals/path-relation-proposal-service.js";
-import { ANSWERS_WITH_SEED_PROFILE } from "../edge-proposals/path-relation-proposal-service.js";
+import type {
+  RelationAssertionAdmissionRequest,
+  RelationAssertionAdmissionResult
+} from "../relation-assertions/relation-assertion-service-types.js";
 import {
   buildObjectFormationOrder,
   buildSessionMap,
-  parsePathPairKeys,
   type PathPair,
   type PathPairObject,
   sparsifyPairs
 } from "./path-pair-sparsify.js";
 
-// Source of object↔object answer-co-relevance pairs (HQ answer-overlap >= bar,
-// canonical `${low}|${high}` keys). The overlap math lives behind this port; the
-// producer never touches HQ text. Satisfied by HqAnswerOverlapPairSource.
+export interface AnswerCoRelevancePairWitness {
+  readonly pair: PathPair;
+  readonly evidenceReceipts: RelationAssertionAdmissionRequest["evidenceReceipts"];
+  readonly formationReceipt: RelationAssertionAdmissionRequest["formationReceipt"];
+  readonly validFrom: string;
+}
+
 export interface AnswerCoRelevancePairSourcePort {
-  answerCoRelevantPairKeys(params: {
+  answerCoRelevantPairs(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
     readonly objectIds: readonly string[];
     readonly bar: number;
-  }): Promise<ReadonlySet<string>>;
+  }): Promise<readonly AnswerCoRelevancePairWitness[]>;
 }
 
-export interface AnswersWithEdgeMintPort {
-  submitCandidate(input: SubmitCandidateInput): Promise<PathMintOutcome>;
+export interface AnswersWithRelationAssertionPort {
+  admit(input: RelationAssertionAdmissionRequest): Promise<RelationAssertionAdmissionResult>;
 }
 
 export interface AnswersWithEdgeProducerDeps {
   readonly pairSource: AnswerCoRelevancePairSourcePort;
-  readonly mintPort: AnswersWithEdgeMintPort;
+  readonly assertionPort: AnswersWithRelationAssertionPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
@@ -43,20 +48,16 @@ export interface AnswersWithCrystallizeInput {
 export interface AnswersWithCrystallizeResult {
   readonly coRelevantPairs: number;
   readonly keptPairs: number;
-  readonly minted: number;
+  readonly admitted: number;
 }
 
 const EMPTY_RESULT: AnswersWithCrystallizeResult = Object.freeze({
   coRelevantPairs: 0,
   keptPairs: 0,
-  minted: 0
+  admitted: 0
 });
 
-// Crystallize answers_with edges from HQ answer-overlap — two memories that
-// answer the same batch of questions become answer-co-relevant. Mirrors
-// CoherenceEdgeProducerService (same sparsify + mint path) but feeds the path
-// axis an answer-relation edge instead of a co-occurrence one. Sparsified
-// (cross-session + per-node cap) so a dense answer cluster cannot flood the graph.
+// Sparsification bounds dense answer clusters before immutable assertion admission.
 export class AnswersWithEdgeProducerService {
   public constructor(private readonly deps: AnswersWithEdgeProducerDeps) {}
 
@@ -67,11 +68,12 @@ export class AnswersWithEdgeProducerService {
     const objectIds = input.objects.map((object) => object.objectId);
     const sessionById = buildSessionMap(input.objects);
     const objectOrder = buildObjectFormationOrder(input.objects);
-    const pairKeys = await this.loadCoRelevantPairs(input, objectIds);
-    if (pairKeys.size === 0) {
+    const witnesses = await this.loadCoRelevantPairs(input, objectIds);
+    if (witnesses.length === 0) {
       return EMPTY_RESULT;
     }
-    const coRelevant = parsePathPairKeys(pairKeys);
+    const witnessByPair = new Map(witnesses.map((witness) => [pairKey(witness.pair), witness]));
+    const coRelevant = witnesses.map((witness) => witness.pair);
     const kept = sparsifyPairs(
       coRelevant,
       sessionById,
@@ -80,18 +82,18 @@ export class AnswersWithEdgeProducerService {
       input.crossSessionOnly
     );
     if (kept.length === 0) {
-      return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: 0, minted: 0 });
+      return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: 0, admitted: 0 });
     }
-    const minted = await this.mintCoRelevantPairs(input, kept);
-    return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: kept.length, minted });
+    const admitted = await this.admitCoRelevantPairs(input, kept, witnessByPair);
+    return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: kept.length, admitted });
   }
 
   private async loadCoRelevantPairs(
     input: AnswersWithCrystallizeInput,
     objectIds: readonly string[]
-  ): Promise<ReadonlySet<string>> {
+  ): Promise<readonly AnswerCoRelevancePairWitness[]> {
     try {
-      return await this.deps.pairSource.answerCoRelevantPairKeys({
+      return await this.deps.pairSource.answerCoRelevantPairs({
         workspaceId: input.workspaceId,
         runId: input.runId,
         objectIds,
@@ -103,32 +105,41 @@ export class AnswersWithEdgeProducerService {
         run_id: input.runId,
         error: error instanceof Error ? error.message : String(error)
       });
-      return new Set<string>();
+      return [];
     }
   }
 
-  private async mintCoRelevantPairs(
+  private async admitCoRelevantPairs(
     input: AnswersWithCrystallizeInput,
-    kept: readonly PathPair[]
+    kept: readonly PathPair[],
+    witnessByPair: ReadonlyMap<string, AnswerCoRelevancePairWitness>
   ): Promise<number> {
-    let minted = 0;
+    let admitted = 0;
     for (const [source, target] of kept) {
-      const outcome = await this.deps.mintPort.submitCandidate({
-        workspaceId: input.workspaceId,
-        sourceAnchor: { kind: "object", object_id: source },
-        targetAnchor: { kind: "object", object_id: target },
-        relationKind: ANSWERS_WITH_SEED_PROFILE.relationKind,
-        initialStrength: ANSWERS_WITH_SEED_PROFILE.initialStrength,
-        governanceClass: ANSWERS_WITH_SEED_PROFILE.governanceClass,
-        evidenceBasis: ANSWERS_WITH_SEED_PROFILE.evidenceBasis,
-        recallBiasSign: ANSWERS_WITH_SEED_PROFILE.recallBiasSign,
-        recallBiasMagnitude: ANSWERS_WITH_SEED_PROFILE.recallBiasMagnitude,
-        runId: input.runId
-      });
-      if (outcome === "applied") {
-        minted += 1;
+      const witness = witnessByPair.get(pairKey([source, target]));
+      if (witness === undefined) {
+        throw new Error(`Missing formation witness for answers_with pair ${source}|${target}.`);
       }
+      const outcome = await this.deps.assertionPort.admit({
+        workspaceId: input.workspaceId,
+        runId: input.runId,
+        causedBy: "answers_with_edge_producer",
+        evidenceReceipts: witness.evidenceReceipts,
+        formationReceipt: witness.formationReceipt,
+        anchors: {
+          source_anchor: { kind: "object", object_id: source },
+          target_anchor: { kind: "object", object_id: target }
+        },
+        relationKind: "answers_with",
+        validity: { kind: "open", valid_from: witness.validFrom }
+      });
+      if (outcome.status === "admitted") admitted += 1;
     }
-    return minted;
+    return admitted;
   }
+}
+
+function pairKey(pair: PathPair): string {
+  const [left, right] = pair;
+  return left < right ? `${left}|${right}` : `${right}|${left}`;
 }

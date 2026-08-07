@@ -102,16 +102,11 @@ async function materializeAndAcceptSeed(
   evidenceRef: string
 ): Promise<MaterializedAcceptedSeed> {
   const materialized = await input.readMaterializedObjects(signalId);
-  let accepted: AcceptedSeedMemory;
-  try {
-    accepted = await acceptSeededMemory(input, materialized.memoryId, evidenceRef);
-  } catch (error) {
-    throw createUnscoredMaterializedSeedError({
-      memoryId: materialized.memoryId,
-      evidenceRef,
-      cause: error
-    });
-  }
+  const accepted = await protectMaterializedSeed(
+    materialized.memoryId,
+    evidenceRef,
+    () => acceptSeededMemory(input, materialized.memoryId, evidenceRef)
+  );
   return {
     memoryId: materialized.memoryId,
     proposalId: accepted.proposalId,
@@ -258,6 +253,16 @@ function buildCompileSignal(
   signalInput: BenchSignalSeedInput,
   rawPayload: Record<string, unknown>
 ): CandidateMemorySignal {
+  const observedAt = signalInput.sourceObservedAt ?? new Date().toISOString();
+  const sourceObservation = signalInput.sourceObservedAt === undefined
+    ? {}
+    : {
+        source_observation: {
+          observed_at: signalInput.sourceObservedAt,
+          authority: "trusted_host_event" as const,
+          source_event_id: signalInput.evidenceRef
+        }
+      };
   const candidate = {
     signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
     workspace_id: input.activeContext.workspaceId,
@@ -272,7 +277,8 @@ function buildCompileSignal(
     evidence_refs: [signalInput.evidenceRef],
     ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
     raw_payload: rawPayload,
-    created_at: signalInput.sourceObservedAt ?? new Date().toISOString()
+    ...sourceObservation,
+    created_at: observedAt
   };
   try {
     return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse(candidate));
@@ -367,12 +373,23 @@ async function resolveReceivedCompileSignal(
     );
   }
 
-  const accepted = await acceptCompileSeededMemory(
-    input,
+  const accepted = await protectMaterializedSeed(
     memoryObject.object_id,
-    signalInput.evidenceRef
+    signalInput.evidenceRef,
+    () => acceptSeededMemory(input, memoryObject.object_id, signalInput.evidenceRef)
   );
-  await persistBenchAnswerHq(input, memoryObject.object_id, signalInput);
+  if (evidenceObject !== undefined) {
+    await protectMaterializedSeed(
+      memoryObject.object_id,
+      signalInput.evidenceRef,
+      () => persistBenchAnswerHq(
+        input,
+        memoryObject.object_id,
+        evidenceObject.object_id,
+        signalInput
+      )
+    );
+  }
   return {
     kind: "seeded",
     createdEvidence: evidenceObject !== undefined,
@@ -388,13 +405,13 @@ async function resolveReceivedCompileSignal(
   };
 }
 
-async function acceptCompileSeededMemory(
-  input: CreateBenchSeedOpsInput,
+async function protectMaterializedSeed<T>(
   memoryId: string,
-  evidenceRef: string
-): Promise<AcceptedSeedMemory> {
+  evidenceRef: string,
+  operation: () => Promise<T>
+): Promise<T> {
   try {
-    return await acceptSeededMemory(input, memoryId, evidenceRef);
+    return await operation();
   } catch (error) {
     throw createUnscoredMaterializedSeedError({ memoryId, evidenceRef, cause: error });
   }

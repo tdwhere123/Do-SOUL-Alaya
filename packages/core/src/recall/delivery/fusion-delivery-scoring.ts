@@ -1,7 +1,9 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
-  compareMemoryEntries,
-  isWorkspaceMemoryCandidate
+  compareMemorySemanticIdentity,
+  isWorkspaceMemoryCandidate,
+  normalizeActivationAdmissionScore,
+  normalizeRecallRankingScore
 } from "../runtime/recall-service-helpers.js";
 import {
   resolveRrfFusionWeights
@@ -113,7 +115,8 @@ export function applyPathSuppressionToFusionScores(
     if (delta !== 0) {
       return delta;
     }
-    return left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
+    return left.breakdown.fused_rank - right.breakdown.fused_rank ||
+      left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
   });
   const suppressedRankByKey = new Map(
     ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
@@ -155,21 +158,27 @@ function buildFusionRanksForStream(
   nowIso: string
 ): ReadonlyMap<string, number> {
   const scored = candidates
-    .map(({ candidateKey, candidate }) => Object.freeze({
-      candidateKey,
-      entry: candidate.entry,
-      score: scoreRecallFusionStream(
+    .map(({ candidateKey, candidate }) => {
+      const rawScore = scoreRecallFusionStream(
         candidate,
         stream,
         supplementaryData,
         nowIso,
         candidateKey
-      )
-    }))
+      );
+      return Object.freeze({
+        candidateKey,
+        entry: candidate.entry,
+        score: stream === "workspace_activation"
+          ? normalizeActivationAdmissionScore(rawScore)
+          : normalizeRecallRankingScore(rawScore)
+      });
+    })
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) =>
       right.score === left.score
-        ? compareMemoryEntries(left.entry, right.entry)
+        ? compareMemorySemanticIdentity(left.entry, right.entry) ||
+          left.candidateKey.localeCompare(right.candidateKey)
         : right.score - left.score
     );
   return buildFusionCompetitionRanks(scored);
@@ -355,7 +364,8 @@ function buildFusedRankByCandidateKey(
     if (fusionDelta !== 0) {
       return fusionDelta;
     }
-    return left.candidateKey.localeCompare(right.candidateKey);
+    return compareMemorySemanticIdentity(left.entry, right.entry) ||
+      left.candidateKey.localeCompare(right.candidateKey);
   });
   return new Map(ranked.map((candidate, index) => [candidate.candidateKey, index + 1] as const));
 }
@@ -401,7 +411,8 @@ export function compareFusedRecallCandidates(
   if (fusionDelta !== 0) {
     return fusionDelta;
   }
-  return left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
+  return compareMemorySemanticIdentity(left.entry, right.entry) ||
+    left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
 }
 
 export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {

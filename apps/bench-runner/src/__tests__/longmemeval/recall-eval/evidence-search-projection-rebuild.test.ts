@@ -66,7 +66,7 @@ describe("receipt-v2 evidence search projection rebuild", () => {
       promotable: false,
       input_db_sha256: inputDbSha256,
       rebuilt_db_identity_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      source_schema_version: 108,
+      source_schema_version: fixture.currentSchemaVersion,
       working_schema_version: fixture.currentSchemaVersion,
       eligible_owner_count: 2,
       rebuilt_owner_count: 2,
@@ -88,7 +88,8 @@ describe("receipt-v2 evidence search projection rebuild", () => {
         capture_binding_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
       }
     });
-    expect(readSchemaMigrationLedger(fixture.sourceDbPath).at(-1)).toBe(108);
+    expect(readSchemaMigrationLedger(fixture.sourceDbPath).at(-1))
+      .toBe(fixture.currentSchemaVersion);
     expect(readSchemaMigrationLedger(workingDbPath).at(-1))
       .toBe(fixture.currentSchemaVersion);
     expect(await fileSha256(fixture.sourceDbPath)).toBe(sourceBefore);

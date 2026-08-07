@@ -11,8 +11,8 @@ import {
 } from "./relation-projection-policy.js";
 import type { RelationAssertionProjectionResult } from "./relation-assertion-service-types.js";
 
-const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v1";
-const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v1";
+const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
+const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
 const PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
 
 export function buildRelationProjection(
@@ -87,7 +87,8 @@ function buildRelationHistoryDigest(
       assertion_id: assertion.assertion_id,
       admission_event_id: assertion.admission_event_id,
       workspace_id: assertion.workspace_id,
-      evidence_ids: assertion.evidence_ids,
+      evidence_receipts: assertion.evidence_receipts,
+      formation_receipt: assertion.formation_receipt,
       anchors: assertion.anchors,
       relation_kind: assertion.relation_kind,
       validity: assertion.validity,

@@ -1,6 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "@do-soul/alaya";
+import {
+  createAlayaDaemonRuntime,
+  type AlayaDaemonRuntime,
+  type EffectiveReconciliationBasis
+} from "@do-soul/alaya";
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import {
@@ -21,6 +25,7 @@ export interface BenchDaemonStartupInput {
   readonly defaultRunId: string;
   readonly activeContext: ActiveBenchContext;
   readonly launch: BenchDaemonLaunchConfig;
+  readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly configDirectory: BenchDaemonConfigDirectoryLease;
   readonly managedEnvKeys: readonly string[];
   readonly createManagedWorkspaceRoot: (workspaceId: string) => Promise<string>;
@@ -40,7 +45,10 @@ export async function initializeBenchDaemon(
 ): Promise<BenchDaemonStartupResources> {
   applyBenchDaemonEnvironment(input.launch.environment, input.managedEnvKeys);
   await input.configDirectory.prepare();
-  const resources = await createBenchRuntimeResources(input.activeContext);
+  const resources = await createBenchRuntimeResources(
+    input.activeContext,
+    input.expectedReconciliationBasis
+  );
   try {
     await installBenchProfile(
       resources.dispatchCli,
@@ -58,9 +66,16 @@ export async function initializeBenchDaemon(
 }
 
 async function createBenchRuntimeResources(
-  activeContext: ActiveBenchContext
+  activeContext: ActiveBenchContext,
+  expectedReconciliationBasis: EffectiveReconciliationBasis | undefined
 ): Promise<BenchDaemonStartupResources> {
   const runtime = await createAlayaDaemonRuntime();
+  try {
+    assertExpectedReconciliationBasis(runtime, expectedReconciliationBasis);
+  } catch (error) {
+    await runtime.shutdown();
+    throw error;
+  }
   const server = createAlayaMcpServer({
     memoryToolHandler: runtime.services.mcpMemoryToolHandler,
     contextProvider: () => createBenchToolContext(activeContext)
@@ -78,6 +93,24 @@ async function createBenchRuntimeResources(
     mcpClient,
     dispatchCli: makeDispatchCli(runtime)
   };
+}
+
+function assertExpectedReconciliationBasis(
+  runtime: AlayaDaemonRuntime,
+  expected: EffectiveReconciliationBasis | undefined
+): void {
+  if (expected === undefined) return;
+  const status = runtime.services.reconciliationBasisStatus;
+  if (!status.enabled) {
+    throw new Error(
+      `expected reconciliation basis ${expected} but reconciliation is disabled`
+    );
+  }
+  if (status.basis !== expected) {
+    throw new Error(
+      `expected reconciliation basis ${expected} but daemon selected ${status.basis}`
+    );
+  }
 }
 
 function createBenchToolContext(activeContext: ActiveBenchContext) {

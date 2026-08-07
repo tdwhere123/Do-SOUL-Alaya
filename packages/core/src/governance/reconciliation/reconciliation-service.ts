@@ -29,6 +29,7 @@ import {
 } from "./reconciliation-service-internal.js";
 
 export {
+  compareCandidateContent,
   AUDIT_DROPPED_CONTENT_MAX_CHARS,
   RECONCILE_LEASE_TTL_MS,
   createRuleOnlyReconciliationDecisionPort
