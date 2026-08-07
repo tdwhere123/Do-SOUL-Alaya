@@ -306,6 +306,31 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     ]);
   });
 
+  it("orders equal FTS evidence by source identity before generated object IDs", async () => {
+    const { repo } = await createRepo();
+    const shared = "Replay-stable evidence tie for source ordering.";
+    await repo.create(createEvidenceCapsule({
+      object_id: "1f5c2a90-0000-4000-8000-000000000040",
+      gist: shared,
+      excerpt: shared,
+      source_hash: "sha256:source-z"
+    }));
+    await repo.create(createEvidenceCapsule({
+      object_id: "1f5c2a90-0000-4000-8000-000000000041",
+      gist: shared,
+      excerpt: shared,
+      source_hash: "sha256:source-a"
+    }));
+
+    const field = await repo.searchByKeywordField!("workspace-1", "replay stable", 10);
+    const porter = field.lanes.find(({ lane }) => lane === "porter");
+
+    expect(porter?.observations.map(({ object_id }) => object_id)).toEqual([
+      "1f5c2a90-0000-4000-8000-000000000041",
+      "1f5c2a90-0000-4000-8000-000000000040"
+    ]);
+  });
+
   it("materializes evidence refinement levels from one transaction-bound row set", async () => {
     const { repo } = await createRepo();
     for (const [index, objectId] of [

@@ -80,16 +80,16 @@ export function parseEmbeddingPrecheckReason(error: unknown): string | null {
     : null;
 }
 const RECALL_RANK_SCORE_SCALE = 1e8;
-// Admission cutoffs must ignore sub-micro drift from replay-local lifecycle timing.
-const ACTIVATION_ADMISSION_SCORE_SCALE = 1e6;
+// Replay-local lifecycle timing must not affect rank-sensitive scoring.
+const DRIFT_SENSITIVE_RANK_SCORE_SCALE = 1e6;
 
 export function normalizeRecallRankingScore(score: number): number {
   return Math.round(score * RECALL_RANK_SCORE_SCALE) / RECALL_RANK_SCORE_SCALE;
 }
 
-export function normalizeActivationAdmissionScore(score: number | null): number {
-  return Math.round(normalizeActivationScore(score) * ACTIVATION_ADMISSION_SCORE_SCALE) /
-    ACTIVATION_ADMISSION_SCORE_SCALE;
+export function normalizeDriftSensitiveRankingScore(score: number | null): number {
+  return Math.round(normalizeActivationScore(score) * DRIFT_SENSITIVE_RANK_SCORE_SCALE) /
+    DRIFT_SENSITIVE_RANK_SCORE_SCALE;
 }
 
 export function compareMemorySemanticIdentity(
@@ -113,8 +113,8 @@ export function compareMemoryEntriesForActivationAdmission(
   left: Readonly<MemoryEntry>,
   right: Readonly<MemoryEntry>
 ): number {
-  const activationDelta = normalizeActivationAdmissionScore(right.activation_score) -
-    normalizeActivationAdmissionScore(left.activation_score);
+  const activationDelta = normalizeDriftSensitiveRankingScore(right.activation_score) -
+    normalizeDriftSensitiveRankingScore(left.activation_score);
   if (activationDelta !== 0) {
     return activationDelta;
   }

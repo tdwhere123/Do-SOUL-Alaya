@@ -2,7 +2,7 @@ import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   compareMemorySemanticIdentity,
   isWorkspaceMemoryCandidate,
-  normalizeActivationAdmissionScore,
+  normalizeDriftSensitiveRankingScore,
   normalizeRecallRankingScore
 } from "../runtime/recall-service-helpers.js";
 import {
@@ -169,8 +169,8 @@ function buildFusionRanksForStream(
       return Object.freeze({
         candidateKey,
         entry: candidate.entry,
-        score: stream === "workspace_activation"
-          ? normalizeActivationAdmissionScore(rawScore)
+        score: stream === "workspace_activation" || stream === "existing_score"
+          ? normalizeDriftSensitiveRankingScore(rawScore)
           : normalizeRecallRankingScore(rawScore)
       });
     })

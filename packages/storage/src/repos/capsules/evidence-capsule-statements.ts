@@ -192,7 +192,8 @@ const SEARCH_EVIDENCE_KEYWORD_SQL = `
         AND evidence_capsule_fts MATCH ?
         AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
       ORDER BY raw_rank ASC, COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) ASC,
-        evidence_capsules.gist ASC, evidence_capsule_fts.object_id ASC
+        evidence_capsules.gist ASC, COALESCE(evidence_capsules.source_hash, '') ASC,
+        evidence_capsule_fts.object_id ASC
       LIMIT ?
 `;
 
@@ -208,7 +209,8 @@ const SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL = `
         AND evidence_capsule_fts_trigram MATCH ?
         AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
       ORDER BY raw_rank ASC, COALESCE(evidence_capsules.excerpt, evidence_capsules.gist) ASC,
-        evidence_capsules.gist ASC, evidence_capsule_fts_trigram.object_id ASC
+        evidence_capsules.gist ASC, COALESCE(evidence_capsules.source_hash, '') ASC,
+        evidence_capsule_fts_trigram.object_id ASC
       LIMIT ?
 `;
 

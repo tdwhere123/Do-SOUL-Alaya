@@ -68,8 +68,16 @@ function buildContentRanks(params: Readonly<{
   });
   return Object.freeze(Object.fromEntries(entries.map((entry) => [
     entry.content,
-    fusion.get(`workspace_local:memory_entry:${entry.object_id}`)?.per_stream_rank.workspace_activation
-  ])) as Record<string, number>);
+    Object.freeze({
+      workspace_activation: fusion.get(`workspace_local:memory_entry:${entry.object_id}`)
+        ?.per_stream_rank.workspace_activation,
+      existing_score: fusion.get(`workspace_local:memory_entry:${entry.object_id}`)
+        ?.per_stream_rank.existing_score
+    })
+  ])) as Record<string, Readonly<{
+    readonly workspace_activation: number | null | undefined;
+    readonly existing_score: number | null | undefined;
+  }>>);
 }
 
 describe("fusion replay invariance", () => {
@@ -88,6 +96,7 @@ describe("fusion replay invariance", () => {
     });
 
     expect(first).toEqual(replay);
-    expect(first[ALPHA_CONTENT]).toBe(1);
+    expect(first[ALPHA_CONTENT]?.workspace_activation).toBe(1);
+    expect(first[ALPHA_CONTENT]?.existing_score).toBe(1);
   });
 });
