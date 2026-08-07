@@ -30,6 +30,7 @@ export interface CoarseCandidateAdmissionMetadata {
   readonly objectKind?: RecallCandidate["object_kind"];
   readonly answerRerankText?: string;
   readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
   readonly evidenceSourceRole?: CoarseCandidateDraft["evidenceSourceRole"];
   readonly verifiedUserSupportSource?: CoarseCandidateDraft["verifiedUserSupportSource"];
 }
@@ -123,6 +124,8 @@ function buildNextCoarseCandidateDraft(
     metadata.answerRerankText ?? current?.answerRerankText;
   const evidenceDocumentIdentity =
     metadata.evidenceDocumentIdentity ?? current?.evidenceDocumentIdentity;
+  const evidenceSourceIdentity =
+    metadata.evidenceSourceIdentity ?? current?.evidenceSourceIdentity;
   const evidenceSourceRole = metadata.evidenceSourceRole ?? current?.evidenceSourceRole;
   const verifiedUserSupportSource =
     metadata.verifiedUserSupportSource ?? current?.verifiedUserSupportSource;
@@ -133,6 +136,9 @@ function buildNextCoarseCandidateDraft(
     ...(evidenceDocumentIdentity === undefined
       ? {}
       : { evidenceDocumentIdentity }),
+    ...(evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity }),
     ...(evidenceSourceRole === undefined ? {} : { evidenceSourceRole }),
     ...(verifiedUserSupportSource === undefined
       ? {}

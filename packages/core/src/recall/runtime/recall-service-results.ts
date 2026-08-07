@@ -201,6 +201,7 @@ export interface CoarseRecallCandidate {
   readonly entry: Readonly<MemoryEntry>;
   readonly answerRerankText?: string;
   readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
   readonly evidenceSourceRole?: "user" | "assistant";
   readonly verifiedUserSupportSource?: Readonly<
     import("../query/recall-answer-support-observation.js").RecallVerifiedUserSupportSource

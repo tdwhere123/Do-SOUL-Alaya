@@ -40,6 +40,7 @@ export interface CoarseCandidateDraft {
   readonly objectKind?: RecallCandidate["object_kind"];
   readonly answerRerankText?: string;
   readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
   readonly evidenceSourceRole?: CoarseRecallCandidate["evidenceSourceRole"];
   readonly verifiedUserSupportSource?: CoarseRecallCandidate["verifiedUserSupportSource"];
   readonly admissionPlanes: readonly RecallAdmissionPlane[];

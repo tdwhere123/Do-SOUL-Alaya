@@ -80,6 +80,51 @@ function buildContentRanks(params: Readonly<{
   }>>);
 }
 
+function buildDirectEvidenceRanks(params: Readonly<{
+  readonly alphaId: string;
+  readonly zebraId: string;
+}>): Readonly<Record<string, number | undefined>> {
+  const candidates = [
+    {
+      entry: createMemoryEntry({
+        object_id: params.alphaId,
+        content: "Identical direct evidence content.",
+        activation_score: 0.5
+      }),
+      evidenceSourceIdentity: "sha256:source-alpha"
+    },
+    {
+      entry: createMemoryEntry({
+        object_id: params.zebraId,
+        content: "Identical direct evidence content.",
+        activation_score: 0.5
+      }),
+      evidenceSourceIdentity: "sha256:source-zebra"
+    }
+  ] as const;
+  const fusion = buildRecallFusionDetails({
+    candidates: candidates.map((candidate) => ({
+      ...candidate,
+      objectKind: "evidence_capsule" as const,
+      effectiveScore: 0.5,
+      effectiveFactors: { activation: 0.5, relevance: 0 }
+    })),
+    policy: {} as RecallPolicy,
+    supplementaryData: {
+      ...emptySupplementaryData(),
+      evidenceFtsRanks: Object.fromEntries(candidates.map((candidate) => [
+        candidate.entry.object_id,
+        0.5
+      ]))
+    },
+    nowIso: "2026-08-06T03:01:00.000Z"
+  });
+  return Object.freeze(Object.fromEntries(candidates.map((candidate) => [
+    candidate.evidenceSourceIdentity,
+    fusion.get(`workspace_local:evidence_capsule:${candidate.entry.object_id}`)?.fused_rank
+  ])) as Record<string, number | undefined>);
+}
+
 describe("fusion replay invariance", () => {
   it("does not amplify sub-precision dynamics drift or random IDs into relevance order", () => {
     const first = buildContentRanks({
@@ -98,5 +143,19 @@ describe("fusion replay invariance", () => {
     expect(first).toEqual(replay);
     expect(first[ALPHA_CONTENT]?.workspace_activation).toBe(1);
     expect(first[ALPHA_CONTENT]?.existing_score).toBe(1);
+  });
+
+  it("uses source identity before replay-local IDs for tied direct evidence", () => {
+    const first = buildDirectEvidenceRanks({
+      alphaId: "99999999-9999-4999-8999-999999999999",
+      zebraId: "11111111-1111-4111-8111-111111111111"
+    });
+    const replay = buildDirectEvidenceRanks({
+      alphaId: "11111111-1111-4111-8111-111111111111",
+      zebraId: "99999999-9999-4999-8999-999999999999"
+    });
+
+    expect(first).toEqual(replay);
+    expect(first["sha256:source-alpha"]).toBe(1);
   });
 });

@@ -38,6 +38,7 @@ export type PreliminaryFusionCandidate = Readonly<{
   readonly objectKind: RecallFusionBreakdown["object_kind"];
   readonly originPlane: RecallFusionBreakdown["origin_plane"];
   readonly entry: Readonly<MemoryEntry>;
+  readonly evidenceSourceIdentity?: string;
   readonly effectiveScore: number;
   readonly perStreamRank: RecallFusionStreamRanks;
   readonly contributions: RecallFusionStreamContributions;

@@ -168,7 +168,7 @@ function buildFusionRanksForStream(
       );
       return Object.freeze({
         candidateKey,
-        entry: candidate.entry,
+        candidate,
         score: stream === "workspace_activation" || stream === "existing_score"
           ? normalizeDriftSensitiveRankingScore(rawScore)
           : normalizeRecallRankingScore(rawScore)
@@ -177,7 +177,7 @@ function buildFusionRanksForStream(
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) =>
       right.score === left.score
-        ? compareMemorySemanticIdentity(left.entry, right.entry) ||
+        ? compareFusionCandidateSemanticIdentity(left.candidate, right.candidate) ||
           left.candidateKey.localeCompare(right.candidateKey)
         : right.score - left.score
     );
@@ -233,6 +233,9 @@ function buildPreliminaryFusionCandidate(
     objectKind: candidate.objectKind ?? "memory_entry",
     originPlane: candidate.originPlane ?? "workspace_local",
     entry: candidate.entry,
+    ...(candidate.evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity: candidate.evidenceSourceIdentity }),
     effectiveScore: candidate.effectiveScore,
     perStreamRank,
     contributions,
@@ -364,7 +367,7 @@ function buildFusedRankByCandidateKey(
     if (fusionDelta !== 0) {
       return fusionDelta;
     }
-    return compareMemorySemanticIdentity(left.entry, right.entry) ||
+    return compareFusionCandidateSemanticIdentity(left, right) ||
       left.candidateKey.localeCompare(right.candidateKey);
   });
   return new Map(ranked.map((candidate, index) => [candidate.candidateKey, index + 1] as const));
@@ -411,8 +414,16 @@ export function compareFusedRecallCandidates(
   if (fusionDelta !== 0) {
     return fusionDelta;
   }
-  return compareMemorySemanticIdentity(left.entry, right.entry) ||
+  return compareFusionCandidateSemanticIdentity(left, right) ||
     left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
+}
+
+function compareFusionCandidateSemanticIdentity(
+  left: Readonly<Pick<RecallFusionCandidateInput, "entry" | "evidenceSourceIdentity">>,
+  right: Readonly<Pick<RecallFusionCandidateInput, "entry" | "evidenceSourceIdentity">>
+): number {
+  return compareMemorySemanticIdentity(left.entry, right.entry) ||
+    (left.evidenceSourceIdentity ?? "").localeCompare(right.evidenceSourceIdentity ?? "");
 }
 
 export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {

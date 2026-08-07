@@ -411,9 +411,12 @@ function admitDirectEvidenceCandidate(
     candidate.recallText
   );
     params.addCandidate(entry, "lexical", candidate.rank, "evidence_fts_direct", {
-    objectKind: "evidence_capsule",
-    answerRerankText: entry.content,
+      objectKind: "evidence_capsule",
+      answerRerankText: entry.content,
       evidenceDocumentIdentity: candidate.documentIdentity,
+      ...(evidence.source_hash === null
+        ? {}
+        : { evidenceSourceIdentity: evidence.source_hash }),
       ...(candidate.sourceRole === undefined
         ? {}
         : { evidenceSourceRole: candidate.sourceRole }),
