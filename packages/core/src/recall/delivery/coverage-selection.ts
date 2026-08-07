@@ -26,6 +26,8 @@ export type CoverageSelectableCandidate = Readonly<{
   >>;
   readonly originPlane?: RecallOriginPlane;
   readonly objectKind?: RecallCandidate["object_kind"];
+  readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
   readonly effectiveFactors: Readonly<RecallScoreFactors>;
   readonly fusion: Readonly<{
     readonly candidate_key: string;
@@ -287,6 +289,7 @@ export function resolveCoverageIdentity(
 ): CoverageIdentity {
   const objectId = candidate.entry.object_id;
   const canUseMemorySignals = isWorkspaceMemoryCandidate(candidate);
+  const evidenceIdentity = resolveEvidenceCoverageIdentity(candidate);
   const gist = canUseMemorySignals
     ? supplementaryData.evidenceGistsByMemoryId[objectId]?.trim() ?? ""
     : "";
@@ -297,9 +300,19 @@ export function resolveCoverageIdentity(
       ? `ref:${evidenceRef}`
       : `object:${candidate.fusion.candidate_key}`;
   return Object.freeze({
-    objectKey: buildRecallLogicalObjectKey(candidate),
-    gistKey
+    objectKey: evidenceIdentity ?? buildRecallLogicalObjectKey(candidate),
+    gistKey: evidenceIdentity ?? gistKey
   });
+}
+
+function resolveEvidenceCoverageIdentity(
+  candidate: CoverageSelectableCandidate
+): string | null {
+  if (isWorkspaceMemoryCandidate(candidate)) return null;
+  const source = candidate.evidenceSourceIdentity?.trim() ?? "";
+  const document = candidate.evidenceDocumentIdentity?.trim() ?? "";
+  if (source.length === 0 && document.length === 0) return null;
+  return `evidence:${source}:${document}`;
 }
 
 function marginalCoverageGain(params: Readonly<{
@@ -374,6 +387,12 @@ function initializeCoverageCandidateState<T extends CoverageSelectableCandidate>
     }),
     originPlane: candidate.originPlane,
     objectKind: candidate.objectKind,
+    ...(candidate.evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity: candidate.evidenceDocumentIdentity }),
+    ...(candidate.evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity: candidate.evidenceSourceIdentity }),
     effectiveFactors: candidate.effectiveFactors,
     fusion: candidate.fusion
   });

@@ -51,6 +51,23 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
+  it("uses source-bound identity for direct evidence coverage", () => {
+    const createEvidence = (objectId: string): FineAssessmentCandidate => ({
+      ...createCandidate(objectId, 0.2),
+      objectKind: "evidence_capsule",
+      evidenceSourceIdentity: "sha256:source-turn",
+      evidenceDocumentIdentity: "owner"
+    });
+
+    expect(resolveCoverageIdentity(
+      createEvidence("materialized-a"),
+      createSupplementaryData()
+    )).toEqual(resolveCoverageIdentity(
+      createEvidence("materialized-b"),
+      createSupplementaryData()
+    ));
+  });
+
   it("observes the live marginal gain without changing coverage order", () => {
     const sharedGistFirst = createCandidate("dup-1", 0.99);
     const sharedGistSecond = createCandidate("dup-2", 0.98);
