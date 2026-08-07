@@ -5,6 +5,8 @@ import {
   type SqlDefinitionMap,
   type SqliteStatement
 } from "../statement-group-utils.js";
+import { MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL } from
+  "../semantic-tie-order.js";
 import { ACTIVE_MEMORY_FILTER_SQL } from "./active-memory-filter-sql.js";
 
 export interface RecallEventTimeWindowStatements {
@@ -28,7 +30,9 @@ const RECALL_EVENT_TIME_WINDOW_SQL: SqlDefinitionMap<RecallEventTimeWindowStatem
           julianday(event_time_start),
           COALESCE(julianday(event_time_end), julianday(event_time_start))
         ) >= julianday(?)
-${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY COALESCE(activation_score, 0) DESC, created_at ASC, object_id ASC
+${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY COALESCE(activation_score, 0) DESC,
+${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL},
+        object_id ASC
       LIMIT ?
     `
 };
