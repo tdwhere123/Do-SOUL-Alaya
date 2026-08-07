@@ -2,7 +2,9 @@ import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import { scoreQueryEvidenceMatch } from "../../scoring/query-evidence-scoring.js";
 import {
   buildRecallCandidateDedupeKey,
-  isWorkspaceMemoryCandidate
+  compareMemorySemanticIdentity,
+  isWorkspaceMemoryCandidate,
+  normalizeDriftSensitiveRankingScore
 } from "../../runtime/recall-service-helpers.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../../runtime/recall-service-types.js";
@@ -387,9 +389,18 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
       candidate, candidateKey, evidenceCandidate, evidenceActivations
     );
     return score !== undefined && Number.isFinite(score) && score > 0
-      ? [{ candidate, candidateKey, index, score, evidenceCandidate }]
+      ? [{
+          candidate,
+          candidateKey,
+          index,
+          score: normalizeDriftSensitiveRankingScore(score),
+          evidenceCandidate
+        }]
       : [];
-  }).sort((left, right) => right.score - left.score);
+  }).sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    return scoreDelta !== 0 ? scoreDelta : compareSemanticHeadCandidates(left, right);
+  });
   if (ranked.length === 0 || ranked[1]?.score === ranked[0]!.score) return undefined;
   const leader = ranked[0]!;
   if (leader.evidenceCandidate !== undefined) return leader.evidenceCandidate;
@@ -444,13 +455,25 @@ function selectUniqueSemanticMemoryLeader<T extends DirectEvidenceHeadCandidate>
           candidate,
           candidateKey: buildRecallCandidateDedupeKey(candidate),
           index,
-          score
+          score: normalizeDriftSensitiveRankingScore(score)
         }]
       : [];
-  }).sort((left, right) => right.score - left.score);
+  }).sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    return scoreDelta !== 0 ? scoreDelta : compareSemanticHeadCandidates(left, right);
+  });
   return ranked.length > 0 && ranked[1]?.score !== ranked[0]!.score
     ? ranked[0]
     : undefined;
+}
+
+function compareSemanticHeadCandidates<T extends DirectEvidenceHeadCandidate>(
+  left: Readonly<{ readonly candidate: T; readonly candidateKey: string }>,
+  right: Readonly<{ readonly candidate: T; readonly candidateKey: string }>
+): number {
+  return compareMemorySemanticIdentity(left.candidate.entry, right.candidate.entry) ||
+    compareEvidenceSourceIdentity(left.candidate, right.candidate) ||
+    left.candidateKey.localeCompare(right.candidateKey);
 }
 
 function compareScoredEvidence<T extends DirectEvidenceHeadCandidate>(
