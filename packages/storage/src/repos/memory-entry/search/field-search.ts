@@ -3,6 +3,8 @@ import type { StorageTier } from "@do-soul/alaya-protocol";
 import {
   buildAnchorScopedFtsMatch,
 } from "../../shared/fts-lane-routing.js";
+import { buildMonotoneFieldRefinementLevels } from
+  "../../shared/monotone-field-refinement.js";
 import {
   buildGroupedOrdinalScores,
   countQueryCodepoints,
@@ -64,13 +66,12 @@ export async function searchByKeywordField(
       this, workspaceId, laneTokens.trigram, maxDepth, objectIds, scope.tier
     )
   }))();
-  return fieldWithRefinements(
-    buildKeywordFieldView(rows, laneTokens, limit),
-    depths.map((depth) => ({
-      requested_depth: depth,
-      ...buildKeywordFieldView(rows, laneTokens, depth)
-    }))
-  );
+  const base = buildKeywordFieldView(rows, laneTokens, limit);
+  return fieldWithRefinements(base, buildMonotoneFieldRefinementLevels(
+    base.matches,
+    depths,
+    (depth) => buildKeywordFieldView(rows, laneTokens, depth)
+  ));
 }
 
 export async function searchByAnchorField(
@@ -98,13 +99,12 @@ export async function searchByAnchorField(
       this, MEMORY_FTS_PORTER, workspaceId, matchExpression, maxDepth, objectIds, scope.tier
     )
   }))();
-  return fieldWithRefinements(
-    buildAnchorFieldView(rows, limit),
-    depths.map((depth) => ({
-      requested_depth: depth,
-      ...buildAnchorFieldView(rows, depth)
-    }))
-  );
+  const base = buildAnchorFieldView(rows, limit);
+  return fieldWithRefinements(base, buildMonotoneFieldRefinementLevels(
+    base.matches,
+    depths,
+    (depth) => buildAnchorFieldView(rows, depth)
+  ));
 }
 
 type KeywordFieldRows = Readonly<{

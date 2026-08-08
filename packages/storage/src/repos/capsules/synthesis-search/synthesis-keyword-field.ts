@@ -3,6 +3,8 @@ import {
   rankFtsLaneRows,
   type FtsLaneRankRow
 } from "@do-soul/alaya-protocol";
+import { buildMonotoneFieldRefinementLevels } from
+  "../../shared/monotone-field-refinement.js";
 
 export interface SynthesisCapsuleKeywordHit {
   readonly object_id: string;
@@ -51,6 +53,23 @@ export function buildSynthesisFieldView(
       buildSynthesisLane("trigram", trigramHits, depth, trigramEligible)
     ])
   });
+}
+
+export function buildSynthesisFieldRefinementLevels(
+  rows: Readonly<{
+    readonly porter: readonly FtsLaneRankRow[];
+    readonly trigram: readonly FtsLaneRankRow[];
+  }>,
+  baseMatches: readonly Readonly<SynthesisCapsuleKeywordHit>[],
+  depths: readonly number[],
+  porterEligible: boolean,
+  trigramEligible: boolean
+): NonNullable<SynthesisKeywordFieldResult["refinement_levels"]> {
+  return buildMonotoneFieldRefinementLevels(
+    baseMatches,
+    depths,
+    (depth) => buildSynthesisFieldView(rows, depth, porterEligible, trigramEligible)
+  );
 }
 
 export function normalizeSynthesisRefinementDepths(

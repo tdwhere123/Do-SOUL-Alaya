@@ -243,6 +243,36 @@ describe("SqliteMemoryEntryRepo event-time window", () => {
     ]);
   });
 
+  it("normalizes drift-sensitive activation scores before the temporal limit", async () => {
+    const { repo } = await createRepo();
+    await Promise.all([
+      repo.create(createMemoryEntry({
+        object_id: "f0000001-1111-4111-8111-111111111111",
+        content: "Alpha drift-stable temporal recall fixture.",
+        activation_score: 0.9324999963147926,
+        event_time_start: "2026-03-11T00:00:00.000Z"
+      })),
+      repo.create(createMemoryEntry({
+        object_id: "00000001-1111-4111-8111-111111111111",
+        content: "Zebra drift-stable temporal recall fixture.",
+        activation_score: 0.9324999985083684,
+        event_time_start: "2026-03-11T00:00:00.000Z"
+      }))
+    ]);
+
+    const result = await repo.findByEventTimeWindow({
+      workspaceId: "workspace-1",
+      tier: StorageTier.HOT,
+      startTime: "2026-03-10T00:00:00.000Z",
+      endTime: "2026-03-12T00:00:00.000Z",
+      limit: 1
+    });
+
+    expect(result.map((entry) => entry.content)).toEqual([
+      "Alpha drift-stable temporal recall fixture."
+    ]);
+  });
+
   it.each([
     [
       "no fractional seconds",

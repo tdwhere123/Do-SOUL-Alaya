@@ -274,6 +274,27 @@ describe("official API exact sentence-range locator", () => {
 });
 
 describe("official API assertion catalog locator", () => {
+  it("keeps a cross-sentence assertion owned by one User locator", async () => {
+    const matchedText = "I caught 12 largemouth bass on my last trip there";
+    const sourceAssertion = [
+      "By the way, I've had some experience with fishing in Lake Michigan, and I've found that spinner lures worked better for trout than live bait.",
+      "Also, I caught 12 largemouth bass on my last trip there, so you might want to consider targeting those as well."
+    ].join(" ");
+    const source = `${sourceAssertion} What's the best type of spinner lure to use?`;
+    const provider = providerFor({
+      source_locator: assertionLocator(2),
+      matched_text: matchedText
+    });
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: sourceAssertion
+    });
+    expect(signal?.raw_payload.distilled_fact).toBe(sourceAssertion);
+  });
+
   it("recovers an exact user quote when a valid catalog assertion is narrower", async () => {
     const quote = "I just recently changed my last name, and I'm still getting used to it - it's funny, my old name was Johnson, but now it's Winters.";
     const source = "I need to update my address with my health insurance provider. Can you walk me through the process or give me a phone number to call? By the way, " + quote;

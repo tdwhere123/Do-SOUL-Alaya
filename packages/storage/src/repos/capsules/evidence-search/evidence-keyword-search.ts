@@ -9,6 +9,11 @@ import {
   buildWorkspaceScopedFtsMatch,
   tokenizeFtsQuery
 } from "../../shared/fts-lane-routing.js";
+import {
+  buildMonotoneFieldRefinementLevels,
+  preserveFieldLaneObservationPrefix
+} from
+  "../../shared/monotone-field-refinement.js";
 import type {
   EvidenceCapsuleStatements,
   SqliteStatement
@@ -66,15 +71,42 @@ export function searchEvidenceByKeywordField(
   return Object.freeze({
     ...base,
     ...(depths.length === 0 ? {} : {
-      refinement_levels: Object.freeze(depths.map((depth) => Object.freeze({
-        requested_depth: depth,
-        ...buildEvidenceFieldView(
-          porterRows, trigramRows, depth,
-          porterTokens.length > 0, trigramTokens.length > 0
+      refinement_levels: preserveEvidenceLanePrefixes(
+        base.lanes,
+        buildMonotoneFieldRefinementLevels(
+          base.matches,
+          depths,
+          (depth) => buildEvidenceFieldView(
+            porterRows, trigramRows, depth,
+            porterTokens.length > 0, trigramTokens.length > 0
+          )
         )
-      })))
+      )
     })
   });
+}
+
+function preserveEvidenceLanePrefixes(
+  baseLanes: EvidenceKeywordFieldResult["lanes"],
+  levels: NonNullable<EvidenceKeywordFieldResult["refinement_levels"]>
+): NonNullable<EvidenceKeywordFieldResult["refinement_levels"]> {
+  let previousLanes = baseLanes;
+  return Object.freeze(levels.map((level) => {
+    const lanes = Object.freeze(level.lanes.map((lane, index) => {
+      const previous = previousLanes[index];
+      if (previous === undefined || previous.lane !== lane.lane) {
+        throw new Error("evidence field lane catalog changed within one observation");
+      }
+      if (previous.status !== "truncated") return lane;
+      const observations = preserveFieldLaneObservationPrefix(
+        previous.observations,
+        lane.observations
+      );
+      return Object.freeze({ ...lane, depth: observations.length, observations });
+    }));
+    previousLanes = lanes;
+    return Object.freeze({ ...level, lanes });
+  }));
 }
 
 type EvidenceLaneRows = Readonly<{

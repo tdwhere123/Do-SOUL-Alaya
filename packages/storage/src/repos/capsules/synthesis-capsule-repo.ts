@@ -20,6 +20,7 @@ import {
   type SynthesisCapsuleStatements
 } from "./synthesis-capsule-statements.js";
 import {
+  buildSynthesisFieldRefinementLevels,
   buildSynthesisFieldView,
   ineligibleSynthesisField,
   normalizeSynthesisRefinementDepths,
@@ -155,12 +156,13 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       return Object.freeze({
         ...base,
         ...(depths.length === 0 ? {} : {
-          refinement_levels: Object.freeze(depths.map((depth) => Object.freeze({
-            requested_depth: depth,
-            ...buildSynthesisFieldView(
-              rows, depth, porterTokens.length > 0, trigramTokens.length > 0
-            )
-          })))
+          refinement_levels: buildSynthesisFieldRefinementLevels(
+            rows,
+            base.matches,
+            depths,
+            porterTokens.length > 0,
+            trigramTokens.length > 0
+          )
         })
       });
     } catch (error) {

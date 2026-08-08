@@ -30,7 +30,7 @@ const RECALL_EVENT_TIME_WINDOW_SQL: SqlDefinitionMap<RecallEventTimeWindowStatem
           julianday(event_time_start),
           COALESCE(julianday(event_time_end), julianday(event_time_start))
         ) >= julianday(?)
-${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY COALESCE(activation_score, 0) DESC,
+${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY ROUND(COALESCE(activation_score, 0), 6) DESC,
 ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL},
         object_id ASC
       LIMIT ?

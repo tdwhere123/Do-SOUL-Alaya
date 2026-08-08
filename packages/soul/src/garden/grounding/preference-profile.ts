@@ -6,7 +6,6 @@ import {
   type SourceAssertionResolution
 } from "./source-assertion.js";
 import {
-  buildOfficialApiSourceSpans,
   isDirectQuestionSourceText,
   parseOfficialApiSourceLocator,
   resolveOfficialApiSourceLocatorQuote
@@ -82,7 +81,8 @@ function resolveOwnedAssertion(
   maxChars: number
 ): SourceAssertionResolution {
   const sourceText = input.sourceText ?? input.sourceCorpus;
-  const resolution = input.sourceLocator === undefined
+  const hasSourceLocator = input.sourceLocator !== undefined;
+  const resolution = !hasSourceLocator
     ? resolveSourceAssertion(sourceText, input.proposedMatch, maxChars)
     : resolveLocatedAssertion(sourceText, input, maxChars);
   if (resolution === undefined) {
@@ -114,12 +114,19 @@ function resolveLocatedAssertion(
 }
 
 function hasUniqueUserOwnership(sourceCorpus: string, assertion: string): boolean {
-  if (collectSourceRoleMarkers(sourceCorpus).length === 0) return true;
+  const markers = collectSourceRoleMarkers(sourceCorpus);
+  if (markers.length === 0) return true;
   const first = sourceCorpus.indexOf(assertion);
   if (first < 0 || sourceCorpus.indexOf(assertion, first + 1) >= 0) return false;
-  const containing = buildOfficialApiSourceSpans(sourceCorpus)
-    .filter((span) => span.text.includes(assertion));
-  return containing.length === 1 && containing[0]?.role === "user";
+  const end = first + assertion.length;
+  let ownerIndex = -1;
+  for (const [index, marker] of markers.entries()) {
+    if (marker.start > first) break;
+    ownerIndex = index;
+  }
+  const owner = markers[ownerIndex];
+  const next = markers[ownerIndex + 1];
+  return owner?.role === "user" && (next === undefined || end <= next.start);
 }
 
 function withGroundedProfile(
