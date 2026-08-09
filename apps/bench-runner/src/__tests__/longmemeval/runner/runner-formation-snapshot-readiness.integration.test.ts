@@ -45,7 +45,11 @@ describe("embedding-disabled runner formation to snapshot readiness", () => {
     const workspaceId = daemon.workspaceId;
     const members = await seedEndpoints(dbPath, workspaceId, daemon.runId);
 
-    await runAnswersWithEdges("q-embedding-disabled-formation", daemon, members);
+    const formation = await runAnswersWithEdges(
+      "q-embedding-disabled-formation",
+      daemon,
+      members
+    );
     await runAnswersWithEdges("q-embedding-disabled-formation", daemon, members);
 
     await daemon.shutdown();
@@ -83,7 +87,7 @@ describe("embedding-disabled runner formation to snapshot readiness", () => {
     }
     expect(() => assertSnapshotAnswersWithFormation(
       dbPath,
-      [workspaceId]
+      [{ workspaceId, answersWithFormation: formation }]
     )).not.toThrow();
   }, 60_000);
 });

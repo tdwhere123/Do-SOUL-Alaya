@@ -79,13 +79,17 @@ export async function accrueAnswersWithCoRelevance(
   }
 ): Promise<{ readonly coRelevantPairs: number; readonly keptPairs: number; readonly admitted: number }> {
   const pairSource = input.activeRuntime.services.answersWithPairSource;
-  if (pairSource === undefined || members.length < 2) {
+  if (members.length < 2) {
     return { coRelevantPairs: 0, keptPairs: 0, admitted: 0 };
+  }
+  if (pairSource === undefined) {
+    throw new Error("answers_with pair source is unavailable");
   }
   return new AnswersWithEdgeProducerService({
     pairSource,
     assertionPort: input.activeRuntime.services.relationAssertionService,
-    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta)
+    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta),
+    failOnPairSourceError: true
   }).crystallize({
     workspaceId: input.activeContext.workspaceId,
     runId: input.activeContext.runId,

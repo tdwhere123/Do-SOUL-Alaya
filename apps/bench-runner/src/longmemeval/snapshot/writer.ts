@@ -67,7 +67,7 @@ export async function writeRecallEvalSnapshotArtifacts(
   });
   const graphPreflight = assertSnapshotAnswersWithFormation(
     liveDbPath,
-    input.snapshotQuestions.map((question) => question.workspaceId)
+    input.snapshotQuestions
   );
   const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
   const authorityPath = snapshotExtractionAuthorityPath(input.snapshotOut);

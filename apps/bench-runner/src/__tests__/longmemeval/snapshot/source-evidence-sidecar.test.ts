@@ -50,7 +50,12 @@ describe("snapshot source evidence sidecar", () => {
           }]
         }],
         workspaceId: "workspace-source",
-        runId: "run-source"
+        runId: "run-source",
+        answersWithFormation: {
+          coRelevantPairs: 4,
+          keptPairs: 2,
+          admitted: 2
+        }
       }]
     }, "source-evidence.sidecar.json", RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION);
 
@@ -64,5 +69,10 @@ describe("snapshot source evidence sidecar", () => {
       signalId: "signal-source",
       evidenceId: "evidence-source"
     }]);
+    expect(parsed.questions[0]?.answersWithFormation).toEqual({
+      coRelevantPairs: 4,
+      keptPairs: 2,
+      admitted: 2
+    });
   });
 });

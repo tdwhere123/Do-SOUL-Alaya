@@ -193,6 +193,25 @@ describe("AnswersWithEdgeProducerService", () => {
     expect(assertion.calls).toHaveLength(0);
   });
 
+  it("surfaces pair-source failures when strict proof is required", async () => {
+    const assertion = recordingAssertionPort();
+    const producer = new AnswersWithEdgeProducerService({
+      pairSource: { answerCoRelevantPairs: async () => { throw new Error("hq store down"); } },
+      assertionPort: assertion.port,
+      failOnPairSourceError: true
+    });
+
+    await expect(producer.crystallize({
+      workspaceId: "ws",
+      runId: null,
+      objects: OBJECTS,
+      bar: 3,
+      capPerNode: 3,
+      crossSessionOnly: true
+    })).rejects.toThrow(/hq store down/u);
+    expect(assertion.calls).toHaveLength(0);
+  });
+
   it("forms a witness over immutable HQ observations", async () => {
     const assertion = recordingAssertionPort();
     const hqRepo = {

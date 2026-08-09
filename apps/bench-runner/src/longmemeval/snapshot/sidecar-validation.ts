@@ -24,6 +24,11 @@ const SeedDropReasonsSchema = z.object({
   candidate_absent: z.number().int().nonnegative(),
   materialization_drop: z.number().int().nonnegative()
 }).strict();
+const AnswersWithFormationSchema = z.object({
+  coRelevantPairs: CountSchema,
+  keptPairs: CountSchema,
+  admitted: CountSchema
+}).strict();
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SeedBindingSchema = z.object({
   objectId: NonEmptyStringSchema,
@@ -70,6 +75,7 @@ const SnapshotQuestionSchema = z.object({
   seedRounds: z.array(SeedRoundSchema).optional(),
   workspaceId: NonEmptyStringSchema,
   runId: NonEmptyStringSchema,
+  answersWithFormation: AnswersWithFormationSchema.optional(),
   answerSeedDropReasons: SeedDropReasonsSchema.optional()
 }).strict();
 const SnapshotSidecarSchema = z.object({

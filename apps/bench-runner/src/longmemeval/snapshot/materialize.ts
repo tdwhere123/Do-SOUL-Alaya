@@ -128,6 +128,12 @@ export interface LongMemEvalSnapshotSeedRound {
   readonly directEvidenceBindings?: readonly LongMemEvalSnapshotDirectEvidenceBinding[];
 }
 
+export interface LongMemEvalAnswersWithFormationReceipt {
+  readonly coRelevantPairs: number;
+  readonly keptPairs: number;
+  readonly admitted: number;
+}
+
 /** Per-question persisted recall-scoring inputs. */
 export interface LongMemEvalSnapshotQuestion {
   readonly questionId: string;
@@ -143,6 +149,8 @@ export interface LongMemEvalSnapshotQuestion {
   readonly workspaceId: string;
   /** Run id the question's workspace was attached with. */
   readonly runId: string;
+  /** Formation outcome proving whether this workspace should contain answers_with paths. */
+  readonly answersWithFormation?: LongMemEvalAnswersWithFormationReceipt;
   /** Answer-turn seed failures that explain a no-gold question. */
   readonly answerSeedDropReasons?: LongMemEvalSeedDropReasons;
 }

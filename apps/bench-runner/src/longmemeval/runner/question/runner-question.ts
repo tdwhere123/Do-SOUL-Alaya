@@ -203,7 +203,7 @@ async function prepareLongMemEvalQuestionInWorkspace(
     input.daemon.runEdgePlanePassIfConfigured()
   );
   await runCoherenceEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
-  await runAnswersWithEdges(
+  seedState.answersWithFormation = await runAnswersWithEdges(
     input.question.question_id,
     workspace,
     seedState.coherenceMembers
@@ -337,7 +337,7 @@ export async function runAnswersWithEdges(
   questionId: string,
   workspace: Pick<BenchWorkspaceHandle, "accrueAnswersWithCoRelevance">,
   members: readonly BenchEdgeFormationMember[]
-): Promise<void> {
+): ReturnType<BenchWorkspaceHandle["accrueAnswersWithCoRelevance"]> {
   const config = resolveLongMemEvalEdgeFormationConfig(process.env).answersWith;
   const summary = await workspace.accrueAnswersWithCoRelevance(members, {
     bar: config.bar,
@@ -349,6 +349,7 @@ export async function runAnswersWithEdges(
       `co_relevant=${summary.coRelevantPairs} kept=${summary.keptPairs} ` +
       `admitted=${summary.admitted}`
   );
+  return summary;
 }
 
 async function runQuestionPhase<T>(

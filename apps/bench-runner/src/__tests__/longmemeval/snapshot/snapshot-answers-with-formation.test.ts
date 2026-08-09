@@ -30,12 +30,38 @@ describe("snapshot answers_with formation readiness", () => {
 
     expect(() => assertSnapshotAnswersWithFormation(
       dbPath,
-      ["longmemeval-q-1"]
+      [{
+        workspaceId: "longmemeval-q-1",
+        answersWithFormation: { coRelevantPairs: 1, keptPairs: 1, admitted: 1 }
+      }, {
+        workspaceId: "longmemeval-q-2",
+        answersWithFormation: { coRelevantPairs: 4, keptPairs: 0, admitted: 0 }
+      }]
     )).not.toThrow();
     expect(() => assertSnapshotAnswersWithFormation(
       dbPath,
-      ["longmemeval-q-1", "longmemeval-q-2"]
+      [{
+        workspaceId: "longmemeval-q-1",
+        answersWithFormation: { coRelevantPairs: 1, keptPairs: 1, admitted: 1 }
+      }, {
+        workspaceId: "longmemeval-q-2",
+        answersWithFormation: { coRelevantPairs: 4, keptPairs: 1, admitted: 1 }
+      }]
+    )).toThrow(/count mismatch/u);
+    expect(() => assertSnapshotAnswersWithFormation(
+      dbPath,
+      [{
+        workspaceId: "longmemeval-q-1",
+        answersWithFormation: { coRelevantPairs: 1, keptPairs: 0, admitted: 0 }
+      }, {
+        workspaceId: "longmemeval-q-2",
+        answersWithFormation: { coRelevantPairs: 4, keptPairs: 1, admitted: 1 }
+      }]
     )).toThrow(/coverage mismatch/u);
+    expect(() => assertSnapshotAnswersWithFormation(
+      dbPath,
+      [{ workspaceId: "longmemeval-q-1" }]
+    )).toThrow(/missing answers_with formation receipt/u);
     database.close();
   });
 });

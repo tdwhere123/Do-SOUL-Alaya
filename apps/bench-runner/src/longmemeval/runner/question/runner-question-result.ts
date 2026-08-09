@@ -204,6 +204,9 @@ export function buildLongMemEvalSnapshotQuestion(input: Pick<
     answerSessionIds: [...input.question.answer_session_ids],
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
+    ...(input.seedState.answersWithFormation === undefined
+      ? {}
+      : { answersWithFormation: { ...input.seedState.answersWithFormation } }),
     sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry),
     seedRounds: input.seedState.seedRounds.map((round) => ({
       ...round,

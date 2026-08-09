@@ -20,10 +20,11 @@ describe("answers-with edges", () => {
       { memoryId: "memory-b", sessionId: "session-b", formationKey: "formation-b" }
     ] satisfies readonly BenchEdgeFormationMember[];
 
-    await runAnswersWithEdges("q-embedding-disabled", {
+    const result = await runAnswersWithEdges("q-embedding-disabled", {
       accrueAnswersWithCoRelevance
     }, members);
 
+    expect(result).toEqual({ coRelevantPairs: 1, keptPairs: 1, admitted: 1 });
     expect(accrueAnswersWithCoRelevance).toHaveBeenCalledOnce();
     expect(accrueAnswersWithCoRelevance).toHaveBeenCalledWith(members, {
       bar: 4,

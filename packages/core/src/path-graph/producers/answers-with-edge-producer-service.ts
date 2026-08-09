@@ -34,6 +34,7 @@ export interface AnswersWithEdgeProducerDeps {
   readonly pairSource: AnswerCoRelevancePairSourcePort;
   readonly assertionPort: AnswersWithRelationAssertionPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  readonly failOnPairSourceError?: boolean;
 }
 
 export interface AnswersWithCrystallizeInput {
@@ -105,6 +106,7 @@ export class AnswersWithEdgeProducerService {
         run_id: input.runId,
         error: error instanceof Error ? error.message : String(error)
       });
+      if (this.deps.failOnPairSourceError === true) throw error;
       return [];
     }
   }

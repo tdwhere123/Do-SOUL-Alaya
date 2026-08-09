@@ -30,6 +30,7 @@ import {
   requireLongMemEvalTimestamp
 } from "../../ingestion/source-time.js";
 import type {
+  LongMemEvalAnswersWithFormationReceipt,
   LongMemEvalSnapshotSeedRound
 } from "../../snapshot/materialize.js";
 import { isSeededMemoryResult } from
@@ -52,6 +53,7 @@ export interface LongMemEvalQuestionSeedState {
   answerSeedDropReasons: LongMemEvalSeedDropReasons;
   readonly coherenceMembers: BenchEdgeFormationMember[];
   readonly seedRounds: LongMemEvalSnapshotSeedRound[];
+  answersWithFormation?: LongMemEvalAnswersWithFormationReceipt;
   seedTurnsTruncated: number;
   answerTurnsTruncated: number;
   seedCharsClipped: number;
