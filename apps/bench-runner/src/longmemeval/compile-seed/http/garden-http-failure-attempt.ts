@@ -114,6 +114,12 @@ export function readGardenHttpAttemptTimedOut(error: unknown): boolean {
     (error as { readonly benchAttemptTimedOut?: unknown }).benchAttemptTimedOut === true;
 }
 
+export function readGardenHttpFailureKind(
+  error: unknown
+): BenchTransportFailureKind | undefined {
+  return readSafeFailureInput(error)?.kind;
+}
+
 function readSafeFailureInput(error: unknown): SafeFailureFingerprintInput | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   return (error as { readonly [FAILURE_INPUT]?: SafeFailureFingerprintInput })[FAILURE_INPUT];

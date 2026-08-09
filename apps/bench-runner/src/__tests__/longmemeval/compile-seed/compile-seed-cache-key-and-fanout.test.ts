@@ -32,14 +32,14 @@ import {
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
 import {
-  computeCacheKey,
+  computeExtractionTurnCacheKeys,
   computeExtractionTurnCacheKey,
+  computeSourceTurnCacheKeys,
   computeSourceTurnCacheKey
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { writeCachedExtraction } from "../../../longmemeval/compile-seed/cache/cache-shard.js";
-import { computeTrustedRoleCorpusDigest } from "../../../longmemeval/extraction/turn-contents.js";
 
-describe("userPrompt shape contract — cache key turn_content dependency", () => {
+describe("canonical extraction request cache identity", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
@@ -50,17 +50,69 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  // The extraction cache key hashes only the load-bearing turn_content,
-  // recovered by parsing the userPrompt JSON the production
-  // OfficialApiGardenProvider assembles. If a future compute-provider.ts
-  // change renames or restructures the turn_content field,
-  // extractTurnContent silently falls through to hashing the WHOLE
-  // userPrompt — which embeds the wall-clock run_id, making every run a
-  // 100% cache miss and the committed fixture dead. These tests drive the
-  // REAL provider so that shape change fails a test instead of silently
-  // degrading the cache.
+  it("derives one raw cache key for each bounded assertion batch", () => {
+    const source = Array.from(
+      { length: 9 },
+      (_, index) => `I recorded durable detail number ${index + 1}.`
+    ).join(" ");
+    const input = { turnContent: source };
 
-  it("the production provider's userPrompt carries turn_content as a top-level string", async () => {
+    const sourceKeys = computeSourceTurnCacheKeys(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, input
+    );
+    const turnKeys = computeExtractionTurnCacheKeys(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT,
+      { ...input, turnMessages: [] }
+    );
+
+    expect(sourceKeys).toHaveLength(2);
+    expect(turnKeys).toEqual(sourceKeys);
+    expect(new Set(sourceKeys)).toHaveLength(2);
+  });
+
+  it("accounts and receipts every bounded shard in one seed turn", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      })
+    });
+    const source = Array.from(
+      { length: 9 },
+      (_, index) => `I recorded durable detail number ${index + 1}.`
+    ).join(" ");
+
+    await runner.seedTurn({
+      daemon: buildCompileSeedDaemon(() => makeSeed("unexpected")),
+      turnContent: source,
+      evidenceRefBase: "q-1-s0-r0",
+      seedIndex: 0,
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(runner.stats.extractionAttempts).toBe(2);
+    expect(runner.stats.llmCalls).toBe(2);
+    expect(runner.stats.lastExtractionShards).toHaveLength(2);
+    expect(runner.stats.lastExtractionShards?.map(({ cacheKey }) => cacheKey)).toEqual(
+      computeSourceTurnCacheKeys(
+        CREDENTIALLED_CONFIG.model,
+        CREDENTIALLED_CONFIG.requestProfile,
+        OFFICIAL_API_SYSTEM_PROMPT,
+        { turnContent: source }
+      )
+    );
+  });
+
+  it("the production provider's userPrompt carries only the canonical assertion catalog", async () => {
     let capturedUserPrompt: string | null = null;
     const capturingExtractor: BenchSignalExtractor = {
       extract: async (input) => {
@@ -86,11 +138,15 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       string,
       unknown
     >;
-    // The cache key (createCachingSignalExtractor / extractTurnContent)
-    // reads `turn_content`. If this assertion fails, the provider changed
-    // its userPrompt shape and the bench cache must be updated in lockstep.
-    expect(typeof parsed.turn_content).toBe("string");
-    expect(parsed.turn_content).toBe("I moved to Berlin last spring.");
+    expect(parsed).toEqual({
+      schema_version: 2,
+      source_locator_contract_version: 2,
+      batch_contract_version: 1,
+      source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      batch_index: 0,
+      batch_count: 1,
+      source_assertions: [{ assertion_id: 1, text: "User: I moved to Berlin last spring." }]
+    });
   });
 
   it("the cache hits for the same turn across a different run_id, end to end", async () => {
@@ -99,11 +155,8 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       model: "test-model",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    // Full-chain check: the real provider builds the userPrompt, the real
-    // caching extractor derives the key. A second compile() of the SAME
-    // turn under a DIFFERENT wall-clock run_id must be served from the
-    // fixture with zero delegate calls — only true if the key ignores
-    // run_id, which depends on extractTurnContent recovering turn_content.
+    // Full-chain check: run_id is absent from the canonical request and cannot
+    // change a cache identity.
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
     };
@@ -128,8 +181,7 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    // The first strict-empty live result is rechecked once because the real
-    // provider prompt carries a non-empty source assertion catalog.
+    // The first strict-empty live result is rechecked once by the transport.
     expect(delegate.extract).toHaveBeenCalledTimes(2);
 
     await provider.compile("I moved to Berlin last spring.", {
@@ -138,11 +190,40 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    // Still 2 — the second turn was a cache hit despite the new run_id.
+    // Still 2: the second turn was a cache hit despite the new run_id.
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 
-  it("does not reuse a shard when the trusted role corpus changes", async () => {
+  it("passes the live semantic validator through the cache delegate boundary", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async (input) => {
+        input.validateRawJson?.('{"signals":[42]}');
+        return { rawJson: '{"signals":[]}' };
+      })
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot,
+      })
+    });
+
+    await expect(provider.compile("I moved to Berlin.", {
+      workspace_id: "ws-1", run_id: "run-validator", surface_id: null,
+      turn_messages: []
+    })).rejects.toMatchObject({ kind: "invalid_response" });
+    expect(delegate.extract).toHaveBeenCalledOnce();
+  });
+
+  it("does not reuse a shard when the User assertion catalog changes", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,
       model: "test-model",
@@ -164,119 +245,27 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
         cacheRoot
       })
     });
-    const turnContent = "User: A.\nAssistant: B.";
+    const turnContent = "User: I chose A.\nAssistant: You chose B.";
 
     await provider.compile(turnContent, {
       workspace_id: "ws-1", run_id: "run-1", surface_id: null,
       turn_messages: [
-        { message_id: "m1", role: "user", content: "A." },
-        { message_id: "m2", role: "assistant", content: "B." }
+        { message_id: "m1", role: "user", content: "I chose A." },
+        { message_id: "m2", role: "assistant", content: "You chose B." }
       ]
     });
     await provider.compile(turnContent, {
       workspace_id: "ws-1", run_id: "run-2", surface_id: null,
       turn_messages: [
-        { message_id: "m3", role: "assistant", content: "A." },
-        { message_id: "m4", role: "user", content: "B." }
+        { message_id: "m3", role: "assistant", content: "I chose A." },
+        { message_id: "m4", role: "user", content: "You chose B." }
       ]
     });
 
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledTimes(4);
   });
 
-  it("does not reuse a legacy empty shard when an atomic catalog changes", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.";
-    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
-    writeLegacyEmptyShard(cacheRoot, source, messages);
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot
-      })
-    });
-
-    await provider.compile(source, {
-      workspace_id: "ws-1", run_id: "run-catalog-delta", surface_id: null,
-      turn_messages: messages
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not reuse a legacy empty shard when a 600-character preference gains a catalog identity", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = `I prefer ${"x".repeat(600)}.`;
-    const messages = [{ message_id: "m-long", role: "user" as const, content: source }];
-    writeLegacyEmptyShard(cacheRoot, source, messages);
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot
-      })
-    });
-
-    await provider.compile(source, {
-      workspace_id: "ws-1",
-      run_id: "run-long-preference-catalog-delta",
-      surface_id: null,
-      turn_messages: messages
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-  });
-
-  it("continues to reuse a legacy shard when the catalog is unchanged", async () => {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const source = "I moved to Berlin last spring.";
-    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
-    writeLegacyEmptyShard(cacheRoot, source, messages);
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
-    };
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "test-key",
-      model: "test-model",
-      extractor: createCachingSignalExtractor({
-        delegate,
-        config: testCacheConfig(),
-        cacheRoot
-      })
-    });
-
-    await provider.compile(source, {
-      workspace_id: "ws-1", run_id: "run-catalog-unchanged", surface_id: null,
-      turn_messages: messages
-    });
-
-    expect(delegate.extract).not.toHaveBeenCalled();
-  });
-
-  it("replays a non-empty legacy shard against its original assertion id", async () => {
+  it("replays a non-empty canonical shard against its assertion id", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,
       model: "test-model",
@@ -284,21 +273,16 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
     });
     const source = "I use TypeScript, but I avoid any.";
     const messages = [{ message_id: "m1", role: "user" as const, content: source }];
-    const legacyKey = computeCacheKey(
+    const canonicalKey = computeSourceTurnCacheKey(
       "test-model",
       "provider-default-v1",
       OFFICIAL_API_SYSTEM_PROMPT,
-      source,
-      computeTrustedRoleCorpusDigest(messages)
-    );
-    expect(computeSourceTurnCacheKey(
-      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT,
       { turnContent: source, turnMessages: messages }
-    )).toBe(legacyKey);
-    writeCachedExtraction(cacheRoot, legacyKey, {
+    );
+    writeCachedExtraction(cacheRoot, canonicalKey, {
       model: "test-model",
       request_profile: "provider-default-v1",
-      cache_key: legacyKey,
+      cache_key: canonicalKey,
       raw_json: JSON.stringify({ signals: [{
         signal_kind: "potential_claim",
         object_kind: "activity",
@@ -309,7 +293,32 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
           assertion_id: 3
         },
         matched_text: "I avoid any.",
-        distilled_fact: "I avoid any."
+        distilled_fact: "I avoid any.",
+        semantic_factor_graph: {
+          schema_version: 1,
+          source_kind: "evidence",
+          factors: [{
+            factor_id: "f0",
+            surface: "avoid",
+            semantic_identity: "avoid"
+          }, {
+            factor_id: "f1",
+            surface: "any",
+            semantic_identity: "any"
+          }],
+          variables: [],
+          result_variable_ids: [],
+          propositions: [{
+            proposition_id: "p0",
+            predicate_factor_id: "f0",
+            arguments: [{
+              position: 0,
+              binding_identity: "object",
+              reference_kind: "factor",
+              reference_id: "f1"
+            }]
+          }]
+        }
       }] }),
       extracted_at: "2026-07-22T00:00:00.000Z"
     });
@@ -426,27 +435,6 @@ function testCacheConfig(): CompileSeedExtractionConfig {
     requestProfile: "provider-default-v1",
     apiKey: "test-key"
   };
-}
-
-function writeLegacyEmptyShard(
-  cacheRoot: string,
-  turnContent: string,
-  messages: readonly { readonly role: "user" | "assistant"; readonly content: string }[]
-): void {
-  const cacheKey = computeCacheKey(
-    "test-model",
-    "provider-default-v1",
-    OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent,
-    computeTrustedRoleCorpusDigest(messages)
-  );
-  writeCachedExtraction(cacheRoot, cacheKey, {
-    model: "test-model",
-    request_profile: "provider-default-v1",
-    cache_key: cacheKey,
-    raw_json: '{"signals":[]}',
-    extracted_at: "2026-07-22T00:00:00.000Z"
-  });
 }
 
 describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {

@@ -1,7 +1,10 @@
 import { isTemporalProjectionSelected } from "@do-soul/alaya-storage";
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
-import { createDaemonCoreServices } from "../daemon/wiring/daemon-service-wiring.js";
+import {
+  createDaemonCoreServices,
+  createGardenComputeRuntime
+} from "../daemon/wiring/daemon-service-wiring.js";
 import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime-types.js";
 import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
 import { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
@@ -26,15 +29,21 @@ type RecallCoreStartupInput = Readonly<{
 }>;
 
 export async function createRecallAndCoreWiring(input: RecallCoreStartupInput) {
+  const gardenComputeRuntime = await createGardenComputeRuntime({
+    rawConfigService: input.foundation.rawConfigService
+  });
   const recallWiring = await createRecallMaterializationWiring({
     ...buildRecallRuntimeInput(input),
     ...buildRecallPersistenceInput(input),
-    ...buildRecallServiceInput(input)
+    ...buildRecallServiceInput(input, gardenComputeRuntime)
   });
   input.registerRecallReadWorker(recallWiring.recallReadWorkerClient);
   input.foundation.pathRelationProposalServiceRef.current =
     recallWiring.pathRelationProposalService;
-  const coreWiring = await createDaemonCoreServices(buildCoreServiceInput(input, recallWiring));
+  const coreWiring = await createDaemonCoreServices(
+    buildCoreServiceInput(input, recallWiring),
+    gardenComputeRuntime
+  );
   recordStartupStep(input.bootstrap.startupSteps, "core-services");
   return { recallWiring, coreWiring };
 }
@@ -77,7 +86,10 @@ function buildRecallPersistenceInput(input: RecallCoreStartupInput) {
   };
 }
 
-function buildRecallServiceInput(input: RecallCoreStartupInput) {
+function buildRecallServiceInput(
+  input: RecallCoreStartupInput,
+  gardenComputeRuntime: Awaited<ReturnType<typeof createGardenComputeRuntime>>
+) {
   const { foundation, repositories } = input;
   return {
     manifestationBudgetConfigProvider: foundation.manifestationBudgetConfigProvider,
@@ -96,7 +108,18 @@ function buildRecallServiceInput(input: RecallCoreStartupInput) {
     enqueueEnrichPending: repositories.enqueueEnrichPending,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
     recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
-    evidenceService: foundation.evidenceService
+    evidenceService: foundation.evidenceService,
+    openSemanticFactorExtractionPort: {
+      operator_id: gardenComputeRuntime.officialGardenProvider.operator_id,
+      extract: async (
+        sourceKind: "evidence" | "query",
+        sourceText: string
+      ) =>
+        await gardenComputeRuntime.officialGardenProvider.extractOpenSemanticFactors(
+          sourceKind,
+          sourceText
+        )
+    }
   };
 }
 

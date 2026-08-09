@@ -23,7 +23,7 @@ import { assertSnapshotDatasetSubstrateIdentity } from
   "../../../longmemeval/snapshot/substrate-binding.js";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
   "../../../longmemeval/snapshot/materialize.js";
-import { CREDENTIALLED_CONFIG } from
+import { CREDENTIALLED_CONFIG, withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
@@ -195,7 +195,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: JSON.stringify({
-            signals: [{
+            signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
               confidence: 0.4,
@@ -206,7 +206,7 @@ describe("LongMemEval source evidence fallback integration", () => {
                 kind: "assertion_catalog",
                 assertion_id: 1
               }
-            }]
+            })]
           })
         })
       })
@@ -284,7 +284,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: JSON.stringify({
-            signals: [{
+            signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
               confidence: 0.2,
@@ -295,7 +295,7 @@ describe("LongMemEval source evidence fallback integration", () => {
                 kind: "assertion_catalog",
                 assertion_id: 1
               }
-            }]
+            })]
           })
         })
       })

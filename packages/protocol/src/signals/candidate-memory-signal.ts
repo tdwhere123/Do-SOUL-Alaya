@@ -15,7 +15,8 @@ const signalKindValues = [
   "potential_handoff",
   "potential_evidence_anchor",
   "potential_conflict",
-  "potential_preference"
+  "potential_preference",
+  "potential_semantic_observation"
 ] as const;
 
 const signalSourceValues = ["model_tool", "garden_compile", "user_seed", "import"] as const;
@@ -43,7 +44,8 @@ export const SignalKind = {
   POTENTIAL_HANDOFF: "potential_handoff",
   POTENTIAL_EVIDENCE_ANCHOR: "potential_evidence_anchor",
   POTENTIAL_CONFLICT: "potential_conflict",
-  POTENTIAL_PREFERENCE: "potential_preference"
+  POTENTIAL_PREFERENCE: "potential_preference",
+  POTENTIAL_SEMANTIC_OBSERVATION: "potential_semantic_observation"
 } as const;
 
 export const SignalSource = {

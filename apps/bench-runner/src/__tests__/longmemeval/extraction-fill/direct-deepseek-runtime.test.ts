@@ -20,6 +20,8 @@ import {
 import { readExtractionCacheManifest } from
   "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import { withOpenSemanticFactorGraph } from
+  "../compile-seed/compile-seed-fixture.js";
 
 const { acquireWriteLease, loadCanonicalDataset } = vi.hoisted(() => ({
   acquireWriteLease: vi.fn(),
@@ -153,7 +155,7 @@ describe("direct DeepSeek runtime extraction", () => {
     const extractedTurns: string[] = [];
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      extractedTurns.push((JSON.parse(input.userPrompt) as { turn_content: string }).turn_content);
+      extractedTurns.push(readFirstAssertion(input.userPrompt));
       return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
@@ -383,7 +385,7 @@ function firstAssertionEnvelope(userPrompt: string): string {
   }
   const matchedText = assertion.text.replace(/^User:\s*/u, "");
   return JSON.stringify({
-    signals: [{
+    signals: [withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "activity",
       confidence: 0.9,
@@ -394,8 +396,17 @@ function firstAssertionEnvelope(userPrompt: string): string {
         kind: "assertion_catalog",
         assertion_id: assertion.assertion_id
       }
-    }]
+    })]
   });
+}
+
+function readFirstAssertion(userPrompt: string): string {
+  const request = JSON.parse(userPrompt) as {
+    readonly source_assertions?: readonly { readonly text?: unknown }[];
+  };
+  const text = request.source_assertions?.[0]?.text;
+  if (typeof text !== "string") throw new Error("expected a source assertion");
+  return text;
 }
 
 async function createDirectRuntimeFixture(

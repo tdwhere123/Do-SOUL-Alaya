@@ -10,10 +10,13 @@ import {
   type AttributedQueryFacilityDemandReceipt
 } from "../query-facility-demand.js";
 import {
-  REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID,
-  regularRelationInflectionEquivalent
+  REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
 } from "./relation-inflection-alignment.js";
-import { containsAlignedTokenSequence } from "./token-sequence-alignment.js";
+import {
+  alignFactFrameSemanticFactor,
+  projectFactFrameSemanticFactors,
+  type FactFrameSemanticAlignment
+} from "../fact-frame-semantic-factors.js";
 
 export type AttributedFacilityMatchCandidate = Readonly<{
   readonly candidate_key: string;
@@ -86,18 +89,22 @@ function matchingFieldProjectionForms(
   if (demand.kind !== "entity" && demand.kind !== "relation" && demand.kind !== "time") {
     return null;
   }
-  const roles = FIELD_SLOT_ROLES[demand.kind];
+  if (demand.semantic_factor === undefined) {
+    return null;
+  }
   const exactKeys = new Set<string>();
   const relationInflectionKeys = new Set<string>();
   const pluralKeys = new Set<string>();
-  for (const [slotIndex, slot] of (atom.projection.fact_slots ?? []).entries()) {
-    if (!roles.has(slot.role)) continue;
-    const alignment = fieldValueAlignment(
-      slot.text,
-      demand.value,
-      atom.matched_fts_lanes?.includes("porter") === true,
-      demand.kind
-    );
+  const demandFactor = demand.semantic_factor;
+  const candidateFactors = projectFactFrameSemanticFactors(atom.projection.fact_slots ?? []);
+  for (const candidateFactor of candidateFactors) {
+    const alignment = alignFactFrameSemanticFactor({
+      candidate: candidateFactor,
+      demand: demandFactor,
+      demand_kind: demand.kind,
+      allow_porter: atom.matched_fts_lanes?.includes("porter") === true,
+      require_exact_role: demand.attribution_kind === "typed_fact_frame"
+    });
     if (alignment === null) continue;
     const keys = alignmentKeys(alignment, {
       exactKeys,
@@ -105,7 +112,7 @@ function matchingFieldProjectionForms(
       pluralKeys
     });
     for (const form of atom.projection.matched_fact_key_forms) {
-      if (form.kind === "complete" || form.omitted_slot.slot_index !== slotIndex) {
+      if (form.kind === "complete" || form.omitted_slot.slot_index !== candidateFactor.slot_index) {
         keys.add(buildCoverageProjectionFormKey(form));
       }
     }
@@ -121,7 +128,7 @@ function matchingFieldProjectionForms(
 }
 
 function alignmentKeys(
-  alignment: Exclude<FacilityAlignment, "identity_v1">,
+  alignment: FactFrameSemanticAlignment,
   keys: Readonly<{
     readonly exactKeys: Set<string>;
     readonly relationInflectionKeys: Set<string>;
@@ -132,52 +139,6 @@ function alignmentKeys(
   return alignment === REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
     ? keys.relationInflectionKeys
     : keys.pluralKeys;
-}
-
-function fieldValueAlignment(
-  fieldValue: string,
-  demandValue: string,
-  allowPorterAlignment: boolean,
-  demandKind: "entity" | "relation" | "time"
-): Exclude<FacilityAlignment, "identity_v1"> | null {
-  const fieldTokens = canonicalTokens(fieldValue);
-  const demandTokens = canonicalTokens(demandValue);
-  if (demandTokens.length === 0 || demandTokens.length > fieldTokens.length) return null;
-  const exact = containsAlignedTokenSequence(
-    fieldTokens,
-    demandTokens,
-    (fieldToken, demandToken) => fieldToken === demandToken
-  );
-  if (exact) return "exact_token_sequence_v1";
-  if (!allowPorterAlignment) return null;
-  if (demandKind === "relation" &&
-      regularRelationInflectionEquivalent(fieldValue, demandValue)) {
-    return REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID;
-  }
-  if (demandKind !== "entity") return null;
-  const aligned = containsAlignedTokenSequence(
-    fieldTokens,
-    demandTokens,
-    regularPluralEquivalent
-  );
-  return aligned ? "porter_regular_plural_v1" : null;
-}
-
-function regularPluralEquivalent(left: string, right: string): boolean {
-  return left === right || regularSingular(left) === right || regularSingular(right) === left;
-}
-
-function regularSingular(token: string): string | null {
-  if (token.length > 4 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
-  if (token.length > 3 && token.endsWith("s") &&
-      !token.endsWith("ss") && !token.endsWith("us") && !token.endsWith("is")) {
-    return token.slice(0, -1);
-  }
-  return null;
-}
-
-function canonicalTokens(value: string): readonly string[] {
-  return Object.freeze(value.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []);
 }
 
 function freezeMatch(
@@ -231,9 +192,3 @@ function compareMatches(
 function compareText(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
 }
-
-const FIELD_SLOT_ROLES = Object.freeze({
-  entity: new Set(["subject", "value", "qualifier"]),
-  relation: new Set(["relation"]),
-  time: new Set(["time"])
-} as const);

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { EvidenceCapsule, MemoryEntry } from "@do-soul/alaya-protocol";
+import type {
+  EvidenceCapsule,
+  MemoryEntry,
+  OpenSemanticFactorFormationCapture
+} from "@do-soul/alaya-protocol";
 import {
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
   buildVerifiedUserAssertionReceiptPreimage,
@@ -36,6 +40,10 @@ export interface RecallEvidenceContexts {
   readonly verifiedUserAssertionContextsByMemoryId: Readonly<
     Record<string, Readonly<RecallVerifiedUserAssertionContext>>
   >;
+  readonly semanticFactorFormationsByEvidenceId: Readonly<Record<
+    string,
+    Readonly<OpenSemanticFactorFormationCapture>
+  >>;
 }
 
 interface EvidenceRecord {
@@ -68,9 +76,10 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
   ]);
   if (evidenceIds.length === 0) return emptyEvidenceContexts();
   try {
-    const [capsules, factKeys] = await Promise.all([
+    const [capsules, factKeys, semanticFormations] = await Promise.all([
       evidenceSearchPort.findByIds(params.workspaceId, evidenceIds),
-      loadQualifiedFactKeys(params, evidenceIds)
+      loadQualifiedFactKeys(params, evidenceIds),
+      loadQualifiedSemanticFormations(params, evidenceIds)
     ]);
     return buildMemoryEvidenceContexts(
       params.workspaceId,
@@ -78,7 +87,8 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       authorityCandidates,
       params.coarseEvidenceFtsRanksPerRef,
       capsules,
-      factKeys
+      factKeys,
+      semanticFormations
     );
   } catch (error) {
     params.warn("evidence context lookup for coverage and answer authority failed", {
@@ -88,6 +98,29 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       error: toErrorMessage(error)
     });
     return emptyEvidenceContexts();
+  }
+}
+
+async function loadQualifiedSemanticFormations(
+  params: Parameters<typeof collectRecallEvidenceContexts>[0],
+  evidenceIds: readonly string[]
+): Promise<readonly RecallQualifiedEvidence[]> {
+  const find = params.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
+  if (find === undefined) return Object.freeze([]);
+  try {
+    return await find.call(
+      params.dependencies.evidenceSearchPort,
+      params.workspaceId,
+      evidenceIds.map((objectId) => Object.freeze({ object_id: objectId }))
+    );
+  } catch (error) {
+    params.warn("semantic factor evidence context lookup failed", {
+      workspace_id: params.workspaceId,
+      operation: "qualified_semantic_factor_lookup",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    });
+    return Object.freeze([]);
   }
 }
 
@@ -119,7 +152,8 @@ function emptyEvidenceContexts(): Readonly<RecallEvidenceContexts> {
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze({}),
     evidenceSemanticDocumentsByMemoryId: Object.freeze({}),
-    verifiedUserAssertionContextsByMemoryId: Object.freeze({})
+    verifiedUserAssertionContextsByMemoryId: Object.freeze({}),
+    semanticFactorFormationsByEvidenceId: Object.freeze({})
   });
 }
 
@@ -168,7 +202,8 @@ function buildMemoryEvidenceContexts(
   authorityCandidates: readonly Readonly<MemoryEntry>[],
   ranksByRef: Readonly<Record<string, number>>,
   capsules: readonly Readonly<EvidenceCapsule>[],
-  qualifiedFactKeys: readonly Readonly<RecallQualifiedEvidence>[]
+  qualifiedFactKeys: readonly Readonly<RecallQualifiedEvidence>[],
+  qualifiedSemanticFormations: readonly Readonly<RecallQualifiedEvidence>[]
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
   const factKeysByEvidenceId = buildFactKeysByEvidenceId(qualifiedFactKeys);
@@ -195,8 +230,22 @@ function buildMemoryEvidenceContexts(
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze(gists),
     evidenceSemanticDocumentsByMemoryId: Object.freeze(semanticDocuments),
-    verifiedUserAssertionContextsByMemoryId: Object.freeze(contexts)
+    verifiedUserAssertionContextsByMemoryId: Object.freeze(contexts),
+    semanticFactorFormationsByEvidenceId:
+      buildSemanticFactorFormationsByEvidenceId(qualifiedSemanticFormations)
   });
+}
+
+function buildSemanticFactorFormationsByEvidenceId(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): Readonly<Record<string, Readonly<OpenSemanticFactorFormationCapture>>> {
+  const formations: Record<string, Readonly<OpenSemanticFactorFormationCapture>> = {};
+  for (const item of qualified) {
+    if (item.matched_projection !== undefined ||
+        item.semantic_factor_formation === undefined) continue;
+    formations[item.capsule.object_id] = item.semantic_factor_formation;
+  }
+  return Object.freeze(formations);
 }
 
 function buildFactKeysByEvidenceId(

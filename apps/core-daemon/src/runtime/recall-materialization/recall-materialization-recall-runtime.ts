@@ -263,6 +263,9 @@ function createRecallService(input: {
       : { defaultPolicyDecorator: input.embeddingRuntime.defaultPolicyDecorator }),
     entityExtractionPort: new RuleBasedEntityExtractor(),
     queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
+    ...(input.input.openSemanticFactorExtractionPort === undefined
+      ? {}
+      : { openSemanticFactorExtractionPort: input.input.openSemanticFactorExtractionPort }),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn
   });

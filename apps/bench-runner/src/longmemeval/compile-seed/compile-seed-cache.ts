@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import {
-  buildOfficialApiSourceAssertions,
-  buildOfficialApiSourceCorpus,
-  computeOfficialApiSourceCatalogRequestIdentity,
-  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+  parseOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest,
+  type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
@@ -48,23 +46,36 @@ import type {
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats
 } from "./compile-seed-types.js";
-import { computeTrustedRoleCorpusDigest } from "../extraction/turn-contents.js";
-import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
+import { computeCacheKey } from "./cache/cache-key.js";
+import { buildExtractionTransportProvenance } from
+  "../extraction/transport-route.js";
+export {
+  computeCacheKey,
+  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys,
+  computeSourceTurnCacheKey,
+  computeSourceTurnCacheKeys
+} from "./cache/cache-key.js";
 
 interface CachingSignalExtractorOptions {
   readonly delegate: BenchSignalExtractor;
   readonly config: Pick<
     CompileSeedExtractionConfig,
-    "model" | "modelFamily" | "providerUrl" | "requestProfile"
+    "model" | "modelFamily" | "providerUrl" | "requestProfile" |
+      "transportModel" | "transportProviderUrl"
   >;
   readonly cacheRoot?: string;
   readonly stats?: CompileSeedExtractionStats;
   readonly allowLiveExtraction?: boolean;
   readonly writeLease?: ExtractionCacheWriteLease;
+  /** Aggregate exact shards for the single-threaded snapshot seed loop. */
+  readonly trackTurnShards?: boolean;
   /** Called before each actual provider HTTP attempt for an uncached shard. */
   readonly onTransportAttempt?: (cacheKey: string, signal?: AbortSignal) => void | Promise<void>;
-  /** Called only after an atomic raw shard write succeeds. */
-  readonly onLiveExtractionSucceeded?: (cacheKey: string) => void;
+  /** Called only after a reserved provider-backed shard is atomically written. */
+  readonly onLiveProviderExtractionSucceeded?: (cacheKey: string) => void;
+  /** Records an atomically written canonical empty shard without a provider attempt. */
+  readonly onDeterministicExtractionSucceeded?: (cacheKey: string) => void;
   /** Releases a reserved shard slot after its live delegate fails. */
   readonly onLiveExtractionFailed?: (cacheKey: string) => void;
   /** Records the exact provider-reported usage, or an explicit unavailable outcome. */
@@ -74,14 +85,15 @@ interface CachingSignalExtractorOptions {
   ) => void;
   /** Advances a no-progress watchdog after a cache hit or durable write. */
   readonly onExtractionProgress?: () => void;
+  /** Completed siblings stay opaque because fill only needs missing raw shards. */
+  readonly executionCacheKeys?: ReadonlySet<string>;
 }
 
 /**
  * Build an on-disk-cached `SignalExtractor`.
  *
  * It wraps a live delegate and keys raw responses by model, request profile,
- * system prompt, turn content, trusted role corpus, and changed source catalog
- * — never volatile routing context in the user prompt.
+ * system prompt, and the canonical compact extraction request.
  * A hit returns stored `rawJson` without LLM calls; a cache-only miss fails
  * closed before the delegate boundary.
  *
@@ -106,12 +118,14 @@ async function extractWithCache(
     options.config.model,
     options.config.requestProfile,
     input.systemPrompt,
-    extractionInput.turnContent,
-    extractionInput.trustedRoleCorpusDigest,
-    extractionInput.sourceCatalogRequestIdentity
+    extractionInput.canonical
   );
+  if (options.executionCacheKeys !== undefined &&
+      !options.executionCacheKeys.has(cacheKey)) {
+    return { rawJson: '{"signals":[]}' };
+  }
   if (options.stats !== undefined) {
-    options.stats.lastExtractionSource = null;
+    options.stats.extractionAttempts = (options.stats.extractionAttempts ?? 0) + 1;
     options.stats.lastCacheKey = cacheKey;
     options.stats.lastRawJsonSha256 = null;
   }
@@ -122,7 +136,7 @@ async function extractWithCache(
     options.config.requestProfile
   );
   if (cached.status === "hit") {
-    recordCacheHit(options.stats, cacheKey, cached);
+    recordCacheHit(options, cacheKey, cached);
     options.onExtractionProgress?.();
     return cachedExtractionResult(cached);
   }
@@ -132,19 +146,61 @@ async function extractWithCache(
       `${cacheKey}; live extraction disabled${cached.reason === undefined ? "" : ` (${cached.reason})`}`
     );
   }
+  if (extractionInput.request.source_assertions.length === 0) {
+    return persistDeterministicEmpty(options, cacheRoot, cacheKey, input);
+  }
   return extractLive(options, cacheRoot, cacheKey, input);
 }
 
+async function persistDeterministicEmpty(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  cacheKey: string,
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): ReturnType<BenchSignalExtractor["extract"]> {
+  const ownedLease = options.writeLease;
+  const lease = ownedLease ?? acquireExtractionCacheWriteLease(cacheRoot);
+  const write = async (): ReturnType<BenchSignalExtractor["extract"]> => {
+    lease.assertOwned();
+    const recached = inspectCachedExtraction(
+      cacheRoot,
+      cacheKey,
+      options.config.model,
+      options.config.requestProfile
+    );
+    if (recached.status === "hit") {
+      recordCacheHit(options, cacheKey, recached);
+      options.onExtractionProgress?.();
+      return cachedExtractionResult(recached);
+    }
+    const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
+    const result = { rawJson: '{"signals":[]}' };
+    const inspection = persistExtraction(options, cacheRoot, cacheKey, result, false);
+    assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
+    options.onDeterministicExtractionSucceeded?.(cacheKey);
+    if (options.stats !== undefined) {
+      options.stats.lastExtractionSource = "cache";
+      options.stats.lastCacheKey = cacheKey;
+      options.stats.cacheHits += 1;
+      recordExtractionInspection(options, cacheKey, "cache", inspection);
+    }
+    options.onExtractionProgress?.();
+    return result;
+  };
+  if (ownedLease !== undefined) return write();
+  return withExtractionCacheWriteLease(lease, write);
+}
+
 function recordCacheHit(
-  stats: CompileSeedExtractionStats | undefined,
+  options: CachingSignalExtractorOptions,
   cacheKey: string,
   cached: ExtractionRawJsonInspection & { readonly rawJson: string }
 ): void {
+  const stats = options.stats;
   if (stats === undefined) return;
-  stats.lastExtractionSource = "cache";
   stats.lastCacheKey = cacheKey;
   stats.cacheHits += 1;
-  recordExtractionInspection(stats, cached);
+  recordExtractionInspection(options, cacheKey, "cache", cached);
 }
 
 async function extractLive(
@@ -184,7 +240,7 @@ async function extractLiveWithLease(
     options.config.requestProfile
   );
   if (recached.status === "hit") {
-    recordCacheHit(options.stats, cacheKey, recached);
+    recordCacheHit(options, cacheKey, recached);
     options.onExtractionProgress?.();
     return cachedExtractionResult(recached);
   }
@@ -194,9 +250,11 @@ async function extractLiveWithLease(
   let providerAttemptAuthorized = options.onTransportAttempt === undefined;
   const result = await extractLiveDelegate({
     delegate: options.delegate,
-    request: withAuthorityAttemptHook(input, options, cacheKey, () => {
-      providerAttemptAuthorized = true;
-    }),
+    request: withSemanticValidation(
+      withAuthorityAttemptHook(input, options, cacheKey, () => {
+        providerAttemptAuthorized = true;
+      })
+    ),
     stats,
     onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
     onOutcome: (outcome) => {
@@ -207,9 +265,21 @@ async function extractLiveWithLease(
   });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
-  const inspection = persistLiveExtraction(options, cacheRoot, cacheKey, result);
+  const inspection = persistExtraction(options, cacheRoot, cacheKey, result, true);
   recordLiveExtractionSuccess(options, cacheKey, stats, inspection);
   return result;
+}
+
+function withSemanticValidation(
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): Parameters<BenchSignalExtractor["extract"]>[0] {
+  return {
+    ...input,
+    validateRawJson: (rawJson) => {
+      inspectExtractionRawJson(rawJson);
+      input.validateRawJson?.(rawJson);
+    }
+  };
 }
 
 function markLiveExtractionStarted(
@@ -221,11 +291,12 @@ function markLiveExtractionStarted(
   stats.lastCacheKey = cacheKey;
 }
 
-function persistLiveExtraction(
+function persistExtraction(
   options: CachingSignalExtractorOptions,
   cacheRoot: string,
   cacheKey: string,
-  result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>
+  result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
+  providerBacked: boolean
 ): ExtractionRawJsonInspection {
   const inspection = inspectExtractionRawJson(result.rawJson);
   try {
@@ -235,6 +306,9 @@ function persistLiveExtraction(
       cache_key: cacheKey,
       raw_json: result.rawJson,
       extracted_at: new Date().toISOString(),
+      ...(providerBacked ? {
+        transport_provenance: buildExtractionTransportProvenance(options.config)
+      } : {}),
       ...persistedResponseMetadata(result.responseMetadata, result.usage)
     });
   } catch (cause) {
@@ -254,9 +328,9 @@ function recordLiveExtractionSuccess(
 ): void {
   if (stats !== undefined) {
     stats.llmCalls += 1;
-    recordExtractionInspection(stats, inspection);
+    recordExtractionInspection(options, cacheKey, "live", inspection);
   }
-  options.onLiveExtractionSucceeded?.(cacheKey);
+  options.onLiveProviderExtractionSucceeded?.(cacheKey);
   options.onExtractionProgress?.();
 }
 
@@ -312,105 +386,19 @@ function assertWriteIdentity(
   return identity.manifestSha256;
 }
 
-/**
- * Pull the load-bearing `turn_content` out of the assembled provider
- * userPrompt. The provider builds userPrompt as
- * `JSON.stringify({workspace_id, run_id, surface_id, turn_content, ...})`
- * (see compute-provider.ts requestSignals); only `turn_content` decides the
- * extraction. Falls back to the whole userPrompt if the shape is
- * unexpected, never silently keying on a constant.
- */
 function extractCacheInputIdentity(userPrompt: string): {
-  readonly turnContent: string;
-  readonly trustedRoleCorpusDigest?: string;
-  readonly sourceCatalogRequestIdentity?: string;
+  readonly request: OfficialApiExtractionRequest;
+  readonly canonical: string;
 } {
   try {
-    const parsed = JSON.parse(userPrompt) as unknown;
-    if (typeof parsed === "object" && parsed !== null) {
-      const record = parsed as Record<string, unknown>;
-      const turnContent = record.turn_content;
-      if (typeof turnContent === "string" && turnContent.length > 0) {
-        const messages = readRoleCorpus(record.turn_messages);
-        const sourceCatalogRequestIdentity = readSourceCatalogRequestIdentity(
-          record,
-          turnContent,
-          messages
-        );
-        if (sourceCatalogRequestIdentity === null) return { turnContent: userPrompt };
-        return {
-          turnContent,
-          ...(messages === undefined
-            ? {}
-            : { trustedRoleCorpusDigest: computeTrustedRoleCorpusDigest(messages) }),
-          ...(sourceCatalogRequestIdentity === undefined ? {} : { sourceCatalogRequestIdentity })
-        };
-      }
-    }
-  } catch {
-    // Not JSON: fall through to hashing the raw userPrompt.
+    const request = parseOfficialApiExtractionRequest(JSON.parse(userPrompt) as unknown);
+    return { request, canonical: stringifyOfficialApiExtractionRequest(request) };
+  } catch (cause) {
+    throw new ExtractionCacheInvariantError(
+      "cache extractor received a non-canonical official API extraction request",
+      { cause }
+    );
   }
-  return { turnContent: userPrompt };
-}
-
-function readRoleCorpus(
-  value: unknown
-): readonly { readonly role: "user" | "assistant"; readonly content: string }[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const messages: { role: "user" | "assistant"; content: string }[] = [];
-  for (const item of value) {
-    if (typeof item !== "object" || item === null) return undefined;
-    const { role, content } = item as Record<string, unknown>;
-    if ((role !== "user" && role !== "assistant") || typeof content !== "string") {
-      return undefined;
-    }
-    messages.push({ role, content });
-  }
-  return messages;
-}
-
-function readSourceCatalogRequestIdentity(
-  record: Readonly<Record<string, unknown>>,
-  turnContent: string,
-  messages: readonly { readonly role: "user" | "assistant"; readonly content: string }[] | undefined
-): string | undefined | null {
-  if (record.source_assertions === undefined && record.source_locator_contract_version === undefined) {
-    return undefined;
-  }
-  if (record.source_locator_contract_version !== OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION) {
-    return null;
-  }
-  const assertions = readSourceAssertions(record.source_assertions);
-  if (assertions === undefined) return null;
-  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages ?? []);
-  if (!sameSourceAssertions(assertions, buildOfficialApiSourceAssertions(sourceCorpus))) return null;
-  return computeOfficialApiSourceCatalogRequestIdentity(sourceCorpus);
-}
-
-function readSourceAssertions(
-  value: unknown
-): readonly { readonly assertion_id: number; readonly text: string }[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const assertions: { assertion_id: number; text: string }[] = [];
-  for (const item of value) {
-    if (typeof item !== "object" || item === null) return undefined;
-    const { assertion_id, text } = item as Record<string, unknown>;
-    if (typeof assertion_id !== "number" || !Number.isInteger(assertion_id) ||
-        assertion_id <= 0 || typeof text !== "string") {
-      return undefined;
-    }
-    assertions.push({ assertion_id, text });
-  }
-  return assertions;
-}
-
-function sameSourceAssertions(
-  left: readonly { readonly assertion_id: number; readonly text: string }[],
-  right: readonly { readonly assertion_id: number; readonly text: string }[]
-): boolean {
-  return left.length === right.length && left.every((assertion, index) =>
-    assertion.assertion_id === right[index]?.assertion_id && assertion.text === right[index]?.text
-  );
 }
 
 /**
@@ -430,70 +418,31 @@ function sameSourceAssertions(
  * already silently discarded.
  */
 function recordExtractionInspection(
-  stats: CompileSeedExtractionStats,
+  options: CachingSignalExtractorOptions,
+  cacheKey: string,
+  source: "cache" | "live",
   inspection: ExtractionRawJsonInspection
 ): void {
+  const stats = options.stats;
+  if (stats === undefined) return;
+  const aggregate = options.trackTurnShards === true;
+  stats.lastExtractionSource = aggregate && stats.lastExtractionSource === "live"
+    ? "live"
+    : source;
   stats.lastRawJsonSha256 = inspection.rawJsonSha256;
-  stats.lastTurnRawSignalCount = inspection.rawSignalCount;
-  stats.lastTurnDraftCount = inspection.parsedDraftCount;
-}
-
-export function computeCacheKey(
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"],
-  systemPrompt: string,
-  turnContent: string,
-  trustedRoleCorpusDigest?: string,
-  sourceCatalogRequestIdentity?: string
-): string {
-  const hash = createHash("sha256")
-    .update(model, "utf8")
-    .update("\u0000", "utf8")
-    .update(requestProfile, "utf8")
-    .update("\u0000", "utf8")
-    .update(systemPrompt, "utf8")
-    .update("\u0000", "utf8")
-    .update(turnContent, "utf8");
-  if (trustedRoleCorpusDigest !== undefined) {
-    if (!/^[a-f0-9]{64}$/u.test(trustedRoleCorpusDigest)) {
-      throw new Error("trusted role corpus digest must be a lowercase sha256");
-    }
-    hash.update("\u0000trusted-role-corpus-v1\u0000", "utf8")
-      .update(trustedRoleCorpusDigest, "utf8");
+  stats.lastTurnRawSignalCount = aggregate
+    ? stats.lastTurnRawSignalCount + inspection.rawSignalCount
+    : inspection.rawSignalCount;
+  stats.lastTurnDraftCount = aggregate
+    ? stats.lastTurnDraftCount + inspection.parsedDraftCount
+    : inspection.parsedDraftCount;
+  if (aggregate) {
+    stats.lastExtractionShards?.push(Object.freeze({
+      extractionSource: source,
+      cacheKey,
+      rawJsonSha256: inspection.rawJsonSha256,
+      rawSignalCount: inspection.rawSignalCount,
+      draftCount: inspection.parsedDraftCount
+    }));
   }
-  if (sourceCatalogRequestIdentity !== undefined) {
-    if (!/^[a-f0-9]{64}$/u.test(sourceCatalogRequestIdentity)) {
-      throw new Error("source catalog request identity must be a lowercase sha256");
-    }
-    hash.update("\u0000source-assertion-catalog-v1\u0000", "utf8")
-      .update(sourceCatalogRequestIdentity, "utf8");
-  }
-  return hash.digest("hex");
-}
-
-export function computeExtractionTurnCacheKey(
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"],
-  systemPrompt: string,
-  turn: LongMemEvalExtractionTurn
-): string {
-  return computeSourceTurnCacheKey(model, requestProfile, systemPrompt, turn);
-}
-
-export function computeSourceTurnCacheKey(
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"],
-  systemPrompt: string,
-  input: Pick<LongMemEvalExtractionTurn, "turnContent"> & Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>
-): string {
-  const messages = input.turnMessages ?? [];
-  const sourceCorpus = buildOfficialApiSourceCorpus(input.turnContent, messages);
-  return computeCacheKey(
-    model,
-    requestProfile,
-    systemPrompt,
-    input.turnContent,
-    messages.length === 0 ? undefined : computeTrustedRoleCorpusDigest(messages),
-    computeOfficialApiSourceCatalogRequestIdentity(sourceCorpus)
-  );
 }

@@ -1,6 +1,7 @@
 import type {
   EvidenceCapsule,
   EvidenceFactFrameFormationCapture,
+  OpenSemanticFactorFormationCapture,
   EvidenceHealthState,
   EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
@@ -20,7 +21,8 @@ export interface EvidenceCapsuleRepo {
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
   ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;

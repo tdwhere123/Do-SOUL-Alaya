@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   cacheFilePath,
-  computeCacheKey,
+  computeSourceTurnCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
@@ -30,11 +30,11 @@ export function writeCompletedExtractionCacheFixture(input: {
   const model = input.model ?? "test-extraction-model";
   const requestProfile = "provider-default-v1" as const;
   const rawJson = input.rawJson ?? DEFAULT_RAW_JSON;
-  const keys = [...new Set(input.turnContents.map((turnContent) => computeCacheKey(
+  const keys = [...new Set(input.turnContents.map((turnContent) => computeSourceTurnCacheKey(
     model,
     requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent
+    { turnContent }
   )))].sort();
   for (const cacheKey of keys) writeShard(input.cacheRoot, cacheKey, model, rawJson);
   const closureEntries = keys.map((cacheKey) => ({

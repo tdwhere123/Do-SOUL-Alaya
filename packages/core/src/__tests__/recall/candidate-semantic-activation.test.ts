@@ -78,4 +78,20 @@ describe("candidate activation receipt", () => {
       { channel: "object_embedding", state: "observed", score: 0 }
     ]);
   });
+
+  it("lets a complete open semantic solution win without an embedding score", () => {
+    const receipt = resolveCandidateSemanticActivation({
+      scope: "workspace_memory",
+      openSemanticSolution: 1
+    });
+
+    expect(receipt).toMatchObject({
+      state: "observed",
+      score: 1,
+      winner: { channel: "open_semantic_solution", score: 1 },
+      observations: expect.arrayContaining([
+        { channel: "open_semantic_solution", state: "observed", score: 1 }
+      ])
+    });
+  });
 });

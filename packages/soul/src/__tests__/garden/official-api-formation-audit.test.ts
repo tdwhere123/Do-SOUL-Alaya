@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CREATED_AT = "2026-07-17T00:00:00.000Z";
 const SOURCE_OBSERVED_AT = "2026-07-16T12:00:00.000Z";
 
-const validSignal = {
+const validSignal = withOpenSemanticFactorGraph({
   signal_kind: "potential_claim",
   object_kind: "decision",
   confidence: 0.7,
   matched_text: "We decided to ship on Friday."
-};
+});
 
 function auditInput(overrides: Partial<Parameters<typeof auditOfficialApiSignalFormation>[0]> = {}) {
   return {

@@ -11,7 +11,10 @@ import {
   type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
-import { resolveGardenSignalGrounding } from "../grounding/signal-source-grounding.js";
+import {
+  readGardenVerifiedUserAssertionReceipt,
+  resolveGardenSignalGrounding
+} from "../grounding/signal-source-grounding.js";
 import {
   resolveVerifiedGardenTurnEvidenceProjection
 } from "../evidence-preservation/turn-evidence-anchor.js";
@@ -94,6 +97,7 @@ export function routeByObjectKind(objectKind: string): MaterializationTarget | n
     case "task_state":
     case "fact":
     case "activity":
+    case "open_semantic_observation":
       return {
         kind: "evidence_only",
         route_target: "memory_entry_only",
@@ -277,6 +281,9 @@ function buildVerifiedUserAssertionSourceHash(
   signal: CandidateMemorySignal,
   sourceCorpus: string
 ): string | null {
+  const receipt = readGardenVerifiedUserAssertionReceipt(signal);
+  if (receipt !== null) return receipt.sourceHash;
+  if (Object.hasOwn(signal.raw_payload, "verified_user_assertion_source_hash")) return null;
   if (signal.source !== "garden_compile" ||
       !Object.hasOwn(signal.raw_payload, "source_locator")) return null;
   const fullTurn = readStringPayload(signal.raw_payload, "full_turn_content");

@@ -30,6 +30,7 @@ export * from "./soul/base-types.js";
 export * from "./soul/governance-subject.js";
 export * from "./soul/evidence-capsule.js";
 export * from "./soul/associative-fact-frame.js";
+export * from "./soul/open-semantic-factor-graph.js";
 export * from "./soul/verified-user-assertion-receipt.js";
 export * from "./soul/garden-source-turn-fallback-receipt.js";
 export * from "./soul/memory-entry.js";

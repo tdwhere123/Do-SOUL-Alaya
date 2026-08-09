@@ -2,13 +2,21 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   type BenchSignalExtractor
 } from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { writeExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { buildCompileSeedDaemon, CREDENTIALLED_CONFIG } from "../compile-seed/compile-seed-fixture.js";
+import {
+  buildCompileSeedDaemon,
+  CREDENTIALLED_CONFIG,
+  signalsEnvelope
+} from "../compile-seed/compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
@@ -19,6 +27,11 @@ import {
   registerCacheRootHooks,
   writeCacheShard
 } from "./extraction-cache-preflight-fixture.js";
+
+const TURN_CONTENT = "I moved to Berlin.";
+const TURN_REQUEST = stringifyOfficialApiExtractionRequest(
+  buildOfficialApiExtractionRequest(TURN_CONTENT, [])
+);
 
 describe("cache-only compile seed smoke", () => {
   let cacheRoot: string;
@@ -37,13 +50,10 @@ describe("cache-only compile seed smoke", () => {
       cacheRoot,
       CREDENTIALLED_CONFIG.model,
       turnContent,
-      JSON.stringify({ signals: [{
-        signal_kind: "potential_preference",
-        object_kind: "user_preference",
-        confidence: 0.9,
-        matched_text: "moved to Berlin",
-        distilled_fact: "Alice lives in Berlin."
-      }] })
+      signalsEnvelope([{
+        matched: "I moved to Berlin and started a new job in March 2024.",
+        distilled: "Alice lives in Berlin."
+      }])
     );
 
     const liveExtract: BenchSignalExtractor = {
@@ -101,7 +111,7 @@ describe("single-source extraction model", () => {
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
       cacheRoot
     });
-    await extractor.extract({ systemPrompt: "sys", userPrompt: "turn" });
+    await extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST });
 
     // The cache-key model component and the persisted fixture model both come
     // from the single `model` field — there is no independent re-derivation.
@@ -130,8 +140,8 @@ describe("single-source extraction model", () => {
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
       cacheRoot
     });
-    await writer.extract({ systemPrompt: "sys", userPrompt: "turn" });
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
+    await writer.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST });
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
 
     const reader = createCachingSignalExtractor({
       delegate,
@@ -144,9 +154,9 @@ describe("single-source extraction model", () => {
       cacheRoot
     });
     await expect(
-      reader.extract({ systemPrompt: "sys", userPrompt: "turn" })
+      reader.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST })
     ).rejects.toThrow(/extraction model mismatch/u);
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a request-profile change before the delegate or shard write", async () => {
@@ -162,7 +172,7 @@ describe("single-source extraction model", () => {
       cacheRoot
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: "turn" }))
+    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/request profile mismatch/u);
     expect(delegate).not.toHaveBeenCalled();
     expect(readdirSync(cacheRoot).filter((entry) => /^[0-9a-f]{2}$/u.test(entry)))
@@ -180,17 +190,17 @@ describe("single-source extraction model", () => {
       allowLiveExtraction: false
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: "turn" }))
+    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/cache-only.*missing|missing.*live extraction disabled/u);
     expect(delegate.extract).not.toHaveBeenCalled();
   });
 
   it("fails closed on a corrupt cache entry when live extraction is disabled", async () => {
-    const cacheKey = computeCacheKey(
+    const cacheKey = computeSourceTurnCacheKey(
       CONFIG.model,
       CONFIG.requestProfile,
       "sys",
-      "turn"
+      { turnContent: TURN_CONTENT }
     );
     mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
     writeFileSync(cacheFilePath(cacheRoot, cacheKey), "{torn", "utf8");
@@ -204,7 +214,7 @@ describe("single-source extraction model", () => {
       allowLiveExtraction: false
     });
 
-    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: "turn" }))
+    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST }))
       .rejects.toThrow(/cache-only.*invalid/u);
     expect(delegate.extract).not.toHaveBeenCalled();
   });

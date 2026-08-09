@@ -16,6 +16,9 @@ import type {
 import type {
   LongMemEvalQuestion
 } from "../../../longmemeval/ingestion/dataset.js";
+import { TEST_EXTRACTION_PROVIDER_URL } from
+  "../extraction/extraction-cache-test-fixture.js";
+import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -30,6 +33,7 @@ beforeEach(async () => {
   pinnedMetaRoot = join(root, "pinned");
   await Promise.all([mkdir(cacheRoot), mkdir(dataDir), mkdir(pinnedMetaRoot)]);
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", TEST_EXTRACTION_PROVIDER_URL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   await writeDataset();
 });
@@ -47,7 +51,10 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return { rawJson: '{"signals":[]}' };
+    if (calls === 1) return { rawJson: signalsEnvelope([{
+      distilled: "I saved alpha.",
+      matched: "I saved alpha."
+    }]) };
     secondStarted.resolve();
     return waitForAbort(input.abortSignal);
   });
@@ -256,10 +263,10 @@ function questionFixture(): LongMemEvalQuestion {
     haystack_dates: ["2025-12-01", "2025-11-01"],
     haystack_sessions: [
       [
-        { role: "user", content: "alpha", has_answer: true },
+        { role: "user", content: "I saved alpha.", has_answer: true },
         { role: "assistant", content: "noted" }
       ],
-      [{ role: "user", content: "decoy" }]
+      [{ role: "user", content: "I saved decoy." }]
     ],
     answer_session_ids: ["s-answer"]
   };

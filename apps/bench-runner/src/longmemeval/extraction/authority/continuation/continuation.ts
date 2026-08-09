@@ -11,8 +11,13 @@ import { assertMonotonicExtractionAttemptLedgerFork } from
   "../attempt-ledger/fork-contract.js";
 import {
   assertSameRootExtractionContinuation,
+  sameRootContinuationMode,
   type SameRootExtractionContinuation
 } from "./contract.js";
+import {
+  assertExtractionAuthorityRenewal,
+  captureExtractionTransportAuthority
+} from "./renewal.js";
 import type { ExtractionAuthorityInspection } from "../inspection.js";
 import type {
   ExtractionAuthorityObservation,
@@ -31,19 +36,26 @@ export function createSameRootExtractionContinuation(input: {
   readonly inspection: ExtractionAuthorityInspection;
 }): SameRootExtractionContinuation {
   assertPredecessorEvidence(input.predecessor, input.predecessorLedger);
-  assertIdentityContinuity(input.predecessor.observation, input.inspection.observation);
-  assertSelectionAncestry(input.targetSelection, input.predecessor);
+  const mode = resolveContinuationMode(
+    input.predecessor, input.targetSelection, input.inspection.observation
+  );
+  assertIdentityContinuity(
+    input.predecessor.observation, input.inspection.observation, mode
+  );
   assertInitialPreservedState(input.inspection, input.predecessorLedger);
   assertManifestMatchesInspection(input.cacheRoot, input.inspection);
   const predecessor = input.predecessorLedger;
   const continuation = {
-    schema_version: 2 as const,
+    schema_version: 4 as const,
     kind: "same-root-settled-predecessor" as const,
+    mode,
     successor_revision: input.inspection.observation.revision,
     starting_manifest_sha256: requireDigest(
       input.inspection.observation.extraction.manifestSha256,
       "same-root continuation requires an in-progress manifest"
     ),
+    predecessor_transport_authority:
+      captureExtractionTransportAuthority(input.predecessor),
     predecessor: {
       receipt_digest: input.predecessor.receipt_digest,
       lineage_digest: input.predecessor.lineage_digest,
@@ -81,10 +93,14 @@ export function assertSameRootExtractionContinuationRuntime(input: {
   const continuation = input.receipt.continuation;
   assertSameRootExtractionContinuation(continuation);
   assertContinuationBinding(continuation, input.receipt, input.predecessor);
+  assertExtractionAuthorityRenewal(input.receipt, input.predecessor);
   assertPredecessorEvidence(input.predecessor, input.predecessorLedger);
   assertBoundPredecessorLedger(continuation, input.predecessorLedger);
-  assertIdentityContinuity(input.predecessor.observation, input.receipt.observation);
-  assertSelectionAncestry(input.targetSelection, input.predecessor);
+  const mode = sameRootContinuationMode(continuation);
+  assertIdentityContinuity(
+    input.predecessor.observation, input.receipt.observation, mode
+  );
+  assertSelectionBinding(input.targetSelection, input.predecessor, mode);
   assertMonotonicExtractionAttemptLedgerFork({
     predecessor: input.predecessorLedger,
     successor: input.successorLedger,
@@ -163,11 +179,20 @@ function assertBoundPredecessorLedger(
 
 function assertIdentityContinuity(
   predecessor: ExtractionAuthorityObservation,
-  successor: ExtractionAuthorityObservation
+  successor: ExtractionAuthorityObservation,
+  mode: "revision_successor" | "output_token_cap_renewal" | "transport_successor"
 ): void {
   const predecessorExtraction = semanticExtractionIdentity(predecessor);
   const successorExtraction = semanticExtractionIdentity(successor);
-  if (predecessor.revision === successor.revision ||
+  const revisionChanged = predecessor.revision !== successor.revision;
+  const transportChanged = JSON.stringify(transportIdentity(predecessor)) !==
+    JSON.stringify(transportIdentity(successor));
+  const validMode = mode === "revision_successor"
+    ? revisionChanged
+    : mode === "transport_successor"
+      ? !revisionChanged && transportChanged
+      : !revisionChanged && !transportChanged;
+  if (!validMode ||
       predecessor.commandDigest !== successor.commandDigest ||
       predecessor.selectionDigest !== successor.selectionDigest ||
       predecessor.keyDigest !== successor.keyDigest ||
@@ -175,6 +200,13 @@ function assertIdentityContinuity(
       JSON.stringify(predecessorExtraction) !== JSON.stringify(successorExtraction)) {
     throw new Error("same-root extraction continuation semantic identity drifted");
   }
+}
+
+function transportIdentity(observation: ExtractionAuthorityObservation) {
+  return observation.transport ?? {
+    providerUrl: observation.extraction.providerUrl,
+    model: observation.extraction.model
+  };
 }
 
 function semanticExtractionIdentity(observation: ExtractionAuthorityObservation) {
@@ -189,10 +221,34 @@ function semanticExtractionIdentity(observation: ExtractionAuthorityObservation)
   };
 }
 
-function assertSelectionAncestry(
+function resolveContinuationMode(
+  predecessor: ExtractionAuthorityReceipt,
   targetSelection: ExtractionTargetSelectionReceipt,
-  predecessor: ExtractionAuthorityReceipt
+  successor: ExtractionAuthorityObservation
+): "revision_successor" | "output_token_cap_renewal" | "transport_successor" {
+  const revisionChanged = predecessor.observation.revision !== successor.revision;
+  const transportChanged = JSON.stringify(transportIdentity(predecessor.observation)) !==
+    JSON.stringify(transportIdentity(successor));
+  const mode = revisionChanged
+    ? "revision_successor" as const
+    : transportChanged
+      ? "transport_successor" as const
+      : "output_token_cap_renewal" as const;
+  assertSelectionBinding(targetSelection, predecessor, mode);
+  return mode;
+}
+
+function assertSelectionBinding(
+  targetSelection: ExtractionTargetSelectionReceipt,
+  predecessor: ExtractionAuthorityReceipt,
+  mode: "revision_successor" | "output_token_cap_renewal" | "transport_successor"
 ): void {
+  if (mode === "output_token_cap_renewal" || mode === "transport_successor") {
+    if (targetSelection.receipt_digest !== predecessor.target_selection_digest) {
+      throw new Error("output token cap renewal target selection drifted");
+    }
+    return;
+  }
   const basis = targetSelection.selection_basis;
   if (basis.kind !== "same_root_continuation" ||
       basis.predecessor_target_selection_digest !== predecessor.target_selection_digest ||

@@ -2,7 +2,7 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
 import {
-  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys,
   inspectCachedExtraction
 } from "../../../compile-seed/compile-seed-cache.js";
 import type { ExtractionAuthorityReceipt } from "../../authority/receipt.js";
@@ -24,12 +24,13 @@ interface CacheKeyAllowlistWriteLease {
 
 type CacheKeyAllowlistAuthority = Pick<
   ExtractionAuthorityReceipt,
-  "action" | "direct_spend" | "repair_scope" | "catalog_refill"
+  "action" | "direct_spend" | "repair_scope" | "catalog_refill" | "continuation"
 >;
 
 export interface CacheKeyAllowlistResolution {
   readonly turns: readonly LongMemEvalExtractionTurn[];
   readonly skippedCacheHits: number;
+  readonly executionCacheKeys?: ReadonlySet<string>;
 }
 
 export function resolveCacheKeyAllowlistedTurns(input: {
@@ -63,17 +64,60 @@ export function resolveCacheKeyAllowlistedTurns(input: {
     );
   }
   const pinnedCachedTurns = requirePinnedCachedTurns(input.prepared.pinnedCachedTurns);
+  const expected = indexTurns(input.prepared.distinctExtractionTurns, input.prepared.config);
   countIntentionalSkippedTurns(
-    input.prepared.distinctExtractionTurns.length, pinnedCachedTurns, remainingKeys.length
+    expected.size, pinnedCachedTurns, remainingKeys.length
   );
   input.writeLease.assertOwned();
-  const expected = indexTurns(input.prepared.distinctExtractionTurns, input.prepared.config);
   const executable = indexTurns(input.prepared.executionExtractionTurns, input.prepared.config);
   return Object.freeze({
-    turns: Object.freeze(remainingKeys.map((key) => selectMissingTurn(
-      key, expected, executable, input.cacheRoot, input.prepared.config
-    ))),
-    skippedCacheHits: pinnedCachedTurns
+    turns: selectUniqueMissingTurns(
+      remainingKeys, expected, executable, input.cacheRoot, input.prepared.config
+    ),
+    skippedCacheHits: pinnedCachedTurns,
+    executionCacheKeys: new Set(remainingKeys)
+  });
+}
+
+export function resolveContinuationMissingTurns(input: {
+  readonly cacheRoot: string;
+  readonly prepared: CacheKeyAllowlistPrepared;
+  readonly authority: CacheKeyAllowlistAuthority | undefined;
+  readonly successfulKeys: readonly string[] | undefined;
+  readonly writeLease: CacheKeyAllowlistWriteLease;
+}): CacheKeyAllowlistResolution | undefined {
+  if (input.authority?.continuation === undefined) return undefined;
+  assertContinuationScope(input.prepared, input.authority);
+  const successfulKeys = validatedCompletedKeys(input.successfulKeys);
+  const pinnedCachedTurns = requirePinnedCachedTurns(input.prepared.pinnedCachedTurns);
+  if (successfulKeys.length !== pinnedCachedTurns) {
+    throw new ExtractionCacheInvariantError(
+      "continuation ledger success count does not match the pinned manifest"
+    );
+  }
+  const expected = indexTurns(input.prepared.distinctExtractionTurns, input.prepared.config);
+  if (successfulKeys.some((key) => !expected.has(key))) {
+    throw new ExtractionCacheInvariantError(
+      "continuation ledger contains a success outside the production full window"
+    );
+  }
+  const completed = new Set(successfulKeys);
+  const remainingKeys = [...expected.keys()].filter((key) => !completed.has(key));
+  if (remainingKeys.length === 0) {
+    throw new ExtractionCacheInvariantError(
+      "continuation authority has no remaining missing cache keys"
+    );
+  }
+  input.writeLease.assertOwned();
+  const executable = indexTurns(
+    input.prepared.executionExtractionTurns, input.prepared.config
+  );
+  return Object.freeze({
+    turns: selectUniqueMissingTurns(
+      remainingKeys, expected, executable, input.cacheRoot, input.prepared.config
+    ),
+    skippedCacheHits: successfulKeys.length,
+    executionCacheKeys: new Set(remainingKeys)
   });
 }
 
@@ -146,16 +190,46 @@ function validatedAllowlist(allowlist: readonly string[]): readonly string[] {
   return allowlist;
 }
 
+function validatedCompletedKeys(
+  keys: readonly string[] | undefined
+): readonly string[] {
+  if (keys === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "continuation authority requires a settled attempt ledger"
+    );
+  }
+  if (keys.some((key) => !/^[a-f0-9]{64}$/u.test(key)) ||
+      new Set(keys).size !== keys.length) {
+    throw new ExtractionCacheInvariantError(
+      "continuation ledger successes must be unique lowercase SHA-256 digests"
+    );
+  }
+  return keys;
+}
+
+function assertContinuationScope(
+  prepared: CacheKeyAllowlistPrepared,
+  authority: CacheKeyAllowlistAuthority
+): void {
+  if (authority.action !== "fill" || authority.continuation === undefined ||
+      authority.direct_spend !== undefined || authority.repair_scope !== undefined ||
+      authority.catalog_refill !== undefined || prepared.expansion !== undefined ||
+      prepared.questionBatchLimit !== undefined) {
+    throw new ExtractionCacheInvariantError(
+      "sparse continuation requires a normal settled continuation authority"
+    );
+  }
+}
+
 function indexTurns(
   turns: readonly LongMemEvalExtractionTurn[],
   config: CacheKeyAllowlistPrepared["config"]
 ): ReadonlyMap<string, LongMemEvalExtractionTurn> {
-  return new Map(turns.map((turn) => [
-    computeExtractionTurnCacheKey(
+  return new Map(turns.flatMap((turn) =>
+    computeExtractionTurnCacheKeys(
       config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
-    ),
-    turn
-  ]));
+    ).map((cacheKey) => [cacheKey, turn] as const)
+  ));
 }
 
 function selectMissingTurn(
@@ -185,6 +259,19 @@ function selectMissingTurn(
     );
   }
   return turn;
+}
+
+function selectUniqueMissingTurns(
+  keys: readonly string[],
+  expected: ReadonlyMap<string, LongMemEvalExtractionTurn>,
+  executable: ReadonlyMap<string, LongMemEvalExtractionTurn>,
+  cacheRoot: string,
+  config: CacheKeyAllowlistPrepared["config"]
+): readonly LongMemEvalExtractionTurn[] {
+  const turns = keys.map((key) => selectMissingTurn(
+    key, expected, executable, cacheRoot, config
+  ));
+  return Object.freeze([...new Set(turns)]);
 }
 
 function sameOrderedKeys(left: readonly string[], right: readonly string[]): boolean {

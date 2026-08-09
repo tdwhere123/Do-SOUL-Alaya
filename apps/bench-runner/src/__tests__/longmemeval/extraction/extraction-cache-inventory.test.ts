@@ -54,6 +54,25 @@ describe("extraction cache inventory", () => {
     expect(hashExtractionCacheInventory(forward)).toBe(hashExtractionCacheInventory(reversed));
   });
 
+  it("separates authority control artifacts from raw shard inventory", () => {
+    const root = cacheRoot();
+    const digest = "d".repeat(64);
+    const controlArtifacts = [
+      ".alaya-extraction-target-root.json",
+      `continuation-child.${digest}.json`,
+      `extraction-attempt-ledger.${digest}.json`
+    ];
+    for (const name of controlArtifacts) writeFileSync(join(root, name), "{}", "utf8");
+    writeFileSync(join(root, "continuation-child.not-a-digest.json"), "{}", "utf8");
+
+    const inventory = inspectExtractionCacheInventory({
+      cacheRoot: root, cacheKeys: [], model, requestProfile
+    });
+
+    expect(inventory.controlArtifactPaths).toEqual(controlArtifacts.sort());
+    expect(inventory.unexpectedPaths).toEqual(["continuation-child.not-a-digest.json"]);
+  });
+
   it("marks legacy salvaged-but-malformed raw JSON invalid for repair", () => {
     const root = cacheRoot();
     const key = "d".repeat(64);

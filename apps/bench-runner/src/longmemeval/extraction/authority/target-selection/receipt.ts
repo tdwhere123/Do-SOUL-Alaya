@@ -3,7 +3,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } 
 import { dirname } from "node:path";
 import {
   assertFreshExtractionCacheRoot,
-  type ExtractionCacheCompatibilityIdentity
+  type ExtractionCacheCompatibilityDecision
 } from "../../cache-audit/compatibility.js";
 import type { ExtractionCacheAuditReceipt } from "../../cache-audit/receipt.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
@@ -171,7 +171,7 @@ export function createExtractionTargetSelectionReceipt(input: {
   readonly now?: Date;
 }): ExtractionTargetSelectionReceipt {
   assertRebuildAudit(input.auditReceipt);
-  assertAuditFinalIdentity(input.auditReceipt.decision.final, input.observation);
+  assertAuditFinalIdentity(input.auditReceipt.decision, input.observation);
   return createTargetSelectionReceipt({
     selectionBasis: auditSelectionBasis(input.auditReceipt),
     targetRoot: input.targetRoot,
@@ -361,7 +361,7 @@ export function discardFreshExtractionTargetSelectionRoot(input: {
 }
 
 function assertRebuildAudit(auditReceipt: ExtractionCacheAuditReceipt): void {
-  if (auditReceipt.decision.action !== "rebuild") {
+  if (auditReceipt.decision.raw.action !== "rebuild") {
     throw new Error("extraction target selection requires a rebuild cache audit receipt");
   }
 }
@@ -378,16 +378,18 @@ function assertFreshInitialSelection(observation: ExtractionAuthorityObservation
 }
 
 function assertAuditFinalIdentity(
-  auditFinal: ExtractionCacheCompatibilityIdentity,
+  auditDecision: ExtractionCacheCompatibilityDecision,
   observation: ExtractionAuthorityObservation
 ): void {
   const current = finalIdentity(observation);
-  if (auditFinal.datasetRevision !== current.dataset_revision_sha256 ||
-      auditFinal.model !== current.model || auditFinal.modelFamily !== current.model_family ||
-      auditFinal.requestProfile !== current.request_profile ||
-      auditFinal.providerUrl !== current.provider_url ||
-      auditFinal.systemPromptSha256 !== current.system_prompt_sha256 ||
-      auditFinal.cacheKeyAlgorithm !== current.cache_key_algorithm) {
+  const raw = auditDecision.raw.final;
+  if (raw.datasetRevision !== current.dataset_revision_sha256 ||
+      raw.model !== current.model ||
+      auditDecision.projection.final.modelFamily !== current.model_family ||
+      raw.requestProfile !== current.request_profile ||
+      raw.providerUrl !== current.provider_url ||
+      raw.systemPromptSha256 !== current.system_prompt_sha256 ||
+      raw.cacheKeyAlgorithm !== current.cache_key_algorithm) {
     throw new Error("extraction target selection audit final identity does not match the live target");
   }
 }

@@ -10,6 +10,10 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import {
   initDatabase,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
@@ -225,7 +229,10 @@ describe("materialization fuel inventory integration", () => {
       cacheRoot,
       stats: warmStats
     });
-    await warmExtractor.extract({ systemPrompt: "sys", userPrompt: "turn-content" });
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest("I moved to Berlin.", [])
+    );
+    await warmExtractor.extract({ systemPrompt: "sys", userPrompt });
     expect(warmStats.llmCalls).toBe(1);
 
     const replayStats = freshStats();
@@ -239,7 +246,7 @@ describe("materialization fuel inventory integration", () => {
       cacheRoot,
       stats: replayStats
     });
-    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt: "turn-content" });
+    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt });
     expect(replay.rawJson).toContain("Alice lives in Berlin");
     expect(replayStats.cacheHits).toBe(1);
     expect(replayStats.llmCalls).toBe(0);

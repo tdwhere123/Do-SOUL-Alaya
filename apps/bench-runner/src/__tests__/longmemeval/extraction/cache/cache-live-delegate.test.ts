@@ -4,9 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildOfficialApiSourceAssertions,
-  buildOfficialApiSourceCorpus,
-  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
@@ -22,6 +21,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction-cache-test-fixture.js";
+import { signalsEnvelope } from "../../compile-seed/compile-seed-fixture.js";
 
 const MODEL = "test-model";
 const SYSTEM_PROMPT = "test-system-prompt";
@@ -46,20 +46,10 @@ describe("extraction live delegate empty-result recheck", () => {
   });
 
   it("rechecks one strict empty result once and persists only the terminal raw response", async () => {
-    const terminalRaw = JSON.stringify({
-      signals: [{
-        signal_kind: "potential_claim",
-        object_kind: "activity",
-        confidence: 0.9,
-        matched_text: "I completed the review today.",
-        distilled_fact: "I completed the review today.",
-        source_locator: {
-          contract_version: 2,
-          kind: "assertion_catalog",
-          assertion_id: 1
-        }
-      }]
-    });
+    const terminalRaw = signalsEnvelope([{
+      distilled: "I completed the review today.",
+      matched: "I completed the review today."
+    }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
@@ -79,6 +69,8 @@ describe("extraction live delegate empty-result recheck", () => {
         model: MODEL,
         modelFamily: MODEL,
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        transportProviderUrl: "https://physical.example/v1?secret=hidden",
+        transportModel: "provider-model-alias",
         requestProfile: REQUEST_PROFILE
       },
       cacheRoot,
@@ -101,8 +93,17 @@ describe("extraction live delegate empty-result recheck", () => {
     expect(existsSync(expectedShardPath)).toBe(true);
     const shard = JSON.parse(readFileSync(expectedShardPath, "utf8")) as {
       readonly raw_json: string;
+      readonly transport_provenance?: {
+        readonly provider_url_sha256: string;
+        readonly model: string;
+      };
     };
     expect(shard.raw_json).toBe(terminalRaw);
+    expect(shard.transport_provenance).toEqual({
+      provider_url_sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+      model: "provider-model-alias"
+    });
+    expect(JSON.stringify(shard)).not.toContain("secret=hidden");
   });
 
   it("accepts a second strict empty result without a third request", async () => {
@@ -229,7 +230,7 @@ describe("extraction live delegate empty-result recheck", () => {
       cacheRoot,
       onTransportAttempt: ledger.reserveAttempt,
       onLiveExtractionOutcome: ledger.recordTransportOutcome,
-      onLiveExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
       onLiveExtractionFailed: ledger.abandonPendingShard
     });
 
@@ -251,6 +252,43 @@ describe("extraction live delegate empty-result recheck", () => {
     };
     expect(ledger.snapshot()).toMatchObject(expected);
     expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toMatchObject(expected);
+  });
+
+  it("does not commit a deterministic empty shard as a provider attempt", async () => {
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "4".repeat(64),
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1,
+      maximumAttempts: 1,
+      successfulShardCeiling: 1
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => {
+        throw new Error("deterministic empty requests must not reach the provider");
+      })
+    };
+    const extractor = createCachingSignalExtractor({
+      delegate,
+      config: extractionConfig(),
+      cacheRoot,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onDeterministicExtractionSucceeded: ledger.commitDeterministicShard
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(
+        buildOfficialApiExtractionRequest("", [])
+      )
+    })).resolves.toMatchObject({ rawJson: '{"signals":[]}' });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 0,
+      successfulShards: 1,
+      pendingKeys: []
+    });
   });
 
   it("settles a typed terminal failure against its reserved global ordinal", async () => {
@@ -492,13 +530,7 @@ function readShard(cacheRoot: string): {
 
 function userPromptWithAssertions(): string {
   const turnContent = "I completed the review today.";
-  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, []);
-  return JSON.stringify({
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    turn_content: turnContent,
-    source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-    source_assertions: buildOfficialApiSourceAssertions(sourceCorpus)
-  });
+  return stringifyOfficialApiExtractionRequest(
+    buildOfficialApiExtractionRequest(turnContent, [])
+  );
 }

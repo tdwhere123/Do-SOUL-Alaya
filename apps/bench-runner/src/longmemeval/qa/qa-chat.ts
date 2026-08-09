@@ -17,27 +17,18 @@
 export type QaChatFn = (system: string, user: string) => Promise<string>;
 
 export interface QaChatConfig {
-  /** Garden provider base URL, e.g. https://yunwu.ai/v1 (no trailing slash). */
+  /** OpenAI-compatible provider base URL without a trailing slash. */
   readonly url: string;
   /** Bearer API key. */
   readonly apiKey: string;
-  /** Chat model id, e.g. gpt-5.4-nano. */
+  /** Provider model id. */
   readonly model: string;
 }
 
-export const QA_ENV_PROVIDER_URL = "OFFICIAL_API_GARDEN_PROVIDER_URL";
-export const QA_ENV_API_KEY = "ALAYA_OFFICIAL_GARDEN_API_KEY";
-export const QA_ENV_MODEL = "OFFICIAL_API_GARDEN_MODEL";
-// QA answer/judge model override, independent of the extraction model. Lets a
-// run keep OFFICIAL_API_GARDEN_MODEL=<seed model> (extraction cache hit) while
-// answering/judging with a stronger model — extraction resolves its own model
-// elsewhere and is unaffected by this override.
-const QA_ENV_MODEL_OVERRIDE = "OFFICIAL_API_GARDEN_QA_MODEL";
-const QA_DEFAULT_MODEL = "gpt-5.4-nano";
-// Judge model override, independent of the answer model (LongMemEval's official
-// metric judges with gpt-4o; mini-as-judge deflates preference). Falls back to
-// the answer model when unset.
-const QA_ENV_JUDGE_MODEL_OVERRIDE = "OFFICIAL_API_GARDEN_QA_JUDGE_MODEL";
+export const QA_ENV_PROVIDER_URL = "ALAYA_QA_PROVIDER_URL";
+export const QA_ENV_API_KEY = "ALAYA_QA_API_KEY";
+export const QA_ENV_MODEL = "ALAYA_QA_MODEL";
+export const QA_ENV_JUDGE_MODEL = "ALAYA_QA_JUDGE_MODEL";
 
 /**
  * Resolve the garden chat credentials from env. Throws (fail-loud) when the
@@ -48,8 +39,7 @@ export function resolveQaChatConfig(
 ): QaChatConfig {
   const url = env[QA_ENV_PROVIDER_URL]?.trim();
   const apiKey = env[QA_ENV_API_KEY]?.trim();
-  const model =
-    env[QA_ENV_MODEL_OVERRIDE]?.trim() || env[QA_ENV_MODEL]?.trim() || QA_DEFAULT_MODEL;
+  const model = env[QA_ENV_MODEL]?.trim();
   if (url === undefined || url.length === 0) {
     throw new Error(
       `--qa requires ${QA_ENV_PROVIDER_URL} (garden chat provider base URL)`
@@ -57,6 +47,9 @@ export function resolveQaChatConfig(
   }
   if (apiKey === undefined || apiKey.length === 0) {
     throw new Error(`--qa requires ${QA_ENV_API_KEY} (garden chat API key)`);
+  }
+  if (model === undefined || model.length === 0) {
+    throw new Error(`--qa requires ${QA_ENV_MODEL} (answer model)`);
   }
   return { url, apiKey, model };
 }
@@ -69,7 +62,7 @@ export function resolveQaJudgeChatConfig(
   env: NodeJS.ProcessEnv = process.env
 ): QaChatConfig {
   const base = resolveQaChatConfig(env);
-  const judgeModel = env[QA_ENV_JUDGE_MODEL_OVERRIDE]?.trim();
+  const judgeModel = env[QA_ENV_JUDGE_MODEL]?.trim();
   return judgeModel !== undefined && judgeModel.length > 0
     ? { ...base, model: judgeModel }
     : base;

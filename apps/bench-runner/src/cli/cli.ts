@@ -7,6 +7,8 @@ import { runAuditExtractionCacheCommand } from "./cache-audit/command.js";
 import { runSelectExtractionTargetCommand } from "./target-selection/command.js";
 import { runFactFrameFormationAuditCommand } from
   "./fact-frame-formation-audit/command.js";
+import { runQuerySemanticFactorCacheFillCommand } from
+  "./query-semantic-factor-cache/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -26,7 +28,7 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--expected-reconciliation-basis rule_only|garden_llm] [--weights '<json>'] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>] [--promotion-contract <json>]
-    --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 garden chat calls/question (costs money). Needs OFFICIAL_API_GARDEN_PROVIDER_URL / ALAYA_OFFICIAL_GARDEN_API_KEY / OFFICIAL_API_GARDEN_MODEL.
+    --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 provider chat calls/question (costs money). Needs ALAYA_QA_PROVIDER_URL / ALAYA_QA_API_KEY / ALAYA_QA_MODEL; optional ALAYA_QA_JUDGE_MODEL.
     --expected-reconciliation-basis  fail before question execution unless the daemon attests the requested effective decision basis.
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
@@ -44,6 +46,7 @@ Usage:
   alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
   alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
   alaya-bench-runner fact-frame-formation-audit --snapshot <db> [--output <json>]
+  alaya-bench-runner query-semantic-factor-cache-fill --snapshot <db> --query-semantic-factor-cache <new-cache.json> [--concurrency N]
   alaya-bench-runner --help
 
 Variants:
@@ -128,6 +131,10 @@ function commandFlagCompatibilityError(
   if (opts.seedExtractionSystemPrompt !== undefined && command !== "recall-eval") {
     return "--seed-extraction-system-prompt is only valid for recall-eval";
   }
+  if (opts.querySemanticFactorCache !== undefined &&
+      command !== "recall-eval" && command !== "query-semantic-factor-cache-fill") {
+    return "--query-semantic-factor-cache is only valid for recall-eval or query-semantic-factor-cache-fill";
+  }
   return null;
 }
 
@@ -171,6 +178,8 @@ function dispatchParsedCommand(
       return runExtractionFillCommand(opts);
     case "recall-eval":
       return runRecallEvalCommand(opts);
+    case "query-semantic-factor-cache-fill":
+      return runQuerySemanticFactorCacheFillCommand(opts);
     default:
       process.stderr.write(
         `alaya-bench-runner: unknown command '${command ?? ""}'\n${HELP_TEXT}`

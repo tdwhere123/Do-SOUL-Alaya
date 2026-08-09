@@ -2,7 +2,9 @@ import {
   existsSync, readFileSync, writeFileSync
 } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { runAuthorizeExtractionCommand } from
+  "../../../../cli/extraction-authority/command.js";
 import { persistContinuationAuthority } from
   "../../../../cli/extraction-authority/continuation.js";
 import {
@@ -22,6 +24,7 @@ import { readExtractionCacheManifestIdentity } from
   "../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   cleanupContinuationRoots,
+  createAuthorityRenewalScenario,
   createContinuationScenario,
   createSiblingReceipt,
   persistScenario,
@@ -31,6 +34,76 @@ import {
 afterEach(cleanupContinuationRoots);
 
 describe("same-root continuation issuance", () => {
+  it("renews a settled same-revision authority only with a higher output cap", () => {
+    const scenario = createAuthorityRenewalScenario();
+    expect(scenario.successorReceipt.limits).toMatchObject({
+      max_output_tokens: 1_024,
+      maximum_attempts: scenario.predecessorReceipt.limits.maximum_attempts,
+      successful_shard_ceiling: scenario.predecessorReceipt.limits.successful_shard_ceiling
+    });
+    persistScenario(scenario);
+    expectRuntime(scenario, readSuccessorLedger(scenario)!).not.toThrow();
+    expect(() => createAuthorityRenewalScenario(512)).toThrow(/output token cap.*increase/u);
+    expect(() => createAuthorityRenewalScenario(1_024, 301))
+      .toThrow(/changed another authority term/u);
+  });
+
+  it("switches only physical transport without changing semantic cache identity", () => {
+    const scenario = createAuthorityRenewalScenario(
+      512, 300, "https://provider-b.example/v1"
+    );
+
+    expect(scenario.continuation.mode).toBe("transport_successor");
+    expect(scenario.successorReceipt.observation.transport).toEqual({
+      providerUrl: "https://provider-b.example/v1",
+      model: "provider-model-alias"
+    });
+    persistScenario(scenario);
+    expectRuntime(scenario, readSuccessorLedger(scenario)!).not.toThrow();
+    expect(() => createAuthorityRenewalScenario(
+      1_024, 300, "https://provider-b.example/v1"
+    )).toThrow(/transport successor changed another authority term/u);
+  });
+
+  it("issues the renewal through the canonical authorize command", async () => {
+    const scenario = createAuthorityRenewalScenario();
+    const writeContinuation = vi.fn();
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const exitCode = await runAuthorizeExtractionCommand([
+      "--variant", "s", "--offset", "0", "--limit", "100",
+      "--extraction-cache-root", scenario.cacheRoot,
+      "--extraction-action", "fill",
+      "--extraction-receipt-out", scenario.outputPath,
+      "--extraction-output-token-cap", "1024",
+      "--extraction-output-token-field", "max_tokens",
+      "--extraction-input-price-usd-per-million", "1",
+      "--extraction-output-price-usd-per-million", "2",
+      "--extraction-max-input-tokens", "300",
+      "--extraction-disk-floor-bytes", "0",
+      "--extraction-predecessor-authority", "/predecessor.json",
+      "--extraction-target-selection", "/target-selection.json"
+    ], {
+      inspect: vi.fn(async () => scenario.inspection),
+      readLedger: () => scenario.predecessorLedger,
+      readPredecessorAuthority: () => scenario.predecessorReceipt,
+      readSettledLedger: () => scenario.predecessorLedger,
+      readTargetSelection: () => scenario.predecessorSelection,
+      assertTargetSelection: () => undefined,
+      assertTargetSelectionWindow: () => undefined,
+      claimChild: () => undefined,
+      ensureForkedLedger: () => undefined,
+      writeContinuation
+    });
+    expect(exitCode).toBe(0);
+    expect(writeContinuation).toHaveBeenCalledWith(
+      scenario.outputPath,
+      expect.objectContaining({
+        limits: expect.objectContaining({ max_output_tokens: 1_024 }),
+        continuation: expect.objectContaining({ mode: "output_token_cap_renewal" })
+      })
+    );
+  });
+
   it("rejects live ledger or manifest drift before creating durable child state", () => {
     const scenario = createContinuationScenario();
     appendWhitespace(scenario.predecessorLedgerPath);

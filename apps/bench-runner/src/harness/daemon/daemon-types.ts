@@ -1,7 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
-  SoulMemorySearchResponse
+  SoulMemorySearchResponse,
+  OpenSemanticFactorFormationCapture,
+  OpenSemanticFactorFormationProposal
 } from "@do-soul/alaya-protocol";
 import type {
   AlayaDaemonRuntime,
@@ -76,6 +78,8 @@ export interface BenchRecallOptions {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
   readonly referenceTime?: string;
+  readonly querySemanticFactorFormationProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;

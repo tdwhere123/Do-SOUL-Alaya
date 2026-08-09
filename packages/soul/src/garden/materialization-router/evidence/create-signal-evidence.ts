@@ -8,6 +8,8 @@ import type {
 } from "../contracts.js";
 import { buildFactFrameFormationProposal } from
   "../../grounding/fact-frame/search-projections.js";
+import { buildOpenSemanticFactorFormationProposal } from
+  "../../grounding/semantic-factors/formation-proposal.js";
 
 export async function createSignalEvidence(
   service: EvidenceMaterializationPort,
@@ -16,10 +18,13 @@ export async function createSignalEvidence(
   searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
 ) {
   const proposal = buildFactFrameFormationProposal(signal.raw_payload);
-  if (proposal !== undefined) {
-    return await service.create(input, searchProjections ?? [], proposal);
-  }
-  return searchProjections === undefined
-    ? await service.create(input)
-    : await service.create(input, searchProjections);
+  const semanticProposal = buildOpenSemanticFactorFormationProposal(
+    signal.raw_payload
+  );
+  return await service.create(
+    input,
+    searchProjections ?? [],
+    proposal,
+    semanticProposal
+  );
 }

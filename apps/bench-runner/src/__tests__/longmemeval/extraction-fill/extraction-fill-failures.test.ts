@@ -27,6 +27,8 @@ import {
 } from "../../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
 
 import {
+  buildAuthorityQuestion,
+  buildGroundedSignalResponse,
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
@@ -123,10 +125,18 @@ describe("runExtractionFill", () => {
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:ZEN_TEST_API_KEY");
     vi.stubEnv("ZEN_TEST_API_KEY", "test-only-key");
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildAuthorityQuestion("q001", "alpha", "decoy")
     ]);
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      choices: [{ message: { content: '{"signals":[]}' } }]
+      choices: [{ message: { content: buildGroundedSignalResponse(JSON.stringify({
+        schema_version: 2,
+        source_locator_contract_version: 2,
+        batch_contract_version: 1,
+        source_corpus_identity: "a".repeat(64),
+        batch_index: 0,
+        batch_count: 1,
+        source_assertions: [{ assertion_id: 1, text: "User: alpha" }]
+      })) } }]
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const authorityReceiptPath = await writeLiveAuthorityReceipt();
@@ -154,7 +164,7 @@ describe("runExtractionFill", () => {
       .map((entry) => entry.name);
     expectFirstShardModel(cacheRoot, shardDirs, "deepseek-v4-flash-free");
     const answerTurn = inspectTurnContentKeySpace([
-      buildQuestion("key", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildAuthorityQuestion("key", "alpha", "decoy")
     ]).distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
     expect(answerTurn).toBeDefined();
     const exactKey = computeExtractionTurnCacheKey(
@@ -184,11 +194,11 @@ describe("runExtractionFill", () => {
     // a distinct decoy round. Distinct turns: 2 shared-collapsed-to-1 + 2 decoys
     // = 3 cache keys.
     await writeFixtureDataset([
-      buildQuestion("q001", "User: shared fact\nAssistant: Acknowledged.", "User: decoy one"),
-      buildQuestion("q002", "User: shared fact\nAssistant: Acknowledged.", "User: decoy two")
+      buildAuthorityQuestion("q001", "shared fact", "decoy one"),
+      buildAuthorityQuestion("q002", "shared fact", "decoy two")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
+      rawJson: buildGroundedSignalResponse(input.userPrompt)
     }));
     const result = await runExtractionFill({
       variant: VARIANT,

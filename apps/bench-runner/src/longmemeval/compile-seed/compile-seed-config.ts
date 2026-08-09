@@ -50,8 +50,10 @@ const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const EXTRACTION_MODEL_FAMILY_ENV = "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY";
 const EXTRACTION_REQUEST_PROFILE_ENV = "ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE";
 const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
+const EXTRACTION_TRANSPORT_PROVIDER_URL_ENV =
+  "ALAYA_BENCH_EXTRACTION_TRANSPORT_PROVIDER_URL";
+const EXTRACTION_TRANSPORT_MODEL_ENV = "ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL";
 const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
-const DEFAULT_GARDEN_PROVIDER_URL = "https://yunwu.ai/v1";
 
 /**
  * Single source for the operator opt-in that relaxes the run-start coverage
@@ -116,26 +118,39 @@ export function resolveCompileSeedExtractionConfig(
   env: NodeJS.ProcessEnv = process.env,
   manifest?: ExtractionCacheManifest | undefined
 ): CompileSeedExtractionConfig {
-  const providerUrl = normalizeBaseUrl(
-    readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ??
-      manifest?.provider_url ??
-      DEFAULT_GARDEN_PROVIDER_URL
-  );
+  const providerUrlValue = readNonEmpty(env[GARDEN_PROVIDER_URL_ENV]) ?? manifest?.provider_url;
+  if (providerUrlValue === undefined) {
+    throw new Error(
+      `bench extraction provider URL is unresolved: set ${GARDEN_PROVIDER_URL_ENV} ` +
+        "or use a self-describing cache manifest."
+    );
+  }
+  const providerUrl = normalizeBaseUrl(providerUrlValue);
   const model = resolveBenchExtractionModel(env, manifest);
   const modelFamily =
     readNonEmpty(env[EXTRACTION_MODEL_FAMILY_ENV]) ??
     manifest?.model_family ??
     model;
   const requestProfile = resolveExtractionRequestProfile(env, manifest);
+  const transportProviderUrl = readNonEmpty(env[EXTRACTION_TRANSPORT_PROVIDER_URL_ENV]);
+  const transportModel = readNonEmpty(env[EXTRACTION_TRANSPORT_MODEL_ENV]);
+  const transport = {
+    ...(transportProviderUrl === undefined ? {} : {
+      transportProviderUrl: normalizeBaseUrl(transportProviderUrl)
+    }),
+    ...(transportModel === undefined ? {} : { transportModel })
+  };
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
-    return { providerUrl, model, modelFamily, requestProfile, apiKey: null };
+    return { providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: null };
   }
   const resolved = resolveSecretRef(secretRef);
   if ("value" in resolved) {
-    return { providerUrl, model, modelFamily, requestProfile, apiKey: resolved.value };
+    return {
+      providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: resolved.value
+    };
   }
-  return { providerUrl, model, modelFamily, requestProfile, apiKey: null };
+  return { providerUrl, model, modelFamily, requestProfile, ...transport, apiKey: null };
 }
 
 function resolveExtractionRequestProfile(

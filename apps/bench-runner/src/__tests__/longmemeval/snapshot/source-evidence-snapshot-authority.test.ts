@@ -46,7 +46,10 @@ import { captureSnapshotExtractionAuthority } from
 import { assertSnapshotSeedLedgerBinding } from
   "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
 import { assertSnapshotDatasetSubstrateIdentity } from "../../../longmemeval/snapshot/substrate-binding.js";
-import { CREDENTIALLED_CONFIG } from "../compile-seed/compile-seed-fixture.js";
+import {
+  CREDENTIALLED_CONFIG,
+  signalsEnvelope
+} from "../compile-seed/compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 import {
   SOURCE_EVIDENCE_USER_CONTENT,
@@ -341,18 +344,10 @@ async function seedFixture(
       extract: async () => ({
         rawJson: extractionIndex++ === 0
           ? "{\"signals\":[]}"
-          : JSON.stringify({ signals: [{
-            signal_kind: "potential_preference",
-            object_kind: "user_preference",
-            confidence: 0.9,
-            matched_text: "I check the platform near the main entrance.",
-            distilled_fact: "The user checks the platform near the main entrance.",
-            source_locator: {
-              contract_version: 2,
-              kind: "assertion_catalog",
-              assertion_id: 1
-            }
-          }] })
+          : signalsEnvelope([{
+            matched: "I check the platform near the main entrance.",
+            distilled: "The user checks the platform near the main entrance."
+          }])
       })
     })
   });

@@ -98,6 +98,13 @@ export interface LongMemEvalSnapshotDirectEvidenceBinding {
   readonly evidenceId: string;
 }
 
+export interface LongMemEvalSnapshotExtractionShard {
+  readonly cacheKey: string;
+  readonly rawJsonSha256: string;
+  readonly rawSignalCount: number;
+  readonly draftCount: number;
+}
+
 export interface LongMemEvalSnapshotSeedRound {
   readonly sessionIndex: number;
   readonly roundIndex: number;
@@ -109,6 +116,8 @@ export interface LongMemEvalSnapshotSeedRound {
   readonly rawJsonSha256: string | null;
   readonly rawSignalCount: number | null;
   readonly draftCount: number | null;
+  /** Exact bounded raw responses consumed by this source round. */
+  readonly extractionShards?: readonly LongMemEvalSnapshotExtractionShard[];
   readonly factsProduced: number;
   readonly parseDropped: number;
   readonly compileOverflowDropped: number;

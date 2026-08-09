@@ -45,6 +45,7 @@ export interface PreparedExtractionFill {
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
+  readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
   readonly windowOffset: number;
@@ -61,6 +62,7 @@ export interface InspectedExtractionFill {
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
+  readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
   readonly windowOffset: number;
@@ -102,6 +104,7 @@ export async function inspectExtractionFillPreparation(
     distinctExtractionTurns: window.distinctExtractionTurns,
     executionExtractionTurns: window.executionExtractionTurns,
     requestedTurns: window.requestedTurns,
+    executionRequestedTurns: window.executionRequestedTurns,
     datasetRevision: window.datasetRevision,
     variant: options.variant,
     windowOffset: window.windowOffset,
@@ -137,7 +140,8 @@ export function pinInspectedExtractionFill(
     })
   });
   log(`[extraction-fill] variant=${inspected.variant} questions=${inspected.windowLimit} ` +
-    `distinct_turns=${inspected.requestedTurns} model=${inspected.config.model} ` +
+    `distinct_turns=${inspected.distinctExtractionTurns.length} ` +
+    `unique_cache_keys=${inspected.requestedTurns} model=${inspected.config.model} ` +
     `concurrency=${concurrency}`);
   return {
     config: inspected.config,
@@ -148,6 +152,7 @@ export function pinInspectedExtractionFill(
     distinctExtractionTurns: inspected.distinctExtractionTurns,
     executionExtractionTurns: inspected.executionExtractionTurns,
     requestedTurns: inspected.requestedTurns,
+    executionRequestedTurns: inspected.executionRequestedTurns,
     datasetRevision: inspected.datasetRevision,
     variant: inspected.variant,
     windowOffset: inspected.windowOffset,

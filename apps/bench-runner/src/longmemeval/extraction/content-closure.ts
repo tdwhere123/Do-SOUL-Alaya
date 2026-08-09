@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  parseOfficialApiSignals
-} from "@do-soul/alaya-soul";
+import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 
@@ -10,6 +8,11 @@ export interface ExtractionRawJsonInspection {
   readonly rawSignalCount: number;
   readonly parsedDraftCount: number;
 }
+
+export type ExtractionRawEnvelopeInspection = Readonly<{
+  readonly rawJsonSha256: string;
+  readonly rawSignalCount: number;
+}>;
 
 export interface ExtractionContentClosureEntry extends ExtractionRawJsonInspection {
   readonly cacheKey: string;
@@ -32,18 +35,28 @@ export function computeExtractionRawJsonSha256(rawJson: string): string {
   return createHash("sha256").update(rawJson, "utf8").digest("hex");
 }
 
-export function inspectExtractionRawJson(rawJson: string): ExtractionRawJsonInspection {
+export function inspectExtractionRawJson(
+  rawJson: string
+): ExtractionRawJsonInspection {
+  const envelope = inspectExtractionRawEnvelope(rawJson);
+  const parsedDraftCount = parseOfficialApiSignals(rawJson).length;
+  return { ...envelope, parsedDraftCount };
+}
+
+export function inspectExtractionRawEnvelope(
+  rawJson: string
+): ExtractionRawEnvelopeInspection {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson) as unknown;
   } catch (cause) {
     throw new Error("extraction raw_json is not strict JSON", { cause });
   }
-  const parsedDraftCount = parseOfficialApiSignals(rawJson).length;
+  const rawSignalCount = countRawEnvelopeSignals(parsed);
+  if (rawSignalCount === null) throw new Error("signals array missing");
   return {
     rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
-    rawSignalCount: countRawEnvelopeSignals(parsed),
-    parsedDraftCount
+    rawSignalCount
   };
 }
 
@@ -109,8 +122,8 @@ function uniqueEntriesByKey(
   );
 }
 
-function countRawEnvelopeSignals(parsed: unknown): number {
-  if (typeof parsed !== "object" || parsed === null) return 0;
+function countRawEnvelopeSignals(parsed: unknown): number | null {
+  if (typeof parsed !== "object" || parsed === null) return null;
   const signals = (parsed as { readonly signals?: unknown }).signals;
-  return Array.isArray(signals) ? signals.length : 0;
+  return Array.isArray(signals) ? signals.length : null;
 }

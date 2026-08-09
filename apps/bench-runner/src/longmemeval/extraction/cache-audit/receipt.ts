@@ -4,14 +4,16 @@ import { dirname } from "node:path";
 import {
   hashExtractionCacheCompatibilityDecision,
   type ExtractionCacheCompatibilityDecision,
-  type ExtractionCacheCompatibilityIdentity,
-  type ExtractionCacheCompatibilityReason,
-  type ExtractionReplayClosure
+  type ExtractionProjectionCompatibilityReason,
+  type ExtractionProjectionIdentity,
+  type ExtractionReplayClosure,
+  type RawExtractionCacheCompatibilityReason,
+  type RawExtractionCacheIdentity
 } from "./compatibility.js";
 
 export interface ExtractionCacheAuditReceipt {
-  readonly schema_version: 1;
-  readonly kind: "longmemeval_extraction_cache_compatibility_decision";
+  readonly schema_version: 2;
+  readonly kind: "longmemeval_extraction_cache_projection_decision";
   readonly created_at: string;
   readonly source_root: string;
   readonly source_manifest_sha256: string;
@@ -30,8 +32,8 @@ export function buildExtractionCacheAuditReceipt(input: {
   readonly decision: ExtractionCacheCompatibilityDecision;
 }): ExtractionCacheAuditReceipt {
   const receipt = {
-    schema_version: 1 as const,
-    kind: "longmemeval_extraction_cache_compatibility_decision" as const,
+    schema_version: 2 as const,
+    kind: "longmemeval_extraction_cache_projection_decision" as const,
     created_at: input.createdAt,
     source_root: input.sourceRoot,
     source_manifest_sha256: input.sourceManifestSha256,
@@ -99,8 +101,8 @@ function withoutDigest(
 }
 
 function isExtractionCacheAuditReceipt(value: unknown): value is ExtractionCacheAuditReceipt {
-  return isRecord(value) && value.schema_version === 1 &&
-    value.kind === "longmemeval_extraction_cache_compatibility_decision" &&
+  return isRecord(value) && value.schema_version === 2 &&
+    value.kind === "longmemeval_extraction_cache_projection_decision" &&
     typeof value.created_at === "string" && typeof value.source_root === "string" &&
     typeof value.source_manifest_sha256 === "string" &&
     typeof value.raw_inventory_sha256 === "string" &&
@@ -116,15 +118,31 @@ function assertReceiptShape(receipt: ExtractionCacheAuditReceipt): void {
 }
 
 function isDecision(value: unknown): value is ExtractionCacheCompatibilityDecision {
-  return isRecord(value) && (value.action === "reuse" || value.action === "rebuild") &&
-    typeof value.sourceRoot === "string" && Array.isArray(value.reasons) &&
-    value.reasons.every(isCompatibilityReason) && isCompatibilityIdentity(value.source) &&
-    isCompatibilityIdentity(value.final) && isReplayClosure(value.replay);
+  return isRecord(value) && typeof value.sourceRoot === "string" &&
+    isRawDecision(value.raw) && isProjectionDecision(value.projection);
 }
 
-function isCompatibilityIdentity(value: unknown): value is ExtractionCacheCompatibilityIdentity {
-  if (!isRecord(value)) return false;
-  return compatibilityFields.every((field) => typeof value[field] === "string");
+function isRawDecision(value: unknown): boolean {
+  return isRecord(value) && (value.action === "reuse" || value.action === "rebuild") &&
+    Array.isArray(value.reasons) && value.reasons.every(isRawReason) &&
+    isRawIdentity(value.source) && isRawIdentity(value.final);
+}
+
+function isProjectionDecision(value: unknown): boolean {
+  return isRecord(value) &&
+    (value.action === "reuse" || value.action === "replay" || value.action === "blocked") &&
+    Array.isArray(value.reasons) && value.reasons.every(isProjectionReason) &&
+    isProjectionIdentity(value.source) && isProjectionIdentity(value.final) &&
+    isReplayClosure(value.replay);
+}
+
+function isRawIdentity(value: unknown): value is RawExtractionCacheIdentity {
+  return isRecord(value) && rawIdentityFields.every((field) => typeof value[field] === "string");
+}
+
+function isProjectionIdentity(value: unknown): value is ExtractionProjectionIdentity {
+  return isRecord(value) &&
+    projectionIdentityFields.every((field) => typeof value[field] === "string");
 }
 
 function isReplayClosure(value: unknown): value is ExtractionReplayClosure {
@@ -132,10 +150,13 @@ function isReplayClosure(value: unknown): value is ExtractionReplayClosure {
   return replayCountFields.every((field) => isNonnegativeInteger(value[field]));
 }
 
-function isCompatibilityReason(value: unknown): value is ExtractionCacheCompatibilityReason {
-  return typeof value === "string" && compatibilityReasons.has(
-    value as ExtractionCacheCompatibilityReason
-  );
+function isRawReason(value: unknown): value is RawExtractionCacheCompatibilityReason {
+  return typeof value === "string" && rawReasons.has(value as RawExtractionCacheCompatibilityReason);
+}
+
+function isProjectionReason(value: unknown): value is ExtractionProjectionCompatibilityReason {
+  return typeof value === "string" &&
+    projectionReasons.has(value as ExtractionProjectionCompatibilityReason);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -154,10 +175,14 @@ function isSha256(value: string): boolean {
   return /^[a-f0-9]{64}$/u.test(value);
 }
 
-const compatibilityFields: readonly (keyof ExtractionCacheCompatibilityIdentity)[] = [
-  "datasetRevision", "model", "modelFamily", "requestProfile", "providerUrl",
-  "systemPromptSha256", "cacheKeyAlgorithm", "rawClosureSha256", "parserSemanticsSha256",
-  "formationSemanticsSha256", "temporalSchemaRevision"
+const rawIdentityFields: readonly (keyof RawExtractionCacheIdentity)[] = [
+  "datasetRevision", "model", "requestProfile", "providerUrl",
+  "systemPromptSha256", "cacheKeyAlgorithm", "rawClosureSha256"
+];
+
+const projectionIdentityFields: readonly (keyof ExtractionProjectionIdentity)[] = [
+  "modelFamily", "parserSemanticsSha256", "formationSemanticsSha256",
+  "temporalSchemaRevision"
 ];
 
 const replayCountFields: readonly (keyof Omit<ExtractionReplayClosure, "ledgerSha256">)[] = [
@@ -165,10 +190,13 @@ const replayCountFields: readonly (keyof Omit<ExtractionReplayClosure, "ledgerSh
   "admitted", "deferred", "rejected", "invalid"
 ];
 
-const compatibilityReasons = new Set<ExtractionCacheCompatibilityReason>([
-  "dataset_revision_mismatch", "model_mismatch", "model_family_mismatch",
-  "request_profile_mismatch", "provider_url_mismatch", "system_prompt_mismatch",
-  "cache_key_algorithm_mismatch", "raw_closure_mismatch", "parser_semantics_mismatch",
-  "formation_semantics_mismatch", "temporal_schema_mismatch", "raw_inventory_not_closed",
-  "replay_not_closed"
+const rawReasons = new Set<RawExtractionCacheCompatibilityReason>([
+  "dataset_revision_mismatch", "model_mismatch", "request_profile_mismatch",
+  "provider_url_mismatch", "system_prompt_mismatch", "cache_key_algorithm_mismatch",
+  "raw_closure_mismatch", "raw_inventory_not_closed"
+]);
+
+const projectionReasons = new Set<ExtractionProjectionCompatibilityReason>([
+  "model_family_mismatch", "parser_semantics_mismatch", "formation_semantics_mismatch",
+  "temporal_schema_mismatch", "raw_cache_rebuild", "replay_not_closed"
 ]);

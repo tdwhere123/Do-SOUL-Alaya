@@ -38,6 +38,8 @@ import { verifyRecallFieldRefinementStopCertificate } from
   "../../field/refinement/field-refinement-stop-certificate.js";
 import { verifyRecallRelevanceUpperBoundReceipt } from
   "../../rerank/relevance-upper-bound-receipt.js";
+import { assertOpenSemanticCandidateActivations } from
+  "./validation/open-semantic-candidate-activation-receipt.js";
 
 export {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH,
@@ -69,6 +71,7 @@ export function validateSelectionBoundary(
     assertUniqueEntryKeys(entries);
   }
   assertEvidenceSemanticReceipts(boundary.input.supplementary_data);
+  assertOpenSemanticCandidateActivations(boundary.input.supplementary_data);
   assertEvidenceFtsReceipts(boundary.input.supplementary_data);
   assertRetrievalFieldSeal(boundary.input.supplementary_data);
   assertRetrievalFieldRefinements(boundary.input.supplementary_data);
@@ -213,6 +216,7 @@ export function restoreSupplementaryData(
 ): RecallSupplementaryData {
   const {
     evidenceSemanticActivationsByCandidateKey,
+    openSemanticFactorCandidateActivationsByCandidateKey,
     evidenceSemanticScoresByCandidateKey: _evidenceSemanticScoresByCandidateKey,
     evidenceSemanticWinnersByCandidateKey,
     answerRelevanceScoresByCandidateKey,
@@ -226,6 +230,11 @@ export function restoreSupplementaryData(
       evidenceSemanticActivationsByCandidateKey,
       evidenceSemanticWinnersByCandidateKey
     ),
+    ...(openSemanticFactorCandidateActivationsByCandidateKey === undefined ? {} : {
+      openSemanticFactorCandidateActivationsByCandidateKey: new Map(
+        openSemanticFactorCandidateActivationsByCandidateKey
+      )
+    }),
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey: new Map(
         answerRelevanceScoresByCandidateKey
@@ -287,6 +296,9 @@ function serializedSupplementaryMaps(
     ...(input.supplementary_data.evidenceSemanticWinnersByCandidateKey === undefined
       ? []
       : [input.supplementary_data.evidenceSemanticWinnersByCandidateKey]),
+    ...(input.supplementary_data.openSemanticFactorCandidateActivationsByCandidateKey === undefined
+      ? []
+      : [input.supplementary_data.openSemanticFactorCandidateActivationsByCandidateKey]),
     ...(input.supplementary_data.routingKeysByOwnerIdentity === undefined
       ? []
       : [input.supplementary_data.routingKeysByOwnerIdentity]),

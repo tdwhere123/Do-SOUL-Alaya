@@ -7,10 +7,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
-  computeCacheKey,
+  computeSourceTurnCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
-  computeExtractionTurnCacheKey
+  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
   buildLongMemEvalRoundMessages,
@@ -45,11 +46,11 @@ const MATERIALIZED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 1, MATERIALIZ
 const EXTRA_KEY = sha256("extra cache member");
 const SELECTED_RAW_SHA = sha256('{"signals":[]}');
 const HISTORICAL_SYSTEM_PROMPT = "historical source-extraction prompt";
-const CONTENT_ONLY_SELECTED_KEY = computeCacheKey(
+const CONTENT_ONLY_SELECTED_KEY = computeSourceTurnCacheKey(
   MODEL,
   PROFILE,
   OFFICIAL_API_SYSTEM_PROMPT,
-  CONTENT
+  { turnContent: CONTENT }
 );
 
 afterEach(async () => {
@@ -82,6 +83,10 @@ describe("contained snapshot seed-ledger closure", () => {
     expect(() => verifyRounds(canonicalAnswerRounds(), true)).not.toThrow();
   });
 
+  it("accepts a source round bound to every bounded extraction shard", () => {
+    expect(() => verifyMultiShardRound()).not.toThrow();
+  });
+
   it("rejects raw digest drift even when the contained ledger is self-consistent", () => {
     const rounds = canonicalRounds();
     rounds[0] = {
@@ -112,6 +117,63 @@ describe("contained snapshot seed-ledger closure", () => {
     expect(() => verifyRounds(rounds)).toThrow(/cache closure mismatch/u);
   });
 });
+
+function verifyMultiShardRound(): void {
+  const source = multiShardQuestion();
+  const session = source.haystack_sessions[0]!;
+  const round = pairSessionIntoRounds(session)[0]!;
+  const turnMessages = buildLongMemEvalRoundMessages(session, round, "q-multi-s0-r0");
+  const cacheKeys = computeExtractionTurnCacheKeys(
+    MODEL, PROFILE, OFFICIAL_API_SYSTEM_PROMPT,
+    { turnContent: round.content.trim(), turnMessages }
+  );
+  const entries = cacheKeys.map((cacheKey, index) => ({
+    cacheKey,
+    model: MODEL,
+    requestProfile: PROFILE,
+    rawJsonSha256: sha256(`raw-${index}`),
+    rawSignalCount: index === 0 ? 1 : 0,
+    parsedDraftCount: index === 0 ? 1 : 0
+  }));
+  const manifest = completeManifest(entries, 1);
+  const sourceManifestSha256 = "e".repeat(64);
+  const compact = buildSnapshotExtractionSummary(manifest, sourceManifestSha256);
+  const root = mkdtempSync(join(tmpdir(), "contained-multi-shard-ledger-"));
+  roots.push(root);
+  const dbPath = join(root, "snapshot.db");
+  initDatabase({ filename: dbPath }).close();
+  const seedRound: LongMemEvalSnapshotSeedRound = {
+    sessionIndex: 0, roundIndex: 0, sessionId: "session-multi",
+    contentSha256: sha256(round.content.trim()), hasAnswer: false,
+    extractionSource: "cache", cacheKey: null, rawJsonSha256: null,
+    rawSignalCount: 1, draftCount: 1,
+    extractionShards: entries.map((entry) => ({
+      cacheKey: entry.cacheKey,
+      rawJsonSha256: entry.rawJsonSha256,
+      rawSignalCount: entry.rawSignalCount,
+      draftCount: entry.parsedDraftCount
+    })),
+    factsProduced: 1, parseDropped: 0, compileOverflowDropped: 0,
+    candidateAbsent: 1, materializationDrop: 0, memoryObjectIds: []
+  };
+  assertSnapshotSeedLedgerBinding({
+    dbPath,
+    sidecar: sidecarForQuestion(source, [seedRound]),
+    questions: [source],
+    extraction: compact,
+    extractionAuthority: buildSnapshotExtractionAuthority(
+      manifest, sourceManifestSha256, compact
+    ),
+    seedExtractionPath: {
+      path: "official_api_compile", extraction_attempts: 2, cache_hits: 2,
+      llm_calls: 0, offline_fallbacks: 0, live_extraction_failures: 0,
+      cached_extraction_failures: 0, facts_produced: 1, signals_dropped: 1,
+      parse_dropped: 0, compile_overflow_dropped: 0,
+      signals_dropped_by_reason: { candidate_absent: 1, materialization_drop: 0 }
+    },
+    closureAuthority: { kind: "contained", questionWindow: { offset: 0, limit: 1 } }
+  });
+}
 
 function verifyRounds(
   rounds: LongMemEvalSnapshotSeedRound[],
@@ -226,6 +288,88 @@ function extraction(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT) {
       sourceManifestSha256,
       compact
     )
+  };
+}
+
+function completeManifest(
+  entries: readonly {
+    readonly cacheKey: string;
+    readonly rawJsonSha256: string;
+    readonly rawSignalCount: number;
+    readonly parsedDraftCount: number;
+  }[],
+  windowLimit: number
+): ExtractionCacheManifestV3 {
+  return {
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    extraction_model: MODEL,
+    model_family: MODEL,
+    request_profile: PROFILE,
+    provider_url: "redacted",
+    system_prompt_sha256: sha256(OFFICIAL_API_SYSTEM_PROMPT),
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+    dataset: "longmemeval-s",
+    dataset_revision: "b".repeat(64),
+    requested_turns: entries.length,
+    cached_turns: entries.length,
+    coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: windowLimit,
+    expected_turns: entries.length,
+    expected_key_set_sha256: computeExtractionKeySetSha256(
+      entries.map(({ cacheKey }) => cacheKey)
+    ),
+    content_closure_sha256: computeExtractionContentClosureSha256(entries.map((entry) => ({
+      ...entry,
+      model: MODEL,
+      requestProfile: PROFILE
+    }))),
+    content_closure_index: Object.fromEntries(entries.map((entry) => [
+      entry.cacheKey,
+      [entry.rawJsonSha256, entry.rawSignalCount, entry.parsedDraftCount] as const
+    ])),
+    storage: "git-tracked",
+    built_at: "2026-08-09T00:00:00.000Z",
+    builder: "test"
+  };
+}
+
+function multiShardQuestion(): LongMemEvalQuestion {
+  const content = Array.from(
+    { length: 9 },
+    (_, index) => `I recorded durable detail number ${index + 1}.`
+  ).join(" ");
+  return {
+    question_id: "q-multi",
+    question_type: "single-session-user",
+    question: "What was recorded?",
+    answer: "details",
+    question_date: "2026-08-09T00:00:00.000Z",
+    haystack_session_ids: ["session-multi"],
+    haystack_dates: ["2026-08-08T00:00:00.000Z"],
+    haystack_sessions: [[{ role: "user", content }]],
+    answer_session_ids: []
+  };
+}
+
+function sidecarForQuestion(
+  source: LongMemEvalQuestion,
+  rounds: readonly LongMemEvalSnapshotSeedRound[]
+): LongMemEvalSnapshotSidecarFile {
+  return {
+    schema_version: 2,
+    variant: "longmemeval_s",
+    questions: [{
+      questionId: source.question_id,
+      question: source.question,
+      questionDate: source.question_date,
+      answerSessionIds: [],
+      sidecar: [],
+      seedRounds: rounds,
+      workspaceId: `longmemeval-${source.question_id}`,
+      runId: `longmemeval-${source.question_id}`
+    }]
   };
 }
 

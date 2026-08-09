@@ -68,7 +68,8 @@ describe("EvidenceService", () => {
     expect(create).toHaveBeenCalledWith(
       expect.any(Object),
       [projection],
-      expect.objectContaining({ status: "unavailable" })
+      expect.objectContaining({ status: "unavailable" }),
+      expect.objectContaining({ status: "unavailable", graph: null })
     );
     expect(appendedEvents[0]).toMatchObject({
       event_type: "soul.evidence.created",

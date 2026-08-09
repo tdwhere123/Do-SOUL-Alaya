@@ -120,8 +120,8 @@ async function writeDataset(): Promise<void> {
     haystack_session_ids: ["s-answer", "s-decoy"],
     haystack_dates: ["2025-12-01", "2025-11-01"],
     haystack_sessions: [
-      [{ role: "user", content: "alpha", has_answer: true }],
-      [{ role: "user", content: "decoy" }]
+      [{ role: "user", content: "I completed alpha.", has_answer: true }],
+      [{ role: "user", content: "I completed decoy." }]
     ],
     answer_session_ids: ["s-answer"]
   }];

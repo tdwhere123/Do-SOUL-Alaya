@@ -3,6 +3,7 @@ import {
   OfficialApiGardenProvider,
   type GardenCompileContext
 } from "../../garden/compute-provider.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const SOURCE = "I prefer dark mode for the theme.";
 const CONTEXT: GardenCompileContext = {
@@ -59,7 +60,7 @@ describe("official API preference profile grounding", () => {
 
   it("does not assign a direct third-party preference to the operator", async () => {
     const source = "I told Alice that she prefers dark mode.";
-    const [signal] = await providerFor({
+    await expect(providerFor({
       matched_text: source,
       preference_profile: {
         projection_schema_version: 1,
@@ -71,9 +72,7 @@ describe("official API preference profile grounding", () => {
     }).compile(source, {
       ...CONTEXT,
       turn_messages: [{ message_id: "u1", role: "user", content: source }]
-    });
-
-    expect(signal?.raw_payload).not.toHaveProperty("preference_profile");
+    })).rejects.toMatchObject({ kind: "invalid_response" });
   });
 
   it.each([
@@ -213,19 +212,13 @@ describe("official API preference profile grounding", () => {
 
   it("does not widen a long generic assertion through an empty preference proposal", async () => {
     const source = `The deployment report contains ${"x".repeat(600)}.`;
-    const [signal] = await providerFor({
+    await expect(providerFor({
       matched_text: source,
       preference_profile: {}
     }).compile(source, {
       ...CONTEXT,
       turn_messages: [{ message_id: "u-long-generic", role: "user", content: source }]
-    });
-
-    expect(signal?.raw_payload.source_grounding).toMatchObject({
-      status: "rejected",
-      content_basis: "none"
-    });
-    expect(signal?.raw_payload).not.toHaveProperty("preference_profile");
+    })).rejects.toMatchObject({ kind: "invalid_response" });
   });
 });
 
@@ -235,7 +228,7 @@ function providerFor(fields: Readonly<Record<string, unknown>>): OfficialApiGard
     extractor: {
       extract: async () => ({
         rawJson: JSON.stringify({
-          signals: [{
+          signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_preference",
             object_kind: "preference",
             confidence: 0.9,
@@ -245,7 +238,7 @@ function providerFor(fields: Readonly<Record<string, unknown>>): OfficialApiGard
               assertion_id: 1
             },
             ...fields
-          }]
+          })]
         })
       })
     },

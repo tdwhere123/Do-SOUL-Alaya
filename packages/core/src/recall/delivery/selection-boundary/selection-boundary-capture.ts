@@ -243,6 +243,7 @@ function serializeSupplementaryData(
   const {
     evidenceSemanticDocumentsByMemoryId: _evidenceSemanticDocumentsByMemoryId,
     evidenceSemanticActivationsByCandidateKey,
+    openSemanticFactorCandidateActivationsByCandidateKey,
     answerRelevanceScoresByCandidateKey,
     routingKeysByOwnerIdentity,
     keyActivationByOwnerIdentity,
@@ -253,6 +254,11 @@ function serializeSupplementaryData(
     evidenceSemanticActivationsByCandidateKey: stableEntries(
       evidenceSemanticActivationsByCandidateKey
     ),
+    ...(openSemanticFactorCandidateActivationsByCandidateKey === undefined ? {} : {
+      openSemanticFactorCandidateActivationsByCandidateKey: stableEntries(
+        openSemanticFactorCandidateActivationsByCandidateKey
+      )
+    }),
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey:
         stableNumberEntries(answerRelevanceScoresByCandidateKey)

@@ -8,7 +8,7 @@ import {
 describe("official API system prompt", () => {
   it("requires quote-first evidence before distillation", () => {
     const quoteFirst = "For each signal, work quote-first, then distill.";
-    const distill = "Then write distilled_fact using only what that quote entails.";
+    const distill = "Then represent only what that quote entails in semantic_factor_graph.";
 
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(quoteFirst);
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
@@ -33,7 +33,7 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT.indexOf(quoteFirst))
       .toBeLessThan(OFFICIAL_API_SYSTEM_PROMPT.indexOf(distill));
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "Return {\"signals\":[]} when the turn does not contain durable memory candidates."
+      "Return {\"signals\":[]} when the catalog does not contain durable memory candidates."
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not invent facts");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"source_locator"');
@@ -41,13 +41,27 @@ describe("official API system prompt", () => {
       'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('Prefer "source_locator"');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Only User source spans");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Assistant spans are context only");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "source_assertions contain only assertions the runtime can ground"
+      "source_assertions catalog contains only User assertions the runtime can ground"
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"assertion_catalog"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Return only assertion_id");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "one bounded source assertion batch"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "an unreferenced factor has no graph meaning and is discarded"
+    );
+  });
+
+  it("defines one open semantic proposal instead of fixed world categories", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"semantic_factor_graph"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"binding_identity":OPEN_NAME');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit character spans");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("not a fixed role list");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"canonical_entities"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"preference_profile"');
   });
 
   it("defines confidence as a bounded JSON number rather than a label", () => {

@@ -14,20 +14,30 @@ describe("EvidenceService creation", () => {
     const { service, create } = createCreationHarness();
     const assertion = "I use Atlas for research.";
 
-    await service.create(createEvidenceInput({ excerpt: assertion }), [], {
-      schema_version: 1,
-      producer_operator_id: "structured_fact_frame_v1",
-      source_assertion: assertion,
-      fact_frame: {
+    await service.create(
+      createEvidenceInput({ excerpt: assertion }),
+      [],
+      {
         schema_version: 1,
-        slots: [
-          { role: "subject", text: "I" },
-          { role: "relation", text: "use" },
-          { role: "value", text: "Atlas" },
-          { role: "qualifier", text: "for research" }
-        ]
+        producer_operator_id: "structured_fact_frame_v1",
+        source_assertion: assertion,
+        fact_frame: {
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "use" },
+            { role: "value", text: "Atlas" },
+            { role: "qualifier", text: "for research" }
+          ]
+        }
+      },
+      {
+        schema_version: 1,
+        producer_operator_id: "structured_open_semantic_factor_v1",
+        source_text: assertion,
+        graph: semanticGraph(assertion)
       }
-    });
+    );
 
     expect(create).toHaveBeenCalledWith(
       expect.any(Object),
@@ -39,6 +49,11 @@ describe("EvidenceService creation", () => {
         status: "formed",
         producer_operator_id: "structured_fact_frame_v1",
         source_hash: "sha256:abc"
+      }),
+      expect.objectContaining({
+        status: "formed",
+        producer_operator_id: "structured_open_semantic_factor_v1",
+        graph: expect.objectContaining({ source_kind: "evidence" })
       })
     );
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
@@ -88,3 +103,44 @@ describe("EvidenceService creation", () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+function semanticGraph(_source: string) {
+  return {
+    schema_version: 1 as const,
+    source_kind: "evidence" as const,
+    factors: [
+      factor("actor", "I", 0, 1, "speaker"),
+      factor("predicate", "use", 2, 5, "use"),
+      factor("object", "Atlas", 6, 11, "atlas"),
+      factor("purpose", "research", 16, 24, "research")
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "use-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        { position: 0, binding_identity: "agent", reference_kind: "factor" as const,
+          reference_id: "actor" },
+        { position: 1, binding_identity: "object", reference_kind: "factor" as const,
+          reference_id: "object" },
+        { position: 2, binding_identity: "purpose", reference_kind: "factor" as const,
+          reference_id: "purpose" }
+      ]
+    }]
+  };
+}
+
+function factor(
+  factorId: string,
+  surface: string,
+  _start: number,
+  _end: number,
+  semanticIdentity: string
+) {
+  return {
+    factor_id: factorId,
+    surface,
+    semantic_identity: semanticIdentity
+  };
+}

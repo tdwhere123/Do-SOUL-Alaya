@@ -53,6 +53,10 @@ import type { LongMemEvalSelectionBoundarySpool } from
   "../../selection-replay/selection-boundary-spool.js";
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+import {
+  readQuerySemanticFactorCache,
+  type LoadedQuerySemanticFactorCache
+} from "../../query-factors/query-semantic-factor-cache.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -77,6 +81,7 @@ export interface RecallEvalRunContext {
     EvidenceSearchProjectionRebuildReport | null;
   readonly warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
   readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
+  readonly querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
 }
 
 export async function prepareRecallEvalRunContext(
@@ -179,6 +184,13 @@ async function prepareBoundRecallEvalRunContext(
   });
   const { policyShape, recallOptions, plannedDataDir, daemonLaunch } =
     resolveRecallEvalLaunch(options, ambientEnv);
+  const window = selectWindow(bundle.sidecar.questions, options);
+  const querySemanticFactorCache = options.querySemanticFactorCachePath === undefined
+    ? null
+    : await readQuerySemanticFactorCache({
+        path: options.querySemanticFactorCachePath,
+        required_source_texts: window.map((question) => question.question)
+      });
   const runtimeAttribution = await buildRecallEvalRuntimeAttribution(
     bundle.manifest,
     daemonLaunch.environment,
@@ -187,6 +199,9 @@ async function prepareBoundRecallEvalRunContext(
       datasetSha256: bundle.datasetSha256,
       recallOptions,
       recallWeightOverrides,
+      ...(querySemanticFactorCache === null
+        ? {}
+        : { querySemanticFactorCache: querySemanticFactorCache.binding }),
       nonPromotableDerivedRebuild:
         options.derivedEvidenceProjectionRebuild === true ||
         options.warmDerivedSnapshotReceiptPath !== undefined
@@ -196,7 +211,7 @@ async function prepareBoundRecallEvalRunContext(
   return {
     options,
     manifest: bundle.manifest,
-    window: selectWindow(bundle.sidecar.questions, options),
+    window,
     sidecarQuestionCount: bundle.sidecar.questions.length,
     dataDirRoot: dataDir.path,
     ownsDataDirRoot: dataDir.owned,
@@ -215,7 +230,8 @@ async function prepareBoundRecallEvalRunContext(
     derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild,
     warmDerivedSnapshot: dataDir.warmDerivedSnapshot,
     selectionBoundarySpool:
-      await createRecallEvalSelectionBoundarySpool(ambientEnv)
+      await createRecallEvalSelectionBoundarySpool(ambientEnv),
+    querySemanticFactorCache
   };
 }
 

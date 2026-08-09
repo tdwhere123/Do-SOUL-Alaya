@@ -1,4 +1,5 @@
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
+import { resolveExtractionTransportRoute } from "./transport-route.js";
 
 export function buildGardenHttpRequestInit(
   config: CompileSeedExtractionConfig,
@@ -11,6 +12,7 @@ export function buildGardenHttpRequestInit(
   },
   signal: AbortSignal
 ): RequestInit {
+  const transport = resolveExtractionTransportRoute(config);
   return {
     method: "POST",
     headers: {
@@ -18,7 +20,7 @@ export function buildGardenHttpRequestInit(
       authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: config.model,
+      model: transport.model,
       temperature: 0,
       stream: true,
       stream_options: { include_usage: true },

@@ -114,6 +114,7 @@ function createCompileSeedStats(usesOfficialCompile: boolean): CompileSeedExtrac
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
     lastExtractionSource: null,
+    lastExtractionShards: [],
     lastCacheKey: null,
     lastRawJsonSha256: null
   };
@@ -157,6 +158,7 @@ function createOfficialApiProvider(input: {
     config: input.config,
     cacheRoot: input.cacheRoot,
     stats: input.stats,
+    trackTurnShards: true,
     allowLiveExtraction: input.credentialled && input.options?.allowLiveExtraction === true
   });
   return new OfficialApiGardenProvider({

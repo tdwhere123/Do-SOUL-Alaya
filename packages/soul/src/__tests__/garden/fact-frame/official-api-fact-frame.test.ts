@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseOfficialApiSignals } from "../../../garden/official-api-signal-parser.js";
 import { groundOfficialApiDraft } from "../../../garden/official-api/source-grounding.js";
+import { withOpenSemanticFactorGraph } from "../compute-provider-fixtures.js";
 
 function envelope(factFrame: unknown): string {
   return JSON.stringify({
-    signals: [{
+    signals: [withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "fact",
       confidence: 0.9,
@@ -13,7 +14,7 @@ function envelope(factFrame: unknown): string {
       evidence_refs: [],
       source_memory_refs: [],
       fact_frame: factFrame
-    }]
+    })]
   });
 }
 

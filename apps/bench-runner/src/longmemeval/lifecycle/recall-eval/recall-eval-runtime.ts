@@ -100,6 +100,16 @@ export interface RecallEvalRuntimeAttribution {
     evaluated_count: number;
     question_id_digest: string;
   }>;
+  readonly query_semantic_factor_cache?: Readonly<{
+    schema_version: 1;
+    cache_content_sha256: string;
+    compiler_operator_id: string;
+    system_prompt_sha256: string;
+    model_id: string;
+    provider_url_sha256: string;
+    source_set_sha256: string;
+    entry_count: number;
+  }>;
   readonly hydration_binding?: Readonly<{
     dataset_sha256: string;
     source: "external_expected_sha256";
@@ -137,6 +147,7 @@ export async function buildRecallEvalRuntimeAttribution(
     recallOptions?: EffectiveRecallOptions;
     recallWeightOverrides?: BenchRecallWeightOverrides;
     nonPromotableDerivedRebuild?: boolean;
+    querySemanticFactorCache?: RecallEvalRuntimeAttribution["query_semantic_factor_cache"];
   }> = {}
 ): Promise<RecallEvalRuntimeAttribution> {
   const identity = await resolveRecallEvalRuntimeIdentity(
@@ -170,6 +181,9 @@ export async function buildRecallEvalRuntimeAttribution(
           dataset_sha256: evaluatorBinding.datasetSha256,
           source: "external_expected_sha256" as const
         } }),
+    ...(evaluatorBinding.querySemanticFactorCache === undefined
+      ? {}
+      : { query_semantic_factor_cache: evaluatorBinding.querySemanticFactorCache }),
     snapshot_binding: buildRecallEvalSnapshotBinding(
       manifest,
       evaluatorBinding.snapshotManifestSha256 ?? null

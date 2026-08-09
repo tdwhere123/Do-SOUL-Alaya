@@ -3,6 +3,7 @@ import {
   parseOfficialApiSignals,
   salvageRawSignalElements
 } from "../../garden/compute-provider.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 // Realistic {"signals":[...]} envelope shapes mirroring the production
 // gpt-5.4-mini extraction output, so the salvage path is exercised against
@@ -12,17 +13,48 @@ import {
 // see also: packages/soul/src/garden/compute-provider.ts salvageOfficialApiSignals
 
 function validEntry(matchedText: string, objectKind = "user_preference"): string {
-  return JSON.stringify({
+  return JSON.stringify(withOpenSemanticFactorGraph({
     signal_kind: "potential_preference",
     object_kind: objectKind,
     confidence: 0.9,
     matched_text: matchedText,
     distilled_fact: `The operator stated: ${matchedText}`,
     reason: "stated_preference"
-  });
+  }));
 }
 
 describe("parseOfficialApiSignals element-wise salvage", () => {
+  it("prunes graph factors that no proposition can observe", () => {
+    const candidate = withOpenSemanticFactorGraph({
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      confidence: 0.9,
+      matched_text: "My brother would love guitar lessons."
+    });
+    const graph = candidate.semantic_factor_graph!;
+    const rawJson = JSON.stringify({
+      signals: [{
+        ...candidate,
+        semantic_factor_graph: {
+          ...graph,
+          factors: [
+            ...graph.factors,
+            {
+              factor_id: "unused",
+              surface: "brother",
+              semantic_identity: "brother"
+            }
+          ]
+        }
+      }]
+    });
+
+    const [draft] = parseOfficialApiSignals(rawJson);
+
+    expect(draft?.semantic_factor_graph?.factors.map(({ factor_id }) => factor_id))
+      .not.toContain("unused");
+  });
+
   it("recovers valid siblings when one entry has a bad JSON escape", () => {
     // `\'` is not a legal JSON escape, so a strict JSON.parse of the whole
     // envelope throws even though the two siblings are clean.
@@ -141,15 +173,16 @@ describe("parseOfficialApiSignals element-wise salvage", () => {
     expect(() => JSON.parse(envelope)).not.toThrow();
     const signals = parseOfficialApiSignals(envelope);
     expect(signals).toHaveLength(2);
-    expect(signals[0]).toEqual({
-      signal_kind: "potential_preference",
-      object_kind: "user_preference",
+    expect(signals[0]).toMatchObject({
+      signal_kind: "potential_semantic_observation",
+      object_kind: "open_semantic_observation",
       confidence: 0.9,
       matched_text: "Call me Ash",
       evidence_refs: [],
       source_memory_refs: [],
       distilled_fact: "The operator stated: Call me Ash",
-      reason: "stated_preference"
+      reason: "stated_preference",
+      semantic_factor_graph: expect.any(Object)
     });
     expect(signals[1]?.matched_text).toBe("I take oat milk");
   });

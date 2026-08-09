@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import {
+  buildOfficialApiExtractionRequest,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
@@ -67,13 +71,9 @@ async function fillTurns(
   for (const turn of turnContents) {
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({
-        workspace_id: "x",
-        run_id: "x",
-        surface_id: null,
-        turn_content: turn,
-        turn_messages: []
-      })
+      userPrompt: stringifyOfficialApiExtractionRequest(
+        buildOfficialApiExtractionRequest(turn, [])
+      )
     });
   }
   // The staged-fill scenario always has a manifest claiming full coverage of

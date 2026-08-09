@@ -12,6 +12,7 @@ import {
   writeExtractionCacheManifest
 } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import { buildGroundedSignalResponse } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -101,7 +102,7 @@ describe("extraction-fill identity transaction", () => {
       pinnedMetaRoot,
       concurrency: 2,
       extractorFactory: () => ({
-        extract: async () => {
+        extract: async (input) => {
           call++;
           if (call === 1) {
             await started;
@@ -110,7 +111,7 @@ describe("extraction-fill identity transaction", () => {
             blockedStarted();
             await blocked;
           }
-          return { rawJson: '{"signals":[]}' };
+          return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
         }
       }),
       log: () => undefined
@@ -174,10 +175,10 @@ function question(): LongMemEvalQuestion {
     haystack_dates: ["2025-12-01", "2025-12-02"],
     haystack_sessions: [
       [
-        { role: "user", content: "alpha", has_answer: true },
+        { role: "user", content: "I completed alpha.", has_answer: true },
         { role: "assistant", content: "ok" }
       ],
-      [{ role: "user", content: "unrelated decoy" }]
+      [{ role: "user", content: "I completed an unrelated decoy." }]
     ],
     answer_session_ids: ["s1"]
   };

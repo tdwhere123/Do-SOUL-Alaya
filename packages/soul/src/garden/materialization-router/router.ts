@@ -181,7 +181,8 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   private routeDurableSignal(signal: CandidateMemorySignal): MaterializationTarget | null {
     const floor = this.dependencies.materializationConfidenceFloor ?? 0.5;
     const eligibleKind = signal.signal_kind === "potential_claim" ||
-      signal.signal_kind === "potential_preference";
+      signal.signal_kind === "potential_preference" ||
+      signal.signal_kind === "potential_semantic_observation";
     if (!eligibleKind || signal.confidence < floor) return null;
     const route = routeByObjectKind(signal.object_kind);
     if (route !== null) return this.liftSignalOnlyForProjection(signal, route);

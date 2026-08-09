@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
   SignalEventType,
   SignalState,
   SoulSignalMaterializedPayloadSchema,
@@ -8,11 +9,15 @@ import {
   buildVerifiedUserAssertionReceiptPreimage,
   evidenceFactFrameFormationCapturePreimage,
   formatVerifiedUserAssertionSourceHash,
+  groundOpenSemanticFactorGraph,
+  openSemanticFactorFormationCapturePreimage,
   type AssociativeFactFrame,
   type CandidateMemorySignal,
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
-  type EvidenceFactFrameFormationCaptureBody
+  type EvidenceFactFrameFormationCaptureBody,
+  type OpenSemanticFactorFormationCapture,
+  type OpenSemanticFactorFormationCaptureBody
 } from "@do-soul/alaya-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
@@ -58,6 +63,38 @@ describe("verified assertion evidence qualification", () => {
       capsule,
       verified_user_projection: false
     }]);
+  });
+
+  it("returns the evidence-owned semantic factor formation on owner reads", async () => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("cccccccc-1111-4111-8111-cccccccccccc");
+    const semanticFormation = semanticFactorFormationCapture();
+    await repo.create(capsule, [], undefined, semanticFormation);
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [ownerMatch(capsule.object_id)]
+    )).resolves.toEqual([{
+      capsule,
+      verified_user_projection: false,
+      semantic_factor_formation: semanticFormation
+    }]);
+  });
+
+  it("fails closed when the semantic factor formation receipt is corrupt", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("cccccccc-2222-4222-8222-cccccccccccc");
+    await repo.create(capsule, [], undefined, semanticFactorFormationCapture());
+    database.connection.prepare(`
+      UPDATE evidence_semantic_factor_formations
+      SET capture_digest = ?
+      WHERE evidence_object_id = ?
+    `).run(`sha256:${"0".repeat(64)}`, capsule.object_id);
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [ownerMatch(capsule.object_id)]
+    )).rejects.toMatchObject({ name: "EvidenceProjectionIntegrityError" });
   });
 
   it.each([
@@ -254,6 +291,62 @@ function factFrameFormationCapture(
     capture_digest: `sha256:${createHash("sha256")
       .update(evidenceFactFrameFormationCapturePreimage(body), "utf8")
       .digest("hex")}`
+  };
+}
+
+function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
+  const graph = groundOpenSemanticFactorGraph({
+    schema_version: 1,
+    source_kind: "evidence",
+    factors: [
+      factor("actor", "I", 0, 1, "speaker"),
+      factor("predicate", "bought", 2, 8, "buy"),
+      factor("object", "my bookshelf", 9, 21, "bookshelf"),
+      factor("source", "IKEA", 27, 31, "ikea")
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "purchase",
+      predicate_factor_id: "predicate",
+      arguments: [
+        { position: 0, binding_identity: "agent", reference_kind: "factor",
+          reference_id: "actor" },
+        { position: 1, binding_identity: "object", reference_kind: "factor",
+          reference_id: "object" },
+        { position: 2, binding_identity: "source", reference_kind: "factor",
+          reference_id: "source" }
+      ]
+    }]
+  }, ASSERTION);
+  if (graph === null) throw new Error("semantic factor fixture must be grounded");
+  const body: OpenSemanticFactorFormationCaptureBody = {
+    schema_version: 1,
+    operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+    status: "formed",
+    producer_operator_id: "test_open_semantic_factor_v1",
+    source_sha256: `sha256:${createHash("sha256").update(ASSERTION, "utf8").digest("hex")}`,
+    graph
+  };
+  return {
+    ...body,
+    capture_digest: `sha256:${createHash("sha256")
+      .update(openSemanticFactorFormationCapturePreimage(body), "utf8")
+      .digest("hex")}`
+  };
+}
+
+function factor(
+  factorId: string,
+  surface: string,
+  _start: number,
+  _end: number,
+  semanticIdentity: string
+) {
+  return {
+    factor_id: factorId,
+    surface,
+    semantic_identity: semanticIdentity
   };
 }
 

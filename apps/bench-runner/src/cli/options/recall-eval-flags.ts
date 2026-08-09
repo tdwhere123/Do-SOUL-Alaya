@@ -11,6 +11,13 @@ export function consumeRecallEvalPathFlag(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
+  if (matchFlagToken(token, "--query-semantic-factor-cache")) {
+    state.querySemanticFactorCache = readRequiredFlagValue(
+      args, index, token, "--query-semantic-factor-cache",
+      "--query-semantic-factor-cache requires a JSON cache path"
+    );
+    return nextIndex(index, token);
+  }
   if (matchFlagToken(token, "--warm-derived-snapshot-receipt")) {
     state.warmDerivedSnapshotReceipt = readRequiredFlagValue(
       args, index, token, "--warm-derived-snapshot-receipt",

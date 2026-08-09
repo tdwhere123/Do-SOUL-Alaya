@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  parseOfficialApiSignals
 } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
@@ -26,8 +27,8 @@ import {
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
-// invariant: yunwu.ai + gpt-5.4-mini answers chat/completions content ONLY as
-// an SSE delta stream (`stream:true`); a non-stream request returns an empty
+// Some OpenAI-compatible providers answer chat/completions only as an SSE delta
+// stream; a non-stream request can return an empty
 // `data: [DONE]\n\n` body. The extractor sends `stream:true` and parses the
 // SSE body; a compliant provider's plain JSON body must still work
 // (back-compat). The body read stays under the same wall-clock backstop as the
@@ -235,7 +236,13 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
       random: () => 0
     });
 
-    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      validateRawJson: (rawJson) => {
+        parseOfficialApiSignals(rawJson);
+      }
+    });
 
     expect(result.rawJson).toBe('{"signals":[]}');
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
@@ -395,7 +402,7 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
     await expect(
       runner.seedTurn({
         daemon,
-        turnContent: "the user prefers tea over coffee",
+        turnContent: "I prefer tea over coffee.",
         evidenceRefBase: "evidence-1",
         seedIndex: 0,
         workspaceId: "ws-test",

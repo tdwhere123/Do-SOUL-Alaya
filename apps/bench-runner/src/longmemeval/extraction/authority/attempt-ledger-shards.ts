@@ -1,5 +1,5 @@
 import type { ExtractionRequestProfile } from "../request-profile.js";
-import { inspectCachedExtraction } from "../../compile-seed/compile-seed-cache.js";
+import { inspectCachedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
 
 export interface ExtractionAttemptLedgerCacheIdentity {
   readonly model: string;
@@ -30,10 +30,22 @@ export function readValidLedgerShard(
   cacheKey: string,
   identity: ExtractionAttemptLedgerCacheIdentity
 ): ExtractionSuccessfulShard | undefined {
-  const shard = inspectCachedExtraction(
+  const shard = inspectCachedRawExtraction(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
   if (shard.status !== "hit") return undefined;
+  return { cacheKey, rawJsonSha256: shard.rawJsonSha256 };
+}
+
+export function readValidDeterministicLedgerShard(
+  cacheRoot: string,
+  cacheKey: string,
+  identity: ExtractionAttemptLedgerCacheIdentity
+): ExtractionSuccessfulShard | undefined {
+  const shard = inspectCachedRawExtraction(
+    cacheRoot, cacheKey, identity.model, identity.requestProfile
+  );
+  if (shard.status !== "hit" || shard.rawJson !== '{"signals":[]}') return undefined;
   return { cacheKey, rawJsonSha256: shard.rawJsonSha256 };
 }
 

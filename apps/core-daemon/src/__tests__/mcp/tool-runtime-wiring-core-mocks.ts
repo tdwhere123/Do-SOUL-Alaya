@@ -211,6 +211,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       };
     }),
     EvidenceService: makeClass(),
+    RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER: Object.freeze({
+      normalize: vi.fn(() => null)
+    }),
     EdgeAutoProducerService: makeClass({
       produceForNewMemory: vi.fn(async () => undefined)
     }),

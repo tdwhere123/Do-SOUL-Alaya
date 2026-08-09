@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OfficialApiGardenProvider,
+  parseOfficialApiSignals
+} from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -20,7 +23,8 @@ import {
 } from "../../../longmemeval/compile-seed.js";
 import {
   buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG
+  CREDENTIALLED_CONFIG,
+  signalsEnvelope
 } from "./compile-seed-fixture.js";
 
 describe("createGardenHttpExtractor retry policy", () => {
@@ -52,6 +56,25 @@ describe("createGardenHttpExtractor retry policy", () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("sends through the physical route without changing logical cache identity", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const extractor = createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      transportProviderUrl: "https://physical.example/v1",
+      transportModel: "provider-model-alias"
+    }, { fetch: fetchMock });
+
+    await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://physical.example/v1/chat/completions"
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).model)
+      .toBe("provider-model-alias");
   });
 
   it("leaves thinking absent for the provider-default profile", async () => {
@@ -143,6 +166,117 @@ describe("createGardenHttpExtractor retry policy", () => {
     // 4 = first attempt + 3 retries.
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries caller semantic validation before returning raw JSON", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: (rawJson) => {
+        if (rawJson.includes('"legacy"')) {
+          throw new Error("semantic_factor_graph_invalid_arguments_too_few");
+        }
+      }
+    });
+
+    expect(result.extractorMeta).toMatchObject({
+      retryCount: 1,
+      retryClassification: "success_after_retry"
+    });
+    expect(result.extractorMeta?.transportFailures).toEqual([expect.objectContaining({
+      attempt: 1,
+      kind: "response_schema_error",
+      phase: "response_schema"
+    })]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(firstRequest.messages.at(-1)?.content).not.toContain("Schema correction");
+    expect(secondRequest.messages.at(-1)?.content).toContain(
+      "Every semantic_factor_graph proposition must have at least one argument"
+    );
+  });
+
+  it("caps repeated response-schema failures at one retry", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => makeJsonResponse({
+      choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+    }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: () => {
+        throw new Error("semantic factor graph is invalid");
+      }
+    })).rejects.toMatchObject({
+      benchRetry: {
+        retryCount: 1,
+        retryClassification: "failure_max_retries"
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it("lets the canonical validator salvage content before default envelope parsing", async () => {
+    const canonical = signalsEnvelope([{
+      distilled: "The operator prefers dark mode.",
+      matched: "I prefer dark mode"
+    }]);
+    const content = `${canonical}\n{"trailing_wrapper":true}`;
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(makeJsonResponse({
+      choices: [{ message: { content } }]
+    }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      retryMode: "disabled",
+      validateRawJson: (rawJson) => {
+        expect(parseOfficialApiSignals(rawJson)).toHaveLength(1);
+      }
+    });
+
+    expect(result.rawJson).toBe(content);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps strict envelope validation when no canonical validator is supplied", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(makeJsonResponse({
+      choices: [{ message: { content: '{"not_signals":[]}' } }]
+    }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    await expect(extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      retryMode: "disabled"
+    })).rejects.toThrow(/signals array missing/u);
   });
 
   it("does NOT retry on HTTP 401 (auth) and surfaces failure_non_retryable_4xx", async () => {

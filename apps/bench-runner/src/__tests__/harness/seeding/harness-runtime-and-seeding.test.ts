@@ -23,6 +23,8 @@ import {
   type CompileSeedExtractionConfig
 } from "../../../longmemeval/compile-seed.js";
 import { writeExtractionCacheTestManifest } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
+import { withOpenSemanticFactorGraph } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
@@ -295,7 +297,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                     assertion_id: 3
                   }
                 }
-              ]
+              ].map(withOpenSemanticFactorGraph)
             })
           })
         })
@@ -405,7 +407,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                     assertion_id: 3
                   }
                 }
-              ]
+              ].map(withOpenSemanticFactorGraph)
             })
           })
         })

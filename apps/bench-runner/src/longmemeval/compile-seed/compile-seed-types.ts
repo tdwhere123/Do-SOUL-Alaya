@@ -33,6 +33,8 @@ export interface BenchSignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
+    /** Lets the provider reject semantically unusable JSON inside HTTP retries. */
+    readonly validateRawJson?: (rawJson: string) => void;
     /** A probe uses one transport attempt and never enters the retry loop. */
     readonly retryMode?: "default" | "disabled";
     /** Called immediately before each provider HTTP attempt. */
@@ -129,6 +131,10 @@ export interface CompileSeedExtractionConfig {
   readonly providerUrl: string;
   /** Exact chat model id sent to the provider and used by the raw cache key. */
   readonly model: string;
+  /** Physical OpenAI-compatible route; omitted when it equals the logical provider. */
+  readonly transportProviderUrl?: string;
+  /** Provider-side alias for the same logical model. */
+  readonly transportModel?: string;
   /** Comparison-only model family; never participates in the raw cache key. */
   readonly modelFamily?: string;
   /** Explicit request semantics; participates in cache and shard identity. */
@@ -177,7 +183,7 @@ export interface CompileSeedRunnerOptions {
 export interface CompileSeedExtractionStats {
   /** Which seed path ran. Disclosed in the bench report for honesty. */
   path: "official_api_compile" | "no_credentials_fallback";
-  /** Non-empty turns submitted to the extraction seam. */
+  /** Bounded extraction requests submitted to the extraction seam. */
   extractionAttempts?: number;
   /** Turns whose extraction was served from the on-disk cache fixture. */
   cacheHits: number;
@@ -193,9 +199,9 @@ export interface CompileSeedExtractionStats {
   retrySuccesses?: number;
   /** Provider attempts that returned HTTP 429. */
   rateLimitRetries?: number;
-  /** Rate-limit events that reduced the extraction pool's active concurrency. */
+  /** Provider-pressure events that reduced the extraction pool's active concurrency. */
   adaptiveConcurrencyBackoffs?: number;
-  /** Sum of scheduled global rate-limit backoff windows in milliseconds. */
+  /** Sum of scheduled global provider-pressure windows in milliseconds. */
   adaptiveConcurrencyBackoffMs?: number;
   /** Terminal live transport outcomes, grouped without payload data. */
   terminalRetryClassifications?: Partial<
@@ -253,6 +259,8 @@ export interface CompileSeedExtractionStats {
    */
   lastTurnDraftCount: number;
   lastExtractionSource: "cache" | "live" | null;
+  /** Exact raw shards consumed by the current single-threaded seed turn. */
+  lastExtractionShards?: CompileSeedExtractionShardReceipt[];
   /**
    * Diagnostic instrument: cache key (or its 12-char prefix; see writers)
    * for the most recent extract() call, so a subsequent extraction failure
@@ -263,6 +271,14 @@ export interface CompileSeedExtractionStats {
   lastCacheKey?: string | null;
   /** SHA-256 of the exact raw_json string returned by the latest successful extraction. */
   lastRawJsonSha256: string | null;
+}
+
+export interface CompileSeedExtractionShardReceipt {
+  readonly extractionSource: "cache" | "live";
+  readonly cacheKey: string;
+  readonly rawJsonSha256: string;
+  readonly rawSignalCount: number;
+  readonly draftCount: number;
 }
 
 /**

@@ -52,6 +52,11 @@ function createExhaustedExecutionAuthority(
         "extraction authority has no remaining successful-shard capacity"
       );
     },
+    commitDeterministicShard: () => {
+      throw new ExtractionCacheInvariantError(
+        "extraction authority has no remaining successful-shard capacity"
+      );
+    },
     recordTransportOutcome: () => undefined,
     snapshot: () => undefined
   };
@@ -89,6 +94,7 @@ function createLedgerExecutionAuthority(
     },
     abandonPendingShard: ledger.abandonPendingShard,
     commitSuccessfulShard: ledger.commitSuccessfulShard,
+    commitDeterministicShard: ledger.commitDeterministicShard,
     recordTransportOutcome: ledger.recordTransportOutcome,
     snapshot: ledger.snapshot
   };

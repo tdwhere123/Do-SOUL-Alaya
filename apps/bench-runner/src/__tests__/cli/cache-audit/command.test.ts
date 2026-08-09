@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe("audit-extraction-cache command", () => {
-  it("records the audit and rebuilds when execution semantics were not recorded", async () => {
+  it("records projection replay without rebuilding a closed raw cache", async () => {
     const fixture = createFixture();
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -52,12 +52,13 @@ describe("audit-extraction-cache command", () => {
     );
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout.join("")).toContain("Extraction cache compatibility=rebuild");
+    expect(stdout.join("")).toContain("Extraction cache raw=reuse projection=replay");
     expect(stdout.join("")).toContain(
       "fact_frames=formed:0 ineligible:0 unavailable:0 rejected:0 fact_keys:0"
     );
-    expect(receipt.kind).toBe("longmemeval_extraction_cache_compatibility_decision");
-    expect(receipt.decision.reasons).toEqual(expect.arrayContaining([
+    expect(receipt.kind).toBe("longmemeval_extraction_cache_projection_decision");
+    expect(receipt.decision.raw.reasons).toEqual([]);
+    expect(receipt.decision.projection.reasons).toEqual(expect.arrayContaining([
       "parser_semantics_mismatch",
       "formation_semantics_mismatch",
       "temporal_schema_mismatch"
@@ -144,7 +145,9 @@ function createFixture() {
   const occurrences = buildExtractionOccurrenceIndex({
     questions, model, requestProfile, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
   });
-  for (const occurrence of occurrences) writeShard(sourceRoot, occurrence.cacheKey);
+  for (const cacheKey of occurrences.flatMap((occurrence) => occurrence.cacheKeys)) {
+    writeShard(sourceRoot, cacheKey);
+  }
   const manifestRaw = `${JSON.stringify({
     schema_version: 3,
     extraction_model: model,
@@ -180,7 +183,7 @@ function commandArgs(fixture: ReturnType<typeof createFixture>): string[] {
     "--data-dir", fixture.dataDir,
     "--pinned-meta-root", fixture.pinnedMetaRoot,
     "--extraction-cache-root", fixture.sourceRoot,
-    "--rebuild-cache-root", fixture.targetRoot,
+    "--rebuild-cache-root", fixture.sourceRoot,
     "--cache-audit-output", fixture.auditOutput,
     "--target-model", model,
     "--target-model-family", family,

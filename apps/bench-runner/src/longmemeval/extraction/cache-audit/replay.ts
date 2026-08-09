@@ -51,7 +51,7 @@ export interface ExtractionReplayEntry {
 
 export interface ExtractionReplayOccurrence {
   readonly occurrence: ExtractionOccurrence;
-  readonly rawJsonSha256: string | null;
+  readonly rawJsonSha256s: readonly string[] | null;
   readonly entries: readonly ExtractionReplayEntry[];
 }
 
@@ -117,9 +117,9 @@ function hashReplayOccurrences(
 ): string {
   const canonical = occurrences.map((occurrence) => ({
     occurrence_id: occurrence.occurrence.id,
-    cache_key: occurrence.occurrence.cacheKey,
+    cache_keys: occurrence.occurrence.cacheKeys,
     source_observed_at: occurrence.occurrence.sourceObservedAt,
-    raw_json_sha256: occurrence.rawJsonSha256,
+    raw_json_sha256s: occurrence.rawJsonSha256s,
     entries: occurrence.entries
   }));
   return createHash("sha256").update(JSON.stringify({
@@ -140,31 +140,52 @@ function replayOccurrence(input: {
   readonly cached: Map<string, CachedExtractionInspection>;
   readonly audit: ExtractionReplayAuditor;
 }): ExtractionReplayOccurrence {
-  const cached = cachedExtraction(input);
-  if (cached.status !== "hit") return unavailableOccurrence(input.occurrence, cached);
-  const result = input.audit({
-    raw_json: cached.rawJson,
-    turn_content: input.occurrence.turnContent,
-    turn_messages: input.occurrence.turnMessages,
-    workspace_id: replayScopedId("workspace", input.occurrence.id),
-    run_id: replayScopedId("run", input.occurrence.id),
-    surface_id: null,
-    created_at: input.occurrence.sourceObservedAt,
-    source_observed_at: input.occurrence.sourceObservedAt,
-    require_source_observed_at: true,
-    signal_id_for: (index) => replayScopedId("signal", `${input.occurrence.id}:${index}`)
-  });
+  const shards = inspectOccurrenceShards(input);
+  const unavailable = shards.find(({ inspection }) => inspection.status !== "hit");
+  if (unavailable !== undefined && unavailable.inspection.status !== "hit") {
+    return unavailableOccurrence(
+      input.occurrence, unavailable.cacheKey, unavailable.inspection
+    );
+  }
+  const hits = shards.map(({ inspection }) =>
+    inspection as Extract<CachedExtractionInspection, { readonly status: "hit" }>);
   return Object.freeze({
     occurrence: input.occurrence,
-    rawJsonSha256: cached.rawJsonSha256,
-    entries: Object.freeze(result.entries.map((entry) => Object.freeze({
-      index: entry.index,
+    rawJsonSha256s: Object.freeze(hits.map(({ rawJsonSha256 }) => rawJsonSha256)),
+    entries: auditOccurrenceShards(input, hits)
+  });
+}
+
+function auditOccurrenceShards(
+  input: Parameters<typeof replayOccurrence>[0],
+  shards: readonly Extract<CachedExtractionInspection, { readonly status: "hit" }>[]
+): readonly ExtractionReplayEntry[] {
+  const entries: ExtractionReplayEntry[] = [];
+  for (const [batchIndex, shard] of shards.entries()) {
+    const entryOffset = entries.length;
+    const result = input.audit({
+      raw_json: shard.rawJson,
+      turn_content: input.occurrence.turnContent,
+      turn_messages: input.occurrence.turnMessages,
+      workspace_id: replayScopedId("workspace", input.occurrence.id),
+      run_id: replayScopedId("run", input.occurrence.id),
+      surface_id: null,
+      created_at: input.occurrence.sourceObservedAt,
+      source_observed_at: input.occurrence.sourceObservedAt,
+      require_source_observed_at: true,
+      signal_id_for: (index) => replayScopedId(
+        "signal", `${input.occurrence.id}:${batchIndex}:${index}`
+      )
+    });
+    entries.push(...result.entries.map((entry) => Object.freeze({
+      index: entryOffset + entry.index,
       disposition: entry.disposition,
       stage: entry.stage,
       reason: entry.reason,
       ...formationCommitment(entry.signal)
-    })))
-  });
+    })));
+  }
+  return Object.freeze(entries);
 }
 
 function formationCommitment(
@@ -214,24 +235,32 @@ function formFactFrameCommitment(
   });
 }
 
-function cachedExtraction(input: Parameters<typeof replayOccurrence>[0]): CachedExtractionInspection {
-  const existing = input.cached.get(input.occurrence.cacheKey);
-  if (existing !== undefined) return existing;
-  const inspected = inspectCachedExtraction(
-    input.cacheRoot, input.occurrence.cacheKey, input.model, input.requestProfile
-  );
-  input.cached.set(input.occurrence.cacheKey, inspected);
-  return inspected;
+function inspectOccurrenceShards(
+  input: Parameters<typeof replayOccurrence>[0]
+): readonly Readonly<{ cacheKey: string; inspection: CachedExtractionInspection }>[] {
+  return input.occurrence.cacheKeys.map((cacheKey) => {
+    const existing = input.cached.get(cacheKey);
+    if (existing !== undefined) return { cacheKey, inspection: existing };
+    const inspection = inspectCachedExtraction(
+      input.cacheRoot, cacheKey, input.model, input.requestProfile
+    );
+    input.cached.set(cacheKey, inspection);
+    return { cacheKey, inspection };
+  });
 }
 
 function unavailableOccurrence(
   occurrence: ExtractionOccurrence,
+  cacheKey: string,
   cached: Exclude<CachedExtractionInspection, { readonly status: "hit" }>
 ): ExtractionReplayOccurrence {
-  const reason = cached.status === "missing" ? "shard_missing" : `shard_invalid:${cached.reason}`;
+  const prefix = cacheKey.slice(0, 12);
+  const reason = cached.status === "missing"
+    ? `shard_missing:${prefix}`
+    : `shard_invalid:${prefix}:${cached.reason}`;
   return Object.freeze({
     occurrence,
-    rawJsonSha256: null,
+    rawJsonSha256s: null,
     entries: Object.freeze([{
       index: -1,
       disposition: "invalid" as const,

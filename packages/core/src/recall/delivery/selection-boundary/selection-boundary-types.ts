@@ -101,6 +101,7 @@ export type SerializedRecallSupplementaryData = Readonly<
     RecallSupplementaryData,
     "evidenceSemanticDocumentsByMemoryId" |
     "evidenceSemanticActivationsByCandidateKey" |
+    "openSemanticFactorCandidateActivationsByCandidateKey" |
     "answerRelevanceScoresByCandidateKey" |
     "routingKeysByOwnerIdentity" |
     "keyActivationByOwnerIdentity"
@@ -108,6 +109,11 @@ export type SerializedRecallSupplementaryData = Readonly<
     readonly evidenceSemanticActivationsByCandidateKey?: SelectionBoundaryMap<
       Readonly<RecallEvidenceSemanticActivationReceipt>
     >;
+    readonly openSemanticFactorCandidateActivationsByCandidateKey?:
+      SelectionBoundaryMap<
+        Readonly<import("../../field/open-semantic-factors/candidate-attribution.js")
+          .OpenSemanticFactorCandidateActivation>
+      >;
     /** Legacy selection boundaries are normalized into winner-only receipts. */
     readonly evidenceSemanticScoresByCandidateKey?: SelectionBoundaryNumberMap;
     /** Legacy selection boundaries are normalized into winner-only receipts. */

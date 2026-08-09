@@ -1,5 +1,4 @@
 import {
-  type ManifestationState,
   type MemoryEntry,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
@@ -13,7 +12,6 @@ import {
 } from "../runtime/recall-service-helpers.js";
 import type {
   EvidenceSupportVector,
-  PathInflowEdge,
   RecallEvidenceProjectionMatchReceipt,
   RecallServiceDependencies,
   RecallServiceWarnPort,
@@ -23,14 +21,11 @@ import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
 import { parseQueryTimeWindow } from "../scoring/temporal-fusion-scoring.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
-import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
 import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
 import {
-  collectRecallEvidenceContexts
-} from "./evidence/evidence-contexts.js";
-import type {
-  RecallVerifiedUserAssertionContext
-} from "../query/recall-user-assertion-context.js";
+  collectEvidenceAndGovernanceSupplement,
+  type EvidenceAndGovernanceSupplement
+} from "./evidence/evidence-governance-supplement.js";
 import {
   collectRoutingKeySupplement,
   type RoutingKeySupplement
@@ -42,6 +37,14 @@ import {
 } from "../field/query-entity-attribution-producer.js";
 import { collectQueryFieldAttribution } from
   "./query/query-field-attribution.js";
+import { captureRecallQueryOpenSemanticFactors } from
+  "../field/open-semantic-factors/query-capture.js";
+import { materializeOpenSemanticFactorCompatibilityTrace } from
+  "../field/open-semantic-factors/compatibility-trace.js";
+import { materializeOpenSemanticFactorComposition } from
+  "../field/open-semantic-factors/composition.js";
+import { materializeOpenSemanticFactorActivation } from
+  "../field/open-semantic-factors/activation.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
@@ -57,6 +60,7 @@ interface CollectSupplementaryDataParams {
     | "routingKeyProjectionPort"
     | "entityExtractionPort"
     | "queryFactFrameExtractionPort"
+    | "openSemanticFactorExtractionPort"
   >;
   readonly warn: RecallServiceWarnPort;
   readonly candidates: readonly Readonly<MemoryEntry>[];
@@ -68,6 +72,12 @@ interface CollectSupplementaryDataParams {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly querySemanticFactorFormationProposal?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationProposal
+  >;
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
   readonly policy: Readonly<RecallPolicy>;
   readonly coarseFtsRanks: Readonly<Record<string, number>>;
   readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
@@ -118,6 +128,18 @@ export async function collectSupplementaryData(
       error: toErrorMessage(error)
     })
   });
+  const querySemanticFactorFormation = captureRecallQueryOpenSemanticFactors({
+    query_text: params.queryText,
+    port: params.dependencies.openSemanticFactorExtractionPort,
+    prepared_proposal: params.querySemanticFactorFormationProposal,
+    prepared_capture: params.querySemanticFactorFormationCapture,
+    on_failure: (error) => params.warn("query open semantic factor extraction failed", {
+      workspace_id: params.workspaceId,
+      operation: "query_open_semantic_factor_extraction",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    })
+  });
   // graphMetrics is independent of budget+plasticity; evidence needs candidates only.
   const [
     graphMetrics,
@@ -125,13 +147,22 @@ export async function collectSupplementaryData(
     plasticityFactors,
     evidenceAndGovernance,
     routingKeySupplement,
-    resolvedQueryFieldAttribution
+    resolvedQueryFieldAttribution,
+    resolvedQuerySemanticFactorFormation
   ] =
     await Promise.all([
       collectGraphMetrics(params),
       collectBudgetPenaltyFactor(params),
       collectPlasticityFactors(params),
-      collectEvidenceAndGovernanceData(params, candidates),
+      collectEvidenceAndGovernanceSupplement({
+        dependencies: params.dependencies,
+        warn: params.warn,
+        workspaceId: params.workspaceId,
+        pathProjectionAsOf: params.pathProjectionAsOf,
+        candidates,
+        coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
+        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+      }),
       collectRoutingKeySupplement({
         dependencies: params.dependencies,
         warn: params.warn,
@@ -141,7 +172,8 @@ export async function collectSupplementaryData(
         queryProbes: params.queryProbes,
         queryEntityExtraction
       }),
-      queryFieldAttribution
+      queryFieldAttribution,
+      querySemanticFactorFormation
     ]);
   const coldMetrics = computeColdGraphPathMetrics(
     params,
@@ -159,7 +191,8 @@ export async function collectSupplementaryData(
     evidenceAndGovernance,
     routingKeySupplement,
     querySoughtFacets,
-    resolvedQueryFieldAttribution
+    resolvedQueryFieldAttribution,
+    resolvedQuerySemanticFactorFormation
   );
 }
 
@@ -174,29 +207,41 @@ function freezeSupplementaryData(
     readonly recallsEdgeCount: number;
     readonly weightTransferAmount: number;
   }>,
-  evidenceAndGovernance: Readonly<{
-    readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
-    readonly evidenceSemanticDocumentsByMemoryId: NonNullable<
-      RecallSupplementaryData["evidenceSemanticDocumentsByMemoryId"]
-    >;
-    readonly verifiedUserAssertionContextsByMemoryId: Readonly<
-      Record<string, Readonly<RecallVerifiedUserAssertionContext>>
-    >;
-    readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
-    readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
-    readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
-  }>,
+  evidenceAndGovernance: Readonly<EvidenceAndGovernanceSupplement>,
   routingKeySupplement: Readonly<RoutingKeySupplement>,
   querySoughtFacets: readonly string[],
-  queryFieldAttribution: Awaited<ReturnType<typeof collectQueryFieldAttribution>>
+  queryFieldAttribution: Awaited<ReturnType<typeof collectQueryFieldAttribution>>,
+  querySemanticFactorFormation: Awaited<
+    ReturnType<typeof captureRecallQueryOpenSemanticFactors>
+  >
 ): RecallSupplementaryData {
   const queryTimeWindow = resolveQueryTimeWindow(params);
+  const openSemanticFactorCompatibilityTrace =
+    materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: querySemanticFactorFormation,
+      evidence_formations:
+        evidenceAndGovernance.semanticFactorFormationsByEvidenceId
+    });
+  const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
+    trace: openSemanticFactorCompatibilityTrace,
+    query_capture: querySemanticFactorFormation
+  });
   return Object.freeze({
     queryProbes: params.queryProbes,
     queryFactFrameExtraction: queryFieldAttribution.factFrameCapture,
     ...(queryFieldAttribution.attribution === undefined
       ? {}
       : { queryFieldAttribution: queryFieldAttribution.attribution }),
+    queryOpenSemanticFactorFormation: querySemanticFactorFormation,
+    semanticFactorFormationsByEvidenceId:
+      evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+    openSemanticFactorCompatibilityTrace,
+    openSemanticFactorComposition,
+    openSemanticFactorActivation: materializeOpenSemanticFactorActivation({
+      composition: openSemanticFactorComposition,
+      trace: openSemanticFactorCompatibilityTrace,
+      query_capture: querySemanticFactorFormation
+    }),
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,
     queryRoutingKeys: routingKeySupplement.queryKeys,
@@ -216,6 +261,7 @@ function freezeSupplementaryData(
     pathSuppressionScores: params.coarsePathSuppressionScores,
     embeddingSimilarityScores: Object.freeze({}),
     evidenceSemanticActivationsByCandidateKey: new Map(),
+    openSemanticFactorCandidateActivationsByCandidateKey: new Map(),
     graphSupportCounts: Object.freeze(graphSupportCounts),
     evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
     budgetPenaltyFactor,
@@ -296,44 +342,6 @@ async function collectLegacyGraphMetrics(
   const graphSupportCounts = await collectGraphSupportCounts(params);
   const recallEdgeCounts = await collectRecallEdgeCounts(params);
   return Object.freeze({ graphSupportCounts, recallEdgeCounts });
-}
-
-async function collectEvidenceAndGovernanceData(
-  params: CollectSupplementaryDataParams,
-  candidates: readonly Readonly<MemoryEntry>[]
-): Promise<Readonly<{
-  readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
-  readonly evidenceSemanticDocumentsByMemoryId: NonNullable<
-    RecallSupplementaryData["evidenceSemanticDocumentsByMemoryId"]
-  >;
-  readonly verifiedUserAssertionContextsByMemoryId: Readonly<
-    Record<string, Readonly<RecallVerifiedUserAssertionContext>>
-  >;
-  readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
-  readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
-  readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
-}>> {
-  const evidenceContexts = await collectRecallEvidenceContexts({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    candidates,
-    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
-  });
-  const governanceDerivations = await collectGovernancePathDerivations({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    pathProjectionAsOf: params.pathProjectionAsOf,
-    candidates
-  });
-  return Object.freeze({
-    ...evidenceContexts,
-    governanceCeilingByMemoryId: governanceDerivations.governanceCeilingByMemoryId,
-    pathInflowByTarget: governanceDerivations.pathInflowByTarget,
-    pathInflowAvailability: governanceDerivations.pathInflowAvailability
-  });
 }
 
 async function collectGraphSupportCounts(

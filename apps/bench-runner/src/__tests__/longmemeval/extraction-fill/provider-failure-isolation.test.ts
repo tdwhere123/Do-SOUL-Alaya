@@ -24,7 +24,8 @@ import {
 import { readExtractionCacheManifestIdentity } from
   "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
-  buildExtractionFillQuestion,
+  buildGroundedSignalResponse,
+  buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks
 } from "./fixture.js";
@@ -119,7 +120,7 @@ describe("authority-bound provider failure isolation", () => {
       await input.onTransportAttempt?.();
       const turn = readTurnContent(input.userPrompt);
       if (turn.includes("provider-failure")) throw nonRetryable4xx();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
     });
 
     const result = await runExtractionFill({
@@ -179,7 +180,7 @@ function setCredentialFixture(): void {
 }
 
 function question(id: string, fact: string, decoy: string): LongMemEvalQuestion {
-  return buildExtractionFillQuestion(id, `User: ${fact}`, `User: ${decoy}`);
+  return buildAuthorityQuestion(id, fact, decoy);
 }
 
 async function writeCanonicalDataset(questions: readonly LongMemEvalQuestion[]): Promise<void> {
@@ -268,7 +269,12 @@ async function writeUnboundAuthority(): Promise<string> {
 }
 
 function readTurnContent(userPrompt: string): string {
-  return (JSON.parse(userPrompt) as { readonly turn_content: string }).turn_content;
+  const request = JSON.parse(userPrompt) as {
+    readonly source_assertions?: readonly { readonly text?: unknown }[];
+  };
+  const text = request.source_assertions?.[0]?.text;
+  if (typeof text !== "string") throw new Error("expected a source assertion");
+  return text;
 }
 
 function nonRetryable4xx(): Error {

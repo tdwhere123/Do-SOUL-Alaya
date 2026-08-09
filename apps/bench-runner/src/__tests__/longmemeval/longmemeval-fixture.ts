@@ -24,7 +24,7 @@ export function buildLongMemEvalFixtureQuestion(
       [
         {
           role: "user",
-          content: `coelacanth depth fact ${id}: it swims very deep in the ocean.`,
+          content: `I completed coelacanth depth observation ${id} in the ocean.`,
           has_answer: true
         },
         { role: "assistant", content: "Acknowledged." }

@@ -87,6 +87,12 @@ export type AssessCoarseFilterParams = Readonly<{
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly querySemanticFactorFormationProposal?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationProposal
+  >;
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;
@@ -119,6 +125,10 @@ export async function collectCoarseFilterSupplementaryData(
     queryText: params.queryText,
     queryProbes: params.queryProbes,
     queryEntityExtraction: params.queryEntityExtraction,
+    querySemanticFactorFormationProposal:
+      params.querySemanticFactorFormationProposal,
+    querySemanticFactorFormationCapture:
+      params.querySemanticFactorFormationCapture,
     policy: params.policy,
     coarseFtsRanks: params.coarseFilter.ftsRanks,
     coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,

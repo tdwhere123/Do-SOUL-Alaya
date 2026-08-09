@@ -13,6 +13,8 @@ import {
   replayExtractionOccurrences,
   type ExtractionReplayAuditor
 } from "../../../longmemeval/extraction/cache-audit/replay.js";
+import { withOpenSemanticFactorGraph } from
+  "../compile-seed/compile-seed-fixture.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -60,7 +62,10 @@ describe("extraction cache replay", () => {
 
     expect(calls).toEqual([]);
     expect(result.occurrences[0]?.entries).toEqual([{
-      index: -1, disposition: "invalid", stage: "cache", reason: "shard_missing"
+      index: -1,
+      disposition: "invalid",
+      stage: "cache",
+      reason: `shard_missing:${"b".repeat(12)}`
     }]);
     expect(result.closure.invalid).toBe(1);
   });
@@ -225,7 +230,7 @@ function writeShard(root: string, cacheKey: string, rawJson: string): void {
 
 function validRaw(): string {
   return JSON.stringify({
-    signals: [{
+    signals: [withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "fact",
       confidence: 0.8,
@@ -235,7 +240,7 @@ function validRaw(): string {
       canonical_entities: [],
       temporal_projection: null,
       preference_profile: null
-    }]
+    })]
   });
 }
 
@@ -245,7 +250,7 @@ function occurrence(id: string, cacheKey: string, sourceObservedAt: string) {
     sourceObservedAt,
     turnContent: "User: source fact",
     turnMessages: [{ message_id: `${id}-m0`, role: "user" as const, content: "source fact" }],
-    cacheKey
+    cacheKeys: [cacheKey]
   };
 }
 

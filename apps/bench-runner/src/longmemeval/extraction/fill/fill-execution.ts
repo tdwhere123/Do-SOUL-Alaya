@@ -6,7 +6,7 @@ import {
   type CompileSeedExtractionStats
 } from "../../compile-seed.js";
 import {
-  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
 import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
@@ -41,6 +41,7 @@ import { resolveFullFillStatus } from "./policy/full-fill-completion.js";
 import {
   countIntentionalSkippedTurns,
   resolveCacheKeyAllowlistedTurns,
+  resolveContinuationMissingTurns,
   type CacheKeyAllowlistResolution
 } from "./policy/cache-key-allowlist.js";
 
@@ -49,6 +50,7 @@ export interface ExecutionExtractionAuthority {
   readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
   readonly abandonPendingShard: (cacheKey: string) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
+  readonly commitDeterministicShard: (cacheKey: string) => void;
   readonly recordTransportOutcome: (
     cacheKey: string,
     outcome: ExtractionLiveTransportOutcome
@@ -74,8 +76,13 @@ export async function executeExtractionFill(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
   );
   stats.cacheHits += resolved.skippedCacheHits;
+  if (resolved.executionCacheKeys !== undefined) {
+    log(`[extraction-fill] sparse execution keys=${resolved.executionCacheKeys.size} ` +
+      `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
+  }
   const extractor = createFillCachingExtractor(
-    options, prepared, cacheRoot, stats, writeLease, authority, markProgress
+    options, prepared, cacheRoot, stats, writeLease, authority, markProgress,
+    resolved.executionCacheKeys
   );
   await runExtractionPool({
     extractor,
@@ -102,7 +109,8 @@ function createFillCachingExtractor(
   stats: CompileSeedExtractionStats,
   writeLease: ExtractionCacheWriteLease,
   authority: ExecutionExtractionAuthority | undefined,
-  markProgress: (() => void) | undefined
+  markProgress: (() => void) | undefined,
+  executionCacheKeys: ReadonlySet<string> | undefined
 ) {
   const delegate =
     options.extractorFactory?.(prepared.config) ??
@@ -118,11 +126,13 @@ function createFillCachingExtractor(
     allowLiveExtraction: authority !== undefined || options.extractorFactory !== undefined,
     ...(authority === undefined ? {} : {
       onTransportAttempt: authority.reserveAttempt,
-      onLiveExtractionSucceeded: authority.commitSuccessfulShard,
+      onLiveProviderExtractionSucceeded: authority.commitSuccessfulShard,
+      onDeterministicExtractionSucceeded: authority.commitDeterministicShard,
       onLiveExtractionFailed: authority.abandonPendingShard,
       onLiveExtractionOutcome: authority.recordTransportOutcome
     }),
-    ...(markProgress === undefined ? {} : { onExtractionProgress: markProgress })
+    ...(markProgress === undefined ? {} : { onExtractionProgress: markProgress }),
+    ...(executionCacheKeys === undefined ? {} : { executionCacheKeys })
   });
 }
 
@@ -156,28 +166,54 @@ function resolveFillTurns(
     })
   });
   if (allowlisted !== undefined) return allowlisted;
-  const turns = authority?.receipt.action === "probe"
-    ? selectProbeTurn(prepared, authority.receipt.probe_key!)
-    : selectRepairTurns(prepared, authority);
+  const continuation = resolveContinuationMissingTurns({
+    cacheRoot,
+    prepared: {
+      config: prepared.config,
+      pinnedCachedTurns: prepared.existingManifest?.cached_turns,
+      distinctExtractionTurns: prepared.distinctExtractionTurns,
+      executionExtractionTurns: prepared.executionExtractionTurns,
+      questionBatchLimit: prepared.questionBatchLimit,
+      expansion: prepared.expansion
+    },
+    authority: authority?.receipt,
+    successfulKeys: authority?.snapshot()?.successfulKeys,
+    writeLease
+  });
+  if (continuation !== undefined) return continuation;
   if (authority?.receipt.action === "probe") {
-    assertProbeTargetIsMissing(prepared, cacheRoot, authority.receipt.probe_key!);
+    const probeKey = authority.receipt.probe_key!;
+    assertProbeTargetIsMissing(prepared, cacheRoot, probeKey);
+    return {
+      turns: selectProbeTurn(prepared, probeKey),
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set([probeKey])
+    };
   }
-  return { turns, skippedCacheHits: 0 };
+  return resolveRepairTurns(prepared, authority);
 }
 
-function selectRepairTurns(
+function resolveRepairTurns(
   prepared: PreparedExtractionFill,
   authority: ExecutionExtractionAuthority | undefined
-): PreparedExtractionFill["executionExtractionTurns"] {
+): CacheKeyAllowlistResolution {
   const scope = authority?.receipt.repair_scope;
-  if (scope === undefined) return prepared.executionExtractionTurns;
+  if (scope === undefined) {
+    return { turns: prepared.executionExtractionTurns, skippedCacheHits: 0 };
+  }
   const keys = repairScopeKeys(scope);
-  return prepared.executionExtractionTurns.filter((turn) => keys.has(computeExtractionTurnCacheKey(
-    prepared.config.model,
-    prepared.config.requestProfile,
-    OFFICIAL_API_SYSTEM_PROMPT,
-    turn
-  )));
+  return {
+    turns: prepared.executionExtractionTurns.filter((turn) =>
+      computeExtractionTurnCacheKeys(
+        prepared.config.model,
+        prepared.config.requestProfile,
+        OFFICIAL_API_SYSTEM_PROMPT,
+        turn
+      ).some((cacheKey) => keys.has(cacheKey))
+    ),
+    skippedCacheHits: 0,
+    executionCacheKeys: keys
+  };
 }
 
 export function finishExtractionFill(
@@ -197,7 +233,7 @@ export function finishExtractionFill(
   );
   const retryTelemetry = readFillRetryTelemetry(stats);
   const intentionalSkippedTurns = countIntentionalSkippedTurns(
-    prepared.distinctExtractionTurns.length,
+    prepared.requestedTurns,
     prepared.existingManifest?.cached_turns,
     cacheKeyAllowlistSize
   );
@@ -270,7 +306,7 @@ export function finishExtractionQuestionBatch(
       `full_coverage=${(fullCompletion.coverage * 100).toFixed(1)}%`
   );
   return {
-    requestedTurns: prepared.executionTurns.length,
+    requestedTurns: prepared.executionRequestedTurns,
     cacheHits: stats.cacheHits,
     newlyExtracted: stats.llmCalls,
     coverage: batchCompletion.coverage,
@@ -287,7 +323,7 @@ function assertQuestionBatchTaskConservation(
   repairScopeTurns: number | undefined
 ): void {
   const completed = stats.cacheHits + stats.llmCalls + countTerminalProviderFailures(telemetry);
-  const requested = repairScopeTurns ?? prepared.executionExtractionTurns.length;
+  const requested = repairScopeTurns ?? prepared.executionRequestedTurns;
   if (completed === requested) return;
   throw new ExtractionCacheInvariantError(
     "question batch task conservation failed: " +
@@ -357,12 +393,14 @@ function selectProbeTurn(
   prepared: PreparedExtractionFill,
   targetKey: string
 ): PreparedExtractionFill["distinctExtractionTurns"] {
-  const target = prepared.distinctExtractionTurns.find((turn) => computeExtractionTurnCacheKey(
-    prepared.config.model,
-    prepared.config.requestProfile,
-    OFFICIAL_API_SYSTEM_PROMPT,
-    turn
-  ) === targetKey);
+  const target = prepared.distinctExtractionTurns.find((turn) =>
+    computeExtractionTurnCacheKeys(
+      prepared.config.model,
+      prepared.config.requestProfile,
+      OFFICIAL_API_SYSTEM_PROMPT,
+      turn
+    ).includes(targetKey)
+  );
   if (target === undefined) {
     throw new ExtractionCacheInvariantError("extraction probe target is outside the authority window");
   }
@@ -374,15 +412,9 @@ function assertProbeTargetIsMissing(
   cacheRoot: string,
   targetKey: string
 ): void {
-  const target = selectProbeTurn(prepared, targetKey)[0]!;
-  const cacheKey = computeExtractionTurnCacheKey(
-    prepared.config.model,
-    prepared.config.requestProfile,
-    OFFICIAL_API_SYSTEM_PROMPT,
-    target
-  );
+  selectProbeTurn(prepared, targetKey);
   if (inspectCachedExtraction(
-    cacheRoot, cacheKey, prepared.config.model, prepared.config.requestProfile
+    cacheRoot, targetKey, prepared.config.model, prepared.config.requestProfile
   ).status !== "missing") {
     throw new ExtractionCacheInvariantError(
       "extraction probe target changed before its single provider attempt"

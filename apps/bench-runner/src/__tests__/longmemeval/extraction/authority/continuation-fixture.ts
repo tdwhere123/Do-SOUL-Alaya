@@ -62,6 +62,54 @@ export function createContinuationScenario() {
   };
 }
 
+export function createAuthorityRenewalScenario(
+  outputTokenCap = 1_024,
+  maximumInputTokens = 300,
+  transportProviderUrl?: string
+) {
+  const predecessor = createPredecessorArtifacts();
+  const successorObservation = observation({
+    revision: predecessor.predecessorObservation.revision,
+    manifestSha256: predecessor.manifestSha256,
+    rawContentClosureSha256: predecessor.preservedValidClosure.content_closure_sha256,
+    validTurns: 1,
+    missingTurns: 1,
+    transportProviderUrl
+  });
+  const successorSelection = predecessor.predecessorSelection;
+  const inspection = continuationInspection(
+    successorObservation, predecessor.preservedValidClosure
+  );
+  const continuation = createSameRootExtractionContinuation({
+    cacheRoot: predecessor.cacheRoot,
+    predecessor: predecessor.predecessorReceipt,
+    predecessorLedger: predecessor.predecessorLedger,
+    targetSelection: successorSelection,
+    inspection
+  });
+  const successorReceipt = createReceipt({
+    observation: successorObservation,
+    targetSelectionDigest: successorSelection.receipt_digest,
+    continuation,
+    outputTokenCap,
+    maximumInputTokens
+  });
+  return {
+    ...predecessor,
+    successorObservation,
+    successorSelection,
+    inspection,
+    continuation,
+    successorReceipt,
+    outputPath: join(predecessor.cacheRoot, "..", "renewed-authority.json"),
+    prepared: {
+      predecessor: predecessor.predecessorReceipt,
+      predecessorLedger: predecessor.predecessorLedger,
+      evidence: continuation
+    }
+  };
+}
+
 function createPredecessorArtifacts() {
   const cacheRoot = temporaryCacheRoot();
   const predecessorObservation = observation();
@@ -285,6 +333,7 @@ export function observation(overrides: {
   readonly rawContentClosureSha256?: string | null;
   readonly validTurns?: number;
   readonly missingTurns?: number;
+  readonly transportProviderUrl?: string;
 } = {}): ExtractionAuthorityObservation {
   return {
     revision: overrides.revision ?? `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`,
@@ -313,6 +362,12 @@ export function observation(overrides: {
       manifestSha256: overrides.manifestSha256 ?? null,
       rawContentClosureSha256: overrides.rawContentClosureSha256 ?? null
     },
+    ...(overrides.transportProviderUrl === undefined ? {} : {
+      transport: {
+        providerUrl: overrides.transportProviderUrl,
+        model: "provider-model-alias"
+      }
+    }),
     inventory: {
       expectedTurns: 2,
       validTurns: overrides.validTurns ?? 0,
@@ -343,6 +398,8 @@ function createReceipt(input: {
   readonly observation: ExtractionAuthorityObservation;
   readonly targetSelectionDigest: string;
   readonly continuation?: Parameters<typeof createExtractionAuthorityReceipt>[0]["continuation"];
+  readonly outputTokenCap?: number;
+  readonly maximumInputTokens?: number;
 }) {
   return createExtractionAuthorityReceipt({
     action: "fill",
@@ -353,11 +410,11 @@ function createReceipt(input: {
       maximumAttempts: 10,
       successfulShardCeiling: 2
     },
-    outputTokenCap: { field: "max_tokens", value: 512 },
+    outputTokenCap: { field: "max_tokens", value: input.outputTokenCap ?? 512 },
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: input.maximumInputTokens ?? 300
     },
     diskFloorBytes: 0,
     inspection: {

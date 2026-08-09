@@ -187,7 +187,7 @@ function analyzeExtractionCache(input: {
   });
   const inventory = inspectExtractionCacheInventory({
     cacheRoot: input.sourceRoot,
-    cacheKeys: occurrences.map((occurrence) => occurrence.cacheKey),
+    cacheKeys: occurrences.flatMap((occurrence) => occurrence.cacheKeys),
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile
   });
@@ -203,7 +203,7 @@ function analyzeExtractionCache(input: {
     source: sourceIdentity(input.sourceManifest, inventorySha256),
     final: finalIdentity(input.args, input.dataset.sha256, inventorySha256),
     replay: replay.closure,
-    rawInventoryClosed: inventory.orphanKeys.length === 0 && inventory.unexpectedPaths.length === 0
+    rawInventoryClosed: isRawInventoryClosed(inventory)
   });
   return {
     inventory,
@@ -243,18 +243,21 @@ function sourceIdentity(
   rawClosureSha256: string
 ): ExtractionCacheCompatibilityIdentity {
   return {
-    datasetRevision: manifest.dataset_revision,
-    model: manifest.extraction_model,
-    modelFamily: extractionModelFamily(manifest),
-    requestProfile: manifest.request_profile,
-    providerUrl: normalizeProviderUrl(manifest.provider_url),
-    systemPromptSha256: manifest.system_prompt_sha256,
-    cacheKeyAlgorithm: manifest.cache_key_algo,
-    rawClosureSha256,
-    // Schema-version-3 manifests do not record these execution semantics.
-    parserSemanticsSha256: "",
-    formationSemanticsSha256: "",
-    temporalSchemaRevision: ""
+    raw: {
+      datasetRevision: manifest.dataset_revision,
+      model: manifest.extraction_model,
+      requestProfile: manifest.request_profile,
+      providerUrl: normalizeProviderUrl(manifest.provider_url),
+      systemPromptSha256: manifest.system_prompt_sha256,
+      cacheKeyAlgorithm: manifest.cache_key_algo,
+      rawClosureSha256
+    },
+    projection: {
+      modelFamily: extractionModelFamily(manifest),
+      parserSemanticsSha256: "",
+      formationSemanticsSha256: "",
+      temporalSchemaRevision: ""
+    }
   };
 }
 
@@ -264,20 +267,24 @@ function finalIdentity(
   rawClosureSha256: string
 ): ExtractionCacheCompatibilityIdentity {
   return {
-    datasetRevision,
-    model: args.targetModel,
-    modelFamily: args.targetModelFamily,
-    requestProfile: args.targetRequestProfile,
-    providerUrl: args.targetProviderUrl,
-    systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-    cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
-    rawClosureSha256,
-    parserSemanticsSha256: hashString(OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION),
-    formationSemanticsSha256: hashString([
-      OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
-      JSON.stringify(EXTRACTION_REPLAY_FORMATION_POLICY)
-    ].join("\0")),
-    temporalSchemaRevision: TEMPORAL_SCHEMA_REVISION
+    raw: {
+      datasetRevision,
+      model: args.targetModel,
+      requestProfile: args.targetRequestProfile,
+      providerUrl: args.targetProviderUrl,
+      systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+      cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
+      rawClosureSha256
+    },
+    projection: {
+      modelFamily: args.targetModelFamily,
+      parserSemanticsSha256: hashString(OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION),
+      formationSemanticsSha256: hashString([
+        OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+        JSON.stringify(EXTRACTION_REPLAY_FORMATION_POLICY)
+      ].join("\0")),
+      temporalSchemaRevision: TEMPORAL_SCHEMA_REVISION
+    }
   };
 }
 
@@ -286,7 +293,7 @@ function assertDecisionTarget(
   sourceRoot: string,
   targetRoot: string
 ): void {
-  if (decision.action === "rebuild") {
+  if (decision.raw.action === "rebuild") {
     assertFreshExtractionCacheRoot({ sourceRoot, targetRoot });
     return;
   }
@@ -418,9 +425,17 @@ function hashString(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function isRawInventoryClosed(inventory: ExtractionCacheInventory): boolean {
+  const { counts } = inventory;
+  return counts.hit === counts.expected && counts.missing === 0 &&
+    counts.invalid === 0 && counts.orphan === 0 &&
+    inventory.unexpectedPaths.length === 0;
+}
+
 function renderRun(run: ExtractionCacheAuditRun): string {
   const counts = run.inventory.counts;
-  return `Extraction cache compatibility=${run.decision.action} ` +
+  return `Extraction cache raw=${run.decision.raw.action} ` +
+    `projection=${run.decision.projection.action} ` +
     `receipt=${run.receipt.decision_digest}\n` +
     `  source_manifest=${run.sourceManifestSha256} inventory=${run.inventorySha256}\n` +
     `  occurrences=${run.occurrences.length} expected=${counts.expected} hit=${counts.hit} ` +

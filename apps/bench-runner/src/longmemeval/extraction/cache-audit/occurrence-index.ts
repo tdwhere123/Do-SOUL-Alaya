@@ -5,7 +5,7 @@ import {
   type LongMemEvalRoundMessage,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
-import { computeExtractionTurnCacheKey } from "../../compile-seed/compile-seed-cache.js";
+import { computeExtractionTurnCacheKeys } from "../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
 import { computeTrustedRoleCorpusDigest } from "../turn-contents.js";
@@ -20,7 +20,7 @@ export interface ExtractionOccurrence {
   readonly turnContent: string;
   readonly turnMessages: readonly LongMemEvalRoundMessage[];
   readonly trustedRoleCorpusDigest: string;
-  readonly cacheKey: string;
+  readonly cacheKeys: readonly string[];
 }
 
 export function buildExtractionOccurrenceIndex(input: {
@@ -41,7 +41,7 @@ export function hashExtractionOccurrenceIndex(
 ): string {
   const canonical = [...occurrences].sort(compareOccurrences).map((occurrence) => ({
     id: occurrence.id,
-    cache_key: occurrence.cacheKey,
+    cache_keys: occurrence.cacheKeys,
     trusted_role_corpus_digest: occurrence.trustedRoleCorpusDigest,
     source_observed_at: occurrence.sourceObservedAt
   }));
@@ -56,15 +56,17 @@ function occurrencesForQuestion(
 ): readonly ExtractionOccurrence[] {
   return question.haystack_sessions.flatMap((session, sessionIndex) => {
     const sourceObservedAt = requireLongMemEvalTimestamp(question.haystack_dates[sessionIndex]);
-    return pairSessionIntoRounds(session).map((round, roundIndex) => buildOccurrence({
-      question, sessionIndex, roundIndex, sourceObservedAt, turnContent: round.content,
-      turnMessages: buildLongMemEvalRoundMessages(
+    return pairSessionIntoRounds(session).map((round, roundIndex) => {
+      const turnMessages = buildLongMemEvalRoundMessages(
         session,
         round,
         `${question.question_id}-s${sessionIndex}-r${roundIndex}`
-      ),
-      model, requestProfile, systemPrompt
-    }));
+      );
+      return buildOccurrence({
+        question, sessionIndex, roundIndex, sourceObservedAt, turnContent: round.content,
+        turnMessages, model, requestProfile, systemPrompt
+      });
+    });
   });
 }
 
@@ -91,7 +93,7 @@ function buildOccurrence(input: {
     turnContent: input.turnContent.trim(),
     turnMessages: input.turnMessages,
     trustedRoleCorpusDigest,
-    cacheKey: computeExtractionTurnCacheKey(
+    cacheKeys: computeExtractionTurnCacheKeys(
       input.model,
       input.requestProfile,
       input.systemPrompt,

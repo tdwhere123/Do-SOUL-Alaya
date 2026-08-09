@@ -9,6 +9,7 @@ import {
   HealthJournalService,
   MemoryService,
   PathRelationProposalService,
+  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
   SynthesisService
 } from "@do-soul/alaya-core";
 import { SqliteHealthIssueGroupRepo } from "@do-soul/alaya-storage";
@@ -93,6 +94,8 @@ function createEvidenceService(
     evidenceCapsuleRepo: input.evidenceCapsuleRepo,
     eventLogRepo: input.eventLogRepo,
     runtimeNotifier: input.runtimeNotifier,
+    factFrameProposalNormalizer:
+      RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
     karmaEmitter: {
       emitKarmaEvent: async (emitInput) => {
         if (dynamicsServiceRef.current === null) {

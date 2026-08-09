@@ -111,26 +111,29 @@ export function createRecallFailureHealthInbox(input: {
   };
 }
 
-export async function createDaemonCoreServices(input: {
-  readonly rawConfigService: AppConfigService;
-  readonly eventLogRepo: SqliteEventLogRepo;
-  readonly runtimeNotifier: AlayaRuntimeNotifier;
-  readonly workspaceRepo: SqliteWorkspaceRepo;
-  readonly runRepo: SqliteRunRepo;
-  readonly bindingRepo: SqliteEngineBindingRepo;
-  readonly eventPublisher: EventPublisher;
-  readonly trustStateRepo: SqliteTrustStateRepo;
-  readonly pathRelationRepo: SqlitePathRelationRepo;
-  readonly signalService: SignalService;
-  readonly contextLensAssembler: ConversationContextLensAssemblerPort;
-  readonly governanceLeaseService: GovernanceLeaseService;
-  readonly budgetBankruptcyService: BudgetBankruptcyService;
-  readonly healthJournalService: HealthJournalService;
-  readonly warn: (message: string, meta: Record<string, unknown>) => void;
-  readonly isPrincipalCodingEngineAvailable: () => boolean;
-}) {
-  const localHeuristicsProvider = new LocalHeuristics();
-  const gardenComputeRuntime = await createGardenComputeRuntime(input, localHeuristicsProvider);
+export async function createDaemonCoreServices(
+  input: {
+    readonly rawConfigService: AppConfigService;
+    readonly eventLogRepo: SqliteEventLogRepo;
+    readonly runtimeNotifier: AlayaRuntimeNotifier;
+    readonly workspaceRepo: SqliteWorkspaceRepo;
+    readonly runRepo: SqliteRunRepo;
+    readonly bindingRepo: SqliteEngineBindingRepo;
+    readonly eventPublisher: EventPublisher;
+    readonly trustStateRepo: SqliteTrustStateRepo;
+    readonly pathRelationRepo: SqlitePathRelationRepo;
+    readonly signalService: SignalService;
+    readonly contextLensAssembler: ConversationContextLensAssemblerPort;
+    readonly governanceLeaseService: GovernanceLeaseService;
+    readonly budgetBankruptcyService: BudgetBankruptcyService;
+    readonly healthJournalService: HealthJournalService;
+    readonly warn: (message: string, meta: Record<string, unknown>) => void;
+    readonly isPrincipalCodingEngineAvailable: () => boolean;
+  },
+  prebuiltGardenComputeRuntime?: Awaited<ReturnType<typeof createGardenComputeRuntime>>
+) {
+  const gardenComputeRuntime = prebuiltGardenComputeRuntime ??
+    await createGardenComputeRuntime(input);
   const conversationService = new ConversationService(
     createConversationServiceDependencies(input, gardenComputeRuntime.computeRoutingService)
   );
@@ -140,7 +143,7 @@ export async function createDaemonCoreServices(input: {
   const supportServices = createDaemonCoreSupportServices(input, runService);
 
   return {
-    localHeuristicsProvider,
+    localHeuristicsProvider: gardenComputeRuntime.localHeuristicsProvider,
     configService: gardenComputeRuntime.configService,
     officialGardenProvider: gardenComputeRuntime.officialGardenProvider,
     computeRoutingService: gardenComputeRuntime.computeRoutingService,
@@ -154,12 +157,12 @@ export async function createDaemonCoreServices(input: {
   };
 }
 
-async function createGardenComputeRuntime(
+export async function createGardenComputeRuntime(
   input: {
     readonly rawConfigService: AppConfigService;
-  },
-  localHeuristicsProvider: LocalHeuristics
+  }
 ) {
+  const localHeuristicsProvider = new LocalHeuristics();
   const gardenComputeProviderResolver = new GardenComputeProviderResolver({
     configReader: input.rawConfigService,
     fallbackProvider: localHeuristicsProvider,
@@ -188,6 +191,7 @@ async function createGardenComputeRuntime(
     localHeuristicsProvider
   );
   return {
+    localHeuristicsProvider,
     officialGardenProvider,
     computeRoutingService,
     configService

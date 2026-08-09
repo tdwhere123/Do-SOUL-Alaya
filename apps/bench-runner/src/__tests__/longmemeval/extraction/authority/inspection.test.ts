@@ -68,9 +68,8 @@ describe("no-network extraction authority inspection", () => {
         authorizedUniqueCacheKeys: 4
       },
       extraction: {
-        cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
-          "[\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest]" +
-          "[\\0source-assertion-catalog-v1\\0sourceCatalogRequestIdentity])",
+        cacheKeyAlgorithm:
+          "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)",
         manifestSha256: null,
         rawContentClosureSha256: null
       },
@@ -114,6 +113,50 @@ describe("no-network extraction authority inspection", () => {
       invalidTurns: 0
     });
     expect(inspected.missingKeys).toHaveLength(2);
+  });
+
+  it("counts bounded request shards as the authority window key space", async () => {
+    const fact = Array.from(
+      { length: 9 },
+      (_value, index) => `I completed task ${index + 1}.`
+    ).join(" ");
+    await writeFixtureDataset([
+      buildExtractionFillQuestion("q001", fact, "Hello.")
+    ]);
+
+    const inspected = await inspectExtractionAuthority({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      revision: "a".repeat(40),
+      action: "fill"
+    });
+
+    expect(inspected.observation.dataset).toMatchObject({
+      windowTurnOccurrences: 2,
+      windowUniqueCacheKeys: 3,
+      authorizedUniqueCacheKeys: 3
+    });
+    expect(inspected.observation.inventory.expectedTurns).toBe(3);
+    expect(inspected.missingKeys).toHaveLength(3);
+    expect(() => createExtractionAuthorityReceipt({
+      action: "fill",
+      observation: inspected.observation,
+      outputTokenCap: { field: "max_tokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 0,
+      inspection: {
+        writerLock: inspected.writerLock,
+        disk: inspected.disk,
+        credentialStatus: inspected.credentialStatus,
+        modelReadiness: inspected.modelReadiness
+      }
+    })).not.toThrow();
   });
 
   it("permits only the inspected canonical operation and selection", async () => {

@@ -22,3 +22,60 @@ export function createExtractor(rawJson: string): SignalExtractor {
     extract: vi.fn(async () => ({ rawJson }))
   };
 }
+
+type OpenSemanticSignal<T> = T & Readonly<{
+  semantic_factor_graph: Readonly<Record<string, unknown>>;
+}>;
+
+export function withOpenSemanticFactorGraph<T extends Readonly<Record<string, unknown>>>(
+  signal: T
+): OpenSemanticSignal<T> {
+  if (signal.semantic_factor_graph !== undefined) return signal as OpenSemanticSignal<T>;
+  const matchedText = typeof signal.matched_text === "string" ? signal.matched_text : "";
+  const surface = matchedText.slice(0, 64);
+  return {
+    ...signal,
+    semantic_factor_graph: {
+      schema_version: 1,
+      source_kind: "evidence",
+      factors: [{ factor_id: "f0", surface, semantic_identity: canonicalSemanticIdentity(surface) }],
+      variables: [],
+      result_variable_ids: [],
+      propositions: [{
+        proposition_id: "p0",
+        predicate_factor_id: "f0",
+        arguments: [{
+          position: 0,
+          binding_identity: "assertion",
+          reference_kind: "factor",
+          reference_id: "f0"
+        }]
+      }]
+    }
+  };
+}
+
+function canonicalSemanticIdentity(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+export function createOpenSemanticExtractor(rawJson: string): SignalExtractor {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson) as unknown;
+  } catch {
+    return createExtractor(rawJson);
+  }
+  if (typeof parsed !== "object" || parsed === null ||
+      !Array.isArray((parsed as { readonly signals?: unknown }).signals)) {
+    return createExtractor(rawJson);
+  }
+  const record = parsed as { readonly signals: readonly unknown[] };
+  return createExtractor(JSON.stringify({
+    ...parsed,
+    signals: record.signals.map((signal) =>
+      typeof signal === "object" && signal !== null
+        ? withOpenSemanticFactorGraph(signal as Readonly<Record<string, unknown>>)
+        : signal)
+  }));
+}

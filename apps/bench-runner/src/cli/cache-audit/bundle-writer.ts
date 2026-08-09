@@ -38,7 +38,7 @@ export function writeExtractionCacheAuditBundle(
       fact_frame_closure: run.replay.factFrameClosure,
       occurrences: run.replay.occurrences.map((occurrence) => ({
         occurrence: renderOccurrence(occurrence.occurrence),
-        raw_json_sha256: occurrence.rawJsonSha256,
+        raw_json_sha256s: occurrence.rawJsonSha256s,
         entries: occurrence.entries
       }))
     }) },
@@ -75,7 +75,7 @@ function renderOccurrence(occurrence: ExtractionOccurrence) {
     round_index: occurrence.roundIndex,
     source_observed_at: occurrence.sourceObservedAt,
     turn_content_sha256: hashString(occurrence.turnContent),
-    cache_key: occurrence.cacheKey
+    cache_keys: occurrence.cacheKeys
   };
 }
 

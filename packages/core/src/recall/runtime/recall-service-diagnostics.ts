@@ -451,6 +451,21 @@ export interface RecallDiagnostics {
     import("../field/query-attribution/query-fact-frame-attribution-producer.js")
       .RecallQueryFactFrameExtractionCapture
   >;
+  readonly query_open_semantic_factor_formation?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly open_semantic_factor_compatibility_trace?: Readonly<
+    import("../field/open-semantic-factors/compatibility-trace.js")
+      .OpenSemanticFactorCompatibilityTrace
+  >;
+  readonly open_semantic_factor_composition?: Readonly<
+    import("../field/open-semantic-factors/composition.js")
+      .OpenSemanticFactorCompositionReceipt
+  >;
+  readonly open_semantic_factor_activation?: Readonly<
+    import("../field/open-semantic-factors/activation.js")
+      .OpenSemanticFactorActivationReceipt
+  >;
   readonly total_scanned: number;
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;

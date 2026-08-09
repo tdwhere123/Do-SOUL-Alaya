@@ -7,8 +7,15 @@ export interface AdaptiveConcurrencySnapshot {
   readonly current: number;
   readonly active: number;
   readonly rateLimitBackoffs: number;
+  readonly transientFailureBackoffs: number;
   readonly backoffMs: number;
 }
+
+export type AdaptiveConcurrencyReleaseOutcome =
+  | "success"
+  | "rate_limit"
+  | "transient_failure"
+  | "neutral";
 
 export function createAdaptiveConcurrencyController(input: {
   readonly maximum: number;
@@ -19,7 +26,7 @@ export function createAdaptiveConcurrencyController(input: {
   readonly clearTimeout?: typeof clearTimeout;
 }): {
   readonly acquire: (signal: AbortSignal) => Promise<void>;
-  readonly release: (rateLimited: boolean) => AdaptiveConcurrencySnapshot;
+  readonly release: (outcome: AdaptiveConcurrencyReleaseOutcome) => AdaptiveConcurrencySnapshot;
   readonly snapshot: () => AdaptiveConcurrencySnapshot;
   readonly dispose: () => void;
 } {
@@ -33,7 +40,7 @@ export function createAdaptiveConcurrencyController(input: {
   const cancel = input.clearTimeout ?? clearTimeout;
   return {
     acquire: async (signal) => await acquireSlot(state, signal, schedule, cancel),
-    release: (rateLimited) => releaseSlot(state, rateLimited),
+    release: (outcome) => releaseSlot(state, outcome),
     snapshot: () => snapshot(state),
     dispose: () => disposeWaiters(state, cancel)
   };
@@ -46,9 +53,10 @@ interface AdaptiveState {
   current: number;
   active: number;
   successfulReleases: number;
-  rateLimitStreak: number;
+  pressureStreak: number;
   resumeAt: number;
   rateLimitBackoffs: number;
+  transientFailureBackoffs: number;
   totalBackoffMs: number;
   waiters: Set<() => void>;
 }
@@ -66,9 +74,10 @@ function createState(
     current: initial,
     active: 0,
     successfulReleases: 0,
-    rateLimitStreak: 0,
+    pressureStreak: 0,
     resumeAt: 0,
     rateLimitBackoffs: 0,
+    transientFailureBackoffs: 0,
     totalBackoffMs: 0,
     waiters: new Set()
   };
@@ -115,26 +124,38 @@ function waitForAvailability(
   });
 }
 
-function releaseSlot(state: AdaptiveState, rateLimited: boolean): AdaptiveConcurrencySnapshot {
+function releaseSlot(
+  state: AdaptiveState,
+  outcome: AdaptiveConcurrencyReleaseOutcome
+): AdaptiveConcurrencySnapshot {
   if (state.active < 1) throw new Error("adaptive extraction concurrency released without a slot");
   state.active -= 1;
-  if (rateLimited) applyRateLimitBackoff(state);
-  else recoverConcurrency(state);
+  if (outcome === "rate_limit" || outcome === "transient_failure") {
+    applyPressureBackoff(state, outcome);
+  } else if (outcome === "success") {
+    recoverConcurrency(state);
+  } else {
+    state.successfulReleases = 0;
+  }
   wakeWaiters(state);
   return snapshot(state);
 }
 
-function applyRateLimitBackoff(state: AdaptiveState): void {
+function applyPressureBackoff(
+  state: AdaptiveState,
+  outcome: "rate_limit" | "transient_failure"
+): void {
   if (state.now() < state.resumeAt) return;
   state.current = Math.max(state.minimum, Math.floor(state.current / 2));
   state.successfulReleases = 0;
-  state.rateLimitStreak += 1;
+  state.pressureStreak += 1;
   const backoffMs = Math.min(
-    BASE_BACKOFF_MS * 2 ** Math.max(0, state.rateLimitStreak - 1),
+    BASE_BACKOFF_MS * 2 ** Math.max(0, state.pressureStreak - 1),
     MAX_BACKOFF_MS
   );
   state.resumeAt = Math.max(state.resumeAt, state.now() + backoffMs);
-  state.rateLimitBackoffs += 1;
+  if (outcome === "rate_limit") state.rateLimitBackoffs += 1;
+  else state.transientFailureBackoffs += 1;
   state.totalBackoffMs += backoffMs;
 }
 
@@ -147,7 +168,7 @@ function recoverConcurrency(state: AdaptiveState): void {
   state.successfulReleases += 1;
   if (state.successfulReleases < state.current) return;
   state.successfulReleases = 0;
-  state.rateLimitStreak = 0;
+  state.pressureStreak = 0;
   state.current = Math.min(state.maximum, state.current + 1);
 }
 
@@ -162,6 +183,7 @@ function snapshot(state: AdaptiveState): AdaptiveConcurrencySnapshot {
     current: state.current,
     active: state.active,
     rateLimitBackoffs: state.rateLimitBackoffs,
+    transientFailureBackoffs: state.transientFailureBackoffs,
     backoffMs: state.totalBackoffMs
   });
 }

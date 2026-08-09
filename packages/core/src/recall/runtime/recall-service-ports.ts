@@ -493,6 +493,9 @@ export interface RecallServiceDependencies {
   // Optional read-only structured query parser; absent means relation demand is unavailable.
   readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js")
     .QueryFactFrameExtractionPort;
+  readonly openSemanticFactorExtractionPort?: import(
+    "../../semantic/open-semantic-factor-extraction-port.js"
+  ).OpenSemanticFactorExtractionPort;
   // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora. Default off.
   readonly robustSourceRefParsing?: boolean;
   readonly generateRuntimeId?: () => string;

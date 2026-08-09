@@ -336,10 +336,7 @@ async function createHarness(
   return { router, memoryRepo, evidenceRepo };
 }
 
-async function compileRecallSignal(
-  source: string,
-  assertionNeedle: string
-): Promise<CandidateMemorySignal> {
+async function compileRecallSignal(source: string, assertionNeedle: string): Promise<CandidateMemorySignal> {
   const provider = new OfficialApiGardenProvider({
     apiKey: "sk-test",
     extractor: {
@@ -365,6 +362,12 @@ async function compileRecallSignal(
               contract_version: 2,
               kind: "assertion_catalog",
               assertion_id: assertion.assertion_id
+            },
+            semantic_factor_graph: {
+              schema_version: 1, source_kind: "evidence",
+              factors: [{ factor_id: "f0", surface: quote.slice(0, 64), semantic_identity: quote.slice(0, 64).toLowerCase() }],
+              variables: [], result_variable_ids: [],
+              propositions: [{ proposition_id: "p0", predicate_factor_id: "f0", arguments: [{ position: 0, binding_identity: "assertion", reference_kind: "factor", reference_id: "f0" }] }]
             }
           }] })
         };

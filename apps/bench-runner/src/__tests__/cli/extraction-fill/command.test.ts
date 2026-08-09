@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
+import { ExtractionFillTaskError } from
+  "../../../longmemeval/extraction/fill/fill-pool.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -61,6 +63,35 @@ it("routes a bare extraction-fill command through the cache-only runtime", async
     authorityReceiptPath: expect.anything()
   }));
   expect(stderr).not.toHaveBeenCalled();
+});
+
+it("renders a bounded cause summary for a terminal fill failure", async () => {
+  const signalSource = new FakeSignalSource();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const run = vi.fn(async () => {
+    throw new ExtractionFillTaskError({
+      retryClassification: "unknown",
+      retrySuccesses: 0,
+      rateLimitRetries: 0,
+      processedTurns: 6,
+      requestedTurns: 13_998,
+      cause: new Error("semantic graph validation failed")
+    });
+  });
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command(
+    { variant: "longmemeval_s" } as ParsedFlags,
+    { runExtractionFill: run, signalSource }
+  );
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining(
+    "cause=Error"
+  ));
 });
 
 it("rejects a predecessor receipt without its child extraction authority", async () => {

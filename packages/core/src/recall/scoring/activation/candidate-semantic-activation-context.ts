@@ -27,6 +27,7 @@ export type RecallCandidateActivationSupplementary = Readonly<Pick<
   RecallSupplementaryData,
   | "embeddingSimilarityScores"
   | "evidenceSemanticActivationsByCandidateKey"
+  | "openSemanticFactorCandidateActivationsByCandidateKey"
 >>;
 
 export function resolveRecallCandidateSemanticActivation(
@@ -38,6 +39,8 @@ export function resolveRecallCandidateSemanticActivation(
     buildRecallCandidateDedupeKey(candidate);
   const evidenceActivation = supplementaryData
     .evidenceSemanticActivationsByCandidateKey.get(candidateKey);
+  const openSemanticActivation = supplementaryData
+    .openSemanticFactorCandidateActivationsByCandidateKey?.get(candidateKey);
   return resolveCandidateSemanticActivation({
     scope: resolveCandidateSemanticActivationScope({
       originPlane: candidate.originPlane,
@@ -45,6 +48,7 @@ export function resolveRecallCandidateSemanticActivation(
       workspaceMemoryEligible: isWorkspaceMemoryCandidate(candidate)
     }),
     evidenceSemantic: evidenceActivation?.score,
+    openSemanticSolution: openSemanticActivation?.score,
     effectiveEmbedding: candidate.effectiveFactors.embedding_similarity,
     objectEmbedding: supplementaryData.embeddingSimilarityScores[
       candidate.entry.object_id

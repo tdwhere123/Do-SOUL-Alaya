@@ -13,6 +13,7 @@ import {
 } from "../../compile-seed/compile-seed-http.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { createAdaptiveConcurrencyController } from "../adaptive-concurrency.js";
+import type { AdaptiveConcurrencyReleaseOutcome } from "../adaptive-concurrency.js";
 import { EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD } from
   "../authority/receipt-limits.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
@@ -35,12 +36,14 @@ export class ExtractionFillTaskError extends Error {
     readonly rateLimitRetries: number;
     readonly processedTurns: number;
     readonly requestedTurns: number;
+    readonly cause: unknown;
   }) {
     super(
       `terminal task failure: retry_classification=${input.retryClassification} ` +
         `retry_successes=${input.retrySuccesses} ` +
         `rate_limit_retries=${input.rateLimitRetries} ` +
-        `processed_turns=${input.processedTurns}/${input.requestedTurns}`
+        `processed_turns=${input.processedTurns}/${input.requestedTurns}`,
+      { cause: input.cause }
     );
     this.name = "ExtractionFillTaskError";
     this.retryClassification = input.retryClassification;
@@ -71,7 +74,7 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
   const adaptive = createAdaptiveConcurrencyController({
     maximum: input.concurrency,
     initial: initialConcurrency,
-    minimumConcurrency: Math.min(8, initialConcurrency, input.concurrency)
+    minimumConcurrency: 1
   });
   let processed = 0;
   let toleratedFailures = 0;
@@ -80,13 +83,13 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
     await runBoundedPool(input.turns, input.concurrency, async (turn) => {
       scope.signal.throwIfAborted();
       await adaptive.acquire(scope.signal);
-      let rateLimited = false;
+      let releaseOutcome: AdaptiveConcurrencyReleaseOutcome = "neutral";
       try {
-        rateLimited = await extractTurn(
+        releaseOutcome = await extractTurn(
           input.extractor, turn, scope.signal, input.transport
-        ) > 0;
+        ) > 0 ? "rate_limit" : "success";
       } catch (cause) {
-        rateLimited = readRateLimitRetries(cause) > 0;
+        releaseOutcome = releaseOutcomeForFailure(cause);
         scope.signal.throwIfAborted();
         if (cause instanceof ExtractionCacheInvariantError) {
           scope.abort(cause);
@@ -98,6 +101,7 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
           input.log(
             `[extraction-fill] leaving provider failure for a later fill: ` +
               `retry_classification=${readTerminalClassification(cause)} ` +
+              `failure_reason=${classifyProviderFailureReason(cause)} ` +
               `processed_turns=${processed}/${input.requestedTurns}`
           );
           logProgress(
@@ -110,10 +114,10 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
         scope.abort(failure);
         throw failure;
       } finally {
-        const priorBackoffs = adaptive.snapshot().rateLimitBackoffs;
-        const concurrency = adaptive.release(rateLimited);
+        const prior = adaptive.snapshot();
+        const concurrency = adaptive.release(releaseOutcome);
         recordAdaptiveTelemetry(
-          input, concurrency.rateLimitBackoffs > priorBackoffs, concurrency
+          input, releaseOutcome, prior, concurrency
         );
       }
       processed += 1;
@@ -200,6 +204,26 @@ function readRateLimitRetries(cause: unknown): number {
   return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
+function releaseOutcomeForFailure(cause: unknown): AdaptiveConcurrencyReleaseOutcome {
+  if (readRateLimitRetries(cause) > 0) return "rate_limit";
+  if (hasResponseSchemaFailure(cause)) return "neutral";
+  const classification = readTerminalClassification(cause);
+  return classification === "failure_max_retries" || classification === "failure_timeout"
+    ? "transient_failure"
+    : "neutral";
+}
+
+function hasResponseSchemaFailure(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  const retry = (cause as { readonly benchRetry?: unknown }).benchRetry;
+  if (typeof retry !== "object" || retry === null) return false;
+  const failures = (retry as { readonly transportFailures?: unknown }).transportFailures;
+  return Array.isArray(failures) && failures.some((failure) =>
+    typeof failure === "object" && failure !== null &&
+      (failure as { readonly kind?: unknown }).kind === "response_schema_error"
+  );
+}
+
 function buildTaskFailure(
   input: ExtractionPoolInput,
   cause: unknown,
@@ -211,7 +235,8 @@ function buildTaskFailure(
     retrySuccesses: telemetry.retrySuccesses,
     rateLimitRetries: telemetry.rateLimitRetries,
     processedTurns,
-    requestedTurns: input.requestedTurns
+    requestedTurns: input.requestedTurns,
+    cause
   });
 }
 
@@ -222,6 +247,31 @@ function readTerminalClassification(cause: unknown): FillTaskRetryClassification
   const value = (retry as { readonly retryClassification?: unknown }).retryClassification;
   return value === "failure_max_retries" || value === "failure_non_retryable_4xx" ||
     value === "failure_timeout" || value === "failure_aborted" ? value : "unknown";
+}
+
+function classifyProviderFailureReason(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : "";
+  if (/semantic_factor_graph_missing/iu.test(message)) {
+    return "semantic_factor_graph_missing";
+  }
+  const graphInvalid = /semantic_factor_graph_invalid_[a-z_]+/iu.exec(message);
+  if (graphInvalid !== null) {
+    return graphInvalid[0]!.toLowerCase();
+  }
+  if (/signal_entry_invalid/iu.test(message)) return "signal_entry_invalid";
+  if (/no valid open semantic factor entries/iu.test(message)) {
+    return "no_valid_open_semantic_entries";
+  }
+  if (/unparseable and no element recoverable/iu.test(message)) {
+    return "unparseable_signals_envelope";
+  }
+  if (/signals array missing/iu.test(message)) return "signals_array_missing";
+  if (/semantic factor graph has unbound values/iu.test(message)) {
+    return "semantic_graph_unbound_values";
+  }
+  if (/output-token limit/iu.test(message)) return "output_token_limit";
+  if (/schema validation/iu.test(message)) return "provider_response_schema";
+  return "unclassified";
 }
 
 function isContinuableProviderFailure(cause: unknown): boolean {
@@ -247,16 +297,26 @@ function logProgress(
 
 function recordAdaptiveTelemetry(
   input: ExtractionPoolInput,
-  backoffApplied: boolean,
+  outcome: AdaptiveConcurrencyReleaseOutcome,
+  prior: ReturnType<ReturnType<typeof createAdaptiveConcurrencyController>["snapshot"]>,
   concurrency: ReturnType<ReturnType<typeof createAdaptiveConcurrencyController>["snapshot"]>
 ): void {
-  input.stats.adaptiveConcurrencyBackoffs = concurrency.rateLimitBackoffs;
+  const priorBackoffs = totalAdaptiveBackoffs(prior);
+  const currentBackoffs = totalAdaptiveBackoffs(concurrency);
+  input.stats.adaptiveConcurrencyBackoffs = currentBackoffs;
   input.stats.adaptiveConcurrencyBackoffMs = concurrency.backoffMs;
-  if (!backoffApplied) return;
-  input.log(
-    `[extraction-fill] rate-limit backoff: concurrency=${concurrency.current}/` +
-      `${concurrency.maximum} total_backoff_ms=${concurrency.backoffMs}`
-  );
+  if (currentBackoffs === priorBackoffs) return;
+  const prefix = outcome === "rate_limit"
+    ? "rate-limit backoff: "
+    : `provider-pressure backoff: cause=${outcome} `;
+  input.log(`[extraction-fill] ${prefix}concurrency=${concurrency.current}/` +
+    `${concurrency.maximum} total_backoff_ms=${concurrency.backoffMs}`);
+}
+
+function totalAdaptiveBackoffs(
+  snapshot: ReturnType<ReturnType<typeof createAdaptiveConcurrencyController>["snapshot"]>
+): number {
+  return snapshot.rateLimitBackoffs + snapshot.transientFailureBackoffs;
 }
 
 function createPoolAbortScope(external: AbortSignal | undefined): {

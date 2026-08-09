@@ -262,6 +262,37 @@ describe("extraction attempt ledger", () => {
     expect(() => ledger.reserveAttempt(key("4"))).toThrow(ExtractionAttemptLimitError);
   });
 
+  it("records a canonical deterministic shard without spending a provider attempt", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "d".repeat(64);
+    const cacheKey = key("0");
+    const ledger = openLedger(lineageDigest, 1);
+    await writeValidShard(cacheKey);
+
+    ledger.commitDeterministicShard(cacheKey);
+
+    expect(readLedger(lineageDigest)).toMatchObject({
+      attempts: 0,
+      successfulShards: 1,
+      successfulKeys: [cacheKey]
+    });
+  });
+
+  it("refuses to adopt provider output as a deterministic shard", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const ledger = openLedger("0".repeat(64), 1);
+    const cacheKey = key("1");
+    await writeShard(cacheKey, JSON.stringify({
+      model: cacheIdentity.model,
+      request_profile: cacheIdentity.requestProfile,
+      cache_key: cacheKey,
+      raw_json: '{"signals":[{}]}'
+    }));
+
+    expect(() => ledger.commitDeterministicShard(cacheKey)).toThrow(/canonical empty/u);
+    expect(ledger.snapshot()).toMatchObject({ attempts: 0, successfulShards: 0 });
+  });
+
   it("isolates a probe ledger from the fresh post-probe fill lineage", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
     const probe = openLedger("c".repeat(64), 1, 1, 1);

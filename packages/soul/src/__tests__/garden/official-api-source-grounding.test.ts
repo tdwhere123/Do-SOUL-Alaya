@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OfficialApiGardenProvider, type GardenCompileContext } from "../../garden/compute-provider.js";
 import { resolveSourceAssertion } from "../../garden/grounding/source-assertion.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CONTEXT: GardenCompileContext = {
   workspace_id: "workspace-source-grounding",
@@ -426,12 +427,12 @@ function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider
     extractor: {
       extract: async () => ({
         rawJson: JSON.stringify({
-          signals: [{
+          signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_claim",
             object_kind: "activity",
             confidence: 0.9,
             ...fields
-          }]
+          })]
         })
       })
     },

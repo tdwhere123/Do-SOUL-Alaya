@@ -1,6 +1,7 @@
 import {
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
+  type OpenSemanticFactorFormationCapture,
   type EvidenceSearchProjection,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
@@ -33,6 +34,8 @@ import {
 import { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
 import { prepareFactFrameFormationInsert } from
   "./fact-frame-formation/capture-store.js";
+import { prepareSemanticFactorFormationInsert } from
+  "./semantic-factor-formation/capture-store.js";
 import { EvidenceProjectionIntegrityError } from
   "./qualification/qualified-evidence-projection.js";
 import type {
@@ -135,13 +138,18 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   public async create(
     capsule: EvidenceCapsule,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
   ): Promise<Readonly<EvidenceCapsule>> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
     const formationInsert = prepareFactFrameFormationInsert(
       parsedCapsule,
       searchProjections,
       factFrameFormation
+    );
+    const semanticFormationInsert = prepareSemanticFactorFormationInsert(
+      parsedCapsule,
+      semanticFactorFormation
     );
 
     try {
@@ -178,6 +186,11 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         }
         if (formationInsert !== null) {
           this.statements.createFactFrameFormationStatement.run(...formationInsert);
+        }
+        if (semanticFormationInsert !== null) {
+          this.statements.createSemanticFactorFormationStatement.run(
+            ...semanticFormationInsert
+          );
         }
       })();
     } catch (error) {

@@ -3,6 +3,7 @@ import type {
   AssociativeFactKeyProjectionForm,
   EvidenceCapsule,
   EvidenceSearchProjection,
+  OpenSemanticFactorFormationCapture,
   FtsLaneId
 } from "@do-soul/alaya-protocol";
 
@@ -46,4 +47,5 @@ export interface RecallQualifiedEvidence {
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
   readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
+  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
 }

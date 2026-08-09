@@ -9,7 +9,7 @@ import { resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
-  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys,
   type ExtractionContentClosureEntry
 } from "../../compile-seed/compile-seed-cache.js";
 import { extractionContentClosureEntriesFromIndex } from
@@ -178,8 +178,7 @@ function assertRoundIdentity(
   systemPrompt: string
 ): void {
   const content = expected.round.content.trim();
-  // invariant: must match fill/seed computeExtractionTurnCacheKey (trusted-role digest)
-  const cacheKey = computeExtractionTurnCacheKey(
+  const cacheKeys = computeExtractionTurnCacheKeys(
     extraction.extraction_model,
     extraction.request_profile,
     systemPrompt,
@@ -192,14 +191,38 @@ function assertRoundIdentity(
       )
     }
   );
+  const shards = readRoundExtractionShards(actual);
+  const rawSignalCount = shards.reduce((sum, shard) => sum + shard.rawSignalCount, 0);
+  const draftCount = shards.reduce((sum, shard) => sum + shard.draftCount, 0);
+  const single = shards.length === 1 ? shards[0] : undefined;
   if (actual.sessionIndex !== expected.sessionIndex ||
       actual.roundIndex !== expected.roundIndex || actual.sessionId !== expected.sessionId ||
       actual.hasAnswer !== expected.round.hasAnswer || actual.contentSha256 !== sha256(content) ||
-      actual.extractionSource !== "cache" || actual.cacheKey !== cacheKey ||
-      actual.rawJsonSha256 === null || actual.rawSignalCount === null ||
-      actual.draftCount === null) {
+      actual.extractionSource !== "cache" || !sameStrings(
+        shards.map(({ cacheKey }) => cacheKey), cacheKeys
+      ) || actual.cacheKey !== (single?.cacheKey ?? null) ||
+      actual.rawJsonSha256 !== (single?.rawJsonSha256 ?? null) ||
+      actual.rawSignalCount !== rawSignalCount || actual.draftCount !== draftCount) {
     throw new Error("snapshot canonical seed round identity mismatch");
   }
+}
+
+function readRoundExtractionShards(
+  round: LongMemEvalSnapshotSeedRound
+): readonly NonNullable<LongMemEvalSnapshotSeedRound["extractionShards"]>[number][] {
+  if (round.extractionShards !== undefined) return round.extractionShards;
+  if (round.cacheKey === null || round.rawJsonSha256 === null ||
+      round.rawSignalCount === null || round.draftCount === null) return [];
+  return [{
+    cacheKey: round.cacheKey,
+    rawJsonSha256: round.rawJsonSha256,
+    rawSignalCount: round.rawSignalCount,
+    draftCount: round.draftCount
+  }];
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function assertRoundConservation(round: LongMemEvalSnapshotSeedRound): void {
@@ -262,19 +285,21 @@ function addClosureEntry(
   round: LongMemEvalSnapshotSeedRound,
   extraction: CompleteExtraction
 ): void {
-  const entry = {
-    cacheKey: round.cacheKey!,
-    model: extraction.extraction_model,
-    requestProfile: extraction.request_profile,
-    rawJsonSha256: round.rawJsonSha256!,
-    rawSignalCount: round.rawSignalCount!,
-    parsedDraftCount: round.draftCount!
-  };
-  const prior = closure.get(entry.cacheKey);
-  if (prior !== undefined && !isDeepStrictEqual(prior, entry)) {
-    throw new Error("snapshot seed ledger repeats a cache key with different content");
+  for (const shard of readRoundExtractionShards(round)) {
+    const entry = {
+      cacheKey: shard.cacheKey,
+      model: extraction.extraction_model,
+      requestProfile: extraction.request_profile,
+      rawJsonSha256: shard.rawJsonSha256,
+      rawSignalCount: shard.rawSignalCount,
+      parsedDraftCount: shard.draftCount
+    };
+    const prior = closure.get(entry.cacheKey);
+    if (prior !== undefined && !isDeepStrictEqual(prior, entry)) {
+      throw new Error("snapshot seed ledger repeats a cache key with different content");
+    }
+    closure.set(entry.cacheKey, entry);
   }
-  closure.set(entry.cacheKey, entry);
 }
 
 function assertCacheClosure(
@@ -410,7 +435,7 @@ function isVerifiedEmptyAnswerWipeRound(
 }
 
 function addTotals(totals: LedgerTotals, round: LongMemEvalSnapshotSeedRound): void {
-  totals.attempts += 1;
+  totals.attempts += readRoundExtractionShards(round).length;
   totals.factsProduced += round.factsProduced;
   totals.parseDropped += round.parseDropped;
   totals.compileOverflowDropped += round.compileOverflowDropped;

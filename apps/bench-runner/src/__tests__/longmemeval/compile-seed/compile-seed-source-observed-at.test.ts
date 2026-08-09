@@ -9,7 +9,10 @@ import {
   type CompileSeedDaemon
 } from "../../../longmemeval/compile-seed.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
-import { CREDENTIALLED_CONFIG } from "./compile-seed-fixture.js";
+import {
+  CREDENTIALLED_CONFIG,
+  withOpenSemanticFactorGraph
+} from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
 describe("compile seed source observation", () => {
@@ -74,7 +77,7 @@ describe("compile seed source observation", () => {
 
 function relativeSignalEnvelope(): string {
   return JSON.stringify({
-    signals: [{
+    signals: [withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "activity",
       confidence: 0.9,
@@ -92,7 +95,7 @@ function relativeSignalEnvelope(): string {
         kind: "assertion_catalog",
         assertion_id: 1
       }
-    }]
+    })]
   });
 }
 

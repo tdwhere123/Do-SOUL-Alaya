@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildOfficialApiExtractionRequest,
   OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
@@ -28,7 +30,8 @@ import {
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
   makeSeed,
-  signalsEnvelope
+  signalsEnvelope,
+  withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
@@ -102,7 +105,7 @@ describe("compile() signal-drop count is observable", () => {
                 matched_text: "Closing sentence",
                 distilled_fact: "Survivor two."
               }
-            ]
+            ].map(withOpenSemanticFactorGraph)
           })
         })
       })
@@ -152,7 +155,7 @@ describe("compile() signal-drop count is observable", () => {
       extractorFactory: () => ({
         extract: async () => ({
           // The model envelope carries 3 raw signals. The middle one is
-          // malformed — its signal_kind is not a recognised enum value —
+          // malformed — its confidence is not numeric —
           // so parseOfficialApiSignalEntry returns null and it never
           // reaches compile(). The two well-formed entries survive.
           rawJson: JSON.stringify({
@@ -165,9 +168,9 @@ describe("compile() signal-drop count is observable", () => {
                 distilled_fact: "Survivor one."
               },
               {
-                signal_kind: "not_a_real_signal_kind",
+                signal_kind: "potential_preference",
                 object_kind: "user_preference",
-                confidence: 0.9,
+                confidence: "not-a-confidence",
                 matched_text: "Malformed span",
                 distilled_fact: "Malformed entry."
               },
@@ -178,7 +181,7 @@ describe("compile() signal-drop count is observable", () => {
                 matched_text: "Closing span",
                 distilled_fact: "Survivor two."
               }
-            ]
+            ].map(withOpenSemanticFactorGraph)
           })
         })
       })
@@ -377,7 +380,7 @@ describe("extraction cache write is atomic", () => {
     // visibly partial. The write-tmp-then-rename discipline means the final
     // shard is always whole, parseable JSON with the complete raw_json.
     const bigRawJson = JSON.stringify({
-      signals: Array.from({ length: 200 }, (_, i) => ({
+      signals: Array.from({ length: 200 }, (_, i) => withOpenSemanticFactorGraph({
         signal_kind: "potential_preference",
         object_kind: "user_preference",
         confidence: 0.9,
@@ -401,7 +404,10 @@ describe("extraction cache write is atomic", () => {
       },
       cacheRoot
     });
-    await extractor.extract({ systemPrompt: "sys", userPrompt: "atomic-turn" });
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest("Atomic turn persists a complete shard.", [])
+    );
+    await extractor.extract({ systemPrompt: "sys", userPrompt });
 
     const cacheKey = createHash("sha256")
       .update("test-model", "utf8")
@@ -410,7 +416,7 @@ describe("extraction cache write is atomic", () => {
       .update("\u0000", "utf8")
       .update("sys", "utf8")
       .update("\u0000", "utf8")
-      .update("atomic-turn", "utf8")
+      .update(userPrompt, "utf8")
       .digest("hex");
     const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
     const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
@@ -437,7 +443,7 @@ describe("extraction cache write is atomic", () => {
     });
     const second = await reread.extract({
       systemPrompt: "sys",
-      userPrompt: "atomic-turn"
+      userPrompt
     });
     expect(second.rawJson).toBe(bigRawJson);
     expect(delegate.extract).toHaveBeenCalledTimes(1);

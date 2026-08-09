@@ -143,7 +143,11 @@ async function executeRecallEvalRun(
         (selectionBoundaryObserver) => recallEvalOneQuestion({
           daemon, question, turnIndex: i + 1,
           embeddingMode: context.daemonLaunch.embeddingMode,
-          recallOptions: { ...context.recallOptions, selectionBoundaryObserver },
+          recallOptions: recallOptionsForQuestion(
+            context,
+            question.question,
+            selectionBoundaryObserver
+          ),
           simulateReport: context.simulateReport,
           measurement: context.measurementForQuestion?.(question.questionId)
         })
@@ -162,6 +166,27 @@ async function executeRecallEvalRun(
   }
   throwLifecycleErrors("recall-eval daemon lifecycle failed", [primaryError, shutdownError]);
   return collected;
+}
+
+function recallOptionsForQuestion(
+  context: RecallEvalRunContext,
+  questionText: string,
+  selectionBoundaryObserver: BenchRecallOptions["selectionBoundaryObserver"]
+): BenchRecallOptions {
+  if (context.querySemanticFactorCache === null) {
+    return selectionBoundaryObserver === undefined
+      ? context.recallOptions
+      : { ...context.recallOptions, selectionBoundaryObserver };
+  }
+  const capture = context.querySemanticFactorCache.captures_by_source_text.get(questionText);
+  if (capture === undefined) {
+    throw new Error("query semantic factor cache lost a required query source");
+  }
+  return {
+    ...context.recallOptions,
+    ...(selectionBoundaryObserver === undefined ? {} : { selectionBoundaryObserver }),
+    querySemanticFactorFormationCapture: capture
+  };
 }
 
 async function writeRecallEvalArtifacts(

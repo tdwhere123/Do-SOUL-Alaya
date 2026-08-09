@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { auditOfficialApiSignalFormation } from "../../garden/compute-provider.js";
 import { resolveGardenSignalGrounding } from "../../garden/grounding/signal-source-grounding.js";
 import { createSignal } from "./materialization-router-fixture.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const SOURCE = "I moved to Berlin last year. I moved to Berlin today.";
 const MESSAGES = [{ message_id: "u1", role: "user" as const, content: SOURCE }];
@@ -14,7 +15,7 @@ const LOCATOR = {
 describe("official API locator quote commitment", () => {
   it("rejects a shared quote that cannot identify the selected assertion", () => {
     const formation = auditOfficialApiSignalFormation({
-      raw_json: JSON.stringify({ signals: [{
+      raw_json: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
         signal_kind: "potential_claim",
         object_kind: "activity",
         confidence: 0.9,
@@ -23,7 +24,7 @@ describe("official API locator quote commitment", () => {
         evidence_refs: [],
         source_memory_refs: [],
         source_locator: LOCATOR
-      }] }),
+      })] }),
       turn_content: SOURCE,
       turn_messages: MESSAGES,
       workspace_id: "workspace-quote",

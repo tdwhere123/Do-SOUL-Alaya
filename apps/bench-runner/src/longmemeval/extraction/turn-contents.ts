@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import {
+  buildOfficialApiExtractionRequests,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import {
   buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
   type LongMemEvalRoundMessage,
@@ -25,6 +29,7 @@ export function computeTrustedRoleCorpusDigest(
 
 export interface TurnContentKeySpace {
   readonly turnOccurrences: number;
+  readonly distinctExtractionRequestCount: number;
   readonly distinctTurnContents: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
 }
@@ -33,20 +38,23 @@ export function inspectTurnContentKeySpace(
   questions: readonly LongMemEvalQuestion[]
 ): TurnContentKeySpace {
   let turnOccurrences = 0;
+  let distinctExtractionRequestCount = 0;
   const distinct = new Map<string, LongMemEvalExtractionTurn>();
   for (const question of questions) {
     for (const [sessionIndex, session] of question.haystack_sessions.entries()) {
       for (const [roundIndex, round] of pairSessionIntoRounds(session).entries()) {
         const normalized = round.content.trim();
         if (normalized.length === 0) continue;
-        turnOccurrences += 1;
         const turnMessages = buildLongMemEvalRoundMessages(
           session,
           round,
           `${question.question_id}-fill-s${sessionIndex}-r${roundIndex}`
         );
-        const identity = `${normalized}\u0000${computeTrustedRoleCorpusDigest(turnMessages)}`;
+        const requests = buildOfficialApiExtractionRequests(normalized, turnMessages);
+        turnOccurrences += 1;
+        const identity = JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest));
         if (distinct.has(identity)) continue;
+        distinctExtractionRequestCount += requests.length;
         distinct.set(identity, Object.freeze({
           turnContent: normalized,
           turnMessages
@@ -57,6 +65,7 @@ export function inspectTurnContentKeySpace(
   const distinctExtractionTurns = Object.freeze([...distinct.values()]);
   return Object.freeze({
     turnOccurrences,
+    distinctExtractionRequestCount,
     distinctTurnContents: Object.freeze(distinctExtractionTurns.map((turn) => turn.turnContent)),
     distinctExtractionTurns
   });

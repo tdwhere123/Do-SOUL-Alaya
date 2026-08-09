@@ -10,7 +10,7 @@ import {
 } from "../../../longmemeval/compile-seed.js";
 import {
   cacheFilePath,
-  computeCacheKey
+  computeSourceTurnCacheKey
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
@@ -298,11 +298,11 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
   }
 
   function writeShard(rawJson: string): void {
-    const cacheKey = computeCacheKey(
+    const cacheKey = computeSourceTurnCacheKey(
       MODEL,
       REQUEST_PROFILE,
       OFFICIAL_API_SYSTEM_PROMPT,
-      TURN
+      { turnContent: TURN }
     );
     const filePath = cacheFilePath(cacheRoot, cacheKey);
     mkdirSync(dirname(filePath), { recursive: true });

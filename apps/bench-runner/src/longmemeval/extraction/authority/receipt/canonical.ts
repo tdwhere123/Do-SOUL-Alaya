@@ -13,6 +13,9 @@ export function canonicalAuthorityObservation(
     keyDigest: observation.keyDigest,
     dataset: { ...observation.dataset },
     extraction: { ...observation.extraction },
+    ...(observation.transport === undefined ? {} : {
+      transport: { ...observation.transport }
+    }),
     inventory: { ...observation.inventory }
   };
 }
@@ -34,6 +37,9 @@ export function canonicalAuthorityLineage(
       systemPromptSha256: observation.extraction.systemPromptSha256,
       cacheKeyAlgorithm: observation.extraction.cacheKeyAlgorithm
     },
+    ...(observation.transport === undefined ? {} : {
+      transport: { ...observation.transport }
+    }),
     expectedTurns: observation.inventory.expectedTurns
   };
 }
@@ -45,6 +51,9 @@ export function freezeAuthorityObservation(
     ...canonicalAuthorityObservation(observation),
     dataset: Object.freeze({ ...observation.dataset }),
     extraction: Object.freeze({ ...observation.extraction }),
+    ...(observation.transport === undefined ? {} : {
+      transport: Object.freeze({ ...observation.transport })
+    }),
     inventory: Object.freeze({ ...observation.inventory })
   });
 }

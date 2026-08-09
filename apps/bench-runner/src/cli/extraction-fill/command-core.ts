@@ -144,11 +144,18 @@ function renderAuthorityTelemetry(
 function handleExtractionFillError(error: unknown): number {
   if (error instanceof ExtractionFillInterruptedError) return error.exitCode;
   if (error instanceof ExtractionFillTaskError) {
-    process.stderr.write(`alaya-bench-runner extraction-fill: ${error.message}\n`);
+    process.stderr.write(
+      `alaya-bench-runner extraction-fill: ${error.message}${taskCauseSummary(error.cause)}\n`
+    );
     return error.exitCode;
   }
   process.stderr.write(
     `alaya-bench-runner extraction-fill: ${error instanceof Error ? error.message : String(error)}\n`
   );
   return 2;
+}
+
+function taskCauseSummary(cause: unknown): string {
+  if (!(cause instanceof Error)) return " cause=non_error";
+  return ` cause=${cause.name}`;
 }

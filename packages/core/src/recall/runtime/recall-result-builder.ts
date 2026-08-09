@@ -37,6 +37,14 @@ export function buildRecallResult(
       queryEntityExtraction: prepared.queryEntityExtraction,
       queryFactFrameExtraction:
         assessment.supplementaryData.queryFactFrameExtraction,
+      queryOpenSemanticFactorFormation:
+        assessment.supplementaryData.queryOpenSemanticFactorFormation,
+      openSemanticFactorCompatibilityTrace:
+        assessment.supplementaryData.openSemanticFactorCompatibilityTrace,
+      openSemanticFactorComposition:
+        assessment.supplementaryData.openSemanticFactorComposition,
+      openSemanticFactorActivation:
+        assessment.supplementaryData.openSemanticFactorActivation,
       retrievalFieldCaptures: assessment.retrievalFieldCaptures,
       retrievalFieldRefinementReceipts:
         assessment.supplementaryData.retrievalFieldRefinementReceipts,

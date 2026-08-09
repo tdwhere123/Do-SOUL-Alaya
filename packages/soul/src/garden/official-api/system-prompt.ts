@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 
 const ENVELOPE_PROMPT_PARTS = Object.freeze([
+  "You extract candidate durable memory signals from one bounded source assertion batch.",
+  'Return strict JSON only with shape {"signals":[...]} and no markdown.',
+  'Each non-empty signal must include "signal_kind", "object_kind", "confidence", "matched_text", "source_locator", and "semantic_factor_graph".',
+  'A signal without semantic_factor_graph is invalid. signal_kind and object_kind are routing metadata only; they are not semantic roles or an ontology.'
+]);
+
+const HISTORICAL_ENVELOPE_PROMPT_PARTS = Object.freeze([
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
   'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", "distilled_fact", and "source_locator".'
@@ -11,6 +18,22 @@ const CURRENT_CONFIDENCE_PROMPT_PARTS = Object.freeze([
 ]);
 
 const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
+  'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
+  'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
+  "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
+  "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
+  "For each signal, work quote-first, then distill.",
+  "First copy the shortest contiguous exact substring that contains the complete atomic assertion and every explicit local antecedent needed to resolve its references into matched_text; preserve capitalization, punctuation, spacing, and wording.",
+  "Then represent only what that quote entails in semantic_factor_graph.",
+  "Do not use surrounding text to add facts or guess unresolved references.",
+  "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
+  "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
+  "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
+  '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
+  'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.'
+]);
+
+const HISTORICAL_GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
   'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
   "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
@@ -30,13 +53,36 @@ const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".'
 ]);
 
-const CURRENT_FACT_FRAME_PROMPT_PARTS = Object.freeze([
-  'For every atomic fact that can be decomposed without inference, include "fact_frame":{"schema_version":1,"slots":[...]}.',
-  'Fact-frame slots use only roles "subject", "relation", "value", "qualifier", or "time"; include subject, relation, and value, keep source order, and copy every slot text as an exact non-overlapping substring of matched_text.',
-  "The fact frame is a routing index over the assertion, not a rewrite: omit it when exact source slots cannot express the fact."
+export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
+  'Each factor is {"factor_id":LOCAL_ID,"surface":EXACT_SUBSTRING,"semantic_identity":CANONICAL_TEXT}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
+  'semantic_identity is NFKC lowercase text: use a stable lemma for predicates and a stable source-supported name or phrase for other factors, so morphological variants such as "bought" and "buy" share an identity.',
+  "Keep a factor as a whole phrase when finer decomposition would add inference or lose its meaning.",
+  'Each proposition is {"proposition_id":LOCAL_ID,"predicate_factor_id":FACTOR_ID,"arguments":[...]}; every argument is {"position":N,"binding_identity":OPEN_NAME,"reference_kind":"factor" or "variable","reference_id":LOCAL_ID}.',
+  "Argument positions start at 0 and are contiguous. binding_identity is a concise, relation-local canonical name; it is open text, not a fixed role list.",
+  "Every factor must be used as a predicate or argument. Reuse one factor in multiple propositions when the same source phrase has the same meaning.",
+  "Do not emit alternative, explanatory, or otherwise unused factors; an unreferenced factor has no graph meaning and is discarded.",
+  "Do not emit character spans; the runtime grounds exact surfaces and derives spans.",
+  "Do not force facts into subject/relation/value/qualifier/time slots and do not invent entity, event, attribute, or answer-family categories."
+]);
+
+const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
+  'Use "semantic_factor_graph":{"schema_version":1,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
+  'For a single atomic assertion, a minimal valid graph still has one predicate factor, one argument factor, and one proposition; never omit the graph or replace it with fact_frame.',
+  'Example structure only: {"factors":[{"factor_id":"f0","surface":"A","semantic_identity":"a"},{"factor_id":"f1","surface":"B","semantic_identity":"b"}],"variables":[],"result_variable_ids":[],"propositions":[{"proposition_id":"p0","predicate_factor_id":"f0","arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]}]}.',
+  "Do not emit variables in evidence graphs.",
+  ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ]);
 
 const FINAL_PROMPT_PARTS = Object.freeze([
+  "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
+  "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
+  "Preserve relative-date meaning as source-supported factors; never infer an absolute date absent from the assertion.",
+  "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
+  "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals, but keep dependent propositions together in one graph.",
+  'Return {"signals":[]} when the catalog does not contain durable memory candidates.'
+]);
+
+const HISTORICAL_FINAL_PROMPT_PARTS = Object.freeze([
   'Include "canonical_entities": an array of at most 3 lowercase canonical names for the entities or subjects the distilled_fact is about, resolving pronouns and aliases so the SAME real-world entity always yields the SAME string across turns.',
   "Resolve pronouns and non-temporal references in distilled_fact using only the turn text.",
   "Preserve relative-date wording exactly; never infer an absolute date absent from the turn text.",
@@ -46,9 +92,9 @@ const FINAL_PROMPT_PARTS = Object.freeze([
 ]);
 
 const HISTORICAL_PROMPT_5EC274 = joinPrompt([
-  ...ENVELOPE_PROMPT_PARTS,
-  ...GROUNDED_SIGNAL_PROMPT_PARTS,
-  ...FINAL_PROMPT_PARTS
+  ...HISTORICAL_ENVELOPE_PROMPT_PARTS,
+  ...HISTORICAL_GROUNDED_SIGNAL_PROMPT_PARTS,
+  ...HISTORICAL_FINAL_PROMPT_PARTS
 ]);
 const HISTORICAL_PROMPT_5EC274_SHA256 =
   "5ec2740bd63923305b376b240d5a219383f3cbfe8a7d9198d504f7f8de542326";
@@ -57,7 +103,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...ENVELOPE_PROMPT_PARTS,
   ...CURRENT_CONFIDENCE_PROMPT_PARTS,
   ...GROUNDED_SIGNAL_PROMPT_PARTS,
-  ...CURRENT_FACT_FRAME_PROMPT_PARTS,
+  ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
   ...FINAL_PROMPT_PARTS
 ]);
 

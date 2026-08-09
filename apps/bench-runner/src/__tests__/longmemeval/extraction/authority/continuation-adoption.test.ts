@@ -12,6 +12,7 @@ import {
   addFailedPredecessorAttempt,
   cleanupContinuationRoots,
   createAndPersistGrandchild,
+  createAuthorityRenewalScenario,
   createContinuationScenario,
   model,
   persistScenario,
@@ -22,6 +23,30 @@ import {
 afterEach(cleanupContinuationRoots);
 
 describe("same-root continuation legacy adoption", () => {
+  it("adopts an output-cap renewal that intentionally reuses its target selection", () => {
+    const scenario = createAuthorityRenewalScenario();
+    persistScenario(scenario);
+
+    expect(adoptExistingContinuationChild({
+      cacheRoot: scenario.cacheRoot,
+      child: scenario.successorReceipt,
+      childTargetSelection: scenario.successorSelection
+    })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+  });
+
+  it("adopts a transport successor that intentionally reuses its target selection", () => {
+    const scenario = createAuthorityRenewalScenario(
+      512, 300, "https://provider-b.example/v1"
+    );
+    persistScenario(scenario);
+
+    expect(adoptExistingContinuationChild({
+      cacheRoot: scenario.cacheRoot,
+      child: scenario.successorReceipt,
+      childTargetSelection: scenario.successorSelection
+    })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+  });
+
   it("adopts a spent legacy child and permits the next claimed generation", () => {
     const scenario = createContinuationScenario();
     persistScenario(scenario);

@@ -13,16 +13,18 @@ afterEach(() => {
 describe("post-turn Garden source observation", () => {
   it("passes the verified delivery observation time to the provider", async () => {
     const compile = vi.fn(async () => []);
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    const observedAt = new Date(Date.now() - 120_000).toISOString();
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
       localCompile: compile
     });
     harness.enqueuePostTurnTask({
-      created_at: "2026-08-01T12:00:01.000Z",
+      created_at: createdAt,
       payload: createPostTurnPayload({
-        created_at: "2026-08-01T12:00:01.000Z",
+        created_at: createdAt,
         source_observation: {
-          observed_at: "2026-08-01T11:59:00.000Z",
+          observed_at: observedAt,
           authority: "verified_delivery_observation",
           source_event_id: "event-delivery-1"
         }
@@ -34,20 +36,21 @@ describe("post-turn Garden source observation", () => {
     expect(compile).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        source_observed_at: "2026-08-01T11:59:00.000Z"
+        source_observed_at: observedAt
       })
     );
   });
 
   it("omits source_observed_at when no verified delivery observation exists", async () => {
     const compile = vi.fn(async () => []);
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
       localCompile: compile
     });
     harness.enqueuePostTurnTask({
-      created_at: "2026-08-01T12:00:01.000Z",
-      payload: createPostTurnPayload({ created_at: undefined })
+      created_at: createdAt,
+      payload: createPostTurnPayload({ created_at: createdAt })
     });
 
     await harness.runScheduler();

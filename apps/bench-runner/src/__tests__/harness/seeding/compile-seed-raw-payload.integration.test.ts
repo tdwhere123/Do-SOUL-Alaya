@@ -13,6 +13,8 @@ import {
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import { extractSeedInputs } from "../../../longmemeval/compile-seed/compile-seed-extract.js";
 import type { CompileSeedExtractionStats } from "../../../longmemeval/compile-seed.js";
+import { withOpenSemanticFactorGraph } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 function longOfficialCompileInput(turnContent: string) {
   return {
@@ -150,7 +152,7 @@ describe("compile-seed raw payload projection", () => {
       extractor: {
         extract: async () => ({
           rawJson: JSON.stringify({
-            signals: [{
+            signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_preference",
               object_kind: "preference",
               confidence: 0.9,
@@ -168,7 +170,7 @@ describe("compile-seed raw payload projection", () => {
                 preference_polarity: "positive"
               },
               provider_diagnostics: "x".repeat(15_000)
-            }]
+            })]
           })
         })
       },

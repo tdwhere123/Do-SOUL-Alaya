@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import {
   SignalSource,
+  buildVerifiedUserAssertionReceiptPreimage,
+  formatVerifiedUserAssertionSourceHash,
   type GardenProviderKind
 } from "@do-soul/alaya-protocol";
 import {
@@ -62,6 +65,9 @@ function buildOfficialRawPayload(
     ...(input.temporalProjection === undefined ? {} : { temporal_projection: input.temporalProjection }),
     ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
     ...(draft.fact_frame === undefined ? {} : { fact_frame: draft.fact_frame }),
+    ...(draft.semantic_factor_graph === undefined
+      ? {}
+      : { semantic_factor_graph: draft.semantic_factor_graph }),
     ...(draft.canonical_entities === undefined || draft.canonical_entities.length === 0
       ? {}
       : { canonical_entities: draft.canonical_entities }),
@@ -76,10 +82,39 @@ function buildOfficialRawPayload(
     provider_kind: input.providerKind,
     extraction_reason: draft.reason ?? "official_api",
     turn_content_excerpt: buildTurnExcerpt(input.groundingSourceText, draft.matched_text),
-    full_turn_content: draft.source_locator !== undefined
-      ? input.groundingSourceText
-      : input.sourceGrounding.status === "grounded"
-        ? buildSourceVerificationText(input.normalizedTurnContent, input.sourceGrounding.source_assertion)
-        : clampFullTurnContent(input.normalizedTurnContent)
+    full_turn_content: buildBoundedSourceVerificationText(input),
+    ...buildVerifiedUserAssertionReceipt(input)
+  };
+}
+
+function buildBoundedSourceVerificationText(
+  input: Parameters<typeof buildOfficialCandidateSignal>[0]
+): string {
+  if (input.sourceGrounding.status === "grounded") {
+    return buildSourceVerificationText(
+      input.groundingSourceText,
+      input.sourceGrounding.source_assertion
+    );
+  }
+  return clampFullTurnContent(input.groundingSourceText);
+}
+
+function buildVerifiedUserAssertionReceipt(
+  input: Parameters<typeof buildOfficialCandidateSignal>[0]
+): Readonly<Record<string, string>> {
+  if (input.draft.source_locator === undefined || input.sourceGrounding.status !== "grounded") {
+    return {};
+  }
+  const digest = createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptPreimage({
+      workspace_id: input.workspaceId,
+      run_id: input.runId,
+      surface_id: input.surfaceId,
+      source_assertion: input.sourceGrounding.source_assertion,
+      source_corpus: input.groundingSourceText
+    }), "utf8")
+    .digest("hex");
+  return {
+    verified_user_assertion_source_hash: formatVerifiedUserAssertionSourceHash(digest)
   };
 }

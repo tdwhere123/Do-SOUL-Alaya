@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 export const EXTRACTION_FILL_VARIANT = "longmemeval_oracle";
 
@@ -32,6 +33,7 @@ export function registerExtractionFillHooks(
     await mkdir(pinnedMetaRoot, { recursive: true });
     vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+    vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid/v1");
     setRoots({ cacheRoot, dataDir, pinnedMetaRoot });
   });
 
@@ -69,6 +71,44 @@ export function buildExtractionFillQuestion(
     ],
     answer_session_ids: [`s-${id}`]
   };
+}
+
+export function setExtractionCredentialFixture(): void {
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:E0_TEST_GARDEN_KEY");
+  vi.stubEnv("E0_TEST_GARDEN_KEY", "test-key");
+}
+
+export function buildAuthorityQuestion(
+  id: string,
+  fact: string,
+  decoy: string
+): LongMemEvalQuestion {
+  return buildExtractionFillQuestion(
+    id,
+    `I completed ${fact}.`,
+    `I completed ${decoy}.`
+  );
+}
+
+export function buildGroundedSignalResponse(userPrompt: string): string {
+  const request = JSON.parse(userPrompt) as {
+    readonly source_assertions?: readonly {
+      readonly assertion_id: number;
+      readonly text: string;
+    }[];
+  };
+  const sourceAssertion = request.source_assertions?.[0];
+  const assertion = sourceAssertion?.text;
+  if (assertion === undefined) throw new Error("expected a source assertion");
+  const envelope = JSON.parse(
+    signalsEnvelope([{ distilled: assertion, matched: assertion }])
+  ) as { signals: Record<string, unknown>[] };
+  envelope.signals[0]!.source_locator = {
+    contract_version: 2,
+    kind: "assertion_catalog",
+    assertion_id: sourceAssertion.assertion_id
+  };
+  return JSON.stringify(envelope);
 }
 
 async function writeExtractionFillDataset(

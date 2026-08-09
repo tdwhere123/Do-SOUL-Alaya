@@ -27,13 +27,15 @@ import {
   classifyResponseFailureKind,
   markGardenHttpFailure,
   readGardenHttpAttemptTimedOut,
+  readGardenHttpFailureKind,
   settleGardenHttpAttemptFailure,
   toBenchTransportFailureAttempt
 } from "./http/garden-http-failure-attempt.js";
 import {
-  extractValidGardenHttpContent
+  buildGardenHttpAttemptResponse
 } from "./http/garden-http-response-validation.js";
 import { readBoundedGardenHttpErrorBody } from "./http/garden-http-error-body.js";
+import { resolveExtractionTransportRoute } from "../extraction/transport-route.js";
 export { extractContentFromChatCompletionBody } from "../extraction/chat-completion-response.js";
 
 export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
@@ -43,6 +45,7 @@ const EXTRACTION_WALL_CLOCK_TICK_MS = 5_000;
 // Keep bench retry parity with pi-mono-extractor.ts.
 const BENCH_HTTP_MAX_RETRIES = 3;
 const BENCH_HTTP_MAX_TIMEOUT_RETRIES = 1;
+const BENCH_HTTP_MAX_RESPONSE_SCHEMA_RETRIES = 1;
 const BENCH_HTTP_JITTER_BASE_MS = 250;
 const BENCH_HTTP_JITTER_MAX_MS = 1500;
 
@@ -111,22 +114,33 @@ async function extractGardenHttpSignals(
 ): Promise<GardenHttpExtractResult> {
   const apiKey = requireGardenApiKey(config);
   let useOutputTokenCeiling = false;
+  let responseSchemaRetryInstruction: string | null = null;
   const retry = await runGardenHttpRetryLoop({
     maxRetries: input.retryMode === "disabled" ? 0 : BENCH_HTTP_MAX_RETRIES,
     beforeAttempt: async () => {
       await input.onTransportAttempt?.(input.abortSignal);
       input.abortSignal?.throwIfAborted();
     },
-    runAttempt: (attempt) => runGardenHttpAttempt(
-      config,
-      apiKey,
-      deps,
-      withAttemptOutputTokenLimit(input, useOutputTokenCeiling),
-      attempt
-    ),
+    runAttempt: async (attempt) => {
+      const response = await runGardenHttpAttempt(
+        config,
+        apiKey,
+        deps,
+        withAttemptOutputTokenLimit(
+          withResponseSchemaRetryInstruction(input, responseSchemaRetryInstruction),
+          useOutputTokenCeiling
+        ),
+        attempt
+      );
+      validateGardenHttpRawJson(input, response.rawJson);
+      return response;
+    },
     isRateLimited: (error) => readStatusFromBenchError(error) === 429,
     decideRetry: (error, attempt, timeoutRetries, maxRetries) => {
       if (isOutputTokenTruncation(error)) useOutputTokenCeiling = true;
+      if (readGardenHttpFailureKind(error) === "response_schema_error") {
+        responseSchemaRetryInstruction = schemaRetryInstruction(error);
+      }
       return decideGardenHttpRetry(input, error, attempt, timeoutRetries, maxRetries);
     },
     waitForRetry: (attempt, rateLimitRetries) =>
@@ -137,6 +151,47 @@ async function extractGardenHttpSignals(
   return buildGardenHttpSuccess(
     retry.response, retry.attempt, retry.rateLimitRetries, retry.transportFailures
   );
+}
+
+function withResponseSchemaRetryInstruction(
+  input: GardenHttpExtractInput,
+  instruction: string | null
+): GardenHttpExtractInput {
+  if (instruction === null) return input;
+  return Object.freeze({
+    ...input,
+    userPrompt: `${input.userPrompt}\n\nSchema correction for this retry: ${instruction}`
+  });
+}
+
+function schemaRetryInstruction(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/semantic_factor_graph_invalid_arguments_too_few/iu.test(message)) {
+    return "Every semantic_factor_graph proposition must have at least one argument. " +
+      "Each argument needs contiguous position, binding_identity, reference_kind, and reference_id.";
+  }
+  if (/semantic_factor_graph_missing/iu.test(message)) {
+    return "Every emitted signal must include semantic_factor_graph; do not emit legacy fact_frame.";
+  }
+  if (/semantic_factor_graph_invalid_identity/iu.test(message)) {
+    return "Use NFKC lowercase semantic_identity and binding_identity text.";
+  }
+  if (/semantic_factor_graph_invalid_reference/iu.test(message)) {
+    return "Every predicate and argument reference_id must resolve to a declared factor or variable.";
+  }
+  return "Return only JSON that satisfies every required signal and semantic_factor_graph field.";
+}
+
+function validateGardenHttpRawJson(input: GardenHttpExtractInput, rawJson: string): void {
+  try {
+    input.validateRawJson?.(rawJson);
+  } catch (error) {
+    throw markGardenHttpFailure(error, {
+      kind: "response_schema_error",
+      phase: "response_schema",
+      rawBody: rawJson
+    });
+  }
 }
 
 function requireGardenApiKey(config: CompileSeedExtractionConfig): string {
@@ -231,7 +286,11 @@ async function runGardenHttpAttempt(
       () => attemptSettled,
       attempt
     );
-    return buildGardenHttpAttemptResponse(responseInspection, input.maxOutputTokens);
+    return buildGardenHttpAttemptResponse(
+      responseInspection,
+      input.maxOutputTokens,
+      input.validateRawJson === undefined ? "default_envelope" : "caller_owned"
+    );
   } catch (error) {
     throw settleGardenHttpAttemptFailure(
       error, settlement.hasTimedOut(), input.abortSignal?.aborted === true
@@ -262,20 +321,6 @@ async function inspectGardenHttpAttemptResponse(
       rawBody: bodyText
     });
   }
-}
-
-function buildGardenHttpAttemptResponse(
-  response: ChatCompletionResponseInspection,
-  maxOutputTokens: number | undefined
-) {
-  return {
-    rawJson: extractValidGardenHttpContent(response),
-    ...(response.usage === undefined ? {} : { usage: response.usage }),
-    responseMetadata: {
-      finishReason: response.finishReason,
-      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens })
-    }
-  };
 }
 
 function buildGardenHttpSuccess(
@@ -320,6 +365,10 @@ function decideGardenHttpRetry(
       retry: true,
       timeoutRetries: timeoutRetries + 1
     };
+  }
+  if (readGardenHttpFailureKind(error) === "response_schema_error") {
+    const retry = attempt < Math.min(maxRetries, BENCH_HTTP_MAX_RESPONSE_SCHEMA_RETRIES);
+    return { classification: "failure_max_retries", retry, timeoutRetries };
   }
   const classified = classifyBenchHttpError(error, readStatusFromBenchError(error));
   if (!classified.retryable || attempt >= maxRetries) {
@@ -390,8 +439,9 @@ type GardenHttpFetchInput = { readonly config: CompileSeedExtractionConfig; read
 async function fetchGardenHttpResponse(
   input: GardenHttpFetchInput
 ): Promise<Response> {
+  const transport = resolveExtractionTransportRoute(input.config);
   const fetchPromise = input.deps.fetch(
-    `${input.config.providerUrl}/chat/completions`,
+    `${transport.providerUrl}/chat/completions`,
     buildGardenHttpRequestInit(
       input.config,
       input.apiKey,

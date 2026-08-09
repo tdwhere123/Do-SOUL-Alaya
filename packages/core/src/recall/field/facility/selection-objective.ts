@@ -12,7 +12,7 @@ import {
   type CoverageSelectionSupplementary
 } from "../../delivery/coverage-selection.js";
 import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
-import { collectRelationDemandTermsFromFactFrameCapture } from
+import { collectFactFrameSemanticFactorsFromCapture } from
   "../query-attribution/query-fact-frame-attribution-producer.js";
 import {
   ATTRIBUTED_FACILITY_COVERAGE_OPERATOR_ID,
@@ -146,15 +146,14 @@ function materializeAttributedFacilityObjective<
   const demand = materializeAttributedQueryFacilityDemand({
     query_demand: compileRecallQueryDemand(queryProbes, {
       soughtFacets: supplementaryData.querySoughtFacets,
-      sourceExactLexicalTerms:
-        supplementaryData.queryFactFrameExtraction === undefined
-          ? []
-          : collectRelationDemandTermsFromFactFrameCapture(
-              supplementaryData.queryFactFrameExtraction
-            )
     }),
     weights: config.demand_weights,
-    field_attribution: supplementaryData.queryFieldAttribution
+    semantic_factors:
+      supplementaryData.queryFactFrameExtraction === undefined
+        ? []
+        : collectFactFrameSemanticFactorsFromCapture(
+            supplementaryData.queryFactFrameExtraction
+          )
   });
   return createAttributedFacilityCoverageObjective<T>({
     base_relevance_weight: config.base_relevance_weight,

@@ -4,8 +4,8 @@ import {
 } from "../extraction/cache/extraction-cache-manifest.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import {
-  computeExtractionTurnCacheKey,
-  computeSourceTurnCacheKey,
+  computeExtractionTurnCacheKeys,
+  computeSourceTurnCacheKeys,
   inspectCachedExtraction
 } from "./compile-seed-cache.js";
 import {
@@ -388,10 +388,10 @@ function inspectRequiredTurnFixtures(
   let missing = 0;
   let invalid = 0;
   const keys = extractionTurns === undefined
-    ? turnContents.map((turnContent) => computeSourceTurnCacheKey(
+    ? turnContents.flatMap((turnContent) => computeSourceTurnCacheKeys(
       model, requestProfile, systemPrompt, { turnContent }
     ))
-    : extractionTurns.map((turn) => computeExtractionTurnCacheKey(
+    : extractionTurns.flatMap((turn) => computeExtractionTurnCacheKeys(
       model, requestProfile, systemPrompt, turn
     ));
   for (const cacheKey of keys) {

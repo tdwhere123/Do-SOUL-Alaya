@@ -34,6 +34,12 @@ const DirectEvidenceBindingSchema = z.object({
   signalId: NonEmptyStringSchema,
   evidenceId: NonEmptyStringSchema
 }).strict();
+const ExtractionShardSchema = z.object({
+  cacheKey: Sha256Schema,
+  rawJsonSha256: Sha256Schema,
+  rawSignalCount: CountSchema,
+  draftCount: CountSchema
+}).strict();
 const SeedRoundSchema = z.object({
   sessionIndex: CountSchema,
   roundIndex: CountSchema,
@@ -45,6 +51,7 @@ const SeedRoundSchema = z.object({
   rawJsonSha256: Sha256Schema.nullable(),
   rawSignalCount: CountSchema.nullable(),
   draftCount: CountSchema.nullable(),
+  extractionShards: z.array(ExtractionShardSchema).nonempty().optional(),
   factsProduced: CountSchema,
   parseDropped: CountSchema,
   compileOverflowDropped: CountSchema,

@@ -1,5 +1,7 @@
 import type {
   RecallPolicy,
+  OpenSemanticFactorFormationCapture,
+  OpenSemanticFactorFormationProposal,
   SoulRecallHostContext,
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
@@ -27,6 +29,8 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
+  readonly querySemanticFactorFormationProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
@@ -47,6 +51,8 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
+  readonly querySemanticFactorFormationProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
@@ -69,6 +75,12 @@ export async function invokeBoundRecall<TRecallResult>(
     ...(params.timeFilter === undefined ? {} : { timeFilter: params.timeFilter }),
     ...(params.hostContext === undefined ? {} : { hostContext: params.hostContext }),
     ...(params.referenceTime === undefined ? {} : { referenceTime: params.referenceTime }),
+    ...(params.querySemanticFactorFormationProposal === undefined ? {} : {
+      querySemanticFactorFormationProposal: params.querySemanticFactorFormationProposal
+    }),
+    ...(params.querySemanticFactorFormationCapture === undefined ? {} : {
+      querySemanticFactorFormationCapture: params.querySemanticFactorFormationCapture
+    }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
     ...(params.selectionBoundaryObserver === undefined
       ? {}

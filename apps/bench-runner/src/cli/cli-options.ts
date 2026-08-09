@@ -69,6 +69,7 @@ export interface ParsedFlags {
   readonly warmDerivedSnapshotReceipt?: string;
   readonly factFrameRetrofitLedger?: string;
   readonly seedExtractionSystemPrompt?: string;
+  readonly querySemanticFactorCache?: string;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
@@ -117,6 +118,7 @@ export interface ParsedFlagsState {
   warmDerivedSnapshotReceipt?: string;
   factFrameRetrofitLedger?: string;
   seedExtractionSystemPrompt?: string;
+  querySemanticFactorCache?: string;
   qa: boolean;
   edgePlane: boolean;
   expectedReconciliationBasis?: EffectiveReconciliationBasis;
@@ -130,6 +132,7 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
   assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
+  assertFlagAtMostOnce(args, "--query-semantic-factor-cache");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -516,6 +519,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     warmDerivedSnapshotReceipt: state.warmDerivedSnapshotReceipt,
     factFrameRetrofitLedger: state.factFrameRetrofitLedger,
     seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,
+    querySemanticFactorCache: state.querySemanticFactorCache,
     qa: state.qa,
     edgePlane: state.edgePlane,
     expectedReconciliationBasis: state.expectedReconciliationBasis

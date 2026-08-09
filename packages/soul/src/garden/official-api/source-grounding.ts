@@ -1,4 +1,7 @@
-import { groundAssociativeFactFrame } from "@do-soul/alaya-protocol";
+import {
+  groundAssociativeFactFrame,
+  groundOpenSemanticFactorGraph
+} from "@do-soul/alaya-protocol";
 import type {
   OfficialApiPreferenceProfileDraft,
   OfficialApiSignalDraft
@@ -20,6 +23,7 @@ interface OfficialApiSourceGroundingProposal {
   readonly proposed_canonical_entities?: readonly string[];
   readonly proposed_preference_profile?: OfficialApiPreferenceProfileDraft;
   readonly proposed_fact_frame?: OfficialApiSignalDraft["fact_frame"];
+  readonly proposed_semantic_factor_graph?: OfficialApiSignalDraft["semantic_factor_graph"];
   readonly reasons: readonly string[];
 }
 
@@ -61,8 +65,17 @@ export function groundOfficialApiDraft(
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
   const preferenceProfile = preferenceGrounding.preferenceProfile;
   const factFrame = groundAssociativeFactFrame(draft.fact_frame, assertion) ?? undefined;
+  const semanticFactorGraph = groundEvidenceSemanticFactorGraph(
+    draft.semantic_factor_graph,
+    assertion
+  );
   const reasons = groundingReasons(
-    draft, assertion, canonicalEntities, preferenceProfile, factFrame
+    draft,
+    assertion,
+    canonicalEntities,
+    preferenceProfile,
+    factFrame,
+    semanticFactorGraph
   );
   const {
     matched_text: _matchedText,
@@ -70,6 +83,7 @@ export function groundOfficialApiDraft(
     canonical_entities: _canonicalEntities,
     preference_profile: _preferenceProfile,
     fact_frame: _factFrame,
+    semantic_factor_graph: _semanticFactorGraph,
     ...rest
   } = draft;
   const groundedDraft: OfficialApiSignalDraft = Object.freeze({
@@ -78,7 +92,10 @@ export function groundOfficialApiDraft(
     distilled_fact: assertion,
     ...(canonicalEntities.length === 0 ? {} : { canonical_entities: canonicalEntities }),
     ...(preferenceProfile === undefined ? {} : { preference_profile: preferenceProfile }),
-    ...(factFrame === undefined ? {} : { fact_frame: factFrame })
+    ...(factFrame === undefined ? {} : { fact_frame: factFrame }),
+    ...(semanticFactorGraph === undefined
+      ? {}
+      : { semantic_factor_graph: semanticFactorGraph })
   });
   return {
     status: "grounded",
@@ -93,6 +110,9 @@ export function groundOfficialApiDraft(
       ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
       ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
       ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
+      ...(draft.semantic_factor_graph === undefined
+        ? {}
+        : { proposed_semantic_factor_graph: draft.semantic_factor_graph }),
       reasons: Object.freeze(reasons)
     })
   };
@@ -115,6 +135,7 @@ function rejectedGrounding(
     preference_profile: _preferenceProfile,
     temporal_projection: _temporalProjection,
     fact_frame: _factFrame,
+    semantic_factor_graph: _semanticFactorGraph,
     ...safeDraft
   } = draft;
   return {
@@ -129,6 +150,9 @@ function rejectedGrounding(
       ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
       ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
       ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
+      ...(draft.semantic_factor_graph === undefined
+        ? {}
+        : { proposed_semantic_factor_graph: draft.semantic_factor_graph }),
       reasons: Object.freeze([reason])
     })
   };
@@ -139,7 +163,8 @@ function groundingReasons(
   assertion: string,
   canonicalEntities: readonly string[],
   preferenceProfile: OfficialApiPreferenceProfileDraft | undefined,
-  factFrame: OfficialApiSignalDraft["fact_frame"]
+  factFrame: OfficialApiSignalDraft["fact_frame"],
+  semanticFactorGraph: OfficialApiSignalDraft["semantic_factor_graph"]
 ): readonly string[] {
   const reasons: string[] = [];
   if (draft.matched_text.trim() !== assertion) reasons.push("matched_text_expanded_to_source_assertion");
@@ -157,7 +182,18 @@ function groundingReasons(
   if (draft.fact_frame !== undefined && factFrame === undefined) {
     reasons.push("proposed_fact_frame_not_source_grounded");
   }
+  if (draft.semantic_factor_graph !== undefined && semanticFactorGraph === undefined) {
+    reasons.push("proposed_semantic_factor_graph_not_source_grounded");
+  }
   return reasons;
+}
+
+function groundEvidenceSemanticFactorGraph(
+  proposal: OfficialApiSignalDraft["semantic_factor_graph"],
+  assertion: string
+): OfficialApiSignalDraft["semantic_factor_graph"] {
+  const graph = groundOpenSemanticFactorGraph(proposal, assertion);
+  return graph?.source_kind === "evidence" ? proposal : undefined;
 }
 
 function groundCanonicalEntities(

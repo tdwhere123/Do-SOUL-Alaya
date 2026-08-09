@@ -4,6 +4,7 @@ import type {
   EvidenceCapsule,
   EvidenceSearchProjection,
   FtsLaneId,
+  OpenSemanticFactorFormationCapture,
   StorageTier as StorageTierType
 } from "@do-soul/alaya-protocol";
 
@@ -37,6 +38,7 @@ export type RecallQualifiedEvidence = Readonly<{
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
   readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
+  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
 }>;
 
 export type KeywordSearchLaneId = FtsLaneId;

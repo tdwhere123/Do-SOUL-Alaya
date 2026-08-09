@@ -29,13 +29,12 @@ import {
   RecallAdmissionAttemptDiagnosticSchema,
   RecallEvidenceProjectionMatchReceiptSchema
 } from "./candidate-projection-diagnostics-schema.js";
-import {
-  RecallFieldRefinementStopCertificateSchema,
-  RecallFiniteFieldChannelCaptureSchema,
-  RecallQueryEntityExtractionCaptureSchema,
-  RecallQueryFactFrameExtractionCaptureSchema,
-  RecallRetrievalFieldRefinementReceiptSchema
-} from "./field-capture-schema.js";
+import { RecallFieldRefinementStopCertificateSchema, RecallFiniteFieldChannelCaptureSchema,
+  RecallQueryEntityExtractionCaptureSchema, RecallQueryFactFrameExtractionCaptureSchema,
+  RecallRetrievalFieldRefinementReceiptSchema } from "./field-capture-schema.js";
+import { OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompatibilityTraceSchema,
+  OpenSemanticFactorCompositionReceiptSchema, OpenSemanticFactorFormationCaptureSchema } from
+  "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -259,12 +258,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .strict()
   .readonly();
 
-// invariant: mirrors RecallTokenEconomy from
-// packages/core/src/recall/recall-service-types.ts. The bench harness captures
-// these per-recall figures so the longmemeval / locomo KPI summaries can
-// aggregate p50 / p95 / mean across questions. Measure-only — no field
-// gates ranking or admission.
-// see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
+// Mirrors core token-economy telemetry for measure-only run aggregation.
 export const RecallTokenEconomySchema = z
   .object({
     delivered_context_tokens_estimate: z.number().int().nonnegative(),
@@ -337,6 +331,14 @@ export const BenchRecallDiagnosticsSchema = z
     query_entity_extraction: RecallQueryEntityExtractionCaptureSchema.optional(),
     query_fact_frame_extraction:
       RecallQueryFactFrameExtractionCaptureSchema.optional(),
+    query_open_semantic_factor_formation:
+      OpenSemanticFactorFormationCaptureSchema.optional(),
+    open_semantic_factor_compatibility_trace:
+      OpenSemanticFactorCompatibilityTraceSchema.optional(),
+    open_semantic_factor_composition:
+      OpenSemanticFactorCompositionReceiptSchema.optional(),
+    open_semantic_factor_activation:
+      OpenSemanticFactorActivationReceiptSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),
@@ -392,7 +394,6 @@ export const BenchRecallDiagnosticsSchema = z
             object_id: z.string().min(1),
             object_kind: RecallDiagnosticObjectKindSchema,
             origin_plane: RecallOriginPlaneSchema,
-            // Mirrors RecallFusionBreakdown.facet_overlap from core diagnostics.
             facet_overlap: z.number().int().nonnegative(),
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),
@@ -414,19 +415,9 @@ export const BenchRecallDiagnosticsSchema = z
     candidates: z.array(RecallCandidateDiagnosticSchema).readonly(),
     fine_assessment_pruned_candidates:
       z.array(FineAssessmentPrunedCandidateDiagnosticSchema).readonly(),
-    // Optional only for legacy/malformed diagnostics. Current RecallService
-    // emits token_economy on normal and degraded recall paths, and the bench
-    // aggregator drops absent blocks instead of admitting a `{0,0,0,0,0}`
-    // record that biases run-level mean / p50 distributions downward.
-    // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
-    // packages/core/src/recall/recall-service.ts (call site), and packages/core/src/recall/recall-service-types.ts
-    // (RecallDiagnostics.token_economy doc-comment).
+    // Optional for legacy diagnostics; absent telemetry is dropped from aggregates.
     token_economy: RecallTokenEconomySchema.optional(),
-    // Optional wall-clock per recall phase, mirrored from
-    // packages/core/src/recall/recall-service-types.ts RecallDiagnostics.
-    // Bench keeps it as opaque numeric telemetry for offline bottleneck
-    // localization and must accept new phase keys without widening the rest of
-    // the diagnostics contract.
+    // Phase names remain open while the enclosing diagnostics contract stays strict.
     phase_latency_ms: z.record(z.string(), z.number().nonnegative()).readonly().optional()
   })
   .strict()

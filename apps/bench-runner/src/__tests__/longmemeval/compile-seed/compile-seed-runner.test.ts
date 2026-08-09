@@ -26,7 +26,8 @@ import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
-  signalsEnvelope
+  signalsEnvelope,
+  withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
@@ -130,7 +131,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("preserves trusted User and Assistant roles for source-locator extraction", async () => {
+  it("preserves trusted User assertions without exposing Assistant text", async () => {
     let userPrompt: Record<string, unknown> | null = null;
     const seeded: BenchSignalSeedInput[] = [];
     const runner = createCompileSeedRunner({
@@ -140,7 +141,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           userPrompt = JSON.parse(input.userPrompt) as Record<string, unknown>;
-          return { rawJson: JSON.stringify({ signals: [{
+          return { rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_claim",
             object_kind: "memory_entry",
             confidence: 0.9,
@@ -151,7 +152,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
               kind: "assertion_catalog",
               assertion_id: 1
             }
-          }] }) };
+          })] }) };
         }
       })
     });
@@ -171,9 +172,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       ...SEED_CONTEXT
     });
 
-    expect(userPrompt?.source_spans).toEqual([
-      { span_id: 1, role: "user", text: "User: I moved to Berlin." },
-      { span_id: 2, role: "assistant", text: "Assistant: You moved to Berlin." }
+    expect(userPrompt?.source_assertions).toEqual([
+      { assertion_id: 1, text: "User: I moved to Berlin." }
     ]);
     expect(result.seeds).toHaveLength(1);
     expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");

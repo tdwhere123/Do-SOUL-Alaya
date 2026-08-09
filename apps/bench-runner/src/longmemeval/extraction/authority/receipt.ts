@@ -16,6 +16,7 @@ import {
   type ExtractionAuthorityReceiptLimits,
   type ExtractionAuthorityReceiptPrice
 } from "./receipt-limits.js";
+import { assertExtractionAuthorityRenewal } from "./continuation/renewal.js";
 import {
   assertExtractionRepairScope,
   isExtractionRepairScope,
@@ -67,6 +68,10 @@ export interface ExtractionAuthorityObservation {
     readonly cacheKeyAlgorithm: string;
     readonly manifestSha256: string | null;
     readonly rawContentClosureSha256: string | null;
+  };
+  readonly transport?: {
+    readonly providerUrl: string;
+    readonly model: string;
   };
   readonly inventory: {
     readonly expectedTurns: number;
@@ -128,11 +133,10 @@ export interface ExtractionAuthorityReceiptInput {
   readonly now?: Date;
 }
 
-export function createExtractionAuthorityReceipt(
-  input: ExtractionAuthorityReceiptInput
-): ExtractionAuthorityReceipt {
+export function createExtractionAuthorityReceipt(input: ExtractionAuthorityReceiptInput): ExtractionAuthorityReceipt {
   assertReceiptCreationInput(input);
   const unsigned = buildUnsignedReceipt(input);
+  assertExtractionAuthorityRenewal(unsigned);
   return Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });
 }
 
@@ -394,6 +398,7 @@ function isObservation(value: unknown): value is ExtractionAuthorityObservation 
   const dataset = observation.dataset;
   const extraction = observation.extraction;
   const inventory = observation.inventory;
+  const transport = observation.transport;
   return isAuthorityRevision(observation.revision) && isDigest(observation.commandDigest) &&
     isDigest(observation.selectionDigest) && isDigest(observation.keyDigest) &&
     isObject(dataset) && typeof dataset.variant === "string" &&
@@ -407,6 +412,10 @@ function isObservation(value: unknown): value is ExtractionAuthorityObservation 
     typeof extraction.cacheKeyAlgorithm === "string" &&
     (extraction.manifestSha256 === null || isDigest(extraction.manifestSha256)) &&
     (extraction.rawContentClosureSha256 === null || isDigest(extraction.rawContentClosureSha256)) &&
+    (transport === undefined ||
+      (isObject(transport) && typeof transport.providerUrl === "string" &&
+       transport.providerUrl.length > 0 && typeof transport.model === "string" &&
+       transport.model.length > 0)) &&
     isObject(inventory) && isNonNegativeSafeInteger(inventory.expectedTurns) &&
     isNonNegativeSafeInteger(inventory.validTurns) && isNonNegativeSafeInteger(inventory.missingTurns) &&
     isNonNegativeSafeInteger(inventory.invalidTurns) && isNonNegativeSafeInteger(inventory.orphanTurns) &&

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { preflightExtractionCache } from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { writeExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
@@ -126,11 +126,11 @@ describe("preflightExtractionCache", () => {
   it("rejects an invalid required fixture inside a consumer subwindow", () => {
     const invalidTurn = "invalid subwindow turn";
     const cachedTurn = "other global turn";
-    const invalidKey = computeCacheKey(
+    const invalidKey = computeSourceTurnCacheKey(
       CONFIG.model,
       CONFIG.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
-      invalidTurn
+      { turnContent: invalidTurn }
     );
     mkdirSync(join(cacheRoot, invalidKey.slice(0, 2)), { recursive: true });
     writeFileSync(cacheFilePath(cacheRoot, invalidKey), "{torn", "utf8");
@@ -187,11 +187,11 @@ describe("preflightExtractionCache", () => {
 
   it("rejects a corrupt required fixture instead of trusting its path", () => {
     const turnContent = "required turn";
-    const cacheKey = computeCacheKey(
+    const cacheKey = computeSourceTurnCacheKey(
       CONFIG.model,
       CONFIG.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
-      turnContent
+      { turnContent }
     );
     mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
     writeFileSync(cacheFilePath(cacheRoot, cacheKey), "{torn", "utf8");
@@ -224,11 +224,11 @@ describe("preflightExtractionCache", () => {
     ["raw_json", { model: CONFIG.model, raw_json: 7 }]
   ])("validates required fixture %s", (_field, override) => {
     const turnContent = `required-${_field}`;
-    const cacheKey = computeCacheKey(
+    const cacheKey = computeSourceTurnCacheKey(
       CONFIG.model,
       CONFIG.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
-      turnContent
+      { turnContent }
     );
     mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
     const fixture: Record<string, unknown> = {

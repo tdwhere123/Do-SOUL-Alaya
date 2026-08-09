@@ -6,10 +6,13 @@ import { materializeAttributedFacilityMatches } from
   "../../../recall/field/facility/match-materialization.js";
 import { regularRelationInflectionEquivalent } from
   "../../../recall/field/facility/relation-inflection-alignment.js";
-import { createRecallQueryFieldAttributionReceipt } from
-  "../../../recall/field/query-attribution/query-field-attribution.js";
-import { materializeAttributedQueryFacilityDemand } from
-  "../../../recall/field/query-facility-demand.js";
+import {
+  ATTRIBUTED_QUERY_FACILITY_DEMAND_OPERATOR_ID,
+  materializeAttributedQueryFacilityDemand,
+  type AttributedQueryFacilityDemandReceipt
+} from "../../../recall/field/query-facility-demand.js";
+import { projectFactFrameSemanticFactors } from
+  "../../../recall/field/fact-frame-semantic-factors.js";
 import { digestRecallFieldIdentity } from
   "../../../recall/field/field-identity.js";
 import type { RecallQueryDemand } from
@@ -23,27 +26,13 @@ describe("attributed facility match materialization", () => {
 
   it("binds demand only to source-exact slots present in a captured form", () => {
     const demand = queryDemand();
-    const attribution = createRecallQueryFieldAttributionReceipt({
-      producer_operator_id: "fixture_query_field_roles_v1",
-      producer_capture_digest: digestRecallFieldIdentity({ fixture: "roles" }),
-      query_demand: demand,
-      attributions: [
-        {
-          query_atom_id: "lexical_term:bought",
-          role: "relation",
-          source_spans: [[0, 6]]
-        },
-        {
-          query_atom_id: "lexical_term:ikea",
-          role: "entity",
-          source_spans: [[7, 11]]
-        }
-      ]
-    });
     const facilityDemand = materializeAttributedQueryFacilityDemand({
       query_demand: demand,
-      field_attribution: attribution,
-      weights: facilityWeights()
+      weights: facilityWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "relation", text: "bought" },
+        { role: "qualifier", text: "IKEA" }
+      ], 0)
     });
 
     const matches = materializeAttributedFacilityMatches({
@@ -57,7 +46,7 @@ describe("attributed facility match materialization", () => {
 
     expect(matches).toEqual([
       expect.objectContaining({
-        demand_atom_id: "facility:entity:lexical_term:ikea",
+        demand_atom_id: "facility:entity:frame:0:slot:1:qualifier:ikea",
         coverage_atom_id: "fact:evidence-a:7",
         projection_form_keys: [
           "complete",
@@ -75,7 +64,7 @@ describe("attributed facility match materialization", () => {
         projection_form_keys: []
       }),
       expect.objectContaining({
-        demand_atom_id: "facility:relation:lexical_term:bought",
+        demand_atom_id: "facility:relation:frame:0:slot:0:relation:bought",
         coverage_atom_id: "fact:evidence-a:7",
         projection_form_keys: ["complete"]
       })
@@ -84,27 +73,13 @@ describe("attributed facility match materialization", () => {
 
   it("does not promote substring or omitted-slot matches", () => {
     const demand = queryDemand(["graduate", "bought"]);
-    const attribution = createRecallQueryFieldAttributionReceipt({
-      producer_operator_id: "fixture_query_field_roles_v1",
-      producer_capture_digest: digestRecallFieldIdentity({ fixture: "negative" }),
-      query_demand: demand,
-      attributions: [
-        {
-          query_atom_id: "lexical_term:graduate",
-          role: "entity",
-          source_spans: [[0, 8]]
-        },
-        {
-          query_atom_id: "lexical_term:bought",
-          role: "relation",
-          source_spans: [[9, 15]]
-        }
-      ]
-    });
     const facilityDemand = materializeAttributedQueryFacilityDemand({
       query_demand: demand,
-      field_attribution: attribution,
-      weights: facilityWeights()
+      weights: facilityWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "subject", text: "graduate" },
+        { role: "relation", text: "bought" }
+      ], 0)
     });
     const coverage = coverageReceipt({ onlyRelationOmitted: true });
 
@@ -121,20 +96,12 @@ describe("attributed facility match materialization", () => {
 
   it("uses regular plural alignment only with a captured porter lane", () => {
     const demand = queryDemand(["trips"]);
-    const attribution = createRecallQueryFieldAttributionReceipt({
-      producer_operator_id: "fixture_query_field_roles_v1",
-      producer_capture_digest: digestRecallFieldIdentity({ fixture: "porter" }),
-      query_demand: demand,
-      attributions: [{
-        query_atom_id: "lexical_term:trips",
-        role: "entity",
-        source_spans: [[0, 5]]
-      }]
-    });
     const facilityDemand = materializeAttributedQueryFacilityDemand({
       query_demand: demand,
-      field_attribution: attribution,
-      weights: facilityWeights()
+      weights: facilityWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "value", text: "trips" }
+      ], 0)
     });
     const candidate = (matchedFtsLanes: readonly ("porter" | "trigram")[]) => ({
       candidate_key: "candidate-a",
@@ -156,31 +123,23 @@ describe("attributed facility match materialization", () => {
     }).get("candidate-a")!;
 
     expect(porter).toContainEqual(expect.objectContaining({
-      demand_atom_id: "facility:entity:lexical_term:trips",
+      demand_atom_id: "facility:entity:frame:0:slot:0:value:trips",
       coverage_atom_id: "fact:evidence-a:7",
       alignment_operator_id: "porter_regular_plural_v1"
     }));
     expect(noPorter.some((match) =>
-      match.demand_atom_id === "facility:entity:lexical_term:trips"
+      match.demand_atom_id === "facility:entity:frame:0:slot:0:value:trips"
     )).toBe(false);
   });
 
   it("fails closed when a multi-token Porter demand starts at an incomplete suffix", () => {
     const demand = queryDemand(["camp trips"]);
-    const attribution = createRecallQueryFieldAttributionReceipt({
-      producer_operator_id: "fixture_query_field_roles_v1",
-      producer_capture_digest: digestRecallFieldIdentity({ fixture: "incomplete-suffix" }),
-      query_demand: demand,
-      attributions: [{
-        query_atom_id: "lexical_term:camp trips",
-        role: "entity",
-        source_spans: [[0, 10]]
-      }]
-    });
     const facilityDemand = materializeAttributedQueryFacilityDemand({
       query_demand: demand,
-      field_attribution: attribution,
-      weights: facilityWeights()
+      weights: facilityWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "value", text: "camp trips" }
+      ], 0)
     });
 
     const matches = materializeAttributedFacilityMatches({
@@ -197,7 +156,7 @@ describe("attributed facility match materialization", () => {
     }).get("candidate-a")!;
 
     expect(matches.some(({ demand_atom_id: id }) =>
-      id === "facility:entity:lexical_term:camp trips"
+      id === "facility:entity:frame:0:slot:0:value:camp trips"
     )).toBe(false);
   });
 
@@ -213,24 +172,12 @@ describe("attributed facility match materialization", () => {
     capturedRelation
   ) => {
     const demand = queryDemand([queryRelation]);
-    const attribution = createRecallQueryFieldAttributionReceipt({
-      producer_operator_id: "fixture_query_field_roles_v1",
-      producer_capture_digest: digestRecallFieldIdentity({
-        fixture: "relation-inflection",
-        queryRelation,
-        capturedRelation
-      }),
-      query_demand: demand,
-      attributions: [{
-        query_atom_id: `lexical_term:${queryRelation}`,
-        role: "relation",
-        source_spans: [[0, queryRelation.length]]
-      }]
-    });
     const facilityDemand = materializeAttributedQueryFacilityDemand({
       query_demand: demand,
-      field_attribution: attribution,
-      weights: facilityWeights()
+      weights: facilityWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "relation", text: queryRelation }
+      ], 0)
     });
     const candidate = (matchedFtsLanes: readonly ("porter" | "trigram")[]) => ({
       candidate_key: "candidate-a",
@@ -248,12 +195,56 @@ describe("attributed facility match materialization", () => {
     }).get("candidate-a")!;
 
     expect(porter).toContainEqual(expect.objectContaining({
-      demand_atom_id: `facility:relation:lexical_term:${queryRelation}`,
+      demand_atom_id: `facility:relation:frame:0:slot:0:relation:${queryRelation}`,
       alignment_operator_id: "porter_regular_relation_inflection_v1"
     }));
     expect(noPorter.some((match) =>
-      match.demand_atom_id === `facility:relation:lexical_term:${queryRelation}`
+      match.demand_atom_id === `facility:relation:frame:0:slot:0:relation:${queryRelation}`
     )).toBe(false);
+  });
+
+  it("uses the same source-bound factor identity for query and candidate slots", () => {
+    const semanticFactors = projectFactFrameSemanticFactors([
+      { role: "relation", text: "watch" },
+      { role: "subject", text: "I" },
+      { role: "value", text: "a degree" }
+    ], 0);
+    const facilityDemand = materializeAttributedQueryFacilityDemand({
+      query_demand: queryDemand(),
+      weights: facilityWeights(),
+      semantic_factors: semanticFactors
+    });
+    const matches = materializeAttributedFacilityMatches({
+      demand: facilityDemand,
+      candidates: [{
+        candidate_key: "candidate-a",
+        object_id: "other",
+        coverage: coverageReceipt({ relationText: "watched", matchedFtsLanes: ["porter"] })
+      }]
+    }).get("candidate-a")!;
+
+    expect(matches).toContainEqual(expect.objectContaining({
+      demand_atom_id: "facility:relation:frame:0:slot:0:relation:watch",
+      alignment_operator_id: "porter_regular_relation_inflection_v1"
+    }));
+    expect(facilityDemand.demand_atoms.every((atom) =>
+      atom.attribution_kind === "typed_fact_frame" ||
+      atom.attribution_kind === "typed_query_atom"
+    )).toBe(true);
+  });
+
+  it("fails closed when a typed query atom is missing a semantic factor", () => {
+    const demand = legacyDemandReceipt();
+    const matches = materializeAttributedFacilityMatches({
+      demand,
+      candidates: [{
+        candidate_key: "candidate-a",
+        object_id: "other",
+        coverage: coverageReceipt({ subjectText: "legacy" })
+      }]
+    }).get("candidate-a")!;
+
+    expect(matches).toEqual([]);
   });
 });
 
@@ -296,6 +287,7 @@ function facilityWeights() {
 
 function coverageReceipt(
   options: Readonly<{
+    readonly subjectText?: string;
     readonly onlyRelationOmitted?: boolean;
     readonly valueText?: string;
     readonly relationText?: string;
@@ -364,7 +356,10 @@ function coverageReceipt(
           projection_kind: "fact_key" as const,
           matched_fact_key_forms: Object.freeze(forms),
           fact_slots: Object.freeze([
-            Object.freeze({ role: "subject" as const, text: "I" }),
+            Object.freeze({
+              role: "subject" as const,
+              text: options.subjectText ?? "I"
+            }),
             Object.freeze({
               role: "relation" as const,
               text: options.relationText ?? "bought"
@@ -381,5 +376,30 @@ function coverageReceipt(
         matched_fts_lanes: Object.freeze([...(options.matchedFtsLanes ?? [])])
       })
     ])
+  });
+}
+
+function legacyDemandReceipt(): Readonly<AttributedQueryFacilityDemandReceipt> {
+  const demand_atoms = Object.freeze([
+    Object.freeze({
+      demand_atom_id: "facility:entity:legacy",
+      kind: "entity" as const,
+      weight: 1,
+      value: "legacy",
+      source_query_atom_id: "legacy",
+      attribution_kind: "typed_query_atom" as const
+    })
+  ]);
+  const body = Object.freeze({
+    schema_version: 1 as const,
+    operator_id: ATTRIBUTED_QUERY_FACILITY_DEMAND_OPERATOR_ID,
+    query_demand_digest: digestRecallFieldIdentity({ query_demand: "legacy" }),
+    semantic_factor_digest: null,
+    weight_configuration_digest: digestRecallFieldIdentity(facilityWeights()),
+    demand_atoms
+  });
+  return Object.freeze({
+    ...body,
+    demand_digest: digestRecallFieldIdentity(body)
   });
 }

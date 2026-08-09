@@ -272,40 +272,43 @@ describe("aggregateQaVerdicts", () => {
 describe("resolveQaChatConfig (env gating)", () => {
   it("resolves url/key/model from env", () => {
     const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test",
-      [QA_ENV_MODEL]: "gpt-5.4-nano"
+      [QA_ENV_MODEL]: "qa-answer-model"
     } as NodeJS.ProcessEnv);
-    expect(config.url).toBe("https://yunwu.ai/v1");
+    expect(config.url).toBe("https://provider.example/v1");
     expect(config.apiKey).toBe("sk-test");
-    expect(config.model).toBe("gpt-5.4-nano");
+    expect(config.model).toBe("qa-answer-model");
   });
 
-  it("defaults the model when unset", () => {
-    const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+  it("requires an explicit QA model", () => {
+    expect(() => resolveQaChatConfig({
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test"
-    } as NodeJS.ProcessEnv);
-    expect(config.model).toBe("gpt-5.4-nano");
+    } as NodeJS.ProcessEnv)).toThrow(/ALAYA_QA_MODEL/u);
   });
 
-  it("prefers the QA model override over the base model (extraction stays on base)", () => {
+  it("does not inherit the extraction model", () => {
     const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test",
-      [QA_ENV_MODEL]: "gpt-5.4-nano",
-      OFFICIAL_API_GARDEN_QA_MODEL: "gpt-4.1"
+      [QA_ENV_MODEL]: "qa-answer-model",
+      OFFICIAL_API_GARDEN_MODEL: "extraction-model"
     } as NodeJS.ProcessEnv);
-    expect(config.model).toBe("gpt-4.1");
+    expect(config.model).toBe("qa-answer-model");
   });
 
   it("throws when url or key is missing (fail-loud, no silent degrade)", () => {
     expect(() =>
-      resolveQaChatConfig({ [QA_ENV_API_KEY]: "sk-test" } as NodeJS.ProcessEnv)
+      resolveQaChatConfig({
+        [QA_ENV_API_KEY]: "sk-test",
+        [QA_ENV_MODEL]: "qa-answer-model"
+      } as NodeJS.ProcessEnv)
     ).toThrow(/PROVIDER_URL/u);
     expect(() =>
       resolveQaChatConfig({
-        [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1"
+        [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
+        [QA_ENV_MODEL]: "qa-answer-model"
       } as NodeJS.ProcessEnv)
     ).toThrow(/API_KEY/u);
   });

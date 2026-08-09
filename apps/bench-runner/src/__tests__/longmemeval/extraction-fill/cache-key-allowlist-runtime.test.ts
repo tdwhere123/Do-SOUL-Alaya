@@ -24,7 +24,8 @@ import { inspectTurnContentKeySpace } from
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import {
-  buildExtractionFillQuestion,
+  buildGroundedSignalResponse,
+  buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks
 } from "./fixture.js";
@@ -53,7 +54,7 @@ describe("cache-key allowlist runtime", () => {
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
     });
     const logs: string[] = [];
 
@@ -90,7 +91,7 @@ describe("cache-key allowlist runtime", () => {
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
     });
     const logs: string[] = [];
     const options = {
@@ -123,7 +124,9 @@ describe("cache-key allowlist runtime", () => {
     const failedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       calls += 1;
-      if (calls === 1) return { rawJson: '{"signals":[]}' };
+      if (calls === 1) {
+        return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
+      }
       throw providerTimeoutFailure();
     });
 
@@ -158,7 +161,7 @@ describe("cache-key allowlist runtime", () => {
 
     const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
     });
     const result = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -182,8 +185,8 @@ describe("cache-key allowlist runtime", () => {
 });
 
 async function prefillFirstQuestion(): Promise<void> {
-  const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-    rawJson: '{"signals":[]}'
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
+    rawJson: buildGroundedSignalResponse(input.userPrompt)
   }));
   await runExtractionFill({
     variant: EXTRACTION_FILL_VARIANT,
@@ -253,7 +256,7 @@ function cacheKey(questionValue: LongMemEvalQuestion, index: number): string {
 }
 
 function question(id: string, fact: string, decoy: string): LongMemEvalQuestion {
-  return buildExtractionFillQuestion(id, `User: ${fact}`, `User: ${decoy}`);
+  return buildAuthorityQuestion(id, fact, decoy);
 }
 
 function setCredentialFixture(): void {

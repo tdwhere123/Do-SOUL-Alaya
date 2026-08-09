@@ -50,6 +50,8 @@ import {
   type AuthorityContinuationDependencies,
   type PreparedAuthorityContinuation
 } from "./continuation.js";
+import { sameRootContinuationMode } from
+  "../../longmemeval/extraction/authority/continuation/contract.js";
 
 interface AuthorizeExtractionDependencies extends AuthorityContinuationDependencies {
   readonly inspect?: typeof inspectExtractionAuthority;
@@ -156,7 +158,9 @@ async function buildAuthorizedReceipt(
       dependencies: deps
     })
     : undefined;
-  if (continuation !== undefined && ledger !== undefined) {
+  if (continuation !== undefined && ledger !== undefined &&
+      (sameRootContinuationMode(continuation.evidence) !== "output_token_cap_renewal" ||
+       ledger.lineageDigest !== continuation.predecessor.lineage_digest)) {
     throw new Error("same-root continuation successor lineage already exists");
   }
   return Object.freeze({

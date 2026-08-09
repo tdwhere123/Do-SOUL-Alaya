@@ -13,8 +13,6 @@ import {
   inspectCachedExtraction
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { computeTrustedRoleCorpusDigest } from
-  "../../../longmemeval/extraction/turn-contents.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -32,6 +30,7 @@ beforeEach(async () => {
   ));
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid/v1");
 });
 
 afterEach(async () => {
@@ -61,7 +60,29 @@ describe("extraction-fill cache validity", () => {
         object_kind: "user_preference",
         confidence: 0.9,
         matched_text: "alpha",
-        distilled_fact: "Alpha fact."
+        distilled_fact: "Alpha fact.",
+        semantic_factor_graph: {
+          schema_version: 1,
+          source_kind: "evidence",
+          factors: [{
+            factor_id: "fact",
+            semantic_identity: "alpha",
+            surface: "alpha",
+            source_occurrence: 0
+          }],
+          variables: [],
+          result_variable_ids: [],
+          propositions: [{
+            proposition_id: "fact-proposition",
+            predicate_factor_id: "fact",
+            arguments: [{
+              position: 0,
+              binding_identity: "fact",
+              reference_kind: "factor",
+              reference_id: "fact"
+            }]
+          }]
+        }
       }]
     });
     const result = await fill(() => ({ rawJson }));
@@ -92,7 +113,7 @@ describe("extraction-fill cache validity", () => {
     const result = await fill(delegate);
 
     expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
-    expect(delegate).toHaveBeenCalledOnce();
+    expect(delegate).toHaveBeenCalledTimes(2);
     expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
       raw_json: '{"signals":[]}'
     });
@@ -110,15 +131,13 @@ describe("extraction-fill cache validity", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           const turn = JSON.parse(input.userPrompt) as {
-            turn_content: string;
-            turn_messages: readonly { role: string; content: string }[];
+            source_assertions: readonly { assertion_id: number; text: string }[];
           };
           const key = computeCacheKey(
             "fixture-model",
             "provider-default-v1",
             OFFICIAL_API_SYSTEM_PROMPT,
-            turn.turn_content,
-            computeTrustedRoleCorpusDigest(turn.turn_messages)
+            input.userPrompt
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
           return { rawJson: '{"signals":[]}' };
@@ -228,9 +247,9 @@ function question(): LongMemEvalQuestion {
     haystack_session_ids: ["s1", "s2"],
     haystack_dates: ["2025-12-01", "2025-12-02"],
     haystack_sessions: [[
-      { role: "user", content: "alpha", has_answer: true },
-      { role: "assistant", content: "ok" }
-    ], [{ role: "user", content: "unrelated decoy" }]],
+      { role: "user", content: "Alpha happened.", has_answer: true },
+      { role: "assistant", content: "Acknowledged." }
+    ], [{ role: "user", content: "Unrelated decoy." }]],
     answer_session_ids: ["s1"]
   };
 }

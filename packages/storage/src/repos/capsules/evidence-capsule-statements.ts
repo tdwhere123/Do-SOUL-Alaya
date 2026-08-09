@@ -7,6 +7,7 @@ export type SqliteStatement = BetterSqlite3.Statement;
 export interface EvidenceCapsuleStatements {
   readonly createStatement: SqliteStatement;
   readonly createFactFrameFormationStatement: SqliteStatement;
+  readonly createSemanticFactorFormationStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
   readonly findByArtifactRefStatement: SqliteStatement;
   readonly findByIdsStatement: SqliteStatement;
@@ -31,6 +32,9 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
     createFactFrameFormationStatement: db.connection.prepare(
       CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL
+    ),
+    createSemanticFactorFormationStatement: db.connection.prepare(
+      CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL
     ),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
     findByArtifactRefStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL),
@@ -120,6 +124,20 @@ const CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL = `
         producer_operator_id,
         source_hash,
         fact_frame_json,
+        capture_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+const CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL = `
+      INSERT INTO evidence_semantic_factor_formations (
+        evidence_object_id,
+        workspace_id,
+        schema_version,
+        operator_id,
+        status,
+        producer_operator_id,
+        source_sha256,
+        graph_json,
         capture_digest
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;

@@ -18,6 +18,7 @@ import {
   assertExtractionTargetSelectionReceipt,
   type ExtractionTargetSelectionReceipt
 } from "../target-selection/receipt.js";
+import { sameRootContinuationMode } from "./contract.js";
 
 export interface ExtractionContinuationChildClaim {
   readonly schema_version: 1;
@@ -282,13 +283,32 @@ function assertAdoptionSelection(
   child: ExtractionAuthorityReceipt,
   selection: ExtractionTargetSelectionReceipt
 ): void {
+  if (child.target_selection_digest === selection.receipt_digest &&
+      (hasImmediateSelectionParent(child, selection) ||
+       reusesUnchangedTargetSelection(child, selection))) return;
+  throw new Error("existing continuation child selection ancestry drifted");
+}
+
+function hasImmediateSelectionParent(
+  child: ExtractionAuthorityReceipt,
+  selection: ExtractionTargetSelectionReceipt
+): boolean {
   const basis = selection.selection_basis;
-  if (child.target_selection_digest !== selection.receipt_digest ||
-      basis.kind !== "same_root_continuation" ||
-      basis.predecessor_authority_receipt_digest !==
-        child.continuation?.predecessor.receipt_digest) {
-    throw new Error("existing continuation child selection ancestry drifted");
-  }
+  return basis.kind === "same_root_continuation" &&
+    basis.predecessor_authority_receipt_digest ===
+      child.continuation?.predecessor.receipt_digest;
+}
+
+function reusesUnchangedTargetSelection(
+  child: ExtractionAuthorityReceipt,
+  selection: ExtractionTargetSelectionReceipt
+): boolean {
+  const continuation = child.continuation;
+  if (continuation === undefined) return false;
+  const mode = sameRootContinuationMode(continuation);
+  return (mode === "output_token_cap_renewal" || mode === "transport_successor") &&
+    continuation.predecessor_transport_authority?.target_selection_digest ===
+      selection.receipt_digest;
 }
 
 function assertLedgerMatchesContinuation(

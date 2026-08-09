@@ -29,8 +29,6 @@ export function isExtractionAuthorityKeySpaceEvidence(
   return authorizedQuestions <= windowQuestionCount &&
     authorizedOccurrences <= windowOccurrences &&
     authorizedKeys <= windowKeys &&
-    windowOccurrences >= windowKeys &&
-    authorizedOccurrences >= authorizedKeys &&
     authorizedKeys === inventoryExpectedKeys &&
     (authorizedQuestions !== windowQuestionCount ||
       (authorizedOccurrences === windowOccurrences && authorizedKeys === windowKeys));

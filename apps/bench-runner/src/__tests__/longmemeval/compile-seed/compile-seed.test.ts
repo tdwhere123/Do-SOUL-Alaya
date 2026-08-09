@@ -6,6 +6,10 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
   createCompileSeedRunner,
@@ -78,11 +82,11 @@ describe("createCachingSignalExtractor", () => {
 
     const result = await extractor.extract({
       systemPrompt: "sys",
-      userPrompt: "user"
+      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
     });
 
     expect(result.rawJson).toBe('{"signals":[]}');
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
     expect(stats.llmCalls).toBe(1);
     expect(stats.cacheHits).toBe(0);
     expect(stats.liveExtractionFailures).toBe(0);
@@ -124,7 +128,7 @@ describe("createCachingSignalExtractor", () => {
       cacheRoot,
       stats: firstStats
     });
-    await firstRun.extract({ systemPrompt: "sys", userPrompt: "turn-A" });
+    await firstRun.extract({ systemPrompt: "sys", userPrompt: canonicalExtractionUserPrompt("I have a dog.") });
     expect(delegate.extract).toHaveBeenCalledTimes(1);
 
     // A fresh extractor sharing the same fixture must not call the delegate.
@@ -158,7 +162,7 @@ describe("createCachingSignalExtractor", () => {
     });
     const cached = await secondRun.extract({
       systemPrompt: "sys",
-      userPrompt: "turn-A"
+      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
     });
 
     expect(delegate.extract).toHaveBeenCalledTimes(1);
@@ -191,8 +195,8 @@ describe("createCachingSignalExtractor", () => {
       cacheRoot
     });
 
-    const first = await extractor.extract({ systemPrompt: "s", userPrompt: "A" });
-    const second = await extractor.extract({ systemPrompt: "s", userPrompt: "B" });
+    const first = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a dog.") });
+    const second = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a cat.") });
 
     expect(first.rawJson).toBe(firstRaw);
     expect(second.rawJson).toBe(secondRaw);
@@ -203,14 +207,16 @@ describe("createCachingSignalExtractor", () => {
 describe("resolveCompileSeedExtractionConfig", () => {
   it("requires an explicit request profile when no cache manifest exists", () => {
     expect(() => resolveCompileSeedExtractionConfig({
-      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini"
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1"
     })).toThrow(/request profile.*unresolved|ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE/iu);
   });
 
   it("resolves the closed request profile independently of the model", () => {
     const config = resolveCompileSeedExtractionConfig({
       OFFICIAL_API_GARDEN_MODEL: "arbitrary-model",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-v4-nonthinking-v1"
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-v4-nonthinking-v1",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1"
     });
     expect(config.requestProfile).toBe("deepseek-v4-nonthinking-v1");
   });
@@ -218,7 +224,8 @@ describe("resolveCompileSeedExtractionConfig", () => {
   it("rejects an unknown request profile", () => {
     expect(() => resolveCompileSeedExtractionConfig({
       OFFICIAL_API_GARDEN_MODEL: "arbitrary-model",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-auto"
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-auto",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1"
     })).toThrow(/must be one of.*provider-default-v1.*deepseek-v4-nonthinking-v1/iu);
   });
 
@@ -226,24 +233,36 @@ describe("resolveCompileSeedExtractionConfig", () => {
     const config = resolveCompileSeedExtractionConfig({
       OFFICIAL_API_GARDEN_MODEL: "deepseek-v4-flash-free",
       ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "deepseek-v4-flash",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1"
     });
     expect(config.model).toBe("deepseek-v4-flash-free");
     expect(config.modelFamily).toBe("deepseek-v4-flash");
   });
 
+  it("requires an explicit provider URL when no cache manifest exists", () => {
+    expect(() => resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+    })).toThrow(/provider URL is unresolved.*OFFICIAL_API_GARDEN_PROVIDER_URL/iu);
+  });
+
   it("resolves a null key when no garden secret ref is set", () => {
     const config = resolveCompileSeedExtractionConfig({
       OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1"
     });
     expect(config.apiKey).toBeNull();
     expect(config.model).toBe("gpt-5.4-mini");
-    expect(config.providerUrl).toBe("https://yunwu.ai/v1");
+    expect(config.providerUrl).toBe("https://provider.example/v1");
   });
 
   it("throws when neither env model nor manifest can resolve the model", () => {
-    expect(() => resolveCompileSeedExtractionConfig({})).toThrow(
+    expect(() => resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://provider.example/v1",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+    })).toThrow(
       /extraction model is unresolved/u
     );
   });
@@ -254,7 +273,7 @@ describe("resolveCompileSeedExtractionConfig", () => {
       {
         schema_version: 1,
         extraction_model: "gpt-5.4-mini",
-        provider_url: "https://yunwu.ai/v1",
+        provider_url: "https://provider.example/v1",
         system_prompt_sha256: "deadbeef",
         cache_key_algo: "sha256(model\\0systemPrompt\\0turnContent)",
         dataset: "longmemeval-s",
@@ -265,6 +284,30 @@ describe("resolveCompileSeedExtractionConfig", () => {
       }
     );
     expect(config.model).toBe("gpt-5.4-mini");
-    expect(config.providerUrl).toBe("https://yunwu.ai/v1");
+    expect(config.providerUrl).toBe("https://provider.example/v1");
+  });
+
+  it("keeps logical cache identity while resolving a physical provider route", () => {
+    const config = resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "DeepSeek-V4-Flash",
+      OFFICIAL_API_GARDEN_PROVIDER_URL: "https://logical.example/v1",
+      ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "deepseek-v4-flash-nonthinking",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-v4-nonthinking-v1",
+      ALAYA_BENCH_EXTRACTION_TRANSPORT_PROVIDER_URL: "https://physical.example/v1/",
+      ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL: "deepseek-v4-flash"
+    });
+
+    expect(config).toMatchObject({
+      providerUrl: "https://logical.example/v1",
+      model: "DeepSeek-V4-Flash",
+      transportProviderUrl: "https://physical.example/v1",
+      transportModel: "deepseek-v4-flash"
+    });
   });
 });
+
+function canonicalExtractionUserPrompt(turnContent: string): string {
+  return stringifyOfficialApiExtractionRequest(
+    buildOfficialApiExtractionRequest(turnContent, [])
+  );
+}

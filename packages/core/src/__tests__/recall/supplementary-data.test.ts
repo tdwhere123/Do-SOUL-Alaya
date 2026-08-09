@@ -11,6 +11,8 @@ import { withEmbeddingSimilarityScores } from
   "../../recall/coarse-filter/embedding/embedding-similarity-supplement.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { collectSupplementaryData, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY } from "../../recall/supplements/supplementary-data.js";
+import { materializeOpenSemanticFactorFormation } from
+  "../../semantic/open-semantic-factor-formation.js";
 import { createDependencies, createMemoryEntry, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
@@ -222,6 +224,67 @@ describe("collectSupplementaryData", () => {
       producer_operator_id: null,
       frames: []
     }));
+  });
+
+  it("traces persisted evidence and query factors without changing ranking", async () => {
+    const evidenceText = "I used Atlas for research.";
+    const queryText = "What do I use for research?";
+    const evidence = createEvidenceCapsule({
+      gist: `User: ${evidenceText}`,
+      excerpt: evidenceText
+    });
+    const candidate = createMemoryEntry({
+      object_id: "memory-open-factor",
+      content: evidenceText,
+      evidence_refs: [evidence.object_id]
+    });
+    const evidenceFormation = materializeOpenSemanticFactorFormation({
+      source_kind: "evidence",
+      source_text: evidenceText,
+      proposal: semanticProposal(evidenceText, evidenceSemanticGraph())
+    });
+
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText,
+      openSemanticFactorExtractionPort: {
+        operator_id: "test_open_semantic_factor_v1",
+        extract: async () => querySemanticGraph()
+      },
+      evidenceSearchPort: {
+        searchByKeyword: async () => [],
+        findByIds: async () => [evidence],
+        findRecallQualifiedByIds: async () => [{
+          capsule: evidence,
+          verified_user_projection: false,
+          semantic_factor_formation: evidenceFormation
+        }],
+        findRecallQualifiedFactKeysByIds: async () => []
+      }
+    });
+
+    expect(result.queryOpenSemanticFactorFormation).toMatchObject({ status: "formed" });
+    expect(result.openSemanticFactorCompatibilityTrace).toMatchObject({
+      observed_evidence_count: 1,
+      entries: [{
+        evidence_id: evidence.object_id,
+        receipt: { status: "compatible" }
+      }]
+    });
+    expect(result.openSemanticFactorComposition).toMatchObject({
+      status: "composed",
+      variable_collections: [{
+        variable_id: "answer",
+        values: [{ semantic_identity: "atlas" }]
+      }]
+    });
+    expect(result.openSemanticFactorActivation).toMatchObject({
+      status: "composed",
+      ranking_effect: "candidate_attribution",
+      entries: [{ evidence_id: evidence.object_id, activation: 1 }]
+    });
+    expect(result.evidenceSemanticActivationsByCandidateKey.size).toBe(0);
   });
 
   it("derives a unique User assertion receipt from the loaded evidence capsule", async () => {
@@ -643,6 +706,8 @@ async function collectWith(params: {
   readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
   readonly queryFactFrameExtractionPort?:
     RecallServiceDependencies["queryFactFrameExtractionPort"];
+  readonly openSemanticFactorExtractionPort?:
+    RecallServiceDependencies["openSemanticFactorExtractionPort"];
   readonly queryText?: string | null;
   readonly budgetPenaltyPort?: RecallServiceDependencies["budgetPenaltyPort"];
   readonly pathPlasticityPort?: RecallServiceDependencies["pathPlasticityPort"];
@@ -661,6 +726,7 @@ async function collectWith(params: {
       routingKeyProjectionPort: params.routingKeyProjectionPort,
       entityExtractionPort: params.entityExtractionPort,
       queryFactFrameExtractionPort: params.queryFactFrameExtractionPort,
+      openSemanticFactorExtractionPort: params.openSemanticFactorExtractionPort,
       ...(params.budgetPenaltyPort === undefined
         ? {}
         : { budgetPenaltyPort: params.budgetPenaltyPort }),
@@ -695,6 +761,89 @@ async function collectWith(params: {
 
 function emptyGraphSupportPort(): NonNullable<RecallServiceDependencies["graphSupportPort"]> {
   return { countInboundSupports: vi.fn(async () => 0), countInboundEdgesWeighted: vi.fn(async () => 0) };
+}
+
+function semanticProposal(sourceText: string, graph: ReturnType<
+  typeof evidenceSemanticGraph
+>) {
+  return {
+    schema_version: 1 as const,
+    producer_operator_id: "test_open_semantic_factor_v1",
+    source_text: sourceText,
+    graph
+  };
+}
+
+function evidenceSemanticGraph() {
+  return semanticGraph("evidence", [
+    factor("actor", "I", 0, 1, "speaker"),
+    factor("predicate", "used", 2, 6, "use"),
+    factor("object", "Atlas", 7, 12, "atlas"),
+    factor("purpose", "research", 17, 25, "research")
+  ], []);
+}
+
+function querySemanticGraph() {
+  return semanticGraph("query", [
+    factor("actor", "I", 8, 9, "speaker"),
+    factor("predicate", "use", 10, 13, "use"),
+    factor("purpose", "research", 18, 26, "research")
+  ], [{ variable_id: "answer", surface: "What" }]);
+}
+
+function semanticGraph(
+  sourceKind: "evidence" | "query",
+  factors: readonly ReturnType<typeof factor>[],
+  variables: readonly Readonly<{
+    readonly variable_id: string;
+    readonly surface: string;
+  }>[]
+) {
+  return {
+    schema_version: 1 as const,
+    source_kind: sourceKind,
+    factors,
+    variables,
+    result_variable_ids: variables.length === 0 ? [] : ["answer"],
+    propositions: [{
+      proposition_id: "use-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        semanticArgument(0, "factor", "actor"),
+        semanticArgument(1, variables.length === 0 ? "factor" : "variable",
+          variables.length === 0 ? "object" : "answer"),
+        semanticArgument(2, "factor", "purpose")
+      ]
+    }]
+  };
+}
+
+function factor(
+  factorId: string,
+  surface: string,
+  _start: number,
+  _end: number,
+  semanticIdentity: string
+) {
+  return {
+    factor_id: factorId,
+    surface,
+    semantic_identity: semanticIdentity
+  };
+}
+
+function semanticArgument(
+  position: number,
+  referenceKind: "factor" | "variable",
+  referenceId: string,
+  bindingIdentity = position === 0 ? "agent" : position === 1 ? "object" : "purpose"
+) {
+  return {
+    position,
+    binding_identity: bindingIdentity,
+    reference_kind: referenceKind,
+    reference_id: referenceId
+  };
 }
 
 function createEvidenceCapsule(overrides: Readonly<{

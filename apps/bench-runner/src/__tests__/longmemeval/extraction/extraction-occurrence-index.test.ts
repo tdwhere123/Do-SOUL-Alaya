@@ -21,7 +21,7 @@ describe("extraction occurrence index", () => {
     });
 
     expect(occurrences).toHaveLength(2);
-    expect(occurrences[0]?.cacheKey).toBe(occurrences[1]?.cacheKey);
+    expect(occurrences[0]?.cacheKeys).toEqual(occurrences[1]?.cacheKeys);
     expect(occurrences.map((occurrence) => occurrence.sourceObservedAt)).toEqual([
       "2025-01-01T00:00:00.000Z",
       "2025-02-01T00:00:00.000Z"

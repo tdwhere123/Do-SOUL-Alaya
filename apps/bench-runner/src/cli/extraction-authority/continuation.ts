@@ -48,7 +48,7 @@ export function prepareAuthorityContinuation(input: {
 }): PreparedAuthorityContinuation | undefined {
   if (input.predecessorAuthorityPath === undefined) return undefined;
   if (input.targetSelection === undefined) {
-    throw new Error("same-root continuation requires a successor target selection");
+    throw new Error("same-root continuation requires a bound target selection");
   }
   const deps = input.dependencies ?? {};
   const predecessor = (deps.readPredecessorAuthority ?? readExtractionAuthorityReceipt)(

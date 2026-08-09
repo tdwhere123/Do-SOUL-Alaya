@@ -70,6 +70,9 @@ export function buildRecallEvalOptions(
     ...(opts.seedExtractionSystemPrompt === undefined
       ? {}
       : { seedExtractionSystemPromptPath: opts.seedExtractionSystemPrompt }),
+    ...(opts.querySemanticFactorCache === undefined
+      ? {}
+      : { querySemanticFactorCachePath: opts.querySemanticFactorCache }),
     ...(expansionCapability === undefined ? {} : { expansionCapability })
   };
 }

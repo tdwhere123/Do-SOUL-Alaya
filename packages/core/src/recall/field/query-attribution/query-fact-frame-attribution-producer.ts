@@ -14,6 +14,10 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "../field-identity.js";
+import {
+  projectFactFrameSemanticFactors,
+  type FactFrameSemanticFactor
+} from "../fact-frame-semantic-factors.js";
 
 export const RECALL_QUERY_FACT_FRAME_MAX_FRAMES = 8;
 export const QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID =
@@ -136,6 +140,16 @@ export function collectRelationDemandTermsFromFactFrameCapture(
     }
   }
   return Object.freeze([...terms.values()]);
+}
+
+export function collectFactFrameSemanticFactorsFromCapture(
+  capture: Readonly<RecallQueryFactFrameExtractionCapture>
+): readonly Readonly<FactFrameSemanticFactor>[] {
+  verifyRecallQueryFactFrameExtractionCapture(capture);
+  if (capture.status !== "returned") return Object.freeze([]);
+  return Object.freeze(capture.frames.flatMap((frame, frameIndex) =>
+    projectFactFrameSemanticFactors(frame.slots, frameIndex)
+  ));
 }
 
 export function verifyRecallQueryFactFrameExtractionCapture(

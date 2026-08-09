@@ -3,6 +3,7 @@ import { clamp01 } from "../../shared/clamp.js";
 
 export type CandidateSemanticActivationSource =
   | "evidence_semantic"
+  | "open_semantic_solution"
   | "effective_factor"
   | "object_embedding";
 
@@ -46,6 +47,7 @@ export type CandidateSemanticActivation = CandidateActivationReceipt;
 export type CandidateSemanticActivationInput = Readonly<{
   readonly scope: CandidateSemanticActivationScope;
   readonly evidenceSemantic?: number;
+  readonly openSemanticSolution?: number;
   readonly effectiveEmbedding?: number;
   readonly objectEmbedding?: number;
 }>;
@@ -72,12 +74,17 @@ export function resolveCandidateSemanticActivationScope(
 export function resolveCandidateSemanticActivation(
   input: CandidateSemanticActivationInput
 ): CandidateActivationReceipt {
-  const observations = [
+  const observations: CandidateActivationObservation[] = [
     observeChannel(
       "evidence_semantic",
       input.evidenceSemantic,
       input.scope === "workspace_memory" || input.scope === "evidence_capsule"
     ),
+    ...(input.openSemanticSolution === undefined ? [] : [observeChannel(
+      "open_semantic_solution",
+      input.openSemanticSolution,
+      input.scope === "workspace_memory" || input.scope === "evidence_capsule"
+    )]),
     observeChannel(
       "effective_factor",
       input.effectiveEmbedding,
@@ -88,7 +95,7 @@ export function resolveCandidateSemanticActivation(
       input.objectEmbedding,
       input.scope === "workspace_memory"
     )
-  ] as const;
+  ];
   let winner: CandidateActivationWinner | null = null;
   for (const observation of observations) {
     if (observation.state !== "observed" || observation.score === null) continue;

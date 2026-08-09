@@ -24,13 +24,22 @@ export async function seedCompileTurn(
   if (normalized.length === 0) {
     return { seeds: [], turnTruncated: false, charsClipped: 0 };
   }
-  context.stats.extractionAttempts = (context.stats.extractionAttempts ?? 0) + 1;
+  resetTurnExtractionReceipts(context);
   const signalInputs = await buildTurnSignalInputs(context, input, normalized);
   const seeds =
     signalInputs[0]?.extractionProvider === "official_api_compile"
       ? await seedOfficialCompileSignals(context, input, signalInputs)
       : await seedFallbackSignals(context, input, signalInputs);
   return summarizeSeedTurn(seeds);
+}
+
+function resetTurnExtractionReceipts(context: CompileSeedRunnerContext): void {
+  context.stats.lastTurnRawSignalCount = 0;
+  context.stats.lastTurnDraftCount = 0;
+  context.stats.lastExtractionSource = null;
+  context.stats.lastCacheKey = null;
+  context.stats.lastRawJsonSha256 = null;
+  context.stats.lastExtractionShards = [];
 }
 
 async function buildTurnSignalInputs(

@@ -143,6 +143,22 @@ describe("MaterializationRouter routing-by-object_kind", () => {
     expect(target.route_target).toBe("memory_entry_only");
   });
 
+  it("routes open semantic observations to recallable memory without a world kind", () => {
+    const router = new MaterializationRouter(createDeps());
+
+    const target = router.route(
+      createSignal({
+        object_kind: "open_semantic_observation",
+        signal_kind: "potential_semantic_observation",
+        confidence: 0.95,
+        evidence_refs: []
+      })
+    );
+
+    expect(target.kind).toBe("evidence_only");
+    expect(target.route_target).toBe("memory_entry_only");
+  });
+
   it("still defers a low-confidence unknown object_kind even when retainUnroutedHighConfidenceFacts is set", () => {
     const router = new MaterializationRouter({
       ...createDeps(),

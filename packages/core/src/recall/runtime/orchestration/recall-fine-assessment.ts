@@ -18,6 +18,8 @@ import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import { attributeEvidenceSemanticActivations } from
   "./evidence-semantic-candidates.js";
+import { attributeOpenSemanticFactorActivations } from
+  "../../field/open-semantic-factors/candidate-attribution.js";
 import {
   asTimedSpan,
   instantTimedResult,
@@ -61,7 +63,18 @@ export function collectTimedSupplementaryData(
         coarse.combinedCoarseCandidates
       )
     );
-    return Object.freeze({ supplementaryData });
+    return Object.freeze({
+      supplementaryData: Object.freeze({
+        ...supplementaryData,
+        openSemanticFactorCandidateActivationsByCandidateKey:
+          supplementaryData.openSemanticFactorActivation === undefined
+            ? new Map()
+            : attributeOpenSemanticFactorActivations({
+              candidates: coarse.combinedCoarseCandidates,
+              activation: supplementaryData.openSemanticFactorActivation
+            })
+      })
+    });
   });
 }
 
@@ -244,6 +257,10 @@ function buildCoarseAssessmentParams(
     policy: prepared.policy,
     queryProbes: prepared.queryProbes,
     queryEntityExtraction: prepared.queryEntityExtraction,
+    querySemanticFactorFormationProposal:
+      params.querySemanticFactorFormationProposal,
+    querySemanticFactorFormationCapture:
+      params.querySemanticFactorFormationCapture,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)

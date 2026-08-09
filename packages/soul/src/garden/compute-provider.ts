@@ -3,6 +3,7 @@ import {
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
+  type OpenSemanticFactorGraphProposal,
   readErrorMessage,
   type CandidateMemorySignal,
   type ConversationMessage
@@ -34,25 +35,31 @@ import {
   groundOfficialApiDraft,
   rejectOfficialApiDraftGrounding
 } from "./official-api/source-grounding.js";
+import { buildOfficialApiSourceCorpus } from "./grounding/source-locator.js";
 import {
-  buildOfficialApiSourceCorpus,
-  buildOfficialApiSourceAssertions,
-  buildOfficialApiSourceSpans,
-  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
-} from "./grounding/source-locator.js";
+  buildOfficialApiExtractionRequests,
+  stringifyOfficialApiExtractionRequest,
+  type OfficialApiExtractionRequest
+} from "./official-api/extraction-request.js";
 import {
   dumpOfficialApiRequestDiagnostic,
   type OfficialApiExtractorMeta
 } from "./official-api/request-diagnostic.js";
 import { assessOfficialApiSourceTrust } from "./official-api/source-trust.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "./official-api/system-prompt.js";
+import {
+  createOpenSemanticFactorQueryCompiler,
+  type OpenSemanticFactorQueryCompiler
+} from "./semantic-factors/query-compiler.js";
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   parseOfficialApiSignals,
   salvageRawSignalElements
 } from "./official-api-signal-parser.js";
-export type { OfficialApiSignalDraft } from "./official-api-signal-parser.js";
+export type {
+  OfficialApiSignalDraft
+} from "./official-api-signal-parser.js";
 export {
   OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
   auditOfficialApiSignalFormation,
@@ -66,6 +73,16 @@ export {
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
 } from "./official-api/system-prompt.js";
+export {
+  OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
+  OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION,
+  OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
+  buildOfficialApiExtractionRequest,
+  buildOfficialApiExtractionRequests,
+  parseOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest,
+  type OfficialApiExtractionRequest
+} from "./official-api/extraction-request.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;
@@ -82,6 +99,10 @@ export interface GardenCompileContext {
 export interface GardenComputeProvider {
   readonly provider_kind: GardenProviderKind;
   compile(turnContent: string, context: GardenCompileContext): Promise<readonly CandidateMemorySignal[]>;
+  extractOpenSemanticFactors?(
+    sourceKind: "evidence" | "query",
+    sourceText: string
+  ): Promise<Readonly<OpenSemanticFactorGraphProposal> | null>;
 }
 
 type GardenProviderErrorKind = "auth" | "network" | "provider_failure" | "invalid_response";
@@ -146,6 +167,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly requestTimeoutMs: number;
   private readonly wallClockBudgetMs: number;
   private readonly extractor: SignalExtractor | null;
+  private readonly queryCompiler: OpenSemanticFactorQueryCompiler | null;
   private readonly canUseCredentiallessCacheExtractor: boolean;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
@@ -176,6 +198,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
           model: this.model,
           ...(this.endpoint === null ? {} : { endpoint: this.endpoint })
         }));
+    this.queryCompiler = this.extractor === null
+      ? null
+      : createOpenSemanticFactorQueryCompiler({
+        extractor: this.extractor,
+        timeoutMs: this.requestTimeoutMs,
+        wallClockBudgetMs: this.wallClockBudgetMs
+      });
     this.now = deps.now ?? (() => new Date().toISOString());
     this.generateSignalId = deps.generateSignalId ?? (() => randomUUID());
     // null sentinel ("disabled") vs undefined ("use default cwd path"). A null
@@ -203,15 +232,11 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     }
 
     const sourceCorpus = buildOfficialApiSourceCorpus(normalizedTurnContent, context.turn_messages);
-    const drafts = await this.requestSignals(normalizedTurnContent, context, sourceCorpus);
+    const drafts = await this.requestSignals(normalizedTurnContent, context);
     const createdAt = normalizeSourceObservedAt(context.source_observed_at) ?? this.now();
 
     const signals: CandidateMemorySignal[] = [];
-    let distilledFactOmittedCount = 0;
     for (const draft of drafts) {
-      if (draft.distilled_fact === undefined) {
-        distilledFactOmittedCount += 1;
-      }
       const signal = this.buildSignalFromDraft(
         draft,
         context,
@@ -224,15 +249,18 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       }
     }
 
-    if (distilledFactOmittedCount > 0) {
-      console.warn("garden/compute-provider: official-API drafts missing distilled_fact", {
-        runId: context.run_id,
-        omittedCount: distilledFactOmittedCount,
-        draftCount: drafts.length
-      });
-    }
-
     return Object.freeze(signals);
+  }
+
+  public async extractOpenSemanticFactors(
+    sourceKind: "evidence" | "query",
+    sourceText: string
+  ): Promise<Readonly<OpenSemanticFactorGraphProposal> | null> {
+    if (sourceKind !== "query") return null;
+    if (this.queryCompiler === null) {
+      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    }
+    return await this.queryCompiler.compile(sourceText);
   }
 
   private buildSignalFromDraft(
@@ -284,26 +312,30 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
 
   private async requestSignals(
     turnContent: string,
-    context: GardenCompileContext,
-    sourceCorpus: string
+    context: GardenCompileContext
   ): Promise<readonly OfficialApiSignalDraft[]> {
     if (this.extractor === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
-    const userPrompt = JSON.stringify({
-      workspace_id: context.workspace_id,
-      run_id: context.run_id,
-      surface_id: context.surface_id,
-      turn_content: turnContent,
-      turn_messages: context.turn_messages,
-      source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-      preferred_source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-      source_assertions: buildOfficialApiSourceAssertions(sourceCorpus),
-      source_spans: buildOfficialApiSourceSpans(sourceCorpus)
-    });
+    const requests = buildOfficialApiExtractionRequests(turnContent, context.turn_messages);
+    const drafts: OfficialApiSignalDraft[] = [];
+    for (const request of requests) {
+      drafts.push(...await this.requestSignalBatch(request, context));
+    }
+    return Object.freeze(drafts);
+  }
+
+  private async requestSignalBatch(
+    request: OfficialApiExtractionRequest,
+    context: GardenCompileContext
+  ): Promise<readonly OfficialApiSignalDraft[]> {
+    if (this.extractor === null) {
+      throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
+    }
     let rawJson: string | null = null;
     let extractorMeta: OfficialApiExtractorMeta | null = null;
+    const userPrompt = stringifyOfficialApiExtractionRequest(request);
     try {
       const extractor = this.extractor;
       const requestTimeoutMs = this.requestTimeoutMs;
@@ -313,13 +345,16 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
             systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
             userPrompt,
             timeoutMs: requestTimeoutMs,
-            abortSignal: signal
+            abortSignal: signal,
+            validateRawJson: (value: string) => {
+              parseBoundedBatchSignals(value, request);
+            }
           }),
         { budgetMs: this.wallClockBudgetMs }
       );
       rawJson = response.rawJson;
       extractorMeta = response.extractorMeta ?? null;
-      return parseOfficialApiSignals(rawJson);
+      return parseBoundedBatchSignals(rawJson, request);
     } catch (error) {
       return this.handleRequestFailure(error, { rawJson, userPrompt, context, extractorMeta });
     }
@@ -357,6 +392,20 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       cause: error
     });
   }
+}
+
+function parseBoundedBatchSignals(
+  rawJson: string,
+  request: OfficialApiExtractionRequest
+): readonly OfficialApiSignalDraft[] {
+  const drafts = parseOfficialApiSignals(rawJson);
+  const allowedIds = new Set(request.source_assertions.map(({ assertion_id }) => assertion_id));
+  if (drafts.some(({ source_locator }) =>
+    source_locator !== undefined && !allowedIds.has(source_locator.assertion_id)
+  )) {
+    throw new Error("official API signal locator is outside its bounded assertion batch");
+  }
+  return drafts;
 }
 
 function groundDraftForContext(

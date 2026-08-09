@@ -4,8 +4,9 @@ import { existsSync, lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
+import { resolveExtractionTransportRoute } from "../transport-route.js";
 import {
-  computeExtractionTurnCacheKey,
+  computeExtractionTurnCacheKeys,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
 import {
@@ -118,12 +119,13 @@ function buildAuthorityObservation(
       datasetRevision: window.datasetRevision,
       offset: window.windowOffset,
       limit: window.questionCount,
-      windowUniqueCacheKeys: window.requestedTurns,
+      windowUniqueCacheKeys: window.windowUniqueCacheKeys,
       authorizedUniqueCacheKeys: completion.expectedTurns
     }),
     keyDigest: completion.expectedKeySetSha256,
     dataset: buildAuthorityDatasetObservation(input, window, completion),
     extraction: buildAuthorityExtractionObservation(config, manifestIdentity, completion),
+    transport: resolveExtractionTransportRoute(config),
     inventory: buildAuthorityInventoryObservation(completion)
   } satisfies ExtractionAuthorityObservation);
 }
@@ -139,7 +141,7 @@ function buildAuthorityDatasetObservation(
     windowOffset: window.windowOffset,
     windowLimit: window.questionCount,
     windowTurnOccurrences: window.windowTurnOccurrences,
-    windowUniqueCacheKeys: window.requestedTurns,
+    windowUniqueCacheKeys: window.windowUniqueCacheKeys,
     authorizedQuestionCount: window.questionBatchLimit ?? window.questionCount,
     authorizedTurnOccurrences: input.repairInvalidShards === true
       ? window.executionTurnOccurrences
@@ -208,25 +210,27 @@ function collectShardStatus(
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
   for (const turn of turns) {
-    const key = computeExtractionTurnCacheKey(
+    const keys = computeExtractionTurnCacheKeys(
       config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
     );
-    const shard = inspectCachedExtraction(
-      cacheRoot, key, config.model, config.requestProfile
-    );
-    if (shard.status === "missing") missingKeys.push(key);
-    if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {
-      validEntries.push({
-        cacheKey: key,
-        model: config.model,
-        requestProfile: config.requestProfile,
-        rawJsonSha256: shard.rawJsonSha256,
-        rawSignalCount: shard.rawSignalCount,
-        parsedDraftCount: shard.parsedDraftCount
-      });
-    }
-    if (shard.status === "invalid" && shard.rawJsonSha256 !== undefined) {
-      invalidShards.push({ cache_key: key, raw_json_sha256: shard.rawJsonSha256 });
+    for (const key of keys) {
+      const shard = inspectCachedExtraction(
+        cacheRoot, key, config.model, config.requestProfile
+      );
+      if (shard.status === "missing") missingKeys.push(key);
+      if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {
+        validEntries.push({
+          cacheKey: key,
+          model: config.model,
+          requestProfile: config.requestProfile,
+          rawJsonSha256: shard.rawJsonSha256,
+          rawSignalCount: shard.rawSignalCount,
+          parsedDraftCount: shard.parsedDraftCount
+        });
+      }
+      if (shard.status === "invalid" && shard.rawJsonSha256 !== undefined) {
+        invalidShards.push({ cache_key: key, raw_json_sha256: shard.rawJsonSha256 });
+      }
     }
   }
   return {

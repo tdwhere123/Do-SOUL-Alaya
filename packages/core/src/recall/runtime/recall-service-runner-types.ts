@@ -61,6 +61,12 @@ export interface RecallExecutionParams {
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
+  readonly querySemanticFactorFormationProposal?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationProposal
+  >;
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture

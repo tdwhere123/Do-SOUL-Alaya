@@ -9,6 +9,7 @@ import {
 } from "../../../longmemeval/compile-seed.js";
 import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
+  ExtractionFillTaskError,
   runExtractionPool
 } from "../../../longmemeval/extraction/fill/fill-pool.js";
 import { newFillStats } from "../../../longmemeval/extraction/fill/fill-stats.js";
@@ -17,7 +18,21 @@ import {
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
 
-it("uses the production request envelope with trusted round roles", async () => {
+it("retains the originating task failure for terminal fill diagnostics", () => {
+  const cause = new Error("semantic graph validation failed");
+  const error = new ExtractionFillTaskError({
+    retryClassification: "unknown",
+    retrySuccesses: 0,
+    rateLimitRetries: 0,
+    processedTurns: 6,
+    requestedTurns: 13_998,
+    cause
+  });
+
+  expect(error.cause).toBe(cause);
+});
+
+it("uses the compact production extraction request", async () => {
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
     rawJson: '{"signals":[]}'
   }));
@@ -38,17 +53,44 @@ it("uses the production request envelope with trusted round roles", async () => 
   });
 
   const request = JSON.parse(extract.mock.calls[0]![0].userPrompt) as {
+    readonly schema_version?: number;
     readonly source_locator_contract_version?: number;
     readonly source_assertions?: readonly { readonly text: string }[];
-    readonly source_spans?: readonly { readonly role: string; readonly text: string }[];
   };
+  expect(request.schema_version).toBe(2);
   expect(request.source_locator_contract_version).toBe(2);
   expect(request.source_assertions).toEqual([
     { assertion_id: 1, text: "User: I moved to Berlin." }
   ]);
-  expect(request.source_spans).toEqual([
-    { span_id: 1, role: "user", text: "User: I moved to Berlin." },
-    { span_id: 2, role: "assistant", text: "Assistant: That sounds exciting." }
+  expect(JSON.stringify(request)).not.toContain("Assistant");
+});
+
+it("extracts every source assertion through bounded request batches", async () => {
+  const requests: number[][] = [];
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+    const request = JSON.parse(input.userPrompt) as {
+      readonly source_assertions: readonly { readonly assertion_id: number }[];
+    };
+    requests.push(request.source_assertions.map(({ assertion_id }) => assertion_id));
+    return { rawJson: '{"signals":[]}' };
+  });
+  const source = Array.from(
+    { length: 9 },
+    (_, index) => `I recorded durable detail number ${index + 1}.`
+  ).join(" ");
+
+  await runExtractionPool({
+    extractor: { extract },
+    turns: [{ turnContent: source, turnMessages: [] }],
+    concurrency: 1,
+    requestedTurns: 1,
+    stats: newFillStats(),
+    log: () => undefined
+  });
+
+  expect(requests).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    [9]
   ]);
 });
 
@@ -59,8 +101,10 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
   const releaseClean = deferred<void>();
   const extractor: BenchSignalExtractor = {
     extract: vi.fn(async (input) => {
-      const turn = JSON.parse(input.userPrompt) as { readonly turn_content: string };
-      if (turn.turn_content === "clean") {
+      const turn = JSON.parse(input.userPrompt) as {
+        readonly source_assertions: readonly { readonly text: string }[];
+      };
+      if (turn.source_assertions.some(({ text }) => text.includes("clean"))) {
         cleanStarted.resolve();
         await releaseClean.promise;
         return {
@@ -91,12 +135,12 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
     extractor,
     turns: [
       {
-        turnContent: "clean",
-        turnMessages: [{ message_id: "clean", role: "user", content: "clean" }]
+        turnContent: "I am clean.",
+        turnMessages: [{ message_id: "clean", role: "user", content: "I am clean." }]
       },
       {
-        turnContent: "limited",
-        turnMessages: [{ message_id: "limited", role: "user", content: "limited" }]
+        turnContent: "I am limited.",
+        turnMessages: [{ message_id: "limited", role: "user", content: "I am limited." }]
       }
     ],
     concurrency: 2,
@@ -113,6 +157,75 @@ it("attributes a concurrent 429 backoff to its own task instead of shared run st
     adaptiveConcurrencyBackoffs: 1,
     adaptiveConcurrencyBackoffMs: 250
   });
+});
+
+it("backs a four-worker fill below its authority maximum after a 429", async () => {
+  let calls = 0;
+  const logs: string[] = [];
+  await runExtractionPool({
+    extractor: {
+      extract: vi.fn(async () => ({
+        rawJson: '{"signals":[]}',
+        taskRateLimitRetries: calls++ === 0 ? 1 : 0
+      }))
+    },
+    turns: Array.from({ length: 4 }, (_, index) => ({
+      turnContent: `I saved durable detail ${index}.`,
+      turnMessages: []
+    })),
+    concurrency: 4,
+    requestedTurns: 4,
+    stats: newFillStats(),
+    log: (message) => logs.push(message)
+  });
+
+  expect(logs).toContain(
+    "[extraction-fill] rate-limit backoff: concurrency=2/4 total_backoff_ms=250"
+  );
+});
+
+it("reports a redacted reason without treating schema rejection as provider pressure", async () => {
+  const logs: string[] = [];
+  const stats = newFillStats();
+  const failure = Object.assign(
+    new Error(
+      "signals array contained no valid open semantic factor entries " +
+        "(rejections=semantic_factor_graph_missing:2)"
+    ), {
+    benchRetry: {
+      retryCount: 4,
+      rateLimitRetries: 0,
+      retryClassification: "failure_max_retries" as const,
+      transportFailures: [{
+        kind: "response_schema_error" as const,
+        phase: "response_schema" as const,
+        httpStatus: null,
+        fingerprint: "schema-fingerprint"
+      }]
+    }
+  });
+
+  await runExtractionPool({
+    extractor: { extract: vi.fn(async () => await Promise.reject(failure)) },
+    turns: extractionTurns(1),
+    concurrency: 4,
+    initialConcurrency: 1,
+    requestedTurns: 1,
+    stats,
+    log: (message) => logs.push(message),
+    tolerateProviderTaskFailures: true
+  });
+
+  expect(stats).toMatchObject({
+    adaptiveConcurrencyBackoffs: 0,
+    adaptiveConcurrencyBackoffMs: 0
+  });
+  expect(logs).toContain(
+      "[extraction-fill] leaving provider failure for a later fill: " +
+      "retry_classification=failure_max_retries " +
+      "failure_reason=semantic_factor_graph_missing processed_turns=1/1"
+  );
+  expect(logs.some((message) => message.includes("provider-pressure backoff"))).toBe(false);
 });
 
 it("reports a first-pass 429 through a strict-empty cache recheck to adaptive concurrency", async () => {
@@ -273,8 +386,8 @@ it("starts at the explicit initial concurrency before recovering toward the maxi
     })
   };
   const turns = Array.from({ length: 32 }, (_, index) => ({
-    turnContent: `turn-${index}`,
-    turnMessages: [{ message_id: `m-${index}`, role: "user" as const, content: `turn-${index}` }]
+    turnContent: `I remember turn-${index}.`,
+    turnMessages: [{ message_id: `m-${index}`, role: "user" as const, content: `I remember turn-${index}.` }]
   }));
 
   const running = runExtractionPool({
@@ -296,7 +409,7 @@ it("starts at the explicit initial concurrency before recovering toward the maxi
   await running;
 });
 
-it("keeps the 100Q extraction pool at its initial-eight floor after a 429", async () => {
+it("backs the 100Q extraction pool below its initial concurrency after a 429", async () => {
   vi.useFakeTimers();
   try {
     const firstWave = deferred<void>();
@@ -331,7 +444,7 @@ it("keeps the 100Q extraction pool at its initial-eight floor after a 429", asyn
     expect(started).toBe(8);
     await vi.advanceTimersByTimeAsync(250);
     await flushMicrotasks();
-    expect(started).toBe(16);
+    expect(started).toBe(12);
 
     secondWave.resolve();
     await running;
@@ -391,11 +504,11 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function extractionTurns(count: number) {
   return Array.from({ length: count }, (_, index) => ({
-    turnContent: `turn-${index}`,
+    turnContent: `I remember turn-${index}.`,
     turnMessages: [{
       message_id: `m-${index}`,
       role: "user" as const,
-      content: `turn-${index}`
+      content: `I remember turn-${index}.`
     }]
   }));
 }

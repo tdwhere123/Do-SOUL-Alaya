@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
   AssociativeFactFrameSchema,
+  OpenSemanticFactorGraphProposalSchema,
   SignalKind,
   type AssociativeFactFrame,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import {
@@ -14,12 +16,13 @@ import {
   OfficialApiSourceLocatorSchema,
   type OfficialApiSourceLocator
 } from "./grounding/source-locator.js";
+import { pruneUnboundOpenSemanticFactorProposal } from
+  "./semantic-factors/proposal-normalizer.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
-// invariant: extraction-cache reuse binds this parser behavior explicitly rather than
-// inferring compatibility from raw cache identity alone. source_locator is additive
-// and independently versioned, so locator absence keeps legacy v1 output unchanged.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v4";
+export const OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND = "open_semantic_observation";
+// Raw cache identity and parser projection identity evolve independently.
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v7";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
@@ -33,17 +36,6 @@ const RequiredTrimmedStringSchema = z.preprocess(normalizeStringValue, z.string(
 const OptionalTrimmedStringSchema = z
   .preprocess(normalizeStringValue, z.string().min(1).nullable())
   .transform((value) => value ?? null);
-const OfficialApiSignalKindSchema = z.preprocess(
-  normalizeStringValue,
-  z.union([
-    z.literal(SignalKind.POTENTIAL_CLAIM),
-    z.literal(SignalKind.POTENTIAL_SYNTHESIS),
-    z.literal(SignalKind.POTENTIAL_HANDOFF),
-    z.literal(SignalKind.POTENTIAL_EVIDENCE_ANCHOR),
-    z.literal(SignalKind.POTENTIAL_CONFLICT),
-    z.literal(SignalKind.POTENTIAL_PREFERENCE)
-  ])
-);
 const OfficialApiConfidenceSchema = z.preprocess((value) => {
   if (typeof value !== "string") return value;
   const normalized = value.trim();
@@ -102,6 +94,12 @@ const OptionalAssociativeFactFrameSchema = z.preprocess((value) => {
   const parsed = AssociativeFactFrameSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }, AssociativeFactFrameSchema.optional());
+const OptionalOpenSemanticFactorGraphSchema = z.preprocess((value) => {
+  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(
+    pruneUnboundOpenSemanticFactorProposal(value)
+  );
+  return parsed.success ? parsed.data : undefined;
+}, OpenSemanticFactorGraphProposalSchema.optional());
 const PreferencePolarityValueSchema = z.union([
   z.literal("positive"),
   z.literal("negative"),
@@ -139,9 +137,7 @@ const OfficialApiPreferenceProfileSchema = z
     };
     return Object.keys(draft).length === 0 ? null : Object.freeze(draft);
   });
-const OfficialApiSignalEntrySchema = z.object({
-  signal_kind: OfficialApiSignalKindSchema,
-  object_kind: RequiredTrimmedStringSchema,
+const OfficialApiSignalEntrySharedShape = {
   confidence: OfficialApiConfidenceSchema,
   matched_text: RequiredTrimmedStringSchema,
   evidence_refs: StringArraySchema,
@@ -149,11 +145,17 @@ const OfficialApiSignalEntrySchema = z.object({
   canonical_entities: CanonicalEntitiesArraySchema,
   distilled_fact: OptionalTrimmedStringSchema,
   reason: OptionalTrimmedStringSchema,
-  // Optional only for legacy extraction-cache replay; a declared locator must parse strictly.
+  // A declared locator is strict; absence means the whole source assertion is grounded.
   source_locator: OfficialApiSourceLocatorSchema.optional(),
   temporal_projection: OfficialApiTemporalProjectionSchema,
   preference_profile: OfficialApiPreferenceProfileSchema,
-  fact_frame: OptionalAssociativeFactFrameSchema
+  fact_frame: OptionalAssociativeFactFrameSchema,
+  semantic_factor_graph: OptionalOpenSemanticFactorGraphSchema
+} as const;
+const OpenOfficialApiSignalEntrySchema = z.object({
+  signal_kind: RequiredTrimmedStringSchema.optional(),
+  object_kind: RequiredTrimmedStringSchema.optional(),
+  ...OfficialApiSignalEntrySharedShape
 }).loose().readonly();
 
 export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
@@ -185,7 +187,26 @@ export interface OfficialApiSignalDraft {
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
   readonly fact_frame?: AssociativeFactFrame;
+  readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
 }
+
+type OfficialApiSignalEntryRejection =
+  | "semantic_factor_graph_missing"
+  | `semantic_factor_graph_invalid_${SemanticGraphCardinalitySubject}_${"too_few" | "too_many"}`
+  | "semantic_factor_graph_invalid_identity"
+  | "semantic_factor_graph_invalid_reference"
+  | "semantic_factor_graph_invalid_shape"
+  | "semantic_factor_graph_invalid_structure"
+  | "semantic_factor_graph_invalid_unbound"
+  | "signal_entry_invalid";
+
+type SemanticGraphCardinalitySubject =
+  | "arguments"
+  | "factors"
+  | "field"
+  | "propositions"
+  | "result_variables"
+  | "variables";
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
 // through this exact production parse instead of a divergent bench-only
@@ -219,14 +240,14 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   }
 
   const drafts: OfficialApiSignalDraft[] = [];
+  const rejections: OfficialApiSignalEntryRejection[] = [];
   for (const candidate of envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT)) {
-    const draft = parseOfficialApiSignalEntry(candidate);
-    if (draft !== null) {
-      drafts.push(draft);
-    }
+    const inspected = inspectOfficialApiSignalEntry(candidate);
+    if (inspected.draft === null) rejections.push(inspected.rejection);
+    else drafts.push(inspected.draft);
   }
   if (envelope.signals.length > 0 && drafts.length === 0) {
-    throw new Error("signals array contained no valid entries");
+    throw noValidOpenEntriesError(rejections);
   }
   return Object.freeze(drafts);
 }
@@ -360,21 +381,100 @@ function findSignalsArrayStart(content: string): number {
 // null — instead of throwing — when the entry is malformed (hallucinated
 // signal_kind, missing object_kind / matched_text / confidence, or a
 // non-object element), so one bad fact is dropped while the rest survive.
-export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
-  const parsed = OfficialApiSignalEntrySchema.safeParse(candidate);
-  if (!parsed.success) {
-    return null;
+export function parseOfficialApiSignalEntry(
+  candidate: unknown
+): OfficialApiSignalDraft | null {
+  return inspectOfficialApiSignalEntry(candidate).draft;
+}
+
+function inspectOfficialApiSignalEntry(candidate: unknown): Readonly<{
+  readonly draft: OfficialApiSignalDraft | null;
+  readonly rejection: OfficialApiSignalEntryRejection;
+}> {
+  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+    return { draft: null, rejection: "signal_entry_invalid" };
   }
-  const record = parsed.data;
+  const semanticFactorGraph = (candidate as Record<string, unknown>).semantic_factor_graph;
+  if (semanticFactorGraph === undefined || semanticFactorGraph === null) {
+    return { draft: null, rejection: "semantic_factor_graph_missing" };
+  }
+  const parsedSemanticFactorGraph = OpenSemanticFactorGraphProposalSchema.safeParse(
+    pruneUnboundOpenSemanticFactorProposal(semanticFactorGraph)
+  );
+  if (!parsedSemanticFactorGraph.success) {
+    return {
+      draft: null,
+      rejection: classifySemanticFactorGraphRejection(parsedSemanticFactorGraph.error)
+    };
+  }
+  const parsed = OpenOfficialApiSignalEntrySchema.safeParse(candidate);
+  if (!parsed.success) {
+    return { draft: null, rejection: "signal_entry_invalid" };
+  }
+  if (parsed.data.semantic_factor_graph === undefined) {
+    return { draft: null, rejection: "semantic_factor_graph_invalid_shape" };
+  }
+  return {
+    draft: buildOfficialApiSignalDraft(Object.freeze({
+      ...parsed.data,
+      signal_kind: SignalKind.POTENTIAL_SEMANTIC_OBSERVATION,
+      object_kind: OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
+    })),
+    rejection: "signal_entry_invalid"
+  };
+}
+
+function classifySemanticFactorGraphRejection(
+  error: z.ZodError
+): OfficialApiSignalEntryRejection {
+  const messages = error.issues.map(({ message }) => message);
+  if (messages.includes("semantic factor graph has unbound values")) {
+    return "semantic_factor_graph_invalid_unbound";
+  }
+  if (messages.some((message) => /reference|predicate factor is missing/iu.test(message))) {
+    return "semantic_factor_graph_invalid_reference";
+  }
+  if (error.issues.some(({ path, message }) =>
+    path.at(-1) === "semantic_identity" || path.at(-1) === "binding_identity" ||
+      /semantic identity/iu.test(message))) {
+    return "semantic_factor_graph_invalid_identity";
+  }
+  const cardinality = error.issues.find(
+    ({ code }) => code === "too_big" || code === "too_small"
+  );
+  if (cardinality !== undefined &&
+      (cardinality.code === "too_big" || cardinality.code === "too_small")) {
+    const subject = semanticGraphCardinalitySubject(cardinality.path);
+    const direction = cardinality.code === "too_big" ? "too_many" : "too_few";
+    return `semantic_factor_graph_invalid_${subject}_${direction}`;
+  }
+  if (messages.some((message) => /unique|contiguous|evidence graph cannot/iu.test(message))) {
+    return "semantic_factor_graph_invalid_structure";
+  }
+  return "semantic_factor_graph_invalid_shape";
+}
+
+function semanticGraphCardinalitySubject(
+  path: readonly PropertyKey[]
+): SemanticGraphCardinalitySubject {
+  if (path.includes("factors")) return "factors";
+  if (path.includes("variables")) return "variables";
+  if (path.includes("result_variable_ids")) return "result_variables";
+  if (path.includes("propositions")) {
+    return path.includes("arguments") ? "arguments" : "propositions";
+  }
+  return "field";
+}
+
+function buildOfficialApiSignalDraft(
+  record: z.infer<typeof OpenOfficialApiSignalEntrySchema> & {
+    readonly signal_kind: typeof SignalKind.POTENTIAL_SEMANTIC_OBSERVATION;
+    readonly object_kind: typeof OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND;
+  }
+): OfficialApiSignalDraft {
 
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
-  // distilled_fact is the resolved one-assertion fact materialization
-  // stores as memory_entry content. A model that omits it (or sends a
-  // non-string / empty value) leaves the field ABSENT so
-  // materialization-router/inputs.ts buildDistilledFact degrades honestly to
-  // its rule distiller — never fake one from matched_text. The clamp
-  // shares DISTILLED_FACT_MAX_CHARS so the provider and materialization
-  // agree on one budget.
+  // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
   const clampedDistilledFact =
     record.distilled_fact === null ? null : record.distilled_fact.slice(0, DISTILLED_FACT_MAX_CHARS);
   const clampedReason = record.reason === null ? null : record.reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
@@ -391,8 +491,28 @@ export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSign
     ...(record.source_locator === undefined ? {} : { source_locator: record.source_locator }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
     ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile }),
-    ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame })
+    ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame }),
+    ...(record.semantic_factor_graph === undefined
+      ? {}
+      : { semantic_factor_graph: record.semantic_factor_graph })
   });
+}
+
+function noValidOpenEntriesError(
+  rejections: readonly OfficialApiSignalEntryRejection[]
+): Error {
+  const counts = new Map<OfficialApiSignalEntryRejection, number>();
+  for (const rejection of rejections) {
+    counts.set(rejection, (counts.get(rejection) ?? 0) + 1);
+  }
+  const summary = [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(",");
+  return new Error(
+    "signals array contained no valid open semantic factor entries " +
+      `(rejections=${summary})`
+  );
 }
 
 function normalizePreferenceProfileInput(value: unknown): unknown {

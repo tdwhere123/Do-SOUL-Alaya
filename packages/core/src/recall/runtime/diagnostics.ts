@@ -31,11 +31,29 @@ import type { RecallRetrievalFieldRefinementReceipt } from
   "../field/refinement/field-refinement-receipt.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
+import type { OpenSemanticFactorFormationCapture } from
+  "@do-soul/alaya-protocol";
+import type { OpenSemanticFactorCompatibilityTrace } from
+  "../field/open-semantic-factors/compatibility-trace.js";
+import type { OpenSemanticFactorCompositionReceipt } from
+  "../field/open-semantic-factors/composition.js";
+import type { OpenSemanticFactorActivationReceipt } from
+  "../field/open-semantic-factors/activation.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly queryFactFrameExtraction?: Readonly<RecallQueryFactFrameExtractionCapture>;
+  readonly queryOpenSemanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly openSemanticFactorCompatibilityTrace?: Readonly<
+    OpenSemanticFactorCompatibilityTrace
+  >;
+  readonly openSemanticFactorComposition?: Readonly<
+    OpenSemanticFactorCompositionReceipt
+  >;
+  readonly openSemanticFactorActivation?: Readonly<
+    OpenSemanticFactorActivationReceipt
+  >;
   readonly retrievalFieldCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly retrievalFieldRefinementReceipts?:
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
@@ -75,6 +93,30 @@ export function buildRecallDiagnostics(
     ...(params.queryFactFrameExtraction === undefined
       ? {}
       : { query_fact_frame_extraction: params.queryFactFrameExtraction }),
+    ...(params.queryOpenSemanticFactorFormation === undefined
+      ? {}
+      : {
+        query_open_semantic_factor_formation:
+          params.queryOpenSemanticFactorFormation
+      }),
+    ...(params.openSemanticFactorCompatibilityTrace === undefined
+      ? {}
+      : {
+        open_semantic_factor_compatibility_trace:
+          params.openSemanticFactorCompatibilityTrace
+      }),
+    ...(params.openSemanticFactorComposition === undefined
+      ? {}
+      : {
+        open_semantic_factor_composition:
+          params.openSemanticFactorComposition
+      }),
+    ...(params.openSemanticFactorActivation === undefined
+      ? {}
+      : {
+        open_semantic_factor_activation:
+          params.openSemanticFactorActivation
+      }),
     ...(params.retrievalFieldCaptures === undefined
       ? {}
       : { retrieval_field_captures: Object.freeze([...params.retrievalFieldCaptures]) }),

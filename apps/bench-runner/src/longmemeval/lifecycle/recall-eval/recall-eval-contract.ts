@@ -40,6 +40,7 @@ export interface RecallEvalOptions {
   readonly warmDerivedSnapshotReceiptPath?: string;
   readonly factFrameRetrofitLedgerPath?: string;
   readonly seedExtractionSystemPromptPath?: string;
+  readonly querySemanticFactorCachePath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
@@ -24,19 +23,7 @@ import {
 } from "./source-role/marker.js";
 
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = 2;
-const LEGACY_SENTENCE_RANGE_CONTRACT_VERSION = 1;
-const MAX_LOCATOR_SPANS = 2;
 const MAX_SOURCE_ASSERTIONS = 64;
-
-const ExactSentenceRangeLocatorSchema = z.object({
-  contract_version: z.literal(LEGACY_SENTENCE_RANGE_CONTRACT_VERSION),
-  kind: z.literal("exact_sentence_range"),
-  start_span: z.number().int().positive(),
-  end_span: z.number().int().positive()
-}).strict().refine(
-  (locator) => locator.end_span >= locator.start_span &&
-    locator.end_span - locator.start_span + 1 <= MAX_LOCATOR_SPANS
-).readonly();
 
 const AssertionCatalogLocatorSchema = z.object({
   contract_version: z.literal(OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION),
@@ -44,27 +31,13 @@ const AssertionCatalogLocatorSchema = z.object({
   assertion_id: z.number().int().positive()
 }).strict().readonly();
 
-export const OfficialApiSourceLocatorSchema = z.union([
-  AssertionCatalogLocatorSchema,
-  ExactSentenceRangeLocatorSchema
-]).readonly();
+export const OfficialApiSourceLocatorSchema = AssertionCatalogLocatorSchema;
 
 export type OfficialApiSourceLocator = z.infer<typeof OfficialApiSourceLocatorSchema>;
-
-export interface OfficialApiSourceSpan {
-  readonly span_id: number;
-  readonly role: "user" | "assistant";
-  readonly text: string;
-}
 
 export interface OfficialApiSourceAssertion {
   readonly assertion_id: number;
   readonly text: string;
-}
-
-interface IndexedSourceSpan extends OfficialApiSourceSpan {
-  readonly start: number;
-  readonly end: number;
 }
 
 interface IndexedSourceAssertion extends OfficialApiSourceAssertion {
@@ -91,12 +64,6 @@ export function buildOfficialApiSourceCorpus(
   return source;
 }
 
-export function buildOfficialApiSourceSpans(sourceText: string): readonly OfficialApiSourceSpan[] {
-  return Object.freeze(indexSourceSpans(sourceText).map(({ span_id, role, text }) =>
-    Object.freeze({ span_id, role, text })
-  ));
-}
-
 export function buildOfficialApiSourceAssertions(
   sourceText: string
 ): readonly OfficialApiSourceAssertion[] {
@@ -105,50 +72,12 @@ export function buildOfficialApiSourceAssertions(
   ));
 }
 
-/**
- * Carries only a semantic catalog delta into an extraction request identity.
- * Existing v2 catalogs retain their old cache identity so a source change can
- * be refilled narrowly instead of invalidating every historical shard.
- */
-export function computeOfficialApiSourceCatalogRequestIdentity(sourceText: string): string | undefined {
-  const legacy = selectBoundedAssertions(indexLegacySourceAssertions(
-    sourceText,
-    SOURCE_ASSERTION_MAX_CHARS
-  ));
-  const current = indexSourceAssertions(sourceText);
-  if (sameAssertionCatalog(legacy, current)) return undefined;
-  return createHash("sha256").update(JSON.stringify({
-    contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-    source_assertions: current.map(({ assertion_id, text }) => ({ assertion_id, text }))
-  }), "utf8").digest("hex");
-}
-
 export function resolveOfficialApiSourceLocator(
   sourceText: string,
   locator: OfficialApiSourceLocator,
   maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
-  if (locator.kind === "assertion_catalog") {
-    return resolveAssertionCatalogLocator(sourceText, locator.assertion_id, maxChars);
-  }
-  if (locator.end_span < locator.start_span ||
-      locator.end_span - locator.start_span + 1 > MAX_LOCATOR_SPANS) {
-    return rejectedRange();
-  }
-  const spans = indexSourceSpans(sourceText);
-  const selected = spans.slice(locator.start_span - 1, locator.end_span);
-  if (selected.length !== locator.end_span - locator.start_span + 1 ||
-      selected.some((span) => span.role !== "user")) {
-    return rejectedRange();
-  }
-  const first = selected[0];
-  const last = selected.at(-1);
-  if (first === undefined || last === undefined) return rejectedRange();
-  const selectedText = sourceText.slice(first.start, last.end);
-  if (hasDirectQuestion(selected)) {
-    return { status: "rejected", reason: "source_assertion_incomplete" };
-  }
-  return resolveSourceAssertion(sourceText, selectedText, maxChars);
+  return resolveAssertionCatalogLocator(sourceText, locator.assertion_id, maxChars);
 }
 
 export function resolveOfficialApiSourceLocatorQuote(
@@ -162,7 +91,6 @@ export function resolveOfficialApiSourceLocatorQuote(
   if (locatorAssertionUniquelyCommitsToQuote(sourceText, located.assertion, proposedText)) {
     return located;
   }
-  if (locator.kind !== "assertion_catalog") return rejectedQuote();
   return resolveCatalogVerbatimQuote(
     sourceText,
     locator.assertion_id,
@@ -188,7 +116,7 @@ function resolveAssertionCatalogLocator(
   maxChars: number
 ): SourceAssertionResolution {
   const selected = indexSourceAssertions(sourceText)[assertionId - 1];
-  if (selected === undefined) return rejectedRange();
+  if (selected === undefined) return rejectedLocator();
   const sentenceText = sourceText.slice(selected.sentence.start, selected.sentence.end);
   const assertionText = sourceText.slice(selected.start, selected.end);
   return selected.atomic
@@ -258,10 +186,6 @@ function isRecoverableVerbatimUserQuote(value: string, maxChars: number): boolea
     return true;
   }
   return /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(quote);
-}
-
-function hasDirectQuestion(selected: readonly IndexedSourceSpan[]): boolean {
-  return selected.some((span) => isDirectQuestionSourceText(span.text));
 }
 
 export function isDirectQuestionSourceText(text: string): boolean {
@@ -426,26 +350,6 @@ function selectBoundedAssertions(
   });
 }
 
-function sameAssertionCatalog(
-  left: readonly IndexedSourceAssertion[],
-  right: readonly IndexedSourceAssertion[]
-): boolean {
-  return left.length === right.length && left.every((assertion, index) =>
-    assertion.assertion_id === right[index]?.assertion_id && assertion.text === right[index]?.text
-  );
-}
-
-function indexSourceSpans(sourceText: string): readonly IndexedSourceSpan[] {
-  const roleMarkers = collectSourceRoleMarkers(sourceText);
-  return sentenceSpans(sourceText).map((span, index) => ({
-    span_id: index + 1,
-    role: roleAt(roleMarkers, span.start),
-    text: sourceText.slice(span.start, span.end),
-    start: span.start,
-    end: span.end
-  }));
-}
-
 function roleAt(
   markers: readonly SourceRoleMarker[],
   offset: number
@@ -466,7 +370,7 @@ function canonicalMessageContent(content: string): string {
   return content.trim().replace(/\s*[\r\n]+\s*/gu, " ");
 }
 
-function rejectedRange(): SourceAssertionResolution {
+function rejectedLocator(): SourceAssertionResolution {
   return { status: "rejected", reason: "source_assertion_not_self_contained" };
 }
 

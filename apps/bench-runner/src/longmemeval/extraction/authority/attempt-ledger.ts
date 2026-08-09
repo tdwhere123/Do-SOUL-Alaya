@@ -3,7 +3,8 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 import {
-  assertExtractionAttemptLedgerCacheIdentity, assertLedgerSuccessfulShard, readValidLedgerShard,
+  assertExtractionAttemptLedgerCacheIdentity, assertLedgerSuccessfulShard,
+  readValidDeterministicLedgerShard, readValidLedgerShard,
   type ExtractionAttemptLedgerCacheIdentity,
   type ExtractionSuccessfulShard
 } from "./attempt-ledger-shards.js";
@@ -25,6 +26,11 @@ import {
   settleTransportOutcome,
   type ExtractionTransportOutcome
 } from "./attempt-ledger/outcome.js";
+import {
+  commitDeterministicShard,
+  commitProviderBackedShard,
+  sortedSuccessfulShards
+} from "./attempt-ledger/success.js";
 
 export { ExtractionAttemptLimitError } from "./attempt-ledger/outcome.js";
 export const computeExtractionAttemptCeiling = computeExtractionFillAttemptCeiling;
@@ -186,6 +192,7 @@ export function openExtractionAttemptLedger(input: {
   readonly reserveAttempt: (cacheKey: string) => void;
   readonly abandonPendingShard: (cacheKey: string) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
+  readonly commitDeterministicShard: (cacheKey: string) => void;
   readonly recordTransportOutcome: (
     cacheKey: string,
     input: ExtractionTransportOutcome
@@ -211,7 +218,19 @@ export function openExtractionAttemptLedger(input: {
     },
     commitSuccessfulShard: (cacheKey) => {
       const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity);
-      current = commitSuccessfulShard(current, shard);
+      current = commitProviderBackedShard(current, shard);
+      persistAttemptLedgerRecord(path, current);
+    },
+    commitDeterministicShard: (cacheKey) => {
+      const shard = readValidDeterministicLedgerShard(
+        input.cacheRoot, cacheKey, current.cache_identity
+      );
+      if (shard === undefined) {
+        throw new ExtractionAttemptLimitError(
+          "deterministic extraction shard is not the canonical empty envelope"
+        );
+      }
+      current = commitDeterministicShard(current, shard);
       persistAttemptLedgerRecord(path, current);
     },
     recordTransportOutcome: (cacheKey, outcome) => {
@@ -255,24 +274,6 @@ function createExpectedRecord(input: {
   };
 }
 
-function commitSuccessfulShard(
-  current: ExtractionAttemptLedgerRecord,
-  shard: ExtractionSuccessfulShard
-): ExtractionAttemptLedgerRecord {
-  if (current.successful_shards.some((entry) => entry.cacheKey === shard.cacheKey)) return current;
-  if (!current.pending_keys.includes(shard.cacheKey)) {
-    throw new ExtractionAttemptLimitError("extraction success was not reserved before transport");
-  }
-  if (current.unresolved_attempts.some((attempt) => attempt.cache_key === shard.cacheKey)) {
-    throw new ExtractionAttemptLimitError("extraction success must settle its provider attempt first");
-  }
-  return {
-    ...current,
-    successful_shards: sortedShards([...current.successful_shards, shard]),
-    pending_keys: current.pending_keys.filter((key) => key !== shard.cacheKey)
-  };
-}
-
 function reconcilePending(
   cacheRoot: string,
   current: ExtractionAttemptLedgerRecord,
@@ -287,7 +288,7 @@ function reconcilePending(
   const recoveredKeys = new Set(recovered.map((shard) => shard.cacheKey));
   const next = {
     ...current,
-    successful_shards: sortedShards([...current.successful_shards, ...recovered]),
+    successful_shards: sortedSuccessfulShards([...current.successful_shards, ...recovered]),
     pending_keys: current.pending_keys.filter((key) => !recoveredKeys.has(key))
   };
   if (persist) persistAttemptLedgerRecord(path, next);
@@ -447,11 +448,6 @@ function rawLedgerDigest(path: string): string {
 
 function isAlreadyExistsError(cause: unknown): boolean {
   return cause instanceof Error && "code" in cause && cause.code === "EEXIST";
-}
-
-function sortedShards(shards: readonly ExtractionSuccessfulShard[]): readonly ExtractionSuccessfulShard[] {
-  return [...new Map(shards.map((shard) => [shard.cacheKey, shard])).values()]
-    .sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
 }
 
 function sameCacheIdentity(

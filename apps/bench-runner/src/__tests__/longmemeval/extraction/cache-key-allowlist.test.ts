@@ -8,7 +8,10 @@ import {
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { writeCachedExtraction } from
   "../../../longmemeval/compile-seed/cache/cache-shard.js";
-import { resolveCacheKeyAllowlistedTurns } from
+import {
+  resolveCacheKeyAllowlistedTurns,
+  resolveContinuationMissingTurns
+} from
   "../../../longmemeval/extraction/fill/policy/cache-key-allowlist.js";
 import type { LongMemEvalExtractionTurn } from
   "../../../longmemeval/extraction/turn-contents.js";
@@ -43,7 +46,8 @@ describe("extraction cache-key allowlist", () => {
 
     expect(selected).toEqual({
       turns: keys.map((key) => key === firstKey ? first : second),
-      skippedCacheHits: 0
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set(keys)
     });
     expect(writeLease.assertOwned).toHaveBeenCalledOnce();
   });
@@ -56,6 +60,33 @@ describe("extraction cache-key allowlist", () => {
       authority: undefined,
       writeLease: { assertOwned: vi.fn() }
     })).toBeUndefined();
+  });
+
+  it("derives a sparse continuation scope from settled ledger successes", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({ pinnedCachedTurns: 1 }),
+      authority: continuationAuthority(),
+      successfulKeys: [firstKey],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey])
+    });
   });
 
   it.each([
@@ -145,9 +176,17 @@ function catalogAuthority(keys: readonly string[]) {
   };
 }
 
+function continuationAuthority() {
+  return {
+    action: "fill" as const,
+    continuation: {} as never
+  };
+}
+
 function prepared(overrides: {
   readonly expansion?: object;
   readonly questionBatchLimit?: number;
+  readonly pinnedCachedTurns?: number;
 } = {}) {
   return {
     config,

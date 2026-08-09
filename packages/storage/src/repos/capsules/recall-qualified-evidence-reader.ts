@@ -12,9 +12,9 @@ import {
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
   type EvidenceCapsule,
-  type GardenSourceTurnFallbackVerifiedReceipt
+  type GardenSourceTurnFallbackVerifiedReceipt,
+  type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
-import type BetterSqlite3 from "better-sqlite3";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
@@ -33,15 +33,16 @@ import {
   readQualifiedProjectionIndex,
   type StoredProjectionRow
 } from "./qualification/qualified-evidence-projection.js";
+import {
+  readStoredSemanticFactorFormation,
+  type StoredSemanticFactorFormationColumns
+} from "./qualification/semantic-factor-formation-read.js";
+import {
+  prepareQualifiedEvidenceStatements,
+  type QualifiedEvidenceStatements
+} from "./qualification/qualified-evidence-statements.js";
 
 const QUERY_CHUNK_SIZE = 500;
-
-interface QualificationStatements {
-  readonly findEvidenceRows: BetterSqlite3.Statement;
-  readonly findSignalRows: BetterSqlite3.Statement;
-  readonly findMaterializationRows: BetterSqlite3.Statement;
-  readonly findProjectionRows: BetterSqlite3.Statement;
-}
 
 interface StoredSignalRow {
   readonly signal_id: string;
@@ -77,13 +78,15 @@ interface StoredMaterializationRow {
   readonly payload_json: string;
 }
 
-interface EvidenceQualificationRow extends EvidenceCapsuleRow {
+interface EvidenceQualificationRow extends EvidenceCapsuleRow,
+  StoredSemanticFactorFormationColumns {
   readonly source_signal_id: string | null;
 }
 
 interface EvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly signalId: string | null;
+  readonly semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
 }
 
 interface QualificationInputs {
@@ -97,10 +100,13 @@ interface QualifiedEvidenceProof {
 }
 
 export class RecallQualifiedEvidenceReader {
-  private readonly statementHolder: RefreshableStatementHolder<QualificationStatements>;
+  private readonly statementHolder: RefreshableStatementHolder<QualifiedEvidenceStatements>;
 
   public constructor(db: StorageDatabase) {
-    this.statementHolder = new RefreshableStatementHolder(db, prepareStatements);
+    this.statementHolder = new RefreshableStatementHolder(
+      db,
+      prepareQualifiedEvidenceStatements
+    );
   }
 
   public find(
@@ -175,7 +181,8 @@ export class RecallQualifiedEvidenceReader {
         candidate.capsule,
         proof.turnReceipt,
         projections,
-        candidate.signalId === null ? undefined : signals.get(candidate.signalId)
+        candidate.signalId === null ? undefined : signals.get(candidate.signalId),
+        candidate.semanticFactorFormation
       );
       return qualified === null ? [] : [qualified];
     });
@@ -226,15 +233,6 @@ export class RecallQualifiedEvidenceReader {
   }
 }
 
-function prepareStatements(db: StorageDatabase): QualificationStatements {
-  return {
-    findEvidenceRows: db.connection.prepare(FIND_EVIDENCE_ROWS_SQL),
-    findSignalRows: db.connection.prepare(FIND_SIGNAL_ROWS_SQL),
-    findMaterializationRows: db.connection.prepare(FIND_MATERIALIZATION_ROWS_SQL),
-    findProjectionRows: db.connection.prepare(FIND_PROJECTION_ROWS_SQL)
-  };
-}
-
 function readEvidenceCandidates(
   rows: readonly EvidenceQualificationRow[]
 ): readonly EvidenceCandidate[] {
@@ -252,8 +250,16 @@ function readEvidenceCandidate(row: EvidenceQualificationRow): EvidenceCandidate
     const signalId = row.source_signal_id ?? readGardenSourceTurnFallbackArtifactSignalId(
       capsule.physical_anchor?.artifact_ref ?? null
     );
-    return matchesEvidenceEnvelope(capsule) ? { capsule, signalId } : null;
+    const semanticFactorFormation = readSemanticFactorFormation(row, capsule);
+    return matchesEvidenceEnvelope(capsule)
+      ? {
+          capsule,
+          signalId,
+          ...(semanticFactorFormation === undefined ? {} : { semanticFactorFormation })
+        }
+      : null;
   } catch (error) {
+    if (error instanceof EvidenceProjectionIntegrityError) throw error;
     process.emitWarning("evidence candidate parse failed; skipping row", {
       code: "ALAYA_EVIDENCE_CANDIDATE_PARSE_FAILED",
       detail: JSON.stringify({
@@ -263,6 +269,24 @@ function readEvidenceCandidate(row: EvidenceQualificationRow): EvidenceCandidate
       })
     });
     return null;
+  }
+}
+
+function readSemanticFactorFormation(
+  row: EvidenceQualificationRow,
+  capsule: Readonly<EvidenceCapsule>
+): Readonly<OpenSemanticFactorFormationCapture> | undefined {
+  try {
+    return readStoredSemanticFactorFormation(
+      row,
+      capsule.workspace_id,
+      capsule.excerpt
+    );
+  } catch (error) {
+    throw new EvidenceProjectionIntegrityError(
+      capsule.object_id,
+      error instanceof Error ? error.message : "invalid semantic factor formation capture"
+    );
   }
 }
 
@@ -442,58 +466,3 @@ function parseJson(value: string | null): unknown {
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
-
-const FIND_EVIDENCE_ROWS_SQL = `
-  SELECT object_id, object_kind, schema_version, lifecycle_state, created_at,
-         updated_at, created_by, evidence_kind, semantic_anchor, event_anchor,
-         physical_anchor, evidence_health_state, gist, excerpt, source_hash,
-         run_id, workspace_id, surface_id,
-         (
-           SELECT CASE WHEN COUNT(*) = 1 THEN MIN(owner.signal_id) ELSE NULL END
-           FROM recall_routing_key_owners AS owner
-           WHERE owner.workspace_id = evidence_capsules.workspace_id
-             AND owner.owner_kind = 'evidence_capsule'
-             AND owner.owner_id = evidence_capsules.object_id
-         ) AS source_signal_id
-  FROM evidence_capsules
-  WHERE workspace_id = ?
-    AND object_id IN (SELECT value FROM json_each(?))
-`;
-
-const FIND_SIGNAL_ROWS_SQL = `
-  SELECT signal_id, workspace_id, run_id, surface_id, source, signal_kind,
-         object_kind, scope_hint, domain_tags_json, confidence, evidence_refs_json,
-         source_memory_refs_json, supersedes_refs_json, exception_to_refs_json,
-         contradicts_refs_json, incompatible_with_refs_json, raw_payload_json,
-         source_delivery_ids_json, source_observation_json, signal_state, created_at
-  FROM signals
-  WHERE workspace_id = ?
-    AND signal_id IN (SELECT value FROM json_each(?))
-`;
-
-const FIND_MATERIALIZATION_ROWS_SQL = `
-  SELECT event_type, entity_type, entity_id, workspace_id, run_id, caused_by,
-         payload_json
-  FROM event_log INDEXED BY idx_event_log_entity
-  WHERE workspace_id = ?
-    AND entity_type = 'candidate_memory_signal'
-    AND entity_id IN (SELECT value FROM json_each(?))
-    AND event_type = ?
-`;
-
-const FIND_PROJECTION_ROWS_SQL = `
-  SELECT projection.evidence_object_id, projection.projection_id,
-         projection.projection_kind, projection.workspace_id, projection.source_hash,
-         projection.content, formation.workspace_id AS formation_workspace_id,
-         formation.schema_version AS formation_schema_version,
-         formation.operator_id AS formation_operator_id, formation.status AS formation_status,
-         formation.producer_operator_id AS formation_producer_operator_id,
-         formation.source_hash AS formation_source_hash,
-         formation.fact_frame_json AS formation_fact_frame_json,
-         formation.capture_digest AS formation_capture_digest
-  FROM evidence_search_projections AS projection
-  LEFT JOIN evidence_fact_frame_formations AS formation
-    ON formation.evidence_object_id = projection.evidence_object_id
-  WHERE projection.workspace_id = ?
-    AND projection.evidence_object_id IN (SELECT value FROM json_each(?))
-`;

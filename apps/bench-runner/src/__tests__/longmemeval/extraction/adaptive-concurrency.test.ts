@@ -10,7 +10,7 @@ describe("adaptive extraction concurrency", () => {
 
     expect(controller.snapshot()).toMatchObject({ maximum: 64, current: 32, active: 0 });
     await controller.acquire(signal);
-    expect(controller.release(false)).toMatchObject({ current: 32, active: 0 });
+    expect(controller.release("success")).toMatchObject({ current: 32, active: 0 });
     controller.dispose();
   });
 
@@ -22,12 +22,12 @@ describe("adaptive extraction concurrency", () => {
       minimumConcurrency: 8
     });
     await bounded.acquire(signal);
-    expect(bounded.release(true)).toMatchObject({ minimum: 8, current: 8 });
+    expect(bounded.release("rate_limit")).toMatchObject({ minimum: 8, current: 8 });
     bounded.dispose();
 
     const defaulted = createAdaptiveConcurrencyController({ maximum: 2, initial: 2 });
     await defaulted.acquire(signal);
-    expect(defaulted.release(true)).toMatchObject({ minimum: 1, current: 1 });
+    expect(defaulted.release("rate_limit")).toMatchObject({ minimum: 1, current: 1 });
     defaulted.dispose();
   });
 
@@ -56,13 +56,13 @@ describe("adaptive extraction concurrency", () => {
     for (let active = 0; active < 8; active += 1) await controller.acquire(signal);
 
     for (let active = 1; active < 8; active += 1) {
-      expect(controller.release(true)).toMatchObject({
+      expect(controller.release("rate_limit")).toMatchObject({
         current: 4,
         rateLimitBackoffs: 1,
         backoffMs: 250
       });
     }
-    expect(controller.release(true)).toMatchObject({
+    expect(controller.release("rate_limit")).toMatchObject({
       current: 4,
       rateLimitBackoffs: 1,
       backoffMs: 250
@@ -75,10 +75,10 @@ describe("adaptive extraction concurrency", () => {
     await blocked;
 
     expect(controller.snapshot()).toMatchObject({ current: 4, active: 1 });
-    controller.release(false);
+    controller.release("success");
     expect(controller.snapshot()).toMatchObject({ current: 4, active: 0 });
     await controller.acquire(signal);
-    expect(controller.release(true)).toMatchObject({
+    expect(controller.release("rate_limit")).toMatchObject({
       current: 2,
       rateLimitBackoffs: 2,
       backoffMs: 750
@@ -91,14 +91,14 @@ describe("adaptive extraction concurrency", () => {
 
     for (let completed = 0; completed < 3; completed += 1) {
       await controller.acquire(signal);
-      expect(controller.release(false)).toMatchObject({ current: 4, active: 0 });
+      expect(controller.release("success")).toMatchObject({ current: 4, active: 0 });
     }
     await controller.acquire(signal);
-    expect(controller.release(false)).toMatchObject({ current: 5, active: 0 });
+    expect(controller.release("success")).toMatchObject({ current: 5, active: 0 });
     for (let completed = 0; completed < 5; completed += 1) {
       await controller.acquire(signal);
       const expected = completed === 4 ? 6 : 5;
-      expect(controller.release(false)).toMatchObject({ current: expected, active: 0 });
+      expect(controller.release("success")).toMatchObject({ current: expected, active: 0 });
     }
     controller.dispose();
   });
@@ -113,7 +113,7 @@ describe("adaptive extraction concurrency", () => {
     waiting.abort(new Error("SIGINT"));
 
     await expect(blocked).rejects.toThrow("SIGINT");
-    controller.release(false);
+    controller.release("neutral");
     controller.dispose();
   });
 });

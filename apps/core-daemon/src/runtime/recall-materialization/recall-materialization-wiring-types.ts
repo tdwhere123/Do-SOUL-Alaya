@@ -97,4 +97,6 @@ export type CreateRecallMaterializationWiringInput = {
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
   readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
+  readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")
+    .OpenSemanticFactorExtractionPort;
 };

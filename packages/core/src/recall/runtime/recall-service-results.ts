@@ -108,6 +108,30 @@ export interface RecallSupplementaryData {
     import("../field/query-attribution/query-fact-frame-attribution-producer.js")
       .RecallQueryFactFrameExtractionCapture
   >;
+  readonly queryOpenSemanticFactorFormation?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly semanticFactorFormationsByEvidenceId?: Readonly<Record<
+    string,
+    Readonly<import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture>
+  >>;
+  readonly openSemanticFactorCompatibilityTrace?: Readonly<
+    import("../field/open-semantic-factors/compatibility-trace.js")
+      .OpenSemanticFactorCompatibilityTrace
+  >;
+  readonly openSemanticFactorComposition?: Readonly<
+    import("../field/open-semantic-factors/composition.js")
+      .OpenSemanticFactorCompositionReceipt
+  >;
+  readonly openSemanticFactorActivation?: Readonly<
+    import("../field/open-semantic-factors/activation.js")
+      .OpenSemanticFactorActivationReceipt
+  >;
+  readonly openSemanticFactorCandidateActivationsByCandidateKey?: ReadonlyMap<
+    string,
+    Readonly<import("../field/open-semantic-factors/candidate-attribution.js")
+      .OpenSemanticFactorCandidateActivation>
+  >;
   readonly queryTimeWindow?: Readonly<import("../scoring/temporal-fusion-scoring.js").QueryTimeWindow>;
   readonly routingKeysByOwnerIdentity?: ReadonlyMap<
     string,

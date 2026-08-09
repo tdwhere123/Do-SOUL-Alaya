@@ -21,6 +21,8 @@ interface ExtractionFillWindow {
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
+  readonly executionRequestedTurns: number;
+  readonly windowUniqueCacheKeys: number;
   readonly windowTurnOccurrences: number;
   readonly executionTurnOccurrences: number;
   readonly questionCount: number;
@@ -54,7 +56,9 @@ function prepareExpansionWindow(
     executionTurns: turnContents,
     distinctExtractionTurns: expansion.nextTurns,
     executionExtractionTurns: expansion.nextTurns,
-    requestedTurns: expansion.nextTurns.length,
+    requestedTurns: keySpace.distinctExtractionRequestCount,
+    executionRequestedTurns: keySpace.distinctExtractionRequestCount,
+    windowUniqueCacheKeys: keySpace.distinctExtractionRequestCount,
     windowTurnOccurrences: expansion.nextTurns.length,
     executionTurnOccurrences: expansion.nextTurns.length,
     questionCount: expansion.nextQuestions.length,
@@ -85,7 +89,9 @@ async function prepareDatasetWindow(
     executionTurns,
     distinctExtractionTurns: windowKeySpace.distinctExtractionTurns,
     executionExtractionTurns: executionKeySpace.distinctExtractionTurns,
-    requestedTurns: distinctTurns.length,
+    requestedTurns: windowKeySpace.distinctExtractionRequestCount,
+    executionRequestedTurns: executionKeySpace.distinctExtractionRequestCount,
+    windowUniqueCacheKeys: windowKeySpace.distinctExtractionRequestCount,
     windowTurnOccurrences: windowKeySpace.turnOccurrences,
     executionTurnOccurrences: executionKeySpace.turnOccurrences,
     questionCount: questions.length,

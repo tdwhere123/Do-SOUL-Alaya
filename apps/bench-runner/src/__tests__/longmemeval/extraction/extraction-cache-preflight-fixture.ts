@@ -9,7 +9,7 @@ import { afterEach, beforeEach } from "vitest";
 import type { CompileSeedExtractionConfig } from "../../../longmemeval/compile-seed.js";
 import {
   cacheFilePath,
-  computeCacheKey,
+  computeSourceTurnCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
@@ -54,11 +54,11 @@ export function scopedManifestFor(
   turnContents: readonly string[],
   fillStatus: "in_progress" | "complete"
 ): ExtractionCacheManifestV3 {
-  const keys = [...new Set(turnContents.map((turnContent) => computeCacheKey(
+  const keys = [...new Set(turnContents.map((turnContent) => computeSourceTurnCacheKey(
     EXTRACTION_CONFIG.model,
     EXTRACTION_CONFIG.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent
+    { turnContent }
   )))].sort();
   return manifestFor({
     requested_turns: keys.length,
@@ -88,11 +88,11 @@ export function writeCacheShard(
   turnContent: string,
   rawJson: string
 ): void {
-  const cacheKey = computeCacheKey(
+  const cacheKey = computeSourceTurnCacheKey(
     model,
     EXTRACTION_CONFIG.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent
+    { turnContent }
   );
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });

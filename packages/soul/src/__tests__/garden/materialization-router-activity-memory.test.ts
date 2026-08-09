@@ -80,7 +80,8 @@ describe("MaterializationRouter activity recallability", () => {
         producer_operator_id: "garden_source_bound_fact_frame_proposal_v1",
         source_assertion: assertion,
         fact_frame: signal.raw_payload.fact_frame
-      })
+      }),
+      undefined
     );
     expect(dependencies.memoryService.create).toHaveBeenCalledWith(
       expect.objectContaining({ content: assertion })
@@ -129,7 +130,8 @@ describe("MaterializationRouter activity recallability", () => {
         producer_operator_id: "garden_source_bound_fact_frame_proposal_v1",
         source_assertion: assertion,
         fact_frame: proposedFactFrame
-      })
+      }),
+      undefined
     );
   });
 });

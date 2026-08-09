@@ -44,6 +44,7 @@ import {
   snapshotSeedCounters,
   type SeedCounterSnapshot
 } from "./seeding/answer-seed-drop-accounting.js";
+import { buildRoundExtractionLedger } from "./seed-round-extraction-ledger.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
@@ -198,18 +199,13 @@ function buildSeedRoundLedger(input: {
   readonly round: ReturnType<typeof pairSessionIntoRounds>[number];
   readonly seeds: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"];
 }): LongMemEvalSnapshotSeedRound {
-  const official = input.stats.lastExtractionSource !== null;
   return {
     sessionIndex: input.context.sessionIndex,
     roundIndex: input.context.roundIndex,
     sessionId: input.context.sessionId,
     contentSha256: sha256(input.round.content.trim()),
     hasAnswer: input.round.hasAnswer,
-    extractionSource: input.stats.lastExtractionSource ?? "fallback",
-    cacheKey: official ? input.stats.lastCacheKey ?? null : null,
-    rawJsonSha256: official ? input.stats.lastRawJsonSha256 : null,
-    rawSignalCount: official ? input.stats.lastTurnRawSignalCount : null,
-    draftCount: official ? input.stats.lastTurnDraftCount : null,
+    ...buildRoundExtractionLedger(input.stats),
     factsProduced: delta(input.stats.factsProduced, input.before.factsProduced),
     parseDropped: delta(input.stats.parseDropped, input.before.parseDropped),
     compileOverflowDropped: delta(

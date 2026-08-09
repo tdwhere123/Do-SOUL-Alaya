@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import {
   computeExtractionRawJsonSha256,
+  inspectExtractionRawEnvelope,
   inspectExtractionRawJson
 } from "../../extraction/content-closure.js";
 import type {
@@ -21,6 +22,10 @@ import {
   inspectCachedResponseMetadata,
   type CachedExtractionResponseMetadata
 } from "./cached-response-metadata.js";
+import {
+  isExtractionTransportProvenance,
+  type ExtractionTransportProvenance
+} from "../../extraction/transport-route.js";
 
 export interface CachedExtractionEntry {
   readonly model: string;
@@ -29,6 +34,7 @@ export interface CachedExtractionEntry {
   readonly raw_json: string;
   readonly extracted_at: string;
   readonly response_metadata?: CachedExtractionResponseMetadata;
+  readonly transport_provenance?: ExtractionTransportProvenance;
 }
 
 export type CachedExtractionInspection =
@@ -48,6 +54,16 @@ export type CachedExtractionInspection =
     readonly rawJsonSha256?: string;
   };
 
+export type CachedRawExtractionInspection =
+  | {
+      readonly status: "hit";
+      readonly rawJson: string;
+      readonly rawJsonSha256: string;
+      readonly rawSignalCount: number;
+    }
+  | { readonly status: "missing"; readonly reason?: undefined }
+  | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string };
+
 export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
   return join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
 }
@@ -58,6 +74,42 @@ export function inspectCachedExtraction(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"]
 ): CachedExtractionInspection {
+  const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
+  if (cached.status !== "hit") return cached;
+  return inspectCachedContent(
+    cached.entry.raw_json,
+    cached.entry.response_metadata
+  );
+}
+
+export function inspectCachedRawExtraction(
+  cacheRoot: string,
+  cacheKey: string,
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+): CachedRawExtractionInspection {
+  const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
+  if (cached.status !== "hit") return cached;
+  const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
+  try {
+    return {
+      status: "hit",
+      rawJson: cached.entry.raw_json,
+      ...inspectExtractionRawEnvelope(cached.entry.raw_json)
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { status: "invalid", reason: `invalid cached raw extraction: ${reason}`, rawJsonSha256 };
+  }
+}
+
+function readCachedEntry(
+  cacheRoot: string,
+  cacheKey: string,
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+): Readonly<{ status: "hit"; entry: CachedExtractionEntry }> |
+  Extract<CachedExtractionInspection, { status: "missing" | "invalid" }> {
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   if (!existsSync(filePath)) return { status: "missing" };
   let parsed: Partial<CachedExtractionEntry>;
@@ -69,7 +121,7 @@ export function inspectCachedExtraction(
   }
   const identityError = inspectCachedIdentity(parsed, cacheKey, model, requestProfile);
   if (identityError !== null) return { status: "invalid", reason: identityError };
-  return inspectCachedContent(parsed.raw_json!, parsed.response_metadata);
+  return { status: "hit", entry: parsed as CachedExtractionEntry };
 }
 
 export function writeCachedExtraction(
@@ -102,7 +154,12 @@ function inspectCachedContent(
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
     const response = inspectCachedResponseMetadata(responseMetadata);
-    return { status: "hit", rawJson, ...inspectExtractionRawJson(rawJson), ...response };
+    return {
+      status: "hit",
+      rawJson,
+      ...inspectExtractionRawJson(rawJson),
+      ...response
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cached extraction: ${reason}`, rawJsonSha256 };
@@ -119,6 +176,10 @@ function inspectCachedIdentity(
   if (parsed.model !== model) return `model ${String(parsed.model)} != ${model}`;
   if (parsed.request_profile !== requestProfile) {
     return `request_profile ${String(parsed.request_profile)} != ${requestProfile}`;
+  }
+  if (parsed.transport_provenance !== undefined &&
+      !isExtractionTransportProvenance(parsed.transport_provenance)) {
+    return "transport_provenance is invalid";
   }
   return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
 }

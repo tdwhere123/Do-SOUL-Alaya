@@ -13,7 +13,8 @@ import {
   type AssociativeFactFrame,
   type AssociativeFactKeyProjectionForm,
   type CandidateMemorySignal,
-  type GardenSourceTurnFallbackVerifiedReceipt
+  type GardenSourceTurnFallbackVerifiedReceipt,
+  type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import type {
   EvidenceSearchMatch,
@@ -116,7 +117,8 @@ export function qualifyEvidenceMatch(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
   projections: QualifiedProjectionIndex,
-  signal?: Readonly<CandidateMemorySignal>
+  signal?: Readonly<CandidateMemorySignal>,
+  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
 ): RecallQualifiedEvidence | null {
   const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
   if (match.matched_projection?.projection_kind === "assistant_observation") {
@@ -135,7 +137,10 @@ export function qualifyEvidenceMatch(
     return Object.freeze({
       capsule,
       verified_user_projection: verifiedUserProjection,
-      matched_projection: projection
+      matched_projection: projection,
+      ...(semanticFactorFormation === undefined
+        ? {}
+        : { semantic_factor_formation: semanticFactorFormation })
     });
   }
   if (match.matched_projection?.projection_kind === "fact_key") {
@@ -156,13 +161,19 @@ export function qualifyEvidenceMatch(
       verified_user_projection: verifiedUserProjection,
       matched_projection: attributed.projection,
       matched_fact_key_forms: attributed.forms,
-      matched_fact_frame: attributed.frame
+      matched_fact_frame: attributed.frame,
+      ...(semanticFactorFormation === undefined
+        ? {}
+        : { semantic_factor_formation: semanticFactorFormation })
     });
   }
   if (!matchesOwnerProjection(capsule, receipt)) return null;
   return Object.freeze({
     capsule,
-    verified_user_projection: verifiedUserProjection
+    verified_user_projection: verifiedUserProjection,
+    ...(semanticFactorFormation === undefined
+      ? {}
+      : { semantic_factor_formation: semanticFactorFormation })
   });
 }
 

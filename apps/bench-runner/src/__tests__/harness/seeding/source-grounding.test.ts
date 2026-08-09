@@ -9,6 +9,8 @@ import type {
   CompileSeedExtractionStats
 } from "../../../longmemeval/compile-seed.js";
 import { attachCompileSourceGrounding } from "../../../harness/seeding/source-grounding.js";
+import { withOpenSemanticFactorGraph } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 describe("compile source grounding revalidation", () => {
   it("preserves the same unique verbatim assertion accepted by the provider", () => {
@@ -134,13 +136,13 @@ describe("compile source grounding revalidation", () => {
       extractor: {
         extract: async () => ({
           rawJson: JSON.stringify({
-            signals: [{
+            signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_preference",
               object_kind: "preference",
               confidence: 0.9,
               matched_text: "I prefer dark mode.",
               source_locator: assertionLocator(2)
-            }]
+            })]
           })
         })
       },

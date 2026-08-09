@@ -15,6 +15,8 @@ import {
   type EvidenceSearchProjection,
   type EvidenceHealthState,
   type EventLogEntry,
+  type OpenSemanticFactorFormationCapture,
+  type OpenSemanticFactorFormationProposal,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
@@ -23,6 +25,8 @@ import { materializeEvidenceFactFrameFormation } from
   "./evidence-fact-frame-formation.js";
 import type { EvidenceFactFrameProposalNormalizer } from
   "./fact-frame-formation/declarative-normalizer.js";
+import { materializeOpenSemanticFactorFormation } from
+  "../semantic/open-semantic-factor-formation.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -49,7 +53,8 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
   ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
@@ -128,7 +133,8 @@ export class EvidenceService {
   public async create(
     input: EvidenceCapsuleInput,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
-    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>
+    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
+    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
   ): Promise<Readonly<EvidenceCapsule>> {
     const timestamp = this.now();
     const evidence = parseEvidenceCapsule({
@@ -161,6 +167,13 @@ export class EvidenceService {
       ...suppliedProjections,
       ...formation.searchProjections
     ]);
+    const semanticFormation = materializeOpenSemanticFactorFormation({
+      source_kind: "evidence",
+      source_text: evidence.excerpt,
+      ...(semanticFactorProposal === undefined
+        ? {}
+        : { proposal: semanticFactorProposal })
+    });
 
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
@@ -180,7 +193,8 @@ export class EvidenceService {
     const created = await this.dependencies.evidenceCapsuleRepo.create(
       evidence,
       projections,
-      formation.capture
+      formation.capture,
+      semanticFormation
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;

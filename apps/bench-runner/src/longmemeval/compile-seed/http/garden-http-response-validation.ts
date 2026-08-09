@@ -1,12 +1,12 @@
 import type { ChatCompletionResponseInspection } from "../../extraction/chat-completion-response.js";
-import { inspectExtractionRawJson } from "../../extraction/content-closure.js";
 import {
   markOutputTokenTruncation
 } from "./output-token-retry.js";
 import { markGardenHttpFailure } from "./garden-http-failure-attempt.js";
 
 export function extractValidGardenHttpContent(
-  response: ChatCompletionResponseInspection
+  response: ChatCompletionResponseInspection,
+  validation: "default_envelope" | "caller_owned" = "default_envelope"
 ): string {
   if (response.finishReason === "length") {
     throw markGardenHttpFailure(markOutputTokenTruncation(
@@ -23,8 +23,28 @@ export function extractValidGardenHttpContent(
       phase: "response_schema"
     });
   }
+  if (validation === "default_envelope") validateDefaultSignalsEnvelope(content);
+  return content;
+}
+
+export function buildGardenHttpAttemptResponse(
+  response: ChatCompletionResponseInspection,
+  maxOutputTokens: number | undefined,
+  validation: "default_envelope" | "caller_owned"
+) {
+  return {
+    rawJson: extractValidGardenHttpContent(response, validation),
+    ...(response.usage === undefined ? {} : { usage: response.usage }),
+    responseMetadata: {
+      finishReason: response.finishReason,
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens })
+    }
+  };
+}
+
+function validateDefaultSignalsEnvelope(content: string): void {
   try {
-    inspectExtractionRawJson(content);
+    inspectSignalsEnvelope(content);
   } catch (parseError) {
     throw markGardenHttpFailure(new Error(
       `garden extraction returned unparseable content: ${
@@ -36,5 +56,12 @@ export function extractValidGardenHttpContent(
       rawBody: content
     });
   }
-  return content;
+}
+
+function inspectSignalsEnvelope(content: string): void {
+  const parsed = JSON.parse(content) as unknown;
+  if (typeof parsed !== "object" || parsed === null ||
+      !Array.isArray((parsed as { readonly signals?: unknown }).signals)) {
+    throw new Error("signals array missing");
+  }
 }

@@ -12,6 +12,8 @@ export interface SignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
+    /** Lets a caller reject semantically unusable JSON inside the retry loop. */
+    readonly validateRawJson?: (rawJson: string) => void;
   }): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }>;
 }
 
@@ -193,6 +195,7 @@ async function runExtractionAttempt(
     }
   );
   const recovered = recoverAttemptJson(message, attempt);
+  input.validateRawJson?.(recovered.rawJson);
   return {
     rawJson: recovered.rawJson,
     extractorMeta: {

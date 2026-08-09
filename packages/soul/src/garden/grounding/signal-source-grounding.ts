@@ -1,4 +1,7 @@
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  readVerifiedUserAssertionSourceHashDigest,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import type { SourceAssertionResolution } from "./source-assertion.js";
 import { resolvePreferenceAwareSourceGrounding } from "./preference-profile.js";
 import { parseOfficialApiSourceLocator } from "./source-locator.js";
@@ -11,7 +14,33 @@ export type GardenSignalGrounding = SourceAssertionResolution | {
 export function resolveGardenSignalGrounding(
   signal: CandidateMemorySignal
 ): GardenSignalGrounding {
+  const receipt = readGardenVerifiedUserAssertionReceipt(signal);
+  if (receipt !== null) return { status: "grounded", assertion: receipt.assertion };
+  if (Object.hasOwn(signal.raw_payload, "verified_user_assertion_source_hash")) {
+    return { status: "rejected", reason: "source_grounding_rejected" };
+  }
   return resolveGardenRawPayloadGrounding(signal.raw_payload);
+}
+
+export function readGardenVerifiedUserAssertionReceipt(
+  signal: Readonly<CandidateMemorySignal>
+): Readonly<{ readonly assertion: string; readonly sourceHash: string }> | null {
+  if (signal.source !== "garden_compile") return null;
+  const rawPayload = signal.raw_payload;
+  const sourceHash = readString(rawPayload.verified_user_assertion_source_hash);
+  if (readVerifiedUserAssertionSourceHashDigest(sourceHash) === null) return null;
+  const grounding = readRecord(rawPayload.source_grounding);
+  const assertion = readString(rawPayload.source_assertion);
+  const fullTurn = readString(rawPayload.full_turn_content);
+  if (assertion === null || fullTurn === null || !fullTurn.includes(assertion) ||
+      grounding?.version !== 1 || grounding.status !== "grounded" ||
+      grounding.content_basis !== "source_assertion" ||
+      readString(grounding.source_assertion) !== assertion ||
+      readString(rawPayload.matched_text) !== assertion ||
+      readString(rawPayload.distilled_fact) !== assertion) {
+    return null;
+  }
+  return { assertion, sourceHash: sourceHash! };
 }
 
 export function resolveGardenRawPayloadGrounding(
