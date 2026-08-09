@@ -18,8 +18,19 @@ import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import { createGardenHttpExtractor } from "../compile-seed/compile-seed-http.js";
 import { resolveCompileSeedExtractionConfig } from "../compile-seed/compile-seed-config.js";
 import { readSnapshotSidecar } from "../snapshot/materialize.js";
+import {
+  buildExtractionTransportProvenance,
+  resolveExtractionTransportRoute,
+  type ExtractionTransportProvenance,
+  type ExtractionTransportRoute
+} from "../extraction/transport-route.js";
+import {
+  openQuerySemanticFactorFillStore,
+  type QuerySemanticFactorFillShard
+} from
+  "./query-semantic-factor-fill-store.js";
 
-const QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION = 1 as const;
+const QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION = 2 as const;
 
 const QuerySemanticFactorCacheEntrySchema = z.object({
   source_text: z.string().min(1),
@@ -27,8 +38,11 @@ const QuerySemanticFactorCacheEntrySchema = z.object({
   capture: OpenSemanticFactorFormationCaptureSchema
 }).strict();
 
-const QuerySemanticFactorCacheSchema = z.object({
-  schema_version: z.literal(QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION),
+const TransportProvenanceSchema = z.object({
+  provider_url_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  model: z.string().min(1)
+}).strict();
+const QuerySemanticFactorCacheBaseSchema = z.object({
   compiler_operator_id: z.literal(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID),
   system_prompt_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   model_id: z.string().min(1),
@@ -37,11 +51,20 @@ const QuerySemanticFactorCacheSchema = z.object({
   entries: z.array(QuerySemanticFactorCacheEntrySchema).min(1),
   cache_content_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u)
 }).strict();
+const QuerySemanticFactorCacheSchema = z.union([
+  QuerySemanticFactorCacheBaseSchema.extend({
+    schema_version: z.literal(1)
+  }).strict(),
+  QuerySemanticFactorCacheBaseSchema.extend({
+    schema_version: z.literal(QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION),
+    transport_routes: z.array(TransportProvenanceSchema).min(1)
+  }).strict()
+]);
 
 export type QuerySemanticFactorCache = z.infer<typeof QuerySemanticFactorCacheSchema>;
 
 export type QuerySemanticFactorCacheBinding = Readonly<{
-  schema_version: 1;
+  schema_version: 1 | 2;
   cache_content_sha256: string;
   compiler_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
   system_prompt_sha256: string;
@@ -49,11 +72,23 @@ export type QuerySemanticFactorCacheBinding = Readonly<{
   provider_url_sha256: string;
   source_set_sha256: string;
   entry_count: number;
+  transport_routes?: readonly ExtractionTransportProvenance[];
 }>;
 
 export type LoadedQuerySemanticFactorCache = Readonly<{
   binding: QuerySemanticFactorCacheBinding;
   captures_by_source_text: ReadonlyMap<string, Readonly<OpenSemanticFactorFormationCapture>>;
+}>;
+
+type FillQuerySemanticFactorSourcesInput = Readonly<{
+  source_texts: readonly string[];
+  output_path: string;
+  model_id: string;
+  provider_url: string;
+  transport: ExtractionTransportRoute;
+  concurrency?: number;
+  compile: (sourceText: string) => Promise<Readonly<OpenSemanticFactorGraphProposal> | null>;
+  log?: (message: string) => void;
 }>;
 
 export async function fillQuerySemanticFactorCache(input: Readonly<{
@@ -81,46 +116,118 @@ export async function fillQuerySemanticFactorCache(input: Readonly<{
     extractor: createGardenHttpExtractor(config),
     diagnosticDir: null
   });
-  const entries = await mapWithConcurrency(
-    sourceTexts,
-    input.concurrency ?? 4,
-    async (sourceText, index) => {
-      const graph = await provider.extractOpenSemanticFactors("query", sourceText);
-      const capture = materializeOpenSemanticFactorFormation({
-        source_kind: "query",
-        source_text: sourceText,
-        ...(graph === null ? {} : {
-          proposal: {
-            schema_version: 1,
-            producer_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
-            source_text: sourceText,
-            graph
-          }
-        })
-      });
-      if (capture.status !== "formed" && capture.status !== "unavailable") {
-        throw new Error(`query semantic factor compiler emitted invalid capture at index ${index}`);
-      }
-      input.log?.(`[query-factor-cache] ${index + 1}/${sourceTexts.length} ${capture.status}`);
-      return {
-        source_text: sourceText,
-        source_sha256: prefixedSha256(sourceText),
-        capture
-      };
-    }
-  );
-  const cache = createQuerySemanticFactorCache({
+  return await fillQuerySemanticFactorSources({
+    source_texts: sourceTexts,
+    output_path: input.output_path,
     model_id: config.model || OFFICIAL_API_GARDEN_MODEL,
     provider_url: config.providerUrl,
-    entries
+    transport: resolveExtractionTransportRoute(config),
+    concurrency: input.concurrency ?? 4,
+    compile: async (sourceText) =>
+      await provider.extractOpenSemanticFactors("query", sourceText),
+    ...(input.log === undefined ? {} : { log: input.log })
   });
+}
+
+export async function fillQuerySemanticFactorSources(
+  input: FillQuerySemanticFactorSourcesInput
+): Promise<QuerySemanticFactorCacheBinding> {
+  const sourceTexts = normalizedSourceTexts(input.source_texts);
+  const store = await openQuerySemanticFactorFillStore({
+    outputPath: input.output_path,
+    identity: fillIdentity(input, sourceTexts)
+  });
+  const staged = await loadStagedSources(store, sourceTexts, input.log);
+  await fillMissingSources({ input, sourceTexts, store, staged });
+  const cache = createCacheFromStaged(input, sourceTexts, staged);
   await writeQuerySemanticFactorCache(input.output_path, cache);
   return toBinding(cache);
+}
+
+function fillIdentity(
+  input: FillQuerySemanticFactorSourcesInput,
+  sourceTexts: readonly string[]
+) {
+  return {
+    schema_version: 1 as const,
+    compiler_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+    system_prompt_sha256: prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
+    model_id: input.model_id,
+    provider_url_sha256: prefixedSha256(input.provider_url),
+    source_set_sha256: sourceSetSha256(sourceTexts)
+  };
+}
+
+async function loadStagedSources(
+  store: Awaited<ReturnType<typeof openQuerySemanticFactorFillStore>>,
+  sourceTexts: readonly string[],
+  log: ((message: string) => void) | undefined
+): Promise<Map<string, QuerySemanticFactorFillShard>> {
+  const staged = new Map<string, QuerySemanticFactorFillShard>();
+  for (const sourceText of sourceTexts) {
+    const shard = await store.load(sourceText);
+    if (shard !== null) {
+      staged.set(sourceText, shard);
+      log?.(`[query-factor-cache] reuse ${staged.size}/${sourceTexts.length}`);
+    }
+  }
+  return staged;
+}
+
+async function fillMissingSources(context: Readonly<{
+  input: FillQuerySemanticFactorSourcesInput;
+  sourceTexts: readonly string[];
+  store: Awaited<ReturnType<typeof openQuerySemanticFactorFillStore>>;
+  staged: Map<string, QuerySemanticFactorFillShard>;
+}>): Promise<void> {
+  const { input, sourceTexts, store, staged } = context;
+  const missing = sourceTexts.filter((sourceText) => !staged.has(sourceText));
+  const transport = transportProvenance(input.transport);
+  await mapWithConcurrencyUntilFailure(
+    missing,
+    input.concurrency ?? 4,
+    async (sourceText) => {
+      const capture = materializeQueryCapture(sourceText, await input.compile(sourceText));
+      const shard = await store.put({
+        source_text: sourceText,
+        source_sha256: prefixedSha256(sourceText),
+        capture,
+        transport
+      });
+      staged.set(sourceText, shard);
+      input.log?.(
+        `[query-factor-cache] ${staged.size}/${sourceTexts.length} ${capture.status}`
+      );
+    }
+  );
+}
+
+function createCacheFromStaged(
+  input: FillQuerySemanticFactorSourcesInput,
+  sourceTexts: readonly string[],
+  staged: ReadonlyMap<string, QuerySemanticFactorFillShard>
+): QuerySemanticFactorCache {
+  const shards = sourceTexts.map((sourceText) => staged.get(sourceText));
+  if (shards.some((shard) => shard === undefined)) {
+    throw new Error("query semantic factor partial cache did not close its source set");
+  }
+  const completeShards = shards.filter((shard) => shard !== undefined);
+  return createQuerySemanticFactorCache({
+    model_id: input.model_id,
+    provider_url: input.provider_url,
+    transport_routes: completeShards.map((shard) => shard.transport),
+    entries: completeShards.map((shard) => ({
+      source_text: shard.source_text,
+      source_sha256: shard.source_sha256,
+      capture: shard.capture
+    }))
+  });
 }
 
 export function createQuerySemanticFactorCache(input: Readonly<{
   readonly model_id: string;
   readonly provider_url: string;
+  readonly transport_routes?: readonly ExtractionTransportProvenance[];
   readonly entries: readonly Readonly<{
     readonly source_text: string;
     readonly source_sha256: string;
@@ -140,6 +247,10 @@ export function createQuerySemanticFactorCache(input: Readonly<{
     system_prompt_sha256: prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
     model_id: input.model_id,
     provider_url_sha256: prefixedSha256(input.provider_url),
+    transport_routes: normalizeTransportProvenance(input.transport_routes ?? [{
+      provider_url_sha256: prefixedSha256(input.provider_url),
+      model: input.model_id
+    }]),
     source_set_sha256: sourceSetSha256(entries.map((entry) => entry.source_text)),
     entries
   };
@@ -202,6 +313,11 @@ function assertQuerySemanticFactorCache(cache: QuerySemanticFactorCache): void {
   if (cache.source_set_sha256 !== sourceSetSha256([...sources])) {
     throw new Error("query semantic factor cache source set digest mismatch");
   }
+  if (cache.schema_version === 2 &&
+      stableJson(cache.transport_routes) !==
+        stableJson(normalizeTransportProvenance(cache.transport_routes))) {
+    throw new Error("query semantic factor cache transport provenance is not canonical");
+  }
   const { cache_content_sha256: _, ...withoutDigest } = cache;
   if (cache.cache_content_sha256 !== prefixedSha256(stableJson(withoutDigest))) {
     throw new Error("query semantic factor cache content digest mismatch");
@@ -247,8 +363,61 @@ function toBinding(cache: QuerySemanticFactorCache): QuerySemanticFactorCacheBin
     model_id: cache.model_id,
     provider_url_sha256: cache.provider_url_sha256,
     source_set_sha256: cache.source_set_sha256,
-    entry_count: cache.entries.length
+    entry_count: cache.entries.length,
+    ...(cache.schema_version === 1
+      ? {}
+      : { transport_routes: cache.transport_routes.map((route) => ({ ...route })) })
   };
+}
+
+function materializeQueryCapture(
+  sourceText: string,
+  graph: Readonly<OpenSemanticFactorGraphProposal> | null
+): Readonly<OpenSemanticFactorFormationCapture> {
+  const capture = materializeOpenSemanticFactorFormation({
+    source_kind: "query",
+    source_text: sourceText,
+    ...(graph === null ? {} : {
+      proposal: {
+        schema_version: 1,
+        producer_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+        source_text: sourceText,
+        graph
+      }
+    })
+  });
+  if (capture.status !== "formed" && capture.status !== "unavailable") {
+    throw new Error("query semantic factor compiler emitted an invalid capture");
+  }
+  return capture;
+}
+
+function normalizedSourceTexts(sourceTexts: readonly string[]): readonly string[] {
+  if (sourceTexts.length === 0 || sourceTexts.some((sourceText) => sourceText.length === 0)) {
+    throw new Error("query semantic factor cache fill requires non-empty sources");
+  }
+  return [...new Set(sourceTexts)].sort((left, right) => left.localeCompare(right));
+}
+
+function transportProvenance(
+  route: ExtractionTransportRoute
+): ExtractionTransportProvenance {
+  return buildExtractionTransportProvenance({
+    model: route.model,
+    providerUrl: route.providerUrl
+  });
+}
+
+function normalizeTransportProvenance(
+  routes: readonly ExtractionTransportProvenance[]
+): readonly ExtractionTransportProvenance[] {
+  const unique = new Map(routes.map((route) => [
+    `${route.provider_url_sha256}\0${route.model}`,
+    TransportProvenanceSchema.parse(route)
+  ]));
+  return [...unique.values()].sort((left, right) =>
+    left.provider_url_sha256.localeCompare(right.provider_url_sha256) ||
+    left.model.localeCompare(right.model));
 }
 
 function sourceSetSha256(sourceTexts: readonly string[]): string {
@@ -274,22 +443,27 @@ function stableJson(value: unknown): string {
     `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
 
-async function mapWithConcurrency<T, R>(
+async function mapWithConcurrencyUntilFailure<T>(
   items: readonly T[],
   concurrency: number,
-  worker: (item: T, index: number) => Promise<R>
-): Promise<readonly R[]> {
-  const results: R[] = new Array(items.length);
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
   let cursor = 0;
+  let failure: unknown;
   const pump = async (): Promise<void> => {
-    while (cursor < items.length) {
+    while (failure === undefined && cursor < items.length) {
       const index = cursor++;
       const item = items[index];
-      if (item !== undefined) results[index] = await worker(item, index);
+      if (item === undefined) continue;
+      try {
+        await worker(item, index);
+      } catch (error) {
+        failure ??= error;
+      }
     }
   };
   await Promise.all(Array.from(
     { length: Math.min(Math.max(1, concurrency), items.length) }, pump
   ));
-  return results;
+  if (failure !== undefined) throw failure;
 }

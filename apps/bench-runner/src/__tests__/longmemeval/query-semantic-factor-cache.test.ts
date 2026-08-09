@@ -6,6 +6,7 @@ import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
 import {
   createQuerySemanticFactorCache,
+  fillQuerySemanticFactorSources,
   readQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
 } from "../../longmemeval/query-factors/query-semantic-factor-cache.js";
@@ -88,6 +89,80 @@ describe("query semantic factor cache", () => {
         path: outputPath,
         required_source_texts: ["What do I buy?"]
       })).rejects.toThrow("missing a required query source");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes successful sources through a same-model transport switch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-fill-"));
+    const outputPath = join(root, "query-cache.json");
+    const firstCompile = async (sourceText: string) => {
+      if (sourceText === "Beta?") throw new Error("primary transport unavailable");
+      return null;
+    };
+    const firstCalls: string[] = [];
+    try {
+      await expect(fillQuerySemanticFactorSources({
+        source_texts: ["Alpha?", "Beta?", "Gamma?"],
+        output_path: outputPath,
+        model_id: "same-model",
+        provider_url: "https://logical-provider.invalid/v1",
+        transport: {
+          providerUrl: "https://primary.invalid/v1",
+          model: "same-model"
+        },
+        concurrency: 1,
+        compile: async (sourceText) => {
+          firstCalls.push(sourceText);
+          return await firstCompile(sourceText);
+        }
+      })).rejects.toThrow(/primary transport unavailable/u);
+      expect(firstCalls).toEqual(["Alpha?", "Beta?"]);
+
+      const driftedCalls: string[] = [];
+      await expect(fillQuerySemanticFactorSources({
+        source_texts: ["Alpha?", "Beta?", "Gamma?"],
+        output_path: outputPath,
+        model_id: "different-model",
+        provider_url: "https://logical-provider.invalid/v1",
+        transport: {
+          providerUrl: "https://successor.invalid/v1",
+          model: "different-model"
+        },
+        concurrency: 1,
+        compile: async (sourceText) => {
+          driftedCalls.push(sourceText);
+          return null;
+        }
+      })).rejects.toThrow(/partial cache identity mismatch/u);
+      expect(driftedCalls).toEqual([]);
+
+      const successorCalls: string[] = [];
+      const binding = await fillQuerySemanticFactorSources({
+        source_texts: ["Alpha?", "Beta?", "Gamma?"],
+        output_path: outputPath,
+        model_id: "same-model",
+        provider_url: "https://logical-provider.invalid/v1",
+        transport: {
+          providerUrl: "https://successor.invalid/v1",
+          model: "same-model"
+        },
+        concurrency: 1,
+        compile: async (sourceText) => {
+          successorCalls.push(sourceText);
+          return null;
+        }
+      });
+
+      expect(successorCalls).toEqual(["Beta?", "Gamma?"]);
+      expect(binding.entry_count).toBe(3);
+      expect(binding.transport_routes).toHaveLength(2);
+      const loaded = await readQuerySemanticFactorCache({
+        path: outputPath,
+        required_source_texts: ["Alpha?", "Beta?", "Gamma?"]
+      });
+      expect(loaded.captures_by_source_text.size).toBe(3);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
