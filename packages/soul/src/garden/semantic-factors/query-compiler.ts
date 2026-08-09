@@ -49,7 +49,9 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
             source_text: normalized
           }),
           timeoutMs,
-          abortSignal
+          abortSignal,
+          validateRawJson: (rawJson) =>
+            assertOpenSemanticFactorQueryResponse(rawJson, normalized)
         }),
         { budgetMs: wallClockBudgetMs }
       );
@@ -60,6 +62,16 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
       return parsed;
     }
   };
+}
+
+function assertOpenSemanticFactorQueryResponse(
+  rawJson: string,
+  sourceText: string
+): void {
+  const parsed = parseOpenSemanticFactorQueryResponse(rawJson);
+  if (parsed === null || groundOpenSemanticFactorGraph(parsed, sourceText) === null) {
+    throw new Error("query semantic factor graph missing or invalid");
+  }
 }
 
 export function parseOpenSemanticFactorQueryResponse(

@@ -25,8 +25,15 @@ describe("open semantic factor query compiler", () => {
         schema_version: 1,
         source_kind: "query",
         source_text: QUERY
-      })
+      }),
+      validateRawJson: expect.any(Function)
     }));
+    const request = extractor.extract.mock.calls[0]?.[0];
+    expect(() => request?.validateRawJson?.(
+      JSON.stringify({ semantic_factor_graph: queryGraph() })
+    )).not.toThrow();
+    expect(() => request?.validateRawJson?.('{"signals":[]}'))
+      .toThrow(/query semantic factor graph missing or invalid/u);
   });
 
   it("fails closed for malformed, wrong-kind, or ungrounded graphs", async () => {
