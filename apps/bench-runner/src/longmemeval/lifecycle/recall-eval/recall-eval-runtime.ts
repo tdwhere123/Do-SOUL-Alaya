@@ -54,6 +54,12 @@ import {
   type WarmDerivedSnapshotBinding,
   type WarmDerivedSnapshotReceipt
 } from "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+import { applyEmbeddingCacheOverlay } from
+  "../../snapshot/recall-eval/embedding-cache-overlay/importer.js";
+import type {
+  EmbeddingCacheOverlayBinding,
+  EmbeddingCacheOverlayExpectedSourceBinding
+} from "../../snapshot/recall-eval/embedding-cache-overlay/contract.js";
 
 export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -114,6 +120,7 @@ export interface RecallEvalRuntimeAttribution {
       model: string;
     }>[];
   }>;
+  readonly embedding_cache_overlay?: EmbeddingCacheOverlayBinding;
   readonly hydration_binding?: Readonly<{
     dataset_sha256: string;
     source: "external_expected_sha256";
@@ -327,14 +334,17 @@ async function resolvePhysicalPath(filePath: string): Promise<string> {
 export async function prepareRecallEvalDataRoot(
   options: RecallEvalOptions,
   bundle: RecallEvalSnapshotBundle,
-  plannedRoot?: OwnedTempRoot
+  plannedRoot?: OwnedTempRoot,
+  embeddingCacheOverlayExpected?: EmbeddingCacheOverlayExpectedSourceBinding
 ): Promise<OwnedTempRoot & Readonly<{
   evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
   warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
+  embeddingCacheOverlay: EmbeddingCacheOverlayBinding | null;
 }>> {
   const { manifest } = bundle;
   const warmDerivedSnapshot = readWarmDerivedSnapshot(options, manifest);
   let evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null = null;
+  let embeddingCacheOverlay: EmbeddingCacheOverlayBinding | null = null;
   const root = await prepareRecallEvalDataDir({
     ...buildRecallEvalRestoreInput(options, bundle, warmDerivedSnapshot),
     requestedRoot: options.dataDirRoot,
@@ -343,6 +353,16 @@ export async function prepareRecallEvalDataRoot(
       evidenceProjectionRebuild = await prepareRecallEvalWorkingDb(
         dbPath, options, bundle, warmDerivedSnapshot
       );
+      if (options.embeddingCacheOverlayReceiptPath !== undefined) {
+        if (embeddingCacheOverlayExpected === undefined) {
+          throw new Error("embedding cache overlay runtime binding is missing");
+        }
+        embeddingCacheOverlay = await applyEmbeddingCacheOverlay({
+          receiptPath: options.embeddingCacheOverlayReceiptPath,
+          restoredDbPath: dbPath,
+          expected: embeddingCacheOverlayExpected
+        });
+      }
     }
   });
   return Object.freeze({
@@ -350,7 +370,8 @@ export async function prepareRecallEvalDataRoot(
     evidenceProjectionRebuild,
     warmDerivedSnapshot: warmDerivedSnapshot === null
       ? null
-      : buildWarmDerivedSnapshotBinding(warmDerivedSnapshot)
+      : buildWarmDerivedSnapshotBinding(warmDerivedSnapshot),
+    embeddingCacheOverlay
   });
 }
 

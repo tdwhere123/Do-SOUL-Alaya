@@ -38,6 +38,7 @@ export interface RecallEvalOptions {
   readonly derivedEvidenceProjectionRebuild?: boolean;
   readonly backfillMissingFactFrameFormations?: boolean;
   readonly warmDerivedSnapshotReceiptPath?: string;
+  readonly embeddingCacheOverlayReceiptPath?: string;
   readonly factFrameRetrofitLedgerPath?: string;
   readonly seedExtractionSystemPromptPath?: string;
   readonly querySemanticFactorCachePath?: string;

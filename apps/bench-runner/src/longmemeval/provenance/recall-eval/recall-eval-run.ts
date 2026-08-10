@@ -39,6 +39,12 @@ export async function buildRecallEvalRunProvenance(input: {
         : {
             query_semantic_factor_cache:
               input.runtimeAttribution.query_semantic_factor_cache
+          }),
+      ...(input.runtimeAttribution.embedding_cache_overlay === undefined
+        ? {}
+        : {
+            embedding_cache_overlay:
+              input.runtimeAttribution.embedding_cache_overlay
           })
     },
     extraction_cache: extractionCache,
@@ -152,6 +158,8 @@ function sameCurrentTreatment(
     JSON.stringify(runtime.answer_rerank) === JSON.stringify(attribution.answer_rerank) &&
     JSON.stringify(runtime.query_semantic_factor_cache) ===
       JSON.stringify(attribution.query_semantic_factor_cache) &&
+    JSON.stringify(runtime.embedding_cache_overlay) ===
+      JSON.stringify(attribution.embedding_cache_overlay) &&
     recallConfig.schema_version === attribution.recall_config.schema_version &&
     recallConfig.max_results === attribution.recall_config.max_results &&
     recallConfig.conflict_awareness === attribution.recall_config.conflict_awareness &&

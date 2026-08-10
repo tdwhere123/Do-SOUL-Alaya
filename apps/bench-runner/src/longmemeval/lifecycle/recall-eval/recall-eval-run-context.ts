@@ -57,6 +57,8 @@ import {
   readQuerySemanticFactorCache,
   type LoadedQuerySemanticFactorCache
 } from "../../query-factors/query-semantic-factor-cache.js";
+import { buildExpectedEmbeddingCacheOverlayBinding } from
+  "../../snapshot/recall-eval/embedding-cache-overlay/runtime-binding.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -139,6 +141,14 @@ function assertDerivedProjectionRebuildBoundary(
       options.experiment !== true) {
     throw new Error("warm derived snapshot restore requires experiment mode");
   }
+  if (options.embeddingCacheOverlayReceiptPath !== undefined &&
+      (options.legacySnapshot === true ||
+       options.derivedEvidenceProjectionRebuild === true ||
+       options.warmDerivedSnapshotReceiptPath !== undefined)) {
+    throw new Error(
+      "embedding cache overlay cannot use legacy or derived snapshot inputs"
+    );
+  }
   if (options.warmDerivedSnapshotReceiptPath !== undefined &&
       options.derivedEvidenceProjectionRebuild === true) {
     throw new Error("warm derived snapshot restore cannot be combined with projection rebuild");
@@ -191,7 +201,7 @@ async function prepareBoundRecallEvalRunContext(
         path: options.querySemanticFactorCachePath,
         required_source_texts: window.map((question) => question.question)
       });
-  const runtimeAttribution = await buildRecallEvalRuntimeAttribution(
+  const baseRuntimeAttribution = await buildRecallEvalRuntimeAttribution(
     bundle.manifest,
     daemonLaunch.environment,
     {
@@ -207,7 +217,25 @@ async function prepareBoundRecallEvalRunContext(
         options.warmDerivedSnapshotReceiptPath !== undefined
     }
   );
-  const dataDir = await prepareRecallEvalDataRoot(options, bundle, plannedDataDir);
+  const overlayExpected = options.embeddingCacheOverlayReceiptPath === undefined
+    ? undefined
+    : buildExpectedEmbeddingCacheOverlayBinding({
+        manifest: bundle.manifest,
+        snapshotManifestSha256: bundle.snapshotManifestSha256,
+        embeddingSupplement: baseRuntimeAttribution.embedding_supplement
+      });
+  const dataDir = await prepareRecallEvalDataRoot(
+    options,
+    bundle,
+    plannedDataDir,
+    overlayExpected
+  );
+  const runtimeAttribution = dataDir.embeddingCacheOverlay === null
+    ? baseRuntimeAttribution
+    : Object.freeze({
+        ...baseRuntimeAttribution,
+        embedding_cache_overlay: dataDir.embeddingCacheOverlay
+      });
   return {
     options,
     manifest: bundle.manifest,

@@ -35,6 +35,25 @@ const RecallEvalAnswerRerankSchema = z.discriminatedUnion("enabled", [
   }).strict()
 ]);
 
+const EmbeddingCacheOverlayBindingSchema = z.object({
+  receipt_sha256: Sha256Schema,
+  overlay_sha256: Sha256Schema,
+  source_snapshot_db_sha256: Sha256Schema,
+  source_snapshot_manifest_sha256: Sha256Schema,
+  source_schema_version: z.number().int().positive(),
+  recall_pipeline_version: z.string().min(1),
+  memory_embedding_count: z.number().int().nonnegative(),
+  evidence_embedding_count: z.number().int().nonnegative(),
+  vector_space: z.object({
+    provider_kind: z.string().min(1),
+    model_id: z.string().min(1),
+    schema_version: z.number().int().positive(),
+    dimensions: z.number().int().positive(),
+    d2q_input: z.enum(["raw_content", "content_plus_hq"]),
+    model_artifact_sha256: Sha256Schema.nullable()
+  }).strict()
+}).strict();
+
 export const RecallEvalAttributionSchema = z.object({
   status: z.enum(["attributed", "legacy_unattributed"]),
   gate_eligible: z.boolean(),
@@ -48,6 +67,7 @@ export const RecallEvalAttributionSchema = z.object({
   onnx_model_artifact_sha256: Sha256Schema.nullable(),
   embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
   answer_rerank: RecallEvalAnswerRerankSchema.optional(),
+  embedding_cache_overlay: EmbeddingCacheOverlayBindingSchema.optional(),
   recall_config: z.object({
     schema_version: z.union([z.literal(1), z.literal(2)]),
     max_results: z.number().int().min(1).max(1_000),

@@ -67,6 +67,24 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     });
   });
 
+  it("threads a semantics-preserving embedding cache overlay independently", () => {
+    const flags = parseFlags([
+      "--embedding-cache-overlay",
+      "/tmp/embedding-overlay.json"
+    ]);
+
+    expect(buildRecallEvalOptions(flags, "/tmp/snapshot.db")).toMatchObject({
+      embeddingCacheOverlayReceiptPath: "/tmp/embedding-overlay.json"
+    });
+  });
+
+  it("routes the standalone overlay builder without reading benchmark inputs", async () => {
+    const exitCode = await runCli(["embedding-cache-overlay-build"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/--source <warmed\.db>/u);
+  });
+
   it("rejects warm restore unless recall-eval is explicitly experimental", async () => {
     const exitCode = await runCli([
       "recall-eval",

@@ -11,6 +11,13 @@ export function consumeRecallEvalPathFlag(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
+  if (matchFlagToken(token, "--embedding-cache-overlay")) {
+    state.embeddingCacheOverlayReceipt = readRequiredFlagValue(
+      args, index, token, "--embedding-cache-overlay",
+      "--embedding-cache-overlay requires a JSON receipt path"
+    );
+    return nextIndex(index, token);
+  }
   if (matchFlagToken(token, "--query-semantic-factor-cache")) {
     state.querySemanticFactorCache = readRequiredFlagValue(
       args, index, token, "--query-semantic-factor-cache",

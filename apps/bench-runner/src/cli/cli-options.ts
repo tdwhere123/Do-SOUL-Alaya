@@ -22,6 +22,7 @@ import {
 } from "./options/flag-values.js";
 import { consumeBooleanFlags } from "./options/boolean-flags.js";
 import { consumeRecallEvalPathFlag } from "./options/recall-eval-flags.js";
+import { finalizeParsedFlags } from "./cli-options-finalize.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -67,6 +68,7 @@ export interface ParsedFlags {
   readonly rebuildEvidenceSearchProjections?: boolean;
   readonly backfillMissingFactFrameFormations?: boolean;
   readonly warmDerivedSnapshotReceipt?: string;
+  readonly embeddingCacheOverlayReceipt?: string;
   readonly factFrameRetrofitLedger?: string;
   readonly seedExtractionSystemPrompt?: string;
   readonly querySemanticFactorCache?: string;
@@ -116,6 +118,7 @@ export interface ParsedFlagsState {
   rebuildEvidenceSearchProjections: boolean;
   backfillMissingFactFrameFormations: boolean;
   warmDerivedSnapshotReceipt?: string;
+  embeddingCacheOverlayReceipt?: string;
   factFrameRetrofitLedger?: string;
   seedExtractionSystemPrompt?: string;
   querySemanticFactorCache?: string;
@@ -132,6 +135,7 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
   assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
+  assertFlagAtMostOnce(args, "--embedding-cache-overlay");
   assertFlagAtMostOnce(args, "--query-semantic-factor-cache");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
@@ -467,61 +471,4 @@ function parseSimulateReport(raw: string): BenchSimulateReportMode {
     );
   }
   return raw;
-}
-
-function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
-  const variantMap: Record<string, LongMemEvalVariant> = {
-    oracle: "longmemeval_oracle",
-    s: "longmemeval_s",
-    m: "longmemeval_m",
-    longmemeval_oracle: "longmemeval_oracle",
-    longmemeval_s: "longmemeval_s",
-    longmemeval_m: "longmemeval_m"
-  };
-  return {
-    variant: variantMap[state.variantRaw] ?? "longmemeval_oracle",
-    limit: state.limit,
-    offset: state.offset,
-    historyRoot: state.historyRoot,
-    dataDir: state.dataDir,
-    shards: state.shards.length > 0 ? state.shards : undefined,
-    source: state.source,
-    embeddingMode: state.embeddingMode,
-    embeddingProviderKind: state.embeddingProviderKind,
-    policyShape: state.policyShape,
-    simulateReport: state.simulateReport,
-    weightOverridesJson: state.weightOverridesJson,
-    rounds: state.rounds,
-    force: state.force,
-    snapshot: state.snapshot,
-    snapshotOut: state.snapshotOut,
-    dataDirRoot: state.dataDirRoot,
-    materializeQuestionDbs: state.materializeQuestionDbs,
-    pinnedMetaRoot: state.pinnedMetaRoot,
-    questionManifest: state.questionManifest,
-    extractionCacheRoot: state.extractionCacheRoot,
-    extractionAuthority: state.extractionAuthority,
-    catalogRefillAllowlist: state.catalogRefillAllowlist,
-    extractionTargetSelection: state.extractionTargetSelection,
-    extractionPredecessorAuthority: state.extractionPredecessorAuthority,
-    promotionContract: state.promotionContract,
-    r3SpendApproval: state.r3SpendApproval,
-    concurrency: state.concurrency,
-    extractionInitialConcurrency: state.extractionInitialConcurrency,
-    questionBatchLimit: state.questionBatchLimit,
-    tolerateProviderTaskFailures: state.tolerateProviderTaskFailures,
-    legacySnapshot: state.legacySnapshot,
-    legacyManifestSha256: state.legacyManifestSha256,
-    legacyDatasetSha256: state.legacyDatasetSha256,
-    experiment: state.experiment,
-    rebuildEvidenceSearchProjections: state.rebuildEvidenceSearchProjections,
-    backfillMissingFactFrameFormations: state.backfillMissingFactFrameFormations,
-    warmDerivedSnapshotReceipt: state.warmDerivedSnapshotReceipt,
-    factFrameRetrofitLedger: state.factFrameRetrofitLedger,
-    seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,
-    querySemanticFactorCache: state.querySemanticFactorCache,
-    qa: state.qa,
-    edgePlane: state.edgePlane,
-    expectedReconciliationBasis: state.expectedReconciliationBasis
-  };
 }

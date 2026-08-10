@@ -27,6 +27,7 @@
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "better-sqlite3": "12.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

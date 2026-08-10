@@ -52,6 +52,24 @@ describe("history archive schema-invalid baselines", () => {
         effective_model_id: "Xenova/reranker",
         model_artifact_sha256: "1".repeat(64)
       },
+      embedding_cache_overlay: {
+        receipt_sha256: "2".repeat(64),
+        overlay_sha256: "3".repeat(64),
+        source_snapshot_db_sha256: "4".repeat(64),
+        source_snapshot_manifest_sha256: "5".repeat(64),
+        source_schema_version: 118,
+        recall_pipeline_version: "fusion-evidence-first-v3",
+        memory_embedding_count: 4_576,
+        evidence_embedding_count: 58_219,
+        vector_space: {
+          provider_kind: "local_onnx",
+          model_id: "Xenova/test",
+          schema_version: 1,
+          dimensions: 384,
+          d2q_input: "raw_content" as const,
+          model_artifact_sha256: "a".repeat(64)
+        }
+      },
       snapshot_binding: {
         commit_sha7: "0ff0ff1",
         gate_sha256: "b".repeat(64),

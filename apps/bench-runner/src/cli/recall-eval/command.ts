@@ -64,6 +64,9 @@ export function buildRecallEvalOptions(
     ...(opts.warmDerivedSnapshotReceipt === undefined
       ? {}
       : { warmDerivedSnapshotReceiptPath: opts.warmDerivedSnapshotReceipt }),
+    ...(opts.embeddingCacheOverlayReceipt === undefined
+      ? {}
+      : { embeddingCacheOverlayReceiptPath: opts.embeddingCacheOverlayReceipt }),
     ...(opts.factFrameRetrofitLedger === undefined
       ? {}
       : { factFrameRetrofitLedgerPath: opts.factFrameRetrofitLedger }),
@@ -147,6 +150,9 @@ function renderStart(opts: ParsedFlags): string {
     (opts.warmDerivedSnapshotReceipt === undefined
       ? ""
       : " warm_derived_snapshot=true promotable=false") +
+    (opts.embeddingCacheOverlayReceipt === undefined
+      ? ""
+      : " embedding_cache_overlay=true") +
     (opts.factFrameRetrofitLedger === undefined ? "" : " fact_frame_retrofit=true") +
     (opts.backfillMissingFactFrameFormations === true
       ? " fact_frame_default_backfill=true"
