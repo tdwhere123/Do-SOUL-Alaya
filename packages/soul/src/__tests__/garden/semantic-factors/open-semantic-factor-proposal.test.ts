@@ -64,6 +64,10 @@ describe("open semantic factor formation proposal", () => {
     expect(grounded.status).toBe("grounded");
     if (grounded.status !== "grounded") return;
     expect(grounded.draft.semantic_factor_graph).toBeUndefined();
+    expect(grounded.draft.semantic_factor_graph_projection).toEqual({
+      status: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
     expect(grounded.audit).toMatchObject({
       reasons: expect.arrayContaining(["proposed_semantic_factor_graph_not_source_grounded"])
     });

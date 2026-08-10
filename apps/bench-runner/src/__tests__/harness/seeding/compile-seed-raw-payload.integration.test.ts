@@ -228,6 +228,17 @@ describe("compile-seed raw payload projection", () => {
         preference_object: proposedObject
       }
     });
+    expect(signal?.raw_payload.source_locator).toEqual({
+      contract_version: 2,
+      kind: "assertion_catalog",
+      assertion_id: 1
+    });
+    expect(signal?.raw_payload.verified_user_assertion_source_hash).toMatch(
+      /^sha256:garden-verified-user-assertion-v1:[0-9a-f]{64}$/u
+    );
+    expect(signal?.raw_payload.semantic_factor_graph).toEqual(
+      draft?.productionRawPayload?.semantic_factor_graph
+    );
   }, 60_000);
 
   it("bounds structured keys when the first projection still overflows after grounding", async () => {

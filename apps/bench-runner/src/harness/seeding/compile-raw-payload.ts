@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { BOUNDED_JSON_OBJECT_MAX_CHARS } from "@do-soul/alaya-protocol";
+import {
+  AssociativeFactFrameSchema,
+  BOUNDED_JSON_OBJECT_MAX_CHARS,
+  OpenSemanticFactorGraphProposalSchema,
+  readVerifiedUserAssertionSourceHashDigest
+} from "@do-soul/alaya-protocol";
+import {
+  parseOfficialApiSemanticFactorGraphProjectionAudit,
+  parseOfficialApiSourceLocator
+} from "@do-soul/alaya-soul";
 
 const PREFERENCE_FIELD_MAX_CHARS = 1_024;
 const PREFERENCE_PROFILE_OMITTED_REASON =
@@ -60,6 +69,10 @@ const OPTIONAL_DUPLICATE_KEYS = [
   "bench_source_raw_payload_char_count",
   "bench_source_raw_payload_sha256"
 ] as const;
+const OPTIONAL_SEMANTIC_PROJECTION_KEYS = [
+  "fact_frame",
+  "semantic_factor_graph"
+] as const;
 
 export function projectCompileRawPayload(
   rawPayload: Readonly<Record<string, unknown>>
@@ -92,10 +105,28 @@ function addStructuredProjection(
   const temporalProjection = projectRecord(rawPayload.temporal_projection, TEMPORAL_STRING_KEYS, 64);
   const preferenceProfile = projectPreferenceProfile(rawPayload.preference_profile);
   const sourceGrounding = projectSourceGrounding(rawPayload.source_grounding);
+  const sourceLocator = parseOfficialApiSourceLocator(rawPayload.source_locator);
+  const semanticFactorGraph = OpenSemanticFactorGraphProposalSchema.safeParse(
+    rawPayload.semantic_factor_graph
+  );
+  const semanticFactorGraphProjection =
+    parseOfficialApiSemanticFactorGraphProjectionAudit(
+      rawPayload.semantic_factor_graph_projection
+    );
+  const factFrame = AssociativeFactFrameSchema.safeParse(rawPayload.fact_frame);
   if (canonicalEntities.length > 0) projection.canonical_entities = canonicalEntities;
   if (temporalProjection !== null) projection.temporal_projection = temporalProjection;
   if (preferenceProfile !== null) projection.preference_profile = preferenceProfile;
   if (sourceGrounding !== null) projection.source_grounding = sourceGrounding;
+  if (sourceLocator !== null) projection.source_locator = sourceLocator;
+  if (semanticFactorGraph.success) {
+    projection.semantic_factor_graph = semanticFactorGraph.data;
+  }
+  if (semanticFactorGraphProjection !== null) {
+    projection.semantic_factor_graph_projection = semanticFactorGraphProjection;
+  }
+  if (factFrame.success) projection.fact_frame = factFrame.data;
+  addVerifiedSourceReceipt(projection, rawPayload);
   if (rawPayload.bench_seed === true) projection.bench_seed = true;
   for (const key of BENCH_INTEGER_KEYS) {
     const value = rawPayload[key];
@@ -168,10 +199,42 @@ function fitProjectedPayload(
     if (fitsRawPayload(projection)) return projection;
     delete projection[key];
   }
+  for (const key of OPTIONAL_SEMANTIC_PROJECTION_KEYS) {
+    if (fitsRawPayload(projection)) return projection;
+    omitSemanticProjection(projection, key);
+  }
   if (!fitsRawPayload(projection)) {
     throw new Error("Compile raw-payload projection exceeded its bounded core.");
   }
   return projection;
+}
+
+function addVerifiedSourceReceipt(
+  projection: Record<string, unknown>,
+  rawPayload: Readonly<Record<string, unknown>>
+): void {
+  const receipt = rawPayload.verified_user_assertion_source_hash;
+  if (
+    typeof receipt === "string" &&
+    readVerifiedUserAssertionSourceHashDigest(receipt) !== null
+  ) {
+    projection.verified_user_assertion_source_hash = receipt;
+  }
+}
+
+function omitSemanticProjection(
+  projection: Record<string, unknown>,
+  key: typeof OPTIONAL_SEMANTIC_PROJECTION_KEYS[number]
+): void {
+  if (!(key in projection)) return;
+  delete projection[key];
+  const existing = projection.bench_source_raw_payload_omitted_projections;
+  projection.bench_source_raw_payload_omitted_projections = Object.freeze([
+    ...(Array.isArray(existing)
+      ? existing.filter((value): value is string => typeof value === "string")
+      : []),
+    key
+  ]);
 }
 
 function compactGroundingReasons(grounding: Record<string, unknown> | null): void {

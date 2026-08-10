@@ -16,13 +16,16 @@ import {
   OfficialApiSourceLocatorSchema,
   type OfficialApiSourceLocator
 } from "./grounding/source-locator.js";
-import { pruneUnboundOpenSemanticFactorProposal } from
-  "./semantic-factors/proposal-normalizer.js";
+import {
+  inspectOfficialApiSemanticFactorGraphProjection,
+  type OfficialApiSemanticFactorGraphProjectionAudit
+} from "./official-api/semantic-factor-projection.js";
+import { salvageRawSignalElements } from "./official-api/raw-signal-envelope.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
 export const OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND = "open_semantic_observation";
 // Raw cache identity and parser projection identity evolve independently.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v7";
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v8";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
@@ -94,12 +97,8 @@ const OptionalAssociativeFactFrameSchema = z.preprocess((value) => {
   const parsed = AssociativeFactFrameSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }, AssociativeFactFrameSchema.optional());
-const OptionalOpenSemanticFactorGraphSchema = z.preprocess((value) => {
-  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(
-    pruneUnboundOpenSemanticFactorProposal(value)
-  );
-  return parsed.success ? parsed.data : undefined;
-}, OpenSemanticFactorGraphProposalSchema.optional());
+const OptionalOpenSemanticFactorGraphSchema =
+  OpenSemanticFactorGraphProposalSchema.optional();
 const PreferencePolarityValueSchema = z.union([
   z.literal("positive"),
   z.literal("negative"),
@@ -159,6 +158,20 @@ const OpenOfficialApiSignalEntrySchema = z.object({
 }).loose().readonly();
 
 export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
+export type {
+  OfficialApiSemanticFactorGraphProjectionAudit,
+  OfficialApiSemanticFactorGraphProjectionReason
+} from "./official-api/semantic-factor-projection.js";
+export {
+  parseOfficialApiSemanticFactorGraphProjectionAudit
+} from "./official-api/semantic-factor-projection.js";
+export {
+  inspectRawOfficialApiSignalElements,
+  salvageRawSignalElements
+} from "./official-api/raw-signal-envelope.js";
+export type {
+  RawOfficialApiSignalElementInspection
+} from "./official-api/raw-signal-envelope.js";
 
 export interface OfficialApiPreferenceProfileDraft {
   readonly preference_subject?: string;
@@ -188,25 +201,21 @@ export interface OfficialApiSignalDraft {
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
   readonly fact_frame?: AssociativeFactFrame;
   readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
+  readonly semantic_factor_graph_projection?:
+    OfficialApiSemanticFactorGraphProjectionAudit;
 }
 
-type OfficialApiSignalEntryRejection =
-  | "semantic_factor_graph_missing"
-  | `semantic_factor_graph_invalid_${SemanticGraphCardinalitySubject}_${"too_few" | "too_many"}`
-  | "semantic_factor_graph_invalid_identity"
-  | "semantic_factor_graph_invalid_reference"
-  | "semantic_factor_graph_invalid_shape"
-  | "semantic_factor_graph_invalid_structure"
-  | "semantic_factor_graph_invalid_unbound"
-  | "signal_entry_invalid";
-
-type SemanticGraphCardinalitySubject =
-  | "arguments"
-  | "factors"
-  | "field"
-  | "propositions"
-  | "result_variables"
-  | "variables";
+type OfficialApiSignalEntryRejection = "signal_entry_invalid";
+type OfficialApiSignalEntryInspection = Readonly<
+  | {
+      readonly draft: OfficialApiSignalDraft;
+      readonly rejection: null;
+    }
+  | {
+      readonly draft: null;
+      readonly rejection: OfficialApiSignalEntryRejection;
+    }
+>;
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
 // through this exact production parse instead of a divergent bench-only
@@ -289,94 +298,6 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
   return Object.freeze(drafts);
 }
 
-export interface RawOfficialApiSignalElementInspection {
-  readonly elements: readonly string[];
-  readonly truncated_final_element: boolean;
-}
-
-// Walk the `signals` array region of an envelope and return each top-level
-// `{...}` element as an independent substring. String-aware (braces inside a
-// JSON string literal do not change depth; `\` escapes the next char) so a
-// `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
-// element (the array ends before its closing `}`) is dropped — only complete
-// balanced elements are returned. Returns [] when no `signals` array region
-// is found; the production parsing path treats that as a hard failure.
-//
-// The inspection preserves the dropped-final-element fact so offline audit
-// tooling can account for it without changing production parse behavior.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-//   countRawEnvelopeSignals
-export function inspectRawOfficialApiSignalElements(content: string): RawOfficialApiSignalElementInspection {
-  const signalsKeyIndex = findSignalsArrayStart(content);
-  if (signalsKeyIndex < 0) {
-    return { elements: [], truncated_final_element: false };
-  }
-  const elements: string[] = [];
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let elementStart = -1;
-  for (let i = signalsKeyIndex; i < content.length; i += 1) {
-    const ch = content[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) {
-        elementStart = i;
-      }
-      depth += 1;
-    } else if (ch === "}") {
-      if (depth > 0) {
-        depth -= 1;
-        if (depth === 0 && elementStart >= 0) {
-          elements.push(content.slice(elementStart, i + 1));
-          elementStart = -1;
-        }
-      }
-    } else if (ch === "]" && depth === 0) {
-      // Closing the signals array at top level — no in-flight element.
-      break;
-    }
-  }
-  return {
-    elements,
-    truncated_final_element: depth > 0 && elementStart >= 0
-  };
-}
-
-// Exported so the LongMemEval bench seed path can count the RAW salvageable
-// element population (lastTurnRawSignalCount) when the strict envelope parse
-// fails — otherwise the dropped corrupt entries would vanish from the
-// parse-drop attribution instead of landing in parseDropped.
-export function salvageRawSignalElements(content: string): readonly string[] {
-  return inspectRawOfficialApiSignalElements(content).elements;
-}
-
-// Find the index of the `[` that opens the `signals` array, scanning past the
-// `"signals"` key. String-aware so a `"signals"` substring inside an earlier
-// string value is not mistaken for the key. Returns -1 when not found.
-function findSignalsArrayStart(content: string): number {
-  const keyMatch = /"signals"\s*:\s*\[/u.exec(content);
-  if (keyMatch === null) {
-    return -1;
-  }
-  // Position the walk at the `[` so the first `{` after it starts element 0.
-  return keyMatch.index + keyMatch[0].length - 1;
-}
-
 // Parse one entry of the official-API {"signals":[...]} envelope. Returns
 // null — instead of throwing — when the entry is malformed (hallucinated
 // signal_kind, missing object_kind / matched_text / confidence, or a
@@ -387,92 +308,39 @@ export function parseOfficialApiSignalEntry(
   return inspectOfficialApiSignalEntry(candidate).draft;
 }
 
-function inspectOfficialApiSignalEntry(candidate: unknown): Readonly<{
-  readonly draft: OfficialApiSignalDraft | null;
-  readonly rejection: OfficialApiSignalEntryRejection;
-}> {
+function inspectOfficialApiSignalEntry(
+  candidate: unknown
+): OfficialApiSignalEntryInspection {
   if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
     return { draft: null, rejection: "signal_entry_invalid" };
   }
-  const semanticFactorGraph = (candidate as Record<string, unknown>).semantic_factor_graph;
-  if (semanticFactorGraph === undefined || semanticFactorGraph === null) {
-    return { draft: null, rejection: "semantic_factor_graph_missing" };
-  }
-  const parsedSemanticFactorGraph = OpenSemanticFactorGraphProposalSchema.safeParse(
-    pruneUnboundOpenSemanticFactorProposal(semanticFactorGraph)
+  const semanticProjection = inspectOfficialApiSemanticFactorGraphProjection(
+    (candidate as Record<string, unknown>).semantic_factor_graph
   );
-  if (!parsedSemanticFactorGraph.success) {
-    return {
-      draft: null,
-      rejection: classifySemanticFactorGraphRejection(parsedSemanticFactorGraph.error)
-    };
-  }
-  const parsed = OpenOfficialApiSignalEntrySchema.safeParse(candidate);
+  const parsed = OpenOfficialApiSignalEntrySchema.safeParse({
+    ...(candidate as Record<string, unknown>),
+    semantic_factor_graph: semanticProjection.graph
+  });
   if (!parsed.success) {
     return { draft: null, rejection: "signal_entry_invalid" };
-  }
-  if (parsed.data.semantic_factor_graph === undefined) {
-    return { draft: null, rejection: "semantic_factor_graph_invalid_shape" };
   }
   return {
     draft: buildOfficialApiSignalDraft(Object.freeze({
       ...parsed.data,
       signal_kind: SignalKind.POTENTIAL_SEMANTIC_OBSERVATION,
       object_kind: OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
-    })),
-    rejection: "signal_entry_invalid"
+    }), semanticProjection.audit),
+    rejection: null
   };
-}
-
-function classifySemanticFactorGraphRejection(
-  error: z.ZodError
-): OfficialApiSignalEntryRejection {
-  const messages = error.issues.map(({ message }) => message);
-  if (messages.includes("semantic factor graph has unbound values")) {
-    return "semantic_factor_graph_invalid_unbound";
-  }
-  if (messages.some((message) => /reference|predicate factor is missing/iu.test(message))) {
-    return "semantic_factor_graph_invalid_reference";
-  }
-  if (error.issues.some(({ path, message }) =>
-    path.at(-1) === "semantic_identity" || path.at(-1) === "binding_identity" ||
-      /semantic identity/iu.test(message))) {
-    return "semantic_factor_graph_invalid_identity";
-  }
-  const cardinality = error.issues.find(
-    ({ code }) => code === "too_big" || code === "too_small"
-  );
-  if (cardinality !== undefined &&
-      (cardinality.code === "too_big" || cardinality.code === "too_small")) {
-    const subject = semanticGraphCardinalitySubject(cardinality.path);
-    const direction = cardinality.code === "too_big" ? "too_many" : "too_few";
-    return `semantic_factor_graph_invalid_${subject}_${direction}`;
-  }
-  if (messages.some((message) => /unique|contiguous|evidence graph cannot/iu.test(message))) {
-    return "semantic_factor_graph_invalid_structure";
-  }
-  return "semantic_factor_graph_invalid_shape";
-}
-
-function semanticGraphCardinalitySubject(
-  path: readonly PropertyKey[]
-): SemanticGraphCardinalitySubject {
-  if (path.includes("factors")) return "factors";
-  if (path.includes("variables")) return "variables";
-  if (path.includes("result_variable_ids")) return "result_variables";
-  if (path.includes("propositions")) {
-    return path.includes("arguments") ? "arguments" : "propositions";
-  }
-  return "field";
 }
 
 function buildOfficialApiSignalDraft(
   record: z.infer<typeof OpenOfficialApiSignalEntrySchema> & {
     readonly signal_kind: typeof SignalKind.POTENTIAL_SEMANTIC_OBSERVATION;
     readonly object_kind: typeof OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND;
-  }
+  },
+  semanticFactorGraphProjection?: OfficialApiSemanticFactorGraphProjectionAudit
 ): OfficialApiSignalDraft {
-
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
   // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
   const clampedDistilledFact =
@@ -494,7 +362,10 @@ function buildOfficialApiSignalDraft(
     ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame }),
     ...(record.semantic_factor_graph === undefined
       ? {}
-      : { semantic_factor_graph: record.semantic_factor_graph })
+      : { semantic_factor_graph: record.semantic_factor_graph }),
+    ...(semanticFactorGraphProjection === undefined
+      ? {}
+      : { semantic_factor_graph_projection: semanticFactorGraphProjection })
   });
 }
 

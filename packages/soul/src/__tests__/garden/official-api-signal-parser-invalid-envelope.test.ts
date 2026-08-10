@@ -21,22 +21,34 @@ describe("parseOfficialApiSignals invalid envelope rejection", () => {
     );
   });
 
-  it("reports a missing open graph without retaining response content", () => {
-    expect(() => parseOfficialApiSignals(JSON.stringify({ signals: [{
+  it("admits a valid candidate core while recording a missing graph projection", () => {
+    expect(parseOfficialApiSignals(JSON.stringify({ signals: [{
       confidence: 0.8,
       matched_text: "private source text"
-    }] }))).toThrow(/semantic_factor_graph_missing:1/u);
+    }] }))).toMatchObject([{
+      matched_text: "private source text",
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      }
+    }]);
   });
 
-  it("distinguishes an invalid open graph from another invalid entry field", () => {
+  it("records an invalid graph projection while rejecting an invalid candidate core", () => {
     const otherwiseValid = withOpenSemanticFactorGraph({
       confidence: 0.8,
       matched_text: "source text"
     });
-    expect(() => parseOfficialApiSignals(JSON.stringify({ signals: [{
+    expect(parseOfficialApiSignals(JSON.stringify({ signals: [{
       ...otherwiseValid,
       semantic_factor_graph: {}
-    }] }))).toThrow(/semantic_factor_graph_invalid_shape:1/u);
+    }] }))).toMatchObject([{
+      matched_text: "source text",
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_shape"
+      }
+    }]);
     expect(() => parseOfficialApiSignals(JSON.stringify({ signals: [{
       ...otherwiseValid,
       matched_text: undefined
@@ -48,13 +60,18 @@ describe("parseOfficialApiSignals invalid envelope rejection", () => {
       confidence: 0.8,
       matched_text: "source text"
     });
-    expect(() => parseOfficialApiSignals(JSON.stringify({ signals: [{
+    expect(parseOfficialApiSignals(JSON.stringify({ signals: [{
       ...otherwiseValid,
       semantic_factor_graph: {
         ...otherwiseValid.semantic_factor_graph,
         factors: [],
         propositions: []
       }
-    }] }))).toThrow(/semantic_factor_graph_invalid_propositions_too_few:1/u);
+    }] }))).toMatchObject([{
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_propositions_too_few"
+      }
+    }]);
   });
 });

@@ -54,10 +54,13 @@ import {
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
+  parseOfficialApiSemanticFactorGraphProjectionAudit,
   parseOfficialApiSignals,
   salvageRawSignalElements
 } from "./official-api-signal-parser.js";
 export type {
+  OfficialApiSemanticFactorGraphProjectionAudit,
+  OfficialApiSemanticFactorGraphProjectionReason,
   OfficialApiSignalDraft
 } from "./official-api-signal-parser.js";
 export {

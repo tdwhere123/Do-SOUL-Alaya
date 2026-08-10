@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID } from
   "@do-soul/alaya-core";
-import { GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-soul";
+import {
+  GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
+  parseOfficialApiSemanticFactorGraphProjectionAudit
+} from "@do-soul/alaya-soul";
 import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_REPLAY_FORMATION_POLICY,
@@ -84,6 +87,36 @@ describe("extraction cache replay", () => {
     expect(result.closure).toMatchObject({ occurrenceCount: 1, accountedOccurrences: 1, elementCount: 0, invalid: 0 });
   });
 
+  it("commits graph projection failure for a later rejected candidate", () => {
+    const root = cacheRoot();
+    const key = "e".repeat(64);
+    writeShard(root, key, validRaw());
+    const result = replayExtractionOccurrences({
+      cacheRoot: root,
+      model,
+      requestProfile,
+      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+      audit: auditor(() => resultFor([{
+        index: 0,
+        disposition: "rejected",
+        stage: "grounding",
+        reason: "matched_text_absent",
+        semantic_factor_graph_projection: {
+          status: "rejected",
+          reason: "semantic_factor_graph_invalid_shape"
+        }
+      }]))
+    });
+
+    expect(result.occurrences[0]?.entries[0]).toMatchObject({
+      disposition: "rejected",
+      semanticFactorGraphProjection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_shape"
+      }
+    });
+  });
+
   it("fails closed when an admitted entry omits its formed signal", () => {
     const root = cacheRoot();
     const key = "f".repeat(64);
@@ -133,29 +166,62 @@ describe("extraction cache replay", () => {
     const root = cacheRoot();
     const key = "d".repeat(64);
     writeShard(root, key, validRaw());
-    const replay = (assertion: string, fullTurnContent: string) => replayExtractionOccurrences({
-      cacheRoot: root,
-      model,
-      requestProfile,
-      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
-      audit: auditor(() => resultFor([{
-        index: 0,
-        disposition: "admitted",
-        stage: "formation",
-        reason: "formed",
-        signal: formedSignal(assertion, fullTurnContent)
-      }]))
-    });
+    const replay = (
+      assertion: string,
+      fullTurnContent: string,
+      rawPayload: Readonly<Record<string, unknown>> = {}
+    ) => {
+      const projection = parseOfficialApiSemanticFactorGraphProjectionAudit(
+        rawPayload.semantic_factor_graph_projection
+      );
+      return replayExtractionOccurrences({
+        cacheRoot: root,
+        model,
+        requestProfile,
+        occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+        audit: auditor(() => resultFor([{
+          index: 0,
+          disposition: "admitted",
+          stage: "formation",
+          reason: "formed",
+          ...(projection === null ? {} : { semantic_factor_graph_projection: projection }),
+          signal: {
+            ...formedSignal(assertion, fullTurnContent),
+            raw_payload: {
+              ...formedSignal(assertion, fullTurnContent).raw_payload,
+              ...rawPayload
+            }
+          }
+        }]))
+      });
+    };
     const first = replay("I live in Berlin.", "User: I live in Berlin.");
     const changedAssertion = replay("I live in Paris.", "User: I live in Berlin.");
     const changedContent = replay("I live in Berlin.", "User: I live in Berlin.\nAssistant: noted");
+    const rejectedProjection = replay(
+      "I live in Berlin.",
+      "User: I live in Berlin.",
+      {
+        semantic_factor_graph_projection: {
+          status: "rejected",
+          reason: "semantic_factor_graph_invalid_shape"
+        }
+      }
+    );
 
     expect(first.occurrences[0]?.entries[0]).toMatchObject({
       sourceAssertion: "I live in Berlin.",
       formedContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
     });
+    expect(rejectedProjection.occurrences[0]?.entries[0]).toMatchObject({
+      semanticFactorGraphProjection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_shape"
+      }
+    });
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedAssertion));
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedContent));
+    expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(rejectedProjection));
   });
 
   it("closes every admitted signal through the production fact-frame formation states", () => {

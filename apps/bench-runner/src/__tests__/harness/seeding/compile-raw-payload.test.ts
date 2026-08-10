@@ -9,17 +9,41 @@ import {
 
 describe("compile raw payload projection", () => {
   it("hashes equivalent source objects deterministically while retaining semantic keys", () => {
+    const semanticFactorGraph = semanticGraph();
+    const factFrame = {
+      schema_version: 1,
+      slots: [
+        { role: "subject", text: "I" },
+        { role: "relation", text: "use" },
+        { role: "value", text: "Atlas" }
+      ]
+    };
+    const sourceLocator = {
+      contract_version: 2,
+      kind: "assertion_catalog",
+      assertion_id: 1
+    };
+    const verifiedSourceHash =
+      `sha256:garden-verified-user-assertion-v1:${"a".repeat(64)}`;
     const first = projectCompileRawPayload({
       provider_diagnostics: "x".repeat(14_000),
       temporal_projection: { time_precision: "day", event_time_start: "2026-07-10" },
       matched_text: "durable fact",
-      canonical_entities: ["source"]
+      canonical_entities: ["source"],
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: verifiedSourceHash,
+      semantic_factor_graph: semanticFactorGraph,
+      fact_frame: factFrame
     });
     const reordered = projectCompileRawPayload({
       canonical_entities: ["source"],
+      fact_frame: factFrame,
       matched_text: "durable fact",
+      semantic_factor_graph: semanticFactorGraph,
+      source_locator: sourceLocator,
       temporal_projection: { event_time_start: "2026-07-10", time_precision: "day" },
-      provider_diagnostics: "x".repeat(14_000)
+      provider_diagnostics: "x".repeat(14_000),
+      verified_user_assertion_source_hash: verifiedSourceHash
     });
 
     expect(first.bench_source_raw_payload_sha256).toBe(
@@ -29,8 +53,12 @@ describe("compile raw payload projection", () => {
       matched_text: "durable fact",
       canonical_entities: ["source"],
       temporal_projection: { event_time_start: "2026-07-10", time_precision: "day" },
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: verifiedSourceHash,
+      semantic_factor_graph: semanticFactorGraph,
+      fact_frame: factFrame,
       bench_source_raw_payload_projected: true,
-      bench_source_raw_payload_key_count: 4
+      bench_source_raw_payload_key_count: 8
     });
     expect(first).not.toHaveProperty("provider_diagnostics");
   });
@@ -40,6 +68,23 @@ describe("compile raw payload projection", () => {
     expect(projected.bench_source_raw_payload_sha256).toBe(
       "sha256:896b8dd27b9b539d56c30c96acce8910a2293d7bef3fc3ef87195bc2eb778073"
     );
+  });
+
+  it.each([
+    "semantic_factor_graph_invalid_reference",
+    "semantic_factor_graph_not_source_grounded"
+  ] as const)("retains a validated semantic projection failure audit: %s", (reason) => {
+    const projected = projectCompileRawPayload({
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason
+      }
+    });
+
+    expect(projected.semantic_factor_graph_projection).toEqual({
+      status: "rejected",
+      reason
+    });
   });
 
   it("recognizes only the raw-payload serialized-size validation failure", () => {
@@ -126,6 +171,29 @@ describe("compile raw payload projection", () => {
       "proposed_preference_profile_omitted_for_payload_bound"
     );
   });
+
+  it("drops oversized semantic projections last while retaining source authority", () => {
+    const sourceLocator = {
+      contract_version: 2,
+      kind: "assertion_catalog",
+      assertion_id: 7
+    };
+    const verifiedSourceHash =
+      `sha256:garden-verified-user-assertion-v1:${"b".repeat(64)}`;
+    const projected = projectCompileRawPayload({
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: verifiedSourceHash,
+      semantic_factor_graph: maximalSemanticGraph()
+    });
+
+    expect(BoundedJsonObjectSchema.safeParse(projected).success).toBe(true);
+    expect(projected).toMatchObject({
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: verifiedSourceHash,
+      bench_source_raw_payload_omitted_projections: ["semantic_factor_graph"]
+    });
+    expect(projected).not.toHaveProperty("semantic_factor_graph");
+  });
 });
 
 function maximalPreferenceProfile(): Readonly<Record<string, unknown>> {
@@ -144,4 +212,62 @@ function canonicalDigest(value: Readonly<Record<string, unknown>>): string {
     Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
   );
   return `sha256:${createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex")}`;
+}
+
+function semanticGraph(): Readonly<Record<string, unknown>> {
+  return {
+    schema_version: 1,
+    source_kind: "evidence",
+    factors: [
+      { factor_id: "actor", surface: "I", semantic_identity: "speaker" },
+      { factor_id: "predicate", surface: "use", semantic_identity: "use" },
+      { factor_id: "object", surface: "Atlas", semantic_identity: "atlas" }
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "use-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        {
+          position: 0,
+          binding_identity: "agent",
+          reference_kind: "factor",
+          reference_id: "actor"
+        },
+        {
+          position: 1,
+          binding_identity: "object",
+          reference_kind: "factor",
+          reference_id: "object"
+        }
+      ]
+    }]
+  };
+}
+
+function maximalSemanticGraph(): Readonly<Record<string, unknown>> {
+  const factors = Array.from({ length: 32 }, (_, index) => ({
+    factor_id: `factor-${index}`,
+    surface: "S".repeat(512),
+    semantic_identity: "s".repeat(512)
+  }));
+  const propositions = Array.from({ length: 4 }, (_, propositionIndex) => ({
+    proposition_id: `proposition-${propositionIndex}`,
+    predicate_factor_id: `factor-${propositionIndex * 8}`,
+    arguments: Array.from({ length: 8 }, (_, position) => ({
+      position,
+      binding_identity: `binding-${position}`,
+      reference_kind: "factor",
+      reference_id: `factor-${propositionIndex * 8 + position}`
+    }))
+  }));
+  return {
+    schema_version: 1,
+    source_kind: "evidence",
+    factors,
+    variables: [],
+    result_variable_ids: [],
+    propositions
+  };
 }

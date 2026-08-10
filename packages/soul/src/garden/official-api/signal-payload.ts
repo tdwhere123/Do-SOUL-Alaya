@@ -68,6 +68,9 @@ function buildOfficialRawPayload(
     ...(draft.semantic_factor_graph === undefined
       ? {}
       : { semantic_factor_graph: draft.semantic_factor_graph }),
+    ...(draft.semantic_factor_graph_projection === undefined
+      ? {}
+      : { semantic_factor_graph_projection: draft.semantic_factor_graph_projection }),
     ...(draft.canonical_entities === undefined || draft.canonical_entities.length === 0
       ? {}
       : { canonical_entities: draft.canonical_entities }),

@@ -24,7 +24,7 @@ import { buildOfficialApiSourceCorpus } from "../grounding/source-locator.js";
 import { assessOfficialApiSourceTrust } from "./source-trust.js";
 
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
-export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v4";
+export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v5";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
@@ -54,6 +54,8 @@ export interface OfficialApiSignalFormationAuditEntry {
   readonly disposition: OfficialApiSignalAuditDisposition;
   readonly stage: OfficialApiSignalAuditStage;
   readonly reason: string;
+  readonly semantic_factor_graph_projection?:
+    OfficialApiSignalDraft["semantic_factor_graph_projection"];
   readonly signal?: CandidateMemorySignal;
 }
 
@@ -168,6 +170,21 @@ function auditDraft(
   input: OfficialApiSignalFormationAuditInput,
   timing: AuditTiming
 ): OfficialApiSignalFormationAuditEntry {
+  const entry = auditDraftCore(draft, index, input, timing);
+  return draft.semantic_factor_graph_projection === undefined
+    ? entry
+    : {
+      ...entry,
+      semantic_factor_graph_projection: draft.semantic_factor_graph_projection
+    };
+}
+
+function auditDraftCore(
+  draft: OfficialApiSignalDraft,
+  index: number,
+  input: OfficialApiSignalFormationAuditInput,
+  timing: AuditTiming
+): OfficialApiSignalFormationAuditEntry {
   const timingEntry = timingFailure(index, input, timing);
   if (timingEntry !== null) return timingEntry;
 
@@ -193,12 +210,7 @@ function auditDraft(
     : buildOfficialApiSourceCorpus(normalizedTurnContent, input.turn_messages!);
   const grounding = groundOfficialApiDraft(draft, groundingSourceText);
   if (grounding.status === "rejected") {
-    return {
-      index,
-      disposition: "rejected",
-      stage: "grounding",
-      reason: grounding.audit.reasons[0] ?? "source_assertion_rejected"
-    };
+    return rejectedGroundingEntry(index, grounding);
   }
   return formGroundedDraft(
     grounding.draft,
@@ -208,6 +220,24 @@ function auditDraft(
     timing.sourceObservedAt!,
     timing.createdAt!
   );
+}
+
+function rejectedGroundingEntry(
+  index: number,
+  grounding: Extract<ReturnType<typeof groundOfficialApiDraft>, { readonly status: "rejected" }>
+): OfficialApiSignalFormationAuditEntry {
+  return {
+    index,
+    disposition: "rejected",
+    stage: "grounding",
+    reason: grounding.audit.reasons[0] ?? "source_assertion_rejected",
+    ...(grounding.draft.semantic_factor_graph_projection === undefined
+      ? {}
+      : {
+        semantic_factor_graph_projection:
+          grounding.draft.semantic_factor_graph_projection
+      })
+  };
 }
 
 function timingFailure(
@@ -255,7 +285,16 @@ function formGroundedDraft(
       createdAt,
       sourceGrounding
     }));
-    return { index, disposition: "admitted", stage: "formation", reason: "formed", signal };
+    return {
+      index,
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      ...(draft.semantic_factor_graph_projection === undefined
+        ? {}
+        : { semantic_factor_graph_projection: draft.semantic_factor_graph_projection }),
+      signal
+    };
   } catch {
     return invalidEntry(index, "formation", "candidate_signal_invalid");
   }

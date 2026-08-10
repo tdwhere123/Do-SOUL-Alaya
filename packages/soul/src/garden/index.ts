@@ -47,6 +47,7 @@ export {
   auditOfficialApiSignalFormation,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
+  parseOfficialApiSemanticFactorGraphProjectionAudit,
   parseOfficialApiSignals,
   parseOfficialApiExtractionRequest,
   salvageRawSignalElements,
@@ -59,6 +60,8 @@ export {
   type OfficialApiSignalFormationAuditInput,
   type OfficialApiSignalFormationAuditResult,
   type OfficialApiExtractionRequest,
+  type OfficialApiSemanticFactorGraphProjectionAudit,
+  type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
 } from "./compute-provider.js";
 export {
@@ -84,7 +87,8 @@ export {
 export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
-  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+  parseOfficialApiSourceLocator
 } from "./grounding/source-locator.js";
 export {
   resolveGardenRawPayloadGrounding,

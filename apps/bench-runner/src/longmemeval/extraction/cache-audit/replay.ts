@@ -9,7 +9,9 @@ import type { EvidenceFactFrameFormationStatus } from "@do-soul/alaya-protocol";
 import {
   auditOfficialApiSignalFormation,
   buildEvidenceInput,
-  buildFactFrameFormationProposal
+  buildFactFrameFormationProposal,
+  parseOfficialApiSemanticFactorGraphProjectionAudit,
+  type OfficialApiSemanticFactorGraphProjectionAudit
 } from "@do-soul/alaya-soul";
 import {
   inspectCachedExtraction,
@@ -46,6 +48,8 @@ export interface ExtractionReplayEntry {
   readonly reason: string;
   readonly sourceAssertion?: string;
   readonly formedContentSha256?: string;
+  readonly semanticFactorGraphProjection?:
+    OfficialApiSemanticFactorGraphProjectionAudit;
   readonly factFrameFormation?: Readonly<ExtractionReplayFactFrameFormation>;
 }
 
@@ -182,6 +186,7 @@ function auditOccurrenceShards(
       disposition: entry.disposition,
       stage: entry.stage,
       reason: entry.reason,
+      ...semanticFactorGraphProjection(entry.semantic_factor_graph_projection),
       ...formationCommitment(entry.signal)
     })));
   }
@@ -212,6 +217,13 @@ function formationCommitment(
       .digest("hex"),
     factFrameFormation: formFactFrameCommitment(signal)
   };
+}
+
+function semanticFactorGraphProjection(
+  value: unknown
+): Pick<ExtractionReplayEntry, "semanticFactorGraphProjection"> {
+  const projection = parseOfficialApiSemanticFactorGraphProjectionAudit(value);
+  return projection === null ? {} : { semanticFactorGraphProjection: projection };
 }
 
 function formFactFrameCommitment(

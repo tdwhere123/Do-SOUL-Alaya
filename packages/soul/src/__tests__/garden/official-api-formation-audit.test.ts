@@ -127,4 +127,90 @@ describe("auditOfficialApiSignalFormation", () => {
       reason: expect.any(String)
     });
   });
+
+  it("forms a grounded candidate while preserving graph projection failure", () => {
+    const { semantic_factor_graph: _graph, ...withoutGraph } = validSignal;
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({ signals: [withoutGraph] })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      },
+      signal: {
+        raw_payload: {
+          semantic_factor_graph_projection: {
+            status: "unavailable",
+            reason: "semantic_factor_graph_missing"
+          }
+        }
+      }
+    });
+    expect(result.entries[0]?.signal?.raw_payload).not.toHaveProperty(
+      "semantic_factor_graph"
+    );
+  });
+
+  it("preserves the exact projection reason when grounding removes a valid graph", () => {
+    const graph = validSignal.semantic_factor_graph as {
+      readonly factors: readonly Readonly<Record<string, unknown>>[];
+    };
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [{
+          ...validSignal,
+          semantic_factor_graph: {
+            ...graph,
+            factors: graph.factors.map((factor) => ({
+              ...factor,
+              surface: "Call me Ash.",
+              semantic_identity: "call"
+            }))
+          }
+        }]
+      })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "admitted",
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_not_source_grounded"
+      },
+      signal: {
+        raw_payload: {
+          semantic_factor_graph_projection: {
+            status: "rejected",
+            reason: "semantic_factor_graph_not_source_grounded"
+          }
+        }
+      }
+    });
+  });
+
+  it("retains graph projection failure when grounding rejects the candidate", () => {
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [{
+          ...validSignal,
+          matched_text: "Call me Ash.",
+          semantic_factor_graph: {}
+        }]
+      })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "rejected",
+      stage: "grounding",
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_shape"
+      }
+    });
+  });
 });
