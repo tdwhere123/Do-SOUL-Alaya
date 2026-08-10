@@ -41,9 +41,11 @@ export function assertSemanticSupplementRound(input: {
   readonly requests: readonly OfficialApiExtractionRequest[];
 }): void {
   if (input.semantic.length === 0) return;
-  if (input.semanticBinding === undefined ||
-      input.requests.length !== input.cacheKeys.length) {
+  if (input.semanticBinding === undefined) {
     throw new Error("snapshot semantic supplement authority is missing");
+  }
+  if (input.requests.length !== input.cacheKeys.length) {
+    throw new Error("snapshot semantic supplement request plan cardinality mismatch");
   }
   const requests = new Map(input.cacheKeys.map((cacheKey, index) => [
     cacheKey,

@@ -38,6 +38,13 @@ describe("snapshot semantic supplement binding", () => {
       requests: [request()]
     })).toThrow(/authority/u);
     expect(() => assertSemanticSupplementRound({
+      semantic: [batch()],
+      semanticEntries: new Map(),
+      semanticBinding: binding(),
+      cacheKeys: [PRIMARY_KEY],
+      requests: []
+    })).toThrow(/request plan cardinality/u);
+    expect(() => assertSemanticSupplementRound({
       semantic: [{ ...batch(), sourceCorpusIdentity: "9".repeat(64) }],
       semanticEntries: new Map(),
       semanticBinding: binding(),

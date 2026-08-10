@@ -274,8 +274,6 @@ export interface CompileSeedExtractionStats {
   lastExtractionShards?: CompileSeedExtractionShardReceipt[];
   /** Exact semantic supplement batches consumed by the current seed turn. */
   lastSemanticSupplementShards?: SourceAssertionSupplementBatchReceipt[];
-  /** Run-wide binding for the active semantic supplement authority. */
-  semanticSupplementBinding?: SourceAssertionSupplementBinding;
   /**
    * Diagnostic instrument: cache key (or its 12-char prefix; see writers)
    * for the most recent extract() call, so a subsequent extraction failure
@@ -373,6 +371,8 @@ export interface CompileSeedDaemon {
  */
 export interface CompileSeedRunner {
   readonly stats: CompileSeedExtractionStats;
+  /** Immutable run authority; never inferred from a turn-local extraction result. */
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
   /**
    * Seed one haystack turn. Runs the turn through production garden
    * extraction (or the no-credentials fallback), then returns every durable

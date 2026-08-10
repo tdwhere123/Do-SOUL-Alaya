@@ -444,9 +444,9 @@ async function writeLongMemEvalSnapshotIfRequested(
     recallOptions: context.recallOptions,
     datasetSha256: context.datasetSha256,
     selection: selectionContractIdentity(context.selectionContract),
-    ...(context.seedRunner.stats.semanticSupplementBinding === undefined
+    ...(context.seedRunner.semanticSupplementBinding === undefined
       ? {}
-      : { semanticSupplement: context.seedRunner.stats.semanticSupplementBinding }),
+      : { semanticSupplement: context.seedRunner.semanticSupplementBinding }),
     ...(reconciliationBasis === undefined ? {} : { reconciliationBasis })
   });
   await writeRecallEvalSnapshot({
@@ -459,9 +459,9 @@ async function writeLongMemEvalSnapshotIfRequested(
     extractionCacheRoot: context.extractionCacheRoot,
     datasetSha256: context.datasetSha256,
     seedExtractionPath: toSeedExtractionPathKpi(context.seedRunner.stats),
-    ...(context.seedRunner.stats.semanticSupplementBinding === undefined
+    ...(context.seedRunner.semanticSupplementBinding === undefined
       ? {}
-      : { semanticSupplementBinding: context.seedRunner.stats.semanticSupplementBinding }),
+      : { semanticSupplementBinding: context.seedRunner.semanticSupplementBinding }),
     runProvenance
   });
   process.stdout.write(

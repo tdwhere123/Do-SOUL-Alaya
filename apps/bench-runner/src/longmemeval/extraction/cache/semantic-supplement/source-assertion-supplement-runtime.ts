@@ -31,6 +31,7 @@ import {
 
 export interface SourceAssertionSupplementRuntime {
   readonly receipt: SourceAssertionSupplementReceipt;
+  readonly binding: ReturnType<typeof sourceAssertionSupplementBinding>;
   beginTurn(): void;
   compile(
     turnContent: string,
@@ -69,6 +70,7 @@ export function createSourceAssertionSupplementRuntime(input: {
   const primary = requireManifest(input.primaryCacheRoot, "primary");
   const source = requireManifest(input.sourceCacheRoot, "source");
   const reader = createReader(input, primary, source);
+  const binding = sourceAssertionSupplementBinding(reader.receipt);
   const turnReceipts: SourceAssertionSupplementBatchReceipt[] = [];
   const extractor = createExtractor(input, reader, turnReceipts);
   const provider = new OfficialApiGardenProvider({
@@ -80,11 +82,12 @@ export function createSourceAssertionSupplementRuntime(input: {
   });
   return Object.freeze({
     receipt: reader.receipt,
+    binding,
     beginTurn: () => { turnReceipts.length = 0; },
     compile: (turnContent: string, context: GardenCompileContext) =>
       provider.compile(turnContent, context),
     mergeTurnStats: (stats: CompileSeedExtractionStats) =>
-      mergeTurnStats(stats, turnReceipts, reader.receipt)
+      mergeTurnStats(stats, turnReceipts)
   });
 }
 
@@ -148,11 +151,9 @@ function createExtractor(
 
 function mergeTurnStats(
   stats: CompileSeedExtractionStats,
-  receipts: readonly SourceAssertionSupplementBatchReceipt[],
-  receipt: SourceAssertionSupplementReceipt
+  receipts: readonly SourceAssertionSupplementBatchReceipt[]
 ): void {
   stats.lastSemanticSupplementShards = [...receipts];
-  stats.semanticSupplementBinding = sourceAssertionSupplementBinding(receipt);
   stats.lastTurnRawSignalCount += receipts.reduce(
     (total, shard) => total + shard.rawSignalCount, 0
   );

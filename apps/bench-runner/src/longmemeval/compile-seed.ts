@@ -62,6 +62,9 @@ export function createCompileSeedRunner(
   const context = createCompileSeedRunnerContext(options);
   return {
     stats: context.stats,
+    ...(context.semanticSupplement === null
+      ? {}
+      : { semanticSupplementBinding: context.semanticSupplement.binding }),
     seedTurn: (input) => seedCompileTurn(context, input)
   };
 }
