@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
 } from "../../garden/compute-provider.js";
@@ -84,6 +85,22 @@ describe("official API system prompt", () => {
     expect(sha256(historical!)).toBe(historicalSha256);
     expect(historical).not.toContain('"fact_frame"');
     expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
+  });
+
+  it("defines a separately identified single-assertion coverage repair prompt", () => {
+    const repairSha256 = sha256(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
+
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT)
+      .toContain(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT).toContain(
+      "exactly one source_assertions entry"
+    );
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT).toContain(
+      "does not lower the durability threshold"
+    );
+    expect(repairSha256).not.toBe(sha256(OFFICIAL_API_SYSTEM_PROMPT));
+    expect(resolveOfficialApiSystemPrompt(repairSha256))
+      .toBe(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
   });
 });
 

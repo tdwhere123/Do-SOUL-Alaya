@@ -34,12 +34,14 @@ export async function seedCompileTurn(
 }
 
 function resetTurnExtractionReceipts(context: CompileSeedRunnerContext): void {
+  context.semanticSupplement?.beginTurn();
   context.stats.lastTurnRawSignalCount = 0;
   context.stats.lastTurnDraftCount = 0;
   context.stats.lastExtractionSource = null;
   context.stats.lastCacheKey = null;
   context.stats.lastRawJsonSha256 = null;
   context.stats.lastExtractionShards = [];
+  context.stats.lastSemanticSupplementShards = [];
 }
 
 async function buildTurnSignalInputs(
@@ -49,6 +51,7 @@ async function buildTurnSignalInputs(
 ): Promise<BenchSignalSeedInput[]> {
   const seedInputs = await extractSeedInputs({
     provider: context.provider,
+    semanticSupplement: context.semanticSupplement,
     stats: context.stats,
     turnContent: normalized,
     seedIndex: input.seedIndex,

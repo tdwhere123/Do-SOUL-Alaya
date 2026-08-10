@@ -28,6 +28,8 @@ import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
 } from "../selection/contract.js";
+import { resolveSourceAssertionSupplementOptions } from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 type LoadedLongMemEvalDataset = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
 type LongMemEvalQuestions = LoadedLongMemEvalDataset["questions"];
@@ -157,12 +159,18 @@ function createLongMemEvalSeedRunner(
   offset: number
 ) {
   const requiredTurns = inspectTurnContentKeySpace(window);
+  const sourceAssertionSupplement = resolveSourceAssertionSupplementOptions(
+    process.env
+  );
   return createCompileSeedRunner({
     requiredTurnContents: requiredTurns.distinctTurnContents,
     requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
     requiredQuestionWindow: { offset, limit: window.length },
     cacheRoot: extractionCacheRoot,
-    allowLiveExtraction: false
+    allowLiveExtraction: false,
+    ...(sourceAssertionSupplement === undefined
+      ? {}
+      : { sourceAssertionSupplement })
   });
 }
 

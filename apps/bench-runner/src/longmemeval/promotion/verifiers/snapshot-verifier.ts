@@ -122,7 +122,8 @@ async function verifyOpenSnapshot(
     questions: input.expectedQuestions,
     extraction: evidence.manifest.extraction_provenance,
     extractionAuthority: evidence.extractionAuthority,
-    seedExtractionPath: evidence.manifest.seed_extraction_path
+    seedExtractionPath: evidence.manifest.seed_extraction_path,
+    semanticSupplementBinding: evidence.manifest.semantic_supplement_receipt
   });
   assertSnapshotIdentity({
     ...input, dbPath: path.resolve(input.contractRoot, references.db),
@@ -277,6 +278,9 @@ async function inspectImmutableDatabaseCopy(input: {
   readonly extraction: Parameters<typeof assertSnapshotSeedLedgerBinding>[0]["extraction"];
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly seedExtractionPath: Parameters<typeof assertSnapshotSeedLedgerBinding>[0]["seedExtractionPath"];
+  readonly semanticSupplementBinding: Parameters<
+    typeof assertSnapshotSeedLedgerBinding
+  >[0]["semanticSupplementBinding"];
 }): Promise<{
   readonly sha256: string;
   readonly schemaMigrationVersion: number;
@@ -302,6 +306,9 @@ async function inspectImmutableDatabaseCopy(input: {
       extraction: input.extraction,
       extractionAuthority: input.extractionAuthority,
       seedExtractionPath: input.seedExtractionPath,
+      ...(input.semanticSupplementBinding === undefined ? {} : {
+        semanticSupplementBinding: input.semanticSupplementBinding
+      }),
       closureAuthority: {
         kind: "exact",
         questionWindow: { offset: 0, limit: input.questions.length }

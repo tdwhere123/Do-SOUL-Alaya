@@ -107,6 +107,13 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...FINAL_PROMPT_PARTS
 ]);
 
+export const OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT = joinPrompt([
+  OFFICIAL_API_SYSTEM_PROMPT,
+  "This is a coverage repair request containing exactly one source_assertions entry that produced no valid candidate in the primary extraction.",
+  "Re-evaluate that assertion independently and preserve every durable source-supported detail if it qualifies.",
+  "The repair pass does not lower the durability threshold; return an empty signals array when the assertion is not durable."
+]);
+
 const SYSTEM_PROMPTS_BY_SHA256 = createPromptRegistry();
 
 /** Frozen snapshot verification resolves its own prompt instead of current code state. */
@@ -123,6 +130,10 @@ function createPromptRegistry(): ReadonlyMap<string, string> {
   }
   return new Map([
     [currentSha256, OFFICIAL_API_SYSTEM_PROMPT],
+    [
+      sha256(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT),
+      OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT
+    ],
     [HISTORICAL_PROMPT_5EC274_SHA256, HISTORICAL_PROMPT_5EC274]
   ]);
 }

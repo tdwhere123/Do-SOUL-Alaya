@@ -173,6 +173,9 @@ async function verifyExpansionSnapshotAuthority(
     extraction,
     extractionAuthority,
     seedExtractionPath: input.bundle.manifest.seed_extraction_path,
+    ...(input.bundle.manifest.semantic_supplement_receipt === undefined ? {} : {
+      semanticSupplementBinding: input.bundle.manifest.semantic_supplement_receipt
+    }),
     closureAuthority: {
       kind: "exact",
       questionWindow: { offset: 0, limit: selection.nextQuestions.length }

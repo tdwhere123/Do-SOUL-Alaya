@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
-import {
-  isCacheOnlySeedExtractionPath,
-  type SeedExtractionPath
-} from "@do-soul/alaya-eval";
-import { resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
+import { isCacheOnlySeedExtractionPath, type SeedExtractionPath } from
+  "@do-soul/alaya-eval";
+import { buildOfficialApiExtractionRequests, resolveOfficialApiSystemPrompt } from
+  "@do-soul/alaya-soul";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -16,10 +15,8 @@ import {
   computeExtractionRawContentClosureSha256,
   extractionContentClosureEntriesFromIndex
 } from "../../extraction/content-closure.js";
-import {
-  EXTRACTION_CACHE_KEY_ALGO,
-  EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../extraction/cache/extraction-cache-manifest.js";
+import { EXTRACTION_CACHE_KEY_ALGO, EXTRACTION_CACHE_MANIFEST_VERSION } from
+  "../../extraction/cache/extraction-cache-manifest.js";
 import { containsExtractionFillQuestionWindow } from
   "../../extraction/fill/fill-authority.js";
 import type { ExtractionFillQuestionWindow } from
@@ -33,10 +30,8 @@ import {
   pairSessionIntoRounds,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
-import {
-  hasOrderedUniqueLongMemEvalSourceRounds,
-  longMemEvalSourceRoundKey
-} from "../../provenance/source-rounds.js";
+import { hasOrderedUniqueLongMemEvalSourceRounds, longMemEvalSourceRoundKey } from
+  "../../provenance/source-rounds.js";
 import type {
   LongMemEvalSnapshotQuestion,
   LongMemEvalSnapshotSeedRound,
@@ -48,6 +43,15 @@ import { assertSeedLedgerMaterializationProof } from
   "./seed-ledger-materialization-proof.js";
 import { assertDirectSourceEvidenceClosure } from
   "./direct-source-evidence-proof.js";
+import type { SourceAssertionSupplementBinding } from
+  "../../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import {
+  assertSemanticSupplementClosure,
+  assertSemanticSupplementRound,
+  readRoundSemanticSupplementShards,
+  sumExtractionShardCount,
+  type SemanticSupplementEntries
+} from "./semantic-supplement-binding.js";
 
 interface LedgerTotals {
   attempts: number;
@@ -77,19 +81,22 @@ export function assertSnapshotSeedLedgerBinding(input: {
   readonly seedExtractionPath: SeedExtractionPath | undefined;
   readonly closureAuthority: SnapshotSeedLedgerClosureAuthority;
   readonly systemPrompt?: string;
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }): void {
   const resolved = requireCompleteExtraction(input.extraction, input.systemPrompt);
   const extraction = resolved.extraction;
   const systemPrompt = resolved.systemPrompt;
   const totals = emptyTotals();
   const closure = new Map<string, ExtractionContentClosureEntry>();
+  const semanticEntries: SemanticSupplementEntries = new Map();
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
   try {
     input.sidecar.questions.forEach((question, index) => {
       const source = input.questions[index];
       if (source === undefined) throw new Error("snapshot seed ledger question order mismatch");
       assertQuestionLedger(
-        db, question, source, extraction, totals, closure, systemPrompt
+        db, question, source, extraction, totals, closure, semanticEntries,
+        input.semanticSupplementBinding, systemPrompt
       );
     });
   } finally {
@@ -100,6 +107,11 @@ export function assertSnapshotSeedLedgerBinding(input: {
     input.extractionAuthority,
     closure,
     input.closureAuthority
+  );
+  assertSemanticSupplementClosure(
+    extraction,
+    semanticEntries,
+    input.semanticSupplementBinding
   );
   assertSeedExtractionPath(input.seedExtractionPath, totals);
 }
@@ -136,6 +148,8 @@ function assertQuestionLedger(
   extraction: CompleteExtraction,
   totals: LedgerTotals,
   closure: Map<string, ExtractionContentClosureEntry>,
+  semanticEntries: SemanticSupplementEntries,
+  semanticBinding: SourceAssertionSupplementBinding | undefined,
   systemPrompt: string
 ): void {
   const ledger = question.seedRounds;
@@ -146,7 +160,10 @@ function assertQuestionLedger(
   ledger.forEach((round, index) => {
     const canonical = expected[index];
     if (canonical === undefined) throw new Error("snapshot canonical seed round order mismatch");
-    assertRoundIdentity(round, canonical, extraction, source, systemPrompt);
+    assertRoundIdentity(
+      round, canonical, extraction, source, semanticEntries, semanticBinding,
+      systemPrompt
+    );
     assertRoundConservation(round);
     addClosureEntry(closure, round, extraction);
     addTotals(totals, round);
@@ -177,25 +194,36 @@ function assertRoundIdentity(
   expected: ReturnType<typeof canonicalRounds>[number],
   extraction: CompleteExtraction,
   source: LongMemEvalQuestion,
+  semanticEntries: SemanticSupplementEntries,
+  semanticBinding: SourceAssertionSupplementBinding | undefined,
   systemPrompt: string
 ): void {
   const content = expected.round.content.trim();
+  const turnMessages = buildLongMemEvalRoundMessages(
+    source.haystack_sessions[expected.sessionIndex]!,
+    expected.round,
+    `${source.question_id}-s${expected.sessionIndex}-r${expected.roundIndex}`
+  );
   const cacheKeys = computeExtractionTurnCacheKeys(
     extraction.extraction_model,
     extraction.request_profile,
     systemPrompt,
     {
       turnContent: content,
-      turnMessages: buildLongMemEvalRoundMessages(
-        source.haystack_sessions[expected.sessionIndex]!,
-        expected.round,
-        `${source.question_id}-s${expected.sessionIndex}-r${expected.roundIndex}`
-      )
+      turnMessages
     }
   );
   const shards = readRoundExtractionShards(actual);
-  const rawSignalCount = shards.reduce((sum, shard) => sum + shard.rawSignalCount, 0);
-  const draftCount = shards.reduce((sum, shard) => sum + shard.draftCount, 0);
+  const semantic = readRoundSemanticSupplementShards(actual);
+  assertSemanticSupplementRound({
+    semantic,
+    semanticEntries,
+    semanticBinding,
+    cacheKeys,
+    requests: buildOfficialApiExtractionRequests(content, turnMessages)
+  });
+  const rawSignalCount = sumExtractionShardCount(shards, semantic, "rawSignalCount");
+  const draftCount = sumExtractionShardCount(shards, semantic, "draftCount");
   const single = shards.length === 1 ? shards[0] : undefined;
   if (actual.sessionIndex !== expected.sessionIndex ||
       actual.roundIndex !== expected.roundIndex || actual.sessionId !== expected.sessionId ||
@@ -222,6 +250,7 @@ function readRoundExtractionShards(
     draftCount: round.draftCount
   }];
 }
+
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -431,7 +460,6 @@ function isVerifiedEmptyAnswerWipeRound(
       (round.directEvidenceBindings?.length ?? 0) > 0 ||
       round.factsProduced > 0) return false;
   if (round.candidateAbsent > 0 || round.materializationDrop > 0) return false;
-  // Successful empty official extraction.
   if (
     round.extractionSource !== "fallback" &&
     round.rawSignalCount === 0 &&

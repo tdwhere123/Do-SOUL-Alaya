@@ -8,6 +8,8 @@ import type {
   BenchRetryClassification,
   CompileSeedExtractionStats
 } from "./compile-seed-types.js";
+import type { SourceAssertionSupplementRuntime } from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
 
@@ -15,6 +17,7 @@ type SeedInputDraft = Omit<BenchSignalSeedInput, "evidenceRef">;
 
 type ExtractSeedInputsInput = {
   readonly provider: OfficialApiGardenProvider | null;
+  readonly semanticSupplement?: SourceAssertionSupplementRuntime | null;
   readonly stats: CompileSeedExtractionStats;
   readonly turnContent: string;
   readonly seedIndex: number;
@@ -56,7 +59,12 @@ async function compileOfficialSeedSignals(
   provider: OfficialApiGardenProvider
 ): Promise<OfficialCompileSignals> {
   try {
-    return await provider.compile(input.turnContent, input.context);
+    const primary = await provider.compile(input.turnContent, input.context);
+    const supplement = input.semanticSupplement;
+    if (supplement === undefined || supplement === null) return primary;
+    const supplemental = await supplement.compile(input.turnContent, input.context);
+    supplement.mergeTurnStats(input.stats);
+    return Object.freeze([...primary, ...supplemental]);
   } catch (error) {
     recordExtractionFailureSource(input.stats);
     await dumpSeedExtractionFailureDiagnostic({

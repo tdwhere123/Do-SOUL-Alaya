@@ -25,6 +25,8 @@ import { SupplementalSourceProvenanceBindingSchema } from
   "../extraction/cache/supplemental-source-receipt.js";
 import { SnapshotGraphPreflightSchema } from
   "./current/snapshot-graph-preflight-contract.js";
+import { SourceAssertionSupplementBindingSchema } from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SnapshotExtractionBaseSchema = z.object({
@@ -106,6 +108,11 @@ export function validateSnapshotManifest(
   const graphPreflight = record.graph_preflight === undefined
     ? undefined
     : SnapshotGraphPreflightSchema.parse(record.graph_preflight);
+  const semanticSupplement = record.semantic_supplement_receipt === undefined
+    ? undefined
+    : SourceAssertionSupplementBindingSchema.parse(
+        record.semantic_supplement_receipt
+      );
   const seedExtractionPath = parseSeedExtractionPath(
     record.seed_extraction_path,
     filePath
@@ -116,6 +123,9 @@ export function validateSnapshotManifest(
   const manifest = {
     ...(parsed as LongMemEvalSnapshotManifest),
     extraction_provenance: extractionProvenance,
+    ...(semanticSupplement === undefined ? {} : {
+      semantic_supplement_receipt: semanticSupplement
+    }),
     ...(seedExtractionPath === undefined
       ? {}
       : { seed_extraction_path: seedExtractionPath })

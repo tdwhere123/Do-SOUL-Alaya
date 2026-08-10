@@ -32,6 +32,8 @@ import {
 } from "./extraction-authority.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 import { compactSnapshotRunProvenance } from "./run-provenance.js";
+import type { SourceAssertionSupplementBinding } from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
 export interface WriteRecallEvalSnapshotInput {
   readonly snapshotOut: string;
@@ -44,6 +46,7 @@ export interface WriteRecallEvalSnapshotInput {
   readonly datasetSha256: string;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }
 
 export async function writeRecallEvalSnapshotArtifacts(
@@ -63,7 +66,10 @@ export async function writeRecallEvalSnapshotArtifacts(
     extractionAuthority: captured.authority,
     seedExtractionPath: input.seedExtractionPath,
     runProvenance: input.runProvenance,
-    datasetSha256: datasetSha
+    datasetSha256: datasetSha,
+    ...(input.semanticSupplementBinding === undefined ? {} : {
+      semanticSupplementBinding: input.semanticSupplementBinding
+    })
   });
   const graphPreflight = assertSnapshotAnswersWithFormation(
     liveDbPath,
@@ -91,7 +97,10 @@ export async function writeRecallEvalSnapshotArtifacts(
     extractionAuthority: persistedAuthority,
     seedExtractionPath: input.seedExtractionPath,
     runProvenance: input.runProvenance,
-    datasetSha256: datasetSha
+    datasetSha256: datasetSha,
+    ...(input.semanticSupplementBinding === undefined ? {} : {
+      semanticSupplementBinding: input.semanticSupplementBinding
+    })
   });
   const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
   assertCapturedAuthorityIntegrity(integrity, authorityPath, captured.bytes);
@@ -144,6 +153,9 @@ function buildManifest(context: {
     sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
     built_at: new Date().toISOString(),
     extraction_provenance: context.extraction,
+    ...(input.semanticSupplementBinding === undefined ? {} : {
+      semantic_supplement_receipt: input.semanticSupplementBinding
+    }),
     seed_extraction_path: input.seedExtractionPath,
     artifact_integrity: context.integrity,
     run_provenance: runProvenance,

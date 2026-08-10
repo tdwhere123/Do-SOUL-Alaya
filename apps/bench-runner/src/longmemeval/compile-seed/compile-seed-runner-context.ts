@@ -22,6 +22,10 @@ import type {
   CompileSeedExtractionStats,
   CompileSeedRunnerOptions
 } from "./compile-seed-types.js";
+import {
+  createSourceAssertionSupplementRuntime,
+  type SourceAssertionSupplementRuntime
+} from "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
   "data/diagnostics/seed-extraction-failures";
@@ -30,6 +34,7 @@ export interface CompileSeedRunnerContext {
   readonly config: ReturnType<typeof resolveCompileSeedExtractionConfig>;
   readonly stats: CompileSeedExtractionStats;
   readonly provider: OfficialApiGardenProvider | null;
+  readonly semanticSupplement: SourceAssertionSupplementRuntime | null;
   readonly diagnosticDir: string | null;
 }
 
@@ -49,10 +54,18 @@ export function createCompileSeedRunnerContext(
   const stats = createCompileSeedStats(credentialled || cacheOnly);
   const diagnosticDir = resolveCompileSeedDiagnosticDir(options);
   ensureDiagnosticDir(diagnosticDir);
+  const semanticSupplement = options?.sourceAssertionSupplement === undefined
+    ? null
+    : createSourceAssertionSupplementRuntime({
+        ...options.sourceAssertionSupplement,
+        primaryCacheRoot: cacheRoot,
+        config
+      });
   return {
     config,
     stats,
     diagnosticDir,
+    semanticSupplement,
     provider: createOfficialApiProvider({
       options,
       config,
@@ -115,6 +128,7 @@ function createCompileSeedStats(usesOfficialCompile: boolean): CompileSeedExtrac
     lastTurnDraftCount: 0,
     lastExtractionSource: null,
     lastExtractionShards: [],
+    lastSemanticSupplementShards: [],
     lastCacheKey: null,
     lastRawJsonSha256: null
   };

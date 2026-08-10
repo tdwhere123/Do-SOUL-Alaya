@@ -73,6 +73,7 @@ export {
   type OfficialApiSignalFormationAuditResult
 } from "./official-api/formation-audit.js";
 export {
+  OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
 } from "./official-api/system-prompt.js";
@@ -161,6 +162,8 @@ function wallClockBudgetFor(readTimeoutMs: number): number {
   return readTimeoutMs + WALL_CLOCK_OUTER_GRACE_MS;
 }
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
+export const OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION =
+  "official-api-source-grounding-v2";
 
 export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;

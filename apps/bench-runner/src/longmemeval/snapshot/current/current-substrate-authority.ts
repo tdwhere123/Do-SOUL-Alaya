@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { isCacheOnlySeedExtractionPath, type SeedExtractionPath } from
   "@do-soul/alaya-eval";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
@@ -46,6 +47,8 @@ import {
   compactSnapshotRunProvenance,
   isSnapshotRunProvenanceSummaryGateEligible
 } from "../run-provenance.js";
+import type { SourceAssertionSupplementBinding } from
+  "../../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
 export function assertCacheOnlyEnvironment(
   env: Readonly<Record<string, string | undefined>>
@@ -105,6 +108,7 @@ export function assertCurrentSnapshotWriteAuthority(input: {
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly datasetSha256: string;
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }): void {
   const questionDigest = snapshotQuestionIdDigest(input.sidecar.questions);
   const compactRunProvenance = compactSnapshotRunProvenance(input.runProvenance);
@@ -126,6 +130,12 @@ export function assertCurrentSnapshotWriteAuthority(input: {
       !isCacheOnlySeedExtractionPath(input.seedExtractionPath) ||
       attribution.status !== "attributed" || !attribution.gate_eligible) {
     throw new Error("snapshot writer requires gate-eligible cache-only provenance");
+  }
+  if (!isDeepStrictEqual(
+    input.runProvenance.semantic_supplement,
+    input.semanticSupplementBinding
+  )) {
+    throw new Error("snapshot semantic supplement provenance mismatch");
   }
   assertSnapshotExtractionAuthorityBinding(input.extractionAuthority, input.extraction);
   assertRunAuthorityBinding(input.runProvenance, input.extractionAuthority);
@@ -182,6 +192,9 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
     extraction,
     extractionAuthority: input.extractionAuthority,
     seedExtractionPath: input.manifest.seed_extraction_path,
+    ...(input.manifest.semantic_supplement_receipt === undefined ? {} : {
+      semanticSupplementBinding: input.manifest.semantic_supplement_receipt
+    }),
     questionWindow: executionQuestionWindow(runProvenance),
     ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt })
   });
@@ -201,6 +214,12 @@ function bindCurrentRunProvenance(
   );
   if (!isLongMemEvalRunProvenanceGateEligible(runProvenance)) {
     throw new Error("current recall-eval snapshot run authority is incomplete");
+  }
+  if (!isDeepStrictEqual(
+    manifest.semantic_supplement_receipt,
+    runProvenance.semantic_supplement
+  )) {
+    throw new Error("snapshot semantic supplement provenance mismatch");
   }
   return runProvenance;
 }
@@ -274,6 +293,7 @@ function assertSnapshotSubstrate(input: {
   readonly seedExtractionPath: SeedExtractionPath | undefined;
   readonly questionWindow: { readonly offset: number; readonly limit: number };
   readonly systemPrompt?: string;
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }): void {
   assertSnapshotDatasetSubstrateIdentity(input);
   assertSnapshotSeedLedgerBinding({

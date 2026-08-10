@@ -21,6 +21,8 @@ import type {
   LongMemEvalQueryEmbeddingCacheSummary
 } from "../diagnostics.js";
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
+import type { SourceAssertionSupplementBinding } from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 export {
   buildLongMemEvalReportContextUsage,
   readLongMemEvalReportSideEffectSnapshot,
@@ -127,6 +129,7 @@ export function writeRecallEvalSnapshot(input: {
   readonly datasetSha256: string;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
+  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }): Promise<void> {
   return writeRecallEvalSnapshotArtifacts(input);
 }

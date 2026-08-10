@@ -45,6 +45,18 @@ const ExtractionShardSchema = z.object({
   rawSignalCount: CountSchema,
   draftCount: CountSchema
 }).strict();
+const SemanticSupplementShardSchema = z.object({
+  semanticSupplementReceiptSha256: Sha256Schema,
+  primaryCacheKey: Sha256Schema,
+  sourceCacheKey: Sha256Schema,
+  sourceRawJsonSha256: Sha256Schema,
+  selectedRawJsonSha256: Sha256Schema,
+  sourceCorpusIdentity: Sha256Schema,
+  assertionIds: z.array(z.number().int().positive()).nonempty(),
+  occurrenceCount: z.number().int().positive(),
+  rawSignalCount: CountSchema,
+  draftCount: CountSchema
+}).strict();
 const SeedRoundSchema = z.object({
   sessionIndex: CountSchema,
   roundIndex: CountSchema,
@@ -57,6 +69,7 @@ const SeedRoundSchema = z.object({
   rawSignalCount: CountSchema.nullable(),
   draftCount: CountSchema.nullable(),
   extractionShards: z.array(ExtractionShardSchema).nonempty().optional(),
+  semanticSupplementShards: z.array(SemanticSupplementShardSchema).nonempty().optional(),
   factsProduced: CountSchema,
   parseDropped: CountSchema,
   compileOverflowDropped: CountSchema,

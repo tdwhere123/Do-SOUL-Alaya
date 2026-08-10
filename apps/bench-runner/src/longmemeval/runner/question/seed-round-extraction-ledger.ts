@@ -5,7 +5,8 @@ export function buildRoundExtractionLedger(
   stats: CompileSeedExtractionStats
 ): Pick<LongMemEvalSnapshotSeedRound,
   "extractionSource" | "cacheKey" | "rawJsonSha256" |
-  "rawSignalCount" | "draftCount" | "extractionShards"> {
+  "rawSignalCount" | "draftCount" | "extractionShards" |
+  "semanticSupplementShards"> {
   const official = stats.lastExtractionSource !== null;
   const shards = stats.lastExtractionShards?.map((shard) => ({
     cacheKey: shard.cacheKey,
@@ -20,7 +21,11 @@ export function buildRoundExtractionLedger(
     rawJsonSha256: official ? single?.rawJsonSha256 ?? legacyRawDigest(stats, shards) : null,
     rawSignalCount: official ? stats.lastTurnRawSignalCount : null,
     draftCount: official ? stats.lastTurnDraftCount : null,
-    ...(official && shards !== undefined ? { extractionShards: shards } : {})
+    ...(official && shards !== undefined ? { extractionShards: shards } : {}),
+    ...(official && stats.lastSemanticSupplementShards !== undefined &&
+      stats.lastSemanticSupplementShards.length > 0
+      ? { semanticSupplementShards: [...stats.lastSemanticSupplementShards] }
+      : {})
   };
 }
 

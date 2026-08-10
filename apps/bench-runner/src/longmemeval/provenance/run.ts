@@ -41,6 +41,10 @@ import {
   ExtractionCacheIdentitySchema,
   readExtractionCacheIdentity
 } from "./extraction-cache-identity.js";
+import {
+  SourceAssertionSupplementBindingSchema,
+  type SourceAssertionSupplementBinding
+} from "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
 export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";
 export { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
@@ -121,6 +125,7 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     executed_dist: ExecutedDistIdentitySchema.nullable().default(null)
   }).strict(),
   extraction_cache: ExtractionCacheIdentitySchema.nullable(),
+  semantic_supplement: SourceAssertionSupplementBindingSchema.optional(),
   runtime: z.object({
     node_version: z.string().min(1),
     platform: z.string().min(1),
@@ -188,6 +193,7 @@ export async function buildLongMemEvalRunProvenance(input: {
   readonly datasetSha256?: string;
   readonly selection?: LongMemEvalSelectionContractIdentity;
   readonly reconciliationBasis?: EffectiveReconciliationBasis;
+  readonly semanticSupplement?: SourceAssertionSupplementBinding;
 }): Promise<LongMemEvalRunProvenance> {
   const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
   const [executedDist, frozenCode] = await Promise.all([
@@ -210,6 +216,9 @@ export async function buildLongMemEvalRunProvenance(input: {
     ...(input.selection === undefined ? {} : { selection: input.selection }),
     code: buildCodeIdentity(input, executedDist, frozenCode),
     extraction_cache: extractionCache,
+    ...(input.semanticSupplement === undefined
+      ? {}
+      : { semantic_supplement: input.semanticSupplement }),
     runtime: await buildRuntimeIdentity(input),
     execution: buildExecutionIdentity(input),
     recall_config: buildRunRecallConfig(input),

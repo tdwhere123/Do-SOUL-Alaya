@@ -14,6 +14,10 @@ import type {
   ExtractionFillQuestionWindow
 } from "../extraction/fill/manifest/fill-manifest-contract.js";
 import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
+import type {
+  SourceAssertionSupplementBatchReceipt,
+  SourceAssertionSupplementBinding
+} from "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
 /**
  * The injectable `SignalExtractor` shape consumed by
@@ -180,6 +184,11 @@ export interface CompileSeedRunnerOptions {
    * disable dumps entirely.
    */
   readonly diagnosticDir?: string | null;
+  /** Optional cache-only semantic supply from a separately bound raw authority. */
+  readonly sourceAssertionSupplement?: Readonly<{
+    receiptPath: string;
+    sourceCacheRoot: string;
+  }>;
 }
 
 export interface CompileSeedExtractionStats {
@@ -263,6 +272,10 @@ export interface CompileSeedExtractionStats {
   lastExtractionSource: "cache" | "live" | null;
   /** Exact raw shards consumed by the current single-threaded seed turn. */
   lastExtractionShards?: CompileSeedExtractionShardReceipt[];
+  /** Exact semantic supplement batches consumed by the current seed turn. */
+  lastSemanticSupplementShards?: SourceAssertionSupplementBatchReceipt[];
+  /** Run-wide binding for the active semantic supplement authority. */
+  semanticSupplementBinding?: SourceAssertionSupplementBinding;
   /**
    * Diagnostic instrument: cache key (or its 12-char prefix; see writers)
    * for the most recent extract() call, so a subsequent extraction failure

@@ -33,6 +33,11 @@ import type { LongMemEvalExpansionSourceAnchor } from
   "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import type { SupplementalSourceProvenanceBinding } from
   "../extraction/cache/supplemental-source-receipt.js";
+import type {
+  SourceAssertionSupplementBatchReceipt,
+  SourceAssertionSupplementBinding
+} from
+  "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { validateSnapshotManifest } from "./manifest-validation.js";
 import { computeLegacySnapshotQuestionIdDigestV1 } from
   "./legacy/legacy-question-id-digest.js";
@@ -66,7 +71,6 @@ export { deriveSnapshotAttribution } from "./attribution.js";
  */
 
 export const RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION = 2;
-/** Filename of the daemon's seeded SQLite DB inside a dataDirRoot. */
 export const BENCH_DAEMON_DB_FILENAME = "alaya.db";
 
 export type LongMemEvalSnapshotSidecarObjectKind =
@@ -74,11 +78,6 @@ export type LongMemEvalSnapshotSidecarObjectKind =
   | "evidence_capsule"
   | "synthesis_capsule";
 
-/**
- * One persisted scoring-sidecar entry. Mirrors the in-memory
- * LongMemEvalSidecarEntry the seed loop builds (runner.ts), keyed by
- * `${objectKind}:${objectId}` on read-back.
- */
 export interface LongMemEvalSnapshotSidecarEntry {
   readonly objectId: string;
   readonly objectKind: LongMemEvalSnapshotSidecarObjectKind;
@@ -118,6 +117,7 @@ export interface LongMemEvalSnapshotSeedRound {
   readonly draftCount: number | null;
   /** Exact bounded raw responses consumed by this source round. */
   readonly extractionShards?: readonly LongMemEvalSnapshotExtractionShard[];
+  readonly semanticSupplementShards?: readonly SourceAssertionSupplementBatchReceipt[];
   readonly factsProduced: number;
   readonly parseDropped: number;
   readonly compileOverflowDropped: number;
@@ -134,7 +134,6 @@ export interface LongMemEvalAnswersWithFormationReceipt {
   readonly admitted: number;
 }
 
-/** Per-question persisted recall-scoring inputs. */
 export interface LongMemEvalSnapshotQuestion {
   readonly questionId: string;
   readonly question: string;
@@ -155,11 +154,6 @@ export interface LongMemEvalSnapshotQuestion {
   readonly answerSeedDropReasons?: LongMemEvalSeedDropReasons;
 }
 
-/**
- * The persisted sidecar payload. Written next to the snapshot DB so recall-eval
- * has every input the seed loop produced in memory (sidecar, gold sessions,
- * workspace ids) without re-running the seed loop.
- */
 export interface LongMemEvalSnapshotSidecarFile {
   readonly schema_version: number;
   readonly variant: string;
@@ -197,6 +191,7 @@ export interface LongMemEvalSnapshotManifest {
    * run resolved an extraction-cache manifest; null otherwise.
    */
   readonly extraction_provenance: SnapshotExtractionProvenance | null;
+  readonly semantic_supplement_receipt?: SourceAssertionSupplementBinding;
   /**
    * Exact producer-side extraction counters. Current writers always persist
    * this; older snapshots may omit it and remain diagnostic-only.
