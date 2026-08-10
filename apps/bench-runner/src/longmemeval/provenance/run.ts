@@ -48,6 +48,7 @@ export { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
 export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME = "longmemeval-run-provenance.json";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const ExecutedDistIdentitySchema = z.object({
   algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),
   sha256: Sha256Schema,
@@ -76,6 +77,20 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
     d2q_input: z.literal("raw_content")
   }).strict()
 ]);
+const QuerySemanticFactorCacheIdentitySchema = z.object({
+  schema_version: z.union([z.literal(1), z.literal(2)]),
+  cache_content_sha256: PrefixedSha256Schema,
+  compiler_operator_id: z.string().min(1),
+  system_prompt_sha256: PrefixedSha256Schema,
+  model_id: z.string().min(1),
+  provider_url_sha256: PrefixedSha256Schema,
+  source_set_sha256: PrefixedSha256Schema,
+  entry_count: z.number().int().nonnegative(),
+  transport_routes: z.array(z.object({
+    provider_url_sha256: PrefixedSha256Schema,
+    model: z.string().min(1)
+  }).strict().readonly()).readonly().optional()
+}).strict().readonly();
 export const LongMemEvalRunProvenanceSchema = z.object({
   schema_version: z.literal(1),
   dataset_sha256: Sha256Schema.optional(),
@@ -101,6 +116,7 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     onnx_model_artifact_sha256: Sha256Schema.optional(),
     embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
     answer_rerank: AnswerRerankRuntimeProvenanceSchema.optional(),
+    query_semantic_factor_cache: QuerySemanticFactorCacheIdentitySchema.optional(),
     reconciliation_basis: z.enum(["rule_only", "garden_llm"]).optional(),
     paired_env: z.record(z.string(), z.string())
   }).strict(),

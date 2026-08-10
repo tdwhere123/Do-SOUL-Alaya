@@ -69,5 +69,6 @@ export interface RecallEvalQuestionResult {
   readonly edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+  readonly documentEmbeddingWarmupLatencyMs: number | null;
   readonly deliveredObjectIds: readonly string[];
 }

@@ -357,6 +357,14 @@ export interface NarrowRecallDiagnostics {
     NonNullable<BenchRecallDiagnostics["query_entity_extraction"]> | null;
   readonly queryFactFrameExtraction:
     NonNullable<BenchRecallDiagnostics["query_fact_frame_extraction"]> | null;
+  readonly queryOpenSemanticFactorFormation:
+    NonNullable<BenchRecallDiagnostics["query_open_semantic_factor_formation"]> | null;
+  readonly openSemanticFactorCompatibilityTrace:
+    NonNullable<BenchRecallDiagnostics["open_semantic_factor_compatibility_trace"]> | null;
+  readonly openSemanticFactorComposition:
+    NonNullable<BenchRecallDiagnostics["open_semantic_factor_composition"]> | null;
+  readonly openSemanticFactorActivation:
+    NonNullable<BenchRecallDiagnostics["open_semantic_factor_activation"]> | null;
   readonly answerShapePlan: DiagnosticAnswerShapePlan | null;
   readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;

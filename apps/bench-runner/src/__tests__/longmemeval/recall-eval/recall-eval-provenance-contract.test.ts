@@ -166,6 +166,20 @@ function runtimeAttribution(
       maxResults: 10,
       conflictAwareness: true
     }),
+    query_semantic_factor_cache: {
+      schema_version: 2,
+      cache_content_sha256: `sha256:${"3".repeat(64)}`,
+      compiler_operator_id: "open_semantic_factor_query_compiler_v2",
+      system_prompt_sha256: `sha256:${"4".repeat(64)}`,
+      model_id: "DeepSeek-V4-Flash",
+      provider_url_sha256: `sha256:${"5".repeat(64)}`,
+      source_set_sha256: `sha256:${"7".repeat(64)}`,
+      entry_count: 100,
+      transport_routes: [{
+        provider_url_sha256: `sha256:${"9".repeat(64)}`,
+        model: "deepseek-v4-flash"
+      }]
+    },
     snapshot_binding: {
       commit_sha7: "05d98df",
       gate_sha256: "d".repeat(64),
@@ -237,6 +251,9 @@ describe("recall-eval provenance producer/comparator contract", () => {
         effective_model_id: "Xenova/reranker",
         model_artifact_sha256: crossSha
       });
+      expect(control.runtime.query_semantic_factor_cache).toEqual(
+        runtimeAttribution(biSha, crossSha).query_semantic_factor_cache
+      );
       expect(control.seed_capabilities).toEqual({ facet_tags_enabled: true });
       expect(treatment.seed_capabilities).toEqual({ facet_tags_enabled: true });
       expect(control).toMatchObject({ dataset_sha256: DATASET_SHA, selection });
@@ -249,6 +266,21 @@ describe("recall-eval provenance producer/comparator contract", () => {
         offset: 0,
         limit: null
       })).toBe(true);
+      expect(isRecallEvalRunEvidenceEligible({
+        runtimeAttribution: {
+          ...runtimeAttribution(biSha, crossSha),
+          query_semantic_factor_cache: {
+            ...runtimeAttribution(biSha, crossSha).query_semantic_factor_cache!,
+            cache_content_sha256: `sha256:${"a".repeat(64)}`
+          }
+        },
+        provenance: control,
+        expectedQuestionIdDigest: selection.selected_id_digest,
+        actualQuestionIdDigest: selection.selected_id_digest,
+        evaluatedCount: dataset.length,
+        offset: 0,
+        limit: null
+      })).toBe(false);
 
       const sliced = withFrozenCode(await buildRecallEvalRunProvenance({
         manifest: manifest(),

@@ -28,6 +28,12 @@ import {
   RecallQueryFactFrameExtractionCaptureSchema,
   RecallRetrievalFieldRefinementReceiptSchema
 } from "../../../harness/recall/field-capture-schema.js";
+import {
+  OpenSemanticFactorActivationReceiptSchema,
+  OpenSemanticFactorCompatibilityTraceSchema,
+  OpenSemanticFactorCompositionReceiptSchema,
+  OpenSemanticFactorFormationCaptureSchema
+} from "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
 
 export { buildObjectIdentityKey };
 
@@ -58,6 +64,18 @@ export function readRecallDiagnostics(
   const queryFactFrameExtraction = readQueryFactFrameExtraction(
     record.query_fact_frame_extraction
   );
+  const queryOpenSemanticFactorFormation = readQueryOpenSemanticFactorFormation(
+    record.query_open_semantic_factor_formation
+  );
+  const openSemanticFactorCompatibilityTrace = readOpenSemanticFactorCompatibilityTrace(
+    record.open_semantic_factor_compatibility_trace
+  );
+  const openSemanticFactorComposition = readOpenSemanticFactorComposition(
+    record.open_semantic_factor_composition
+  );
+  const openSemanticFactorActivation = readOpenSemanticFactorActivation(
+    record.open_semantic_factor_activation
+  );
   const answerShapePlan = readAnswerShapePlan(record.answer_shape_plan);
   const querySoughtFacets = readStringArray(record.query_sought_facets);
   if (record.query_probes !== undefined && queryProbes === null) return null;
@@ -69,6 +87,14 @@ export function readRecallDiagnostics(
   if (record.query_entity_extraction !== undefined && queryEntityExtraction === null) return null;
   if (record.query_fact_frame_extraction !== undefined &&
       queryFactFrameExtraction === null) return null;
+  if (record.query_open_semantic_factor_formation !== undefined &&
+      queryOpenSemanticFactorFormation === null) return null;
+  if (record.open_semantic_factor_compatibility_trace !== undefined &&
+      openSemanticFactorCompatibilityTrace === null) return null;
+  if (record.open_semantic_factor_composition !== undefined &&
+      openSemanticFactorComposition === null) return null;
+  if (record.open_semantic_factor_activation !== undefined &&
+      openSemanticFactorActivation === null) return null;
   if (record.answer_shape_plan != null && answerShapePlan === null) return null;
   if (record.query_sought_facets !== undefined && querySoughtFacets === null) return null;
   const candidates = readCandidates(record);
@@ -80,6 +106,10 @@ export function readRecallDiagnostics(
     fieldRefinementStopCertificate,
     queryEntityExtraction,
     queryFactFrameExtraction,
+    queryOpenSemanticFactorFormation,
+    openSemanticFactorCompatibilityTrace,
+    openSemanticFactorComposition,
+    openSemanticFactorActivation,
     answerShapePlan,
     querySoughtFacets,
     ...buildNarrowCandidateEvidence(candidates),
@@ -160,6 +190,38 @@ function readQueryFactFrameExtraction(
 ): NarrowRecallDiagnostics["queryFactFrameExtraction"] {
   if (value === undefined) return null;
   const parsed = RecallQueryFactFrameExtractionCaptureSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readQueryOpenSemanticFactorFormation(
+  value: unknown
+): NarrowRecallDiagnostics["queryOpenSemanticFactorFormation"] {
+  if (value === undefined) return null;
+  const parsed = OpenSemanticFactorFormationCaptureSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readOpenSemanticFactorCompatibilityTrace(
+  value: unknown
+): NarrowRecallDiagnostics["openSemanticFactorCompatibilityTrace"] {
+  if (value === undefined) return null;
+  const parsed = OpenSemanticFactorCompatibilityTraceSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readOpenSemanticFactorComposition(
+  value: unknown
+): NarrowRecallDiagnostics["openSemanticFactorComposition"] {
+  if (value === undefined) return null;
+  const parsed = OpenSemanticFactorCompositionReceiptSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readOpenSemanticFactorActivation(
+  value: unknown
+): NarrowRecallDiagnostics["openSemanticFactorActivation"] {
+  if (value === undefined) return null;
+  const parsed = OpenSemanticFactorActivationReceiptSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 

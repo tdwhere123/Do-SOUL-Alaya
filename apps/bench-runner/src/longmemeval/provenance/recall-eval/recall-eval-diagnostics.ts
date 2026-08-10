@@ -69,6 +69,12 @@ const ExactCountsSchema = z.object({
   ready_count: z.number().int().nonnegative(),
   not_ready_count: z.number().int().nonnegative()
 }).strict();
+const WarmupLatencySummarySchema = z.object({
+  measured_question_count: z.number().int().nonnegative(),
+  total_ms: z.number().nonnegative(),
+  mean_ms: z.number().nonnegative(),
+  max_ms: z.number().nonnegative()
+}).strict();
 
 export const RecallEvalDiagnosticsQuestionSchema = z.object({
   question_id: z.string().min(1),
@@ -78,7 +84,9 @@ export const RecallEvalDiagnosticsQuestionSchema = z.object({
   recall_token_economy: RecallTokenEconomySchema.nullable(),
   diagnostics: LongMemEvalQuestionDiagnosticSchema,
   document_embedding_warmup: DocumentWarmupSchema.nullable(),
-  query_embedding_warmup: QueryWarmupSchema.nullable()
+  query_embedding_warmup: QueryWarmupSchema.nullable(),
+  document_embedding_warmup_latency_ms:
+    z.number().nonnegative().nullable().default(null)
 }).strict().readonly();
 
 const LegacyRecallEvalDiagnosticsQuestionSchema = z.object({
@@ -101,6 +109,12 @@ export const RecallEvalDiagnosticsEvidenceV2Schema = z.object({
     query_embedding_cache: ExactCountsSchema.extend({
       requested_count: z.number().int().nonnegative()
     }).strict(),
+    document_embedding_warmup_latency_ms: WarmupLatencySummarySchema.default({
+      measured_question_count: 0,
+      total_ms: 0,
+      mean_ms: 0,
+      max_ms: 0
+    }),
     provider_states: z.object({
       total: z.number().int().nonnegative(), provider_returned: z.number().int().nonnegative(),
       provider_pending: z.number().int().nonnegative(), provider_failed: z.number().int().nonnegative(),
@@ -150,6 +164,7 @@ type EvidenceQuestionInput = Readonly<{
   diagnostics: z.infer<typeof LongMemEvalQuestionDiagnosticSchema>;
   embeddingWarmup: z.infer<typeof DocumentWarmupSchema> | null;
   queryEmbeddingWarmup: z.infer<typeof QueryWarmupSchema> | null;
+  documentEmbeddingWarmupLatencyMs?: number | null;
 }>;
 
 export function buildRecallEvalDiagnosticsEvidence(input: {
@@ -216,7 +231,9 @@ function normalizeQuestion(question: EvidenceQuestionInput) {
     ),
     diagnostics,
     document_embedding_warmup: DocumentWarmupSchema.nullable().parse(question.embeddingWarmup),
-    query_embedding_warmup: QueryWarmupSchema.nullable().parse(question.queryEmbeddingWarmup)
+    query_embedding_warmup: QueryWarmupSchema.nullable().parse(question.queryEmbeddingWarmup),
+    document_embedding_warmup_latency_ms:
+      question.documentEmbeddingWarmupLatencyMs ?? null
   };
 }
 
@@ -354,6 +371,7 @@ function buildSummary(
     question_count: questions.length,
     document_embedding_cache: sumDocumentReadiness(questions),
     query_embedding_cache: sumQueryReadiness(questions),
+    document_embedding_warmup_latency_ms: summarizeDocumentWarmupLatency(questions),
     provider_states: countProviderStates(questions),
     answer_rerank_status_counts: countCrossStatuses(questions),
     answer_rerank_scores: sumCrossScores(questions),
@@ -363,6 +381,23 @@ function buildSummary(
       schema_version: identity.enabled ? identity.effective_schema_version : null,
       consistent: true as const
     }
+  };
+}
+
+function summarizeDocumentWarmupLatency(
+  questions: readonly ReturnType<typeof normalizeQuestion>[]
+) {
+  const values = questions.flatMap((question) =>
+    question.document_embedding_warmup_latency_ms === null
+      ? []
+      : [question.document_embedding_warmup_latency_ms]
+  );
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return {
+    measured_question_count: values.length,
+    total_ms: total,
+    mean_ms: values.length === 0 ? 0 : total / values.length,
+    max_ms: values.length === 0 ? 0 : Math.max(...values)
   };
 }
 

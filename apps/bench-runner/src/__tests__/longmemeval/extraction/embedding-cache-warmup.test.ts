@@ -25,8 +25,13 @@ describe("warmLongMemEvalEmbeddingCaches", () => {
       embeddingMode: "disabled",
       workspace,
       objectIds: ["m-1"],
-      queryText: "question"
-    })).resolves.toEqual({ embeddingWarmup: null, queryEmbeddingWarmup: null });
+      queryText: "question",
+      now: () => 10
+    })).resolves.toEqual({
+      embeddingWarmup: null,
+      queryEmbeddingWarmup: null,
+      documentWarmupLatencyMs: null
+    });
     expect(workspace.warmEmbeddingCache).not.toHaveBeenCalled();
     expect(workspace.warmQueryEmbeddingCache).not.toHaveBeenCalled();
   });
@@ -37,14 +42,17 @@ describe("warmLongMemEvalEmbeddingCaches", () => {
       warmQueryEmbeddingCache: vi.fn()
     };
 
+    const times = [100, 142];
     await expect(warmLongMemEvalEmbeddingCaches({
       embeddingMode: "env",
       workspace,
       objectIds: ["m-1", "m-2"],
-      queryText: "question"
+      queryText: "question",
+      now: () => times.shift()!
     })).resolves.toEqual({
       embeddingWarmup: vectorSummary,
-      queryEmbeddingWarmup: null
+      queryEmbeddingWarmup: null,
+      documentWarmupLatencyMs: 42
     });
     expect(workspace.warmEmbeddingCache).toHaveBeenCalledWith(["m-1", "m-2"]);
     expect(workspace.warmQueryEmbeddingCache).not.toHaveBeenCalled();

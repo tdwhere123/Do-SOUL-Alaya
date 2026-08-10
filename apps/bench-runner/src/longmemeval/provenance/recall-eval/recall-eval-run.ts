@@ -32,6 +32,15 @@ export async function buildRecallEvalRunProvenance(input: {
       ...current.recall_config,
       ...input.runtimeAttribution.recall_config
     },
+    runtime: {
+      ...current.runtime,
+      ...(input.runtimeAttribution.query_semantic_factor_cache === undefined
+        ? {}
+        : {
+            query_semantic_factor_cache:
+              input.runtimeAttribution.query_semantic_factor_cache
+          })
+    },
     extraction_cache: extractionCache,
     ...(input.manifest.run_provenance?.seed_capabilities === undefined
       ? {}
@@ -141,6 +150,8 @@ function sameCurrentTreatment(
     JSON.stringify(runtime.embedding_supplement) ===
       JSON.stringify(attribution.embedding_supplement) &&
     JSON.stringify(runtime.answer_rerank) === JSON.stringify(attribution.answer_rerank) &&
+    JSON.stringify(runtime.query_semantic_factor_cache) ===
+      JSON.stringify(attribution.query_semantic_factor_cache) &&
     recallConfig.schema_version === attribution.recall_config.schema_version &&
     recallConfig.max_results === attribution.recall_config.max_results &&
     recallConfig.conflict_awareness === attribution.recall_config.conflict_awareness &&

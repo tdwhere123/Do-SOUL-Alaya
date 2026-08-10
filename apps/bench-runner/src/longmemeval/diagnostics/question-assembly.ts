@@ -92,6 +92,14 @@ export function assembleQuestionDiagnostic(
     query_entity_extraction: parts.diagnostics?.queryEntityExtraction ?? null,
     query_fact_frame_extraction:
       parts.diagnostics?.queryFactFrameExtraction ?? null,
+    query_open_semantic_factor_formation:
+      parts.diagnostics?.queryOpenSemanticFactorFormation ?? null,
+    open_semantic_factor_compatibility_trace:
+      parts.diagnostics?.openSemanticFactorCompatibilityTrace ?? null,
+    open_semantic_factor_composition:
+      parts.diagnostics?.openSemanticFactorComposition ?? null,
+    open_semantic_factor_activation:
+      parts.diagnostics?.openSemanticFactorActivation ?? null,
     answer_shape_plan: parts.diagnostics?.answerShapePlan ?? null,
     query_sought_facets: parts.diagnostics?.querySoughtFacets ?? null,
     candidate_pool_count: parts.diagnostics?.candidatePoolCount ?? null,

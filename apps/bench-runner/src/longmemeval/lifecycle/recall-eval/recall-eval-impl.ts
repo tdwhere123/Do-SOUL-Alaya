@@ -438,6 +438,7 @@ async function buildRecallEvalQuestionResult(
     edgeProposalKpiRows: await workspace.queryEdgeProposalKpiRows(),
     embeddingWarmup: readiness.embeddingWarmup,
     queryEmbeddingWarmup: readiness.queryEmbeddingWarmup,
+    documentEmbeddingWarmupLatencyMs: readiness.documentWarmupLatencyMs,
     deliveredObjectIds: buildDeliveredResults(recallResult).map((result) => result.object_id)
   };
 }

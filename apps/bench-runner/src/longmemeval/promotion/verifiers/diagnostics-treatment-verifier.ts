@@ -22,6 +22,9 @@ export interface DiagnosticsTreatmentState {
   queryReady: number;
   crossExpected: number;
   crossScored: number;
+  documentWarmupLatencyMeasured: number;
+  documentWarmupLatencyTotalMs: number;
+  documentWarmupLatencyMaxMs: number;
 }
 
 export function createDiagnosticsTreatmentState(): DiagnosticsTreatmentState {
@@ -40,7 +43,10 @@ export function createDiagnosticsTreatmentState(): DiagnosticsTreatmentState {
     queryRequested: 0,
     queryReady: 0,
     crossExpected: 0,
-    crossScored: 0
+    crossScored: 0,
+    documentWarmupLatencyMeasured: 0,
+    documentWarmupLatencyTotalMs: 0,
+    documentWarmupLatencyMaxMs: 0
   };
 }
 
@@ -86,6 +92,14 @@ export function buildDiagnosticsTreatmentSummary(
       requested_count: state.queryRequested,
       ready_count: state.queryReady,
       not_ready_count: state.queryRequested - state.queryReady
+    },
+    document_embedding_warmup_latency_ms: {
+      measured_question_count: state.documentWarmupLatencyMeasured,
+      total_ms: state.documentWarmupLatencyTotalMs,
+      mean_ms: state.documentWarmupLatencyMeasured === 0
+        ? 0
+        : state.documentWarmupLatencyTotalMs / state.documentWarmupLatencyMeasured,
+      max_ms: state.documentWarmupLatencyMaxMs
     },
     answer_rerank_status_counts: state.cross,
     answer_rerank_scores: {
@@ -206,6 +220,15 @@ function recordReadiness(
     state.documentExpected += document.expected_count;
     state.documentReady += document.ready_count;
     state.warmupIdentities.add(warmupIdentity(document));
+  }
+  const latency = row.document_embedding_warmup_latency_ms;
+  if (latency !== null) {
+    state.documentWarmupLatencyMeasured += 1;
+    state.documentWarmupLatencyTotalMs += latency;
+    state.documentWarmupLatencyMaxMs = Math.max(
+      state.documentWarmupLatencyMaxMs,
+      latency
+    );
   }
   const query = row.query_embedding_warmup;
   if (query !== null) {
