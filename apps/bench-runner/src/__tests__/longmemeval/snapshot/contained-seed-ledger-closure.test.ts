@@ -40,6 +40,7 @@ const MODEL = "fixture-model";
 const PROFILE = "provider-default-v1" as const;
 const CONTENT = "User: no durable fact\nAssistant: acknowledged";
 const MATERIALIZED_CONTENT = "User: durable fact\nAssistant: remembered";
+const MATERIALIZED_RAW = '{"signals":[{},{}]}';
 const FIXTURE_QUESTION = question(false);
 const SELECTED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT);
 const MATERIALIZED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT);
@@ -106,16 +107,16 @@ describe("contained snapshot seed-ledger closure", () => {
     expect(() => verifyRounds(rounds)).toThrow(/cache closure mismatch/u);
   });
 
-  it("rejects draft count drift after conservation-preserving compile accounting", () => {
-    const rounds = canonicalRounds();
-    rounds[0] = {
-      ...rounds[0]!,
-      rawSignalCount: 1,
-      draftCount: 1,
-      compileOverflowDropped: 1
-    };
-    expect(() => verifyRounds(rounds)).toThrow(/cache closure mismatch/u);
-  });
+  it.each(["exact", "contained"] as const)("accepts parser projection drift under %s authority",
+    (closureKind) => {
+      const rounds = canonicalRounds();
+      rounds[1] = {
+        ...rounds[1]!,
+        draftCount: 2, factsProduced: 2, parseDropped: 0, materializationDrop: 2
+      };
+      expect(() => verifyRounds(rounds, false, OFFICIAL_API_SYSTEM_PROMPT, closureKind))
+        .not.toThrow();
+    });
 });
 
 function verifyMultiShardRound(): void {
@@ -178,13 +179,14 @@ function verifyMultiShardRound(): void {
 function verifyRounds(
   rounds: LongMemEvalSnapshotSeedRound[],
   answerRound = false,
-  systemPrompt = OFFICIAL_API_SYSTEM_PROMPT
+  systemPrompt = OFFICIAL_API_SYSTEM_PROMPT,
+  closureKind: "exact" | "contained" = "contained"
 ): void {
   const root = mkdtempSync(join(tmpdir(), "contained-seed-ledger-"));
   roots.push(root);
   const dbPath = join(root, "snapshot.db");
   initDatabase({ filename: dbPath }).close();
-  const extractionFixture = extraction(systemPrompt);
+  const extractionFixture = extraction(systemPrompt, closureKind);
   assertSnapshotSeedLedgerBinding({
     dbPath,
     sidecar: sidecar(rounds, answerRound),
@@ -216,14 +218,17 @@ function verifyRounds(
       }
     },
     closureAuthority: {
-      kind: "contained",
+      kind: closureKind,
       questionWindow: { offset: 0, limit: 1 }
     },
     systemPrompt
   });
 }
 
-function extraction(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT) {
+function extraction(
+  systemPrompt = OFFICIAL_API_SYSTEM_PROMPT,
+  closureKind: "exact" | "contained" = "contained"
+) {
   const selectedKey = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT, systemPrompt);
   const materializedKey = fixtureRoundCacheKey(
     FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT, systemPrompt
@@ -239,17 +244,17 @@ function extraction(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT) {
     cacheKey: materializedKey,
     model: MODEL,
     requestProfile: PROFILE,
-    rawJsonSha256: sha256('{"signals":[{}]}'),
-    rawSignalCount: 1,
+    rawJsonSha256: sha256(MATERIALIZED_RAW),
+    rawSignalCount: 2,
     parsedDraftCount: 1
-  }, {
+  }, ...(closureKind === "contained" ? [{
     cacheKey: EXTRA_KEY,
     model: MODEL,
     requestProfile: PROFILE,
     rawJsonSha256: sha256("extra raw response"),
     rawSignalCount: 1,
     parsedDraftCount: 1
-  }].sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
+  }] : [])].sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
   const manifest: ExtractionCacheManifestV3 = {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
     extraction_model: MODEL,
@@ -265,7 +270,7 @@ function extraction(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT) {
     coverage: 1,
     fill_status: "complete",
     window_offset: 0,
-    window_limit: 2,
+    window_limit: closureKind === "exact" ? 1 : 2,
     expected_turns: entries.length,
     expected_key_set_sha256: computeExtractionKeySetSha256(
       entries.map((entry) => entry.cacheKey)
@@ -401,11 +406,11 @@ function canonicalRounds(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT): LongMemEval
     cacheKey: fixtureRoundCacheKey(
       FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT, systemPrompt
     ),
-    rawJsonSha256: sha256('{"signals":[{}]}'),
-    rawSignalCount: 1,
+    rawJsonSha256: sha256(MATERIALIZED_RAW),
+    rawSignalCount: 2,
     draftCount: 1,
     factsProduced: 1,
-    parseDropped: 0,
+    parseDropped: 1,
     compileOverflowDropped: 0,
     candidateAbsent: 0,
     materializationDrop: 1,

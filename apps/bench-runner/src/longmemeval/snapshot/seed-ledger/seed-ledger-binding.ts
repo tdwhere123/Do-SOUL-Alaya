@@ -12,8 +12,10 @@ import {
   computeExtractionTurnCacheKeys,
   type ExtractionContentClosureEntry
 } from "../../compile-seed/compile-seed-cache.js";
-import { extractionContentClosureEntriesFromIndex } from
-  "../../extraction/content-closure.js";
+import {
+  computeExtractionRawContentClosureSha256,
+  extractionContentClosureEntriesFromIndex
+} from "../../extraction/content-closure.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
@@ -316,8 +318,9 @@ function assertCacheClosure(
     throw new Error("snapshot seed ledger cache closure mismatch");
   }
   assertQuestionWindow(extraction, authority);
+  const authorityEntries = verifiedAuthorityClosureEntries(extraction, extractionAuthority);
   if (authority.kind === "contained") {
-    assertContainedCacheClosure(extraction, extractionAuthority, entries);
+    assertContainedCacheClosure(extractionAuthority, entries);
     return;
   }
   if (entries.length !== extraction.expected_turns) {
@@ -325,17 +328,16 @@ function assertCacheClosure(
   }
   if (computeExtractionKeySetSha256(closure.keys()) !==
       extraction.expected_key_set_sha256 ||
-      computeExtractionContentClosureSha256(entries) !==
-        extraction.content_closure_sha256) {
+      computeExtractionRawContentClosureSha256(entries) !==
+        computeExtractionRawContentClosureSha256(authorityEntries)) {
     throw new Error("snapshot seed ledger cache closure mismatch");
   }
 }
 
-function assertContainedCacheClosure(
+function verifiedAuthorityClosureEntries(
   extraction: CompleteExtraction,
-  extractionAuthority: SnapshotExtractionAuthority,
-  entries: readonly ExtractionContentClosureEntry[]
-): void {
+  extractionAuthority: SnapshotExtractionAuthority
+): readonly ExtractionContentClosureEntry[] {
   const index = extractionAuthority.content_closure_index;
   const indexedEntries = extractionContentClosureEntriesFromIndex(
     index,
@@ -346,12 +348,22 @@ function assertContainedCacheClosure(
       computeExtractionKeySetSha256(Object.keys(index)) !==
         extraction.expected_key_set_sha256 ||
       computeExtractionContentClosureSha256(indexedEntries) !==
-        extraction.content_closure_sha256 ||
-      entries.some((entry) => !isDeepStrictEqual(index[entry.cacheKey], [
-        entry.rawJsonSha256,
-        entry.rawSignalCount,
-        entry.parsedDraftCount
-      ]))) {
+        extraction.content_closure_sha256) {
+    throw new Error("snapshot seed ledger cache closure mismatch");
+  }
+  return indexedEntries;
+}
+
+function assertContainedCacheClosure(
+  extractionAuthority: SnapshotExtractionAuthority,
+  entries: readonly ExtractionContentClosureEntry[]
+): void {
+  const index = extractionAuthority.content_closure_index;
+  if (entries.some((entry) => {
+    const historical = index[entry.cacheKey];
+    return historical === undefined || historical[0] !== entry.rawJsonSha256 ||
+      historical[1] !== entry.rawSignalCount;
+  })) {
     throw new Error("snapshot seed ledger cache closure mismatch");
   }
 }
