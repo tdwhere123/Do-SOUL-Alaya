@@ -20,6 +20,7 @@ import type {
   WorkspaceService
 } from "@do-soul/alaya-core";
 import type { MemoryHqRepo } from "@do-soul/alaya-storage";
+import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 
 export type StartupStep =
   | "database"
@@ -55,7 +56,10 @@ export interface AlayaDaemonRuntime {
   // pre-recall gate.
   // see also: apps/core-daemon/src/runtime/daemon-runtime-lifecycle.ts:runGardenEmbeddingBackfillPass
   // see also: apps/core-daemon/src/garden/runtime.ts:runEmbeddingBackfillPass
-  runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runGardenEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;
 }

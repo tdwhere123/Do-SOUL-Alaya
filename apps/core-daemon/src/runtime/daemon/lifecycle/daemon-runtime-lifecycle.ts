@@ -16,6 +16,7 @@ import {
 } from "./daemon-runtime-timing.js";
 import { resolveDaemonHostFromEnv, warnIfRemoteDaemonListening } from "../../server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
+import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;
@@ -28,7 +29,10 @@ type GardenRuntimeLifecycle = Readonly<{
   setBacklogTelemetryObserver(observer: unknown | null): void;
   runBackgroundPass(): Promise<void>;
   runBulkEnrichPass(workspaceId: string): Promise<void>;
-  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
 }>;
 
 type GardenBacklogTelemetryLifecycle = Readonly<{
@@ -75,7 +79,10 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
   startBackgroundServices(): void;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
-  runGardenEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runGardenEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
   startHttpServer(options?: AlayaDaemonListenOptions): Promise<AlayaDaemonServer>;
   shutdown(): Promise<void>;
 }> {
@@ -121,9 +128,9 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     // first (same ordering guard as runGardenBackgroundPass) so the drain sees
     // a settled queue, then dispatches ONLY EMBEDDING_BACKFILL.
     // see also: garden-runtime.ts runEmbeddingBackfillPass.
-    runGardenEmbeddingBackfillPass: async (workspaceId: string) => {
+    runGardenEmbeddingBackfillPass: async (workspaceId, mode) => {
       await awaitStartupBackgroundPass(state);
-      await input.gardenRuntime.runEmbeddingBackfillPass(workspaceId);
+      await input.gardenRuntime.runEmbeddingBackfillPass(workspaceId, mode);
     },
     startHttpServer,
     shutdown

@@ -146,6 +146,26 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
     expect(harness.warn).toHaveBeenCalledOnce();
     expect(outcome.auditEntries).toEqual(["embedding_backfill:2"]);
   });
+
+  it("fills the vector cache without topology follow-ups in cache-only mode", async () => {
+    const harness = createHarness(true);
+
+    const outcome = await harness.support.runEmbeddingBackfillTask(
+      BACKFILL_TASK,
+      "cache_only"
+    );
+
+    expect(outcome.success).toBe(true);
+    expect(harness.coherentPairKeys).not.toHaveBeenCalled();
+    expect(harness.answerCoRelevantPairs).not.toHaveBeenCalled();
+    expect(harness.admit).not.toHaveBeenCalled();
+    expect(harness.submitCandidate).not.toHaveBeenCalled();
+    expect(harness.warn).not.toHaveBeenCalled();
+    expect(outcome.auditEntries).toEqual([
+      "embedding_backfill:2",
+      "embedding_backfill_topology_follow_up_skipped:cache_only"
+    ]);
+  });
 });
 
 function answerWitness() {

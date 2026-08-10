@@ -39,7 +39,10 @@ export async function warmLongMemEvalEmbeddingCaches(input: {
   }
   const now = input.now ?? performance.now.bind(performance);
   const startedAt = now();
-  const embeddingWarmup = await input.workspace.warmEmbeddingCache(input.objectIds);
+  const embeddingWarmup = await input.workspace.warmEmbeddingCache(
+    input.objectIds,
+    { backfillMode: "cache_only" }
+  );
   // Do not call warmQueryEmbeddingCache: encode must land in the timed recall.
   return {
     embeddingWarmup,

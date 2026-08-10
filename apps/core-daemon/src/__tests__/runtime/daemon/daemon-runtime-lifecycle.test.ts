@@ -29,7 +29,10 @@ function createControls(
   overrides: Partial<{
     runBackgroundPass: () => Promise<void>;
     runBulkEnrichPass: (workspaceId: string) => Promise<void>;
-    runEmbeddingBackfillPass: (workspaceId: string) => Promise<void>;
+    runEmbeddingBackfillPass: (
+      workspaceId: string,
+      mode?: "production" | "cache_only"
+    ) => Promise<void>;
     recallReadWorkerClient: { close(): Promise<void> };
     database: { close(): void };
     temporalRuntimeLease: { release(): Promise<void> };
@@ -104,6 +107,17 @@ function createControls(
 }
 
 describe("createDaemonLifecycleControls", () => {
+  it("forwards cache-only embedding backfill mode to Garden", async () => {
+    const { controls, runEmbeddingBackfillPass } = createControls("env");
+
+    await controls.runGardenEmbeddingBackfillPass("workspace-1", "cache_only");
+
+    expect(runEmbeddingBackfillPass).toHaveBeenCalledWith(
+      "workspace-1",
+      "cache_only"
+    );
+  });
+
   it("fails closed for ephemeral request tokens unless explicitly allowed", async () => {
     const { controls } = createControls("ephemeral");
 

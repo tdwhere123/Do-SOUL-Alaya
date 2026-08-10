@@ -8,6 +8,7 @@ import {
 import { isEmbeddingBackfillPartialFailureError } from "@do-soul/alaya-core";
 import type {
   CreateGardenSchedulerRuntimeSupportInput,
+  EmbeddingBackfillMode,
   EmbeddingBackfillTaskOutcome
 } from "./scheduler-runtime-types.js";
 
@@ -16,6 +17,8 @@ const ERROR_MESSAGE_MAX_LENGTH = 240;
 const ERROR_CAUSE_MAX_DEPTH = 3;
 const PATH_FOLLOW_UP_DEFERRED_AUDIT =
   "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required";
+const CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT =
+  "embedding_backfill_topology_follow_up_skipped:cache_only";
 
 interface SafeCausalError {
   readonly name: string;
@@ -32,9 +35,13 @@ export function createEmbeddingBackfillRuntimeSupport(
   input: CreateGardenSchedulerRuntimeSupportInput
 ): Readonly<{
   enqueueEmbeddingBackfillForAllWorkspaces(): Promise<void>;
-  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
   runEmbeddingBackfillTask(
-    task: Readonly<GardenTaskDescriptor>
+    task: Readonly<GardenTaskDescriptor>,
+    mode?: EmbeddingBackfillMode
   ): Promise<EmbeddingBackfillTaskOutcome>;
 }> {
   const pendingEmbeddingBackfillWorkspaces = new Set<string>();
@@ -44,14 +51,18 @@ export function createEmbeddingBackfillRuntimeSupport(
         input,
         pendingEmbeddingBackfillWorkspaces
       ),
-    runEmbeddingBackfillPass: async (workspaceId: string) =>
+    runEmbeddingBackfillPass: async (
+      workspaceId: string,
+      mode: EmbeddingBackfillMode = "production"
+    ) =>
       await runEmbeddingBackfillPass(
         input,
         pendingEmbeddingBackfillWorkspaces,
-        workspaceId
+        workspaceId,
+        mode
       ),
-    runEmbeddingBackfillTask: async (task) =>
-      await runEmbeddingBackfillTask(input, pendingEmbeddingBackfillWorkspaces, task)
+    runEmbeddingBackfillTask: async (task, mode = "production") =>
+      await runEmbeddingBackfillTask(input, pendingEmbeddingBackfillWorkspaces, task, mode)
   };
 }
 
@@ -104,7 +115,8 @@ function enqueueEmbeddingBackfillTask(
 async function runEmbeddingBackfillTask(
   input: CreateGardenSchedulerRuntimeSupportInput,
   pendingWorkspaces: Set<string>,
-  task: Readonly<GardenTaskDescriptor>
+  task: Readonly<GardenTaskDescriptor>,
+  mode: EmbeddingBackfillMode = "production"
 ): Promise<EmbeddingBackfillTaskOutcome> {
   const completedAt = new Date().toISOString();
   let outcome: EmbeddingBackfillTaskOutcome;
@@ -113,7 +125,8 @@ async function runEmbeddingBackfillTask(
     const followUpAuditEntries = await runEmbeddingPathFollowUps(
       input,
       task,
-      result.objectsAffected
+      result.objectsAffected,
+      mode
     );
     outcome = Object.freeze({
       success: true,
@@ -143,8 +156,12 @@ async function runEmbeddingBackfillTask(
 async function runEmbeddingPathFollowUps(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>,
-  objectsAffected: readonly string[]
+  objectsAffected: readonly string[],
+  mode: EmbeddingBackfillMode
 ): Promise<readonly string[]> {
+  if (mode === "cache_only") {
+    return [CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT];
+  }
   if (objectsAffected.length < 2) {
     return [];
   }
@@ -350,7 +367,8 @@ function buildEmbeddingBackfillFailure(error: unknown): EmbeddingBackfillTaskOut
 async function runEmbeddingBackfillPass(
   input: CreateGardenSchedulerRuntimeSupportInput,
   pendingWorkspaces: Set<string>,
-  workspaceId: string
+  workspaceId: string,
+  mode: EmbeddingBackfillMode
 ): Promise<void> {
   if (input.embeddingBackfillHandler === undefined) {
     return;
@@ -358,14 +376,16 @@ async function runEmbeddingBackfillPass(
   const firstPass = await drainEmbeddingBackfillQueue(
     input,
     pendingWorkspaces,
-    workspaceId
+    workspaceId,
+    mode
   );
   const secondPass =
     firstPass.dispatchedCount === 0
       ? await runQueuedTargetedEmbeddingBackfill(
           input,
           pendingWorkspaces,
-          workspaceId
+          workspaceId,
+          mode
         )
       : firstPass;
   if (secondPass.lastTargetedReason !== null) {
@@ -376,7 +396,8 @@ async function runEmbeddingBackfillPass(
 async function runQueuedTargetedEmbeddingBackfill(
   input: CreateGardenSchedulerRuntimeSupportInput,
   pendingWorkspaces: Set<string>,
-  workspaceId: string
+  workspaceId: string,
+  mode: EmbeddingBackfillMode
 ): Promise<Readonly<{ readonly dispatchedCount: number; readonly lastTargetedReason: string | null }>> {
   const enqueued = enqueueEmbeddingBackfillTask(
     input,
@@ -388,13 +409,14 @@ async function runQueuedTargetedEmbeddingBackfill(
     return { dispatchedCount: 0, lastTargetedReason: null };
   }
   input.requestBacklogTelemetryCapture(`enqueue:${GardenTaskKind.EMBEDDING_BACKFILL}`);
-  return await drainEmbeddingBackfillQueue(input, pendingWorkspaces, workspaceId);
+  return await drainEmbeddingBackfillQueue(input, pendingWorkspaces, workspaceId, mode);
 }
 
 async function drainEmbeddingBackfillQueue(
   input: CreateGardenSchedulerRuntimeSupportInput,
   pendingWorkspaces: Set<string>,
-  workspaceId: string
+  workspaceId: string,
+  mode: EmbeddingBackfillMode
 ): Promise<Readonly<{ readonly dispatchedCount: number; readonly lastTargetedReason: string | null }>> {
   let dispatchedCount = 0;
   let lastTargetedReason: string | null = null;
@@ -409,7 +431,7 @@ async function drainEmbeddingBackfillQueue(
       break;
     }
     dispatchedCount += 1;
-    const outcome = await runEmbeddingBackfillTask(input, pendingWorkspaces, task);
+    const outcome = await runEmbeddingBackfillTask(input, pendingWorkspaces, task, mode);
     lastTargetedReason = summarizeEmbeddingBackfillTargetedReason(outcome) ?? lastTargetedReason;
   }
   return { dispatchedCount, lastTargetedReason };

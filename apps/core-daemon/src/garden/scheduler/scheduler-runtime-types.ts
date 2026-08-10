@@ -23,6 +23,8 @@ export type EmbeddingBackfillTaskOutcome = Readonly<{
   readonly errorMessage: string | null;
 }>;
 
+export type EmbeddingBackfillMode = "production" | "cache_only";
+
 export type RuntimeGardenScheduler = {
   dispatchNextMatchingTaskKind(
     role: string,
@@ -44,12 +46,18 @@ export interface GardenSchedulerRuntimeSupport {
   enqueueEmbeddingBackfillForAllWorkspaces(): Promise<void>;
   enqueuePathPlasticityForAllWorkspaces(): Promise<void>;
   runPathGraphSnapshotTask(task: Readonly<GardenTaskDescriptor>): Promise<void>;
-  runEmbeddingBackfillTask(task: Readonly<GardenTaskDescriptor>): Promise<EmbeddingBackfillTaskOutcome>;
+  runEmbeddingBackfillTask(
+    task: Readonly<GardenTaskDescriptor>,
+    mode?: EmbeddingBackfillMode
+  ): Promise<EmbeddingBackfillTaskOutcome>;
   runConsolidationCycleTask(task: Readonly<GardenTaskDescriptor>): Promise<void>;
   reconcileStuckEdgeProposalAccepts(): Promise<void>;
   sweepExpiredEdgeProposals(): Promise<void>;
   runEventLogOrphanDetection(): Promise<void>;
-  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
 }
 
 export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{

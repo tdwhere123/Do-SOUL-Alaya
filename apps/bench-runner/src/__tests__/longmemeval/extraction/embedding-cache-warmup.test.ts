@@ -54,7 +54,10 @@ describe("warmLongMemEvalEmbeddingCaches", () => {
       queryEmbeddingWarmup: null,
       documentWarmupLatencyMs: 42
     });
-    expect(workspace.warmEmbeddingCache).toHaveBeenCalledWith(["m-1", "m-2"]);
+    expect(workspace.warmEmbeddingCache).toHaveBeenCalledWith(
+      ["m-1", "m-2"],
+      { backfillMode: "cache_only" }
+    );
     expect(workspace.warmQueryEmbeddingCache).not.toHaveBeenCalled();
   });
 });

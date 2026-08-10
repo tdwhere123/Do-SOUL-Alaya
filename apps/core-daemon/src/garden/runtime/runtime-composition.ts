@@ -384,8 +384,8 @@ export function createGardenRuntimeFacade(input: Readonly<{
         input.bulkEnrichDrainCap
       );
     },
-    runEmbeddingBackfillPass: (workspaceId: string) =>
-      input.gardenSchedulerRuntime.runEmbeddingBackfillPass(workspaceId),
+    runEmbeddingBackfillPass: (workspaceId, mode) =>
+      input.gardenSchedulerRuntime.runEmbeddingBackfillPass(workspaceId, mode),
     runBackgroundPass: async () => {
       for (const service of input.backgroundServices) {
         await service.task();

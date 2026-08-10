@@ -236,7 +236,8 @@ function createWarmEmbeddingCacheOperation(
       maxStallPasses: EMBEDDING_WARMUP_MAX_STALL_PASSES,
       runPass: async () =>
         await input.activeRuntime.runGardenEmbeddingBackfillPass(
-          input.activeContext.workspaceId
+          input.activeContext.workspaceId,
+          opts.backfillMode
         ),
       readSummary: async (passCount) =>
         await readEmbeddingWarmupSummary({

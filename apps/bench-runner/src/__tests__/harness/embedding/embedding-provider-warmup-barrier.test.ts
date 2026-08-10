@@ -88,7 +88,10 @@ describe("warmEmbeddingCache provider barrier", () => {
     );
 
     try {
-      await expect(operations.warmEmbeddingCache([MEMORY_ID, SECOND_MEMORY_ID]))
+      await expect(operations.warmEmbeddingCache(
+        [MEMORY_ID, SECOND_MEMORY_ID],
+        { backfillMode: "cache_only" }
+      ))
         .resolves.toMatchObject({
           status: "ready",
           expected_count: 2,
@@ -96,6 +99,10 @@ describe("warmEmbeddingCache provider barrier", () => {
           pass_count: 1
         });
       expect(fixture.runBackfillPass).toHaveBeenCalledOnce();
+      expect(fixture.runBackfillPass).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        "cache_only"
+      );
       expect(fixture.embedTexts).toHaveBeenCalledOnce();
     } finally {
       fixture.close();

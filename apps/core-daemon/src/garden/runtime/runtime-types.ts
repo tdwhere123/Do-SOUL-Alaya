@@ -35,6 +35,7 @@ import type {
 } from "@do-soul/alaya-soul";
 import type { BackgroundServiceManager } from "../../background/bootstrap.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
+import type { EmbeddingBackfillMode } from "../scheduler/scheduler-runtime-types.js";
 
 export type RuntimeGardenScheduler = GardenScheduler & {
   dispatchNextMatchingTaskKind(
@@ -225,6 +226,9 @@ export type GardenRuntime = Readonly<{
   runEventLogOrphanDetection(): Promise<void>;
   runBackgroundPass(): Promise<void>;
   runBulkEnrichPass(workspaceId: string): Promise<void>;
-  runEmbeddingBackfillPass(workspaceId: string): Promise<void>;
+  runEmbeddingBackfillPass(
+    workspaceId: string,
+    mode?: EmbeddingBackfillMode
+  ): Promise<void>;
   setBacklogTelemetryObserver(observer: GardenBacklogTelemetryObserver | null): void;
 }>;
