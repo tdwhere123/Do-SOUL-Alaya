@@ -30,6 +30,14 @@ describe("open semantic factor query compiler", () => {
       validateRawJson: expect.any(Function)
     }));
     const request = extractor.extract.mock.calls[0]?.[0];
+    const completeEnvelope =
+      '"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]';
+    const variableShape =
+      '"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING';
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(completeEnvelope);
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(variableShape);
+    expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
+    expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
     expect(() => request?.validateRawJson?.(
       JSON.stringify({ semantic_factor_graph: queryGraph() })
     )).not.toThrow();

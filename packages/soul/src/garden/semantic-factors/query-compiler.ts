@@ -12,10 +12,17 @@ import { pruneUnboundOpenSemanticFactorProposal } from "./proposal-normalizer.js
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
   "open_semantic_factor_query_compiler_v2";
 
+const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
+  'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
+  'Each variable is {"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
+  "A variable surface is the exact query phrase that stands for an unknown, never a predicted answer.",
+  "Every variable referenced by a proposition must appear in variables, and every result_variable_ids entry must reference one of those variables.",
+  'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"buy","semantic_identity":"buy"}],"variables":[{"variable_id":"answer","surface":"What"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]}]}}.'
+].join(" ");
+
 export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
   "Compile one query into the same open semantic factor graph language used for source evidence.",
-  'Return strict JSON only with shape {"semantic_factor_graph":{...}} and no markdown.',
-  'The graph must use "source_kind":"query".',
+  OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT,
   "Use exact contiguous source surfaces and omit character offsets; the runtime grounds surfaces.",
   "Represent every requested unknown as a structural variable and list its id in result_variable_ids.",
   "Keep dependent propositions together and preserve all explicit query constraints.",
@@ -50,8 +57,10 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
           }),
           timeoutMs,
           abortSignal,
-          responseSchemaRetryInstruction:
-            "Return strict JSON only with one semantic_factor_graph envelope matching the query schema.",
+          responseSchemaRetryInstruction: [
+            "Correct the previous response to match this complete contract.",
+            OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT
+          ].join(" "),
           validateRawJson: (rawJson) =>
             assertOpenSemanticFactorQueryResponse(rawJson, normalized)
         }),
