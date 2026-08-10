@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveFinalPacketConsensusPlan } from
+import {
+  buildFinalPacketConsensusObservation,
+  resolveFinalPacketConsensusPlan
+} from
   "../../recall/delivery/final-order/final-packet-consensus.js";
 import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
@@ -74,6 +77,43 @@ describe("final packet consensus selection ownership", () => {
       candidate.admission_attempts.length === 1 &&
       candidate.admission_attempts[0]?.pass === "final_selector"
     )).toBe(true);
+  });
+
+  it("records a rejected tail exchange without duplicating the promoted key", () => {
+    const baseline = baselineCandidates().slice(0, 3);
+    const rankedTail = withStreamRanks(baseline[2]!, {
+      embedding_similarity: 1
+    });
+    const preliminary = resolveFinalPacketConsensusPlan({
+      baseline,
+      sourceCandidates: [baseline[0]!, baseline[1]!, rankedTail],
+      protectedCandidates: []
+    });
+    const plan = resolveFinalPacketConsensusPlan({
+      baseline,
+      sourceCandidates: [baseline[0]!, baseline[1]!, rankedTail],
+      protectedCandidates: preliminary.baseline.slice(0, 2).map((candidate) => ({
+        candidateKey: candidate.candidateKey,
+        rankLimit: 1
+      }))
+    });
+
+    expect(plan.decision).toEqual({
+      status: "rejected",
+      reason: "protected_candidate_constraint"
+    });
+    expect(plan.tailPolicy).toBe("head_tail_exchange");
+
+    const observation = buildFinalPacketConsensusObservation(
+      plan,
+      select(baseline).candidates,
+      false
+    );
+    expect(observation.planned_candidate_keys).toEqual(
+      plan.proposedCandidates.map((candidate) => candidate.candidateKey)
+    );
+    expect(new Set(observation.planned_candidate_keys))
+      .toHaveLength(observation.planned_candidate_keys.length);
   });
 });
 

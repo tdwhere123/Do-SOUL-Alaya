@@ -46,11 +46,10 @@ export function resolveFinalPacketConsensusPlan(
     candidates: consensusCandidates,
     protectedCandidates: baselineProtections
   });
-  const embeddingTailChanged = embeddingPlan.decision.status === "accepted" &&
-    !sameCandidateOrder(
-      embeddingPlan.immutableTail,
-      embeddingPlan.baseline.slice(embeddingPlan.headWidth)
-    );
+  const embeddingTailChanged = !sameCandidateOrder(
+    embeddingPlan.immutableTail,
+    embeddingPlan.baseline.slice(embeddingPlan.headWidth)
+  );
   return deepFreeze({
     ...embeddingPlan,
     ...(embeddingTailChanged ? { tailPolicy: "head_tail_exchange" as const } : {})
@@ -62,15 +61,12 @@ export function buildFinalPacketConsensusObservation(
   actual: readonly Readonly<RecallCandidate>[],
   replayAccepted: boolean
 ): RecallPacketPlanObservation {
-  const proposed = plan.decision.status === "accepted"
-    ? plan.candidates
-    : [...plan.consensusHead, ...plan.immutableTail];
   const decision = plan.decision.status === "accepted" && !replayAccepted
     ? { status: "rejected", reason: "admission_infeasible" } as const
     : plan.decision;
   const observation: RecallPacketPlanObservation = deepFreeze({
     baseline_candidate_keys: candidateKeys(plan.baseline),
-    planned_candidate_keys: candidateKeys(proposed),
+    planned_candidate_keys: candidateKeys(plan.proposedCandidates),
     actual_candidate_keys: actual.map(buildRecallCandidateSelectionKey),
     head_width: plan.headWidth,
     baseline_head_candidate_keys: candidateKeys(plan.baselineHead),

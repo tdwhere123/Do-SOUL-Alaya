@@ -44,6 +44,7 @@ export type EmbeddingRankConsensusPlan<
   T extends EmbeddingRankConsensusCandidate
 > = Readonly<{
   readonly baseline: readonly T[];
+  readonly proposedCandidates: readonly T[];
   readonly candidates: readonly T[];
   readonly headWidth: number;
   readonly baselineHead: readonly T[];
@@ -105,10 +106,11 @@ export function resolveEmbeddingRankConsensusPlan<
   const candidates = decision.status === "accepted"
     ? proposedCandidates
     : params.baseline;
-  const immutableTail = candidates.slice(headWidth);
+  const immutableTail = proposedCandidates.slice(headWidth);
 
   return deepFreeze({
     baseline: params.baseline,
+    proposedCandidates,
     candidates,
     headWidth,
     baselineHead,

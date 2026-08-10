@@ -209,6 +209,7 @@ describe("embedding-rank consensus packet plan", () => {
     });
 
     expect(resolved.baseline).toBe(baseline);
+    expect(resolved.proposedCandidates).toBe(resolved.candidates);
     expect(resolved.headWidth).toBe(3);
     expect(keys(resolved.baselineHead)).toEqual(["a", "b", "c"]);
     expect(resolved.embeddingHead).toEqual([
@@ -231,6 +232,7 @@ describe("embedding-rank consensus packet plan", () => {
     });
 
     expect(Object.isFrozen(resolved)).toBe(true);
+    expect(Object.isFrozen(resolved.proposedCandidates)).toBe(true);
     expect(Object.isFrozen(resolved.candidates)).toBe(true);
     expect(Object.isFrozen(resolved.baselineHead)).toBe(true);
     expect(Object.isFrozen(resolved.embeddingHead)).toBe(true);
@@ -316,6 +318,31 @@ describe("embedding-rank consensus packet plan", () => {
       status: "rejected",
       reason: "cardinality_mismatch"
     });
+  });
+
+  it("keeps a rejected proposal partition distinct from the applied baseline", () => {
+    const baseline = packet("head-a", "head-b", "tail");
+    const resolved = resolve({
+      baseline,
+      candidates: [
+        ...baseline,
+        candidate("tail", 100, 1)
+      ],
+      protectedCandidates: [{ candidateKey: "absent", rankLimit: 2 }]
+    });
+    const proposedKeys = [
+      ...keys(resolved.consensusHead),
+      ...keys(resolved.immutableTail)
+    ];
+
+    expect(resolved.candidates).toBe(baseline);
+    expect(resolved.decision).toEqual({
+      status: "rejected",
+      reason: "protected_candidate_constraint"
+    });
+    expect(keys(resolved.proposedCandidates)).toEqual(proposedKeys);
+    expect(proposedKeys).toEqual(["tail", "head-a", "head-b"]);
+    expect(new Set(proposedKeys)).toHaveLength(proposedKeys.length);
   });
 });
 
