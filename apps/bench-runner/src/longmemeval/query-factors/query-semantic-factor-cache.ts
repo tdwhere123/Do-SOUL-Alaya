@@ -29,6 +29,8 @@ import {
   type QuerySemanticFactorFillShard
 } from
   "./query-semantic-factor-fill-store.js";
+import { mapQueryFactorSourcesWithFailureScope } from
+  "./query-semantic-factor-fill-pool.js";
 
 const QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION = 2 as const;
 
@@ -183,7 +185,7 @@ async function fillMissingSources(context: Readonly<{
   const { input, sourceTexts, store, staged } = context;
   const missing = sourceTexts.filter((sourceText) => !staged.has(sourceText));
   const transport = transportProvenance(input.transport);
-  await mapWithConcurrencyUntilFailure(
+  const sourceLocalFailures = await mapQueryFactorSourcesWithFailureScope(
     missing,
     input.concurrency ?? 4,
     async (sourceText) => {
@@ -200,6 +202,13 @@ async function fillMissingSources(context: Readonly<{
       );
     }
   );
+  if (sourceLocalFailures.length > 0) {
+    throw new AggregateError(
+      sourceLocalFailures,
+      `query semantic factor fill incomplete: ${sourceLocalFailures.length} ` +
+        "source-local response-schema failure(s) remain"
+    );
+  }
 }
 
 function createCacheFromStaged(
@@ -441,29 +450,4 @@ function stableJson(value: unknown): string {
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record).sort().map((key) =>
     `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
-}
-
-async function mapWithConcurrencyUntilFailure<T>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<void>
-): Promise<void> {
-  let cursor = 0;
-  let failure: unknown;
-  const pump = async (): Promise<void> => {
-    while (failure === undefined && cursor < items.length) {
-      const index = cursor++;
-      const item = items[index];
-      if (item === undefined) continue;
-      try {
-        await worker(item, index);
-      } catch (error) {
-        failure ??= error;
-      }
-    }
-  };
-  await Promise.all(Array.from(
-    { length: Math.min(Math.max(1, concurrency), items.length) }, pump
-  ));
-  if (failure !== undefined) throw failure;
 }

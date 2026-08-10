@@ -167,7 +167,64 @@ describe("query semantic factor cache", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("isolates exhausted response-schema failures without stopping unrelated sources", async () => {
+    const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-fill-"));
+    const outputPath = join(root, "query-cache.json");
+    const firstCalls: string[] = [];
+    try {
+      await expect(fillQuerySemanticFactorSources({
+        source_texts: ["Alpha?", "Beta?", "Gamma?"],
+        output_path: outputPath,
+        model_id: "same-model",
+        provider_url: "https://logical-provider.invalid/v1",
+        transport: {
+          providerUrl: "https://provider.invalid/v1",
+          model: "same-model"
+        },
+        concurrency: 1,
+        compile: async (sourceText) => {
+          firstCalls.push(sourceText);
+          if (sourceText === "Beta?") throw responseSchemaFailure();
+          return null;
+        }
+      })).rejects.toThrow(/1 source-local response-schema failure/u);
+      expect(firstCalls).toEqual(["Alpha?", "Beta?", "Gamma?"]);
+
+      const resumedCalls: string[] = [];
+      const binding = await fillQuerySemanticFactorSources({
+        source_texts: ["Alpha?", "Beta?", "Gamma?"],
+        output_path: outputPath,
+        model_id: "same-model",
+        provider_url: "https://logical-provider.invalid/v1",
+        transport: {
+          providerUrl: "https://provider.invalid/v1",
+          model: "same-model"
+        },
+        concurrency: 1,
+        compile: async (sourceText) => {
+          resumedCalls.push(sourceText);
+          return null;
+        }
+      });
+      expect(resumedCalls).toEqual(["Beta?"]);
+      expect(binding.entry_count).toBe(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
+
+function responseSchemaFailure(): Error {
+  const error = new Error("query semantic factor graph missing or invalid");
+  Object.assign(error, {
+    benchRetry: {
+      retryClassification: "failure_max_retries",
+      transportFailures: [{ kind: "response_schema_error" }]
+    }
+  });
+  return error;
+}
 
 function factor(factorId: string, surface: string, semanticIdentity: string) {
   return {
