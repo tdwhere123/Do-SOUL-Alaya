@@ -35,6 +35,8 @@ export interface BenchSignalExtractor {
     readonly timeoutMs?: number;
     /** Lets the provider reject semantically unusable JSON inside HTTP retries. */
     readonly validateRawJson?: (rawJson: string) => void;
+    /** Caller-owned correction when its response schema is not a signals envelope. */
+    readonly responseSchemaRetryInstruction?: string;
     /** A probe uses one transport attempt and never enters the retry loop. */
     readonly retryMode?: "default" | "disabled";
     /** Called immediately before each provider HTTP attempt. */

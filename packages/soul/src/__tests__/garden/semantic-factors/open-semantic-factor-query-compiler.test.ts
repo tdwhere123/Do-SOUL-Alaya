@@ -26,6 +26,7 @@ describe("open semantic factor query compiler", () => {
         source_kind: "query",
         source_text: QUERY
       }),
+      responseSchemaRetryInstruction: expect.stringContaining("semantic_factor_graph"),
       validateRawJson: expect.any(Function)
     }));
     const request = extractor.extract.mock.calls[0]?.[0];

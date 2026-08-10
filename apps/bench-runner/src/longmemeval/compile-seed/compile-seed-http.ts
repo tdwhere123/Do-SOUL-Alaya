@@ -139,7 +139,7 @@ async function extractGardenHttpSignals(
     decideRetry: (error, attempt, timeoutRetries, maxRetries) => {
       if (isOutputTokenTruncation(error)) useOutputTokenCeiling = true;
       if (readGardenHttpFailureKind(error) === "response_schema_error") {
-        responseSchemaRetryInstruction = schemaRetryInstruction(error);
+        responseSchemaRetryInstruction = resolveSchemaRetryInstruction(input, error);
       }
       return decideGardenHttpRetry(input, error, attempt, timeoutRetries, maxRetries);
     },
@@ -162,6 +162,16 @@ function withResponseSchemaRetryInstruction(
     ...input,
     userPrompt: `${input.userPrompt}\n\nSchema correction for this retry: ${instruction}`
   });
+}
+
+function resolveSchemaRetryInstruction(
+  input: GardenHttpExtractInput,
+  error: unknown
+): string {
+  const callerOwned = input.responseSchemaRetryInstruction?.trim();
+  return callerOwned && callerOwned.length > 0
+    ? callerOwned
+    : schemaRetryInstruction(error);
 }
 
 function schemaRetryInstruction(error: unknown): string {

@@ -50,6 +50,8 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
           }),
           timeoutMs,
           abortSignal,
+          responseSchemaRetryInstruction:
+            "Return strict JSON only with one semantic_factor_graph envelope matching the query schema.",
           validateRawJson: (rawJson) =>
             assertOpenSemanticFactorQueryResponse(rawJson, normalized)
         }),

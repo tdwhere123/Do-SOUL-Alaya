@@ -215,6 +215,38 @@ describe("createGardenHttpExtractor retry policy", () => {
     );
   });
 
+  it("uses caller-owned schema correction for a non-signal response contract", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"not_graph":{}}' } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"semantic_factor_graph":{}}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "query",
+      responseSchemaRetryInstruction: "Return only the semantic_factor_graph envelope.",
+      validateRawJson: (rawJson) => {
+        if (!rawJson.includes('"semantic_factor_graph"')) throw new Error("query graph invalid");
+      }
+    });
+
+    const retry = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(retry.messages.at(-1)?.content).toContain(
+      "Return only the semantic_factor_graph envelope."
+    );
+  });
+
   it("caps repeated response-schema failures at one retry", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => makeJsonResponse({
       choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]

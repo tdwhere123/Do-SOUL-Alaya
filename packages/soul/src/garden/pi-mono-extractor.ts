@@ -14,6 +14,8 @@ export interface SignalExtractor {
     readonly timeoutMs?: number;
     /** Lets a caller reject semantically unusable JSON inside the retry loop. */
     readonly validateRawJson?: (rawJson: string) => void;
+    /** Caller-owned correction when its response schema is not a signals envelope. */
+    readonly responseSchemaRetryInstruction?: string;
   }): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }>;
 }
 
