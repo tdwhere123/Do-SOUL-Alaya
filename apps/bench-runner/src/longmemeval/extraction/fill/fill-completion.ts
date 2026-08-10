@@ -11,6 +11,7 @@ import {
   buildExtractionContentClosureIndex,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
+  computeExtractionRawContentClosureSha256,
   type ExtractionContentClosureIndex,
   type ExtractionContentClosureEntry
 } from "../content-closure.js";
@@ -36,6 +37,7 @@ export interface ExtractionCacheContentInspection {
   readonly invalidTurns: number;
   readonly keySetSha256: string;
   readonly contentClosureSha256: string | null;
+  readonly rawContentClosureSha256: string | null;
 }
 
 interface ShardInspectionInput {
@@ -106,6 +108,9 @@ export function inspectExtractionCacheContentClosure(input: {
     keySetSha256: computeExtractionKeySetSha256(inventory.keys),
     contentClosureSha256: invalidTurns === 0
       ? computeExtractionContentClosureSha256(counts.entries)
+      : null,
+    rawContentClosureSha256: invalidTurns === 0
+      ? computeExtractionRawContentClosureSha256(counts.entries)
       : null
   };
 }

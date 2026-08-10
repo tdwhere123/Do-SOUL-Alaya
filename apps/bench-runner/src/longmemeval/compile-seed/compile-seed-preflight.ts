@@ -13,6 +13,10 @@ import {
   inspectExtractionFillCompletion
 } from "../extraction/fill/fill-completion.js";
 import {
+  computeExtractionRawContentClosureSha256,
+  extractionContentClosureEntriesFromIndex
+} from "../extraction/content-closure.js";
+import {
   containsExtractionFillQuestionWindow
 } from "../extraction/fill/fill-authority.js";
 import type {
@@ -227,12 +231,30 @@ function assertFinalizedContentClosure(
       inspected.validTurns !== manifest.expected_turns ||
       inspected.invalidTurns !== 0 ||
       inspected.keySetSha256 !== manifest.expected_key_set_sha256 ||
-      inspected.contentClosureSha256 !== manifest.content_closure_sha256) {
+      !matchesFinalizedContentClosure(input, inspected)) {
     throw new Error(
       "[longmemeval preflight] extraction cache finalized content closure differs " +
         "from its complete manifest. Resume extraction-fill before consuming it."
     );
   }
+}
+
+function matchesFinalizedContentClosure(
+  input: Parameters<typeof assertScopedWindowBinding>[0],
+  inspected: ReturnType<typeof inspectExtractionCacheContentClosure>
+): boolean {
+  const manifest = input.manifest;
+  if (manifest.schema_version !== 3 || manifest.content_closure_index === undefined) {
+    return inspected.contentClosureSha256 === manifest.content_closure_sha256;
+  }
+  const expectedRawClosure = computeExtractionRawContentClosureSha256(
+    extractionContentClosureEntriesFromIndex(
+      manifest.content_closure_index,
+      input.model,
+      input.requestProfile
+    )
+  );
+  return inspected.rawContentClosureSha256 === expectedRawClosure;
 }
 
 function assertContainedFillWindow(

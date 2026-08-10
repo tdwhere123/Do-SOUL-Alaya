@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { preflightExtractionCache } from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import {
+  cacheFilePath,
+  computeExtractionContentClosureSha256,
+  computeExtractionRawJsonSha256,
+  computeSourceTurnCacheKey
+} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { writeExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
@@ -82,6 +87,48 @@ describe("preflightExtractionCache", () => {
       config: CONFIG,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
       requiredTurnContents: [turnContent, turnContent],
+      requiredQuestionWindow: { offset: 0, limit: 1 }
+    })).not.toThrow();
+  });
+
+  it("keeps raw closure valid when only parser draft cardinality changes", () => {
+    const turnContent = "parser projection changed";
+    const rawJson = JSON.stringify({
+      signals: [{
+        confidence: 0.9,
+        matched_text: turnContent,
+        evidence_refs: [],
+        source_memory_refs: []
+      }]
+    });
+    const cacheKey = computeSourceTurnCacheKey(
+      CONFIG.model,
+      CONFIG.requestProfile,
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent }
+    );
+    const historicalEntry = {
+      cacheKey,
+      model: CONFIG.model,
+      requestProfile: CONFIG.requestProfile,
+      rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
+      rawSignalCount: 1,
+      parsedDraftCount: 0
+    } as const;
+    writeCacheShard(cacheRoot, CONFIG.model, turnContent, rawJson);
+    writeExtractionCacheManifest(cacheRoot, {
+      ...scopedManifestFor([turnContent], "complete"),
+      content_closure_sha256: computeExtractionContentClosureSha256([historicalEntry]),
+      content_closure_index: {
+        [cacheKey]: [historicalEntry.rawJsonSha256, 1, 0]
+      }
+    });
+
+    expect(() => preflightExtractionCache({
+      cacheRoot,
+      config: { ...CONFIG, apiKey: null },
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      requiredTurnContents: [turnContent],
       requiredQuestionWindow: { offset: 0, limit: 1 }
     })).not.toThrow();
   });

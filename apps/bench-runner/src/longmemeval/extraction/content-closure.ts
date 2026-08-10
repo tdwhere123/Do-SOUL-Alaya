@@ -82,6 +82,21 @@ export function computeExtractionContentClosureSha256(
   return createHash("sha256").update(rows.join("\n"), "utf8").digest("hex");
 }
 
+export function computeExtractionRawContentClosureSha256(
+  entries: readonly ExtractionContentClosureEntry[]
+): string {
+  const rows = [...uniqueEntriesByKey(entries).values()]
+    .sort((left, right) => left.cacheKey.localeCompare(right.cacheKey))
+    .map((entry) => JSON.stringify([
+      entry.cacheKey,
+      entry.model,
+      entry.requestProfile,
+      entry.rawJsonSha256,
+      entry.rawSignalCount
+    ]));
+  return createHash("sha256").update(rows.join("\n"), "utf8").digest("hex");
+}
+
 export function buildExtractionContentClosureIndex(
   entries: readonly ExtractionContentClosureEntry[]
 ): ExtractionContentClosureIndex {
