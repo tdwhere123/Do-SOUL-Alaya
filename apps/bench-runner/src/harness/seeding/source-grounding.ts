@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import {
+  buildVerifiedUserAssertionReceiptPreimage,
+  readVerifiedUserAssertionSourceHashDigest
+} from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiSourceCorpus,
   filterSourceAssertionEntities,
@@ -6,9 +11,15 @@ import {
 } from "@do-soul/alaya-soul";
 import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
 
+export interface CompileSourceGroundingIdentity {
+  readonly workspaceId: string;
+  readonly runId: string;
+}
+
 export function attachCompileSourceGrounding(
   rawPayload: Readonly<Record<string, unknown>>,
-  signalInput: BenchSignalSeedInput
+  signalInput: BenchSignalSeedInput,
+  identity?: Readonly<CompileSourceGroundingIdentity>
 ): Record<string, unknown> {
   const proposal = readProposal(rawPayload, signalInput);
   const safePayload = stripDerivedGrounding(rawPayload);
@@ -17,7 +28,14 @@ export function attachCompileSourceGrounding(
     ? signalInput.turnContent
     : buildOfficialApiSourceCorpus(signalInput.turnContent, signalInput.turnMessages);
   const cachedSourceCorpus = readCachedSourceCorpus(rawPayload.full_turn_content);
-  if (cachedSourceCorpus !== null && cachedSourceCorpus !== sourceCorpus) {
+  const verifiedAssertion = readVerifiedCachedAssertion(
+    rawPayload,
+    signalInput,
+    sourceCorpus,
+    identity
+  );
+  if (cachedSourceCorpus !== null && cachedSourceCorpus !== sourceCorpus &&
+      verifiedAssertion === null) {
     return rejectedPayload(
       safePayload,
       sourceCorpus,
@@ -27,9 +45,9 @@ export function attachCompileSourceGrounding(
   }
   const grounding = resolvePreferenceAwareSourceGrounding({
     proposal: proposal.proposed_preference_profile,
-    sourceCorpus,
-    proposedMatch,
-    ...(safePayload.source_locator === undefined
+    sourceCorpus: verifiedAssertion ?? sourceCorpus,
+    proposedMatch: verifiedAssertion ?? proposedMatch,
+    ...(verifiedAssertion !== null || safePayload.source_locator === undefined
       ? {}
       : { sourceLocator: safePayload.source_locator })
   });
@@ -67,6 +85,36 @@ export function attachCompileSourceGrounding(
       )
     }
   };
+}
+
+function readVerifiedCachedAssertion(
+  rawPayload: Readonly<Record<string, unknown>>,
+  signalInput: BenchSignalSeedInput,
+  sourceCorpus: string,
+  identity: Readonly<CompileSourceGroundingIdentity> | undefined
+): string | null {
+  if (identity === undefined) return null;
+  const receiptDigest = readVerifiedUserAssertionSourceHashDigest(
+    readString(rawPayload.verified_user_assertion_source_hash)
+  );
+  const priorGrounding = isRecord(rawPayload.source_grounding)
+    ? rawPayload.source_grounding
+    : {};
+  const assertion = readString(rawPayload.source_assertion) ??
+    readString(priorGrounding.source_assertion);
+  if (receiptDigest === null || assertion === null || !sourceCorpus.includes(assertion)) {
+    return null;
+  }
+  const expected = createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptPreimage({
+      workspace_id: identity.workspaceId,
+      run_id: identity.runId,
+      surface_id: signalInput.surfaceId ?? null,
+      source_assertion: assertion,
+      source_corpus: sourceCorpus
+    }), "utf8")
+    .digest("hex");
+  return receiptDigest === expected ? assertion : null;
 }
 
 function readProposal(

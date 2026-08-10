@@ -121,6 +121,7 @@ function clippedDistilledFact(value: string): string {
 }
 
 function buildSignalRawPayload(
+  input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
   safeExcerpt: string,
   safeDistilledFact: string
@@ -137,7 +138,10 @@ function buildSignalRawPayload(
     ...proposedPayload,
     extraction_provider: signalInput.extractionProvider,
     ...tokenEconomy
-  }, signalInput);
+  }, signalInput, {
+    workspaceId: input.activeContext.workspaceId,
+    runId: input.activeContext.runId
+  });
 }
 
 export async function proposeMemory(
@@ -205,7 +209,7 @@ export async function proposeMemoryFromSignal(
       confidence: signalInput.confidence,
       evidence_refs: [signalInput.evidenceRef],
       ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
-      raw_payload: buildSignalRawPayload(signalInput, clip.safe, safeDistilledFact)
+      raw_payload: buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact)
     }
   );
   if (signalResponse.status !== "emitted") {
@@ -324,7 +328,7 @@ async function seedOneCompileSignal(
   const signal = fallback?.signal ?? buildCompileSignal(
       input,
       signalInput,
-      buildSignalRawPayload(signalInput, clip.safe, safeDistilledFact)
+      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact)
     );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal
