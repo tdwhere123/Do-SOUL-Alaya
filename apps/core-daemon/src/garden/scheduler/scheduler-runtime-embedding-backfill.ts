@@ -8,9 +8,10 @@ import {
 import { isEmbeddingBackfillPartialFailureError } from "@do-soul/alaya-core";
 import type {
   CreateGardenSchedulerRuntimeSupportInput,
-  EmbeddingBackfillMode,
   EmbeddingBackfillTaskOutcome
 } from "./scheduler-runtime-types.js";
+import type { EmbeddingBackfillMode } from
+  "../../embedding-backfill/execution-mode.js";
 
 const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 const ERROR_MESSAGE_MAX_LENGTH = 240;
@@ -18,7 +19,7 @@ const ERROR_CAUSE_MAX_DEPTH = 3;
 const PATH_FOLLOW_UP_DEFERRED_AUDIT =
   "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required";
 const CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT =
-  "embedding_backfill_topology_follow_up_skipped:cache_only";
+  "embedding_backfill_topology_follow_up_skipped:memory_cache_only";
 
 interface SafeCausalError {
   readonly name: string;
@@ -121,7 +122,7 @@ async function runEmbeddingBackfillTask(
   const completedAt = new Date().toISOString();
   let outcome: EmbeddingBackfillTaskOutcome;
   try {
-    const result = await resolveEmbeddingBackfillResult(input, task);
+    const result = await resolveEmbeddingBackfillResult(input, task, mode);
     const followUpAuditEntries = await runEmbeddingPathFollowUps(
       input,
       task,
@@ -159,7 +160,7 @@ async function runEmbeddingPathFollowUps(
   objectsAffected: readonly string[],
   mode: EmbeddingBackfillMode
 ): Promise<readonly string[]> {
-  if (mode === "cache_only") {
+  if (mode === "memory_cache_only") {
     return [CACHE_ONLY_FOLLOW_UP_SKIPPED_AUDIT];
   }
   if (objectsAffected.length < 2) {
@@ -237,7 +238,8 @@ function sanitizeDurableErrorMessage(message: string | null): string | null {
 
 async function resolveEmbeddingBackfillResult(
   input: CreateGardenSchedulerRuntimeSupportInput,
-  task: Readonly<GardenTaskDescriptor>
+  task: Readonly<GardenTaskDescriptor>,
+  mode: EmbeddingBackfillMode
 ): Promise<Readonly<{
   readonly objectsAffected: readonly string[];
   readonly auditEntries: readonly string[];
@@ -248,7 +250,9 @@ async function resolveEmbeddingBackfillResult(
       auditEntries: ["embedding_backfill_skipped:handler_unconfigured"]
     };
   }
-  return await input.embeddingBackfillHandler.handle(task);
+  return mode === "production"
+    ? await input.embeddingBackfillHandler.handle(task)
+    : await input.embeddingBackfillHandler.handle(task, mode);
 }
 
 async function runEmbeddingCoherenceFollowUp(

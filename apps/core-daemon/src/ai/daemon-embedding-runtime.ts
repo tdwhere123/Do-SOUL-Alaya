@@ -37,6 +37,8 @@ import {
   type EmbeddingProviderReadiness
 } from "./daemon-embedding-provider-readiness.js";
 import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
+import { composeEmbeddingBackfillHandlers } from
+  "../embedding-backfill/handler-composition.js";
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
@@ -197,22 +199,6 @@ function createEmbeddingBackfillHandler(
     warn: input.warn
   });
   return composeEmbeddingBackfillHandlers(memoryHandler, evidenceHandler);
-}
-
-function composeEmbeddingBackfillHandlers(
-  memoryHandler: EmbeddingBackfillHandler,
-  evidenceHandler: EvidenceDocumentEmbeddingBackfillHandler
-) {
-  return {
-    handle: async (task: Parameters<EmbeddingBackfillHandler["handle"]>[0]) => {
-      const memory = await memoryHandler.handle(task);
-      const evidence = await evidenceHandler.handle(task);
-      return Object.freeze({
-        objectsAffected: memory.objectsAffected,
-        auditEntries: Object.freeze([...memory.auditEntries, ...evidence.auditEntries])
-      });
-    }
-  };
 }
 
 function resolveBackfillHqProvider(

@@ -20,7 +20,8 @@ import type {
   WorkspaceService
 } from "@do-soul/alaya-core";
 import type { MemoryHqRepo } from "@do-soul/alaya-storage";
-import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
+import type { EmbeddingBackfillMode } from
+  "../../../embedding-backfill/execution-mode.js";
 
 export type StartupStep =
   | "database"
