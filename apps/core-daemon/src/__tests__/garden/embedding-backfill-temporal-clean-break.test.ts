@@ -147,12 +147,12 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
     expect(outcome.auditEntries).toEqual(["embedding_backfill:2"]);
   });
 
-  it("fills the vector cache without topology follow-ups in memory-cache-only mode", async () => {
+  it("fills the vector cache without topology follow-ups in cache-only mode", async () => {
     const harness = createHarness(true);
 
     const outcome = await harness.support.runEmbeddingBackfillTask(
       BACKFILL_TASK,
-      "memory_cache_only"
+      "cache_only"
     );
 
     expect(outcome.success).toBe(true);
@@ -163,7 +163,7 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
     expect(harness.warn).not.toHaveBeenCalled();
     expect(outcome.auditEntries).toEqual([
       "embedding_backfill:2",
-      "embedding_backfill_topology_follow_up_skipped:memory_cache_only"
+      "embedding_backfill_topology_follow_up_skipped:cache_only"
     ]);
   });
 });

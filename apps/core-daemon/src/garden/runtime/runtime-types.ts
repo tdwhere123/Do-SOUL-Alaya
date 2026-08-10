@@ -35,8 +35,7 @@ import type {
 } from "@do-soul/alaya-soul";
 import type { BackgroundServiceManager } from "../../background/bootstrap.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
-import type { EmbeddingBackfillMode } from
-  "../../embedding-backfill/execution-mode.js";
+import type { EmbeddingBackfillMode } from "../scheduler/scheduler-runtime-types.js";
 
 export type RuntimeGardenScheduler = GardenScheduler & {
   dispatchNextMatchingTaskKind(

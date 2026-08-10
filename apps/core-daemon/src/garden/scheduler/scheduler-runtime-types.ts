@@ -15,8 +15,6 @@ import type {
   AuditorSchedulingAdvisor,
   ConsolidationExecutor
 } from "@do-soul/alaya-core";
-import type { EmbeddingBackfillMode } from
-  "../../embedding-backfill/execution-mode.js";
 
 export type EmbeddingBackfillTaskOutcome = Readonly<{
   readonly success: boolean;
@@ -24,6 +22,8 @@ export type EmbeddingBackfillTaskOutcome = Readonly<{
   readonly auditEntries: readonly string[];
   readonly errorMessage: string | null;
 }>;
+
+export type EmbeddingBackfillMode = "production" | "cache_only";
 
 export type RuntimeGardenScheduler = {
   dispatchNextMatchingTaskKind(
@@ -80,12 +80,7 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
   };
   readonly consolidationExecutor: ConsolidationExecutor | null;
   readonly legacyTopologyMutationsEnabled?: boolean;
-  readonly embeddingBackfillHandler?: {
-    handle(
-      task: Parameters<EmbeddingBackfillHandler["handle"]>[0],
-      mode?: EmbeddingBackfillMode
-    ): ReturnType<EmbeddingBackfillHandler["handle"]>;
-  };
+  readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly edgeProposalReconcile?: {
     reconcileStuckAccepts(input: {
       readonly workspaceId: string;

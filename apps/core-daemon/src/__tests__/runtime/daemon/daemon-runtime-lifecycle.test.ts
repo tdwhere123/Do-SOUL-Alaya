@@ -31,7 +31,7 @@ function createControls(
     runBulkEnrichPass: (workspaceId: string) => Promise<void>;
     runEmbeddingBackfillPass: (
       workspaceId: string,
-      mode?: "production" | "memory_cache_only"
+      mode?: "production" | "cache_only"
     ) => Promise<void>;
     recallReadWorkerClient: { close(): Promise<void> };
     database: { close(): void };
@@ -110,14 +110,11 @@ describe("createDaemonLifecycleControls", () => {
   it("forwards cache-only embedding backfill mode to Garden", async () => {
     const { controls, runEmbeddingBackfillPass } = createControls("env");
 
-    await controls.runGardenEmbeddingBackfillPass(
-      "workspace-1",
-      "memory_cache_only"
-    );
+    await controls.runGardenEmbeddingBackfillPass("workspace-1", "cache_only");
 
     expect(runEmbeddingBackfillPass).toHaveBeenCalledWith(
       "workspace-1",
-      "memory_cache_only"
+      "cache_only"
     );
   });
 

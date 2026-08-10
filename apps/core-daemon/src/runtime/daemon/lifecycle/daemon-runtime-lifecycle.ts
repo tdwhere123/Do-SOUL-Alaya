@@ -16,8 +16,7 @@ import {
 } from "./daemon-runtime-timing.js";
 import { resolveDaemonHostFromEnv, warnIfRemoteDaemonListening } from "../../server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
-import type { EmbeddingBackfillMode } from
-  "../../../embedding-backfill/execution-mode.js";
+import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;

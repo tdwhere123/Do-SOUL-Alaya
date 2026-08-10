@@ -56,7 +56,7 @@ describe("warmLongMemEvalEmbeddingCaches", () => {
     });
     expect(workspace.warmEmbeddingCache).toHaveBeenCalledWith(
       ["m-1", "m-2"],
-      { backfillMode: "memory_cache_only" }
+      { backfillMode: "cache_only" }
     );
     expect(workspace.warmQueryEmbeddingCache).not.toHaveBeenCalled();
   });
