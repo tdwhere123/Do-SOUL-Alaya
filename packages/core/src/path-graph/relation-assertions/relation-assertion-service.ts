@@ -12,6 +12,7 @@ import { buildRelationProjection } from "./relation-projection-builder.js";
 import {
   createAdmissionEventInput,
   createResolutionEventInput,
+  deferredProjectionAdmissionResult,
   deriveResolutionId,
   prepareAdmission,
   prepareResolution,
@@ -24,6 +25,7 @@ import {
 import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
+  RelationAssertionDeferredAdmissionResult,
   RelationAssertionEventEntry,
   RelationAssertionProjectionResult,
   RelationAssertionReplayResult,
@@ -56,6 +58,21 @@ export class RelationAssertionService {
     );
   }
 
+  public async admitDeferredProjection(
+    request: RelationAssertionAdmissionRequest
+  ): Promise<RelationAssertionDeferredAdmissionResult> {
+    const prepared = prepareAdmission(request, request.admittedAt ?? this.now());
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
+      this.decideDeferredProjectionAdmission(request, prepared)
+    );
+  }
+
+  public async refreshProjection(): Promise<RelationAssertionReplayResult> {
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
+      this.refreshProjectionDecision(this.now(), true)
+    );
+  }
+
   public async resolve(
     request: RelationAssertionResolutionRequest
   ): Promise<RelationAssertionResolutionResult> {
@@ -69,14 +86,7 @@ export class RelationAssertionService {
     request: RelationAssertionAdmissionRequest,
     prepared: PreparedAdmission
   ): EventPublisherDecision<RelationAssertionAdmissionResult> {
-    const byId = this.dependencies.repo.getByIdInCurrentTransaction(
-      prepared.admission.assertion_id
-    );
-    const byIdentity = this.dependencies.repo.findByIdentityKeyInCurrentTransaction(
-      prepared.identityKey
-    );
-    assertReplayIdentity(byId, byIdentity);
-    const existing = byId ?? byIdentity;
+    const existing = this.findExistingAdmission(prepared);
     return existing === null
       ? this.decideNewAdmission(request, prepared)
       : this.decideExistingAdmission(existing, prepared.admission);
@@ -118,6 +128,50 @@ export class RelationAssertionService {
         return projectionAdmissionResult("admitted", assertion, projection);
       }
     };
+  }
+
+  private decideDeferredProjectionAdmission(
+    request: RelationAssertionAdmissionRequest,
+    prepared: PreparedAdmission
+  ): EventPublisherDecision<RelationAssertionDeferredAdmissionResult> {
+    const existing = this.findExistingAdmission(prepared);
+    if (existing !== null) {
+      assertSameAdmission(existing, prepared.admission);
+      this.assertFormationInputs(existing);
+      return {
+        eventInputs: [],
+        apply: () => deferredProjectionAdmissionResult("already_admitted", existing)
+      };
+    }
+    this.assertFormationInputs(prepared.admission);
+    return {
+      eventInputs: [createAdmissionEventInput(request, prepared.admission)],
+      apply: (entries) => {
+        const entry = entries[0];
+        if (entry === undefined) {
+          throw new Error("Relation assertion admission requires an EventLog entry.");
+        }
+        const assertion = this.dependencies.repo.createInCurrentTransaction({
+          assertion: { ...prepared.admission, admission_event_id: entry.event_id },
+          identityKey: prepared.identityKey
+        });
+        this.dependencies.repo.markProjectionRefreshRequiredInCurrentTransaction();
+        return deferredProjectionAdmissionResult("admitted", assertion);
+      }
+    };
+  }
+
+  private findExistingAdmission(
+    prepared: PreparedAdmission
+  ): Readonly<RelationAssertion> | null {
+    const byId = this.dependencies.repo.getByIdInCurrentTransaction(
+      prepared.admission.assertion_id
+    );
+    const byIdentity = this.dependencies.repo.findByIdentityKeyInCurrentTransaction(
+      prepared.identityKey
+    );
+    assertReplayIdentity(byId, byIdentity);
+    return byId ?? byIdentity;
   }
 
   private decideResolution(
@@ -197,27 +251,34 @@ export class RelationAssertionService {
     const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
     const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
     await this.verifyEventHistory(assertions, resolutions);
-    return await this.dependencies.eventPublisher.decideAppendThenApply(() => {
-      const projection = this.buildProjectionInCurrentTransaction(projectionAsOf);
-      return {
-        eventInputs: [],
-        apply: () => {
-          this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
-            projection.generation,
-            { activate: asOf === undefined }
-          );
-          return {
-            activeProjectionCount: projection.activeProjectionCount,
-            projectionGeneration: projection.generation.generation,
-            nextProjectionRefreshAt: projection.nextProjectionRefreshAt
-          };
-        }
-      };
-    });
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
+      this.refreshProjectionDecision(projectionAsOf, asOf === undefined)
+    );
   }
 
   public readActiveProjectionGeneration(): string | null | undefined {
     return this.dependencies.repo.readActiveProjectionGenerationInCurrentTransaction?.();
+  }
+
+  private refreshProjectionDecision(
+    asOf: string,
+    activate: boolean
+  ): EventPublisherDecision<RelationAssertionReplayResult> {
+    const projection = this.buildProjectionInCurrentTransaction(asOf);
+    return {
+      eventInputs: [],
+      apply: () => {
+        this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
+          projection.generation,
+          { activate }
+        );
+        return {
+          activeProjectionCount: projection.activeProjectionCount,
+          projectionGeneration: projection.generation.generation,
+          nextProjectionRefreshAt: projection.nextProjectionRefreshAt
+        };
+      }
+    };
   }
 
   private assertFormationInputs(

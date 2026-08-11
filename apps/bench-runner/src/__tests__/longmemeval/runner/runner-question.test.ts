@@ -67,6 +67,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       return user;
     });
     const judgeChat = vi.fn(async () => "yes");
+    const checkpointRelationProjection = vi.fn(async () => undefined);
 
     const workspace = {
       workspaceId: "workspace-q-gold-only",
@@ -98,6 +99,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     const daemon = {
       attachWorkspace: vi.fn(async () => workspace),
       runEdgePlanePassIfConfigured: vi.fn(async () => undefined),
+      checkpointRelationProjection,
       runtime: {
         services: {
           graphHealthService: {
@@ -149,6 +151,11 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       expect.objectContaining({ referenceTime: "2026-01-01T00:00:00.000Z" })
     );
     expect(workspace.accrueSessionCoRecall).not.toHaveBeenCalled();
+    expect(checkpointRelationProjection).toHaveBeenCalledTimes(1);
+    expect(checkpointRelationProjection.mock.invocationCallOrder[0])
+      .toBeGreaterThan(workspace.accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
+    expect(checkpointRelationProjection.mock.invocationCallOrder[0])
+      .toBeLessThan(workspace.recall.mock.invocationCallOrder[0]!);
     expect(result.snapshotQuestion?.questionDate).toBe("2026-01-01T00:00:00.000Z");
   });
 });

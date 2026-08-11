@@ -168,6 +168,7 @@ export {
   type PathRelationRepo
 } from "./repos/path/index.js";
 export {
+  assertRelationProjectionCurrent,
   digestRelationFormationEventSource,
   SqliteRelationAssertionRepo,
   type RelationAssertionProjectionGeneration,

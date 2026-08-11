@@ -215,6 +215,10 @@ function buildRecallMaterializationWiringResult(
     reconciliationBasisStatus: materializationRuntime.edgeRuntime.reconciliationBasisStatus,
     pathRelationProposalService: materializationRuntime.pathRelationRuntime.pathRelationProposalService,
     relationAssertionService: materializationRuntime.pathRelationRuntime.relationAssertionService,
+    relationAssertionAdmissionPort:
+      materializationRuntime.pathRelationRuntime.relationAssertionAdmissionPort,
+    relationProjectionCheckpoint:
+      materializationRuntime.pathRelationRuntime.relationProjectionCheckpoint,
     resolutionService: materializationRuntime.resolutionService,
     pathRelationEvictionTimer: materializationRuntime.pathRelationRuntime.pathRelationEvictionTimer,
     materializationRouter: materializationRuntime.materializationRuntime.materializationRouter,

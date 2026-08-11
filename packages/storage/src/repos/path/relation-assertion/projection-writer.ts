@@ -9,6 +9,25 @@ type ExistingGeneration = Readonly<{
   readonly projection_digest: string;
 }>;
 
+export function markProjectionRefreshRequired(db: StorageDatabase): void {
+  try {
+    const updated = db.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_refresh_required = 1
+      WHERE state_id = 1
+    `).run();
+    if (updated.changes !== 1) {
+      throw new StorageError(
+        "CONFLICT",
+        "Temporal schema state is missing during projection invalidation."
+      );
+    }
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw wrapRelationAssertionStorageError("invalidate relation projection", error);
+  }
+}
+
 export function writeProjectionGeneration(
   db: StorageDatabase,
   generation: RelationAssertionProjectionGeneration,
@@ -124,7 +143,8 @@ function activateProjectionGeneration(
     SET assertion_schema_generation = ?, assertion_event_contract_generation = ?,
         projection_schema_generation = ?, active_projection_generation = ?, active_as_of = ?,
         projection_policy_id = ?, projection_policy_sha256 = ?, history_digest = ?,
-        projection_count = ?, projection_digest = ?, status = 'ready', updated_at = ?
+        projection_count = ?, projection_digest = ?, status = 'ready',
+        projection_refresh_required = 0, updated_at = ?
     WHERE state_id = 1
   `).run(
     generation.assertionSchemaGeneration,

@@ -33,6 +33,7 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
+import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
 export type {
   AlayaDaemonListenOptions,
@@ -43,6 +44,7 @@ export type {
   EffectiveReconciliationBasis,
   ReconciliationBasisStatus
 } from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
@@ -50,7 +52,13 @@ export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secr
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
-export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
+export interface AlayaDaemonRuntimeOptions {
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+}
+
+export async function createAlayaDaemonRuntime(
+  options: AlayaDaemonRuntimeOptions = {}
+): Promise<AlayaDaemonRuntime> {
   const bootstrap = await createRuntimeBootstrapContext();
   let recallReadWorkerClient: RecallReadWorkerClient | null = null;
   try {
@@ -62,7 +70,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       foundation,
       registerRecallReadWorker: (client) => {
         recallReadWorkerClient = client;
-      }
+      },
+      relationProjectionAdmissionMode: options.relationProjectionAdmissionMode
     });
     const runtime = await createGardenAndFinalRuntime(
       bootstrap,
@@ -206,7 +215,7 @@ async function buildGardenWiring(
     pathRelationRepo: repositories.pathRelationRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
-    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
+    relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
     configService: runtimeWiring.coreWiring.configService,
     officialGardenProvider: runtimeWiring.coreWiring.officialGardenProvider,
     localHeuristicsProvider: runtimeWiring.coreWiring.localHeuristicsProvider,
@@ -299,6 +308,8 @@ function buildFinalizeSurfaceRuntimeInput(
     evidenceService: foundation.evidenceService,
     pathRelationProposalService: runtimeWiring.recallWiring.pathRelationProposalService,
     relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
+    relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
+    relationProjectionCheckpoint: runtimeWiring.recallWiring.relationProjectionCheckpoint,
     signalService: runtimeWiring.recallWiring.signalService,
     graphExploreService: foundation.graphExploreService,
     edgeProposalService: foundation.edgeProposalService,

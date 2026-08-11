@@ -21,7 +21,8 @@ const mocks = vi.hoisted(() => ({
   quiesce: vi.fn(),
   buildProvenance: vi.fn(),
   writeSnapshot: vi.fn(),
-  snapshotAuthority: vi.fn()
+  snapshotAuthority: vi.fn(),
+  checkpoint: vi.fn()
 }));
 const QUESTION_IDS = ["first", "second"] as const;
 
@@ -68,7 +69,8 @@ beforeEach(() => {
         reconciliationBasisStatus: { enabled: false }
       }
     },
-    shutdown: vi.fn(async () => mocks.events.push("shutdown"))
+    shutdown: vi.fn(async () => mocks.events.push("shutdown")),
+    checkpointRelationProjection: mocks.checkpoint
   }));
   mocks.prepare.mockImplementation(async ({ question }) => {
     mocks.events.push(`prepare:${question.question_id}`);
@@ -80,6 +82,9 @@ beforeEach(() => {
   });
   mocks.quiesce.mockImplementation(async () => {
     mocks.events.push("quiescence");
+  });
+  mocks.checkpoint.mockImplementation(async () => {
+    mocks.events.push("checkpoint");
   });
   mocks.collectInventory.mockImplementation(async () => {
     mocks.events.push("inventory");
@@ -107,6 +112,7 @@ describe("LongMemEval snapshot execution ordering", () => {
       "prepare:first",
       "prepare:second",
       "quiescence",
+      "checkpoint",
       "provenance",
       "snapshot",
       "shutdown"

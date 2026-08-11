@@ -32,6 +32,7 @@ export interface RelationAssertionAtomicRepoPort {
     readonly assertion: RelationAssertion;
     readonly identityKey: string;
   }): Readonly<RelationAssertion>;
+  markProjectionRefreshRequiredInCurrentTransaction(): void;
   assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
     readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
@@ -103,6 +104,17 @@ export type RelationAssertionAdmissionResult = Readonly<{
   readonly activeProjectionCount: number;
   readonly projectionGeneration: string;
 }>;
+
+export type RelationAssertionDeferredAdmissionResult = Readonly<{
+  readonly status: "admitted" | "already_admitted";
+  readonly assertion: Readonly<RelationAssertion>;
+}>;
+
+export interface RelationAssertionAdmissionPort {
+  admit(
+    request: RelationAssertionAdmissionRequest
+  ): Promise<RelationAssertionDeferredAdmissionResult>;
+}
 
 export type RelationAssertionResolutionResult = Readonly<{
   readonly status: "resolved" | "already_resolved";

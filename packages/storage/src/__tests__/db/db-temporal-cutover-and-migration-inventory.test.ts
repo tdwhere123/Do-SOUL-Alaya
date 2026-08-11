@@ -54,7 +54,8 @@ describe("temporal cutover startup gate", () => {
     const database = initDatabase({ filename: context.filename });
     try {
       const state = database.connection.prepare(`
-        SELECT active_projection_generation, projection_count, status
+        SELECT active_projection_generation, projection_count, status,
+               projection_refresh_required
         FROM temporal_schema_state
         WHERE state_id = 1
       `).get() as {
@@ -63,11 +64,12 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(118);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(119);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,
-        status: "ready"
+        status: "ready",
+        projection_refresh_required: 0
       });
     } finally {
       database.close();
@@ -116,12 +118,13 @@ describe("temporal cutover startup gate", () => {
       const state = database.connection.prepare(`
         SELECT assertion_schema_generation, assertion_event_contract_generation,
                projection_count, temporal_projection_selection_required,
-               temporal_projection_selected, selection_id
+               temporal_projection_selected, selection_id,
+               projection_refresh_required
         FROM temporal_schema_state
         WHERE state_id = 1
       `).get();
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(118);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(119);
       expect(database.connection.prepare("SELECT COUNT(*) AS count FROM relation_assertions").get())
         .toEqual({ count: 0 });
       expect(database.connection.prepare(
@@ -147,7 +150,8 @@ describe("temporal cutover startup gate", () => {
         projection_count: 0,
         temporal_projection_selection_required: 1,
         temporal_projection_selected: 0,
-        selection_id: null
+        selection_id: null,
+        projection_refresh_required: 0
       });
     } finally {
       database.close();

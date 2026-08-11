@@ -87,7 +87,7 @@ export async function accrueAnswersWithCoRelevance(
   }
   return new AnswersWithEdgeProducerService({
     pairSource,
-    assertionPort: input.activeRuntime.services.relationAssertionService,
+    assertionPort: input.activeRuntime.services.relationAssertionAdmissionPort,
     warn: (message, meta) => console.error(`[answers-with] ${message}`, meta),
     failOnPairSourceError: true
   }).crystallize({

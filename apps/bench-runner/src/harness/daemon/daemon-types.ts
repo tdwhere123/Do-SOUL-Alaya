@@ -7,7 +7,8 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type {
   AlayaDaemonRuntime,
-  EffectiveReconciliationBasis
+  EffectiveReconciliationBasis,
+  RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
 import type { CoRecallWarmupSummary } from "../embedding/co-recall-warmup.js";
@@ -66,6 +67,7 @@ export interface BenchDaemonOptions {
   readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly reviewerIdentity?: string;
   readonly reviewerToken?: string;
 }
@@ -119,6 +121,8 @@ export interface BenchDaemonHandle {
    * env parsing or call runtime methods ad hoc.
    */
   runEdgePlanePassIfConfigured(): Promise<void>;
+  /** Flushes deferred relation assertions into one active temporal generation. */
+  checkpointRelationProjection(): Promise<void>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain

@@ -12,6 +12,7 @@ import { sha256RelationAssertionValue as sha256 } from "./relation-projection-bu
 import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
+  RelationAssertionDeferredAdmissionResult,
   RelationAssertionProjectionResult,
   RelationAssertionResolutionRequest,
   RelationAssertionResolutionResult
@@ -110,6 +111,13 @@ export function projectionAdmissionResult(
     activeProjectionCount: projection.activeProjectionCount,
     projectionGeneration: projection.generation.generation
   };
+}
+
+export function deferredProjectionAdmissionResult(
+  status: RelationAssertionDeferredAdmissionResult["status"],
+  assertion: Readonly<RelationAssertion>
+): RelationAssertionDeferredAdmissionResult {
+  return { status, assertion };
 }
 
 export function projectionResolutionResult(

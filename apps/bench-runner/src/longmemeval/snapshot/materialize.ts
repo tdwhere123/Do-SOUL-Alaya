@@ -1,5 +1,4 @@
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -13,7 +12,10 @@ import {
   computeLongMemEvalQuestionIdDigest,
   type SeedExtractionPath
 } from "@do-soul/alaya-eval";
-import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
+import {
+  getCurrentSchemaSummary,
+  initDatabase
+} from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "../extraction/seed-fuel/seed-drop-reasons.js";
 import type { LongMemEvalSourceRound } from "../provenance/source-rounds.js";
@@ -43,6 +45,8 @@ import { computeLegacySnapshotQuestionIdDigestV1 } from
   "./legacy/legacy-question-id-digest.js";
 import { parseSnapshotSidecar } from "./sidecar-validation.js";
 import { copyRegularFileNoFollow } from "./bound-file.js";
+import { atomicCopy } from "./freeze/db-copy.js";
+export { checkpointAndCopyBenchDb } from "./freeze/db-copy.js";
 export { deriveSnapshotAttribution } from "./attribution.js";
 
 /**
@@ -279,36 +283,6 @@ export function readSchemaMigrationVersion(dbPath: string): number {
 }
 
 /**
- * Checkpoint the WAL of a live bench DB then copy the complete main DB file to
- * a frozen snapshot path. MUST run while the daemon connection is still open
- * so `wal_checkpoint(TRUNCATE)` flushes every committed frame into the main DB
- * file before the copy — under the bench fast-pragma (synchronous=NORMAL) an
- * un-checkpointed copy would lose the last frames.
- *
- * see also: apps/bench-runner/src/harness/daemon.ts applyBenchFastPragmaIfRequested
- */
-export function checkpointAndCopyBenchDb(
-  liveDbPath: string,
-  snapshotDbPath: string
-): void {
-  const db = initDatabase({ filename: liveDbPath });
-  // TRUNCATE checkpoint flushes the WAL into the main DB and resets the WAL
-  // file to zero length, so a plain file copy of the .db captures everything.
-  const [checkpoint] = db.connection.pragma(
-    "wal_checkpoint(TRUNCATE)"
-  ) as Array<{ readonly busy: number; readonly log: number; readonly checkpointed: number }>;
-  if (checkpoint === undefined || checkpoint.busy !== 0 ||
-      checkpoint.log !== checkpoint.checkpointed) {
-    const detail = checkpoint === undefined
-      ? "missing checkpoint status"
-      : `busy=${checkpoint.busy} log=${checkpoint.log} checkpointed=${checkpoint.checkpointed}`;
-    throw new Error(`cannot freeze live bench DB: incomplete WAL checkpoint (${detail})`);
-  }
-  mkdirSync(dirname(snapshotDbPath), { recursive: true });
-  atomicCopy(liveDbPath, snapshotDbPath);
-}
-
-/**
  * Restore a frozen snapshot DB into a working dataDirRoot the daemon will open.
  * Copies the snapshot to `<dataDirRoot>/alaya.db` (a WORKING COPY — recall
  * appends delivery/lens events, which must never touch the frozen snapshot).
@@ -489,11 +463,4 @@ function atomicWriteJson(filePath: string, value: unknown): void {
   const tmpPath = `${filePath}.${randomUUID()}.tmp`;
   writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   renameSync(tmpPath, filePath);
-}
-
-function atomicCopy(fromPath: string, toPath: string): void {
-  mkdirSync(dirname(toPath), { recursive: true });
-  const tmpPath = `${toPath}.${randomUUID()}.tmp`;
-  copyFileSync(fromPath, tmpPath);
-  renameSync(tmpPath, toPath);
 }

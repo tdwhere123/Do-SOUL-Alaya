@@ -12,6 +12,7 @@ import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PathRelationProposalService,
   RelationAssertionService,
+  type RelationAssertionAdmissionPort,
   scheduleAuditedAsyncSideEffect,
   stableStringify
 } from "@do-soul/alaya-core";
@@ -24,6 +25,11 @@ import {
   type RelationFormationEventSource
 } from "@do-soul/alaya-storage";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
+import {
+  createRelationProjectionModePorts,
+  type RelationProjectionCheckpointPort
+} from "./relation-projection/checkpoint.js";
+import { DEFAULT_RELATION_PROJECTION_ADMISSION_MODE } from "./relation-projection/mode.js";
 
 export type PathRelationProposalPort = {
   assertPathRelationProposalAvailable(input: { readonly workspaceId: string }): Promise<void>;
@@ -48,6 +54,7 @@ type PathRelationRuntimeInput = Pick<
   | "pathFailureHealthInboxPort"
   | "pathRelationRepo"
   | "proposalRepo"
+  | "relationProjectionAdmissionMode"
   | "relationAssertionRepo"
   | "runtimeNotifier"
   | "temporalProjectionSelected"
@@ -57,6 +64,8 @@ type PathRelationRuntimeInput = Pick<
 export function createPathRelationRuntime(input: PathRelationRuntimeInput): Readonly<{
   readonly pathRelationProposalService: PathRelationProposalService;
   readonly relationAssertionService: RelationAssertionService;
+  readonly relationAssertionAdmissionPort: RelationAssertionAdmissionPort;
+  readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
   readonly pathRelationProposalPort: PathRelationProposalPort;
   readonly temporalRelationAssertionPort: TemporalRelationAssertionPort;
   readonly pathRelationEvictionTimer: NodeJS.Timeout;
@@ -74,13 +83,22 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
     runtimeConfig.counterTtlMs
   );
   const pathRelationProposalPort = createPathRelationProposalPort(input);
+  const admissionMode = input.relationProjectionAdmissionMode ??
+    DEFAULT_RELATION_PROJECTION_ADMISSION_MODE;
+  const { relationAssertionAdmissionPort, relationProjectionCheckpoint } =
+    createRelationProjectionModePorts(
+      relationAssertionService,
+      admissionMode
+    );
   const temporalRelationAssertionPort = createTemporalRelationAssertionPort(
     input,
-    relationAssertionService
+    relationAssertionAdmissionPort
   );
   return Object.freeze({
     pathRelationProposalService,
     relationAssertionService,
+    relationAssertionAdmissionPort,
+    relationProjectionCheckpoint,
     pathRelationProposalPort,
     temporalRelationAssertionPort,
     pathRelationEvictionTimer
@@ -89,7 +107,7 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
 
 function createTemporalRelationAssertionPort(
   input: Pick<PathRelationRuntimeInput, "eventLogRepo">,
-  service: RelationAssertionService
+  assertionPort: RelationAssertionAdmissionPort
 ): TemporalRelationAssertionPort {
   return {
     admit: async (admission) => {
@@ -122,7 +140,7 @@ function createTemporalRelationAssertionPort(
         relationKind: admission.relationKind,
         validity: admission.validity
       });
-      const result = await service.admit({
+      const result = await assertionPort.admit({
         workspaceId: admission.workspaceId,
         runId: admission.runId,
         causedBy: "garden",

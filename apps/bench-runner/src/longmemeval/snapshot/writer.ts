@@ -1,5 +1,4 @@
-import { basename, dirname, resolve } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../../shared/version.js";
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
@@ -34,6 +33,11 @@ import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 import { compactSnapshotRunProvenance } from "./run-provenance.js";
 import type { SourceAssertionSupplementBinding } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import { assertRelationProjectionCurrent, initDatabase } from
+  "@do-soul/alaya-storage";
+import { persistSnapshotExtractionAuthority } from
+  "./freeze/extraction-authority-publisher.js";
+import { withSnapshotPublishLock } from "./freeze/publish-lock.js";
 
 export interface WriteRecallEvalSnapshotInput {
   readonly snapshotOut: string;
@@ -49,65 +53,93 @@ export interface WriteRecallEvalSnapshotInput {
   readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
 }
 
+interface SnapshotArtifactWritePreparation {
+  readonly captured: ReturnType<typeof captureSnapshotExtractionAuthority>;
+  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly sidecar: LongMemEvalSnapshotSidecarFile;
+  readonly questionDigest: string;
+  readonly datasetSha: string;
+  readonly graphPreflight: ReturnType<typeof assertSnapshotAnswersWithFormation>;
+  readonly schemaMigrationVersion: number;
+}
+
 export async function writeRecallEvalSnapshotArtifacts(
   input: WriteRecallEvalSnapshotInput
 ): Promise<void> {
+  await withSnapshotPublishLock(input.snapshotOut, async () => {
+    await writeRecallEvalSnapshotArtifactsUnlocked(input);
+  });
+}
+
+async function writeRecallEvalSnapshotArtifactsUnlocked(
+  input: WriteRecallEvalSnapshotInput
+): Promise<void> {
   const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
+  const prepared = prepareSnapshotArtifactWrite(input, liveDbPath);
+  const authorityPath = snapshotExtractionAuthorityPath(input.snapshotOut);
+  persistSnapshotExtractionAuthority(authorityPath, prepared.captured.bytes);
+  const persistedAuthority = readPersistedAuthority(
+    authorityPath,
+    prepared.captured.bytes,
+    prepared.extraction
+  );
+  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
+  writeSnapshotSidecar(input.snapshotOut, prepared.sidecar);
+  assertPreparedWriteAuthority(input, prepared, input.snapshotOut, persistedAuthority);
+  const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
+  assertCapturedAuthorityIntegrity(integrity, authorityPath, prepared.captured.bytes);
+  writeSnapshotManifest(input.snapshotOut, buildManifest({
+    input, integrity,
+    schemaMigrationVersion: prepared.schemaMigrationVersion,
+    extraction: prepared.extraction,
+    datasetSha: prepared.datasetSha,
+    questionDigest: prepared.questionDigest,
+    graphPreflight: prepared.graphPreflight
+  }));
+}
+
+function prepareSnapshotArtifactWrite(
+  input: WriteRecallEvalSnapshotInput,
+  liveDbPath: string
+): SnapshotArtifactWritePreparation {
+  assertRelationProjectionCurrent(initDatabase({ filename: liveDbPath }));
   const captured = captureSnapshotExtractionAuthority(input.extractionCacheRoot);
   const extraction = captured.compact;
   const sidecar = buildSidecar(input);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);
   const datasetSha = resolveSnapshotDatasetSha(input, extraction, questionDigest);
-  assertCurrentSnapshotWriteAuthority({
-    dbPath: liveDbPath,
-    sidecar,
-    canonicalQuestions: input.canonicalQuestions,
+  const prepared = {
+    captured,
     extraction,
-    extractionAuthority: captured.authority,
+    sidecar,
+    questionDigest,
+    datasetSha,
+    graphPreflight: assertSnapshotAnswersWithFormation(liveDbPath, input.snapshotQuestions),
+    schemaMigrationVersion: readSchemaMigrationVersion(liveDbPath)
+  };
+  assertPreparedWriteAuthority(input, prepared, liveDbPath, captured.authority);
+  return prepared;
+}
+
+function assertPreparedWriteAuthority(
+  input: WriteRecallEvalSnapshotInput,
+  prepared: SnapshotArtifactWritePreparation,
+  dbPath: string,
+  extractionAuthority: ReturnType<typeof captureSnapshotExtractionAuthority>["authority"]
+): void {
+  assertCurrentSnapshotWriteAuthority({
+    dbPath,
+    sidecar: prepared.sidecar,
+    canonicalQuestions: input.canonicalQuestions,
+    extraction: prepared.extraction,
+    extractionAuthority,
     seedExtractionPath: input.seedExtractionPath,
     runProvenance: input.runProvenance,
-    datasetSha256: datasetSha,
+    datasetSha256: prepared.datasetSha,
     ...(input.semanticSupplementBinding === undefined ? {} : {
       semanticSupplementBinding: input.semanticSupplementBinding
     })
   });
-  const graphPreflight = assertSnapshotAnswersWithFormation(
-    liveDbPath,
-    input.snapshotQuestions
-  );
-  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
-  const authorityPath = snapshotExtractionAuthorityPath(input.snapshotOut);
-  mkdirSync(dirname(authorityPath), { recursive: true });
-  writeFileSync(authorityPath, captured.bytes, {
-    flag: "wx",
-    mode: 0o400
-  });
-  const persistedAuthority = readPersistedAuthority(
-    authorityPath,
-    captured.bytes,
-    extraction
-  );
-  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
-  writeSnapshotSidecar(input.snapshotOut, sidecar);
-  assertCurrentSnapshotWriteAuthority({
-    dbPath: input.snapshotOut,
-    sidecar,
-    canonicalQuestions: input.canonicalQuestions,
-    extraction,
-    extractionAuthority: persistedAuthority,
-    seedExtractionPath: input.seedExtractionPath,
-    runProvenance: input.runProvenance,
-    datasetSha256: datasetSha,
-    ...(input.semanticSupplementBinding === undefined ? {} : {
-      semanticSupplementBinding: input.semanticSupplementBinding
-    })
-  });
-  const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
-  assertCapturedAuthorityIntegrity(integrity, authorityPath, captured.bytes);
-  writeSnapshotManifest(input.snapshotOut, buildManifest({
-    input, schemaMigrationVersion, extraction, integrity, datasetSha,
-    questionDigest, graphPreflight
-  }));
 }
 
 function assertCapturedAuthorityIntegrity(

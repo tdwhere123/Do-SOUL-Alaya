@@ -208,6 +208,9 @@ async function prepareLongMemEvalQuestionInWorkspace(
     workspace,
     seedState.coherenceMembers
   );
+  await runQuestionPhase(phase, "relation_projection_checkpoint", () =>
+    input.daemon.checkpointRelationProjection()
+  );
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
     seedState.sidecar,
     seedState.answerSessionSet

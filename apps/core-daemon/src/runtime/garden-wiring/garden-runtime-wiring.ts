@@ -92,7 +92,7 @@ type GardenRuntimeWiringInput = Readonly<{
     | "embeddingRecallService"
     | "conflictDetectionService"
     | "edgeClassifyQueueRepoHolder"
-    | "relationAssertionService"
+    | "relationAssertionAdmissionPort"
   >;
 
 export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput) {
@@ -198,7 +198,7 @@ function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
   }
   return new AnswersWithEdgeProducerService({
     pairSource: new HqAnswerOverlapPairSource(hqRepo),
-    assertionPort: input.relationAssertionService,
+    assertionPort: input.relationAssertionAdmissionPort,
     warn: input.warnLogger.warn
   });
 }

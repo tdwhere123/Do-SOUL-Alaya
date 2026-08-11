@@ -38,10 +38,12 @@ import type {
 } from "@do-soul/alaya-storage";
 import type { AppConfigService } from "../../services/config/config-service.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
+import type { RelationProjectionAdmissionMode } from "./relation-projection/mode.js";
 
 export type CreateRecallMaterializationWiringInput = {
   readonly database: StorageDatabase;
   readonly temporalProjectionSelected?: boolean;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly rawConfigService: Pick<AppConfigService, "getRuntimeGardenComputeConfig">;
   readonly eventLogRepo: SqliteEventLogRepo;

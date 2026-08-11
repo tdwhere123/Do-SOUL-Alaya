@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { LongMemEvalRunProvenance } from
   "../../../longmemeval/provenance/run.js";
 import type { ExtractionCacheManifestV3 } from
@@ -17,6 +20,8 @@ import {
   parseSnapshotExtractionAuthorityBytes,
   renderSnapshotExtractionAuthority
 } from "../../../longmemeval/snapshot/extraction-authority.js";
+import { persistSnapshotExtractionAuthority } from
+  "../../../longmemeval/snapshot/freeze/extraction-authority-publisher.js";
 import {
   LongMemEvalSnapshotRunProvenanceSchema,
   bindSnapshotRunProvenanceAuthority,
@@ -25,6 +30,11 @@ import {
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 
 const SOURCE_SHA = "a".repeat(64);
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 describe("snapshot extraction authority", () => {
   it("keeps provider identity out of the full authority artifact", () => {
@@ -136,7 +146,36 @@ describe("snapshot extraction authority", () => {
       .toBeLessThan(1_024);
     expect(sizes[1]!.authorityBytes).toBeGreaterThan(sizes[0]!.authorityBytes);
   }, 30_000);
+
+  it("reuses an identical immutable authority left by an interrupted attempt", () => {
+    const authorityPath = temporaryAuthorityPath();
+    const bytes = Buffer.from("same-authority", "utf8");
+
+    persistSnapshotExtractionAuthority(authorityPath, bytes);
+
+    expect(() => persistSnapshotExtractionAuthority(authorityPath, bytes))
+      .not.toThrow();
+  });
+
+  it("rejects a conflicting authority left by an interrupted attempt", () => {
+    const authorityPath = temporaryAuthorityPath();
+    persistSnapshotExtractionAuthority(
+      authorityPath,
+      Buffer.from("first-authority", "utf8")
+    );
+
+    expect(() => persistSnapshotExtractionAuthority(
+      authorityPath,
+      Buffer.from("different-authority", "utf8")
+    )).toThrow(/conflicts with captured authority/u);
+  });
 });
+
+function temporaryAuthorityPath(): string {
+  const root = mkdtempSync(join(tmpdir(), "snapshot-authority-publish-"));
+  roots.push(root);
+  return join(root, "nested", "snapshot.db.extraction-authority.json");
+}
 
 function sizeEvidence(count: number) {
   const manifest = extractionManifest(count, `scale-${count}`);

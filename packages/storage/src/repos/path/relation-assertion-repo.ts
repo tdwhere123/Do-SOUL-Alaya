@@ -23,7 +23,10 @@ import {
   readActiveProjectionGeneration
 } from "./relation-assertion/projection-reader.js";
 import type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
-import { writeProjectionGeneration } from "./relation-assertion/projection-writer.js";
+import {
+  markProjectionRefreshRequired,
+  writeProjectionGeneration
+} from "./relation-assertion/projection-writer.js";
 import { digestRelationFormationEventSource } from "./relation-assertion/source-digest.js";
 import {
   parseAssertionRow,
@@ -60,6 +63,7 @@ export interface RelationAssertionRepo {
     readonly assertion: RelationAssertion;
     readonly identityKey: string;
   }): Readonly<RelationAssertion>;
+  markProjectionRefreshRequiredInCurrentTransaction(): void;
   assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
     readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
@@ -237,6 +241,10 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
       if (error instanceof StorageError) throw error;
       throw wrapRelationAssertionStorageError(`create relation assertion ${assertion.assertion_id}`, error);
     }
+  }
+
+  public markProjectionRefreshRequiredInCurrentTransaction(): void {
+    markProjectionRefreshRequired(this.db);
   }
 
   public assertFormationInputsInCurrentTransaction(input: {

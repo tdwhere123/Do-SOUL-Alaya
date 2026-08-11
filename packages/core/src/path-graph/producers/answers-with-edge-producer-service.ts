@@ -1,6 +1,6 @@
 import type {
-  RelationAssertionAdmissionRequest,
-  RelationAssertionAdmissionResult
+  RelationAssertionAdmissionPort,
+  RelationAssertionAdmissionRequest
 } from "../relation-assertions/relation-assertion-service-types.js";
 import {
   buildObjectFormationOrder,
@@ -26,9 +26,7 @@ export interface AnswerCoRelevancePairSourcePort {
   }): Promise<readonly AnswerCoRelevancePairWitness[]>;
 }
 
-export interface AnswersWithRelationAssertionPort {
-  admit(input: RelationAssertionAdmissionRequest): Promise<RelationAssertionAdmissionResult>;
-}
+export type AnswersWithRelationAssertionPort = RelationAssertionAdmissionPort;
 
 export interface AnswersWithEdgeProducerDeps {
   readonly pairSource: AnswerCoRelevancePairSourcePort;

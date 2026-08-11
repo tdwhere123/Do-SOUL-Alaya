@@ -10,6 +10,7 @@ import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js
 import { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { CreateRecallMaterializationWiringInput } from "../recall-materialization/recall-materialization-wiring-types.js";
 import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
+import type { RelationProjectionAdmissionMode } from "../recall-materialization/relation-projection/mode.js";
 
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -26,6 +27,7 @@ type RecallCoreStartupInput = Readonly<{
   readonly repositories: Repositories;
   readonly foundation: Foundation;
   readonly registerRecallReadWorker: (client: RecallReadWorkerClient | null) => void;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
 }>;
 
 export async function createRecallAndCoreWiring(input: RecallCoreStartupInput) {
@@ -53,6 +55,7 @@ function buildRecallRuntimeInput(input: RecallCoreStartupInput) {
   return {
     database: bootstrap.database,
     temporalProjectionSelected: isTemporalProjectionSelected(bootstrap.database),
+    relationProjectionAdmissionMode: input.relationProjectionAdmissionMode,
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,

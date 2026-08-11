@@ -69,6 +69,8 @@ import {
   parseBenchRecallDiagnosticsForRun
 } from "../../recall/recall-diagnostics-schema.js";
 import { assertEmbeddingTreatmentDiagnosticsPresent } from "../../embedding/embedding-treatment-activation.js";
+import { createRelationProjectionCheckpointOperation } from
+  "../runtime/daemon-relation-projection.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -113,6 +115,7 @@ export function createBenchDaemonOps(
   | "warmEmbeddingCache"
   | "warmQueryEmbeddingCache"
   | "runEdgePlanePassIfConfigured"
+  | "checkpointRelationProjection"
   | "reportContextUsage"
   | "proposeMemory"
   | "proposeMemoryFromSignal"
@@ -129,6 +132,10 @@ export function createBenchDaemonOps(
     warmEmbeddingCache: createWarmEmbeddingCacheOperation(input),
     warmQueryEmbeddingCache: createWarmQueryEmbeddingCacheOperation(input),
     runEdgePlanePassIfConfigured: createRunEdgePlaneOperation(input),
+    checkpointRelationProjection: createRelationProjectionCheckpointOperation({
+      dataDir: input.dataDir,
+      runtime: input.activeRuntime
+    }),
     reportContextUsage: createBenchReportContextUsageOperation(input),
     ...seedOps,
     shutdown: createBenchShutdownOperation(input)

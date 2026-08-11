@@ -250,6 +250,8 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     synthesisService: input.synthesisService,
     pathRelationProposalService: input.pathRelationProposalService,
     relationAssertionService: input.relationAssertionService,
+    relationAssertionAdmissionPort: input.relationAssertionAdmissionPort,
+    relationProjectionCheckpoint: input.relationProjectionCheckpoint,
     recallUtilizationService: input.recallUtilizationService,
     reconciliationBasisStatus: input.reconciliationBasisStatus,
     runService: input.runService,

@@ -3,7 +3,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   createAlayaDaemonRuntime,
   type AlayaDaemonRuntime,
-  type EffectiveReconciliationBasis
+  type EffectiveReconciliationBasis,
+  type RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
@@ -26,6 +27,7 @@ export interface BenchDaemonStartupInput {
   readonly activeContext: ActiveBenchContext;
   readonly launch: BenchDaemonLaunchConfig;
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly configDirectory: BenchDaemonConfigDirectoryLease;
   readonly managedEnvKeys: readonly string[];
   readonly createManagedWorkspaceRoot: (workspaceId: string) => Promise<string>;
@@ -47,7 +49,8 @@ export async function initializeBenchDaemon(
   await input.configDirectory.prepare();
   const resources = await createBenchRuntimeResources(
     input.activeContext,
-    input.expectedReconciliationBasis
+    input.expectedReconciliationBasis,
+    input.relationProjectionAdmissionMode
   );
   try {
     await installBenchProfile(
@@ -67,9 +70,10 @@ export async function initializeBenchDaemon(
 
 async function createBenchRuntimeResources(
   activeContext: ActiveBenchContext,
-  expectedReconciliationBasis: EffectiveReconciliationBasis | undefined
+  expectedReconciliationBasis: EffectiveReconciliationBasis | undefined,
+  relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined
 ): Promise<BenchDaemonStartupResources> {
-  const runtime = await createAlayaDaemonRuntime();
+  const runtime = await createAlayaDaemonRuntime({ relationProjectionAdmissionMode });
   try {
     assertExpectedReconciliationBasis(runtime, expectedReconciliationBasis);
   } catch (error) {
