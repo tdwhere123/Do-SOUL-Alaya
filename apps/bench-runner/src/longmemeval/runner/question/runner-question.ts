@@ -137,6 +137,13 @@ export async function prepareLongMemEvalQuestion(
   }
 }
 
+export async function prepareLongMemEvalSnapshotQuestion(
+  input: LongMemEvalQuestionRunInput
+): Promise<LongMemEvalSnapshotQuestion> {
+  const prepared = await prepareLongMemEvalQuestion(input);
+  return prepared.snapshotQuestion;
+}
+
 export async function runPreparedLongMemEvalQuestion(
   input: LongMemEvalQuestionRunInput,
   prepared: LongMemEvalPreparedQuestion

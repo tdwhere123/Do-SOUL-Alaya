@@ -14,6 +14,7 @@ import { emptySeedFuelInventory } from
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
   prepare: vi.fn(),
+  prepareSnapshot: vi.fn(),
   recall: vi.fn(),
   runQuestion: vi.fn(),
   startDaemon: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("../../../longmemeval/snapshot/quiescence.js", () => ({
 }));
 vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({
   prepareLongMemEvalQuestion: mocks.prepare,
+  prepareLongMemEvalSnapshotQuestion: mocks.prepareSnapshot,
   runLongMemEvalQuestion: mocks.runQuestion,
   runPreparedLongMemEvalQuestion: mocks.recall
 }));
@@ -75,6 +77,10 @@ beforeEach(() => {
   mocks.prepare.mockImplementation(async ({ question }) => {
     mocks.events.push(`prepare:${question.question_id}`);
     return preparedQuestion(question.question_id);
+  });
+  mocks.prepareSnapshot.mockImplementation(async ({ question }) => {
+    mocks.events.push(`prepare:${question.question_id}`);
+    return { questionId: question.question_id };
   });
   mocks.recall.mockImplementation(async ({ question }) => {
     mocks.events.push(`recall:${question.question_id}`);
@@ -124,6 +130,21 @@ describe("LongMemEval snapshot execution ordering", () => {
     expect(mocks.runQuestion).not.toHaveBeenCalled();
   });
 
+  it("uses the snapshot-only preparer and forwards snapshot questions", async () => {
+    mocks.prepare.mockRejectedValue(
+      new Error("snapshot execution retained the generic prepared-question graph")
+    );
+
+    await expect(executeLongMemEvalRun(snapshotContext())).resolves.toBeDefined();
+
+    expect(mocks.prepareSnapshot).toHaveBeenCalledTimes(QUESTION_IDS.length);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.writeSnapshot.mock.calls[0]?.[0].snapshotQuestions).toEqual([
+      { questionId: "first" },
+      { questionId: "second" }
+    ]);
+  });
+
   it("shuts down without freezing when producer quiescence fails", async () => {
     mocks.quiesce.mockImplementationOnce(async () => {
       mocks.events.push("quiescence");
@@ -145,7 +166,7 @@ describe("LongMemEval snapshot execution ordering", () => {
 
   it("does not freeze when a real audited producer side effect rejects", async () => {
     vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
-    mocks.prepare.mockImplementationOnce(async ({ question }) => {
+    mocks.prepareSnapshot.mockImplementationOnce(async ({ question }) => {
       mocks.events.push(`prepare:${question.question_id}`);
       scheduleAuditedAsyncSideEffect(Promise.reject(new Error("producer write failed")), {
         source: "runner-snapshot-order",
@@ -156,7 +177,7 @@ describe("LongMemEval snapshot execution ordering", () => {
         warningCode: "ALAYA_FIXTURE_SIDE_EFFECT_FAILED",
         warningMessage: "fixture producer side effect failed"
       });
-      return preparedQuestion(question.question_id);
+      return { questionId: question.question_id };
     });
     mocks.quiesce.mockImplementationOnce(async () => {
       mocks.events.push("quiescence");

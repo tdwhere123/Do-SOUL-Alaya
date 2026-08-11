@@ -13,9 +13,8 @@ import { QaChatError } from "../qa/qa-chat.js";
 import { selectionContractIdentity } from "../selection/contract.js";
 import { writeRecallEvalSnapshot } from "./runner-helpers.js";
 import {
-  prepareLongMemEvalQuestion,
+  prepareLongMemEvalSnapshotQuestion,
   runLongMemEvalQuestion,
-  type LongMemEvalPreparedQuestion,
   type LongMemEvalQuestionRunInput,
   type LongMemEvalWorkerResult
 } from "./question/runner-question.js";
@@ -113,7 +112,7 @@ async function runSnapshotCompatiblePhases(
   await daemon.checkpointRelationProjection();
   await writeLongMemEvalSnapshotIfRequested(
     context,
-    prepared.map((row) => row.prepared.snapshotQuestion),
+    prepared,
     enabledReconciliationBasis(execution.reconciliationBasisStatus)
   );
   return buildExecutionResult(execution, emptySeedFuelInventory());
@@ -268,25 +267,19 @@ async function startLongMemEvalDaemon(
   });
 }
 
-interface PreparedSnapshotQuestion {
-  readonly questionIndex: number;
-  readonly question: LongMemEvalQuestion;
-  readonly prepared: LongMemEvalPreparedQuestion;
-}
-
 async function prepareSnapshotWindow(
   context: LongMemEvalRunContext,
   daemon: BenchDaemonHandle
-): Promise<readonly PreparedSnapshotQuestion[]> {
-  const prepared: PreparedSnapshotQuestion[] = [];
+): Promise<readonly LongMemEvalSnapshotQuestion[]> {
+  const prepared: LongMemEvalSnapshotQuestion[] = [];
   const totalQuestions = context.window.length;
   for (let i = 0; i < totalQuestions; i += 1) {
     const question = context.window[i];
     if (question === undefined) continue;
-    const value = await prepareLongMemEvalQuestion(
+    const value = await prepareLongMemEvalSnapshotQuestion(
       buildQuestionRunInput(context, daemon, i, question)
     );
-    prepared.push({ questionIndex: i, question, prepared: value });
+    prepared.push(value);
     writeLongMemEvalSeedProgress(i, totalQuestions, question.question_id);
   }
   return prepared;
