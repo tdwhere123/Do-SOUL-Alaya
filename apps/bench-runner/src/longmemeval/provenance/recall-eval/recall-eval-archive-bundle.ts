@@ -14,9 +14,7 @@ import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
 import {
-  buildRecallEvalDiagnosticsEvidence,
-  RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
-  writeRecallEvalDiagnosticsGzipStream
+  RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME
 } from "./recall-eval-diagnostics.js";
 import {
   RECALL_EVAL_RANK_IDENTITY_FILENAME,
@@ -38,14 +36,17 @@ import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import type { RecallEvalSelectionBoundaryBinding } from
   "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
+import type { RecallEvalDiagnosticsSpool } from "./recall-eval-diagnostics-spool.js";
 
 export interface RecallEvalArchiveBundle {
   readonly sidecars: readonly { readonly filename: string; readonly contents: string }[];
   readonly diagnosticsFilename: string;
-  readonly diagnosticsArtifact: StagedDiagnosticsArtifact;
+  readonly diagnosticsArtifact: StagedDiagnosticsArtifact & {
+    readonly identity: { readonly sha256: string; readonly bytes: number };
+  };
 }
 
-export async function buildRecallEvalArchiveBundle(input: {
+export interface RecallEvalArchiveInput {
   readonly slug: string;
   readonly historyRoot: string;
   readonly payload: KpiPayload;
@@ -62,7 +63,12 @@ export async function buildRecallEvalArchiveBundle(input: {
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
   readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
   readonly selectionBoundary?: RecallEvalSelectionBoundaryBinding;
-}): Promise<RecallEvalArchiveBundle> {
+  readonly diagnosticsSpool: RecallEvalDiagnosticsSpool;
+}
+
+export async function buildRecallEvalArchiveBundle(
+  input: RecallEvalArchiveInput
+): Promise<RecallEvalArchiveBundle> {
   const rankIdentity = renderRankIdentity(input);
   const runProvenance = renderRunProvenance(input);
   const diagnostics = await stageRecallEvalDiagnostics(input);
@@ -83,10 +89,20 @@ export async function buildRecallEvalArchiveBundle(input: {
         }
       ],
       diagnosticsFilename: RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
-      diagnosticsArtifact: diagnostics.artifact
+      diagnosticsArtifact: {
+        ...diagnostics.artifact,
+        identity: diagnostics.identity
+      }
     };
   } catch (error) {
-    await rm(diagnostics.artifact.stagedPath, { force: true });
+    try {
+      await rm(diagnostics.artifact.stagedPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "recall-eval archive assembly failed"
+      );
+    }
     throw error;
   }
 }
@@ -101,13 +117,40 @@ async function stageRecallEvalDiagnostics(
   const finalPath = path.join(
     artifactRoot, "public", input.slug, RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME
   );
-  const evidence = buildRecallEvalDiagnosticsEvidence({
-    questions: input.collected,
+  const runtime = {
     embeddingSupplement: input.runtimeAttribution.embedding_supplement,
     answerRerank: input.runtimeAttribution.answer_rerank
-  });
-  const identity = await writeRecallEvalDiagnosticsGzipStream(stagedPath, evidence);
+  };
+  const identity = await writeStagedRecallEvalDiagnostics(
+    input, stagedPath, runtime
+  );
   return { identity, artifact: { stagedPath, finalPath } };
+}
+
+async function writeStagedRecallEvalDiagnostics(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0],
+  stagedPath: string,
+  runtime: Readonly<{
+    embeddingSupplement: RecallEvalRuntimeAttribution["embedding_supplement"];
+    answerRerank: RecallEvalRuntimeAttribution["answer_rerank"];
+  }>
+) {
+  try {
+    return await input.diagnosticsSpool.writeGzipArtifact(stagedPath, {
+      retainedQuestions: input.collected,
+      ...runtime
+    });
+  } catch (primaryError) {
+    try {
+      await rm(stagedPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [primaryError, cleanupError],
+        "recall-eval diagnostics staging failed"
+      );
+    }
+    throw primaryError;
+  }
 }
 
 function renderRankIdentity(

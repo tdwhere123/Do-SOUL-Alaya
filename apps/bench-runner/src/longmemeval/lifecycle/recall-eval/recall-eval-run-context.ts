@@ -59,6 +59,10 @@ import {
 } from "../../query-factors/query-semantic-factor-cache.js";
 import { buildExpectedEmbeddingCacheOverlayBinding } from
   "../../snapshot/recall-eval/embedding-cache-overlay/runtime-binding.js";
+import type { RecallEvalMemoryProfile } from
+  "../../measurement/recall-eval-memory-profile.js";
+import { finalizeOwnedTempRoot } from "../owned-temp-root.js";
+import { throwLifecycleErrors } from "../errors.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -84,12 +88,14 @@ export interface RecallEvalRunContext {
   readonly warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
   readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
   readonly querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
+  readonly memoryProfile: RecallEvalMemoryProfile | null;
 }
 
 export async function prepareRecallEvalRunContext(
   options: RecallEvalOptions,
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
-  ambientEnv: Readonly<Record<string, string | undefined>> = process.env
+  ambientEnv: Readonly<Record<string, string | undefined>> = process.env,
+  memoryProfile: RecallEvalMemoryProfile | null = null
 ): Promise<RecallEvalRunContext> {
   if (options.dataDirRoot !== undefined) {
     await assertDistinctSnapshotRestorePaths(
@@ -118,12 +124,13 @@ export async function prepareRecallEvalRunContext(
       "recall-eval product treatment"
     );
   }
-  return withRecallEvalSnapshot(options, (bundle) => prepareBoundRecallEvalRunContext(
-    options,
-    recallWeightOverrides,
-    ambientEnv,
-    bundle
-  ));
+  return withRecallEvalSnapshot(options, async (bundle) => {
+    await memoryProfile?.sample({ phase: "snapshot_authority_verified" });
+    const context = await prepareBoundRecallEvalRunContext(
+      options, recallWeightOverrides, ambientEnv, bundle, memoryProfile
+    );
+    return context;
+  });
 }
 
 function assertDerivedProjectionRebuildBoundary(
@@ -184,7 +191,8 @@ async function prepareBoundRecallEvalRunContext(
   options: RecallEvalOptions,
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   ambientEnv: Readonly<Record<string, string | undefined>>,
-  bundle: RecallEvalSnapshotBundle
+  bundle: RecallEvalSnapshotBundle,
+  memoryProfile: RecallEvalMemoryProfile | null
 ): Promise<RecallEvalRunContext> {
   await assertExpansionRecallAuthority({
     options,
@@ -194,6 +202,66 @@ async function prepareBoundRecallEvalRunContext(
   });
   const { policyShape, recallOptions, plannedDataDir, daemonLaunch } =
     resolveRecallEvalLaunch(options, ambientEnv);
+  const { window, querySemanticFactorCache, baseRuntimeAttribution } =
+    await prepareRecallEvalAttribution(
+      options, bundle, daemonLaunch, recallOptions, recallWeightOverrides
+    );
+  const overlayExpected = options.embeddingCacheOverlayReceiptPath === undefined
+    ? undefined
+    : buildExpectedEmbeddingCacheOverlayBinding({
+        manifest: bundle.manifest,
+        snapshotManifestSha256: bundle.snapshotManifestSha256,
+        embeddingSupplement: baseRuntimeAttribution.embedding_supplement
+      });
+  const dataDir = await prepareRecallEvalDataRoot(
+    options, bundle, plannedDataDir, overlayExpected
+  );
+  const runtimeAttribution = dataDir.embeddingCacheOverlay === null
+    ? baseRuntimeAttribution
+    : Object.freeze({
+        ...baseRuntimeAttribution,
+        embedding_cache_overlay: dataDir.embeddingCacheOverlay
+      });
+  const selectionBoundarySpool = await createSelectionSpoolOrFinalizeDataRoot(
+    ambientEnv, dataDir
+  );
+  return buildBoundRecallEvalRunContext({
+    options, bundle, window, policyShape, recallOptions, recallWeightOverrides,
+    daemonLaunch, dataDir, runtimeAttribution, selectionBoundarySpool,
+    querySemanticFactorCache, memoryProfile
+  });
+}
+
+async function createSelectionSpoolOrFinalizeDataRoot(
+  ambientEnv: Readonly<Record<string, string | undefined>>,
+  dataDir: Awaited<ReturnType<typeof prepareRecallEvalDataRoot>>
+): Promise<LongMemEvalSelectionBoundarySpool | null> {
+  try {
+    return await createRecallEvalSelectionBoundarySpool(ambientEnv);
+  } catch (primaryError) {
+    let cleanupError: unknown;
+    try {
+      await finalizeOwnedTempRoot(
+        { path: dataDir.path, owned: dataDir.owned }, false
+      );
+    } catch (error) {
+      cleanupError = error;
+    }
+    throwLifecycleErrors(
+      "recall-eval context acquisition failed",
+      [primaryError, cleanupError]
+    );
+    throw new Error("recall-eval context acquisition lost its failure");
+  }
+}
+
+async function prepareRecallEvalAttribution(
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle,
+  daemonLaunch: BenchDaemonLaunchConfig,
+  recallOptions: ReturnType<typeof resolveRecallEvalLaunch>["recallOptions"],
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined
+) {
   const window = selectWindow(bundle.sidecar.questions, options);
   const querySemanticFactorCache = options.querySemanticFactorCachePath === undefined
     ? null
@@ -217,49 +285,47 @@ async function prepareBoundRecallEvalRunContext(
         options.warmDerivedSnapshotReceiptPath !== undefined
     }
   );
-  const overlayExpected = options.embeddingCacheOverlayReceiptPath === undefined
-    ? undefined
-    : buildExpectedEmbeddingCacheOverlayBinding({
-        manifest: bundle.manifest,
-        snapshotManifestSha256: bundle.snapshotManifestSha256,
-        embeddingSupplement: baseRuntimeAttribution.embedding_supplement
-      });
-  const dataDir = await prepareRecallEvalDataRoot(
-    options,
-    bundle,
-    plannedDataDir,
-    overlayExpected
-  );
-  const runtimeAttribution = dataDir.embeddingCacheOverlay === null
-    ? baseRuntimeAttribution
-    : Object.freeze({
-        ...baseRuntimeAttribution,
-        embedding_cache_overlay: dataDir.embeddingCacheOverlay
-      });
+  return { window, querySemanticFactorCache, baseRuntimeAttribution };
+}
+
+function buildBoundRecallEvalRunContext(input: Readonly<{
+  options: RecallEvalOptions;
+  bundle: RecallEvalSnapshotBundle;
+  window: readonly LongMemEvalSnapshotQuestion[];
+  policyShape: BenchPolicyShape;
+  recallOptions: ReturnType<typeof resolveRecallEvalLaunch>["recallOptions"];
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined;
+  daemonLaunch: BenchDaemonLaunchConfig;
+  dataDir: Awaited<ReturnType<typeof prepareRecallEvalDataRoot>>;
+  runtimeAttribution: RecallEvalRunContext["runtimeAttribution"];
+  selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
+  querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
+  memoryProfile: RecallEvalMemoryProfile | null;
+}>): RecallEvalRunContext {
   return {
-    options,
-    manifest: bundle.manifest,
-    window,
-    sidecarQuestionCount: bundle.sidecar.questions.length,
-    dataDirRoot: dataDir.path,
-    ownsDataDirRoot: dataDir.owned,
-    policyShape,
-    simulateReport: options.simulateReport ?? "none",
-    recallOptions,
+    options: input.options,
+    manifest: input.bundle.manifest,
+    window: input.window,
+    sidecarQuestionCount: input.bundle.sidecar.questions.length,
+    dataDirRoot: input.dataDir.path,
+    ownsDataDirRoot: input.dataDir.owned,
+    policyShape: input.policyShape,
+    simulateReport: input.options.simulateReport ?? "none",
+    recallOptions: input.recallOptions,
     alayaVersion: resolveBenchRunnerVersion(),
     commitSha7: resolveBenchCommitSha7(),
     runAt: new Date(),
-    recallWeightOverrides,
-    daemonLaunch,
-    runtimeAttribution,
-    datasetSha256: resolveDatasetSha(bundle),
-    measurementForQuestion: bundle.measurementForQuestion,
-    extractionAuthority: bundle.extractionAuthority,
-    derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild,
-    warmDerivedSnapshot: dataDir.warmDerivedSnapshot,
-    selectionBoundarySpool:
-      await createRecallEvalSelectionBoundarySpool(ambientEnv),
-    querySemanticFactorCache
+    recallWeightOverrides: input.recallWeightOverrides,
+    daemonLaunch: input.daemonLaunch,
+    runtimeAttribution: input.runtimeAttribution,
+    datasetSha256: resolveDatasetSha(input.bundle),
+    measurementForQuestion: input.bundle.measurementForQuestion,
+    extractionAuthority: input.bundle.extractionAuthority,
+    derivedEvidenceProjectionRebuild: input.dataDir.evidenceProjectionRebuild,
+    warmDerivedSnapshot: input.dataDir.warmDerivedSnapshot,
+    selectionBoundarySpool: input.selectionBoundarySpool,
+    querySemanticFactorCache: input.querySemanticFactorCache,
+    memoryProfile: input.memoryProfile
   };
 }
 

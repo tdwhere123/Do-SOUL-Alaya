@@ -9,6 +9,8 @@ import { exitCodeForReleaseHardGates } from "../release-hard-gate-exit.js";
 import { pct } from "../result-format.js";
 import { verifyLongMemEvalExpansionContractInput } from
   "../promotion/expansion-input.js";
+import { renderLifecycleFailure } from
+  "../../longmemeval/lifecycle/errors.js";
 
 export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   if (opts.snapshot === undefined) {
@@ -191,5 +193,21 @@ function renderResult(result: RecallEvalResult, legacy: boolean): string {
       `${rebuild.fact_frame_formation_backfill.eligible_owner_count} ` +
       `formed=${rebuild.fact_frame_formation_backfill.formed_capture_count} ` +
       `projections=${rebuild.fact_frame_formation_backfill.projection_count}\n`) +
+    renderCompletion(result) +
     `  KPI: ${result.kpiPath}\n`;
+}
+
+function renderCompletion(result: RecallEvalResult): string {
+  return `  completion status=${result.completion.status}` +
+    renderFailures(result.completion.failures) + "\n" +
+    `  memory-profile status=${result.memoryProfile.status}` +
+    renderFailures(result.memoryProfile.failures) + "\n";
+}
+
+function renderFailures(
+  failures: RecallEvalResult["completion"]["failures"]
+): string {
+  return failures.length === 0
+    ? ""
+    : ` failures=${failures.map(renderLifecycleFailure).join(",")}`;
 }

@@ -23,6 +23,8 @@ import {
   type LongMemEvalRunProvenance
 } from "../../../longmemeval/provenance/run.js";
 import { buildRecallEvalArchiveBundle } from "../../../longmemeval/provenance/recall-eval/recall-eval-archive-bundle.js";
+import { withRecallEvalDiagnosticsSpool } from
+  "../../../longmemeval/provenance/recall-eval/recall-eval-diagnostics-spool.js";
 import { verifyPromotionSnapshot } from "../../../longmemeval/promotion/verifiers/snapshot-verifier.js";
 import {
   canonicalQuestion,
@@ -53,47 +55,82 @@ async function writeEntryFixture(
   snapshotBindingGate = SNAPSHOT_GATE_SHA,
   snapshotOptions: SnapshotFixtureOptions = {}
 ) {
+  const fixture = await preparePromotionEntryFixture(
+    snapshotBindingGate, snapshotOptions
+  );
+  const report = "# report\n";
+  const archive = await buildFixtureArchive({
+    slug: "promotion-entry", historyRoot: fixture.root,
+    payload: fixture.payload, report, findings: null,
+    collected: fixture.collected, manifest: fixture.snapshot,
+    runtimeAttribution: fixture.runtime, offset: 0, limit: null,
+    runProvenance: fixture.provenance,
+    expectedQuestionIdDigest: fixture.selection.selected_id_digest,
+    provenanceComplete: true
+  });
+  await persistPromotionEntry(fixture, archive, report);
+  const verifiedSnapshot = await verifyPromotionEntrySnapshot(fixture);
+  return {
+    entryRoot: fixture.entryRoot,
+    selection: fixture.selection,
+    snapshot: verifiedSnapshot,
+    archive: {
+      diagnosticsFilename: archive.diagnosticsFilename,
+      sidecarFilenames: archive.sidecars.map((sidecar) => sidecar.filename)
+    }
+  };
+}
+
+async function preparePromotionEntryFixture(
+  snapshotBindingGate: string,
+  snapshotOptions: SnapshotFixtureOptions
+) {
   const root = await mkdtemp(path.join(tmpdir(), "promotion-entry-"));
   roots.push(root);
   const entryRoot = path.join(root, "entry");
   await mkdir(entryRoot, { recursive: true });
   const collected = [question("q-1", 10), question("q-2", 20)];
   const questions = collected.map((row) => canonicalQuestion(row.questionId));
-  const selection = createLongMemEvalSelectionContractIdentity({
+  const selection = buildFixtureSelection(collected);
+  const snapshotProvenance = withOptionalDistinctProducerCode(driftExtractionAuthority(
+    runProvenance(
+      selection, SNAPSHOT_GATE_SHA, questions, snapshotOptions.producerEnvOverride
+    ),
+    snapshotOptions.extractionAuthorityDrift
+  ), snapshotOptions.distinctProducerCode === true);
+  const snapshotFixture = await writeSnapshotFixture(
+    root, collected, selection, snapshotProvenance, questions, snapshotOptions
+  );
+  const provenance = runProvenance(selection, GATE_SHA, questions);
+  const runtime = runtimeAttribution(
+    selection.selected_id_digest, provenance, snapshotFixture.manifestSha256,
+    snapshotBindingGate, snapshotFixture.schemaMigrationVersion,
+    snapshotProvenance.code
+  );
+  const snapshot = snapshotFixture.manifest;
+  const payload = buildPromotionEntryPayload(collected, snapshot, runtime);
+  return {
+    root, entryRoot, collected, questions, selection, snapshotProvenance,
+    snapshotFixture, provenance, runtime, snapshot, payload
+  };
+}
+
+function buildFixtureSelection(collected: ReturnType<typeof question>[]) {
+  return createLongMemEvalSelectionContractIdentity({
     datasetSha256: DATASET_SHA,
     assignments: collected.map((row) => ({
       question_id: row.questionId,
       dataset_cohort: "answerable" as const
     }))
   });
-  const snapshotProvenance = withOptionalDistinctProducerCode(driftExtractionAuthority(
-    runProvenance(
-      selection,
-      SNAPSHOT_GATE_SHA,
-      questions,
-      snapshotOptions.producerEnvOverride
-    ),
-    snapshotOptions.extractionAuthorityDrift
-  ), snapshotOptions.distinctProducerCode === true);
-  const snapshotFixture = await writeSnapshotFixture(
-    root,
-    collected,
-    selection,
-    snapshotProvenance,
-    questions,
-    snapshotOptions
-  );
-  const provenance = runProvenance(selection, GATE_SHA, questions);
-  const runtime = runtimeAttribution(
-    selection.selected_id_digest,
-    provenance,
-    snapshotFixture.manifestSha256,
-    snapshotBindingGate,
-    snapshotFixture.schemaMigrationVersion,
-    snapshotProvenance.code
-  );
-  const snapshot = snapshotFixture.manifest;
-  const payload = KpiPayloadSchema.parse(assembleRecallEvalKpi({
+}
+
+function buildPromotionEntryPayload(
+  collected: ReturnType<typeof question>[],
+  snapshot: Awaited<ReturnType<typeof writeSnapshotFixture>>["manifest"],
+  runtime: ReturnType<typeof runtimeAttribution>
+) {
+  return KpiPayloadSchema.parse(assembleRecallEvalKpi({
     collected,
     manifest: snapshot,
     variant: "longmemeval_s",
@@ -110,57 +147,58 @@ async function writeEntryFixture(
     datasetSha256: DATASET_SHA,
     provenanceComplete: true
   }));
-  const report = "# report\n";
-  const archive = await buildRecallEvalArchiveBundle({
-    slug: "promotion-entry",
-    historyRoot: root,
-    payload,
-    report,
-    findings: null,
-    collected,
-    manifest: snapshot,
-    runtimeAttribution: runtime,
-    offset: 0,
-    limit: null,
-    runProvenance: provenance,
-    expectedQuestionIdDigest: selection.selected_id_digest,
-    provenanceComplete: true
-  });
+}
+
+async function persistPromotionEntry(
+  fixture: Awaited<ReturnType<typeof preparePromotionEntryFixture>>,
+  archive: Awaited<ReturnType<typeof buildFixtureArchive>>,
+  report: string
+): Promise<void> {
   await Promise.all([
-    writeFile(path.join(entryRoot, "kpi.json"), `${JSON.stringify(payload, null, 2)}\n`),
-    writeFile(path.join(entryRoot, "report.md"), report),
+    writeFile(
+      path.join(fixture.entryRoot, "kpi.json"),
+      `${JSON.stringify(fixture.payload, null, 2)}\n`
+    ),
+    writeFile(path.join(fixture.entryRoot, "report.md"), report),
     ...archive.sidecars.map((sidecar) =>
-      writeFile(path.join(entryRoot, sidecar.filename), sidecar.contents)),
+      writeFile(path.join(fixture.entryRoot, sidecar.filename), sidecar.contents)),
     copyFile(
       archive.diagnosticsArtifact.stagedPath,
-      path.join(entryRoot, archive.diagnosticsFilename)
+      path.join(fixture.entryRoot, archive.diagnosticsFilename)
     )
   ]);
-  const verifiedSnapshot = await verifyPromotionSnapshot({
-    contractRoot: root,
+}
+
+async function verifyPromotionEntrySnapshot(
+  fixture: Awaited<ReturnType<typeof preparePromotionEntryFixture>>
+) {
+  return verifyPromotionSnapshot({
+    contractRoot: fixture.root,
     snapshot: {
       db_path: "snapshot.db",
-      manifest_sha256: snapshotFixture.manifestSha256,
+      manifest_sha256: fixture.snapshotFixture.manifestSha256,
       producer_code: {
-        commit_sha: snapshotProvenance.code.commit_sha,
-        commit_sha7: snapshotProvenance.code.commit_sha7,
-        worktree_state_sha256: snapshotProvenance.code.worktree_state_sha256,
-        executed_dist: snapshotProvenance.code.executed_dist
+        commit_sha: fixture.snapshotProvenance.code.commit_sha,
+        commit_sha7: fixture.snapshotProvenance.code.commit_sha7,
+        worktree_state_sha256: fixture.snapshotProvenance.code.worktree_state_sha256,
+        executed_dist: fixture.snapshotProvenance.code.executed_dist
       }
     },
-    expectedSelection: selection,
-    expectedQuestions: questions,
+    expectedSelection: fixture.selection,
+    expectedQuestions: fixture.questions,
     variant: "longmemeval_s"
   });
-  return {
-    entryRoot,
-    selection,
-    snapshot: verifiedSnapshot,
-    archive: {
-      diagnosticsFilename: archive.diagnosticsFilename,
-      sidecarFilenames: archive.sidecars.map((sidecar) => sidecar.filename)
-    }
-  };
+}
+
+async function buildFixtureArchive(
+  input: Omit<Parameters<typeof buildRecallEvalArchiveBundle>[0], "diagnosticsSpool">
+) {
+  return withRecallEvalDiagnosticsSpool(async (diagnosticsSpool) => {
+    const collected = await Promise.all(
+      input.collected.map((question) => diagnosticsSpool.append(question))
+    );
+    return buildRecallEvalArchiveBundle({ ...input, collected, diagnosticsSpool });
+  });
 }
 
 function withOptionalDistinctProducerCode(

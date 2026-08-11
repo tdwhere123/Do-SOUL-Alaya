@@ -11,6 +11,8 @@ import {
   writeGzipChunks,
   type StreamedArtifactIdentity
 } from "../../diagnostics/artifacts/artifact-gzip-stream.js";
+import { RecallEvalDiagnosticsSummaryAccumulator } from
+  "./diagnostics/recall-eval-diagnostics-summary.js";
 
 export const RECALL_EVAL_DIAGNOSTICS_FILENAME =
   "recall-eval-diagnostics.json";
@@ -154,6 +156,9 @@ export type RecallEvalDiagnosticsEvidence = z.infer<
 export type RecallEvalDiagnosticsEvidenceV2 = z.infer<
   typeof RecallEvalDiagnosticsEvidenceV2Schema
 >;
+export type RecallEvalDiagnosticsQuestion = z.infer<
+  typeof RecallEvalDiagnosticsQuestionSchema
+>;
 
 type EvidenceQuestionInput = Readonly<{
   questionId: string;
@@ -172,17 +177,22 @@ export function buildRecallEvalDiagnosticsEvidence(input: {
   readonly embeddingSupplement: EmbeddingSupplementRuntimeProvenance;
   readonly answerRerank: LocalCrossEncoderRuntimeProvenance;
 }): RecallEvalDiagnosticsEvidenceV2 {
-  const questions = input.questions.map(normalizeQuestion);
+  const accumulator = new RecallEvalDiagnosticsSummaryAccumulator();
+  const questions = input.questions.map((question) => {
+    const normalized = normalizeRecallEvalDiagnosticsQuestion(question);
+    accumulator.add(normalized);
+    return normalized;
+  });
   assertEmbeddingIdentity(questions, input.embeddingSupplement);
-  assertCrossIdentity(questions, input.answerRerank);
+  const summary = accumulator.build(input.embeddingSupplement);
+  assertCrossIdentity(questions, input.answerRerank, summary.answer_rerank_scores);
+  const header = buildRecallEvalDiagnosticsHeader({
+    summary,
+    embeddingSupplement: input.embeddingSupplement,
+    answerRerank: input.answerRerank
+  });
   return RecallEvalDiagnosticsEvidenceV2Schema.parse({
-    schema_version: 2,
-    kind: "recall_eval_diagnostics",
-    runtime: {
-      embedding_supplement: input.embeddingSupplement,
-      answer_rerank: input.answerRerank
-    },
-    summary: buildSummary(questions, input.embeddingSupplement),
+    ...header,
     questions
   });
 }
@@ -198,11 +208,18 @@ export async function writeRecallEvalDiagnosticsGzipStream(
   evidence: RecallEvalDiagnosticsEvidence
 ): Promise<StreamedArtifactIdentity> {
   const parsed = RecallEvalDiagnosticsEvidenceSchema.parse(evidence);
-  return writeGzipChunks(artifactPath, renderRecallEvalDiagnosticsChunks(parsed));
+  if (parsed.schema_version === 1) {
+    return writeGzipChunks(artifactPath, renderLegacyRecallEvalDiagnosticsChunks(parsed));
+  }
+  return writeRecallEvalDiagnosticsGzipFromQuestions(
+    artifactPath,
+    parsed,
+    fromQuestions(parsed.questions)
+  );
 }
 
-async function* renderRecallEvalDiagnosticsChunks(
-  evidence: RecallEvalDiagnosticsEvidence
+async function* renderLegacyRecallEvalDiagnosticsChunks(
+  evidence: z.infer<typeof RecallEvalDiagnosticsEvidenceV1Schema>
 ): AsyncGenerator<string> {
   yield `{"schema_version":${evidence.schema_version}`;
   yield `,"kind":${JSON.stringify(evidence.kind)}`;
@@ -216,7 +233,35 @@ async function* renderRecallEvalDiagnosticsChunks(
   yield "]}\n";
 }
 
-function normalizeQuestion(question: EvidenceQuestionInput) {
+export async function writeRecallEvalDiagnosticsGzipFromQuestions(
+  artifactPath: string,
+  header: Omit<RecallEvalDiagnosticsEvidenceV2, "questions">,
+  questions: AsyncIterable<RecallEvalDiagnosticsQuestion>
+): Promise<StreamedArtifactIdentity> {
+  return writeGzipChunks(artifactPath, renderRecallEvalDiagnosticsChunks(header, questions));
+}
+
+async function* renderRecallEvalDiagnosticsChunks(
+  evidence: Omit<RecallEvalDiagnosticsEvidenceV2, "questions">,
+  questions: AsyncIterable<RecallEvalDiagnosticsQuestion>
+): AsyncGenerator<string> {
+  yield `{"schema_version":${evidence.schema_version}`;
+  yield `,"kind":${JSON.stringify(evidence.kind)}`;
+  yield `,"runtime":${JSON.stringify(evidence.runtime)}`;
+  yield `,"summary":${JSON.stringify(evidence.summary)}`;
+  yield `,"questions":[`;
+  let first = true;
+  for await (const question of questions) {
+    yield first ? "" : ",";
+    yield JSON.stringify(RecallEvalDiagnosticsQuestionSchema.parse(question));
+    first = false;
+  }
+  yield "]}\n";
+}
+
+export function normalizeRecallEvalDiagnosticsQuestion(
+  question: EvidenceQuestionInput
+): RecallEvalDiagnosticsQuestion {
   const diagnostics = LongMemEvalQuestionDiagnosticSchema.parse(question.diagnostics);
   if (question.questionId !== diagnostics.question_id) {
     throw new Error("recall-eval diagnostics question identity drift");
@@ -237,32 +282,37 @@ function normalizeQuestion(question: EvidenceQuestionInput) {
   };
 }
 
-type WarmupSummary = ReturnType<typeof normalizeQuestion>["document_embedding_warmup"] |
-  ReturnType<typeof normalizeQuestion>["query_embedding_warmup"];
+type WarmupSummary = RecallEvalDiagnosticsQuestion["document_embedding_warmup"] |
+  RecallEvalDiagnosticsQuestion["query_embedding_warmup"];
 
 function assertEmbeddingIdentity(
-  questions: readonly ReturnType<typeof normalizeQuestion>[],
+  questions: readonly RecallEvalDiagnosticsQuestion[],
   identity: EmbeddingSupplementRuntimeProvenance
 ): void {
   for (const question of questions) {
-    const summaries = [question.document_embedding_warmup, question.query_embedding_warmup];
-    if (!identity.enabled) {
-      assertDisabledEmbeddingEvidence(question, summaries);
-      continue;
-    }
-    // Query warmup may be null because encoding belongs inside timed recall.
-    // Document warmup must still prove bi-encoder identity.
-    assertEnabledEmbeddingEvidence(question, identity, [
-      question.document_embedding_warmup,
-      ...(question.query_embedding_warmup === null
-        ? []
-        : [question.query_embedding_warmup])
-    ]);
+    assertRecallEvalDiagnosticsQuestionRuntime(question, identity);
   }
 }
 
+export function assertRecallEvalDiagnosticsQuestionRuntime(
+  question: RecallEvalDiagnosticsQuestion,
+  identity: EmbeddingSupplementRuntimeProvenance
+): void {
+  const summaries = [question.document_embedding_warmup, question.query_embedding_warmup];
+  if (!identity.enabled) {
+    assertDisabledEmbeddingEvidence(question, summaries);
+    return;
+  }
+  assertEnabledEmbeddingEvidence(question, identity, [
+    question.document_embedding_warmup,
+    ...(question.query_embedding_warmup === null
+      ? []
+      : [question.query_embedding_warmup])
+  ]);
+}
+
 function assertDisabledEmbeddingEvidence(
-  question: ReturnType<typeof normalizeQuestion>,
+  question: RecallEvalDiagnosticsQuestion,
   summaries: readonly WarmupSummary[]
 ): void {
   const diagnostics = question.diagnostics;
@@ -281,7 +331,7 @@ function assertDisabledEmbeddingEvidence(
 }
 
 function assertEnabledEmbeddingEvidence(
-  question: ReturnType<typeof normalizeQuestion>,
+  question: RecallEvalDiagnosticsQuestion,
   identity: Extract<EmbeddingSupplementRuntimeProvenance, { readonly enabled: true }>,
   summaries: readonly WarmupSummary[]
 ): void {
@@ -320,7 +370,7 @@ function assertEnabledEmbeddingEvidence(
 }
 
 function assertWorkspaceIdentityIfPresent(
-  diagnostics: ReturnType<typeof normalizeQuestion>["diagnostics"],
+  diagnostics: RecallEvalDiagnosticsQuestion["diagnostics"],
   identity: Extract<EmbeddingSupplementRuntimeProvenance, { readonly enabled: true }>
 ): void {
   const fields = [
@@ -343,17 +393,31 @@ function assertWorkspaceIdentityIfPresent(
 }
 
 function assertCrossIdentity(
-  questions: readonly ReturnType<typeof normalizeQuestion>[],
-  identity: LocalCrossEncoderRuntimeProvenance
+  questions: readonly RecallEvalDiagnosticsQuestion[],
+  identity: LocalCrossEncoderRuntimeProvenance,
+  scores: Readonly<{ expected_count: number; scored_count: number }>
 ): void {
   for (const question of questions) {
-    const status = question.diagnostics.answer_rerank_status;
-    const matches = identity.enabled
-      ? status === "returned" || status === "not_applicable"
-      : status === "not_requested";
-    if (!matches) throw new Error("answer rerank identity drift in recall-eval diagnostics");
+    assertRecallEvalDiagnosticsCrossQuestion(question, identity);
   }
-  const scores = sumCrossScores(questions);
+  assertRecallEvalDiagnosticsCrossScores(scores, identity);
+}
+
+export function assertRecallEvalDiagnosticsCrossQuestion(
+  question: RecallEvalDiagnosticsQuestion,
+  identity: LocalCrossEncoderRuntimeProvenance
+): void {
+  const status = question.diagnostics.answer_rerank_status;
+  const matches = identity.enabled
+    ? status === "returned" || status === "not_applicable"
+    : status === "not_requested";
+  if (!matches) throw new Error("answer rerank identity drift in recall-eval diagnostics");
+}
+
+export function assertRecallEvalDiagnosticsCrossScores(
+  scores: Readonly<{ expected_count: number; scored_count: number }>,
+  identity: LocalCrossEncoderRuntimeProvenance
+): void {
   if (identity.enabled && (scores.expected_count === 0 ||
       scores.scored_count !== scores.expected_count)) {
     throw new Error("answer rerank activation produced no complete cross-encoder scores");
@@ -363,89 +427,26 @@ function assertCrossIdentity(
   }
 }
 
-function buildSummary(
-  questions: readonly ReturnType<typeof normalizeQuestion>[],
-  identity: EmbeddingSupplementRuntimeProvenance
-) {
-  return {
-    question_count: questions.length,
-    document_embedding_cache: sumDocumentReadiness(questions),
-    query_embedding_cache: sumQueryReadiness(questions),
-    document_embedding_warmup_latency_ms: summarizeDocumentWarmupLatency(questions),
-    provider_states: countProviderStates(questions),
-    answer_rerank_status_counts: countCrossStatuses(questions),
-    answer_rerank_scores: sumCrossScores(questions),
-    embedding_identity: {
-      provider_kind: identity.enabled ? identity.provider_kind : null,
-      model_id: identity.enabled ? identity.effective_model_id : null,
-      schema_version: identity.enabled ? identity.effective_schema_version : null,
-      consistent: true as const
-    }
-  };
+export function buildRecallEvalDiagnosticsHeader(input: {
+  readonly summary: RecallEvalDiagnosticsEvidenceV2["summary"];
+  readonly embeddingSupplement: EmbeddingSupplementRuntimeProvenance;
+  readonly answerRerank: LocalCrossEncoderRuntimeProvenance;
+}): Omit<RecallEvalDiagnosticsEvidenceV2, "questions"> {
+  const { questions: _questions, ...header } = RecallEvalDiagnosticsEvidenceV2Schema.parse({
+    schema_version: 2,
+    kind: "recall_eval_diagnostics",
+    runtime: {
+      embedding_supplement: input.embeddingSupplement,
+      answer_rerank: input.answerRerank
+    },
+    summary: input.summary,
+    questions: []
+  });
+  return header;
 }
 
-function summarizeDocumentWarmupLatency(
-  questions: readonly ReturnType<typeof normalizeQuestion>[]
-) {
-  const values = questions.flatMap((question) =>
-    question.document_embedding_warmup_latency_ms === null
-      ? []
-      : [question.document_embedding_warmup_latency_ms]
-  );
-  const total = values.reduce((sum, value) => sum + value, 0);
-  return {
-    measured_question_count: values.length,
-    total_ms: total,
-    mean_ms: values.length === 0 ? 0 : total / values.length,
-    max_ms: values.length === 0 ? 0 : Math.max(...values)
-  };
-}
-
-function sumCrossScores(questions: readonly ReturnType<typeof normalizeQuestion>[]) {
-  return questions.reduce((total, question) => ({
-    expected_count: total.expected_count +
-      (question.diagnostics.answer_rerank_expected_count ?? 0),
-    scored_count: total.scored_count +
-      (question.diagnostics.answer_rerank_scored_count ?? 0)
-  }), { expected_count: 0, scored_count: 0 });
-}
-
-function sumDocumentReadiness(questions: readonly ReturnType<typeof normalizeQuestion>[]) {
-  const rows = questions.flatMap((question) =>
-    question.document_embedding_warmup === null ? [] : [question.document_embedding_warmup]
-  );
-  const expected = rows.reduce((sum, row) => sum + row.expected_count, 0);
-  const ready = rows.reduce((sum, row) => sum + row.ready_count, 0);
-  return { expected_count: expected, ready_count: ready, not_ready_count: expected - ready };
-}
-
-function sumQueryReadiness(questions: readonly ReturnType<typeof normalizeQuestion>[]) {
-  const rows = questions.flatMap((question) =>
-    question.query_embedding_warmup === null ? [] : [question.query_embedding_warmup]
-  );
-  const requested = rows.reduce((sum, row) => sum + row.requested_count, 0);
-  const ready = rows.reduce((sum, row) => sum + row.ready_count, 0);
-  return {
-    expected_count: requested, requested_count: requested,
-    ready_count: ready, not_ready_count: requested - ready
-  };
-}
-
-function countProviderStates(questions: readonly ReturnType<typeof normalizeQuestion>[]) {
-  const counts = {
-    total: questions.length, provider_returned: 0, provider_pending: 0,
-    provider_failed: 0, provider_not_requested: 0, unknown: 0
-  };
-  for (const question of questions) counts[question.diagnostics.provider_state]++;
-  return counts;
-}
-
-function countCrossStatuses(questions: readonly ReturnType<typeof normalizeQuestion>[]) {
-  const counts = { returned: 0, not_applicable: 0, not_requested: 0, failed: 0, unavailable: 0 };
-  for (const question of questions) {
-    const status = question.diagnostics.answer_rerank_status;
-    if (status === null) counts.unavailable++;
-    else counts[status]++;
-  }
-  return counts;
+async function* fromQuestions(
+  questions: readonly RecallEvalDiagnosticsQuestion[]
+): AsyncGenerator<RecallEvalDiagnosticsQuestion> {
+  yield* questions;
 }

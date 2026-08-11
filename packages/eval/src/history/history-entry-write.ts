@@ -38,6 +38,14 @@ export interface WriteEntryOptions {
   readonly pointerWriter?: typeof writePointer;
 }
 
+interface HistoryEntryOperations {
+  readonly removeStaging: (stagingPath: string) => Promise<void>;
+}
+
+const historyEntryOperations: HistoryEntryOperations = {
+  removeStaging: (stagingPath) => rm(stagingPath, { recursive: true, force: true })
+};
+
 export class HistoryEntryCommittedError extends Error {
   readonly committed = true;
   readonly entry: HistoryEntry;
@@ -66,6 +74,7 @@ export async function writeHistoryEntry(input: {
   readonly findings: string | null;
   readonly options: WriteEntryOptions;
   readonly entryAllowsPassing: () => Promise<boolean>;
+  readonly operations?: HistoryEntryOperations;
 }): Promise<HistoryEntry> {
   assertEntrySlug(input.slug);
   const benchRoot = path.join(input.layout.historyRoot, input.benchName);
@@ -97,7 +106,17 @@ async function stageAndCommitEntry(
     await stageEntryFiles(staging, input.payload, input.report, input.findings, sidecars, fileSidecars);
     await rename(staging, entryRoot);
   } catch (error) {
-    await rm(staging, { recursive: true, force: true });
+    const removeStaging = input.operations?.removeStaging ??
+      historyEntryOperations.removeStaging;
+    try {
+      await removeStaging(staging);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "history entry staging failed and cleanup was incomplete",
+        { cause: error }
+      );
+    }
     throw error;
   }
 }

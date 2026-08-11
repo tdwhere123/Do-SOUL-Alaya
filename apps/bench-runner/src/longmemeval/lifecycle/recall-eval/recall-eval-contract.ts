@@ -17,6 +17,9 @@ import type { LongMemEvalExpansionCapability } from
   "../../promotion/expansion/expansion-capability.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import type { RecallEvalMemoryProfileCompletion } from
+  "../../measurement/recall-eval-memory-profile.js";
+import type { BoundedLifecycleFailure } from "../errors.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -53,6 +56,11 @@ export interface RecallEvalResult {
   readonly payload: KpiPayload;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
   readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
+  readonly completion: Readonly<{
+    status: "complete" | "incomplete";
+    failures: readonly BoundedLifecycleFailure[];
+  }>;
+  readonly memoryProfile: RecallEvalMemoryProfileCompletion;
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
 }
 
