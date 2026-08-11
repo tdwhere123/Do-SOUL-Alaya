@@ -12,6 +12,7 @@ import type { SourceAssertionSupplementRuntime } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 const COMPILE_SEED_CACHE_KEY_PREFIX_CHARS = 12;
+const COMPILE_SEED_ERROR_CAUSE_MAX_CHARS = 512;
 
 type SeedInputDraft = Omit<BenchSignalSeedInput, "evidenceRef">;
 
@@ -277,8 +278,16 @@ function buildSeedExtractionFailureEnvelope(
     cached_extraction_failures: input.stats.cachedExtractionFailures,
     retry_count: benchRetry?.retryCount ?? null,
     retry_classification: benchRetry?.retryClassification ?? "unknown",
-    error_message: stringifyError(input.error)
+    error_message: stringifyError(input.error),
+    error_cause_message: immediateCauseMessage(input.error)
   };
+}
+
+function immediateCauseMessage(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("cause" in error)) return null;
+  const cause = (error as { readonly cause?: unknown }).cause;
+  if (cause === undefined) return null;
+  return stringifyError(cause).slice(0, COMPILE_SEED_ERROR_CAUSE_MAX_CHARS);
 }
 
 function writeSeedExtractionFailureDump(

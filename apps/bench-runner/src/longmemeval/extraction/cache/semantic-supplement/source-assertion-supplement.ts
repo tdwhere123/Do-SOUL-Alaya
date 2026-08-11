@@ -27,6 +27,7 @@ import {
 } from "./source-assertion-supplement-closure.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const CACHE_KEY_DIAGNOSTIC_PREFIX_CHARS = 12;
 const PositiveCountSchema = z.number().int().positive();
 const AssertionIdsSchema = z.array(PositiveCountSchema).nonempty().readonly();
 const IdentityShape = {
@@ -281,12 +282,7 @@ function readBatch(
   if (digest(sourceRawJson) !== entry.source_raw_json_sha256) {
     throw new Error("source assertion supplement source raw bytes drifted");
   }
-  const selected = selectSourceDraftsByAnchorBindings(
-    sourceRawJson,
-    entry.source_draft_bindings,
-    input.request,
-    input.sourceCorpus
-  );
+  const selected = selectBoundSourceDrafts(entry, sourceRawJson, input);
   const rawJson = JSON.stringify({ signals: selected });
   if (selected.length !== entry.selected_draft_count ||
       digest(rawJson) !== entry.selected_raw_json_sha256) {
@@ -300,6 +296,29 @@ function readBatch(
       computeSourceAssertionSupplementSidecarProjectionSha256(projection),
     ...projection
   }) });
+}
+
+function selectBoundSourceDrafts(
+  entry: SourceAssertionSupplementReceipt["entries"][number],
+  sourceRawJson: string,
+  input: SourceAssertionSupplementBatchInput
+): ReturnType<typeof selectSourceDraftsByAnchorBindings> {
+  try {
+    return selectSourceDraftsByAnchorBindings(
+      sourceRawJson,
+      entry.source_draft_bindings,
+      input.request,
+      input.sourceCorpus
+    );
+  } catch (cause) {
+    const primary = entry.primary_cache_key.slice(0, CACHE_KEY_DIAGNOSTIC_PREFIX_CHARS);
+    const source = entry.source_cache_key.slice(0, CACHE_KEY_DIAGNOSTIC_PREFIX_CHARS);
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `source assertion supplement batch ${primary}/${source}: ${causeMessage}`,
+      { cause }
+    );
+  }
 }
 
 function buildEntry(input: CreateEntryInput): SourceAssertionSupplementReceipt["entries"][number] {
