@@ -50,6 +50,8 @@ import {
   MAX_SNAPSHOT_MANIFEST_BYTES,
   MAX_SNAPSHOT_SIDECAR_BYTES
 } from "../../snapshot/artifact-limits.js";
+import { assertCurrentSnapshotVerifiedAssertionReceiptIntegrity } from
+  "../../snapshot/current/assertion-receipt-integrity.js";
 
 declare const verifiedSnapshotBrand: unique symbol;
 
@@ -294,31 +296,39 @@ async function inspectImmutableDatabaseCopy(input: {
     if (schemaMigrationVersion === undefined) {
       throw new Error("promotion snapshot migration ledger is empty");
     }
-    assertSnapshotDatasetSubstrateIdentity({
-      dbPath: copyPath,
-      sidecar: input.sidecar,
-      questions: input.questions
-    });
-    assertSnapshotSeedLedgerBinding({
-      dbPath: copyPath,
-      sidecar: input.sidecar,
-      questions: input.questions,
-      extraction: input.extraction,
-      extractionAuthority: input.extractionAuthority,
-      seedExtractionPath: input.seedExtractionPath,
-      ...(input.semanticSupplementBinding === undefined ? {} : {
-        semanticSupplementBinding: input.semanticSupplementBinding
-      }),
-      closureAuthority: {
-        kind: "exact",
-        questionWindow: { offset: 0, limit: input.questions.length }
-      }
-    });
+    assertImmutableSnapshotDatabase(copyPath, input);
     return { sha256, schemaMigrationVersion };
   } finally {
     await copy.close().catch(() => undefined);
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function assertImmutableSnapshotDatabase(
+  copyPath: string,
+  input: Parameters<typeof inspectImmutableDatabaseCopy>[0]
+): void {
+  assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(copyPath);
+  assertSnapshotDatasetSubstrateIdentity({
+    dbPath: copyPath,
+    sidecar: input.sidecar,
+    questions: input.questions
+  });
+  assertSnapshotSeedLedgerBinding({
+    dbPath: copyPath,
+    sidecar: input.sidecar,
+    questions: input.questions,
+    extraction: input.extraction,
+    extractionAuthority: input.extractionAuthority,
+    seedExtractionPath: input.seedExtractionPath,
+    ...(input.semanticSupplementBinding === undefined ? {} : {
+      semanticSupplementBinding: input.semanticSupplementBinding
+    }),
+    closureAuthority: {
+      kind: "exact",
+      questionWindow: { offset: 0, limit: input.questions.length }
+    }
+  });
 }
 
 async function copyImmutableDatabase(

@@ -72,6 +72,18 @@ describe("snapshot semantic supplement binding", () => {
       requests: [request()]
     })).toThrow(/identity/u);
   });
+
+  it("rejects grounding semantics predating canonical v2 receipts", () => {
+    const entries = createSemanticSupplementEntries();
+    const receipt = batch();
+    observe(entries, receipt);
+    observe(entries, receipt);
+
+    expect(() => assertSemanticSupplementClosure(extraction(), entries, {
+      ...binding(receipt),
+      grounding_semantics: "official-api-source-grounding-v2"
+    })).toThrow(/closure/u);
+  });
 });
 
 function request() {

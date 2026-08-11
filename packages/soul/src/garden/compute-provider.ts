@@ -164,7 +164,7 @@ function wallClockBudgetFor(readTimeoutMs: number): number {
 }
 export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 export const OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION =
-  "official-api-source-grounding-v2";
+  "official-api-source-grounding-v3";
 
 export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;

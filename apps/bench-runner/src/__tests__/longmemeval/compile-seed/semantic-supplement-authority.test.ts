@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => ({
     primary_manifest_sha256: "3".repeat(64),
     source_manifest_sha256: "4".repeat(64),
     parser_semantics: "official-api-signal-parser-v8",
-    grounding_semantics: "official-api-source-grounding-v2"
+    grounding_semantics: "official-api-source-grounding-v3"
   })
 }));
 

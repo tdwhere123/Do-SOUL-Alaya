@@ -10,7 +10,10 @@ import {
   formatVerifiedUserAssertionV2SourceHash
 } from "@do-soul/alaya-protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { assertSnapshotVerifiedAssertionReceiptIntegrity } from
+import {
+  assertCurrentSnapshotVerifiedAssertionReceiptIntegrity,
+  assertSnapshotVerifiedAssertionReceiptIntegrity
+} from
   "../../../longmemeval/snapshot/current/assertion-receipt-integrity.js";
 
 const roots: string[] = [];
@@ -36,9 +39,17 @@ describe("snapshot verified assertion receipt integrity", () => {
   it("accepts a v2 receipt bound to the linked signal and locator", async () => {
     const dbPath = await createFixture({ sourceHash: receiptV2Hash(USER_CORPUS) });
 
-    expect(assertSnapshotVerifiedAssertionReceiptIntegrity(dbPath)).toEqual({
+    expect(assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(dbPath)).toEqual({
       ownerCount: 1
     });
+  });
+
+  it("keeps v1 readable for migration but rejects it as a current snapshot", async () => {
+    const dbPath = await createFixture();
+
+    expect(assertSnapshotVerifiedAssertionReceiptIntegrity(dbPath)).toEqual({ ownerCount: 1 });
+    expect(() => assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(dbPath))
+      .toThrow(/current snapshot requires a v2 assertion receipt/u);
   });
 
   it("rejects a v2 receipt whose linked signal locator differs", async () => {

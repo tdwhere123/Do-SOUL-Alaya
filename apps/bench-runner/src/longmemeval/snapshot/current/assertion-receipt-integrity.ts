@@ -36,6 +36,19 @@ interface AssertionReceiptRow {
 export function assertSnapshotVerifiedAssertionReceiptIntegrity(
   dbPath: string
 ): Readonly<{ readonly ownerCount: number }> {
+  return scanSnapshotVerifiedAssertionReceipts(dbPath, null);
+}
+
+export function assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(
+  dbPath: string
+): Readonly<{ readonly ownerCount: number }> {
+  return scanSnapshotVerifiedAssertionReceipts(dbPath, 2);
+}
+
+function scanSnapshotVerifiedAssertionReceipts(
+  dbPath: string,
+  requiredVersion: 2 | null
+): Readonly<{ readonly ownerCount: number }> {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const statement = db.prepare(READ_ASSERTION_RECEIPTS_SQL);
@@ -44,12 +57,21 @@ export function assertSnapshotVerifiedAssertionReceiptIntegrity(
       `${VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX}*`,
       `${VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX}*`
     )) {
-      assertReceiptRow(value as unknown as AssertionReceiptRow);
+      const row = value as unknown as AssertionReceiptRow;
+      assertReceiptVersion(row, requiredVersion);
+      assertReceiptRow(row);
       ownerCount += 1;
     }
     return Object.freeze({ ownerCount });
   } finally {
     db.close();
+  }
+}
+
+function assertReceiptVersion(row: AssertionReceiptRow, requiredVersion: 2 | null): void {
+  if (requiredVersion !== null &&
+      parseVerifiedUserAssertionSourceHash(row.source_hash)?.version !== requiredVersion) {
+    throw receiptError(row, "current snapshot requires a v2 assertion receipt");
   }
 }
 

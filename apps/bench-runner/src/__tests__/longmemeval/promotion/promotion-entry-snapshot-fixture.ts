@@ -32,6 +32,8 @@ import {
   sha256,
   type SnapshotFixtureOptions
 } from "./promotion-entry-primitives-fixture.js";
+import { seedValidV1VerifiedAssertionReceipt } from
+  "../snapshot/fixtures/valid-v1-assertion-receipt-fixture.js";
 
 async function writeSnapshotFixture(
   root: string,
@@ -43,6 +45,9 @@ async function writeSnapshotFixture(
 ) {
   const dbPath = path.join(root, "snapshot.db");
   seedSnapshotDatabase(dbPath, questions);
+  if (options.validV1AssertionReceipt === true) {
+    seedValidV1VerifiedAssertionReceipt(dbPath);
+  }
   const db = await readFile(dbPath);
   const schemaMigrationVersion = readSchemaMigrationLedger(dbPath).at(-1)!;
   const sidecar = {

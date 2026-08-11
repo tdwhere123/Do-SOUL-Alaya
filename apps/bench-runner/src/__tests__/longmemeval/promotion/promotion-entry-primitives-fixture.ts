@@ -52,6 +52,7 @@ const EXECUTED_DIST = {
 };
 
 interface SnapshotFixtureOptions {
+  readonly validV1AssertionReceipt?: boolean;
   readonly recallPipelineVersion?: string;
   readonly schemaMigrationOffset?: number;
   readonly storedGateEligible?: boolean;

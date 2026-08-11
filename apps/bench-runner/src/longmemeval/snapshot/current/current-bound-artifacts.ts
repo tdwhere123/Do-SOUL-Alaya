@@ -28,6 +28,8 @@ import {
   MAX_SNAPSHOT_MANIFEST_BYTES,
   MAX_SNAPSHOT_SIDECAR_BYTES
 } from "../artifact-limits.js";
+import { assertCurrentSnapshotVerifiedAssertionReceiptIntegrity } from
+  "./assertion-receipt-integrity.js";
 
 export interface BoundCurrentSnapshotArtifacts {
   readonly snapshotDbPath: string;
@@ -54,6 +56,7 @@ export function bindCurrentSnapshotArtifacts(input: {
     targetPath: snapshotDbPath,
     expectedSha256: current.integrity.db_sha256
   });
+  assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(snapshotDbPath);
   writeBoundMetadata(
     snapshotDbPath,
     current.bytes,

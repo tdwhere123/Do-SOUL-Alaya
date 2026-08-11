@@ -25,6 +25,11 @@ describe("recall-eval promotion entry verifier", () => {
       .rejects.toThrow(/summary differs from round ledger/u);
   });
 
+  it("rejects an immutable snapshot copy with a valid v1 assertion receipt", async () => {
+    await expect(writeEntryFixture(SNAPSHOT_GATE_SHA, { validV1AssertionReceipt: true }))
+      .rejects.toThrow(/current snapshot requires a v2 assertion receipt/u);
+  });
+
   it.each([
     ["expected-turn inflation", "expected_turns", /cache closure mismatch/u],
     ["wrong content closure", "content_closure", /cache closure mismatch/u],

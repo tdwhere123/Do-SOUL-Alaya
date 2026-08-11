@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { initDatabase } from "@do-soul/alaya-storage";
 import { bindCurrentSnapshotArtifacts } from
   "../../../longmemeval/snapshot/current/current-bound-artifacts.js";
 import {
@@ -24,6 +25,8 @@ import {
   MAX_SNAPSHOT_MANIFEST_BYTES,
   MAX_SNAPSHOT_SIDECAR_BYTES
 } from "../../../longmemeval/snapshot/artifact-limits.js";
+import { seedValidV1VerifiedAssertionReceipt } from
+  "./fixtures/valid-v1-assertion-receipt-fixture.js";
 
 const roots: string[] = [];
 
@@ -71,6 +74,15 @@ describe("current snapshot immutable artifact binding", () => {
       sourceDbPath: fixture.snapshotDbPath,
       targetRoot: fixture.targetRoot
     })).toThrow();
+  });
+
+  it("rejects a hash-consistent current snapshot with a valid v1 receipt", async () => {
+    const fixture = await snapshotFixture({ validV1AssertionReceipt: true });
+
+    expect(() => bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    })).toThrow(/current snapshot requires a v2 assertion receipt/u);
   });
 
   it.each(["missing", "replacement", "symlink"] as const)(
@@ -123,13 +135,18 @@ describe("current snapshot immutable artifact binding", () => {
   });
 });
 
-async function snapshotFixture() {
+async function snapshotFixture(options: { readonly validV1AssertionReceipt?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "current-bound-snapshot-"));
   roots.push(root);
   const targetRoot = join(root, "bound");
   await mkdir(targetRoot);
   const snapshotDbPath = join(root, "snapshot.db");
-  const dbBytes = Buffer.from("trusted current snapshot DB", "utf8");
+  const database = initDatabase({ filename: snapshotDbPath });
+  database.close();
+  if (options.validV1AssertionReceipt === true) {
+    seedValidV1VerifiedAssertionReceipt(snapshotDbPath);
+  }
+  const dbBytes = await readFile(snapshotDbPath);
   const sidecarBytes = Buffer.from(
     `${JSON.stringify(currentSnapshotSidecarFor("q-1"), null, 2)}\n`,
     "utf8"
