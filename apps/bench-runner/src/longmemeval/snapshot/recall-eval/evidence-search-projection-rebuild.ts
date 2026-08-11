@@ -11,7 +11,8 @@ import {
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
 import {
-  buildGardenTurnEvidenceSearchProjections
+  buildGardenTurnEvidenceSearchProjections,
+  verifyOfficialApiSourceLocatorBinding
 } from "@do-soul/alaya-soul";
 import {
   getCurrentSchemaSummary,
@@ -231,7 +232,10 @@ function readRuntimeQualifiedOwnerIds(
     if (current === undefined) byWorkspace.set(owner.owner.workspace_id, [owner]);
     else current.push(owner);
   }
-  const reader = new RecallQualifiedEvidenceReader(db);
+  const reader = new RecallQualifiedEvidenceReader(
+    db,
+    verifyOfficialApiSourceLocatorBinding
+  );
   const qualified = new Set<string>();
   for (const [workspaceId, workspaceOwners] of byWorkspace) {
     const objectIds = workspaceOwners.map(({ owner }) => owner.object_id);

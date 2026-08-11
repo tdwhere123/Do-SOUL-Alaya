@@ -58,6 +58,7 @@ export interface BenchSignalSeedInput {
   readonly matchedText?: string;
   readonly surfaceId?: string | null;
   readonly productionRawPayload?: Readonly<Record<string, unknown>>;
+  readonly productionSignalId?: string;
   readonly evidenceRef: string;
   readonly turnSeedIndex: number;
   readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";

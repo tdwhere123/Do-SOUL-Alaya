@@ -11,8 +11,8 @@ import {
   SoulSignalMaterializedPayloadSchema,
   WorkspaceKind,
   WorkspaceState,
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash,
+  buildVerifiedUserAssertionReceiptV2Preimage,
+  formatVerifiedUserAssertionV2SourceHash,
   type CandidateMemorySignal,
   type EvidenceCapsule,
   type EvidenceSearchProjection
@@ -24,7 +24,8 @@ import {
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceSearchProjections,
-  resolveVerifiedGardenTurnEvidenceProjection
+  resolveVerifiedGardenTurnEvidenceProjection,
+  verifyOfficialApiSourceLocatorBinding
 } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -175,7 +176,10 @@ async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
         fact_frame: assertionFactFrame
       }
     });
-    const capsule = await new SqliteEvidenceCapsuleRepo(database).create(
+    const capsule = await new SqliteEvidenceCapsuleRepo(
+      database,
+      verifyOfficialApiSourceLocatorBinding
+    ).create(
       capsuleInput,
       formation.searchProjections,
       formation.capture
@@ -188,8 +192,26 @@ async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
 }
 
 async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMemorySignal> {
+  const sourceCorpus = `User: ${assertion}`;
+  const sourceLocator = {
+    contract_version: 2 as const,
+    kind: "assertion_catalog" as const,
+    assertion_id: 1
+  };
+  const signalId = "signal-assertion";
+  const sourceHash = formatVerifiedUserAssertionV2SourceHash(createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptV2Preimage({
+      signal_id: signalId,
+      source_locator: sourceLocator,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      surface_id: null,
+      source_assertion: assertion,
+      source_corpus: sourceCorpus
+    }), "utf8")
+    .digest("hex"));
   const signal = {
-    signal_id: "signal-assertion",
+    signal_id: signalId,
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
@@ -206,8 +228,16 @@ async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMem
     exception_to_refs: [],
     contradicts_refs: [],
     incompatible_with_refs: [],
+    source_observation: {
+      observed_at: createdAt,
+      authority: "trusted_host_event",
+      source_event_id: "99999999-9999-4999-8999-999999999999"
+    },
     raw_payload: {
       source_assertion: assertion,
+      full_turn_content: sourceCorpus,
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: sourceHash,
       distilled_fact: assertion,
       source_grounding: {
         version: 1,
@@ -228,17 +258,17 @@ async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMem
 
 function buildAssertionCapsule(signal: CandidateMemorySignal): EvidenceCapsule {
   const sourceCorpus = `User: ${assertion}`;
-  const sourceHash = formatVerifiedUserAssertionSourceHash(
-    createHash("sha256")
-      .update(buildVerifiedUserAssertionReceiptPreimage({
-        workspace_id: signal.workspace_id,
-        run_id: signal.run_id,
-        surface_id: signal.surface_id,
-        source_assertion: assertion,
-        source_corpus: sourceCorpus
-      }), "utf8")
-      .digest("hex")
-  );
+  const sourceHash = signal.raw_payload.verified_user_assertion_source_hash;
+  if (typeof sourceHash !== "string") throw new Error("assertion receipt missing");
+  expect(verifyOfficialApiSourceLocatorBinding({
+    sourceCorpus,
+    sourceAssertion: assertion,
+    sourceLocator: signal.raw_payload.source_locator as {
+      readonly contract_version: 2;
+      readonly kind: "assertion_catalog";
+      readonly assertion_id: number;
+    }
+  })).toBe(true);
   return {
     object_id: randomUUID(),
     object_kind: "evidence_capsule",
@@ -346,7 +376,10 @@ async function seedEvidenceCapsule(
     (candidate) => candidate.projection_kind === "assistant_observation"
   );
   if (projection === undefined) throw new Error("assistant projection is missing");
-  const capsule = await new SqliteEvidenceCapsuleRepo(database).create(
+  const capsule = await new SqliteEvidenceCapsuleRepo(
+    database,
+    verifyOfficialApiSourceLocatorBinding
+  ).create(
     buildEvidenceCapsule(signal, sourceCorpus, verified),
     projections
   );

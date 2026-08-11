@@ -119,6 +119,7 @@ function buildOfficialSeedDrafts(
       turnMessages: input.context.turn_messages,
       turnSeedIndex: input.seedIndex,
       ...(matchedText === null ? {} : { matchedText }),
+      productionSignalId: signal.signal_id,
       productionRawPayload: stripSchemaGrounding(signal.raw_payload, signal.object_kind),
       extractionProvider: "official_api_compile"
     });

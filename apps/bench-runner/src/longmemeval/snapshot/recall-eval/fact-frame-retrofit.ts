@@ -5,6 +5,7 @@ import {
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
 import { materializeEvidenceFactFrameFormation } from "@do-soul/alaya-core";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import type BetterSqlite3 from "better-sqlite3";
 import {
   RecallQualifiedEvidenceReader,
@@ -210,7 +211,10 @@ function assertRuntimeQualifiedOwners(
   db: StorageDatabase,
   plans: readonly RetrofitPlan[]
 ): void {
-  const reader = new RecallQualifiedEvidenceReader(db);
+  const reader = new RecallQualifiedEvidenceReader(
+    db,
+    verifyOfficialApiSourceLocatorBinding
+  );
   const byWorkspace = new Map<string, RetrofitPlan[]>();
   for (const plan of plans) {
     const current = byWorkspace.get(plan.owner.workspace_id) ?? [];

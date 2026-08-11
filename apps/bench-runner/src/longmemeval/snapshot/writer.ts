@@ -41,6 +41,8 @@ import { persistSnapshotExtractionAuthority } from
 import { withSnapshotPublishLock } from "./freeze/publish-lock.js";
 import type { ExtractionCachePreflightProof } from
   "../compile-seed/compile-seed-types.js";
+import { assertSnapshotVerifiedAssertionReceiptIntegrity } from
+  "./current/assertion-receipt-integrity.js";
 
 export interface WriteRecallEvalSnapshotInput {
   readonly snapshotOut: string;
@@ -88,6 +90,7 @@ async function writeRecallEvalSnapshotArtifactsUnlocked(
     prepared.extraction
   );
   checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
+  assertSnapshotVerifiedAssertionReceiptIntegrity(input.snapshotOut);
   writeSnapshotSidecar(input.snapshotOut, prepared.sidecar);
   assertPreparedWriteAuthority(input, prepared, input.snapshotOut, persistedAuthority);
   const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
@@ -107,6 +110,7 @@ function prepareSnapshotArtifactWrite(
   liveDbPath: string
 ): SnapshotArtifactWritePreparation {
   assertRelationProjectionCurrent(initDatabase({ filename: liveDbPath }));
+  assertSnapshotVerifiedAssertionReceiptIntegrity(liveDbPath);
   const captured = captureSnapshotExtractionAuthority(input.extractionCacheRoot);
   assertCurrentPostFillCacheAuthorityProofManifest({
     proof: input.extractionCachePreflightProof,

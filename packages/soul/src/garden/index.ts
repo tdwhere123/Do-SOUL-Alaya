@@ -90,10 +90,15 @@ export {
 export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
+  buildOfficialApiVerifiedUserAssertionSource,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
   parseOfficialApiSourceLocator,
+  rebindOfficialApiSourceLocatorQuote,
+  type OfficialApiVerifiedUserAssertionSource,
   resolveOfficialApiSourceLocatorQuote
 } from "./grounding/source-locator.js";
+export { verifyOfficialApiSourceLocatorBinding } from
+  "./grounding/source-locator/verified-binding.js";
 export {
   resolveGardenRawPayloadGrounding,
   resolveGardenSignalGrounding,

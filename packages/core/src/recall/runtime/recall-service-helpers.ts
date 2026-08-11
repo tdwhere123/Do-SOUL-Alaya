@@ -34,6 +34,9 @@ export const BUDGET_PRESSURE_HARD_THRESHOLD = 1;
 /** Additive weight on PathPlasticityState.strength in fine-assessment: a recall supplement (score clamped to [0,1]; base FTS rank still drives ordering on similar plasticity). Sized 0.15 so a full boost cannot close a typical adjacent-rank gap; pinned by a close-tie ordering test. */
 export const PATH_PLASTICITY_WEIGHT = 0.15;
 
+export function isEvidenceProjectionIntegrityError(error: unknown): boolean {
+  return error instanceof Error && error.name === "EvidenceProjectionIntegrityError";
+}
 
 export function buildRecallCandidateDedupeKey(candidate: Readonly<{
   readonly entry: Readonly<{ readonly object_id: string }>;

@@ -124,7 +124,8 @@ function buildSignalRawPayload(
   input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
   safeExcerpt: string,
-  safeDistilledFact: string
+  safeDistilledFact: string,
+  signalId?: string
 ): Record<string, unknown> {
   const tokenEconomy = benchTokenEconomyPayload({
     fullTurnContent: safeExcerpt,
@@ -140,7 +141,8 @@ function buildSignalRawPayload(
     ...tokenEconomy
   }, signalInput, {
     workspaceId: input.activeContext.workspaceId,
-    runId: input.activeContext.runId
+    runId: input.activeContext.runId,
+    ...(signalId === undefined ? {} : { signalId })
   });
 }
 
@@ -255,6 +257,7 @@ type CompileSeedResult =
 function buildCompileSignal(
   input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
+  signalId: string,
   rawPayload: Record<string, unknown>
 ): CandidateMemorySignal {
   const observedAt = signalInput.sourceObservedAt ?? new Date().toISOString();
@@ -268,7 +271,7 @@ function buildCompileSignal(
         }
       };
   const candidate = {
-    signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+    signal_id: signalId,
     workspace_id: input.activeContext.workspaceId,
     run_id: input.activeContext.runId,
     surface_id: signalInput.surfaceId ?? null,
@@ -325,10 +328,12 @@ async function seedOneCompileSignal(
   const fallback = signalInput.evidenceFallbackReason !== undefined
     ? buildBenchSourceEvidenceFallback(input, signalInput)
     : null;
+  const signalId = `bench_signal_${randomUUID().replace(/-/gu, "")}`;
   const signal = fallback?.signal ?? buildCompileSignal(
       input,
       signalInput,
-      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact)
+      signalId,
+      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
     );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal

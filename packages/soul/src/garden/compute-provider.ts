@@ -296,6 +296,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         runId: context.run_id,
         surfaceId: context.surface_id,
         normalizedTurnContent,
+        turnMessages: context.turn_messages,
         groundingSourceText,
         confidence,
         temporalProjection,

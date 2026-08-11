@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   EvidenceCapsule,
   MemoryEntry,
@@ -6,8 +5,8 @@ import type {
 } from "@do-soul/alaya-protocol";
 import {
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
-  buildVerifiedUserAssertionReceiptPreimage,
-  readVerifiedUserAssertionSourceHashDigest
+  VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX,
+  parseVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import {
   projectVerifiedUserAssertionContext,
@@ -20,6 +19,7 @@ import { isDirectRecallEvidence } from
 import { uniqueStrings } from "../../expansion/path-relations.js";
 import {
   errorNameOf,
+  isEvidenceProjectionIntegrityError,
   toErrorMessage
 } from "../../runtime/recall-service-helpers.js";
 import type {
@@ -107,21 +107,17 @@ async function loadQualifiedSemanticFormations(
 ): Promise<readonly RecallQualifiedEvidence[]> {
   const find = params.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
   if (find === undefined) return Object.freeze([]);
-  try {
-    return await find.call(
+  return await loadQualifiedEvidenceWithIsolation({
+    params,
+    evidenceIds,
+    message: "semantic factor evidence context lookup failed",
+    operation: "qualified_semantic_factor_lookup",
+    load: async (ids) => await find.call(
       params.dependencies.evidenceSearchPort,
       params.workspaceId,
-      evidenceIds.map((objectId) => Object.freeze({ object_id: objectId }))
-    );
-  } catch (error) {
-    params.warn("semantic factor evidence context lookup failed", {
-      workspace_id: params.workspaceId,
-      operation: "qualified_semantic_factor_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return Object.freeze([]);
-  }
+      ids.map((objectId) => Object.freeze({ object_id: objectId }))
+    )
+  });
 }
 
 async function loadQualifiedFactKeys(
@@ -131,16 +127,48 @@ async function loadQualifiedFactKeys(
   const find = params.dependencies.evidenceSearchPort
     ?.findRecallQualifiedFactKeysByIds;
   if (find === undefined) return Object.freeze([]);
-  try {
-    return await find.call(
+  return await loadQualifiedEvidenceWithIsolation({
+    params,
+    evidenceIds,
+    message: "fact-key evidence context lookup failed",
+    operation: "qualified_fact_key_lookup",
+    load: async (ids) => await find.call(
       params.dependencies.evidenceSearchPort,
       params.workspaceId,
-      evidenceIds
-    );
+      ids
+    )
+  });
+}
+
+async function loadQualifiedEvidenceWithIsolation(input: Readonly<{
+  readonly params: Parameters<typeof collectRecallEvidenceContexts>[0];
+  readonly evidenceIds: readonly string[];
+  readonly message: string;
+  readonly operation: string;
+  readonly load: (ids: readonly string[]) => Promise<readonly RecallQualifiedEvidence[]>;
+}>): Promise<readonly RecallQualifiedEvidence[]> {
+  try {
+    return await input.load(input.evidenceIds);
   } catch (error) {
-    params.warn("fact-key evidence context lookup failed", {
-      workspace_id: params.workspaceId,
-      operation: "qualified_fact_key_lookup",
+    if (!isEvidenceProjectionIntegrityError(error)) throw error;
+    if (input.evidenceIds.length > 1) {
+      const middle = Math.ceil(input.evidenceIds.length / 2);
+      const left = await loadQualifiedEvidenceWithIsolation({
+        ...input,
+        evidenceIds: input.evidenceIds.slice(0, middle)
+      });
+      const right = await loadQualifiedEvidenceWithIsolation({
+        ...input,
+        evidenceIds: input.evidenceIds.slice(middle)
+      });
+      return Object.freeze([...left, ...right]);
+    }
+    input.params.warn(input.message, {
+      workspace_id: input.params.workspaceId,
+      operation: input.operation,
+      ...(input.evidenceIds.length === 1
+        ? { evidence_object_id: input.evidenceIds[0] }
+        : {}),
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
@@ -206,6 +234,9 @@ function buildMemoryEvidenceContexts(
   qualifiedSemanticFormations: readonly Readonly<RecallQualifiedEvidence>[]
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
+  const qualifiedAssertionEvidenceIds = collectQualifiedAssertionEvidenceIds(
+    qualifiedSemanticFormations
+  );
   const factKeysByEvidenceId = buildFactKeysByEvidenceId(qualifiedFactKeys);
   const gists: Record<string, string> = {};
   const semanticDocuments: Record<
@@ -224,7 +255,11 @@ function buildMemoryEvidenceContexts(
       workspaceId, entry, evidenceById, factKeysByEvidenceId, ranksByRef
     );
     if (documents.length > 0) semanticDocuments[entry.object_id] = documents;
-    const context = projectUniqueVerifiedContext(entry, evidenceById);
+    const context = projectUniqueVerifiedContext(
+      entry,
+      evidenceById,
+      qualifiedAssertionEvidenceIds
+    );
     if (context !== null) contexts[entry.object_id] = context;
   }
   return Object.freeze({
@@ -355,19 +390,21 @@ function orderEvidenceRefs(
 
 function projectUniqueVerifiedContext(
   entry: Readonly<MemoryEntry>,
-  evidenceById: ReadonlyMap<string, EvidenceRecord>
+  evidenceById: ReadonlyMap<string, EvidenceRecord>,
+  qualifiedAssertionEvidenceIds: ReadonlySet<string>
 ): Readonly<RecallVerifiedUserAssertionContext> | null {
   const taggedRecords = stableEvidenceRefs(entry).flatMap((evidenceRef) => {
     const record = evidenceById.get(evidenceRef);
-    return record?.evidence.source_hash?.startsWith(
-      VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX
-    ) === true
-      ? [record]
-      : [];
+    return record !== undefined && hasAssertionFamilyTag(record.evidence.source_hash)
+      ? [record] : [];
   });
   if (taggedRecords.length !== 1) return null;
   const record = taggedRecords[0]!;
-  if (!hasValidSourceReceipt(entry, record.evidence)) return null;
+  if (!hasQualifiedSourceReceipt(
+    entry,
+    record.evidence,
+    qualifiedAssertionEvidenceIds
+  )) return null;
   return projectVerifiedUserAssertionContext({
     evidenceRef: record.evidence.object_id,
     entryContent: entry.content,
@@ -379,31 +416,38 @@ function stableEvidenceRefs(entry: Readonly<MemoryEntry>): readonly string[] {
   return [...uniqueStrings(entry.evidence_refs)].sort();
 }
 
-// Assertion-family source_hash qualifies recall and verified-assertion context;
-// turn-fallback qualifies recall only — one column, two additive families.
-function hasValidSourceReceipt(
+function collectQualifiedAssertionEvidenceIds(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): ReadonlySet<string> {
+  return new Set(qualified.flatMap((item) =>
+    item.matched_projection === undefined &&
+    parseVerifiedUserAssertionSourceHash(item.capsule.source_hash) !== null
+      ? [item.capsule.object_id] : []
+  ));
+}
+
+function hasAssertionFamilyTag(sourceHash: string | null): boolean {
+  return sourceHash?.startsWith(VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX) === true ||
+    sourceHash?.startsWith(VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX) === true;
+}
+
+// Storage owns receipt, Signal, and EventLog qualification. Core only binds
+// that qualified capsule to the selected memory before projecting context.
+function hasQualifiedSourceReceipt(
   entry: Readonly<MemoryEntry>,
-  evidence: Readonly<EvidenceCapsule>
+  evidence: Readonly<EvidenceCapsule>,
+  qualifiedAssertionEvidenceIds: ReadonlySet<string>
 ): boolean {
   if (
+    !qualifiedAssertionEvidenceIds.has(evidence.object_id) ||
     evidence.lifecycle_state !== "active" ||
     evidence.created_by !== "garden_compile" ||
     evidence.evidence_kind !== "conversation_excerpt" ||
     evidence.evidence_health_state !== "verified" ||
     evidence.workspace_id !== entry.workspace_id ||
     evidence.run_id !== entry.run_id ||
-    evidence.surface_id !== entry.surface_id
+    evidence.surface_id !== entry.surface_id ||
+    evidence.excerpt !== entry.content
   ) return false;
-  const observedDigest = readVerifiedUserAssertionSourceHashDigest(evidence.source_hash);
-  if (observedDigest === null) return false;
-  const expectedDigest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: entry.workspace_id,
-      run_id: entry.run_id,
-      surface_id: entry.surface_id,
-      source_assertion: entry.content,
-      source_corpus: evidence.gist
-    }), "utf8")
-    .digest("hex");
-  return observedDigest === expectedDigest;
+  return parseVerifiedUserAssertionSourceHash(evidence.source_hash) !== null;
 }

@@ -3,12 +3,11 @@ import {
   CandidateMemorySignalSchema,
   SignalEventType,
   SoulSignalMaterializedPayloadSchema,
-  buildVerifiedUserAssertionReceiptPreimage,
   formatGardenSourceTurnFallbackSourceHash,
   formatGardenSourceTurnFallbackV2SourceHash,
   isGardenSourceTurnFallbackV2Receipt,
+  parseVerifiedUserAssertionSourceHash,
   readGardenSourceTurnFallbackArtifactSignalId,
-  readVerifiedUserAssertionSourceHashDigest,
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
   type EvidenceCapsule,
@@ -23,7 +22,8 @@ import {
 } from "./evidence-capsule-mappers.js";
 import type {
   EvidenceSearchMatch,
-  RecallQualifiedEvidence
+  RecallQualifiedEvidence,
+  VerifiedAssertionLocatorResolver
 } from "./evidence-recall-types.js";
 import {
   compareQualifiedProjectionIdentity,
@@ -37,6 +37,8 @@ import {
   readStoredSemanticFactorFormation,
   type StoredSemanticFactorFormationColumns
 } from "./qualification/semantic-factor-formation-read.js";
+import { matchesVerifiedAssertionReceipt } from
+  "./qualification/verified-assertion-receipt-proof.js";
 import {
   prepareQualifiedEvidenceStatements,
   type QualifiedEvidenceStatements
@@ -102,7 +104,10 @@ interface QualifiedEvidenceProof {
 export class RecallQualifiedEvidenceReader {
   private readonly statementHolder: RefreshableStatementHolder<QualifiedEvidenceStatements>;
 
-  public constructor(db: StorageDatabase) {
+  public constructor(
+    db: StorageDatabase,
+    private readonly resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver
+  ) {
     this.statementHolder = new RefreshableStatementHolder(
       db,
       prepareQualifiedEvidenceStatements
@@ -173,7 +178,8 @@ export class RecallQualifiedEvidenceReader {
         candidate,
         candidate.signalId === null ? undefined : signals.get(candidate.signalId),
         events,
-        match.matched_projection !== undefined
+        match.matched_projection !== undefined,
+        this.resolveVerifiedAssertionLocator
       );
       if (proof === null) return [];
       const qualified = qualifyEvidenceMatch(
@@ -201,7 +207,8 @@ export class RecallQualifiedEvidenceReader {
         candidate,
         candidate.signalId === null ? undefined : signals.get(candidate.signalId),
         events,
-        false
+        false,
+        this.resolveVerifiedAssertionLocator
       );
       return proof === null ? [] : [candidate.capsule.object_id];
     });
@@ -355,12 +362,21 @@ function readQualifiedProof(
   candidate: EvidenceCandidate,
   signal: Readonly<CandidateMemorySignal> | undefined,
   events: ReadonlyMap<string, readonly StoredMaterializationRow[]>,
-  strictProjection: boolean
+  strictProjection: boolean,
+  resolveAssertionLocator: VerifiedAssertionLocatorResolver | undefined
 ): Readonly<QualifiedEvidenceProof> | null {
-  if (readVerifiedUserAssertionSourceHashDigest(candidate.capsule.source_hash) !== null) {
-    return matchesAssertionReceipt(candidate.capsule)
-      ? Object.freeze({ turnReceipt: null })
-      : rejectProof(candidate, strictProjection);
+  if (parseVerifiedUserAssertionSourceHash(candidate.capsule.source_hash) !== null) {
+    const materializations = candidate.signalId === null ? [] : events.get(candidate.signalId) ?? [];
+    return signal !== undefined && matchesVerifiedAssertionReceipt({
+      capsule: candidate.capsule,
+      signalId: candidate.signalId,
+      signal,
+      resolveAssertionLocator
+    }) &&
+      materializations.length === 1 &&
+      matchesMaterialization(materializations[0]!, candidate, signal)
+        ? Object.freeze({ turnReceipt: null })
+        : rejectProof(candidate, strictProjection);
   }
   if (candidate.signalId === null) return null;
   if (signal === undefined) return null;
@@ -387,22 +403,6 @@ function rejectProof(
     );
   }
   return null;
-}
-
-function matchesAssertionReceipt(capsule: Readonly<EvidenceCapsule>): boolean {
-  const observedDigest = readVerifiedUserAssertionSourceHashDigest(capsule.source_hash);
-  const assertion = capsule.excerpt?.trim() ?? "";
-  if (observedDigest === null || assertion.length === 0) return false;
-  const expectedDigest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: capsule.workspace_id,
-      run_id: capsule.run_id,
-      surface_id: capsule.surface_id,
-      source_assertion: assertion,
-      source_corpus: capsule.gist
-    }), "utf8")
-    .digest("hex");
-  return observedDigest === expectedDigest;
 }
 
 function matchesReceipt(
@@ -433,25 +433,27 @@ function matchesReceiptSourceHash(
 function matchesMaterialization(
   row: StoredMaterializationRow,
   candidate: EvidenceCandidate,
-  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
+  identity: Readonly<Pick<CandidateMemorySignal, "signal_id" | "workspace_id" | "run_id">>
 ): boolean {
   if (candidate.signalId === null) return false;
   const payload = SoulSignalMaterializedPayloadSchema.safeParse(parseJson(row.payload_json));
   if (!payload.success) return false;
   const created = payload.data.created_objects;
+  const matchingEvidence = created.filter((object) =>
+    object.object_kind === "evidence_capsule" &&
+    object.object_id === candidate.capsule.object_id
+  );
   return row.event_type === SignalEventType.SOUL_SIGNAL_MATERIALIZED &&
     row.entity_type === "candidate_memory_signal" &&
     row.entity_id === candidate.signalId &&
-    row.workspace_id === receipt.workspace_id &&
-    row.run_id === receipt.run_id &&
+    row.workspace_id === identity.workspace_id &&
+    row.run_id === identity.run_id &&
     row.caused_by === "materialization_router" &&
     payload.data.signal_id === candidate.signalId &&
-    payload.data.workspace_id === receipt.workspace_id &&
-    payload.data.run_id === receipt.run_id &&
+    payload.data.workspace_id === identity.workspace_id &&
+    payload.data.run_id === identity.run_id &&
     payload.data.success === true &&
-    created.length === 1 &&
-    created[0]?.object_kind === "evidence_capsule" &&
-    created[0].object_id === candidate.capsule.object_id;
+    matchingEvidence.length === 1;
 }
 
 function parseJson(value: string | null): unknown {

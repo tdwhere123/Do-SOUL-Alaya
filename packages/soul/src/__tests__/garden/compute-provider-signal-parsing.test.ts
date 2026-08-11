@@ -1,29 +1,17 @@
-import { createHash } from "node:crypto";
-import {
-  BoundedJsonObjectSchema,
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash
-} from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenProviderError,
   OfficialApiGardenProvider,
   parseOfficialApiSignals
 } from "../../garden/compute-provider.js";
-import { buildOfficialApiSourceCorpus } from
-  "../../garden/grounding/source-locator.js";
-import { resolveGardenSignalGrounding } from
-  "../../garden/grounding/signal-source-grounding.js";
 import {
   SignalExtractorError} from "../../garden/pi-mono-extractor.js";
-import {
-  DISTILLED_FACT_MAX_CHARS,
-  buildEvidenceInput
-} from "../../garden/materialization-router.js";
+import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
 
 import {
   createContext as createBaseContext,
-  createExtractor
+  createExtractor,
+  openSignal
 } from "./compute-provider-fixtures.js";
 
 function createContext(turnContent?: string) {
@@ -35,38 +23,6 @@ function createContext(turnContent?: string) {
       content: turnContent
     }],
     allow_legacy_single_user_source: true
-  };
-}
-
-function openSignal<T extends { readonly matched_text: string }>(signal: T, assertionId = 1) {
-  return {
-    ...signal,
-    source_locator: {
-      contract_version: 2,
-      kind: "assertion_catalog",
-      assertion_id: assertionId
-    },
-    semantic_factor_graph: {
-      schema_version: 1,
-      source_kind: "evidence",
-      factors: [{
-        factor_id: "f0",
-        surface: signal.matched_text.slice(0, 64),
-        semantic_identity: signal.matched_text.slice(0, 64).toLowerCase()
-      }],
-      variables: [],
-      result_variable_ids: [],
-      propositions: [{
-        proposition_id: "p0",
-        predicate_factor_id: "f0",
-        arguments: [{
-          position: 0,
-          binding_identity: "assertion",
-          reference_kind: "factor",
-          reference_id: "f0"
-        }]
-      }]
-    }
   };
 }
 
@@ -116,69 +72,6 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       warn.mockRestore();
     }
   });
-
-  it("preserves a long source through a bounded verified assertion receipt", async () => {
-    const assertion = "I use the cobalt release channel for production deployments.";
-    const messages = [
-      {
-        message_id: "user-long-source",
-        role: "user" as const,
-        content: assertion,
-        created_at: "2026-08-09T00:00:00.000Z"
-      },
-      {
-        message_id: "assistant-long-source",
-        role: "assistant" as const,
-        content: "Background diagnostics. ".repeat(900),
-        created_at: "2026-08-09T00:00:01.000Z"
-      }
-    ];
-    const sourceCorpus = buildOfficialApiSourceCorpus(assertion, messages);
-    expect(sourceCorpus.length).toBeGreaterThan(16_384);
-    const provider = new OfficialApiGardenProvider({
-      apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
-        signals: [openSignal({
-          signal_kind: "potential_claim",
-          object_kind: "deployment_preference",
-          confidence: 0.9,
-          matched_text: assertion
-        })]
-      })),
-      generateSignalId: () => "signal-long-source"
-    });
-
-    const [signal] = await provider.compile(assertion, {
-      ...createBaseContext(),
-      turn_messages: messages
-    });
-
-    expect(signal).toBeDefined();
-    expect(BoundedJsonObjectSchema.safeParse(signal?.raw_payload).success).toBe(true);
-    expect(signal?.raw_payload.semantic_factor_graph).toBeDefined();
-    expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
-    const sourceHash = expectedVerifiedAssertionHash(assertion, sourceCorpus);
-    expect(signal?.raw_payload.verified_user_assertion_source_hash).toBe(sourceHash);
-    expect(buildEvidenceInput(signal!, undefined, { fullTurnExcerpt: true })).toMatchObject({
-      excerpt: assertion,
-      source_hash: sourceHash
-    });
-    const tampered = {
-      ...signal!,
-      raw_payload: {
-        ...signal!.raw_payload,
-        verified_user_assertion_source_hash:
-          "sha256:garden-verified-user-assertion-v1:not-a-digest"
-      }
-    };
-    expect(resolveGardenSignalGrounding(tampered)).toEqual({
-      status: "rejected",
-      reason: "source_grounding_rejected"
-    });
-    expect(buildEvidenceInput(tampered, undefined, { fullTurnExcerpt: true }).source_hash)
-      .toBeNull();
-  });
-
 
   it("emits one atomic signal per fact when the model splits a compound turn", async () => {
     const extractor = createExtractor(JSON.stringify({
@@ -509,16 +402,3 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
   });
 
 });
-
-function expectedVerifiedAssertionHash(assertion: string, sourceCorpus: string): string {
-  const digest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      surface_id: "surface-1",
-      source_assertion: assertion,
-      source_corpus: sourceCorpus
-    }), "utf8")
-    .digest("hex");
-  return formatVerifiedUserAssertionSourceHash(digest);
-}

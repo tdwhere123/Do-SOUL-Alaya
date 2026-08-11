@@ -1,9 +1,6 @@
-import { createHash } from "node:crypto";
 import {
   EvidenceHealthState,
   StorageTier,
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
@@ -12,8 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
-  readGardenVerifiedUserAssertionReceipt,
-  resolveGardenSignalGrounding
+  readGardenVerifiedUserAssertionReceipt
 } from "../grounding/signal-source-grounding.js";
 import {
   resolveVerifiedGardenTurnEvidenceProjection
@@ -249,7 +245,8 @@ function readFullTurnEvidenceExcerpt(signal: CandidateMemorySignal): string {
   if (
     typeof exact === "string" &&
     exact.trim().length > 0 &&
-    resolveVerifiedGardenTurnEvidenceProjection(signal, exact) !== null
+    (resolveVerifiedGardenTurnEvidenceProjection(signal, exact) !== null ||
+      readGardenVerifiedUserAssertionReceipt(signal) !== null)
   ) {
     return exact;
   }
@@ -265,7 +262,7 @@ function resolveEvidenceTextProjection(
 ): Readonly<{ excerpt: string; sourceHash: string | null }> {
   if (!fullTurnExcerpt) return { excerpt: sourceCorpus, sourceHash: null };
   const fallback = resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus);
-  const assertionSourceHash = buildVerifiedUserAssertionSourceHash(signal, sourceCorpus);
+  const assertionSourceHash = readGardenVerifiedUserAssertionReceipt(signal)?.sourceHash ?? null;
   const sourceHash = summarySuffix === undefined
     ? fallback?.sourceHash ?? assertionSourceHash
     : null;
@@ -276,54 +273,6 @@ function resolveEvidenceTextProjection(
     (fallback?.assistantObservations.length ? buildSignalSummary(signal) : sourceCorpus);
   return { excerpt, sourceHash };
 }
-
-function buildVerifiedUserAssertionSourceHash(
-  signal: CandidateMemorySignal,
-  sourceCorpus: string
-): string | null {
-  const receipt = readGardenVerifiedUserAssertionReceipt(signal);
-  if (receipt !== null) return receipt.sourceHash;
-  if (Object.hasOwn(signal.raw_payload, "verified_user_assertion_source_hash")) return null;
-  if (signal.source !== "garden_compile" ||
-      !Object.hasOwn(signal.raw_payload, "source_locator")) return null;
-  const fullTurn = readStringPayload(signal.raw_payload, "full_turn_content");
-  if (fullTurn === null || sourceCorpus !== fullTurn) return null;
-  const sourceGrounding = readRecordPayload(signal.raw_payload, "source_grounding");
-  if (
-    sourceGrounding?.version !== 1 ||
-    sourceGrounding?.status !== "grounded" ||
-    sourceGrounding.content_basis !== "source_assertion"
-  ) return null;
-  const grounding = resolveGardenSignalGrounding(signal);
-  if (grounding.status !== "grounded") return null;
-  const storedAssertion = readStringPayload(signal.raw_payload, "source_assertion");
-  if (
-    storedAssertion !== grounding.assertion ||
-    sourceGrounding.source_assertion !== grounding.assertion ||
-    buildDistilledFact(signal).trim() !== grounding.assertion
-  ) return null;
-  const digest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: signal.workspace_id,
-      run_id: signal.run_id,
-      surface_id: signal.surface_id,
-      source_assertion: grounding.assertion,
-      source_corpus: sourceCorpus
-    }), "utf8")
-    .digest("hex");
-  return formatVerifiedUserAssertionSourceHash(digest);
-}
-
-function readRecordPayload(
-  rawPayload: CandidateMemorySignal["raw_payload"],
-  key: string
-): Readonly<Record<string, unknown>> | null {
-  const value = rawPayload[key];
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
-}
-
 function buildSignalPhysicalAnchor(
   signal: CandidateMemorySignal,
   artifactRefOverride?: string | null

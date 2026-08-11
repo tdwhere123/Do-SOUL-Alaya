@@ -15,6 +15,7 @@ import {
   SqliteSynthesisCapsuleRepo,
   SqliteTemporalPathProjectionReader
 } from "@do-soul/alaya-storage";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import type {
   RecallReadWorkerRequest,
   RecallReadWorkerResponse
@@ -60,7 +61,10 @@ const temporalProjectionSelected = readTemporalProjectionSelected(workerData);
 const database = initDatabase({ filename: databaseFilename });
 database.connection.pragma("query_only = ON");
 const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
-const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
+const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(
+  database,
+  verifyOfficialApiSourceLocatorBinding
+);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const claimFormRepo = new SqliteClaimFormRepo(database);
 const recallPathReadPorts = temporalProjectionSelected

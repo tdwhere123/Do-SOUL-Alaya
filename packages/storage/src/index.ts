@@ -73,6 +73,8 @@ export {
   type EvidenceSearchMatch,
   type EvidenceSearchProjectionIdentity,
   type RecallQualifiedEvidence,
+  type VerifiedAssertionLocatorResolutionInput,
+  type VerifiedAssertionLocatorResolver,
   type EvidenceSourceAnchor
 } from "./repos/capsules/index.js";
 export {

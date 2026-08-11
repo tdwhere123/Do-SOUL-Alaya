@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   EvidenceCapsuleSchema,
-  EvidenceSearchProjectionSchema,
   EvidenceHealthStateSchema,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
   SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
-  readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
   type EvidenceFactFrameFormationProposal,
@@ -21,12 +19,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
-import { materializeEvidenceFactFrameFormation } from
-  "./evidence-fact-frame-formation.js";
 import type { EvidenceFactFrameProposalNormalizer } from
   "./fact-frame-formation/declarative-normalizer.js";
-import { materializeOpenSemanticFactorFormation } from
-  "../semantic/open-semantic-factor-formation.js";
+import { planEvidenceFormation } from "./evidence-create/formation-plan.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -146,33 +141,12 @@ export class EvidenceService {
       created_at: timestamp,
       updated_at: timestamp
     });
-    const suppliedProjections = searchProjections.map((projection) =>
-      EvidenceSearchProjectionSchema.parse(projection)
-    );
-    if (suppliedProjections.some(({ projection_kind: kind }) => kind === "fact_key")) {
-      throw new CoreError(
-        "VALIDATION",
-        "Fact-key projections must come from canonical fact-frame formation"
-      );
-    }
-    const formation = materializeEvidenceFactFrameFormation({
-      sourceAssertion: evidence.excerpt,
-      sourceHash: evidence.source_hash,
-      normalizer: readVerifiedUserAssertionSourceHashDigest(evidence.source_hash) === null
-        ? null
-        : this.dependencies.factFrameProposalNormalizer,
-      ...(factFrameProposal === undefined ? {} : { proposal: factFrameProposal })
-    });
-    const projections = Object.freeze([
-      ...suppliedProjections,
-      ...formation.searchProjections
-    ]);
-    const semanticFormation = materializeOpenSemanticFactorFormation({
-      source_kind: "evidence",
-      source_text: evidence.excerpt,
-      ...(semanticFactorProposal === undefined
-        ? {}
-        : { proposal: semanticFactorProposal })
+    const formation = planEvidenceFormation({
+      evidence,
+      searchProjections,
+      factFrameProposal,
+      semanticFactorProposal,
+      factFrameProposalNormalizer: this.dependencies.factFrameProposalNormalizer
     });
 
     const event = await this.dependencies.eventLogRepo.append({
@@ -192,9 +166,9 @@ export class EvidenceService {
 
     const created = await this.dependencies.evidenceCapsuleRepo.create(
       evidence,
-      projections,
-      formation.capture,
-      semanticFormation
+      formation.searchProjections,
+      formation.factFrameCapture,
+      formation.semanticFormation
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;

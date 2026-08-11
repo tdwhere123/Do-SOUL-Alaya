@@ -43,6 +43,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import {
   createOptionalGlobalMemoryRecallCacheRepo,
   createOptionalGlobalMemoryRepo
@@ -78,7 +79,10 @@ function createCoreDaemonRepos(database: StorageDatabase) {
     reconciliationLeaseRepo: new SqliteReconciliationLeaseRepo(database),
     signalRepo: new SqliteSignalRepo(database),
     edgeProposalRepo: new SqliteEdgeProposalRepo(database),
-    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
+    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(
+      database,
+      verifyOfficialApiSourceLocatorBinding
+    ),
     projectMappingAnchorRepo: new SqliteProjectMappingAnchorRepo(database),
     synthesisCapsuleRepo: new SqliteSynthesisCapsuleRepo(database),
     claimFormRepo: new SqliteClaimFormRepo(database),

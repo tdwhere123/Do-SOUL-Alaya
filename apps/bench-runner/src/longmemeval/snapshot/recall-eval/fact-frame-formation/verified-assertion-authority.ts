@@ -1,16 +1,24 @@
 import { createHash } from "node:crypto";
 import {
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
+  VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX,
   buildVerifiedUserAssertionReceiptPreimage,
   formatVerifiedUserAssertionSourceHash,
+  parseVerifiedUserAssertionSourceHash,
+  verifyVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
+import { parseOfficialApiSourceLocator } from "@do-soul/alaya-soul";
 import {
   SqliteSignalRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 
 const AUTHORITY_QUEUE_TABLE = "verified_assertion_formation_queue";
+const ASSERTION_SOURCE_HASH_PATTERNS = Object.freeze([
+  `${VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX}%`,
+  `${VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX}%`
+]);
 
 export interface VerifiedAssertionOwnerRow {
   readonly object_id: string;
@@ -71,7 +79,7 @@ export function initializeVerifiedAssertionAuthorityQueue(db: StorageDatabase): 
     );
   `);
   db.connection.prepare(INSERT_AUTHORITY_QUEUE_SQL).run(
-    `${VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX}%`
+    ...ASSERTION_SOURCE_HASH_PATTERNS
   );
   assertQueueIdentity(db, "signal_id", "multiple verified assertion owners resolve from one signal");
   assertQueueIdentity(db, "owner_id", "multiple verified assertion signals resolve to one evidence owner");
@@ -192,7 +200,7 @@ function assertOwnerAuthority(
   if (readNonEmptyString(signal.raw_payload.full_turn_content) !== owner.gist) {
     throw authorityError(signalId, "source corpus mismatch");
   }
-  if (owner.source_hash !== expectedSourceHash(owner, assertion)) {
+  if (!matchesExpectedSourceHash(owner, signal, assertion, signalId)) {
     throw authorityError(signalId, "verified assertion receipt mismatch");
   }
 }
@@ -200,7 +208,7 @@ function assertOwnerAuthority(
 function readAssertionOwner(db: StorageDatabase, signalId: string): VerifiedAssertionOwnerRow {
   const rows = db.connection.prepare(READ_OWNER_SQL).all(
     signalId,
-    `${VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX}%`
+    ...ASSERTION_SOURCE_HASH_PATTERNS
   ) as VerifiedAssertionOwnerRow[];
   if (rows.length !== 1) {
     throw authorityError(signalId, `expected one verified assertion owner, found ${rows.length}`);
@@ -229,6 +237,29 @@ function expectedSourceHash(owner: VerifiedAssertionOwnerRow, assertion: string)
       source_corpus: owner.gist
     })
   ));
+}
+
+function matchesExpectedSourceHash(
+  owner: VerifiedAssertionOwnerRow,
+  signal: AssertionSignalEnvelope,
+  assertion: string,
+  signalId: string
+): boolean {
+  const parsed = parseVerifiedUserAssertionSourceHash(owner.source_hash);
+  if (parsed?.version === 1) {
+    return owner.source_hash === expectedSourceHash(owner, assertion);
+  }
+  const sourceLocator = parseOfficialApiSourceLocator(signal.raw_payload.source_locator);
+  return parsed?.version === 2 && sourceLocator !== null &&
+    verifyVerifiedUserAssertionSourceHash(owner.source_hash, {
+      signal_id: signalId,
+      source_locator: sourceLocator,
+      workspace_id: owner.workspace_id,
+      run_id: owner.run_id,
+      surface_id: owner.surface_id,
+      source_assertion: assertion,
+      source_corpus: owner.gist
+    }, digestText);
 }
 
 function parseRawPayload(value: string, signalId: string): Readonly<Record<string, unknown>> {
@@ -267,7 +298,7 @@ const INSERT_AUTHORITY_QUEUE_SQL = `
       ON capsule.workspace_id = owner.workspace_id
      AND capsule.object_id = owner.owner_id
    WHERE owner.owner_kind = 'evidence_capsule'
-     AND capsule.source_hash LIKE ?
+     AND (capsule.source_hash LIKE ? OR capsule.source_hash LIKE ?)
    ORDER BY owner.signal_id ASC, owner.owner_id ASC
 `;
 
@@ -307,6 +338,6 @@ const READ_OWNER_SQL = `
      AND capsule.object_id = owner.owner_id
    WHERE owner.owner_kind = 'evidence_capsule'
      AND owner.signal_id = ?
-     AND capsule.source_hash LIKE ?
+     AND (capsule.source_hash LIKE ? OR capsule.source_hash LIKE ?)
    ORDER BY capsule.object_id ASC
 `;

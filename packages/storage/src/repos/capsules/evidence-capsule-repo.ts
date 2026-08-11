@@ -16,7 +16,8 @@ import {
 import type {
   EvidenceCapsuleKeywordHit,
   EvidenceSearchMatch,
-  RecallQualifiedEvidence
+  RecallQualifiedEvidence,
+  VerifiedAssertionLocatorResolver
 } from "./evidence-recall-types.js";
 import {
   DEFAULT_EVIDENCE_PAGE,
@@ -74,9 +75,15 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<EvidenceCapsuleStatements>;
   private readonly recallQualifiedReader: RecallQualifiedEvidenceReader;
 
-  public constructor(private readonly db: StorageDatabase) {
+  public constructor(
+    private readonly db: StorageDatabase,
+    resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver
+  ) {
     this.statementHolder = new RefreshableStatementHolder(db, prepareEvidenceCapsuleStatements);
-    this.recallQualifiedReader = new RecallQualifiedEvidenceReader(db);
+    this.recallQualifiedReader = new RecallQualifiedEvidenceReader(
+      db,
+      resolveVerifiedAssertionLocator
+    );
   }
 
   private get statements(): EvidenceCapsuleStatements {

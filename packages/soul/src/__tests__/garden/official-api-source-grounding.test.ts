@@ -418,6 +418,10 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.full_turn_content).toContain(assertion);
     expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
+    expect(signal?.raw_payload).toMatchObject({
+      source_locator: { contract_version: 2, kind: "assertion_catalog" },
+      verified_user_assertion_source_hash: expect.any(String)
+    });
   });
 });
 

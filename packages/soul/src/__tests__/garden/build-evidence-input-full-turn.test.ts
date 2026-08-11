@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash
+  buildVerifiedUserAssertionReceiptV2Preimage,
+  formatVerifiedUserAssertionV2SourceHash
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -75,9 +75,9 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
     const firstEvidence = buildEvidenceInput(firstSignal, undefined, { fullTurnExcerpt: true });
     const secondEvidence = buildEvidenceInput(secondSignal, undefined, { fullTurnExcerpt: true });
 
-    for (const [assertion, evidence] of [
-      [firstAssertion, firstEvidence],
-      [secondAssertion, secondEvidence]
+    for (const [assertion, evidence, assertionId] of [
+      [firstAssertion, firstEvidence, 1],
+      [secondAssertion, secondEvidence, 2]
     ] as const) {
       expect(evidence).toMatchObject({
         created_by: "garden_compile",
@@ -86,7 +86,7 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
         gist: sourceCorpus,
         excerpt: assertion,
         semantic_anchor: { summary: assertion },
-        source_hash: expectedSourceHash(assertion, sourceCorpus)
+        source_hash: expectedSourceHash(assertion, sourceCorpus, assertionId)
       });
     }
     expect(firstEvidence.excerpt).not.toBe(secondEvidence.excerpt);
@@ -115,17 +115,27 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
     });
   });
 
-  it("does not mint a receipt from a rejected or locator-free Garden payload", () => {
+  it("does not mint a receipt during materialization or from a locator-free payload", () => {
     const grounded = createGroundedGardenSignal();
+    const {
+      verified_user_assertion_source_hash: _sourceHash,
+      ...withoutProducerReceipt
+    } = grounded.raw_payload;
+    const unreceipted = buildEvidenceInput(createSignal({
+      ...grounded,
+      raw_payload: withoutProducerReceipt
+    }), undefined, { fullTurnExcerpt: true });
     const { source_locator: _sourceLocator, ...withoutLocator } = grounded.raw_payload;
-    const evidence = buildEvidenceInput(createSignal({
+    const locatorFree = buildEvidenceInput(createSignal({
       ...grounded,
       raw_payload: withoutLocator
     }), undefined, { fullTurnExcerpt: true });
 
-    expect(evidence.source_hash).toBeNull();
-    expect(evidence.evidence_health_state).toBe("questionable");
-    expect(evidence.evidence_kind).toBe("inferred");
+    for (const evidence of [unreceipted, locatorFree]) {
+      expect(evidence.source_hash).toBeNull();
+      expect(evidence.evidence_health_state).toBe("questionable");
+      expect(evidence.evidence_kind).toBe("inferred");
+    }
   });
 
   it("does not mint a receipt from contradictory audit fields or a derived gist", () => {
@@ -169,6 +179,8 @@ function createGroundedGardenSignal(
       distilled_fact: assertion,
       proposed_matched_text: assertion,
       source_assertion: assertion,
+      verified_user_assertion_source_hash:
+        expectedSourceHash(assertion, sourceCorpus, assertionId),
       source_locator: {
         contract_version: 2,
         kind: "assertion_catalog",
@@ -187,9 +199,19 @@ function createGroundedGardenSignal(
   });
 }
 
-function expectedSourceHash(sourceAssertion: string, sourceCorpus: string): string {
+function expectedSourceHash(
+  sourceAssertion: string,
+  sourceCorpus: string,
+  assertionId: number
+): string {
   const digest = createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
+    .update(buildVerifiedUserAssertionReceiptV2Preimage({
+      signal_id: "signal-1",
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: assertionId
+      },
       workspace_id: "workspace-1",
       run_id: "run-1",
       surface_id: null,
@@ -197,5 +219,5 @@ function expectedSourceHash(sourceAssertion: string, sourceCorpus: string): stri
       source_corpus: sourceCorpus
     }), "utf8")
     .digest("hex");
-  return formatVerifiedUserAssertionSourceHash(digest);
+  return formatVerifiedUserAssertionV2SourceHash(digest);
 }

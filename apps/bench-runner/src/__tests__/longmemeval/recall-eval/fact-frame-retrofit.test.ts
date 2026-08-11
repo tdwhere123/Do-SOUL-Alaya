@@ -3,7 +3,9 @@ import { copyFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildVerifiedUserAssertionReceiptPreimage,
+  buildVerifiedUserAssertionReceiptV2Preimage,
   formatVerifiedUserAssertionSourceHash,
+  formatVerifiedUserAssertionV2SourceHash,
   type AssociativeFactFrame
 } from "@do-soul/alaya-protocol";
 import {
@@ -113,7 +115,7 @@ describe("verified assertion fact-frame working-copy formation", () => {
     const db = initDatabase({ filename: fixture.sourceDbPath, temporalMode: "candidate" });
     try {
       bindStoredAssertionOwner(db, "signal-assertion-a", fixture.evidenceIds[0]!);
-      bindStoredAssertionOwner(db, "signal-assertion-b", fixture.evidenceIds[1]!);
+      bindStoredAssertionOwner(db, "signal-assertion-b", fixture.evidenceIds[1]!, 2);
       const report = db.connection.transaction(() =>
         backfillMissingFactFrameFormations(db, 1)
       )();
@@ -199,25 +201,45 @@ async function assertionFixture(): ReturnType<typeof createSourceFixture> {
   }], bindVerifiedAssertionOwner);
 }
 
-function bindVerifiedAssertionOwner(db: StorageDatabase, owner: SeededOwner): void {
+function bindVerifiedAssertionOwner(
+  db: StorageDatabase,
+  owner: SeededOwner,
+  receiptVersion: 1 | 2 = 1
+): void {
   const row = db.connection.prepare(
     "SELECT gist FROM evidence_capsules WHERE object_id = ?"
   ).get(owner.evidenceId) as { readonly gist: string };
-  const sourceHash = formatVerifiedUserAssertionSourceHash(createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
+  const baseReceipt = {
       workspace_id: owner.signal.workspace_id,
       run_id: owner.signal.run_id,
       surface_id: owner.signal.surface_id,
       source_assertion: ASSERTION,
       source_corpus: row.gist
-    }), "utf8")
-    .digest("hex"));
+  };
+  const sourceLocator = {
+    contract_version: 2 as const,
+    kind: "assertion_catalog" as const,
+    assertion_id: 1
+  };
+  const sourceHash = receiptVersion === 1
+    ? formatVerifiedUserAssertionSourceHash(digest(
+      buildVerifiedUserAssertionReceiptPreimage(baseReceipt)
+    ))
+    : formatVerifiedUserAssertionV2SourceHash(digest(
+      buildVerifiedUserAssertionReceiptV2Preimage({
+        ...baseReceipt,
+        signal_id: owner.signal.signal_id,
+        source_locator: sourceLocator
+      })
+    ));
   db.connection.prepare(
     "UPDATE signals SET raw_payload_json = ? WHERE signal_id = ?"
   ).run(JSON.stringify({
     ...owner.signal.raw_payload,
     source_assertion: ASSERTION,
     distilled_fact: ASSERTION,
+    verified_user_assertion_source_hash: sourceHash,
+    ...(receiptVersion === 1 ? {} : { source_locator: sourceLocator }),
     source_grounding: {
       version: 1,
       status: "grounded",
@@ -242,11 +264,16 @@ function bindVerifiedAssertionOwner(db: StorageDatabase, owner: SeededOwner): vo
 function bindStoredAssertionOwner(
   db: StorageDatabase,
   signalId: string,
-  evidenceId: string
+  evidenceId: string,
+  receiptVersion: 1 | 2 = 1
 ): void {
   const signal = new SqliteSignalRepo(db).getByIdInCurrentTransaction(signalId);
   if (signal === null) throw new Error(`fixture signal ${signalId} missing`);
-  bindVerifiedAssertionOwner(db, { signal, evidenceId });
+  bindVerifiedAssertionOwner(db, { signal, evidenceId }, receiptVersion);
+}
+
+function digest(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 async function writeLedger(path: string, assertionSha256: string): Promise<void> {

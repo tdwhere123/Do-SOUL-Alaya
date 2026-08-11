@@ -12,6 +12,7 @@ import {
   RecallQualifiedEvidenceReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import {
   disposeVerifiedAssertionAuthorityQueue,
   initializeVerifiedAssertionAuthorityQueue,
@@ -138,7 +139,10 @@ function assertRuntimeQualifiedOwners(
     current.push(authority);
     byWorkspace.set(authority.owner.workspace_id, current);
   }
-  const reader = new RecallQualifiedEvidenceReader(db);
+  const reader = new RecallQualifiedEvidenceReader(
+    db,
+    verifyOfficialApiSourceLocatorBinding
+  );
   for (const [workspaceId, workspaceAuthorities] of byWorkspace) {
     const requested = workspaceAuthorities.map(({ owner }) => owner.object_id);
     const qualified = new Set(reader.findReceiptQualifiedOwnerIds(workspaceId, requested));

@@ -1,6 +1,6 @@
 import {
   mergeFtsLaneIds,
-  readVerifiedUserAssertionSourceHashDigest,
+  parseVerifiedUserAssertionSourceHash,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import type {
@@ -17,6 +17,8 @@ import type { RecallEvidenceProjectionMatchReceipt } from
 import type {
   SemanticSupplementParams
 } from "../coarse-filter-semantic.js";
+import { isEvidenceProjectionIntegrityError } from
+  "../../runtime/recall-service-helpers.js";
 import {
   buildDirectEvidencePseudoMemoryEntry,
   isDirectRecallEvidence
@@ -133,7 +135,7 @@ function isVerifiedAssertionOwnerMatch(
   qualified: Readonly<RecallQualifiedEvidence>
 ): boolean {
   return qualified.matched_projection === undefined &&
-    readVerifiedUserAssertionSourceHashDigest(
+    parseVerifiedUserAssertionSourceHash(
       qualified.capsule.source_hash
     ) !== null;
 }
@@ -193,11 +195,6 @@ function projectionMatchReceiptIdentity(
   receipt: Readonly<RecallEvidenceProjectionMatchReceipt>
 ): string {
   return `${receipt.projection_kind}:${receipt.projection_id ?? "owner"}`;
-}
-
-export function isEvidenceProjectionIntegrityError(error: unknown): boolean {
-  return error instanceof Error &&
-    error.name === "EvidenceProjectionIntegrityError";
 }
 
 function toEvidenceSearchMatch(

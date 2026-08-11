@@ -3,7 +3,12 @@ import {
   type MemoryEntry,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
+import {
+  clamp01,
+  errorNameOf,
+  isEvidenceProjectionIntegrityError,
+  toErrorMessage
+} from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type { KeywordSearchResult } from "../runtime/recall-service-types.js";
 import type { RecallEvidenceProjectionMatchReceipt } from
@@ -21,10 +26,7 @@ import {
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
-import {
-  admitQualifiedEvidenceMatches,
-  isEvidenceProjectionIntegrityError
-} from
+import { admitQualifiedEvidenceMatches } from
   "./evidence/qualified-evidence-admission.js";
 import type {
   RecallMemoryFieldVariant,

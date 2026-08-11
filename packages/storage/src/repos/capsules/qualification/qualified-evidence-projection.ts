@@ -6,7 +6,7 @@ import {
   isGardenSourceTurnFallbackV2Receipt,
   projectGardenSourceTurnFallbackV2AssistantObservations,
   projectGardenSourceTurnFallbackV2UserContent,
-  readVerifiedUserAssertionSourceHashDigest,
+  parseVerifiedUserAssertionSourceHash,
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
   type EvidenceSearchProjection,
@@ -217,7 +217,7 @@ function matchesOwnerProjection(
 ): boolean {
   // Assertion-family stores the distilled fact in excerpt; turn-span equality
   // would reject the display-atomic arm after its assertion proof already bound it.
-  if (readVerifiedUserAssertionSourceHashDigest(capsule.source_hash) !== null) {
+  if (parseVerifiedUserAssertionSourceHash(capsule.source_hash) !== null) {
     return (capsule.excerpt?.trim() ?? "").length > 0;
   }
   if (receipt === null) return false;

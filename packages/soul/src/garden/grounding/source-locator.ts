@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
+  buildSourceVerificationText,
   PREFERENCE_SOURCE_ASSERTION_MAX_CHARS,
   resolveAtomicSourceAssertion,
   resolveSourceAssertion,
@@ -17,6 +18,7 @@ import {
 import { atomicAssertionSpans } from "./source-assertion/atomic-spans.js";
 import {
   collectSourceRoleMarkers,
+  sourceRoleMarkerPrefixLength,
   stripSourceRoleMarker,
   type SourceConversationRole,
   type SourceRoleMarker
@@ -40,6 +42,11 @@ export interface OfficialApiSourceAssertion {
   readonly text: string;
 }
 
+export interface OfficialApiVerifiedUserAssertionSource {
+  readonly source_corpus: string;
+  readonly source_locator: OfficialApiSourceLocator;
+}
+
 interface IndexedSourceAssertion extends OfficialApiSourceAssertion {
   readonly start: number;
   readonly end: number;
@@ -56,12 +63,9 @@ export function buildOfficialApiSourceCorpus(
   turnContent: string,
   messages: readonly Pick<ConversationMessage, "role" | "content">[]
 ): string {
-  const source = messages.length === 0
-    ? `User: ${canonicalMessageContent(turnContent)}`
-    : messages.map((message) =>
-      `${roleLabel(message.role)}: ${canonicalMessageContent(message.content)}`
-    ).join("\n");
-  return source;
+  return canonicalSourceMessages(turnContent, messages)
+    .map(({ source }) => source)
+    .join("\n");
 }
 
 export function buildOfficialApiSourceAssertions(
@@ -70,6 +74,49 @@ export function buildOfficialApiSourceAssertions(
   return Object.freeze(indexSourceAssertions(sourceText).map(({ assertion_id, text }) =>
     Object.freeze({ assertion_id, text })
   ));
+}
+
+export function buildOfficialApiVerifiedUserAssertionSource(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  locator: OfficialApiSourceLocator | undefined,
+  assertion: string,
+  maxChars = 2_048
+): OfficialApiVerifiedUserAssertionSource | null {
+  const sourceText = buildOfficialApiSourceCorpus(turnContent, messages);
+  const block = structuredUserAssertionBlock(turnContent, messages, assertion);
+  if (block === null) return null;
+  const sourceCorpus = boundUserSourceBlock(block, assertion, maxChars);
+  if (sourceCorpus === null) return null;
+  const sourceLocator = rebindOfficialApiSourceLocatorQuote(sourceCorpus, assertion, {
+    sourceText,
+    locator
+  });
+  return sourceLocator === null ? null : { source_corpus: sourceCorpus, source_locator: sourceLocator };
+}
+
+export function rebindOfficialApiSourceLocatorQuote(
+  sourceText: string,
+  assertion: string,
+  preferred?: Readonly<{
+    readonly sourceText: string;
+    readonly locator: OfficialApiSourceLocator | undefined;
+  }>
+): OfficialApiSourceLocator | null {
+  const maxChars = sourceAssertionMaxChars(assertion);
+  const original = preferred?.locator === undefined
+    ? null
+    : resolveOfficialApiSourceLocator(preferred.sourceText, preferred.locator, maxChars);
+  const originalAssertion = original?.status === "grounded" ? original.assertion : null;
+  const catalog = [...buildOfficialApiSourceAssertions(sourceText)].sort((left, right) =>
+    locatorPreference(left.text, right.text, assertion, originalAssertion)
+  );
+  for (const candidate of catalog) {
+    const rebound = catalogLocator(candidate.assertion_id);
+    const resolution = resolveOfficialApiSourceLocatorQuote(sourceText, rebound, assertion, maxChars);
+    if (resolution.status === "grounded" && resolution.assertion === assertion) return rebound;
+  }
+  return null;
 }
 
 export function resolveOfficialApiSourceLocator(
@@ -175,6 +222,62 @@ function sourceMessageBlockAt(
   if (index < 0) return null;
   const marker = markers[index]!;
   return { start: marker.start, end: markers[index + 1]?.start ?? sourceLength, role: marker.role };
+}
+
+function structuredUserAssertionBlock(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  assertion: string
+): string | null {
+  const matches = canonicalSourceMessages(turnContent, messages).filter(({ role, source }) =>
+    role === "user" && source.includes(assertion)
+  );
+  if (matches.length !== 1) return null;
+  const source = matches[0]!.source;
+  const offset = source.indexOf(assertion);
+  return source.indexOf(assertion, offset + 1) < 0 ? source : null;
+}
+
+function boundUserSourceBlock(
+  block: string,
+  assertion: string,
+  maxChars: number
+): string | null {
+  if (maxChars <= "User: ".length || block.length === 0) return null;
+  if (block.length <= maxChars) return block;
+  const prefixLength = sourceRoleMarkerPrefixLength(block);
+  if (prefixLength === 0) return null;
+  const bounded = buildSourceVerificationText(
+    block.slice(prefixLength),
+    assertion,
+    maxChars - "User: ".length
+  );
+  return bounded.includes(assertion) ? `User: ${bounded}` : null;
+}
+
+function locatorPreference(
+  left: string,
+  right: string,
+  assertion: string,
+  originalAssertion: string | null
+): number {
+  const priority = (value: string): number =>
+    value === assertion ? 0 : value === originalAssertion ? 1 : 2;
+  return priority(left) - priority(right);
+}
+
+export function sourceAssertionMaxChars(assertion: string): number {
+  return parseDirectPreferenceRelation(assertion) === undefined
+    ? SOURCE_ASSERTION_MAX_CHARS
+    : PREFERENCE_SOURCE_ASSERTION_MAX_CHARS;
+}
+
+function catalogLocator(assertionId: number): OfficialApiSourceLocator {
+  return {
+    contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+    kind: "assertion_catalog",
+    assertion_id: assertionId
+  };
 }
 
 function isRecoverableVerbatimUserQuote(value: string, maxChars: number): boolean {
@@ -366,8 +469,21 @@ function roleLabel(role: "user" | "assistant"): "User" | "Assistant" {
   return role === "user" ? "User" : "Assistant";
 }
 
+function canonicalSourceMessages(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[]
+): readonly Readonly<{ role: "user" | "assistant"; source: string }>[] {
+  const sourceMessages = messages.length === 0
+    ? [{ role: "user" as const, content: turnContent }]
+    : messages;
+  return sourceMessages.map((message) => ({
+    role: message.role,
+    source: `${roleLabel(message.role)}: ${canonicalMessageContent(message.content)}`
+  }));
+}
+
 function canonicalMessageContent(content: string): string {
-  return content.trim().replace(/\s*[\r\n]+\s*/gu, " ");
+  return content.trim().replace(/\s*[\r\n\u2028\u2029]+\s*/gu, " ");
 }
 
 function rejectedLocator(): SourceAssertionResolution {

@@ -1,8 +1,13 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  buildVerifiedUserAssertionReceiptV2Preimage,
+  formatVerifiedUserAssertionV2SourceHash,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID } from
   "@do-soul/alaya-core";
 import {
@@ -383,16 +388,24 @@ function factFrameSignal(
       { role: "value" as const, text: mode === "rejected" ? "Nova" : "Atlas" }
     ]
   };
+  const signalId = `signal-${mode}`;
+  const sourceLocator = {
+    contract_version: 2 as const,
+    kind: "assertion_catalog" as const,
+    assertion_id: 1
+  };
   return {
     ...signal,
-    signal_id: `signal-${mode}`,
+    signal_id: signalId,
     raw_payload: {
       ...signal.raw_payload,
-      source_locator: {
-        contract_version: 2,
-        kind: "assertion_catalog",
-        assertion_id: 1
-      },
+      source_locator: sourceLocator,
+      verified_user_assertion_source_hash: verifiedAssertionReceipt({
+        signalId,
+        sourceLocator,
+        assertion,
+        sourceCorpus: `User: ${assertion}`
+      }),
       source_grounding: {
         version: 1,
         status: "grounded",
@@ -408,4 +421,29 @@ function factFrameSignal(
       ...(mode === "formed" ? { fact_frame: frame } : {})
     }
   };
+}
+
+function verifiedAssertionReceipt(input: Readonly<{
+  readonly signalId: string;
+  readonly sourceLocator: {
+    readonly contract_version: 2;
+    readonly kind: "assertion_catalog";
+    readonly assertion_id: number;
+  };
+  readonly assertion: string;
+  readonly sourceCorpus: string;
+}>): string {
+  const digest = createHash("sha256").update(
+    buildVerifiedUserAssertionReceiptV2Preimage({
+      signal_id: input.signalId,
+      source_locator: input.sourceLocator,
+      workspace_id: "workspace-replay",
+      run_id: "run-replay",
+      surface_id: null,
+      source_assertion: input.assertion,
+      source_corpus: input.sourceCorpus
+    }),
+    "utf8"
+  ).digest("hex");
+  return formatVerifiedUserAssertionV2SourceHash(digest);
 }

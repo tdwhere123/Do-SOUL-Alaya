@@ -3,7 +3,7 @@ import {
   AssociativeFactFrameSchema,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
   OpenSemanticFactorGraphProposalSchema,
-  readVerifiedUserAssertionSourceHashDigest
+  parseVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import {
   parseOfficialApiSemanticFactorGraphProjectionAudit,
@@ -15,10 +15,10 @@ const PREFERENCE_PROFILE_OMITTED_REASON =
   "proposed_preference_profile_omitted_for_payload_bound";
 
 const RETAINED_STRING_LIMITS = {
-  matched_text: 1_024,
+  matched_text: 2_048,
   distilled_fact: 2_048,
   source_assertion: 2_048,
-  proposed_matched_text: 1_024,
+  proposed_matched_text: 2_048,
   proposed_distilled_fact: 2_048,
   full_turn_content: 2_048,
   turn_content_excerpt: 256,
@@ -73,6 +73,11 @@ const OPTIONAL_SEMANTIC_PROJECTION_KEYS = [
   "fact_frame",
   "semantic_factor_graph"
 ] as const;
+const V2_RECEIPT_REQUIRED_DUPLICATE_KEYS = new Set<string>([
+  "matched_text",
+  "distilled_fact",
+  "source_assertion"
+]);
 
 export function projectCompileRawPayload(
   rawPayload: Readonly<Record<string, unknown>>
@@ -190,8 +195,13 @@ function fitProjectedPayload(
     delete grounding.proposed_preference_profile;
     addOmittedPreferenceAudit(grounding, proposed);
   }
+  const preservesV2Receipt = parseVerifiedUserAssertionSourceHash(
+    typeof projection.verified_user_assertion_source_hash === "string"
+      ? projection.verified_user_assertion_source_hash : null
+  )?.version === 2;
   for (const key of OPTIONAL_DUPLICATE_KEYS) {
     if (fitsRawPayload(projection)) return projection;
+    if (preservesV2Receipt && V2_RECEIPT_REQUIRED_DUPLICATE_KEYS.has(key)) continue;
     delete projection[key];
   }
   compactGroundingReasons(grounding);
@@ -216,7 +226,7 @@ function addVerifiedSourceReceipt(
   const receipt = rawPayload.verified_user_assertion_source_hash;
   if (
     typeof receipt === "string" &&
-    readVerifiedUserAssertionSourceHashDigest(receipt) !== null
+    parseVerifiedUserAssertionSourceHash(receipt) !== null
   ) {
     projection.verified_user_assertion_source_hash = receipt;
   }

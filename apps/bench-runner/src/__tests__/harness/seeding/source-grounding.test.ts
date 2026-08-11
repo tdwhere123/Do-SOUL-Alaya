@@ -164,9 +164,17 @@ describe("compile source grounding revalidation", () => {
     expect.soft(draft?.turnMessages).toEqual(turnMessages);
     const payload = attachCompileSourceGrounding(
       draft!.productionRawPayload!,
-      { ...draft!, evidenceRef: "message-embedded-newline" }
+      { ...draft!, evidenceRef: "message-embedded-newline" },
+      {
+        workspaceId: "workspace-embedded-newline",
+        runId: "run-embedded-newline",
+        signalId: "bench-signal-embedded-newline"
+      }
     );
     expect(payload.full_turn_content).toBe(canonicalCorpus);
+    expect(payload.verified_user_assertion_source_hash).toMatch(
+      /^sha256:garden-verified-user-assertion-v2:[0-9a-f]{64}$/u
+    );
     expect(payload.source_grounding).toMatchObject({
       status: "grounded",
       source_assertion: "I prefer dark mode."

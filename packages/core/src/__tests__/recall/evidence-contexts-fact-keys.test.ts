@@ -10,7 +10,6 @@ import { collectRecallEvidenceContexts } from
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const ASSERTION = "I bought my bookshelf from IKEA.";
-const GIST = `User: ${ASSERTION}`;
 
 describe("recall evidence contexts for associative fact keys", () => {
   it("feeds one source-qualified fact-key field to semantic scoring", async () => {
@@ -62,20 +61,179 @@ describe("recall evidence contexts for associative fact keys", () => {
       }
     ]);
   });
+
+  it("isolates an invalid receipt owner without clearing valid sibling fact keys", async () => {
+    const validEntry = createMemoryEntry({
+      object_id: "memory-valid",
+      content: ASSERTION,
+      evidence_refs: ["evidence-valid"]
+    });
+    const invalidEntry = createMemoryEntry({
+      object_id: "memory-invalid",
+      content: "I bought my desk from IKEA.",
+      evidence_refs: ["evidence-invalid"]
+    });
+    const validEvidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-valid"
+    });
+    const invalidEvidence = {
+      ...createVerifiedAssertionEvidence({
+        objectId: "evidence-invalid",
+        assertion: invalidEntry.content
+      }),
+      source_hash: formatVerifiedUserAssertionSourceHash("0".repeat(64))
+    };
+    const invalidOwnerError = new Error(
+      "evidence-invalid does not match its verified receipt"
+    );
+    invalidOwnerError.name = "EvidenceProjectionIntegrityError";
+    const warn = vi.fn();
+    const findFactKeys = vi.fn(async (
+      _workspaceId: string,
+      evidenceIds: readonly string[]
+    ) => {
+      if (evidenceIds.includes(invalidEvidence.object_id)) {
+        throw invalidOwnerError;
+      }
+      return [{
+        capsule: validEvidence,
+        verified_user_projection: false,
+        matched_fact_key_forms: [{
+          kind: "leave_one_slot_out" as const,
+          omitted_slot: { slot_index: 2, role: "value" as const }
+        }],
+        matched_projection: {
+          projection_id: 5,
+          projection_kind: "fact_key" as const,
+          content: "I bought my bookshelf"
+        }
+      }];
+    });
+
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => [validEvidence, invalidEvidence]),
+          findRecallQualifiedFactKeysByIds: findFactKeys
+        }
+      },
+      warn,
+      workspaceId: "workspace-1",
+      candidates: [validEntry, invalidEntry],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {}
+    });
+
+    expect.soft(contexts.evidenceSemanticDocumentsByMemoryId[validEntry.object_id])
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ documentIdentity: "fact_key:5" })
+      ]));
+    expect.soft(contexts.verifiedUserAssertionContextsByMemoryId[invalidEntry.object_id])
+      .toBeUndefined();
+    expect.soft(contexts.evidenceSemanticDocumentsByMemoryId[invalidEntry.object_id] ?? [])
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ documentIdentity: "fact_key:5" })
+      ]));
+    expect.soft(warn).toHaveBeenCalledWith(
+      "fact-key evidence context lookup failed",
+      expect.objectContaining({ error: invalidOwnerError.message })
+    );
+  });
+
+  it("stops recursive isolation when a child lookup throws a non-integrity error", async () => {
+    const leftEntry = createMemoryEntry({
+      object_id: "memory-left",
+      content: ASSERTION,
+      evidence_refs: ["evidence-left"]
+    });
+    const rightEntry = createMemoryEntry({
+      object_id: "memory-right",
+      content: "I bought my desk from IKEA.",
+      evidence_refs: ["evidence-right"]
+    });
+    const leftEvidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-left"
+    });
+    const rightEvidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-right",
+      assertion: rightEntry.content
+    });
+    const rootIntegrityError = new Error("mixed receipt integrity failure");
+    rootIntegrityError.name = "EvidenceProjectionIntegrityError";
+    const childLookupError = new Error("fact-key storage unavailable");
+    const findFactKeys = vi.fn(async (
+      _workspaceId: string,
+      evidenceIds: readonly string[]
+    ) => {
+      if (evidenceIds.length > 1) throw rootIntegrityError;
+      if (evidenceIds[0] === leftEvidence.object_id) throw childLookupError;
+      return [{
+        capsule: rightEvidence,
+        verified_user_projection: false,
+        matched_fact_key_forms: [],
+        matched_projection: {
+          projection_id: 6,
+          projection_kind: "fact_key" as const,
+          content: "I bought my desk"
+        }
+      }];
+    });
+    const warn = vi.fn();
+
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => [leftEvidence, rightEvidence]),
+          findRecallQualifiedFactKeysByIds: findFactKeys
+        }
+      },
+      warn,
+      workspaceId: "workspace-1",
+      candidates: [leftEntry, rightEntry],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {}
+    });
+
+    expect(contexts).toEqual({
+      evidenceGistsByMemoryId: {},
+      evidenceSemanticDocumentsByMemoryId: {},
+      verifiedUserAssertionContextsByMemoryId: {},
+      semanticFactorFormationsByEvidenceId: {}
+    });
+    expect(findFactKeys.mock.calls.map((call) => call[1])).toEqual([
+      ["evidence-left", "evidence-right"],
+      ["evidence-left"]
+    ]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "evidence context lookup for coverage and answer authority failed",
+      expect.objectContaining({
+        errorName: "Error",
+        error: childLookupError.message
+      })
+    );
+  });
 });
 
-function createVerifiedAssertionEvidence(): EvidenceCapsule {
+function createVerifiedAssertionEvidence(input: Readonly<{
+  readonly objectId?: string;
+  readonly assertion?: string;
+}> = {}): EvidenceCapsule {
+  const assertion = input.assertion ?? ASSERTION;
+  const gist = `User: ${assertion}`;
   const sourceHash = formatVerifiedUserAssertionSourceHash(createHash("sha256")
     .update(buildVerifiedUserAssertionReceiptPreimage({
       workspace_id: "workspace-1",
       run_id: "run-1",
       surface_id: null,
-      source_assertion: ASSERTION,
-      source_corpus: GIST
+      source_assertion: assertion,
+      source_corpus: gist
     }), "utf8")
     .digest("hex"));
   return {
-    object_id: "evidence-1",
+    object_id: input.objectId ?? "evidence-1",
     object_kind: "evidence_capsule",
     schema_version: 1,
     lifecycle_state: "active",
@@ -83,12 +241,12 @@ function createVerifiedAssertionEvidence(): EvidenceCapsule {
     updated_at: "2026-03-20T00:00:00.000Z",
     created_by: "garden_compile",
     evidence_kind: "conversation_excerpt",
-    semantic_anchor: { topic: "bookshelf", keywords: [], summary: ASSERTION },
+    semantic_anchor: { topic: "bookshelf", keywords: [], summary: assertion },
     event_anchor: null,
     physical_anchor: null,
     evidence_health_state: "verified",
-    gist: GIST,
-    excerpt: ASSERTION,
+    gist,
+    excerpt: assertion,
     source_hash: sourceHash,
     run_id: "run-1",
     workspace_id: "workspace-1",

@@ -55,6 +55,20 @@ export function withOpenSemanticFactorGraph<T extends Readonly<Record<string, un
   };
 }
 
+export function openSignal<T extends Readonly<{ readonly matched_text: string }>>(
+  signal: T,
+  assertionId = 1
+) {
+  return {
+    ...withOpenSemanticFactorGraph(signal),
+    source_locator: {
+      contract_version: 2,
+      kind: "assertion_catalog",
+      assertion_id: assertionId
+    }
+  };
+}
+
 function canonicalSemanticIdentity(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }

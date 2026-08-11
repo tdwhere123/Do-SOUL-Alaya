@@ -270,6 +270,7 @@ function formGroundedDraft(
       runId: input.run_id,
       surfaceId: input.surface_id,
       normalizedTurnContent: input.turn_content.trim(),
+      turnMessages: input.turn_messages ?? [],
       groundingSourceText: draft.source_locator === undefined
         ? input.turn_content.trim()
         : buildOfficialApiSourceCorpus(input.turn_content.trim(), input.turn_messages!),

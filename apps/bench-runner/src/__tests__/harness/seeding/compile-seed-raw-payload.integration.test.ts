@@ -234,8 +234,14 @@ describe("compile-seed raw payload projection", () => {
       assertion_id: 1
     });
     expect(signal?.raw_payload.verified_user_assertion_source_hash).toMatch(
-      /^sha256:garden-verified-user-assertion-v1:[0-9a-f]{64}$/u
+      /^sha256:garden-verified-user-assertion-v2:[0-9a-f]{64}$/u
     );
+    expect(signal?.raw_payload).toMatchObject({
+      matched_text: source,
+      distilled_fact: source,
+      source_assertion: source,
+      full_turn_content: `User: ${source}`
+    });
     expect(signal?.raw_payload.semantic_factor_graph).toEqual(
       draft?.productionRawPayload?.semantic_factor_graph
     );

@@ -172,17 +172,30 @@ describe("compile raw payload projection", () => {
     );
   });
 
-  it("drops oversized semantic projections last while retaining source authority", () => {
+  it("keeps the complete v2 verification tuple when semantic projections overflow", () => {
+    const assertion = `I prefer ${"x".repeat(600)}.`;
     const sourceLocator = {
       contract_version: 2,
       kind: "assertion_catalog",
-      assertion_id: 7
+      assertion_id: 1
     };
     const verifiedSourceHash =
-      `sha256:garden-verified-user-assertion-v1:${"b".repeat(64)}`;
+      `sha256:garden-verified-user-assertion-v2:${"b".repeat(64)}`;
     const projected = projectCompileRawPayload({
+      matched_text: assertion,
+      distilled_fact: assertion,
+      source_assertion: assertion,
+      full_turn_content: `User: ${assertion}`,
       source_locator: sourceLocator,
       verified_user_assertion_source_hash: verifiedSourceHash,
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: assertion,
+        proposed_matched_text: assertion,
+        reasons: []
+      },
       semantic_factor_graph: maximalSemanticGraph()
     });
 
@@ -190,6 +203,14 @@ describe("compile raw payload projection", () => {
     expect(projected).toMatchObject({
       source_locator: sourceLocator,
       verified_user_assertion_source_hash: verifiedSourceHash,
+      matched_text: assertion,
+      distilled_fact: assertion,
+      source_assertion: assertion,
+      full_turn_content: `User: ${assertion}`,
+      source_grounding: {
+        status: "grounded",
+        source_assertion: assertion
+      },
       bench_source_raw_payload_omitted_projections: ["semantic_factor_graph"]
     });
     expect(projected).not.toHaveProperty("semantic_factor_graph");

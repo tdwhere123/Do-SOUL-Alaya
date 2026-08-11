@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import {
-  readVerifiedUserAssertionSourceHashDigest,
+  parseVerifiedUserAssertionSourceHash,
+  verifyVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import type { SourceAssertionResolution } from "./source-assertion.js";
@@ -28,16 +30,30 @@ export function readGardenVerifiedUserAssertionReceipt(
   if (signal.source !== "garden_compile") return null;
   const rawPayload = signal.raw_payload;
   const sourceHash = readString(rawPayload.verified_user_assertion_source_hash);
-  if (readVerifiedUserAssertionSourceHashDigest(sourceHash) === null) return null;
+  if (parseVerifiedUserAssertionSourceHash(sourceHash) === null) return null;
   const grounding = readRecord(rawPayload.source_grounding);
   const assertion = readString(rawPayload.source_assertion);
-  const fullTurn = readString(rawPayload.full_turn_content);
+  const fullTurn = readExactString(rawPayload.full_turn_content);
   if (assertion === null || fullTurn === null || !fullTurn.includes(assertion) ||
       grounding?.version !== 1 || grounding.status !== "grounded" ||
       grounding.content_basis !== "source_assertion" ||
       readString(grounding.source_assertion) !== assertion ||
       readString(rawPayload.matched_text) !== assertion ||
       readString(rawPayload.distilled_fact) !== assertion) {
+    return null;
+  }
+  const sourceLocator = parseOfficialApiSourceLocator(rawPayload.source_locator);
+  if (sourceLocator === null || !verifyVerifiedUserAssertionSourceHash(sourceHash, {
+    signal_id: signal.signal_id,
+    source_locator: sourceLocator,
+    workspace_id: signal.workspace_id,
+    run_id: signal.run_id,
+    surface_id: signal.surface_id,
+    source_assertion: assertion,
+    source_corpus: fullTurn
+  }, sha256)) return null;
+  const liveGrounding = resolveGardenRawPayloadGrounding(rawPayload);
+  if (liveGrounding.status !== "grounded" || liveGrounding.assertion !== assertion) {
     return null;
   }
   return { assertion, sourceHash: sourceHash! };
@@ -80,6 +96,14 @@ export function requiresGardenSourceGrounding(signal: CandidateMemorySignal): bo
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readExactString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {

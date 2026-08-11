@@ -4,8 +4,19 @@ import type {
   EvidenceCapsule,
   EvidenceSearchProjection,
   OpenSemanticFactorFormationCapture,
-  FtsLaneId
+  FtsLaneId,
+  VerifiedUserAssertionCatalogLocator
 } from "@do-soul/alaya-protocol";
+
+export interface VerifiedAssertionLocatorResolutionInput {
+  readonly sourceCorpus: string;
+  readonly sourceAssertion: string;
+  readonly sourceLocator: VerifiedUserAssertionCatalogLocator;
+}
+
+export type VerifiedAssertionLocatorResolver = (
+  input: Readonly<VerifiedAssertionLocatorResolutionInput>
+) => boolean;
 
 export type EvidenceSearchProjectionIdentity = Readonly<
   Pick<EvidenceSearchProjection, "projection_id" | "projection_kind">
