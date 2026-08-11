@@ -2,6 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SourceAssertionSupplementBindingSchema } from
+  "../../../longmemeval/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 import {
   currentCanonicalQuestions as questions,
@@ -24,6 +26,13 @@ vi.mock("../../../longmemeval/ingestion/fetch.js", () => ({
 vi.mock("../../../longmemeval/snapshot/integrity.js", async (loadOriginal) => ({
   ...await loadOriginal<typeof import("../../../longmemeval/snapshot/integrity.js")>(),
   verifySnapshotArtifactIntegrity: vi.fn(async () => undefined)
+}));
+vi.mock("../../../longmemeval/snapshot/substrate-binding.js", () => ({
+  assertSnapshotDatasetSubstrateIdentity: vi.fn()
+}));
+const assertSnapshotSeedLedgerBinding = vi.fn();
+vi.mock("../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
+  assertSnapshotSeedLedgerBinding
 }));
 
 afterEach(async () => {
@@ -76,4 +85,53 @@ describe("current snapshot execution-window authority", () => {
       datasetSha256: manifest.dataset_sha256!
     })).toThrow(/execution window/iu);
   });
+
+  it("forwards semantic supplement authority into the writer substrate ledger", async () => {
+    const { assertCurrentSnapshotWriteAuthority } = await import(
+      "../../../longmemeval/snapshot/current/current-substrate-authority.js"
+    );
+    const manifest = manifestFor("q-1");
+    const extraction = manifest.extraction_provenance;
+    const authority = authorityFor();
+    if (extraction?.schema_version !== 3) throw new Error("fixture requires v3 extraction");
+    const { bindSnapshotRunProvenanceAuthority } = await import(
+      "../../../longmemeval/snapshot/run-provenance.js"
+    );
+    const binding = supplementBinding();
+    const runProvenance = {
+      ...bindSnapshotRunProvenanceAuthority(manifest.run_provenance!, authority),
+      semantic_supplement: binding
+    };
+
+    assertCurrentSnapshotWriteAuthority({
+      dbPath: "/missing/current-supplement.db",
+      sidecar: sidecarFor("q-1"),
+      canonicalQuestions: questions,
+      extraction,
+      extractionAuthority: authority,
+      seedExtractionPath: manifest.seed_extraction_path!,
+      runProvenance,
+      datasetSha256: manifest.dataset_sha256!,
+      semanticSupplementBinding: binding
+    });
+
+    expect(assertSnapshotSeedLedgerBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ semanticSupplementBinding: binding })
+    );
+  });
 });
+
+function supplementBinding() {
+  return SourceAssertionSupplementBindingSchema.parse({
+    kind: "longmemeval-source-assertion-semantic-supplement",
+    receipt_sha256: "3".repeat(64),
+    entry_count: 1,
+    assertion_count: 1,
+    occurrence_count: 1,
+    entry_set_sha256: "4".repeat(64),
+    primary_manifest_sha256: "5".repeat(64),
+    source_manifest_sha256: "6".repeat(64),
+    parser_semantics: "test-parser",
+    grounding_semantics: "test-grounding"
+  });
+}

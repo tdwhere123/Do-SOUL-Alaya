@@ -151,6 +151,9 @@ export function assertCurrentSnapshotWriteAuthority(input: {
     extraction: input.extraction,
     extractionAuthority: input.extractionAuthority,
     seedExtractionPath: input.seedExtractionPath,
+    ...(input.semanticSupplementBinding === undefined ? {} : {
+      semanticSupplementBinding: input.semanticSupplementBinding
+    }),
     questionWindow: executionQuestionWindow(input.runProvenance)
   });
 }
