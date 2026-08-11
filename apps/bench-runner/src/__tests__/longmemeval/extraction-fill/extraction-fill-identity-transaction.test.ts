@@ -50,7 +50,12 @@ describe("extraction-fill identity transaction", () => {
   });
 
   it("rejects manifest replacement during dataset preparation on a zero-turn run", async () => {
-    await writeDataset([]);
+    await writeDataset([{ ...question(),
+      haystack_session_ids: [],
+      haystack_dates: [],
+      haystack_sessions: [],
+      answer_session_ids: []
+    }]);
     writeIdentityManifest("https://provider-a.invalid/v1", "family-a", "initial");
     const run = fillSuccessfully();
     writeIdentityManifest("https://provider-b.invalid/v1", "family-b", "replacement");
@@ -144,6 +149,7 @@ async function writeDataset(questions: readonly LongMemEvalQuestion[]): Promise<
   await writeFile(join(pinnedMetaRoot, `${VARIANT}.meta.json`), JSON.stringify({
     name: VARIANT,
     sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: questions.length
   }), "utf8");
 }

@@ -247,7 +247,11 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(dataDir, `${VARIANT}.json`), raw, "utf8");
   await writeFile(
     join(pinnedMetaRoot, `${VARIANT}.meta.json`),
-    JSON.stringify({ sha256, question_count: questions.length }),
+    JSON.stringify({
+      sha256,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
+      question_count: questions.length
+    }),
     "utf8"
   );
 }

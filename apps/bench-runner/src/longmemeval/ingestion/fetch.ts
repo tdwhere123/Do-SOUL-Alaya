@@ -13,11 +13,14 @@ import {
 } from "@do-soul/alaya-eval/internal";
 import type { LongMemEvalSelectionAssignment } from "@do-soul/alaya-eval";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
+import { streamLongMemEvalDataset } from "./streaming-dataset-reader.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR_ROOT = path.resolve(__dirname, "../../../data/longmemeval");
 const HUGGINGFACE_BASE =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main";
+const MAX_PINNED_DATASET_BYTES = 1024 * 1024 * 1024;
+const MAX_PINNED_QUESTION_COUNT = 20_000;
 
 // @anchor upstream-filename-map: variant id is logical (matches our
 // dataset.ts enum); upstream filenames in the HuggingFace repo are
@@ -61,6 +64,10 @@ export interface LoadedLongMemEvalDataset {
   readonly checksumSource: string;
   readonly sourcePath: string;
   readonly promotionAuthority: VerifiedLongMemEvalDatasetAuthority | null;
+}
+
+export interface LoadedLongMemEvalDatasetWindow extends LoadedLongMemEvalDataset {
+  readonly datasetQuestionCount: number;
 }
 
 declare const verifiedDatasetAuthorityBrand: unique symbol;
@@ -167,32 +174,96 @@ export async function loadDatasetWithIdentity(
   variant: LongMemEvalVariant,
   options: { dataDir?: string; pinnedMetaRoot?: string } = {}
 ): Promise<LoadedLongMemEvalDataset> {
+  const loaded = await loadDatasetWindowWithIdentity(variant, {
+    ...options,
+    offset: 0
+  });
+  const { datasetQuestionCount: _datasetQuestionCount, ...dataset } = loaded;
+  return dataset;
+}
+
+export async function loadDatasetWindowWithIdentity(
+  variant: LongMemEvalVariant,
+  options: {
+    readonly dataDir?: string;
+    readonly pinnedMetaRoot?: string;
+    readonly offset: number;
+    readonly limit?: number;
+  }
+): Promise<LoadedLongMemEvalDatasetWindow> {
+  assertDatasetWindow(options.offset, options.limit);
   const dataDir = options.dataDir ?? DATA_DIR_ROOT;
   const localPath = path.join(dataDir, `${variant}.json`);
   const pinnedPath = pinnedMetaPath(variant, options.pinnedMetaRoot);
-  const pinnedSha = await readPinnedDatasetSha(variant, pinnedPath);
-  const { raw, actualSha } = await readVerifiedDatasetBytes({
+  const pinned = await readPinnedDatasetIdentity(variant, pinnedPath);
+  const questions: LongMemEvalQuestion[] = [];
+  const assignments: LongMemEvalSelectionAssignment[] = [];
+  const identity = await streamLongMemEvalDataset(localPath, {
+    datasetLabel: variant,
+    expectedBytes: pinned.sizeBytes,
+    maxQuestionCount: pinned.questionCount
+  }, (question, index) => {
+    assignments.push(datasetAssignment(question));
+    if (index >= options.offset &&
+        (options.limit === undefined || index < options.offset + options.limit)) {
+      questions.push(question);
+    }
+  });
+  assertStreamedDatasetIdentity({
     variant,
     localPath,
-    pinnedSha,
+    pinned,
+    identity,
     dataDir: options.dataDir
   });
-  const questions = validateDataset(JSON.parse(raw) as unknown);
   return {
     questions,
-    sha256: actualSha,
+    datasetQuestionCount: identity.questionCount,
+    sha256: identity.sha256,
     checksumSource: pinnedPath,
     sourcePath: localPath,
     promotionAuthority: options.pinnedMetaRoot === undefined
-      ? mintVerifiedDatasetAuthority(actualSha, datasetAssignments(questions))
+      ? mintVerifiedDatasetAuthority(identity.sha256, assignments)
       : null
   };
 }
 
-async function readPinnedDatasetSha(
+function assertStreamedDatasetIdentity(input: {
+  readonly variant: LongMemEvalVariant;
+  readonly localPath: string;
+  readonly pinned: PinnedDatasetIdentity;
+  readonly identity: Awaited<ReturnType<typeof streamLongMemEvalDataset>>;
+  readonly dataDir?: string;
+}): void {
+  assertDatasetSha({
+    variant: input.variant,
+    localPath: input.localPath,
+    pinnedSha: input.pinned.sha256,
+    actualSha: input.identity.sha256,
+    dataDir: input.dataDir
+  });
+  if (input.identity.bytesRead !== input.pinned.sizeBytes) {
+    throw new Error(
+      `dataset checksum mismatch: ${input.variant}; ` +
+      `pinned_size=${input.pinned.sizeBytes}; actual_size=${input.identity.bytesRead}`
+    );
+  }
+  if (input.identity.parseError !== undefined) throw input.identity.parseError;
+  if (input.identity.questionCount !== input.pinned.questionCount) {
+    throw new Error("LongMemEval dataset does not match pinned question count");
+  }
+}
+
+interface PinnedDatasetIdentity {
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly questionCount: number;
+}
+
+async function readPinnedDatasetIdentity(
   variant: LongMemEvalVariant,
   pinnedPath: string
-): Promise<string> {
+): Promise<PinnedDatasetIdentity> {
   let pinnedRaw: string;
   try {
     pinnedRaw = await readFile(pinnedPath, "utf8");
@@ -202,39 +273,48 @@ async function readPinnedDatasetSha(
     );
   }
 
-  let pinnedSha: string;
   try {
-    const pinned = JSON.parse(pinnedRaw) as { sha256?: unknown };
+    const pinned = JSON.parse(pinnedRaw) as Record<string, unknown>;
     if (typeof pinned.sha256 !== "string" || pinned.sha256.length === 0) {
       throw new Error("missing sha256");
     }
-    pinnedSha = pinned.sha256;
+    if (!isBoundedPositiveInteger(pinned.size_bytes, MAX_PINNED_DATASET_BYTES)) {
+      throw new Error("invalid size_bytes");
+    }
+    if (!isBoundedPositiveInteger(pinned.question_count, MAX_PINNED_QUESTION_COUNT)) {
+      throw new Error("invalid question_count");
+    }
+    return {
+      sha256: pinned.sha256,
+      sizeBytes: pinned.size_bytes,
+      questionCount: pinned.question_count
+    };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
       `dataset pinned meta unreadable: ${variant}; pinnedPath=${pinnedPath}; detail=${detail}`
     );
   }
-  return pinnedSha;
 }
 
-async function readVerifiedDatasetBytes(input: {
+function isBoundedPositiveInteger(value: unknown, maximum: number): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= maximum;
+}
+
+function assertDatasetSha(input: {
   readonly variant: LongMemEvalVariant;
   readonly localPath: string;
   readonly pinnedSha: string;
+  readonly actualSha: string;
   readonly dataDir?: string;
-}): Promise<{ readonly raw: string; readonly actualSha: string }> {
-  const raw = await readFile(input.localPath, "utf8");
-  const actualSha = createHash("sha256").update(raw, "utf8").digest("hex");
-  if (actualSha !== input.pinnedSha) {
-    const dataDirArg = input.dataDir === undefined
-      ? ""
-      : ` --data-dir ${shellQuote(input.dataDir)}`;
-    throw new Error(
-      `dataset checksum mismatch: ${input.variant}; pinned=${input.pinnedSha}; actual=${actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${input.variant}${dataDirArg} --force'`
-    );
-  }
-  return { raw, actualSha };
+}): void {
+  if (input.actualSha === input.pinnedSha) return;
+  const dataDirArg = input.dataDir === undefined
+    ? ""
+    : ` --data-dir ${shellQuote(input.dataDir)}`;
+  throw new Error(
+    `dataset checksum mismatch: ${input.variant}; pinned=${input.pinnedSha}; actual=${input.actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${input.variant}${dataDirArg} --force'`
+  );
 }
 
 export function deriveLongMemEvalReleaseEvidenceAuthority(
@@ -277,13 +357,20 @@ function mintVerifiedDatasetAuthority(
   return authority;
 }
 
-function datasetAssignments(
-  questions: readonly LongMemEvalQuestion[]
-): LongMemEvalSelectionAssignment[] {
-  return questions.map((question) => ({
+function datasetAssignment(
+  question: LongMemEvalQuestion
+): LongMemEvalSelectionAssignment {
+  return {
     question_id: question.question_id,
     dataset_cohort: classifyLongMemEvalDatasetCohort(question)
-  }));
+  };
+}
+
+function assertDatasetWindow(offset: number, limit: number | undefined): void {
+  if (!Number.isSafeInteger(offset) || offset < 0 ||
+      (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0))) {
+    throw new Error("LongMemEval dataset window is invalid");
+  }
 }
 
 function selectExecutionWindow(

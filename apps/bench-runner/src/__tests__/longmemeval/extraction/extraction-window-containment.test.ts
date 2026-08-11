@@ -169,7 +169,12 @@ describe("extraction window-containment preflight", () => {
       await writeFile(join(dataDir, "longmemeval_oracle.json"), raw, "utf8");
       await writeFile(
         join(pinnedMetaRoot, "longmemeval_oracle.meta.json"),
-        JSON.stringify({ name: "longmemeval_oracle", sha256: sha, question_count: 2 }),
+        JSON.stringify({
+          name: "longmemeval_oracle",
+          sha256: sha,
+          size_bytes: Buffer.byteLength(raw, "utf8"),
+          question_count: 2
+        }),
         "utf8"
       );
 

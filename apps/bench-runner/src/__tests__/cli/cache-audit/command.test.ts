@@ -140,7 +140,10 @@ function createFixture() {
   const datasetSha256 = hash(datasetRaw);
   writeFileSync(join(dataDir, "longmemeval_s.json"), datasetRaw, "utf8");
   writeFileSync(join(pinnedMetaRoot, "longmemeval_s.meta.json"), JSON.stringify({
-    name: "longmemeval_s", sha256: datasetSha256, question_count: questions.length
+    name: "longmemeval_s",
+    sha256: datasetSha256,
+    size_bytes: Buffer.byteLength(datasetRaw, "utf8"),
+    question_count: questions.length
   }), "utf8");
   const occurrences = buildExtractionOccurrenceIndex({
     questions, model, requestProfile, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT

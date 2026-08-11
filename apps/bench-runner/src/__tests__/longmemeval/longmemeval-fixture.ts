@@ -53,6 +53,7 @@ export async function writeLongMemEvalFixtureDataset(input: {
     JSON.stringify({
       name: input.variant,
       sha256: sha,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
       question_count: input.questions.length
     }),
     "utf8"

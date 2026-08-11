@@ -176,6 +176,7 @@ async function runContext(
     releaseEvidenceAuthority: null,
     questions: [] as unknown as LongMemEvalRunContext["questions"],
     window: questionIds.map((question_id) => ({ question_id })) as unknown as LongMemEvalRunContext["window"],
+    datasetQuestionCount: questionIds.length,
     datasetSha256: "d".repeat(64),
     datasetChecksumSource: "fixture",
     datasetSourcePath: join(seedDataDirRoot, "dataset.json"),

@@ -130,7 +130,11 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(root, "data", `${VARIANT}.json`), raw, "utf8");
   await writeFile(
     join(root, "pinned", `${VARIANT}.meta.json`),
-    JSON.stringify({ sha256, question_count: questions.length }),
+    JSON.stringify({
+      sha256,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
+      question_count: questions.length
+    }),
     "utf8"
   );
 }

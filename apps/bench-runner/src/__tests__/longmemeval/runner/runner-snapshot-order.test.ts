@@ -238,6 +238,7 @@ function snapshotContext(drift: SnapshotPolicyDrift = {}): LongMemEvalRunContext
       haystack_sessions: []
     })) as
       unknown as LongMemEvalRunContext["window"],
+    datasetQuestionCount: QUESTION_IDS.length,
     datasetSha256: "d".repeat(64),
     datasetChecksumSource: "fixture",
     datasetSourcePath: "/tmp/dataset.json",

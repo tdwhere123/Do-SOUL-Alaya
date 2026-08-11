@@ -9,7 +9,10 @@ import {
 } from "../compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
 import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
-import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
+import {
+  loadDatasetWindowWithIdentity,
+  loadDatasetWithIdentity
+} from "../ingestion/fetch.js";
 import {
   createOwnedTempRoot,
   externalTempRoot
@@ -32,6 +35,9 @@ import { resolveSourceAssertionSupplementOptions } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 
 type LoadedLongMemEvalDataset = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
+type LoadedRunDataset = LoadedLongMemEvalDataset & Readonly<{
+  datasetQuestionCount?: number;
+}>;
 type LongMemEvalQuestions = LoadedLongMemEvalDataset["questions"];
 type LongMemEvalQuestion = LongMemEvalQuestions[number];
 
@@ -39,6 +45,7 @@ export interface LongMemEvalRunContext {
   readonly opts: LongMemEvalRunOptions;
   readonly questions: LongMemEvalQuestions;
   readonly window: readonly LongMemEvalQuestion[];
+  readonly datasetQuestionCount: number;
   readonly datasetSha256: string;
   readonly datasetChecksumSource: string;
   readonly datasetSourcePath: string;
@@ -66,16 +73,19 @@ export async function prepareLongMemEvalRun(
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LongMemEvalRunContext> {
-  const dataset = await loadDatasetWithIdentity(opts.variant, datasetLoadOptions(opts));
+  const dataset = await loadRunDataset(opts);
   const questions = dataset.questions;
   const selectedQuestions = await selectManifestQuestions(opts, dataset);
-  const window = selectQuestionWindow(selectedQuestions, opts);
+  const window = opts.questionManifest === undefined
+    ? selectedQuestions
+    : selectQuestionWindow(selectedQuestions, opts);
   const commitInfo = resolveCommitInfo();
   const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
   return {
     opts,
     questions,
     window,
+    datasetQuestionCount: dataset.datasetQuestionCount ?? questions.length,
     datasetSha256: dataset.sha256,
     datasetChecksumSource: dataset.checksumSource,
     datasetSourcePath: dataset.sourcePath,
@@ -107,6 +117,18 @@ export async function prepareLongMemEvalRun(
     diagnosticsSpool,
     ...(await resolveSeedDataDirRoot(opts))
   };
+}
+
+async function loadRunDataset(opts: LongMemEvalRunOptions): Promise<LoadedRunDataset> {
+  const options = datasetLoadOptions(opts);
+  if (opts.questionManifest !== undefined) {
+    return await loadDatasetWithIdentity(opts.variant, options);
+  }
+  return await loadDatasetWindowWithIdentity(opts.variant, {
+    ...options,
+    offset: Math.max(0, opts.offset ?? 0),
+    ...(opts.limit === undefined ? {} : { limit: opts.limit })
+  });
 }
 
 function deriveRunEvidenceAuthority(

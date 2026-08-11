@@ -191,6 +191,7 @@ async function writeCanonicalDataset(questions: readonly LongMemEvalQuestion[]):
   writeFileSync(join(pinnedMetaRoot, "longmemeval_s.meta.json"), JSON.stringify({
     name: "longmemeval_s",
     sha256,
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: questions.length
   }), "utf8");
 }

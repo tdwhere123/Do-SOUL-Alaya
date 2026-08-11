@@ -128,6 +128,7 @@ async function writeExtractionFillDataset(
     JSON.stringify({
       name: EXTRACTION_FILL_VARIANT,
       sha256: sha,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
       question_count: questions.length
     }),
     "utf8"

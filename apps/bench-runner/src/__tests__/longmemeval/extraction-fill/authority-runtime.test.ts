@@ -509,6 +509,7 @@ function writeFixtureData(
   writeFileSync(join(pinnedMetaRoot, `${variant}.meta.json`), JSON.stringify({
     name: variant,
     sha256,
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: questions.length
   }), "utf8");
 }

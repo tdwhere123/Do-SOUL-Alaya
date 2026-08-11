@@ -97,6 +97,7 @@ describe("LongMemEval runner", () => {
         JSON.stringify({
           name: variant,
           sha256: datasetSha,
+          size_bytes: Buffer.byteLength(datasetRaw, "utf8"),
           question_count: 2,
           first_pinned_at: "2026-05-14T00:00:00Z",
           pinned_by_commit: "test"

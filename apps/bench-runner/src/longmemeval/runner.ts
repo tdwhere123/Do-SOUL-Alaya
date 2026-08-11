@@ -237,7 +237,7 @@ async function runSingleLongMemEval(
   }
   return finalizeLongMemEvalRun({
     opts,
-    questionsLength: context.questions.length,
+    questionsLength: context.datasetQuestionCount,
     windowLength: context.window.length,
     datasetSha256: context.datasetSha256,
     datasetChecksumSource: context.datasetChecksumSource,

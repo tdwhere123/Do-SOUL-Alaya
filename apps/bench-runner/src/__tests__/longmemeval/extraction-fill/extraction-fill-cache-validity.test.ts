@@ -233,6 +233,7 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(pinnedMetaRoot, `${VARIANT}.meta.json`), JSON.stringify({
     name: VARIANT,
     sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: 1
   }), "utf8");
 }
