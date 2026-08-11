@@ -10,7 +10,8 @@ import {
 } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { computeCacheKey } from "../../../compile-seed/compile-seed-cache.js";
-import { inspectCachedExtraction } from "../../../compile-seed/cache/cache-shard.js";
+import type { RunnerRawShardInspector } from
+  "../../../compile-seed/cache/runner-raw-shard-inspector.js";
 import type {
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats
@@ -66,6 +67,7 @@ export function createSourceAssertionSupplementRuntime(input: {
   readonly sourceCacheRoot: string;
   readonly primaryCacheRoot: string;
   readonly config: CompileSeedExtractionConfig;
+  readonly rawShardInspector: RunnerRawShardInspector;
 }): SourceAssertionSupplementRuntime {
   const primary = requireManifest(input.primaryCacheRoot, "primary");
   const source = requireManifest(input.sourceCacheRoot, "source");
@@ -109,6 +111,7 @@ function createReader(
     },
     sourceManifestSha256: source.manifestSha256,
     readSourceRawJson: (cacheKey) => requireRawJson(
+      input.rawShardInspector,
       input.sourceCacheRoot,
       cacheKey,
       source.manifest.extraction_model,
@@ -137,6 +140,7 @@ function createExtractor(
         request: parsed,
         primaryCacheKey,
         primaryRawJson: requireRawJson(
+          input.rawShardInspector,
           input.primaryCacheRoot,
           primaryCacheKey,
           input.config.model,
@@ -185,12 +189,19 @@ function requireRequestProfile(
 }
 
 function requireRawJson(
+  inspector: RunnerRawShardInspector,
   cacheRoot: string,
   cacheKey: string,
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"]
 ): string {
-  const inspected = inspectCachedExtraction(cacheRoot, cacheKey, model, requestProfile);
+  const inspected = inspector.inspect({
+    phase: "supplement",
+    cacheRoot,
+    cacheKey,
+    model,
+    requestProfile
+  });
   if (inspected.status !== "hit") {
     throw new Error(
       `source assertion supplement cache shard ${cacheKey} is ${inspected.status}`

@@ -7,6 +7,10 @@ import {
 import { readExtractionCacheManifest } from "../extraction/cache/extraction-cache-manifest.js";
 import { createCachingSignalExtractor } from "./compile-seed-cache.js";
 import {
+  createRunnerRawShardInspector,
+  type RunnerRawShardInspector
+} from "./cache/runner-raw-shard-inspector.js";
+import {
   resolveCompileSeedExtractionConfig,
   resolveExtractionCacheRoot,
   resolveBenchExtractionCacheMinCoverage,
@@ -20,7 +24,8 @@ import { preflightExtractionCache } from "./compile-seed-preflight.js";
 import { normalizeEnvDiagDir } from "./compile-seed-extract.js";
 import type {
   CompileSeedExtractionStats,
-  CompileSeedRunnerOptions
+  CompileSeedRunnerOptions,
+  RawShardInspectionDiagnostics
 } from "./compile-seed-types.js";
 import {
   createSourceAssertionSupplementRuntime,
@@ -51,7 +56,11 @@ export function createCompileSeedRunnerContext(
     !credentialled &&
     options?.allowLiveExtraction !== true;
   runExtractionCachePreflight(options, cacheRoot, config, credentialled, manifest);
-  const stats = createCompileSeedStats(credentialled || cacheOnly);
+  const rawShardInspector = createRunnerRawShardInspector();
+  const stats = createCompileSeedStats(
+    credentialled || cacheOnly,
+    rawShardInspector.diagnostics
+  );
   const diagnosticDir = resolveCompileSeedDiagnosticDir(options);
   ensureDiagnosticDir(diagnosticDir);
   const semanticSupplement = options?.sourceAssertionSupplement === undefined
@@ -59,7 +68,8 @@ export function createCompileSeedRunnerContext(
     : createSourceAssertionSupplementRuntime({
         ...options.sourceAssertionSupplement,
         primaryCacheRoot: cacheRoot,
-        config
+        config,
+        rawShardInspector
       });
   return {
     config,
@@ -73,7 +83,8 @@ export function createCompileSeedRunnerContext(
       stats,
       credentialled,
       cacheOnly,
-      diagnosticDir
+      diagnosticDir,
+      rawShardInspector
     })
   };
 }
@@ -110,9 +121,13 @@ function runExtractionCachePreflight(
   });
 }
 
-function createCompileSeedStats(usesOfficialCompile: boolean): CompileSeedExtractionStats {
+function createCompileSeedStats(
+  usesOfficialCompile: boolean,
+  rawShardInspection: RawShardInspectionDiagnostics
+): CompileSeedExtractionStats {
   return {
     path: usesOfficialCompile ? "official_api_compile" : "no_credentials_fallback",
+    rawShardInspection,
     extractionAttempts: 0,
     cacheHits: 0,
     llmCalls: 0,
@@ -163,6 +178,7 @@ function createOfficialApiProvider(input: {
   readonly credentialled: boolean;
   readonly cacheOnly: boolean;
   readonly diagnosticDir: string | null;
+  readonly rawShardInspector: RunnerRawShardInspector;
 }): OfficialApiGardenProvider | null {
   if (!input.credentialled && !input.cacheOnly) return null;
   const extractor = createCachingSignalExtractor({
@@ -173,6 +189,7 @@ function createOfficialApiProvider(input: {
     cacheRoot: input.cacheRoot,
     stats: input.stats,
     trackTurnShards: true,
+    rawShardInspector: input.rawShardInspector,
     allowLiveExtraction: input.credentialled && input.options?.allowLiveExtraction === true
   });
   return new OfficialApiGardenProvider({

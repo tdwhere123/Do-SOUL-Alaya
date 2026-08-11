@@ -149,6 +149,20 @@ export interface CompileSeedExtractionConfig {
   readonly apiKey: string | null;
 }
 
+export type RawShardInspectionPhase = "primary" | "supplement";
+
+export interface RawShardInspectionPhaseDiagnostics {
+  readonly physicalReads: number;
+  readonly parseMisses: number;
+  readonly memoHits: number;
+  readonly inspectionMs: number;
+}
+
+export interface RawShardInspectionDiagnostics {
+  readonly primary: RawShardInspectionPhaseDiagnostics;
+  readonly supplement: RawShardInspectionPhaseDiagnostics;
+}
+
 export interface CompileSeedRunnerOptions {
   readonly config?: CompileSeedExtractionConfig;
   readonly cacheRoot?: string;
@@ -194,6 +208,8 @@ export interface CompileSeedRunnerOptions {
 export interface CompileSeedExtractionStats {
   /** Which seed path ran. Disclosed in the bench report for honesty. */
   path: "official_api_compile" | "no_credentials_fallback";
+  /** Runner-local cache I/O diagnostics; excluded from semantic closure and receipts. */
+  readonly rawShardInspection?: RawShardInspectionDiagnostics;
   /** Bounded extraction requests submitted to the extraction seam. */
   extractionAttempts?: number;
   /** Turns whose extraction was served from the on-disk cache fixture. */

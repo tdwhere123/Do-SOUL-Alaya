@@ -28,6 +28,8 @@ import {
   inspectCachedExtraction,
   writeCachedExtraction
 } from "./cache/cache-shard.js";
+import type { RunnerRawShardInspector } from
+  "./cache/runner-raw-shard-inspector.js";
 export {
   cacheFilePath,
   inspectCachedExtraction,
@@ -87,6 +89,8 @@ interface CachingSignalExtractorOptions {
   readonly onExtractionProgress?: () => void;
   /** Completed siblings stay opaque because fill only needs missing raw shards. */
   readonly executionCacheKeys?: ReadonlySet<string>;
+  /** Runner-lifetime verified shard memo shared with semantic supplement reads. */
+  readonly rawShardInspector?: RunnerRawShardInspector;
 }
 
 /**
@@ -129,12 +133,7 @@ async function extractWithCache(
     options.stats.lastCacheKey = cacheKey;
     options.stats.lastRawJsonSha256 = null;
   }
-  const cached = inspectCachedExtraction(
-    cacheRoot,
-    cacheKey,
-    options.config.model,
-    options.config.requestProfile
-  );
+  const cached = inspectPrimaryShard(options, cacheRoot, cacheKey);
   if (cached.status === "hit") {
     recordCacheHit(options, cacheKey, cached);
     options.onExtractionProgress?.();
@@ -162,12 +161,7 @@ async function persistDeterministicEmpty(
   const lease = ownedLease ?? acquireExtractionCacheWriteLease(cacheRoot);
   const write = async (): ReturnType<BenchSignalExtractor["extract"]> => {
     lease.assertOwned();
-    const recached = inspectCachedExtraction(
-      cacheRoot,
-      cacheKey,
-      options.config.model,
-      options.config.requestProfile
-    );
+    const recached = inspectPrimaryShard(options, cacheRoot, cacheKey);
     if (recached.status === "hit") {
       recordCacheHit(options, cacheKey, recached);
       options.onExtractionProgress?.();
@@ -203,6 +197,25 @@ function recordCacheHit(
   recordExtractionInspection(options, cacheKey, "cache", cached);
 }
 
+function inspectPrimaryShard(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  cacheKey: string
+) {
+  return options.rawShardInspector?.inspect({
+    phase: "primary",
+    cacheRoot,
+    cacheKey,
+    model: options.config.model,
+    requestProfile: options.config.requestProfile
+  }) ?? inspectCachedExtraction(
+    cacheRoot,
+    cacheKey,
+    options.config.model,
+    options.config.requestProfile
+  );
+}
+
 async function extractLive(
   options: CachingSignalExtractorOptions,
   cacheRoot: string,
@@ -233,12 +246,7 @@ async function extractLiveWithLease(
   lease: ExtractionCacheWriteLease
 ): ReturnType<BenchSignalExtractor["extract"]> {
   lease.assertOwned();
-  const recached = inspectCachedExtraction(
-    cacheRoot,
-    cacheKey,
-    options.config.model,
-    options.config.requestProfile
-  );
+  const recached = inspectPrimaryShard(options, cacheRoot, cacheKey);
   if (recached.status === "hit") {
     recordCacheHit(options, cacheKey, recached);
     options.onExtractionProgress?.();

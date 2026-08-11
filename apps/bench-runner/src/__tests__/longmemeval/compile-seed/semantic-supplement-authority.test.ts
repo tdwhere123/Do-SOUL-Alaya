@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
   createRuntime: vi.fn(),
+  createCachingExtractor: vi.fn(() => ({ extract: vi.fn() })),
   binding: Object.freeze({
     kind: "longmemeval-source-assertion-semantic-supplement" as const,
     receipt_sha256: "1".repeat(64),
@@ -22,7 +23,15 @@ vi.mock(
   () => ({ createSourceAssertionSupplementRuntime: fixture.createRuntime })
 );
 
-import { createCompileSeedRunner } from "../../../longmemeval/compile-seed.js";
+vi.mock(
+  "../../../longmemeval/compile-seed/compile-seed-cache.js",
+  () => ({ createCachingSignalExtractor: fixture.createCachingExtractor })
+);
+
+import {
+  createCompileSeedRunner,
+  toSeedExtractionPathKpi
+} from "../../../longmemeval/compile-seed.js";
 
 describe("semantic supplement run authority", () => {
   it("is fixed when the runner is created, before any turn is seeded", () => {
@@ -40,7 +49,7 @@ describe("semantic supplement run authority", () => {
         providerUrl: "https://example.test/v1",
         model: "same-logical-model",
         requestProfile: "provider-default-v1",
-        apiKey: null
+        apiKey: "test-key"
       },
       skipPreflight: true,
       diagnosticDir: null,
@@ -52,5 +61,13 @@ describe("semantic supplement run authority", () => {
 
     expect(runner.semanticSupplementBinding).toBe(fixture.binding);
     expect(runner.stats).not.toHaveProperty("semanticSupplementBinding");
+    const supplementInput = fixture.createRuntime.mock.calls[0]?.[0];
+    const primaryInput = fixture.createCachingExtractor.mock.calls[0]?.[0];
+    expect(supplementInput.rawShardInspector).toBe(primaryInput.rawShardInspector);
+    expect(runner.stats.rawShardInspection).toBe(
+      primaryInput.rawShardInspector.diagnostics
+    );
+    expect(toSeedExtractionPathKpi(runner.stats))
+      .not.toHaveProperty("rawShardInspection");
   });
 });

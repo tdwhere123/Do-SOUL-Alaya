@@ -64,6 +64,11 @@ export type CachedRawExtractionInspection =
   | { readonly status: "missing"; readonly reason?: undefined }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string };
 
+export interface CachedExtractionInspectionObserver {
+  readonly onPhysicalRead?: () => void;
+  readonly onParseMiss?: () => void;
+}
+
 export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
   return join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
 }
@@ -72,9 +77,10 @@ export function inspectCachedExtraction(
   cacheRoot: string,
   cacheKey: string,
   model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  observer?: CachedExtractionInspectionObserver
 ): CachedExtractionInspection {
-  const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
+  const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile, observer);
   if (cached.status !== "hit") return cached;
   return inspectCachedContent(
     cached.entry.raw_json,
@@ -107,14 +113,18 @@ function readCachedEntry(
   cacheRoot: string,
   cacheKey: string,
   model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  observer?: CachedExtractionInspectionObserver
 ): Readonly<{ status: "hit"; entry: CachedExtractionEntry }> |
   Extract<CachedExtractionInspection, { status: "missing" | "invalid" }> {
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   if (!existsSync(filePath)) return { status: "missing" };
   let parsed: Partial<CachedExtractionEntry>;
   try {
-    parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedExtractionEntry>;
+    observer?.onPhysicalRead?.();
+    const serialized = readFileSync(filePath, "utf8");
+    observer?.onParseMiss?.();
+    parsed = JSON.parse(serialized) as Partial<CachedExtractionEntry>;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cache shard JSON: ${reason}` };
