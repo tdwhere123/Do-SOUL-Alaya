@@ -20,6 +20,11 @@ export interface ExtractionContentClosureEntry extends ExtractionRawJsonInspecti
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
 }
 
+export type ExtractionRawContentClosureEntry = Omit<
+  ExtractionContentClosureEntry,
+  "parsedDraftCount"
+>;
+
 export type ExtractionContentClosureIndexValue = readonly [
   rawJsonSha256: string,
   rawSignalCount: number,
@@ -83,7 +88,7 @@ export function computeExtractionContentClosureSha256(
 }
 
 export function computeExtractionRawContentClosureSha256(
-  entries: readonly ExtractionContentClosureEntry[]
+  entries: readonly ExtractionRawContentClosureEntry[]
 ): string {
   const rows = [...uniqueEntriesByKey(entries).values()]
     .sort((left, right) => left.cacheKey.localeCompare(right.cacheKey))
@@ -127,9 +132,9 @@ export function extractionContentClosureEntriesFromIndex(
   }));
 }
 
-function uniqueEntriesByKey(
-  entries: readonly ExtractionContentClosureEntry[]
-): ReadonlyMap<string, ExtractionContentClosureEntry> {
+function uniqueEntriesByKey<T extends { readonly cacheKey: string }>(
+  entries: readonly T[]
+): ReadonlyMap<string, T> {
   const byKey = new Map(entries.map((entry) => [entry.cacheKey, entry] as const));
   if (byKey.size === entries.length) return byKey;
   throw new ExtractionCacheInvariantError(

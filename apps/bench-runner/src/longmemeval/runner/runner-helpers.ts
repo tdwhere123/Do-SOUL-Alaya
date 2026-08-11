@@ -23,6 +23,8 @@ import type {
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
 import type { SourceAssertionSupplementBinding } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import type { ExtractionCachePreflightProof } from
+  "../compile-seed/compile-seed-types.js";
 export {
   buildLongMemEvalReportContextUsage,
   readLongMemEvalReportSideEffectSnapshot,
@@ -126,6 +128,7 @@ export function writeRecallEvalSnapshot(input: {
   readonly canonicalQuestions: readonly LongMemEvalQuestion[];
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
+  readonly extractionCachePreflightProof: ExtractionCachePreflightProof;
   readonly datasetSha256: string;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;

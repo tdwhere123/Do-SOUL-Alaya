@@ -18,6 +18,7 @@ import {
 } from "./materialize.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import {
+  assertCurrentPostFillCacheAuthorityProofManifest,
   assertCurrentSnapshotWriteAuthority
 } from "./current/current-substrate-authority.js";
 import { assertSnapshotAnswersWithFormation } from
@@ -38,6 +39,8 @@ import { assertRelationProjectionCurrent, initDatabase } from
 import { persistSnapshotExtractionAuthority } from
   "./freeze/extraction-authority-publisher.js";
 import { withSnapshotPublishLock } from "./freeze/publish-lock.js";
+import type { ExtractionCachePreflightProof } from
+  "../compile-seed/compile-seed-types.js";
 
 export interface WriteRecallEvalSnapshotInput {
   readonly snapshotOut: string;
@@ -47,6 +50,7 @@ export interface WriteRecallEvalSnapshotInput {
   readonly canonicalQuestions: readonly LongMemEvalQuestion[];
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
+  readonly extractionCachePreflightProof: ExtractionCachePreflightProof;
   readonly datasetSha256: string;
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
@@ -104,6 +108,11 @@ function prepareSnapshotArtifactWrite(
 ): SnapshotArtifactWritePreparation {
   assertRelationProjectionCurrent(initDatabase({ filename: liveDbPath }));
   const captured = captureSnapshotExtractionAuthority(input.extractionCacheRoot);
+  assertCurrentPostFillCacheAuthorityProofManifest({
+    proof: input.extractionCachePreflightProof,
+    cacheRoot: input.extractionCacheRoot,
+    manifestSha256: captured.compact.manifest_sha256
+  });
   const extraction = captured.compact;
   const sidecar = buildSidecar(input);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);

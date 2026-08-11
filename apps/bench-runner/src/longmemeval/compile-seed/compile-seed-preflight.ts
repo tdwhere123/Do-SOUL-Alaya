@@ -3,19 +3,23 @@ import {
   type ExtractionCacheManifest
 } from "../extraction/cache/extraction-cache-manifest.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
-import {
-  computeExtractionTurnCacheKeys,
-  computeSourceTurnCacheKeys,
-  inspectCachedExtraction
-} from "./compile-seed-cache.js";
+import { inspectCachedExtraction } from "./compile-seed-cache.js";
 import {
   inspectExtractionCacheContentClosure,
+  inspectExtractionCacheRawContentClosure,
   inspectExtractionFillCompletion
 } from "../extraction/fill/fill-completion.js";
+import type { ExtractionCacheContentInspection } from
+  "../extraction/fill/fill-completion.js";
 import {
   computeExtractionRawContentClosureSha256,
   extractionContentClosureEntriesFromIndex
 } from "../extraction/content-closure.js";
+import {
+  assertV3ExactWindowKeyBinding,
+  assertV3SubsetWindowKeyBinding,
+  requiredExtractionCacheKeys
+} from "./preflight/cache-window-key-binding.js";
 import {
   containsExtractionFillQuestionWindow
 } from "../extraction/fill/fill-authority.js";
@@ -100,7 +104,9 @@ export interface ExtractionCachePreflightInput {
   readonly requireManifest?: boolean;
 }
 
-export function preflightExtractionCache(input: ExtractionCachePreflightInput): void {
+export function preflightExtractionCache(
+  input: ExtractionCachePreflightInput
+): ExtractionCacheContentInspection | undefined {
   const manifest = input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
   const warn = input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
   const liveExtractionPossible = input.liveExtractionPossible ?? input.config.apiKey !== null;
@@ -116,38 +122,51 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
     validateProvider: input.allowLiveExtraction === true
   });
   assertConsumableFillContract(manifest, input);
-  const requiredTurnContents = input.requiredExtractionTurns?.map((turn) => turn.turnContent) ??
-    input.requiredTurnContents;
-  if (requiredTurnContents !== undefined) {
-    if (assertScopedWindowBinding({
-      cacheRoot: input.cacheRoot,
-      model: input.config.model,
-      requestProfile: input.config.requestProfile,
-      systemPrompt: input.systemPrompt,
-      requiredTurnContents,
-      requiredExtractionTurns: input.requiredExtractionTurns,
-      requiredQuestionWindow: input.requiredQuestionWindow,
-      manifest,
-      allowLiveExtraction: input.allowLiveExtraction
-    })) return;
-    assertWindowContainment({
-      cacheRoot: input.cacheRoot,
-      model: input.config.model,
-      requestProfile: input.config.requestProfile,
-      systemPrompt: input.systemPrompt,
-      requiredTurnContents,
-      requiredExtractionTurns: input.requiredExtractionTurns,
-      allowLiveExtraction: input.allowLiveExtraction,
-      liveExtractionPossible
-    });
-    return;
-  }
+  const windowInspection = preflightRequiredTurnWindow(
+    input, manifest, liveExtractionPossible
+  );
+  if (windowInspection !== null) return windowInspection;
   assertCoverageScalar(
     manifest.coverage,
     input.allowLiveExtraction === true,
     liveExtractionPossible,
     minimumCoverage
   );
+  return undefined;
+}
+
+function preflightRequiredTurnWindow(
+  input: ExtractionCachePreflightInput,
+  manifest: ExtractionCacheManifest,
+  liveExtractionPossible: boolean
+): ExtractionCacheContentInspection | undefined | null {
+  const requiredTurnContents = input.requiredExtractionTurns?.map(
+    (turn) => turn.turnContent
+  ) ?? input.requiredTurnContents;
+  if (requiredTurnContents === undefined) return null;
+  const closure = assertScopedWindowBinding({
+    cacheRoot: input.cacheRoot,
+    model: input.config.model,
+    requestProfile: input.config.requestProfile,
+    systemPrompt: input.systemPrompt,
+    requiredTurnContents,
+    requiredExtractionTurns: input.requiredExtractionTurns,
+    requiredQuestionWindow: input.requiredQuestionWindow,
+    manifest,
+    allowLiveExtraction: input.allowLiveExtraction
+  });
+  if (closure !== null) return closure;
+  assertWindowContainment({
+    cacheRoot: input.cacheRoot,
+    model: input.config.model,
+    requestProfile: input.config.requestProfile,
+    systemPrompt: input.systemPrompt,
+    requiredTurnContents,
+    requiredExtractionTurns: input.requiredExtractionTurns,
+    allowLiveExtraction: input.allowLiveExtraction,
+    liveExtractionPossible
+  });
+  return undefined;
 }
 
 function assertConsumableFillContract(
@@ -179,16 +198,25 @@ function assertScopedWindowBinding(input: {
   readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   readonly manifest: ExtractionCacheManifest;
   readonly allowLiveExtraction?: boolean;
-}): boolean {
+}): ExtractionCacheContentInspection | null {
   if (input.allowLiveExtraction === true || input.manifest.fill_status !== "complete") {
-    return false;
+    return null;
   }
   const window = assertContainedFillWindow(input);
-  assertFinalizedContentClosure(input);
+  const closure = assertFinalizedContentClosure(input);
   if (input.manifest.window_offset !== window.offset ||
-    input.manifest.window_limit !== window.limit) {
-    return assertScopedSubsetFixtures(input);
+      input.manifest.window_limit !== window.limit) {
+    assertScopedSubsetBinding(input);
+    return closure;
   }
+  assertExactWindowBinding(input);
+  return closure;
+}
+
+function assertExactWindowBinding(
+  input: Parameters<typeof assertScopedWindowBinding>[0]
+): void {
+  if (assertV3ExactWindowKeyBinding(input)) return;
   const completion = inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: input.model,
@@ -200,10 +228,7 @@ function assertScopedWindowBinding(input: {
   });
   if (completion.expectedTurns !== input.manifest.expected_turns ||
     completion.expectedKeySetSha256 !== input.manifest.expected_key_set_sha256) {
-    throw new Error(
-      "[longmemeval preflight] extraction cache complete fill does not match " +
-        "this run's exact key set. Run extraction-fill for this question window."
-    );
+    throwExactKeySetMismatch();
   }
   if (completion.validTurns !== completion.expectedTurns ||
     completion.missingTurns > 0 || completion.invalidTurns > 0 ||
@@ -214,13 +239,23 @@ function assertScopedWindowBinding(input: {
         `orphan=${completion.orphanTurns}. Resume extraction-fill first.`
     );
   }
-  return true;
+}
+
+function throwExactKeySetMismatch(): never {
+  throw new Error(
+    "[longmemeval preflight] extraction cache complete fill does not match " +
+      "this run's exact key set. Run extraction-fill for this question window."
+  );
 }
 
 function assertFinalizedContentClosure(
   input: Parameters<typeof assertScopedWindowBinding>[0]
-): void {
-  const inspected = inspectExtractionCacheContentClosure({
+): ExtractionCacheContentInspection {
+  const inspect = input.manifest.schema_version === 3 &&
+      input.manifest.content_closure_index !== undefined
+    ? inspectExtractionCacheRawContentClosure
+    : inspectExtractionCacheContentClosure;
+  const inspected = inspect({
     cacheRoot: input.cacheRoot,
     model: input.model,
     requestProfile: input.requestProfile
@@ -237,6 +272,7 @@ function assertFinalizedContentClosure(
         "from its complete manifest. Resume extraction-fill before consuming it."
     );
   }
+  return inspected;
 }
 
 function matchesFinalizedContentClosure(
@@ -271,9 +307,10 @@ function assertContainedFillWindow(
   );
 }
 
-function assertScopedSubsetFixtures(
+function assertScopedSubsetBinding(
   input: Parameters<typeof assertScopedWindowBinding>[0]
 ): true {
+  if (assertV3SubsetWindowKeyBinding(input)) return true;
   const unavailable = inspectRequiredTurnFixtures(
     input.cacheRoot,
     input.model,
@@ -409,13 +446,13 @@ function inspectRequiredTurnFixtures(
 ): { readonly missing: number; readonly invalid: number; readonly total: number } {
   let missing = 0;
   let invalid = 0;
-  const keys = extractionTurns === undefined
-    ? turnContents.flatMap((turnContent) => computeSourceTurnCacheKeys(
-      model, requestProfile, systemPrompt, { turnContent }
-    ))
-    : extractionTurns.flatMap((turn) => computeExtractionTurnCacheKeys(
-      model, requestProfile, systemPrompt, turn
-    ));
+  const keys = requiredExtractionCacheKeys({
+    model, requestProfile, systemPrompt,
+    requiredTurnContents: turnContents,
+    ...(extractionTurns === undefined ? {} : {
+      requiredExtractionTurns: extractionTurns
+    })
+  });
   for (const cacheKey of keys) {
     const status = inspectCachedExtraction(
       cacheRoot,

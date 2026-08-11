@@ -33,6 +33,17 @@ import {
 } from "../selection/contract.js";
 import { resolveSourceAssertionSupplementOptions } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+import { createCurrentPostFillCacheAuthorityProof } from
+  "../snapshot/current/current-substrate-authority.js";
+import { readExtractionCacheManifest } from
+  "../extraction/cache/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from
+  "../extraction/fill/fill-authority.js";
+import {
+  assertSnapshotProducerInvocationPolicy,
+  assertSnapshotProducerReleaseAuthority
+} from
+  "./policy/snapshot-producer-policy.js";
 
 type LoadedLongMemEvalDataset = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
 type LoadedRunDataset = LoadedLongMemEvalDataset & Readonly<{
@@ -81,6 +92,9 @@ export async function prepareLongMemEvalRun(
     : selectQuestionWindow(selectedQuestions, opts);
   const commitInfo = resolveCommitInfo();
   const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const executionPolicy = resolvePreparationExecutionPolicy(
+    dataset, opts, window, extractionCacheRoot, recallWeightOverrides, process.env
+  );
   return {
     opts,
     questions,
@@ -89,7 +103,7 @@ export async function prepareLongMemEvalRun(
     datasetSha256: dataset.sha256,
     datasetChecksumSource: dataset.checksumSource,
     datasetSourcePath: dataset.sourcePath,
-    releaseEvidenceAuthority: deriveRunEvidenceAuthority(dataset, opts, window),
+    ...executionPolicy,
     selectionContract: createLongMemEvalSelectionContract({
       datasetSha256: dataset.sha256,
       questions: window
@@ -103,20 +117,44 @@ export async function prepareLongMemEvalRun(
       process.env,
       opts.embeddingProviderKind
     ),
-    policyShape: opts.policyShape ?? "stress",
-    simulateReport: opts.simulateReport ?? "none",
-    recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
     seedRunner: createLongMemEvalSeedRunner(
       window,
       extractionCacheRoot,
-      Math.max(0, opts.offset ?? 0)
+      Math.max(0, opts.offset ?? 0),
+      dataset.sha256,
+      executionPolicy.captureSnapshot
     ),
-    captureSnapshot: opts.snapshotOut !== undefined,
     extractionCacheRoot,
     recallWeightOverrides,
     diagnosticsSpool,
     ...(await resolveSeedDataDirRoot(opts))
   };
+}
+
+function resolvePreparationExecutionPolicy(
+  dataset: LoadedLongMemEvalDataset,
+  opts: LongMemEvalRunOptions,
+  window: readonly LongMemEvalQuestion[],
+  extractionCacheRoot: string,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  env: Readonly<Record<string, string | undefined>>
+) {
+  const policy = {
+    releaseEvidenceAuthority: deriveRunEvidenceAuthority(dataset, opts, window),
+    policyShape: opts.policyShape ?? "stress",
+    simulateReport: opts.simulateReport ?? "none",
+    recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
+    captureSnapshot: opts.snapshotOut !== undefined
+  } as const;
+  if (policy.captureSnapshot) {
+    const input = { ...policy, opts, recallWeightOverrides };
+    assertSnapshotProducerInvocationPolicy(input, env);
+    const manifest = readExtractionCacheManifest(extractionCacheRoot);
+    if (manifest === undefined || hasCompleteExtractionFillAuthority(manifest)) {
+      assertSnapshotProducerReleaseAuthority(input);
+    }
+  }
+  return policy;
 }
 
 async function loadRunDataset(opts: LongMemEvalRunOptions): Promise<LoadedRunDataset> {
@@ -178,18 +216,34 @@ function selectQuestionWindow(
 function createLongMemEvalSeedRunner(
   window: readonly LongMemEvalQuestion[],
   extractionCacheRoot: string,
-  offset: number
+  offset: number,
+  datasetSha256: string,
+  captureSnapshot: boolean
 ) {
   const requiredTurns = inspectTurnContentKeySpace(window);
+  const requiredQuestionWindow = { offset, limit: window.length };
+  const extractionCachePreflightProof = captureSnapshot
+    ? createCurrentPostFillCacheAuthorityProof({
+        cacheRoot: extractionCacheRoot,
+        datasetSha256,
+        requiredTurnContents: requiredTurns.distinctTurnContents,
+        requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
+        requiredQuestionWindow,
+        env: process.env
+      })
+    : undefined;
   const sourceAssertionSupplement = resolveSourceAssertionSupplementOptions(
     process.env
   );
   return createCompileSeedRunner({
     requiredTurnContents: requiredTurns.distinctTurnContents,
     requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
-    requiredQuestionWindow: { offset, limit: window.length },
+    requiredQuestionWindow,
     cacheRoot: extractionCacheRoot,
     allowLiveExtraction: false,
+    ...(extractionCachePreflightProof === undefined ? {} : {
+      extractionCachePreflightProof
+    }),
     ...(sourceAssertionSupplement === undefined
       ? {}
       : { sourceAssertionSupplement })

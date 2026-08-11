@@ -23,9 +23,13 @@ const mocks = vi.hoisted(() => ({
   buildProvenance: vi.fn(),
   writeSnapshot: vi.fn(),
   snapshotAuthority: vi.fn(),
+  snapshotAuthorityProof: vi.fn(),
   checkpoint: vi.fn()
 }));
 const QUESTION_IDS = ["first", "second"] as const;
+const EXTRACTION_CACHE_PREFLIGHT_PROOF = Object.freeze({
+  kind: "sentinel-extraction-cache-preflight-proof"
+});
 
 interface SnapshotPolicyDrift {
   readonly policyShape?: "chat";
@@ -58,7 +62,8 @@ vi.mock("../../../longmemeval/provenance/run.js", async (importOriginal) => ({
   buildLongMemEvalRunProvenance: mocks.buildProvenance
 }));
 vi.mock("../../../longmemeval/snapshot/current/current-substrate-authority.js", () => ({
-  assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority
+  assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority,
+  assertCurrentPostFillCacheAuthorityProof: mocks.snapshotAuthorityProof
 }));
 
 beforeEach(() => {
@@ -104,6 +109,7 @@ beforeEach(() => {
     mocks.events.push("snapshot");
   });
   mocks.snapshotAuthority.mockImplementation(() => undefined);
+  mocks.snapshotAuthorityProof.mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -238,7 +244,7 @@ describe("LongMemEval snapshot execution ordering", () => {
   });
 
   it("rejects an ineligible substrate before starting the producer daemon", async () => {
-    mocks.snapshotAuthority.mockImplementationOnce(() => {
+    mocks.snapshotAuthorityProof.mockImplementationOnce(() => {
       throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
     });
 
@@ -246,6 +252,21 @@ describe("LongMemEval snapshot execution ordering", () => {
       .rejects.toThrow(/complete v3 extraction manifest/u);
     expect(mocks.startDaemon).not.toHaveBeenCalled();
     expect(mocks.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reuses the seed runner preflight proof without rescanning cache shards", async () => {
+    await executeLongMemEvalRun(snapshotContext());
+
+    expect(mocks.snapshotAuthorityProof).toHaveBeenCalledTimes(1);
+    expect(mocks.snapshotAuthorityProof.mock.calls[0]?.[0]).toMatchObject({
+      proof: EXTRACTION_CACHE_PREFLIGHT_PROOF,
+      cacheRoot: "/tmp/cache",
+      datasetSha256: "d".repeat(64),
+      requiredTurnContents: [],
+      requiredExtractionTurns: [],
+      requiredQuestionWindow: { offset: 0, limit: 2 }
+    });
+    expect(mocks.snapshotAuthority).not.toHaveBeenCalled();
   });
 });
 
@@ -278,7 +299,10 @@ function snapshotContext(drift: SnapshotPolicyDrift = {}): LongMemEvalRunContext
     policyShape: drift.policyShape ?? "stress",
     simulateReport: drift.simulateReport ?? "none",
     recallOptions: { maxResults: 10, conflictAwareness: true },
-    seedRunner: { stats: seedStats() } as unknown as
+    seedRunner: {
+      stats: seedStats(),
+      extractionCachePreflightProof: EXTRACTION_CACHE_PREFLIGHT_PROOF
+    } as unknown as
       LongMemEvalRunContext["seedRunner"],
     captureSnapshot: true,
     extractionCacheRoot: "/tmp/cache",

@@ -4,7 +4,8 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
-import { readExtractionCacheManifest } from "../extraction/cache/extraction-cache-manifest.js";
+import { readExtractionCacheManifestIdentity } from
+  "../extraction/cache/extraction-cache-manifest.js";
 import { createCachingSignalExtractor } from "./compile-seed-cache.js";
 import {
   createRunnerRawShardInspector,
@@ -25,12 +26,15 @@ import { normalizeEnvDiagDir } from "./compile-seed-extract.js";
 import type {
   CompileSeedExtractionStats,
   CompileSeedRunnerOptions,
+  ExtractionCachePreflightProof,
   RawShardInspectionDiagnostics
 } from "./compile-seed-types.js";
 import {
   createSourceAssertionSupplementRuntime,
   type SourceAssertionSupplementRuntime
 } from "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+import { assertExtractionCachePreflightProofReuse } from
+  "./preflight/cache-preflight-proof.js";
 
 const DEFAULT_COMPILE_SEED_DIAGNOSTIC_DIR_REL =
   "data/diagnostics/seed-extraction-failures";
@@ -41,13 +45,15 @@ export interface CompileSeedRunnerContext {
   readonly provider: OfficialApiGardenProvider | null;
   readonly semanticSupplement: SourceAssertionSupplementRuntime | null;
   readonly diagnosticDir: string | null;
+  readonly extractionCachePreflightProof?: ExtractionCachePreflightProof;
 }
 
 export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
   const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
-  const manifest = readExtractionCacheManifest(cacheRoot);
+  const manifestIdentity = readExtractionCacheManifestIdentity(cacheRoot);
+  const manifest = manifestIdentity?.manifest;
   const config =
     options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
   const credentialled = config.apiKey !== null;
@@ -55,7 +61,9 @@ export function createCompileSeedRunnerContext(
     manifest !== undefined &&
     !credentialled &&
     options?.allowLiveExtraction !== true;
-  runExtractionCachePreflight(options, cacheRoot, config, credentialled, manifest);
+  const extractionCachePreflightProof = runExtractionCachePreflight(
+    options, cacheRoot, config, credentialled, manifestIdentity
+  );
   const rawShardInspector = createRunnerRawShardInspector();
   const stats = createCompileSeedStats(
     credentialled || cacheOnly,
@@ -76,6 +84,9 @@ export function createCompileSeedRunnerContext(
     stats,
     diagnosticDir,
     semanticSupplement,
+    ...(extractionCachePreflightProof === undefined ? {} : {
+      extractionCachePreflightProof
+    }),
     provider: createOfficialApiProvider({
       options,
       config,
@@ -94,9 +105,28 @@ function runExtractionCachePreflight(
   cacheRoot: string,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
   credentialled: boolean,
-  manifest: ReturnType<typeof readExtractionCacheManifest> | undefined
-): void {
-  if (options?.skipPreflight === true) return;
+  manifestIdentity: ReturnType<typeof readExtractionCacheManifestIdentity> | undefined
+): ExtractionCachePreflightProof | undefined {
+  if (options?.skipPreflight === true) return undefined;
+  const manifest = manifestIdentity?.manifest;
+  if (options?.extractionCachePreflightProof !== undefined) {
+    if (manifestIdentity === undefined || options.requiredTurnContents === undefined ||
+        options.requiredQuestionWindow === undefined) {
+      throw new Error("extraction cache preflight proof requires a bound manifest window");
+    }
+    assertExtractionCachePreflightProofReuse(options.extractionCachePreflightProof, {
+      cacheRoot,
+      manifestIdentity,
+      config,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      requiredTurnContents: options.requiredTurnContents,
+      requiredQuestionWindow: options.requiredQuestionWindow,
+      ...(options.requiredExtractionTurns === undefined ? {} : {
+        requiredExtractionTurns: options.requiredExtractionTurns
+      })
+    });
+    return options.extractionCachePreflightProof;
+  }
   const minimumCoverage = resolveBenchExtractionCacheMinCoverage();
   preflightExtractionCache({
     cacheRoot,
@@ -119,6 +149,7 @@ function runExtractionCachePreflight(
       : { requiredQuestionWindow: options.requiredQuestionWindow }),
     ...(manifest === undefined ? {} : { manifest })
   });
+  return undefined;
 }
 
 function createCompileSeedStats(

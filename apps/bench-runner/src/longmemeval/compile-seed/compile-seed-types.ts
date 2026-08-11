@@ -163,6 +163,18 @@ export interface RawShardInspectionDiagnostics {
   readonly supplement: RawShardInspectionPhaseDiagnostics;
 }
 
+declare const EXTRACTION_CACHE_PREFLIGHT_PROOF: unique symbol;
+
+/**
+ * Process-local proof of the cache's raw closure at mint time. It deliberately
+ * does not attest that an out-of-band writer leaves the whole root unchanged;
+ * cooperative fills repin the manifest, while the seed ledger rebinds every
+ * shard the snapshot actually consumes.
+ */
+export interface ExtractionCachePreflightProof {
+  readonly [EXTRACTION_CACHE_PREFLIGHT_PROOF]: true;
+}
+
 export interface CompileSeedRunnerOptions {
   readonly config?: CompileSeedExtractionConfig;
   readonly cacheRoot?: string;
@@ -185,6 +197,8 @@ export interface CompileSeedRunnerOptions {
   readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   /** Exact question offset and effective count represented by those turns. */
   readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
+  /** Reuse a verified run-scoped preflight without rescanning every shard. */
+  readonly extractionCachePreflightProof?: ExtractionCachePreflightProof;
   /**
    * Skip the run-start preflight entirely. For unit tests that drive the
    * runner with a hand-built config + temp cacheRoot and do not exercise the
@@ -387,6 +401,7 @@ export interface CompileSeedDaemon {
  */
 export interface CompileSeedRunner {
   readonly stats: CompileSeedExtractionStats;
+  readonly extractionCachePreflightProof?: ExtractionCachePreflightProof;
   /** Immutable run authority; never inferred from a turn-local extraction result. */
   readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
   /**

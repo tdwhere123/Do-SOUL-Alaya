@@ -6,6 +6,8 @@ import {
   computeSourceTurnCacheKeys,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
+import { inspectCachedRawExtraction } from
+  "../../compile-seed/cache/cache-shard.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import {
   buildExtractionContentClosureIndex,
@@ -13,7 +15,8 @@ import {
   computeExtractionKeySetSha256,
   computeExtractionRawContentClosureSha256,
   type ExtractionContentClosureIndex,
-  type ExtractionContentClosureEntry
+  type ExtractionContentClosureEntry,
+  type ExtractionRawContentClosureEntry
 } from "../content-closure.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 
@@ -115,6 +118,24 @@ export function inspectExtractionCacheContentClosure(input: {
   };
 }
 
+export function inspectExtractionCacheRawContentClosure(
+  input: ShardInspectionInput
+): ExtractionCacheContentInspection {
+  const inventory = inspectShardInventory(input.cacheRoot);
+  const counts = inspectExpectedRawShards(input, inventory.keys);
+  const invalidTurns = inventory.invalidEntries + counts.invalid + counts.missing;
+  return {
+    shardTurns: inventory.keys.size,
+    validTurns: counts.valid,
+    invalidTurns,
+    keySetSha256: computeExtractionKeySetSha256(inventory.keys),
+    contentClosureSha256: null,
+    rawContentClosureSha256: invalidTurns === 0
+      ? computeExtractionRawContentClosureSha256(counts.entries)
+      : null
+  };
+}
+
 export function assertExtractionFillComplete(
   completion: ExtractionFillCompletion
 ): void {
@@ -159,6 +180,38 @@ function inspectExpectedShards(
       });
     }
     else if (result.status === "missing") missing += 1;
+    else invalid += 1;
+  }
+  return { valid, missing, invalid, entries };
+}
+
+function inspectExpectedRawShards(
+  input: ShardInspectionInput,
+  expectedKeys: ReadonlySet<string>
+): {
+  readonly valid: number;
+  readonly missing: number;
+  readonly invalid: number;
+  readonly entries: readonly ExtractionRawContentClosureEntry[];
+} {
+  let valid = 0;
+  let missing = 0;
+  let invalid = 0;
+  const entries: ExtractionRawContentClosureEntry[] = [];
+  for (const cacheKey of expectedKeys) {
+    const result = inspectCachedRawExtraction(
+      input.cacheRoot, cacheKey, input.model, input.requestProfile
+    );
+    if (result.status === "hit") {
+      valid += 1;
+      entries.push({
+        cacheKey,
+        model: input.model,
+        requestProfile: input.requestProfile,
+        rawJsonSha256: result.rawJsonSha256,
+        rawSignalCount: result.rawSignalCount
+      });
+    } else if (result.status === "missing") missing += 1;
     else invalid += 1;
   }
   return { valid, missing, invalid, entries };

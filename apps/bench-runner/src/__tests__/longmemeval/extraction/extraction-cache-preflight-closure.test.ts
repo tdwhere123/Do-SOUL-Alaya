@@ -9,7 +9,17 @@ import {
   computeExtractionRawJsonSha256,
   computeSourceTurnCacheKey
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
-import { writeExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import {
+  readExtractionCacheManifestIdentity,
+  writeExtractionCacheManifest
+} from
+  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { createExtractionCachePreflightProof } from
+  "../../../longmemeval/compile-seed/preflight/cache-preflight-proof.js";
+import {
+  inspectExtractionCacheContentClosure,
+  inspectExtractionCacheRawContentClosure
+} from "../../../longmemeval/extraction/fill/fill-completion.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
   manifestFor,
@@ -131,6 +141,114 @@ describe("preflightExtractionCache", () => {
       requiredTurnContents: [turnContent],
       requiredQuestionWindow: { offset: 0, limit: 1 }
     })).not.toThrow();
+  });
+
+  it("computes the same raw closure without semantic draft projection", () => {
+    const turns = ["raw closure first", "raw closure second"];
+    for (const turn of turns) {
+      writeCacheShard(cacheRoot, CONFIG.model, turn, '{"signals":[]}');
+    }
+    const input = {
+      cacheRoot,
+      model: CONFIG.model,
+      requestProfile: CONFIG.requestProfile
+    } as const;
+
+    const full = inspectExtractionCacheContentClosure(input);
+    const rawOnly = inspectExtractionCacheRawContentClosure(input);
+    expect(rawOnly).toMatchObject({
+      shardTurns: full.shardTurns,
+      validTurns: full.validTurns,
+      invalidTurns: full.invalidTurns,
+      keySetSha256: full.keySetSha256,
+      rawContentClosureSha256: full.rawContentClosureSha256
+    });
+  });
+
+  it("does not mint a proof from a stale caller-supplied manifest identity", () => {
+    const turnContent = "stale manifest proof";
+    writeCacheShard(cacheRoot, CONFIG.model, turnContent, '{"signals":[]}');
+    const manifest = scopedManifestFor([turnContent], "complete");
+    writeExtractionCacheManifest(cacheRoot, manifest);
+    const staleIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    writeExtractionCacheManifest(cacheRoot, {
+      ...manifest,
+      built_at: "2026-07-01T00:00:01Z"
+    });
+
+    expect(() => createExtractionCachePreflightProof({
+      cacheRoot,
+      manifestIdentity: staleIdentity,
+      config: { ...CONFIG, apiKey: null },
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      requiredTurnContents: [turnContent],
+      requiredQuestionWindow: { offset: 0, limit: 1 },
+      liveExtractionPossible: false
+    })).toThrow(/manifest identity is not current/iu);
+  });
+
+  it("rejects an invalid raw envelope even when its bytes are indexed", () => {
+    const turnContent = "indexed invalid raw envelope";
+    const rawJson = '{"not_signals":[]}';
+    const cacheKey = computeSourceTurnCacheKey(
+      CONFIG.model,
+      CONFIG.requestProfile,
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent }
+    );
+    const entry = {
+      cacheKey,
+      model: CONFIG.model,
+      requestProfile: CONFIG.requestProfile,
+      rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
+      rawSignalCount: 0,
+      parsedDraftCount: 0
+    } as const;
+    writeCacheShard(cacheRoot, CONFIG.model, turnContent, rawJson);
+    writeExtractionCacheManifest(cacheRoot, {
+      ...scopedManifestFor([turnContent], "complete"),
+      content_closure_sha256: computeExtractionContentClosureSha256([entry]),
+      content_closure_index: { [cacheKey]: [entry.rawJsonSha256, 0, 0] }
+    });
+
+    expect(() => preflightExtractionCache({
+      cacheRoot,
+      config: { ...CONFIG, apiKey: null },
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      requiredTurnContents: [turnContent],
+      requiredQuestionWindow: { offset: 0, limit: 1 }
+    })).toThrow(/content closure/iu);
+  });
+
+  it.each([
+    ["truncated", { finish_reason: "length", max_output_tokens: 2048 }],
+    ["malformed usage", {
+      finish_reason: "stop",
+      usage: { input_tokens: -1, output_tokens: 1, total_tokens: 0 }
+    }]
+  ] as const)("rejects %s response metadata from raw-only closure", (_label, metadata) => {
+    const turnContent = `indexed ${_label} response metadata`;
+    const rawJson = '{"signals":[]}';
+    const cacheKey = computeSourceTurnCacheKey(
+      CONFIG.model,
+      CONFIG.requestProfile,
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent }
+    );
+    const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
+    writeCacheShard(cacheRoot, CONFIG.model, turnContent, rawJson, metadata);
+    writeExtractionCacheManifest(cacheRoot, {
+      ...scopedManifestFor([turnContent], "complete"),
+      content_closure_index: { [cacheKey]: [rawJsonSha256, 0, 0] }
+    });
+
+    expect(() => preflightExtractionCache({
+      cacheRoot,
+      config: { ...CONFIG, apiKey: null },
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      requiredTurnContents: [turnContent],
+      requiredQuestionWindow: { offset: 0, limit: 1 }
+    })).toThrow(/content closure/iu);
   });
 
   it("allows a valid consumer subwindow without treating global shards as orphans", () => {

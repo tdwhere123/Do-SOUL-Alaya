@@ -86,7 +86,8 @@ export function writeCacheShard(
   cacheRoot: string,
   model: string,
   turnContent: string,
-  rawJson: string
+  rawJson: string,
+  responseMetadata?: unknown
 ): void {
   const cacheKey = computeSourceTurnCacheKey(
     model,
@@ -101,7 +102,10 @@ export function writeCacheShard(
     request_profile: EXTRACTION_CONFIG.requestProfile,
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-07-01T00:00:00Z"
+    extracted_at: "2026-07-01T00:00:00Z",
+    ...(responseMetadata === undefined ? {} : {
+      response_metadata: responseMetadata
+    })
   })}\n`, "utf8");
 }
 

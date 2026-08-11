@@ -62,6 +62,9 @@ export function createCompileSeedRunner(
   const context = createCompileSeedRunnerContext(options);
   return {
     stats: context.stats,
+    ...(context.extractionCachePreflightProof === undefined ? {} : {
+      extractionCachePreflightProof: context.extractionCachePreflightProof
+    }),
     ...(context.semanticSupplement === null
       ? {}
       : { semanticSupplementBinding: context.semanticSupplement.binding }),

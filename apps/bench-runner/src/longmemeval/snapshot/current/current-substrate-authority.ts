@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { isCacheOnlySeedExtractionPath, type SeedExtractionPath } from
   "@do-soul/alaya-eval";
@@ -49,6 +50,18 @@ import {
 } from "../run-provenance.js";
 import type { SourceAssertionSupplementBinding } from
   "../../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import type { ExtractionCachePreflightProof } from
+  "../../compile-seed/compile-seed-types.js";
+import {
+  assertExtractionCachePreflightProofManifest,
+  assertExtractionCachePreflightProofReuse,
+  createExtractionCachePreflightProof
+} from "../../compile-seed/preflight/cache-preflight-proof.js";
+
+const currentPostFillProofRoots = new WeakMap<
+  ExtractionCachePreflightProof,
+  string
+>();
 
 export function assertCacheOnlyEnvironment(
   env: Readonly<Record<string, string | undefined>>
@@ -71,32 +84,117 @@ export function assertCurrentPostFillCacheAuthority(input: {
   readonly requiredQuestionWindow: ExtractionFillQuestionWindow;
   readonly env: Readonly<Record<string, string | undefined>>;
 }): SnapshotExtractionProvenanceV3 {
+  return inspectCurrentPostFillCacheAuthority(input).provenance;
+}
+
+export function createCurrentPostFillCacheAuthorityProof(
+  input: Parameters<typeof assertCurrentPostFillCacheAuthority>[0]
+): ExtractionCachePreflightProof {
+  const inspected = inspectCurrentPostFillCacheAuthority(input);
+  const proof = inspected.proof;
+  currentPostFillProofRoots.set(proof, resolve(input.cacheRoot));
+  return proof;
+}
+
+export function assertCurrentPostFillCacheAuthorityProof(
+  input: Parameters<typeof assertCurrentPostFillCacheAuthority>[0] & {
+    readonly proof: ExtractionCachePreflightProof;
+  }
+): void {
+  const cacheRoot = currentPostFillProofRoots.get(input.proof);
+  if (cacheRoot === undefined || cacheRoot !== resolve(input.cacheRoot)) {
+    throw new Error("current post-fill cache authority proof is absent or forged");
+  }
   assertCacheOnlyEnvironment(input.env);
-  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  const identity = readExtractionCacheManifestIdentity(cacheRoot);
   if (identity === undefined || identity.manifest.schema_version !== 3 ||
-      !hasCompleteExtractionFillAuthority(identity.manifest)) {
+      !hasCompleteExtractionFillAuthority(identity.manifest) ||
+      identity.manifest.dataset_revision !== input.datasetSha256) {
+    throw new Error("post-fill extraction manifest changed after cache preflight");
+  }
+  const config = resolveCompileSeedExtractionConfig({ ...input.env }, identity.manifest);
+  assertExtractionCachePreflightProofReuse(input.proof, {
+    cacheRoot,
+    manifestIdentity: identity,
+    config,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    requiredTurnContents: input.requiredTurnContents,
+    requiredExtractionTurns: input.requiredExtractionTurns,
+    requiredQuestionWindow: input.requiredQuestionWindow
+  });
+}
+
+export function assertCurrentPostFillCacheAuthorityProofManifest(
+  input: {
+    readonly proof: ExtractionCachePreflightProof;
+    readonly cacheRoot: string;
+    readonly manifestSha256: string;
+  }
+): void {
+  if (currentPostFillProofRoots.get(input.proof) !== resolve(input.cacheRoot)) {
+    throw new Error("current post-fill cache authority proof is absent or forged");
+  }
+  assertExtractionCachePreflightProofManifest(input.proof, input.manifestSha256);
+}
+
+function inspectCurrentPostFillCacheAuthority(
+  input: Parameters<typeof assertCurrentPostFillCacheAuthority>[0]
+) {
+  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  if (identity === undefined || identity.manifest.schema_version !== 3) {
     throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
   }
   if (identity.manifest.dataset_revision !== input.datasetSha256) {
     throw new Error("post-fill extraction manifest dataset identity mismatch");
   }
+  const complete = hasCompleteExtractionFillAuthority(identity.manifest);
+  if (!complete && identity.manifest.fill_status !== undefined) {
+    throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
+  }
+  if (complete) assertCacheOnlyEnvironment(input.env);
   const config = resolveCompileSeedExtractionConfig(
     { ...input.env },
     identity.manifest
   );
+  if (!complete) assertIncompletePostFillCache(input, identity.manifest, config);
+  const proof = createExtractionCachePreflightProof({
+    cacheRoot: input.cacheRoot,
+    manifestIdentity: identity,
+    config,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    requiredTurnContents: input.requiredTurnContents,
+    requiredQuestionWindow: input.requiredQuestionWindow,
+    liveExtractionPossible: false,
+    ...(input.requiredExtractionTurns === undefined ? {} : {
+      requiredExtractionTurns: input.requiredExtractionTurns
+    })
+  });
+  return {
+    identity,
+    config,
+    proof,
+    provenance: extractionProvenance(identity)
+  };
+}
+
+function assertIncompletePostFillCache(
+  input: Parameters<typeof assertCurrentPostFillCacheAuthority>[0],
+  manifest: Parameters<typeof preflightExtractionCache>[0]["manifest"],
+  config: ReturnType<typeof resolveCompileSeedExtractionConfig>
+): never {
   preflightExtractionCache({
     cacheRoot: input.cacheRoot,
     config,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     allowLiveExtraction: false,
-    liveExtractionPossible: false,
-    manifest: identity.manifest,
+    liveExtractionPossible: config.apiKey !== null,
+    manifest,
     requiredTurnContents: input.requiredTurnContents,
     requiredExtractionTurns: input.requiredExtractionTurns,
     requiredQuestionWindow: input.requiredQuestionWindow,
     requireManifest: true
   });
-  return extractionProvenance(identity);
+  throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
 }
 
 export function assertCurrentSnapshotWriteAuthority(input: {

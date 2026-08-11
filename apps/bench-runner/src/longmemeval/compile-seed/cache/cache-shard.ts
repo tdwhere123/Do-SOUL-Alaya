@@ -98,6 +98,7 @@ export function inspectCachedRawExtraction(
   if (cached.status !== "hit") return cached;
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
+    inspectCachedResponseMetadata(cached.entry.response_metadata);
     return {
       status: "hit",
       rawJson: cached.entry.raw_json,

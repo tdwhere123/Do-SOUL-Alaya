@@ -7,11 +7,15 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   computeSystemPromptSha256,
   EXTRACTION_CACHE_KEY_ALGO,
+  readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest,
   type ExtractionCacheManifest
 } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   assertCurrentPostFillCacheAuthority,
+  assertCurrentPostFillCacheAuthorityProof,
+  assertCurrentPostFillCacheAuthorityProofManifest,
+  createCurrentPostFillCacheAuthorityProof,
   assertStoredCurrentSnapshotAttribution
 } from "../../../longmemeval/snapshot/current/current-substrate-authority.js";
 import { writeCompletedExtractionCacheFixture } from
@@ -66,6 +70,57 @@ describe("current post-fill substrate authority", () => {
     writeComplete(cacheRoot, TURNS, 0, 2);
 
     expect(() => assertAuthority(cacheRoot, [TURNS[0]!], 0, 1)).not.toThrow();
+  });
+
+  it("reuses only the exact verified consumer scope", () => {
+    const cacheRoot = fixtureRoot();
+    writeComplete(cacheRoot, TURNS, 0, 2);
+    const exact = proofInput(cacheRoot, [TURNS[0]!], 0, 1);
+    const proof = createCurrentPostFillCacheAuthorityProof(exact);
+
+    expect(() => assertCurrentPostFillCacheAuthorityProof({ ...exact, proof }))
+      .not.toThrow();
+    expect(() => assertCurrentPostFillCacheAuthorityProof({
+      ...proofInput(cacheRoot, [TURNS[1]!], 1, 1),
+      proof
+    })).toThrow(/scope mismatch/iu);
+  });
+
+  it("rejects a changed manifest after proof creation", () => {
+    const cacheRoot = fixtureRoot();
+    const manifest = writeComplete(cacheRoot, TURNS, 0, 2);
+    const input = proofInput(cacheRoot, TURNS, 0, 2);
+    const proof = createCurrentPostFillCacheAuthorityProof(input);
+    const originalIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    expect(() => assertCurrentPostFillCacheAuthorityProofManifest({
+      proof, cacheRoot, manifestSha256: originalIdentity.manifestSha256
+    })).not.toThrow();
+    writeExtractionCacheManifest(cacheRoot, {
+      ...manifest,
+      built_at: "2026-07-16T00:00:01.000Z"
+    });
+
+    expect(() => assertCurrentPostFillCacheAuthorityProof({ ...input, proof }))
+      .toThrow(/identity mismatch|changed after cache preflight/iu);
+    const changedIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    expect(() => assertCurrentPostFillCacheAuthorityProofManifest({
+      proof, cacheRoot, manifestSha256: changedIdentity.manifestSha256
+    })).toThrow(/manifest changed/iu);
+  });
+
+  it("does not reuse a proof for another root with identical manifest bytes", () => {
+    const cacheRoot = fixtureRoot();
+    const otherRoot = fixtureRoot();
+    writeComplete(cacheRoot, TURNS, 0, 2);
+    writeComplete(otherRoot, TURNS, 0, 2);
+    const proof = createCurrentPostFillCacheAuthorityProof(
+      proofInput(cacheRoot, TURNS, 0, 2)
+    );
+    const otherIdentity = readExtractionCacheManifestIdentity(otherRoot)!;
+
+    expect(() => assertCurrentPostFillCacheAuthorityProofManifest({
+      proof, cacheRoot: otherRoot, manifestSha256: otherIdentity.manifestSha256
+    })).toThrow(/absent or forged/iu);
   });
 
   it("rejects a narrow cache for a wider snapshot window", () => {
@@ -169,6 +224,28 @@ function assertAuthority(
       ...extraEnv
     }
   });
+}
+
+function proofInput(
+  cacheRoot: string,
+  turns: readonly string[],
+  offset: number,
+  limit: number
+) {
+  return {
+    cacheRoot,
+    datasetSha256: DATASET_SHA,
+    requiredTurnContents: turns,
+    requiredExtractionTurns: turns.map((turnContent) => ({
+      turnContent,
+      turnMessages: []
+    })),
+    requiredQuestionWindow: { offset, limit },
+    env: {
+      OFFICIAL_API_GARDEN_MODEL: MODEL,
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+    }
+  } as const;
 }
 
 function writeNoncurrentManifest(

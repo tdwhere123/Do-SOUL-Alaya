@@ -361,6 +361,18 @@ describe("extraction-cache-manifest", () => {
     );
   });
 
+  it("rejects invalid UTF-8 before manifest parsing", () => {
+    const valid = Buffer.from(JSON.stringify(BASE_MANIFEST), "utf8");
+    const invalid = Buffer.concat([
+      valid.subarray(0, valid.length - 1), Buffer.from([0xff, 0x7d])
+    ]);
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(extractionCacheManifestPath(cacheRoot), invalid);
+
+    expect(() => readExtractionCacheManifestIdentity(cacheRoot))
+      .toThrow(/not valid UTF-8/u);
+  });
+
   it.each([
     ["requested_turns", -1],
     ["requested_turns", 1.5],

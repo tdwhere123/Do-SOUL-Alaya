@@ -1,7 +1,6 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   writeFileSync
 } from "node:fs";
@@ -30,6 +29,8 @@ import {
   type SupplementalSourceManifestBinding
 } from
   "./supplemental-source-receipt.js";
+import { readExtractionCacheManifestBytes } from
+  "./io/manifest-byte-reader.js";
 export {
   BENCH_EXTRACTION_MODEL_ENV,
   resolveBenchExtractionModel
@@ -178,22 +179,12 @@ export function readExtractionCacheManifestIdentity(
   if (!existsSync(filePath)) {
     return undefined;
   }
-  const raw = readManifestRaw(filePath);
-  const manifest = parseExtractionCacheManifestContents(raw, filePath);
+  const raw = readExtractionCacheManifestBytes(filePath);
+  const manifest = parseExtractionCacheManifestContents(raw.text, filePath);
   return {
     manifest,
-    manifestSha256: createHash("sha256").update(raw, "utf8").digest("hex")
+    manifestSha256: createHash("sha256").update(raw.bytes).digest("hex")
   };
-}
-
-function readManifestRaw(filePath: string): string {
-  try {
-    return readFileSync(filePath, "utf8");
-  } catch (cause) {
-    throw new Error(
-      `extraction cache manifest unreadable at ${filePath}: ${describeCause(cause)}`
-    );
-  }
 }
 
 export function parseExtractionCacheManifestContents(
@@ -489,11 +480,4 @@ function optionalString(
     return {};
   }
   return { [field]: value };
-}
-
-function describeCause(cause: unknown): string {
-  if (cause instanceof Error) {
-    return cause.message;
-  }
-  return String(cause);
 }

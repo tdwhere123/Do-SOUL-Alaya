@@ -33,14 +33,12 @@ import {
 } from "../extraction/seed-fuel/seed-fuel-inventory.js";
 import { awaitLongMemEvalSnapshotQuiescence } from
   "../snapshot/quiescence.js";
-import { assertLongMemEvalTreatmentNeutralEdgeFormation } from
-  "./edge-formation-config.js";
 import { inspectTurnContentKeySpace } from
   "../extraction/turn-contents.js";
-import { assertCurrentPostFillCacheAuthority } from
+import { assertCurrentPostFillCacheAuthorityProof } from
   "../snapshot/current/current-substrate-authority.js";
-import { assertProductFormationEnvironment } from
-  "../promotion/product/product-formation-policy.js";
+import { assertSnapshotProducerStaticPolicy } from
+  "./policy/snapshot-producer-policy.js";
 
 export interface LongMemEvalExecutionResult {
   readonly collected: readonly LongMemEvalWorkerResult[];
@@ -362,26 +360,15 @@ function buildQaOptions(
 }
 
 function assertSnapshotProducerExecutionPolicy(context: LongMemEvalRunContext): void {
-  assertProductFormationEnvironment(
-    process.env,
-    "snapshot producer product formation"
-  );
-  assertLongMemEvalTreatmentNeutralEdgeFormation(process.env);
-  if (context.policyShape !== "stress" || context.simulateReport !== "none" ||
-      context.recallWeightOverrides !== undefined || context.opts.qa !== undefined ||
-      (context.opts.embeddingMode ?? "disabled") !== "disabled") {
-    throw new Error(
-      "snapshot production requires stress/none, neutral recall weights and embedding, and QA off"
-    );
-  }
-  if (context.releaseEvidenceAuthority === null) {
-    throw new Error("snapshot production requires canonical pinned dataset authority");
-  }
-  assertCurrentPostFillCacheAuthority({
+  assertSnapshotProducerStaticPolicy(context, process.env);
+  const proof = requireSnapshotPreflightProof(context);
+  const requiredTurns = inspectTurnContentKeySpace(context.window);
+  assertCurrentPostFillCacheAuthorityProof({
+    proof,
     cacheRoot: context.extractionCacheRoot,
     datasetSha256: context.datasetSha256,
-    requiredTurnContents: inspectTurnContentKeySpace(context.window).distinctTurnContents,
-    requiredExtractionTurns: inspectTurnContentKeySpace(context.window).distinctExtractionTurns,
+    requiredTurnContents: requiredTurns.distinctTurnContents,
+    requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
     requiredQuestionWindow: {
       offset: Math.max(0, context.opts.offset ?? 0),
       limit: context.window.length
@@ -454,6 +441,7 @@ async function writeLongMemEvalSnapshotIfRequested(
     canonicalQuestions: context.questions,
     snapshotQuestions,
     extractionCacheRoot: context.extractionCacheRoot,
+    extractionCachePreflightProof: requireSnapshotPreflightProof(context),
     datasetSha256: context.datasetSha256,
     seedExtractionPath: toSeedExtractionPathKpi(context.seedRunner.stats),
     ...(context.seedRunner.semanticSupplementBinding === undefined
@@ -464,6 +452,14 @@ async function writeLongMemEvalSnapshotIfRequested(
   process.stdout.write(
     `[longmemeval snapshot] wrote ${snapshotQuestions.length} questions -> ${context.opts.snapshotOut}\n`
   );
+}
+
+function requireSnapshotPreflightProof(context: LongMemEvalRunContext) {
+  const proof = context.seedRunner.extractionCachePreflightProof;
+  if (proof === undefined) {
+    throw new Error("snapshot production requires a verified cache preflight proof");
+  }
+  return proof;
 }
 
 async function cleanupSeedDataDirRoot(
