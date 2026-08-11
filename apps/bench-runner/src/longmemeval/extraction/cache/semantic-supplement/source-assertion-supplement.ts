@@ -2,16 +2,29 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import {
+  computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiExtractionRequest,
-  parseOfficialApiSignals,
   stringifyOfficialApiExtractionRequest,
-  type OfficialApiExtractionRequest,
-  type OfficialApiSignalDraft
+  type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   EXTRACTION_REQUEST_PROFILES,
   type ExtractionRequestProfile
 } from "../../request-profile.js";
+import {
+  assertGroundedPrimaryGap,
+  buildSourceDraftAnchorBindings,
+  hasValidAnchorBindingShape,
+  selectSourceDraftsByAnchorBindings,
+  sourceObservationSha256s,
+  type SourceDraftAnchorInput
+} from "./source-draft-anchor-binding.js";
+import {
+  computeSourceAssertionSupplementReceiptEntrySetSha256,
+  computeSourceAssertionSupplementReceiptEntrySha256,
+  computeSourceAssertionSupplementSidecarProjectionSha256,
+  sourceAssertionSupplementSidecarProjection
+} from "./source-assertion-supplement-closure.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const PositiveCountSchema = z.number().int().positive();
@@ -29,21 +42,32 @@ const PrimaryIdentitySchema = z.object({
   parser_semantics: z.string().trim().min(1),
   grounding_semantics: z.string().trim().min(1)
 }).strict().readonly();
+const SourceDraftBindingSchema = z.object({
+  source_draft_index: z.number().int().nonnegative(),
+  source_draft_sha256: Sha256Schema,
+  current_anchor_assertion_id: PositiveCountSchema,
+  current_anchor_assertion_sha256: Sha256Schema,
+  proposed_quote_sha256: Sha256Schema,
+  grounded_source_assertion_sha256: Sha256Schema
+}).strict().readonly();
 const EntrySchema = z.object({
   primary_cache_key: Sha256Schema,
   primary_request_sha256: Sha256Schema,
   source_corpus_identity: Sha256Schema,
   source_cache_key: Sha256Schema,
   source_raw_json_sha256: Sha256Schema,
-  assertion_ids: AssertionIdsSchema,
+  primary_raw_json_sha256: Sha256Schema,
+  anchor_assertion_ids: AssertionIdsSchema,
+  source_observation_sha256s: z.array(Sha256Schema).nonempty().readonly(),
+  source_draft_bindings: z.array(SourceDraftBindingSchema).nonempty().readonly(),
   occurrence_count: PositiveCountSchema,
   selected_draft_count: PositiveCountSchema,
   selected_raw_json_sha256: Sha256Schema
 }).strict().readonly();
 const ReceiptSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(3),
   kind: z.literal("longmemeval-source-assertion-semantic-supplement"),
-  mapping_basis: z.literal("source-corpus-primary-gap-current-grounding-v1"),
+  mapping_basis: z.literal("source-draft-to-current-anchor-v3"),
   created_at: z.string().datetime(),
   primary_identity: PrimaryIdentitySchema,
   source_identity: IdentitySchema,
@@ -58,6 +82,8 @@ const ReceiptSchema = z.object({
 }).strict().readonly();
 export const SourceAssertionSupplementBindingSchema = z.object({
   kind: z.literal("longmemeval-source-assertion-semantic-supplement"),
+  receipt_schema_version: z.literal(3),
+  mapping_basis: z.literal("source-draft-to-current-anchor-v3"),
   receipt_sha256: Sha256Schema,
   entry_count: PositiveCountSchema,
   assertion_count: PositiveCountSchema,
@@ -95,12 +121,16 @@ export type SourceAssertionSupplementBinding = z.infer<
 
 export interface SourceAssertionSupplementBatchReceipt {
   readonly semanticSupplementReceiptSha256: string;
+  readonly receiptEntrySha256: string;
+  readonly sidecarProjectionSha256: string;
   readonly primaryCacheKey: string;
   readonly sourceCacheKey: string;
   readonly sourceRawJsonSha256: string;
+  readonly primaryRawJsonSha256: string;
   readonly selectedRawJsonSha256: string;
   readonly sourceCorpusIdentity: string;
-  readonly assertionIds: readonly number[];
+  readonly anchorAssertionIds: readonly number[];
+  readonly sourceObservationSha256s: readonly string[];
   readonly occurrenceCount: number;
   readonly rawSignalCount: number;
   readonly draftCount: number;
@@ -111,7 +141,10 @@ interface CreateEntryInput {
   readonly request: OfficialApiExtractionRequest;
   readonly sourceCacheKey: string;
   readonly sourceRawJson: string;
-  readonly assertionIds: readonly number[];
+  readonly primaryRawJson: string;
+  readonly sourceCorpus: string;
+  readonly anchorAssertionIds: readonly number[];
+  readonly sourceDraftBindings?: readonly SourceDraftAnchorInput[];
   readonly occurrenceCount: number;
 }
 
@@ -127,9 +160,9 @@ export function createSourceAssertionSupplementReceipt(input: {
     bytewiseCompare(left.primary_cache_key, right.primary_cache_key)
   );
   const unsigned = {
-    schema_version: 1 as const,
+    schema_version: 3 as const,
     kind: "longmemeval-source-assertion-semantic-supplement" as const,
-    mapping_basis: "source-corpus-primary-gap-current-grounding-v1" as const,
+    mapping_basis: "source-draft-to-current-anchor-v3" as const,
     created_at: input.createdAt,
     primary_identity: encodePrimaryIdentity(input.primaryIdentity),
     source_identity: encodeSourceIdentity(input.sourceIdentity),
@@ -137,14 +170,14 @@ export function createSourceAssertionSupplementReceipt(input: {
     grounding_audit_sha256: input.groundingAuditSha256,
     entry_count: entries.length,
     assertion_count: entries.reduce(
-      (total, entry) => total + entry.assertion_ids.length,
+      (total, entry) => total + entry.source_observation_sha256s.length,
       0
     ),
     occurrence_count: entries.reduce(
       (total, entry) => total + entry.occurrence_count,
       0
     ),
-    entry_set_sha256: digest(JSON.stringify(entries)),
+    entry_set_sha256: computeSourceAssertionSupplementReceiptEntrySetSha256(entries),
     entries
   };
   return parseSourceAssertionSupplementReceipt({
@@ -169,6 +202,8 @@ export function sourceAssertionSupplementBinding(
 ): Readonly<SourceAssertionSupplementBinding> {
   return SourceAssertionSupplementBindingSchema.parse({
     kind: receipt.kind,
+    receipt_schema_version: receipt.schema_version,
+    mapping_basis: receipt.mapping_basis,
     receipt_sha256: receipt.receipt_sha256,
     entry_count: receipt.entry_count,
     assertion_count: receipt.assertion_count,
@@ -193,6 +228,7 @@ export interface SourceAssertionSupplementBatchInput {
   readonly request: OfficialApiExtractionRequest;
   readonly primaryCacheKey: string;
   readonly primaryRawJson: string;
+  readonly sourceCorpus: string;
 }
 
 export function createSourceAssertionSupplementReader(input: {
@@ -229,45 +265,71 @@ function readBatch(
   const entry = byPrimaryKey.get(input.primaryCacheKey);
   if (entry === undefined) return Object.freeze({ rawJson: '{"signals":[]}', receipt: null });
   assertRequestBinding(entry, input.request);
-  const primaryCovered = locatedAssertionIds(parseOfficialApiSignals(input.primaryRawJson));
-  if (entry.assertion_ids.some((assertionId) => primaryCovered.has(assertionId))) {
-    throw new Error("source assertion supplement target is no longer a primary-gap assertion");
+  if (computeOfficialApiSourceCorpusIdentity(input.sourceCorpus) !==
+      entry.source_corpus_identity) {
+    throw new Error("source assertion supplement source corpus identity drifted");
   }
+  if (digest(input.primaryRawJson) !== entry.primary_raw_json_sha256) {
+    throw new Error("source assertion supplement primary raw bytes drifted");
+  }
+  assertGroundedPrimaryGap({
+    bindings: entry.source_draft_bindings,
+    primaryRawJson: input.primaryRawJson,
+    sourceCorpus: input.sourceCorpus
+  });
   const sourceRawJson = readSourceRawJson(entry.source_cache_key);
   if (digest(sourceRawJson) !== entry.source_raw_json_sha256) {
     throw new Error("source assertion supplement source raw bytes drifted");
   }
-  const selected = selectDrafts(sourceRawJson, entry.assertion_ids);
+  const selected = selectSourceDraftsByAnchorBindings(
+    sourceRawJson,
+    entry.source_draft_bindings,
+    input.request,
+    input.sourceCorpus
+  );
   const rawJson = JSON.stringify({ signals: selected });
   if (selected.length !== entry.selected_draft_count ||
       digest(rawJson) !== entry.selected_raw_json_sha256) {
     throw new Error("source assertion supplement selected projection drifted");
   }
-  return Object.freeze({
-    rawJson,
-    receipt: Object.freeze({
-      semanticSupplementReceiptSha256: receipt.receipt_sha256,
-      primaryCacheKey: entry.primary_cache_key,
-      sourceCacheKey: entry.source_cache_key,
-      sourceRawJsonSha256: entry.source_raw_json_sha256,
-      selectedRawJsonSha256: entry.selected_raw_json_sha256,
-      sourceCorpusIdentity: entry.source_corpus_identity,
-      assertionIds: entry.assertion_ids,
-      occurrenceCount: entry.occurrence_count,
-      rawSignalCount: selected.length,
-      draftCount: selected.length
-    })
-  });
+  const projection = sourceAssertionSupplementSidecarProjection(entry);
+  return Object.freeze({ rawJson, receipt: Object.freeze({
+    semanticSupplementReceiptSha256: receipt.receipt_sha256,
+    receiptEntrySha256: computeSourceAssertionSupplementReceiptEntrySha256(entry),
+    sidecarProjectionSha256:
+      computeSourceAssertionSupplementSidecarProjectionSha256(projection),
+    ...projection
+  }) });
 }
 
 function buildEntry(input: CreateEntryInput): SourceAssertionSupplementReceipt["entries"][number] {
   const request = parseOfficialApiExtractionRequest(input.request);
-  const assertionIds = [...input.assertionIds].sort((left, right) => left - right);
-  assertAssertionIdsBound(request, assertionIds);
-  const selected = selectDrafts(input.sourceRawJson, assertionIds);
+  const anchorAssertionIds = [...input.anchorAssertionIds].sort((left, right) => left - right);
+  assertAssertionIdsBound(request, anchorAssertionIds);
+  const bindings = buildSourceDraftAnchorBindings({
+    sourceRawJson: input.sourceRawJson,
+    sourceCorpus: input.sourceCorpus,
+    request,
+    assertionIds: anchorAssertionIds,
+    ...(input.sourceDraftBindings === undefined
+      ? {}
+      : { explicit: input.sourceDraftBindings })
+  });
+  assertGroundedPrimaryGap({
+    bindings,
+    primaryRawJson: input.primaryRawJson,
+    sourceCorpus: input.sourceCorpus
+  });
+  const selected = selectSourceDraftsByAnchorBindings(
+    input.sourceRawJson,
+    bindings,
+    request,
+    input.sourceCorpus
+  );
   if (selected.length === 0) {
     throw new Error("source assertion supplement entry selects no valid drafts");
   }
+  const observationSha256s = sourceObservationSha256s(bindings);
   const selectedRawJson = JSON.stringify({ signals: selected });
   return EntrySchema.parse({
     primary_cache_key: input.primaryCacheKey,
@@ -275,22 +337,14 @@ function buildEntry(input: CreateEntryInput): SourceAssertionSupplementReceipt["
     source_corpus_identity: request.source_corpus_identity,
     source_cache_key: input.sourceCacheKey,
     source_raw_json_sha256: digest(input.sourceRawJson),
-    assertion_ids: assertionIds,
+    primary_raw_json_sha256: digest(input.primaryRawJson),
+    anchor_assertion_ids: anchorAssertionIds,
+    source_observation_sha256s: observationSha256s,
+    source_draft_bindings: bindings,
     occurrence_count: input.occurrenceCount,
     selected_draft_count: selected.length,
     selected_raw_json_sha256: digest(selectedRawJson)
   });
-}
-
-function selectDrafts(
-  rawJson: string,
-  assertionIds: readonly number[]
-): readonly OfficialApiSignalDraft[] {
-  const allowed = new Set(assertionIds);
-  return Object.freeze(parseOfficialApiSignals(rawJson).filter((draft) => {
-    const assertionId = draft.source_locator?.assertion_id;
-    return assertionId !== undefined && allowed.has(assertionId);
-  }));
 }
 
 function assertRequestBinding(
@@ -301,7 +355,7 @@ function assertRequestBinding(
       entry.source_corpus_identity !== request.source_corpus_identity) {
     throw new Error("source assertion supplement request identity drifted");
   }
-  assertAssertionIdsBound(request, entry.assertion_ids);
+  assertAssertionIdsBound(request, entry.anchor_assertion_ids);
 }
 
 function assertAssertionIdsBound(
@@ -332,19 +386,25 @@ function assertReceiptDerivedFields(
     receipt.primary_identity.request_profile === receipt.source_identity.request_profile;
   if (!sorted || !sameLogicalModel || receipt.entry_count !== entries.length ||
       receipt.assertion_count !== entries.reduce(
-        (total, entry) => total + entry.assertion_ids.length, 0
+        (total, entry) => total + entry.source_observation_sha256s.length, 0
       ) || receipt.occurrence_count !== entries.reduce(
         (total, entry) => total + entry.occurrence_count, 0
-      ) || receipt.entry_set_sha256 !== digest(JSON.stringify(entries)) ||
+      ) || entries.some((entry) => !hasValidDerivedBindings(entry)) ||
+      receipt.entry_set_sha256 !==
+        computeSourceAssertionSupplementReceiptEntrySetSha256(entries) ||
       receipt.receipt_sha256 !== digest(JSON.stringify(unsigned))) {
     throw invalidReceipt(label);
   }
 }
 
-function locatedAssertionIds(drafts: readonly OfficialApiSignalDraft[]): ReadonlySet<number> {
-  return new Set(drafts.flatMap((draft) =>
-    draft.source_locator === undefined ? [] : [draft.source_locator.assertion_id]
-  ));
+function hasValidDerivedBindings(
+  entry: SourceAssertionSupplementReceipt["entries"][number]
+): boolean {
+  return hasValidAnchorBindingShape(
+    entry.source_draft_bindings,
+    entry.anchor_assertion_ids,
+    entry.source_observation_sha256s
+  );
 }
 
 function encodePrimaryIdentity(input: SourceAssertionSupplementPrimaryIdentity) {

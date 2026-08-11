@@ -359,7 +359,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     } satisfies Partial<GardenProviderError>);
   });
 
-  it("requires an open semantic factor graph for current live extraction", async () => {
+  it("admits candidate core when the optional semantic graph is unavailable", async () => {
     const graphless = new OfficialApiGardenProvider({
       apiKey: "sk-test",
       extractor: createExtractor(JSON.stringify({
@@ -376,9 +376,16 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
         }]
       }))
     });
-    await expect(graphless.compile("The build is green.", createContext())).rejects.toMatchObject({
-      kind: "invalid_response"
+    const [graphlessSignal] = await graphless.compile(
+      "The build is green.", createContext("The build is green.")
+    );
+    expect(graphlessSignal?.raw_payload).toMatchObject({
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      }
     });
+    expect(graphlessSignal?.raw_payload).not.toHaveProperty("semantic_factor_graph");
 
     const graphful = new OfficialApiGardenProvider({
       apiKey: "sk-test",

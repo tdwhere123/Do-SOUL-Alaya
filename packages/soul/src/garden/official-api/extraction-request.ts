@@ -50,7 +50,7 @@ export function buildOfficialApiExtractionRequests(
 ): readonly OfficialApiExtractionRequest[] {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
-  const sourceCorpusIdentity = computeSourceCorpusIdentity(sourceCorpus);
+  const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
   const batchCount = Math.max(
     1,
     Math.ceil(assertions.length / OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH)
@@ -86,7 +86,7 @@ function buildRequest(
   });
 }
 
-function computeSourceCorpusIdentity(sourceCorpus: string): string {
+export function computeOfficialApiSourceCorpusIdentity(sourceCorpus: string): string {
   return createHash("sha256").update(JSON.stringify({
     contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
     source_corpus: sourceCorpus

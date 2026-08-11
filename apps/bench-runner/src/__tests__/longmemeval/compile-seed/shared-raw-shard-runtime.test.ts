@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   buildOfficialApiExtractionRequests,
+  buildOfficialApiSourceCorpus,
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
@@ -93,6 +94,7 @@ function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) 
     signal(1, "I use TypeScript."),
     signal(2, "I avoid any.")
   ]);
+  const sourceCorpus = buildOfficialApiSourceCorpus(TURN, TURN_MESSAGES);
   writeShard(primaryCacheRoot, cacheKey, primaryRawJson);
   writeShard(sourceCacheRoot, cacheKey, sourceRawJson);
   const receipt = createReceipt({
@@ -100,7 +102,9 @@ function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) 
     sourceIdentity,
     request,
     cacheKey,
-    sourceRawJson
+    sourceRawJson,
+    primaryRawJson,
+    sourceCorpus
   });
   const receiptPath = join(primaryCacheRoot, "supplement-receipt.json");
   writeFileSync(receiptPath, JSON.stringify(receipt), "utf8");
@@ -113,6 +117,8 @@ function createReceipt(input: {
   request: ReturnType<typeof requireSingleRequest>;
   cacheKey: string;
   sourceRawJson: string;
+  primaryRawJson: string;
+  sourceCorpus: string;
 }) {
   return createSourceAssertionSupplementReceipt({
     createdAt: "2026-08-11T00:00:00.000Z",
@@ -139,7 +145,9 @@ function createReceipt(input: {
       request: input.request,
       sourceCacheKey: input.cacheKey,
       sourceRawJson: input.sourceRawJson,
-      assertionIds: [2],
+      primaryRawJson: input.primaryRawJson,
+      sourceCorpus: input.sourceCorpus,
+      anchorAssertionIds: [2],
       occurrenceCount: 1
     }]
   });

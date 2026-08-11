@@ -124,6 +124,8 @@ describe("current snapshot execution-window authority", () => {
 function supplementBinding() {
   return SourceAssertionSupplementBindingSchema.parse({
     kind: "longmemeval-source-assertion-semantic-supplement",
+    receipt_schema_version: 3,
+    mapping_basis: "source-draft-to-current-anchor-v3",
     receipt_sha256: "3".repeat(64),
     entry_count: 1,
     assertion_count: 1,

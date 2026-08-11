@@ -4,6 +4,7 @@ import {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   OFFICIAL_API_SOURCE_GROUNDING_SEMANTICS_VERSION,
   OfficialApiGardenProvider,
+  buildOfficialApiSourceCorpus,
   parseOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest,
   type GardenCompileContext
@@ -74,7 +75,8 @@ export function createSourceAssertionSupplementRuntime(input: {
   const reader = createReader(input, primary, source);
   const binding = sourceAssertionSupplementBinding(reader.receipt);
   const turnReceipts: SourceAssertionSupplementBatchReceipt[] = [];
-  const extractor = createExtractor(input, reader, turnReceipts);
+  const sourceCorpusState: { current: string | null } = { current: null };
+  const extractor = createExtractor(input, reader, turnReceipts, sourceCorpusState);
   const provider = new OfficialApiGardenProvider({
     apiKey: null,
     model: input.config.model,
@@ -87,7 +89,7 @@ export function createSourceAssertionSupplementRuntime(input: {
     binding,
     beginTurn: () => { turnReceipts.length = 0; },
     compile: (turnContent: string, context: GardenCompileContext) =>
-      provider.compile(turnContent, context),
+      compileWithSourceCorpus(provider, sourceCorpusState, turnContent, context),
     mergeTurnStats: (stats: CompileSeedExtractionStats) =>
       mergeTurnStats(stats, turnReceipts)
   });
@@ -125,7 +127,8 @@ function createReader(
 function createExtractor(
   input: Parameters<typeof createSourceAssertionSupplementRuntime>[0],
   reader: SourceAssertionSupplementReader,
-  turnReceipts: SourceAssertionSupplementBatchReceipt[]
+  turnReceipts: SourceAssertionSupplementBatchReceipt[],
+  sourceCorpusState: { current: string | null }
 ) {
   return {
     extract: async (request: { readonly systemPrompt: string; readonly userPrompt: string }) => {
@@ -139,6 +142,7 @@ function createExtractor(
       const selected = reader.readBatch({
         request: parsed,
         primaryCacheKey,
+        sourceCorpus: requireActiveSourceCorpus(sourceCorpusState),
         primaryRawJson: requireRawJson(
           input.rawShardInspector,
           input.primaryCacheRoot,
@@ -151,6 +155,30 @@ function createExtractor(
       return { rawJson: selected.rawJson };
     }
   };
+}
+
+async function compileWithSourceCorpus(
+  provider: OfficialApiGardenProvider,
+  state: { current: string | null },
+  turnContent: string,
+  context: GardenCompileContext
+): Promise<readonly CandidateMemorySignal[]> {
+  if (state.current !== null) {
+    throw new Error("source assertion supplement compile is already active");
+  }
+  state.current = buildOfficialApiSourceCorpus(turnContent.trim(), context.turn_messages);
+  try {
+    return await provider.compile(turnContent, context);
+  } finally {
+    state.current = null;
+  }
+}
+
+function requireActiveSourceCorpus(state: { current: string | null }): string {
+  if (state.current === null) {
+    throw new Error("source assertion supplement source corpus is unavailable");
+  }
+  return state.current;
 }
 
 function mergeTurnStats(

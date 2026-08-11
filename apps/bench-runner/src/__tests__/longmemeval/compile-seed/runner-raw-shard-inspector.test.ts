@@ -73,22 +73,31 @@ describe("runner raw shard inspector", () => {
     const first = inspector.inspect(input);
     expect(first.status).toBe("hit");
     expect(inspector.inspect(input)).toBe(first);
-    expect(inspector.inspect({ ...input, cacheRoot: otherRoot })).not.toBe(first);
+    const otherRootResult = inspector.inspect({ ...input, cacheRoot: otherRoot });
+    expect(otherRootResult.status).toBe("hit");
+    expect(otherRootResult).not.toBe(first);
 
     const missingKey = "b".repeat(64);
     expect(inspector.inspect({ ...input, cacheKey: missingKey }).status).toBe("missing");
     writeShard(cacheRoot, missingKey, '{"signals":[]}');
-    expect(inspector.inspect({ ...input, cacheKey: missingKey }).status).toBe("hit");
-    expect(inspector.inspect({ ...input, model: "different-model" }).status)
-      .toBe("invalid");
-    expect(inspector.inspect({
+    const otherKeyResult = inspector.inspect({ ...input, cacheKey: missingKey });
+    expect(otherKeyResult.status).toBe("hit");
+    expect(otherKeyResult).not.toBe(first);
+    expect(inspector.inspect({ ...input, cacheKey: missingKey })).toBe(otherKeyResult);
+
+    const otherModelResult = inspector.inspect({ ...input, model: "different-model" });
+    expect(otherModelResult.status).toBe("invalid");
+    expect(otherModelResult).not.toBe(first);
+    const otherProfileResult = inspector.inspect({
       ...input,
       requestProfile: "deepseek-v4-nonthinking-v1"
-    }).status).toBe("invalid");
+    });
+    expect(otherProfileResult.status).toBe("invalid");
+    expect(otherProfileResult).not.toBe(first);
     expect(inspector.diagnostics.primary).toMatchObject({
       physicalReads: 5,
       parseMisses: 5,
-      memoHits: 1
+      memoHits: 2
     });
   });
 });

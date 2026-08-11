@@ -50,6 +50,7 @@ import {
   assertSemanticSupplementRound,
   readRoundSemanticSupplementShards,
   sumExtractionShardCount,
+  createSemanticSupplementEntries,
   type SemanticSupplementEntries
 } from "./semantic-supplement-binding.js";
 
@@ -88,7 +89,7 @@ export function assertSnapshotSeedLedgerBinding(input: {
   const systemPrompt = resolved.systemPrompt;
   const totals = emptyTotals();
   const closure = new Map<string, ExtractionContentClosureEntry>();
-  const semanticEntries: SemanticSupplementEntries = new Map();
+  const semanticEntries = createSemanticSupplementEntries();
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
   try {
     input.sidecar.questions.forEach((question, index) => {

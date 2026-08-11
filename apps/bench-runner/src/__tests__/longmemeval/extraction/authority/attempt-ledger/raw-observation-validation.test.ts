@@ -24,7 +24,7 @@ describe("attempt ledger raw observation validation", () => {
       raw_json: JSON.stringify({ signals: [{
         signal_kind: "potential_possession",
         object_kind: "physical_item",
-        confidence: 0.9,
+        confidence: 2,
         matched_text: "I own Atlas."
       }] }),
       extracted_at: new Date(0).toISOString()

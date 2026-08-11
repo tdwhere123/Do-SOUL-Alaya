@@ -47,12 +47,16 @@ const ExtractionShardSchema = z.object({
 }).strict();
 const SemanticSupplementShardSchema = z.object({
   semanticSupplementReceiptSha256: Sha256Schema,
+  receiptEntrySha256: Sha256Schema,
+  sidecarProjectionSha256: Sha256Schema,
   primaryCacheKey: Sha256Schema,
   sourceCacheKey: Sha256Schema,
   sourceRawJsonSha256: Sha256Schema,
+  primaryRawJsonSha256: Sha256Schema,
   selectedRawJsonSha256: Sha256Schema,
   sourceCorpusIdentity: Sha256Schema,
-  assertionIds: z.array(z.number().int().positive()).nonempty(),
+  anchorAssertionIds: z.array(z.number().int().positive()).nonempty(),
+  sourceObservationSha256s: z.array(Sha256Schema).nonempty(),
   occurrenceCount: z.number().int().positive(),
   rawSignalCount: CountSchema,
   draftCount: CountSchema

@@ -83,6 +83,7 @@ export {
   OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
+  computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest

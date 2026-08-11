@@ -49,6 +49,7 @@ export {
   auditOfficialApiSignalFormation,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
+  computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiSemanticFactorGraphProjectionAudit,
   parseOfficialApiSignals,
   parseOfficialApiExtractionRequest,
@@ -90,7 +91,8 @@ export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-  parseOfficialApiSourceLocator
+  parseOfficialApiSourceLocator,
+  resolveOfficialApiSourceLocatorQuote
 } from "./grounding/source-locator.js";
 export {
   resolveGardenRawPayloadGrounding,
