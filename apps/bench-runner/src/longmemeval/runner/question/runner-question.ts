@@ -132,9 +132,8 @@ export async function prepareLongMemEvalQuestion(
   try {
     return await withQuestionWorkspace(input, phase, (workspace) =>
       prepareLongMemEvalQuestionInWorkspace(input, workspace, phase));
-  } catch (error) {
+  } finally {
     writeQuestionProfile(input.question.question_id, phase);
-    throw error;
   }
 }
 
