@@ -4,7 +4,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../../config/install-core-config.js";
 import { createBoundedNonMemoryPreview } from "../../recall/coarse-filter/non-memory-preview.js";
-import { hasDirectEvidenceRecallAuthority } from "../../shared/evidence-recall-authority.js";
+import { hasEvidenceDocumentEmbeddingAuthority } from
+  "../../shared/evidence-recall-authority.js";
 import {
   BACKFILL_BATCH_CONCURRENCY_MAX,
   BACKFILL_BATCH_MAX_INPUT_CHARS,
@@ -98,7 +99,7 @@ function toBackfillDocument(
   source: Readonly<EvidenceDocumentEmbeddingSource>,
   workspaceId: string
 ): readonly BackfillDocument[] {
-  if (!hasDirectEvidenceRecallAuthority(source, workspaceId)) return [];
+  if (!hasEvidenceDocumentEmbeddingAuthority(source, workspaceId)) return [];
   return [{
     ownerObjectId: source.ownerObjectId,
     documentIdentity: source.documentIdentity,

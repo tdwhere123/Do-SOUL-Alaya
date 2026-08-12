@@ -10,6 +10,7 @@ import type {
 } from "../../embedding-recall/types.js";
 
 const SOURCE_HASH = `sha256:garden-source-turn-fallback-v2:${"a".repeat(64)}`;
+const ASSERTION_SOURCE_HASH = `sha256:garden-verified-user-assertion-v2:${"b".repeat(64)}`;
 
 describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
   it("persists exact bounded recall documents once and skips non-authoritative sources", async () => {
@@ -26,6 +27,18 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
         ownerObjectId: "evidence-duplicate",
         documentIdentity: "owner_gist_600",
         content: "  Same bounded text.  "
+      }),
+      source({
+        ownerObjectId: "evidence-assertion",
+        documentIdentity: "fact_key:1",
+        content: "recommended_color=blue",
+        sourceHash: ASSERTION_SOURCE_HASH
+      }),
+      source({
+        ownerObjectId: "evidence-forged-assertion",
+        documentIdentity: "fact_key:1",
+        content: "Must not be embedded.",
+        sourceHash: "sha256:unknown-receipt"
       }),
       source({
         ownerObjectId: "evidence-untrusted",
@@ -45,20 +58,22 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     const first = await handler.handle({ workspace_id: "workspace-1" });
     const second = await handler.handle({ workspace_id: "workspace-1" });
 
-    expect(first.documentsAffected).toBe(4);
+    expect(first.documentsAffected).toBe(5);
     expect(second.documentsAffected).toBe(0);
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(embedTexts).toHaveBeenCalledWith([
       `${"x".repeat(600)}…`,
       "Whole turn.",
       "Assistant observation.",
-      "Same bounded text."
+      "Same bounded text.",
+      "recommended_color=blue"
     ], { timeoutMs: 10_000 });
     expect(records.map(({ documentIdentity }) => documentIdentity)).toEqual([
       "owner",
       "owner_gist_600",
       "assistant_observation:2",
-      "owner"
+      "owner",
+      "fact_key:1"
     ]);
   });
 
