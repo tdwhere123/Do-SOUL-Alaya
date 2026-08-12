@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readBoundedCanonicalUtf8Artifact } from "./bounded-artifact-reader.js";
 import { dirname } from "node:path";
 import {
   hashExtractionCacheCompatibilityDecision,
@@ -11,17 +12,17 @@ import {
   type RawExtractionCacheIdentity
 } from "./compatibility.js";
 
-export interface ExtractionCacheAuditReceipt {
-  readonly schema_version: 2;
-  readonly kind: "longmemeval_extraction_cache_projection_decision";
-  readonly created_at: string;
-  readonly source_root: string;
-  readonly source_manifest_sha256: string;
-  readonly raw_inventory_sha256: string;
-  readonly occurrence_index_sha256: string;
-  readonly decision: ExtractionCacheCompatibilityDecision;
-  readonly decision_digest: string;
-}
+const MAX_EXTRACTION_CACHE_AUDIT_RECEIPT_BYTES = 64 * 1024;
+
+export interface ExtractionCacheAuditReceipt { readonly schema_version: 2;
+readonly kind: "longmemeval_extraction_cache_projection_decision";
+readonly created_at: string;
+readonly source_root: string;
+readonly source_manifest_sha256: string;
+readonly raw_inventory_sha256: string;
+readonly occurrence_index_sha256: string;
+readonly decision: ExtractionCacheCompatibilityDecision;
+readonly decision_digest: string; }
 
 export function buildExtractionCacheAuditReceipt(input: {
   readonly createdAt: string;
@@ -65,7 +66,17 @@ export function writeExtractionCacheAuditArtifact(path: string, contents: string
 }
 
 export function readExtractionCacheAuditReceipt(path: string): ExtractionCacheAuditReceipt {
-  const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  return parseExtractionCacheAuditReceiptContents(readBoundedCanonicalUtf8Artifact({
+    path: path,
+    maxBytes: MAX_EXTRACTION_CACHE_AUDIT_RECEIPT_BYTES,
+    label: "extraction cache audit receipt"
+  }));
+}
+
+export function parseExtractionCacheAuditReceiptContents(
+  contents: string
+): ExtractionCacheAuditReceipt {
+  const value = JSON.parse(contents) as unknown;
   if (!isExtractionCacheAuditReceipt(value)) {
     throw new Error("invalid extraction cache audit receipt shape");
   }
@@ -193,7 +204,7 @@ const replayCountFields: readonly (keyof Omit<ExtractionReplayClosure, "ledgerSh
 const rawReasons = new Set<RawExtractionCacheCompatibilityReason>([
   "dataset_revision_mismatch", "model_mismatch", "request_profile_mismatch",
   "provider_url_mismatch", "system_prompt_mismatch", "cache_key_algorithm_mismatch",
-  "raw_closure_mismatch", "raw_inventory_not_closed"
+  "raw_closure_mismatch", "raw_inventory_not_closed", "retired_source_keys"
 ]);
 
 const projectionReasons = new Set<ExtractionProjectionCompatibilityReason>([

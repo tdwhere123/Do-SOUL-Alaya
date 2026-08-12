@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmdirSync,
   unlinkSync,
@@ -12,6 +11,10 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
+import { readBoundedStableRegularFile } from
+  "../cache-audit/bounded-artifact-reader.js";
+
+const MAX_TARGET_ROOT_MARKER_BYTES = 16 * 1024;
 
 export interface ExtractionTargetRootMarker {
   readonly filename: string;
@@ -62,9 +65,8 @@ export function assertExtractionTargetRootBinding(input: TargetRootInput & {
 }): void {
   const root = canonicalExtractionTargetRoot(input.cacheRoot);
   try {
-    if (!hasRuntimeTargetRootBinding(
-      root, input.marker, input.binding, ownsTargetRootWriteLease(root, input.writeLease)
-    )) {
+    assertTargetRootWriteLease(root, input.writeLease);
+    if (!hasRuntimeTargetRootBinding(root, input.marker, input.binding)) {
       throw new Error("binding mismatch");
     }
   } catch {
@@ -80,7 +82,7 @@ export function discardFreshExtractionTargetRoot(input: TargetRootInput & {
     if (!hasUnchangedFreshTargetRoot(root, input.marker, input.binding)) return;
     if (!hasOnlyMarker(root, input.marker)) return;
     const markerPath = markerPathFor(root, input.marker);
-    const markerBytes = readFileSync(markerPath);
+    const markerBytes = readMarkerBytes(markerPath);
     unlinkSync(markerPath);
     try {
       rmdirSync(root);
@@ -95,24 +97,25 @@ export function discardFreshExtractionTargetRoot(input: TargetRootInput & {
 function hasRuntimeTargetRootBinding(
   root: string,
   marker: ExtractionTargetRootMarker,
-  binding: ExtractionTargetRootBinding,
-  allowRootInodeDrift = false
+  binding: ExtractionTargetRootBinding
 ): boolean {
   const stat = lstatSync(root, { bigint: true });
   return stat.isDirectory() && !stat.isSymbolicLink() &&
     hashRoot(root) === binding.cache_root_sha256 &&
     readMarkerSha256(root, marker) === binding.cache_root_marker_sha256 &&
     stat.dev.toString() === binding.cache_root_device &&
-    (allowRootInodeDrift || stat.ino.toString() === binding.cache_root_inode);
+    stat.ino.toString() === binding.cache_root_inode;
 }
 
-function ownsTargetRootWriteLease(
+function assertTargetRootWriteLease(
   root: string,
   writeLease: ExtractionCacheWriteLease | undefined
-): boolean {
-  if (writeLease === undefined) return false;
+): void {
+  if (writeLease === undefined) return;
   writeLease.assertOwned();
-  return canonicalExtractionTargetRoot(writeLease.cacheRoot) === root;
+  if (canonicalExtractionTargetRoot(writeLease.cacheRoot) !== root) {
+    throw new Error("write lease does not bind the selected target root");
+  }
 }
 
 function hasUnchangedFreshTargetRoot(
@@ -164,9 +167,15 @@ function writeMarker(root: string, marker: ExtractionTargetRootMarker): string {
 
 function readMarkerSha256(root: string, marker: ExtractionTargetRootMarker): string {
   const path = markerPathFor(root, marker);
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("marker is not a file");
-  return hashBytes(readFileSync(path));
+  return hashBytes(readMarkerBytes(path));
+}
+
+function readMarkerBytes(path: string): Buffer {
+  return readBoundedStableRegularFile({
+    path,
+    maxBytes: MAX_TARGET_ROOT_MARKER_BYTES,
+    label: "extraction target root marker"
+  }).bytes;
 }
 
 function markerPathFor(root: string, marker: ExtractionTargetRootMarker): string {

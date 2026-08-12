@@ -1,4 +1,7 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
+  symlinkSync, writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -8,6 +11,10 @@ import { createExtractionAuthorityReceipt, type ExtractionAuthorityObservation }
   "../../../longmemeval/extraction/authority/receipt.js";
 import { createFreshExtractionTargetSelection } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import { assertExtractionTargetSelectionRootBinding } from
+  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import { acquireExtractionCacheWriteLease } from
+  "../../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
 import { createExtractionExecutionAuthority } from
   "../../../longmemeval/extraction/fill/execution-authority.js";
 
@@ -51,6 +58,47 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
   expect(() => createExtractionExecutionAuthority(authority, cacheRoot, selection))
     .toThrow(/target root changed/u);
   expect(readdirSync(cacheRoot)).toEqual([]);
+});
+
+it("rejects a copied lease and marker after the selected root inode changes", () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-leased-root-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({
+    cacheRoot,
+    auditReceipt: rebuildAuditReceipt(),
+    observation: observation()
+  });
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  const movedRoot = join(parent, "moved-cache");
+  renameSync(cacheRoot, movedRoot);
+  mkdirSync(cacheRoot);
+  cpSync(join(movedRoot, ".alaya-extraction-target-root.json"),
+    join(cacheRoot, ".alaya-extraction-target-root.json"));
+  cpSync(join(movedRoot, ".extraction-fill.lock"),
+    join(cacheRoot, ".extraction-fill.lock"), { recursive: true });
+
+  expect(() => assertExtractionTargetSelectionRootBinding(selection, cacheRoot, lease))
+    .toThrow(/target root changed/u);
+});
+
+it("rejects a symlinked selected-root marker", () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-marker-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({
+    cacheRoot,
+    auditReceipt: rebuildAuditReceipt(),
+    observation: observation()
+  });
+  const marker = join(cacheRoot, ".alaya-extraction-target-root.json");
+  const outside = join(parent, "outside-marker.json");
+  writeFileSync(outside, readFileSync(marker));
+  rmSync(marker);
+  symlinkSync(outside, marker);
+
+  expect(() => assertExtractionTargetSelectionRootBinding(selection, cacheRoot))
+    .toThrow(/target root changed/u);
 });
 
 function observation(): ExtractionAuthorityObservation {

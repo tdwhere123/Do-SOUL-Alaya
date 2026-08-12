@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   rmSync,
   writeFileSync
@@ -26,6 +24,12 @@ import {
   isExtractionTransportProvenance,
   type ExtractionTransportProvenance
 } from "../../extraction/transport-route.js";
+import {
+  boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact
+} from
+  "../../extraction/cache-audit/bounded-artifact-reader.js";
+
+const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
 
 export interface CachedExtractionEntry {
   readonly model: string;
@@ -60,6 +64,7 @@ export type CachedRawExtractionInspection =
       readonly rawJson: string;
       readonly rawJsonSha256: string;
       readonly rawSignalCount: number;
+      readonly transportProvenance?: ExtractionTransportProvenance;
     }
   | { readonly status: "missing"; readonly reason?: undefined }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string };
@@ -102,6 +107,9 @@ export function inspectCachedRawExtraction(
     return {
       status: "hit",
       rawJson: cached.entry.raw_json,
+      ...(cached.entry.transport_provenance === undefined ? {} : {
+        transportProvenance: cached.entry.transport_provenance
+      }),
       ...inspectExtractionRawEnvelope(cached.entry.raw_json)
     };
   } catch (error) {
@@ -119,11 +127,15 @@ function readCachedEntry(
 ): Readonly<{ status: "hit"; entry: CachedExtractionEntry }> |
   Extract<CachedExtractionInspection, { status: "missing" | "invalid" }> {
   const filePath = cacheFilePath(cacheRoot, cacheKey);
-  if (!existsSync(filePath)) return { status: "missing" };
+  if (!boundedArtifactEntryExists(filePath)) return { status: "missing" };
   let parsed: Partial<CachedExtractionEntry>;
   try {
     observer?.onPhysicalRead?.();
-    const serialized = readFileSync(filePath, "utf8");
+    const serialized = readBoundedCanonicalUtf8Artifact({
+      path: filePath,
+      maxBytes: MAX_EXTRACTION_CACHE_SHARD_BYTES,
+      label: `cache shard ${cacheKey}`
+    });
     observer?.onParseMiss?.();
     parsed = JSON.parse(serialized) as Partial<CachedExtractionEntry>;
   } catch (error) {

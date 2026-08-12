@@ -5,7 +5,7 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildOfficialApiExtractionRequest,
@@ -50,7 +50,7 @@ function extractionPrompt(turnContent: string): string {
   );
 }
 
-describe("runExtractionFill", () => {
+describe("runExtractionFill authority", () => {
 
   it("rejects an initial concurrency above the extraction maximum", async () => {
     await expect(runExtractionFill({
@@ -108,7 +108,9 @@ describe("runExtractionFill", () => {
       log: () => undefined
     })).rejects.toThrow(/provider URL mismatch|model family mismatch/u);
   });
+});
 
+describe("runExtractionFill writer lease", () => {
   it("holds an exclusive cache-root lock for the full fill", async () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
@@ -149,6 +151,28 @@ describe("runExtractionFill", () => {
     await first;
   });
 
+  it("normalizes an explicit relative cache root before sharing the writer lease", async () => {
+    await writeFixtureDataset([
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
+    ]);
+    const result = await runExtractionFill({
+      variant: VARIANT,
+      cacheRoot: relative(process.cwd(), cacheRoot),
+      dataDir,
+      pinnedMetaRoot,
+      concurrency: 1,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: '{"signals":[]}' })
+      }),
+      log: () => undefined
+    });
+
+    expect(result.newlyExtracted).toBeGreaterThan(0);
+    expect(result.manifest.cached_turns).toBe(result.requestedTurns);
+  });
+});
+
+describe("runExtractionFill live-write identity", () => {
   it("revalidates manifest identity at the shared live-write boundary", async () => {
     preflightExtractionCache({
       cacheRoot,
@@ -211,7 +235,9 @@ describe("runExtractionFill", () => {
     expect(delegate).not.toHaveBeenCalled();
     expect(readdirSync(cacheRoot).some((name) => /^[0-9a-f]{2}$/u.test(name))).toBe(false);
   });
+});
 
+describe("runExtractionFill delegate mutation", () => {
   it("does not write a shard when manifest identity disappears during the delegate", async () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
@@ -292,7 +318,9 @@ describe("runExtractionFill", () => {
     })).rejects.toBeInstanceOf(AggregateError);
     expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
   });
+});
 
+describe("runExtractionFill finalization", () => {
   it("does not auto-delete an ownerless crash lock", async () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
@@ -373,6 +401,4 @@ describe("runExtractionFill", () => {
     expect(readExtractionCacheManifest(cacheRoot)?.coverage).toBeUndefined();
     expect(readdirSync(cacheRoot).filter((name) => /^[0-9a-f]{2}$/u.test(name))).toHaveLength(0);
   });
-
-
 });

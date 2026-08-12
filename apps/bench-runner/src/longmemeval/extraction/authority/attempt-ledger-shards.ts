@@ -1,15 +1,26 @@
 import type { ExtractionRequestProfile } from "../request-profile.js";
+import { isDeepStrictEqual } from "node:util";
 import { inspectCachedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
+import type { ExtractionTransportProvenance } from "../transport-route.js";
 
 export interface ExtractionAttemptLedgerCacheIdentity {
   readonly model: string;
   readonly requestProfile: ExtractionRequestProfile;
 }
 
-export interface ExtractionSuccessfulShard {
+interface SuccessfulShardIdentity {
   readonly cacheKey: string;
   readonly rawJsonSha256: string;
 }
+
+export type ExtractionSuccessfulShard = SuccessfulShardIdentity & (
+  | {
+    readonly successKind: "provider";
+    readonly transportProvenance: ExtractionTransportProvenance;
+  }
+  | { readonly successKind: "deterministic" }
+  | { readonly successKind: "legacy-unclassified" }
+);
 
 export function assertExtractionAttemptLedgerCacheIdentity(
   value: unknown
@@ -33,8 +44,11 @@ export function readValidLedgerShard(
   const shard = inspectCachedRawExtraction(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
-  if (shard.status !== "hit") return undefined;
-  return { cacheKey, rawJsonSha256: shard.rawJsonSha256 };
+  if (shard.status !== "hit" || shard.transportProvenance === undefined) return undefined;
+  return {
+    cacheKey, rawJsonSha256: shard.rawJsonSha256,
+    successKind: "provider", transportProvenance: shard.transportProvenance
+  };
 }
 
 export function readValidDeterministicLedgerShard(
@@ -45,8 +59,9 @@ export function readValidDeterministicLedgerShard(
   const shard = inspectCachedRawExtraction(
     cacheRoot, cacheKey, identity.model, identity.requestProfile
   );
-  if (shard.status !== "hit" || shard.rawJson !== '{"signals":[]}') return undefined;
-  return { cacheKey, rawJsonSha256: shard.rawJsonSha256 };
+  if (shard.status !== "hit" || shard.rawJson !== '{"signals":[]}' ||
+      shard.transportProvenance !== undefined) return undefined;
+  return { cacheKey, rawJsonSha256: shard.rawJsonSha256, successKind: "deterministic" };
 }
 
 export function assertLedgerSuccessfulShard(
@@ -54,10 +69,31 @@ export function assertLedgerSuccessfulShard(
   shard: ExtractionSuccessfulShard,
   identity: ExtractionAttemptLedgerCacheIdentity
 ): void {
-  const current = readValidLedgerShard(cacheRoot, shard.cacheKey, identity);
-  if (current === undefined || current.rawJsonSha256 !== shard.rawJsonSha256) {
+  const current = shard.successKind === "provider"
+    ? readValidLedgerShard(cacheRoot, shard.cacheKey, identity)
+    : shard.successKind === "deterministic"
+      ? readValidDeterministicLedgerShard(cacheRoot, shard.cacheKey, identity)
+      : readLegacyLedgerShard(cacheRoot, shard.cacheKey, identity);
+  if (current === undefined || current.rawJsonSha256 !== shard.rawJsonSha256 ||
+      (shard.successKind === "provider" &&
+        !isDeepStrictEqual(current, shard))) {
     throw new Error(
       `extraction authority successful shard closure drifted: ${shard.cacheKey}`
     );
   }
+}
+
+function readLegacyLedgerShard(
+  cacheRoot: string,
+  cacheKey: string,
+  identity: ExtractionAttemptLedgerCacheIdentity
+): ExtractionSuccessfulShard | undefined {
+  const shard = inspectCachedRawExtraction(
+    cacheRoot, cacheKey, identity.model, identity.requestProfile
+  );
+  if (shard.status !== "hit") return undefined;
+  return {
+    cacheKey, rawJsonSha256: shard.rawJsonSha256,
+    successKind: "legacy-unclassified"
+  };
 }

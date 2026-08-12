@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { readBoundedCanonicalUtf8Artifact } from
+  "../../cache-audit/bounded-artifact-reader.js";
 import type { ExtractionAuthorityInspection } from "../inspection.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
 import {
@@ -7,6 +9,8 @@ import {
   assertPreservedValidClosureUnchanged,
   type ExtractionPreservedValidClosure
 } from "../repair/preserved-valid-closure.js";
+
+const MAX_CATALOG_REFILL_ALLOWLIST_BYTES = 32 * 1024 * 1024;
 
 export interface ExtractionCatalogRefillScope {
   readonly kind: "audited-missing-cache-keys-v1";
@@ -38,6 +42,8 @@ export interface ExtractionCatalogRefillAllowlist {
 export interface ExtractionCatalogRefillLedgerProgress {
   readonly attempts: number;
   readonly successfulKeys: readonly string[];
+  readonly pendingKeys?: readonly string[];
+  readonly unresolvedAttempts?: number;
 }
 
 export function readExtractionCatalogRefillAllowlist(
@@ -45,9 +51,14 @@ export function readExtractionCatalogRefillAllowlist(
 ): ExtractionCatalogRefillAllowlist {
   let value: unknown;
   try {
-    value = JSON.parse(readFileSync(path, "utf8"));
+    value = JSON.parse(readBoundedCanonicalUtf8Artifact({
+      path,
+      maxBytes: MAX_CATALOG_REFILL_ALLOWLIST_BYTES,
+      label: "catalog refill allowlist"
+    }));
   } catch (cause) {
-    throw new Error(`catalog refill allowlist is unreadable: ${path}`, { cause });
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`catalog refill allowlist is unreadable: ${path}: ${detail}`, { cause });
   }
   if (!isCatalogRefillAllowlist(value)) {
     throw new Error("catalog refill allowlist is invalid");
@@ -143,6 +154,7 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
   readonly inspection: ExtractionAuthorityInspection;
   readonly pinnedManifestSha256?: string;
   readonly resumeManifestSha256?: string;
+  readonly settledManifestSha256?: string;
   readonly ledgerProgress?: ExtractionCatalogRefillLedgerProgress;
 }): void {
   const { scope, inspection } = input;
@@ -154,7 +166,8 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
     throw new Error("catalog refill attempt ledger contains an out-of-scope success");
   }
   if (remainingKeys.length === 0) {
-    throw new Error("catalog refill authority has no remaining missing cache keys");
+    assertSettledCatalogRefillInspection(input, progress);
+    return;
   }
   if (input.resumeManifestSha256 !== undefined && !isDigest(input.resumeManifestSha256)) {
     throw invalidScope();
@@ -176,12 +189,41 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
 
 function normalizeLedgerProgress(
   progress: ExtractionCatalogRefillLedgerProgress | undefined
-): { readonly attempts: number; readonly successfulKeys: readonly string[] } {
-  if (progress === undefined) return { attempts: 0, successfulKeys: [] };
+): {
+  readonly attempts: number;
+  readonly successfulKeys: readonly string[];
+  readonly pendingKeys: readonly string[];
+  readonly unresolvedAttempts: number;
+} {
+  if (progress === undefined) {
+    return { attempts: 0, successfulKeys: [], pendingKeys: [], unresolvedAttempts: 0 };
+  }
   if (!isNonNegativeSafeInteger(progress.attempts)) throw invalidScope();
   const successfulKeys = normalizeProgressKeys(progress.successfulKeys);
+  const pendingKeys = normalizeProgressKeys(progress.pendingKeys ?? []);
+  const unresolvedAttempts = progress.unresolvedAttempts ?? 0;
+  if (!isNonNegativeSafeInteger(unresolvedAttempts)) throw invalidScope();
   if (successfulKeys.length > 0 && progress.attempts === 0) throw invalidScope();
-  return { attempts: progress.attempts, successfulKeys };
+  return { attempts: progress.attempts, successfulKeys, pendingKeys, unresolvedAttempts };
+}
+
+function assertSettledCatalogRefillInspection(
+  input: Parameters<typeof assertCatalogRefillScopeMatchesInspection>[0],
+  progress: ReturnType<typeof normalizeLedgerProgress>
+): void {
+  const manifest = input.inspection.observation.extraction.manifestSha256;
+  if (progress.pendingKeys.length !== 0 || progress.unresolvedAttempts !== 0 ||
+      input.settledManifestSha256 === undefined || manifest !== input.settledManifestSha256) {
+    throw new Error("catalog refill authority has no remaining missing cache keys");
+  }
+  assertInspectionInventory(input.scope, input.inspection, progress.successfulKeys);
+  if (input.inspection.missingKeys.length !== 0) {
+    throw new Error("catalog refill authority missing-key set drifted after inspection");
+  }
+  assertPreservedValidClosureUnchanged(
+    input.scope.preserved_valid_closure,
+    input.inspection.preservedValidClosure
+  );
 }
 
 function assertInspectionInventory(

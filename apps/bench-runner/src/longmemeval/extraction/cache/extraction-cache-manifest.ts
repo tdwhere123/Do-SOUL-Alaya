@@ -1,5 +1,4 @@
 import {
-  existsSync,
   mkdirSync,
   renameSync,
   writeFileSync
@@ -31,6 +30,7 @@ import {
   "./supplemental-source-receipt.js";
 import { readExtractionCacheManifestBytes } from
   "./io/manifest-byte-reader.js";
+import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-reader.js";
 export {
   BENCH_EXTRACTION_MODEL_ENV,
   resolveBenchExtractionModel
@@ -176,7 +176,7 @@ export function readExtractionCacheManifestIdentity(
   cacheRoot: string
 ): ExtractionCacheManifestIdentity | undefined {
   const filePath = extractionCacheManifestPath(cacheRoot);
-  if (!existsSync(filePath)) {
+  if (!boundedArtifactEntryExists(filePath)) {
     return undefined;
   }
   const raw = readExtractionCacheManifestBytes(filePath);

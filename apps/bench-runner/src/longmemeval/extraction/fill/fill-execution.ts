@@ -25,6 +25,9 @@ import {
   readFillRetryTelemetry
 } from "./fill-stats.js";
 import {
+  renderAuthorityTelemetry, renderFillCompletion
+} from "./execution/completion-log.js";
+import {
   assertPinnedFillIdentity,
   inspectFillWindow,
   type PreparedExtractionFill
@@ -44,6 +47,13 @@ import {
   resolveContinuationMissingTurns,
   type CacheKeyAllowlistResolution
 } from "./policy/cache-key-allowlist.js";
+import type { SupplementalSourceManifestBinding } from
+  "../cache/supplemental-source-receipt.js";
+
+export interface CompleteFillManifestSupplement {
+  readonly builtAt: string;
+  readonly supplementalSourceReceipt?: SupplementalSourceManifestBinding;
+}
 
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
@@ -124,6 +134,7 @@ function createFillCachingExtractor(
     // The injected extractor is a test seam; the built-in provider never reaches
     // a live request unless a verified authority receipt is present.
     allowLiveExtraction: authority !== undefined || options.extractorFactory !== undefined,
+    requireProviderBackedExtraction: authority?.receipt.catalog_refill !== undefined,
     ...(authority === undefined ? {} : {
       onTransportAttempt: authority.reserveAttempt,
       onLiveProviderExtractionSucceeded: authority.commitSuccessfulShard,
@@ -181,6 +192,14 @@ function resolveFillTurns(
     writeLease
   });
   if (continuation !== undefined) return continuation;
+  return resolveProbeOrRepairTurns(prepared, cacheRoot, authority);
+}
+
+function resolveProbeOrRepairTurns(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  authority: ExecutionExtractionAuthority | undefined
+): CacheKeyAllowlistResolution {
   if (authority?.receipt.action === "probe") {
     const probeKey = authority.receipt.probe_key!;
     assertProbeTargetIsMissing(prepared, cacheRoot, probeKey);
@@ -225,7 +244,8 @@ export function finishExtractionFill(
   authorityTelemetry: ExtractionAttemptLedgerSnapshot | undefined,
   repairScopeTurns: number | undefined,
   allowProviderTaskFailures: boolean,
-  cacheKeyAllowlistSize: number | undefined
+  cacheKeyAllowlistSize: number | undefined,
+  manifestSupplement: CompleteFillManifestSupplement | undefined = undefined
 ): ExtractionFillResult {
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
   const completion = inspectFillWindow(
@@ -242,25 +262,17 @@ export function finishExtractionFill(
     repairScopeTurns, allowProviderTaskFailures, intentionalSkippedTurns
   });
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const manifest = persistFillManifest(prepared, cacheRoot, status, completion);
+  const manifest = persistFillManifest(
+    prepared, cacheRoot, status, completion,
+    status === "complete" ? manifestSupplement : undefined
+  );
   const cacheHits = stats.cacheHits;
   const newlyExtracted = stats.llmCalls;
   const failureCount = countTerminalProviderFailures(retryTelemetry);
-  log(
-    `[extraction-fill] done: status=${status} cache_hits=${cacheHits} ` +
-      `newly_extracted=${newlyExtracted} failures=${failureCount} ` +
-      `intentional_skips=${intentionalSkippedTurns} ` +
-      `retry_successes=${retryTelemetry.retrySuccesses} ` +
-      `rate_limit_retries=${retryTelemetry.rateLimitRetries} ` +
-      `adaptive_backoffs=${retryTelemetry.adaptiveConcurrencyBackoffs} ` +
-      `adaptive_backoff_ms=${retryTelemetry.adaptiveConcurrencyBackoffMs} ` +
-      `terminal_max_retries=${retryTelemetry.terminalRetryClassifications.failure_max_retries} ` +
-      `terminal_nonretryable_4xx=${retryTelemetry.terminalRetryClassifications.failure_non_retryable_4xx} ` +
-      `terminal_timeouts=${retryTelemetry.terminalRetryClassifications.failure_timeout} ` +
-      `${renderAuthorityTelemetry(authorityTelemetry)} ` +
-      `coverage=${(completion.coverage * 100).toFixed(1)}% ` +
-      `cached_turns=${completion.validTurns}`
-  );
+  log(renderFillCompletion({
+    status, cacheHits, newlyExtracted, failureCount, intentionalSkippedTurns,
+    retryTelemetry, authorityTelemetry, completion
+  }));
   return {
     requestedTurns: prepared.requestedTurns,
     cacheHits,
@@ -440,7 +452,8 @@ function persistFillManifest(
   prepared: PreparedExtractionFill,
   cacheRoot: string,
   status: ExtractionFillStatus,
-  completion: ExtractionFillCompletion
+  completion: ExtractionFillCompletion,
+  supplement: CompleteFillManifestSupplement | undefined = undefined
 ): ExtractionCacheManifest {
   const manifest = buildFillManifest({
     config: prepared.config,
@@ -451,6 +464,12 @@ function persistFillManifest(
     windowOffset: prepared.windowOffset,
     windowLimit: prepared.windowLimit,
     completion,
+    ...(supplement === undefined ? {} : {
+      builtAt: supplement.builtAt,
+      ...(supplement.supplementalSourceReceipt === undefined ? {} : {
+        supplementalSourceReceipt: supplement.supplementalSourceReceipt
+      })
+    }),
     ...(prepared.expansion === undefined ? {} : {
       expansionSourceAnchor: prepared.expansion.sourceAnchor
     })
@@ -465,16 +484,4 @@ function persistFillManifest(
       };
   writeExtractionCacheManifest(cacheRoot, finalized);
   return finalized;
-}
-
-function renderAuthorityTelemetry(telemetry: ExtractionAttemptLedgerSnapshot | undefined): string {
-  if (telemetry === undefined) return "authority=none";
-  return `attempts=${telemetry.attempts}/${telemetry.maximumAttempts} ` +
-    `successful_shards=${telemetry.successfulShards}/${telemetry.successfulShardCeiling} ` +
-    `usage_input_tokens=${telemetry.telemetry.inputTokens} ` +
-    `usage_output_tokens=${telemetry.telemetry.outputTokens} ` +
-    `usage_total_tokens=${telemetry.telemetry.totalTokens} ` +
-    `usage_unavailable=${telemetry.telemetry.usageUnavailableRequests} ` +
-    `usage_unresolved=${telemetry.telemetry.unresolvedTransportAttempts} ` +
-    `usage_unknown=${telemetry.telemetry.usageUnknownAttempts}`;
 }

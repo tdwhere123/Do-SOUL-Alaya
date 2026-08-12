@@ -35,17 +35,17 @@ import {
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
 
-describe("createCachingSignalExtractor", () => {
-  let cacheRoot: string;
+let cacheRoot: string;
 
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-cache-"));
-  });
+beforeEach(async () => {
+  cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-cache-"));
+});
 
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-  });
+afterEach(async () => {
+  await rm(cacheRoot, { recursive: true, force: true });
+});
 
+describe("createCachingSignalExtractor provider execution", () => {
   it("delegates to the real extractor on a cache miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
@@ -94,6 +94,37 @@ describe("createCachingSignalExtractor", () => {
     expect(stats.lastExtractionSource).toBe("live");
   });
 
+  it("rejects deterministic empty extraction when provider backing is required", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const request = buildOfficialApiExtractionRequest("Acknowledged.", []);
+    const extractor = createCachingSignalExtractor({
+      delegate,
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
+      cacheRoot,
+      requireProviderBackedExtraction: true
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: "sys",
+      userPrompt: stringifyOfficialApiExtractionRequest({
+        ...request,
+        source_assertions: []
+      })
+    })).rejects.toThrow(/requires provider-backed extraction/u);
+    expect(delegate.extract).not.toHaveBeenCalled();
+    expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
+  });
+});
+
+describe("createCachingSignalExtractor replay", () => {
   it("serves a second extraction from the on-disk fixture with zero LLM calls", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const rawJson = signalsEnvelope([{ distilled: "Fact X.", matched: "X" }]);
@@ -173,7 +204,9 @@ describe("createCachingSignalExtractor", () => {
     expect(secondStats.lastExtractionSource).toBe("cache");
     expect(cached.rawJson).toBe(rawJson);
   });
+});
 
+describe("createCachingSignalExtractor identity", () => {
   it("keys the cache on the prompt: a different user prompt is a fresh miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "s" });
     const firstRaw = signalsEnvelope([{ distilled: "Fact A.", matched: "A" }]);
@@ -286,7 +319,9 @@ describe("resolveCompileSeedExtractionConfig", () => {
     expect(config.model).toBe("gpt-5.4-mini");
     expect(config.providerUrl).toBe("https://provider.example/v1");
   });
+});
 
+describe("resolveCompileSeedExtractionConfig transport", () => {
   it("keeps logical cache identity while resolving a physical provider route", () => {
     const config = resolveCompileSeedExtractionConfig({
       OFFICIAL_API_GARDEN_MODEL: "DeepSeek-V4-Flash",

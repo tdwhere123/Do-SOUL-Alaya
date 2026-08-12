@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
   BenchTerminalRetryClassification,
   BenchTransportFailureKind,
@@ -10,9 +10,16 @@ import type {
   ExtractionAttemptLedgerCacheIdentity,
   ExtractionSuccessfulShard
 } from "../attempt-ledger-shards.js";
+import { readBoundedCanonicalUtf8Artifact } from "../../cache-audit/bounded-artifact-reader.js";
+import {
+  publishBytesExclusiveDurable,
+  replaceBytesDurable
+} from "../../fill/manifest/durable-exclusive-publication.js";
 
-export const EXTRACTION_ATTEMPT_LEDGER_VERSION = 4;
+export const EXTRACTION_ATTEMPT_LEDGER_VERSION = 5;
+const PREVIOUS_LEDGER_VERSION = 4;
 const LEGACY_LEDGER_VERSION = 3;
+const MAX_ATTEMPT_LEDGER_BYTES = 32 * 1024 * 1024;
 
 export interface ExtractionAttemptReservationRecord {
   readonly attempt_ordinal: number;
@@ -61,11 +68,13 @@ export function readAttemptLedgerRecordEnvelope(path: string): {
   readonly record: ExtractionAttemptLedgerRecord;
   readonly rawSha256: string;
 } {
-  let raw: Buffer;
+  const text = readBoundedCanonicalUtf8Artifact({
+    path, maxBytes: MAX_ATTEMPT_LEDGER_BYTES, label: "extraction attempt ledger"
+  });
+  const raw = Buffer.from(text, "utf8");
   let parsed: unknown;
   try {
-    raw = readFileSync(path);
-    parsed = JSON.parse(raw.toString("utf8"));
+    parsed = JSON.parse(text);
   } catch (cause) {
     throw new Error(`extraction attempt ledger is unreadable: ${path}`, { cause });
   }
@@ -81,10 +90,14 @@ export function persistAttemptLedgerRecord(
   record: ExtractionAttemptLedgerRecord
 ): void {
   assertStoredAttemptLedgerRecord(record);
-  mkdirSync(join(path, ".."), { recursive: true });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(temporary, path);
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true });
+  replaceBytesDurable({
+    destination: path,
+    bytes: serializeLedger(record),
+    ownerIdentity: record.lineage_digest,
+    temporaryDirectory: dirname(directory)
+  });
 }
 
 export function persistAttemptLedgerRecordExclusive(
@@ -92,16 +105,18 @@ export function persistAttemptLedgerRecordExclusive(
   record: ExtractionAttemptLedgerRecord
 ): void {
   assertStoredAttemptLedgerRecord(record);
-  mkdirSync(join(path, ".."), { recursive: true });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(record)}\n`, {
-      encoding: "utf8", flag: "wx", mode: 0o600
-    });
-    linkSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true });
+  publishBytesExclusiveDurable({
+    destination: path,
+    bytes: serializeLedger(record),
+    ownerIdentity: record.lineage_digest,
+    temporaryDirectory: dirname(directory)
+  });
+}
+
+function serializeLedger(record: ExtractionAttemptLedgerRecord): Buffer {
+  return Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
 }
 
 export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerRecord): void {
@@ -162,6 +177,15 @@ function isAttemptLedgerRecord(value: unknown): value is ExtractionAttemptLedger
 }
 
 function migrateLegacyRecord(value: unknown): ExtractionAttemptLedgerRecord | undefined {
+  if (isPreviousRecord(value)) {
+    const migrated: ExtractionAttemptLedgerRecord = {
+      ...value,
+      schema_version: EXTRACTION_ATTEMPT_LEDGER_VERSION,
+      successful_shards: classifyLegacyShards(value.successful_shards)
+    };
+    assertStoredAttemptLedgerRecord(migrated);
+    return migrated;
+  }
   if (!isLegacyRecord(value)) return undefined;
   if (value.unresolved_attempts.length > 0) {
     throw new Error(
@@ -171,6 +195,7 @@ function migrateLegacyRecord(value: unknown): ExtractionAttemptLedgerRecord | un
   const migrated: ExtractionAttemptLedgerRecord = {
     ...value,
     schema_version: EXTRACTION_ATTEMPT_LEDGER_VERSION,
+    successful_shards: classifyLegacyShards(value.successful_shards),
     unresolved_attempts: [],
     transport_failures: []
   };
@@ -178,12 +203,35 @@ function migrateLegacyRecord(value: unknown): ExtractionAttemptLedgerRecord | un
   return migrated;
 }
 
+interface LegacySuccessfulShard {
+  readonly cacheKey: string;
+  readonly rawJsonSha256: string;
+}
+
+interface PreviousRecord extends Omit<
+  ExtractionAttemptLedgerRecord, "schema_version" | "successful_shards"
+> {
+  readonly schema_version: typeof PREVIOUS_LEDGER_VERSION;
+  readonly successful_shards: readonly LegacySuccessfulShard[];
+}
+
 interface LegacyRecord extends Omit<
-  ExtractionAttemptLedgerRecord,
-  "schema_version" | "unresolved_attempts" | "transport_failures"
+  PreviousRecord, "schema_version" | "unresolved_attempts" | "transport_failures"
 > {
   readonly schema_version: typeof LEGACY_LEDGER_VERSION;
   readonly unresolved_attempts: readonly string[];
+}
+
+function isPreviousRecord(value: unknown): value is PreviousRecord {
+  if (!hasExactKeys(value, [
+    "schema_version", "lineage_digest", "cache_identity", "starting_missing",
+    "maximum_attempts", "successful_shard_ceiling", "attempts", "successful_shards",
+    "pending_keys", "unresolved_attempts", "transport_failures", "telemetry"
+  ])) return false;
+  const record = value as unknown as PreviousRecord;
+  return record.schema_version === PREVIOUS_LEDGER_VERSION &&
+    isCommonLegacyRecord(record) && isReservations(record.unresolved_attempts) &&
+    isFailures(record.transport_failures);
 }
 
 function isLegacyRecord(value: unknown): value is LegacyRecord {
@@ -197,9 +245,24 @@ function isLegacyRecord(value: unknown): value is LegacyRecord {
     isCacheIdentity(record.cache_identity) && isNonNegativeSafeInteger(record.starting_missing) &&
     isNonNegativeSafeInteger(record.maximum_attempts) &&
     isNonNegativeSafeInteger(record.successful_shard_ceiling) &&
-    isNonNegativeSafeInteger(record.attempts) && isShards(record.successful_shards) &&
+    isNonNegativeSafeInteger(record.attempts) && isLegacyShards(record.successful_shards) &&
     isKeys(record.pending_keys) && isKeys(record.unresolved_attempts) &&
     record.unresolved_attempts.length <= record.attempts && isTelemetry(record.telemetry);
+}
+
+function isCommonLegacyRecord(record: PreviousRecord): boolean {
+  return isDigest(record.lineage_digest) && isCacheIdentity(record.cache_identity) &&
+    isNonNegativeSafeInteger(record.starting_missing) &&
+    isNonNegativeSafeInteger(record.maximum_attempts) &&
+    isNonNegativeSafeInteger(record.successful_shard_ceiling) &&
+    isNonNegativeSafeInteger(record.attempts) && isLegacyShards(record.successful_shards) &&
+    isKeys(record.pending_keys) && isTelemetry(record.telemetry);
+}
+
+function classifyLegacyShards(
+  shards: readonly LegacySuccessfulShard[]
+): readonly ExtractionSuccessfulShard[] {
+  return shards.map((shard) => ({ ...shard, successKind: "legacy-unclassified" }));
 }
 
 function isReservations(value: unknown): value is readonly ExtractionAttemptReservationRecord[] {
@@ -255,9 +318,39 @@ function isHttpStatus(value: unknown): value is number | null {
 }
 
 function isShards(value: unknown): value is readonly ExtractionSuccessfulShard[] {
+  return Array.isArray(value) && value.every((shard) => {
+    if (!hasShardIdentity(shard) || typeof shard.successKind !== "string") return false;
+    if (shard.successKind === "provider") {
+      return hasExactKeys(shard, [
+        "cacheKey", "rawJsonSha256", "successKind", "transportProvenance"
+      ]) && isTransportProvenance(shard.transportProvenance);
+    }
+    return (shard.successKind === "deterministic" ||
+      shard.successKind === "legacy-unclassified") && hasExactKeys(
+      shard, ["cacheKey", "rawJsonSha256", "successKind"]
+    );
+  });
+}
+
+function isLegacyShards(value: unknown): value is readonly LegacySuccessfulShard[] {
   return Array.isArray(value) && value.every((shard) => hasExactKeys(
     shard, ["cacheKey", "rawJsonSha256"]
-  ) && isDigest(shard.cacheKey) && isDigest(shard.rawJsonSha256));
+  ) && hasShardIdentity(shard));
+}
+
+function hasShardIdentity(value: unknown): value is Record<string, unknown> & LegacySuccessfulShard {
+  return typeof value === "object" && value !== null &&
+    isDigest((value as Record<string, unknown>).cacheKey) &&
+    isDigest((value as Record<string, unknown>).rawJsonSha256);
+}
+
+function isTransportProvenance(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return hasExactKeys(record, ["provider_url_sha256", "model"]) &&
+    typeof record.provider_url_sha256 === "string" &&
+    /^sha256:[a-f0-9]{64}$/u.test(record.provider_url_sha256) &&
+    typeof record.model === "string" && record.model.length > 0;
 }
 
 function isKeys(value: unknown): value is readonly string[] {

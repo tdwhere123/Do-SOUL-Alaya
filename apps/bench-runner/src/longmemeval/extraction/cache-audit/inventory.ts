@@ -1,11 +1,21 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   inspectCachedExtraction,
   type CachedExtractionInspection
 } from "../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
+import {
+  MATERIALIZATION_COMMIT_NAME,
+  MATERIALIZATION_STAGE_NAME,
+  hasValidMaterializationCommit
+} from "./materialization/contract.js";
+import {
+  CATALOG_REFILL_COMPLETION_PREFIX,
+  hasValidCatalogRefillCompletionWitness
+} from "../authority/catalog-refill/completion-witness.js";
+import { isStableLeasePath } from "../fill/manifest/fill-root-guard.js";
 
 const CACHE_KEY_FILE = /^([a-f0-9]{64})\.json$/u;
 const ROOT_CONTROL_ARTIFACT =
@@ -23,6 +33,8 @@ export interface ExtractionCacheShard {
 export interface ExtractionCacheInventory {
   readonly shards: readonly ExtractionCacheShard[];
   readonly orphanKeys: readonly string[];
+  /** Source keys proven by its complete predecessor manifest to be retired. */
+  readonly retiredKeys: readonly string[];
   readonly controlArtifactPaths: readonly string[];
   readonly unexpectedPaths: readonly string[];
   readonly counts: Readonly<{
@@ -49,6 +61,7 @@ export function inspectExtractionCacheInventory(input: {
   return Object.freeze({
     shards: Object.freeze(shards),
     orphanKeys: Object.freeze(orphanKeys),
+    retiredKeys: Object.freeze([]),
     controlArtifactPaths: Object.freeze(discovered.controlArtifactPaths),
     unexpectedPaths: Object.freeze(discovered.unexpectedPaths),
     counts: Object.freeze(countsFor(shards, orphanKeys))
@@ -66,6 +79,7 @@ export function hashExtractionCacheInventory(inventory: ExtractionCacheInventory
       reason: shard.reason ?? null
     })),
     orphan_keys: inventory.orphanKeys,
+    retired_keys: inventory.retiredKeys,
     control_artifact_paths: inventory.controlArtifactPaths,
     unexpected_paths: inventory.unexpectedPaths
   };
@@ -74,8 +88,10 @@ export function hashExtractionCacheInventory(inventory: ExtractionCacheInventory
 
 function assertDirectoryNotSymlink(cacheRoot: string): void {
   if (!existsSync(cacheRoot)) return;
-  const stat = lstatSync(cacheRoot);
-  if (stat.isSymbolicLink()) throw new Error("extraction cache root must not be a symlink");
+  const stat = isStableLeasePath(cacheRoot) ? statSync(cacheRoot) : lstatSync(cacheRoot);
+  if (stat.isSymbolicLink()) {
+    throw new Error("extraction cache root must not be a symlink");
+  }
   if (!stat.isDirectory()) throw new Error("extraction cache root must be a directory");
 }
 
@@ -147,12 +163,27 @@ function walkCacheRoot(
       throw new Error(`extraction cache contains a symlink: ${relative(root, path)}`);
     }
     if (entry.isDirectory()) {
+      if (directory === root && entry.name === MATERIALIZATION_STAGE_NAME) {
+        unexpectedPaths.push(entry.name);
+        continue;
+      }
       if (entry.name !== ".extraction-fill.lock") {
         walkCacheRoot(root, path, keys, controlArtifactPaths, unexpectedPaths);
       }
       continue;
     }
     if (directory === root && entry.name === "manifest.json") continue;
+    if (directory === root && entry.isFile() && entry.name === MATERIALIZATION_COMMIT_NAME) {
+      if (hasValidMaterializationCommit(path)) controlArtifactPaths.push(entry.name);
+      else unexpectedPaths.push(entry.name);
+      continue;
+    }
+    if (directory === root && entry.isFile() &&
+        entry.name.startsWith(CATALOG_REFILL_COMPLETION_PREFIX)) {
+      if (hasValidCatalogRefillCompletionWitness(path)) controlArtifactPaths.push(entry.name);
+      else unexpectedPaths.push(entry.name);
+      continue;
+    }
     if (directory === root && entry.isFile() && ROOT_CONTROL_ARTIFACT.test(entry.name)) {
       controlArtifactPaths.push(entry.name);
       continue;

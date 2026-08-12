@@ -32,6 +32,8 @@ import {
   computeExtractionKeySetSha256,
   computeExtractionRawJsonSha256
 } from "../../../../longmemeval/extraction/content-closure.js";
+import { buildExtractionTransportProvenance } from
+  "../../../../longmemeval/extraction/transport-route.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
@@ -465,6 +467,9 @@ function writeShard(cacheRoot: string, cacheKey: string): void {
     model,
     request_profile: requestProfile,
     cache_key: cacheKey,
-    raw_json: rawJson
+    raw_json: rawJson,
+    transport_provenance: buildExtractionTransportProvenance({
+      providerUrl: "https://example.test/v1", model
+    })
   }), "utf8");
 }

@@ -1,6 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
 import type { ExtractionRequestProfile } from "../request-profile.js";
 import {
   assertDirectExtractionSpendAuthorization,
@@ -43,9 +41,12 @@ import {
   freezeAuthorityObservation
 } from "./receipt/canonical.js";
 import { assertExtractionAuthorityInventoryProgress } from "./receipt/inventory.js";
-
-const LEGACY_RECEIPT_VERSION = 2;
-const PREVIOUS_RECEIPT_VERSION = 3;
+import {
+  readExtractionAuthorityReceiptArtifact,
+  writeExtractionAuthorityReceiptArtifact
+} from "./receipt/artifact-io.js";
+import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
+const LEGACY_RECEIPT_VERSION = 2, PREVIOUS_RECEIPT_VERSION = 3;
 const CURRENT_RECEIPT_VERSION = 4;
 export interface ExtractionAuthorityObservation {
   readonly revision: string;
@@ -175,7 +176,7 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
     assertExtractionCatalogRefillScope(input.catalogRefillScope);
     assertCatalogRefillScopeMatchesReceipt(input.catalogRefillScope, input.observation);
     if (input.action !== "fill" || input.directSpend !== undefined ||
-        input.targetSelectionDigest !== undefined || input.repairScope !== undefined ||
+        input.targetSelectionDigest === undefined || input.repairScope !== undefined ||
         input.continuation !== undefined) {
       throw new Error("catalog refill is an existing-root fill authority mode");
     }
@@ -305,19 +306,11 @@ export function writeExtractionAuthorityReceipt(
   receipt: ExtractionAuthorityReceipt
 ): void {
   assertReceiptShape(receipt);
-  mkdirSync(dirname(outputPath), { recursive: true });
-  const temporary = `${outputPath}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
-  renameSync(temporary, outputPath);
+  writeExtractionAuthorityReceiptArtifact(outputPath, receipt);
 }
 
 export function readExtractionAuthorityReceipt(outputPath: string): ExtractionAuthorityReceipt {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(outputPath, "utf8"));
-  } catch (cause) {
-    throw new Error(`extraction authority receipt is unreadable: ${outputPath}`, { cause });
-  }
+  const parsed = readExtractionAuthorityReceiptArtifact(outputPath);
   assertReceiptShape(parsed);
   return parsed;
 }
@@ -352,29 +345,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
     throw new Error("extraction probe authority receipt is missing its target key");
   }
   const verified = receipt as ExtractionAuthorityReceipt;
-  if (verified.continuation !== undefined &&
-      (verified.action !== "fill" || verified.target_selection_digest === undefined ||
-       verified.direct_spend !== undefined || verified.repair_scope !== undefined ||
-       verified.catalog_refill !== undefined)) {
-    throw new Error("same-root continuation authority scope is inconsistent");
-  }
-  if (verified.catalog_refill !== undefined) {
-    assertCatalogRefillScopeMatchesReceipt(verified.catalog_refill, verified.observation);
-    if (verified.action !== "fill" || verified.target_selection_digest !== undefined ||
-        verified.direct_spend !== undefined || verified.repair_scope !== undefined ||
-        verified.continuation !== undefined) {
-      throw new Error("catalog refill authority scope is inconsistent");
-    }
-  }
-  if ((verified.repair_scope === undefined) !==
-        (verified.observation.inventory.invalidTurns === 0) ||
-      (verified.repair_scope !== undefined &&
-        (verified.action !== "fill" || verified.repair_scope.shard_count !==
-          verified.observation.inventory.invalidTurns ||
-          verified.repair_scope.preserved_valid_closure.shard_count !==
-            verified.observation.inventory.validTurns))) {
-    throw new Error("extraction repair authority scope is inconsistent");
-  }
+  assertExtractionAuthorityReceiptScope(verified);
   if (verified.receipt_digest !== computeReceiptDigest(withoutReceiptDigest(verified))) {
     throw new Error("extraction authority receipt digest is invalid");
   }

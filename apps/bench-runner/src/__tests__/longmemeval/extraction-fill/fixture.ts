@@ -18,7 +18,8 @@ interface ExtractionFillTestRoots {
 }
 
 export function registerExtractionFillHooks(
-  setRoots: (roots: ExtractionFillTestRoots) => void
+  setRoots: (roots: ExtractionFillTestRoots) => void,
+  variant: string = EXTRACTION_FILL_VARIANT
 ): (questions: readonly LongMemEvalQuestion[]) => Promise<void> {
   let tmpDir = "";
   let dataDir = "";
@@ -45,7 +46,8 @@ export function registerExtractionFillHooks(
   return async (questions) => await writeExtractionFillDataset(
     dataDir,
     pinnedMetaRoot,
-    questions
+    questions,
+    variant
   );
 }
 
@@ -114,19 +116,20 @@ export function buildGroundedSignalResponse(userPrompt: string): string {
 async function writeExtractionFillDataset(
   dataDir: string,
   pinnedMetaRoot: string,
-  questions: readonly LongMemEvalQuestion[]
+  questions: readonly LongMemEvalQuestion[],
+  variant: string
 ): Promise<void> {
   const raw = JSON.stringify(questions);
   const sha = createHash("sha256").update(raw, "utf8").digest("hex");
   await writeFile(
-    join(dataDir, `${EXTRACTION_FILL_VARIANT}.json`),
+    join(dataDir, `${variant}.json`),
     raw,
     "utf8"
   );
   await writeFile(
-    join(pinnedMetaRoot, `${EXTRACTION_FILL_VARIANT}.meta.json`),
+    join(pinnedMetaRoot, `${variant}.meta.json`),
     JSON.stringify({
-      name: EXTRACTION_FILL_VARIANT,
+      name: variant,
       sha256: sha,
       size_bytes: Buffer.byteLength(raw, "utf8"),
       question_count: questions.length

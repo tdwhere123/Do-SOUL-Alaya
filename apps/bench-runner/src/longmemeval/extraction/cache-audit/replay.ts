@@ -96,6 +96,8 @@ export function replayExtractionOccurrences(input: {
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly occurrences: readonly ExtractionOccurrence[];
   readonly audit?: ExtractionReplayAuditor;
+  /** A refill audit may defer absent shards while still rejecting malformed ones. */
+  readonly allowMissingShards?: boolean;
 }): ExtractionReplayResult {
   const cached = new Map<string, CachedExtractionInspection>();
   const audit = input.audit ?? auditOfficialApiSignalFormation;
@@ -143,12 +145,14 @@ function replayOccurrence(input: {
   readonly occurrence: ExtractionOccurrence;
   readonly cached: Map<string, CachedExtractionInspection>;
   readonly audit: ExtractionReplayAuditor;
+  readonly allowMissingShards?: boolean;
 }): ExtractionReplayOccurrence {
   const shards = inspectOccurrenceShards(input);
   const unavailable = shards.find(({ inspection }) => inspection.status !== "hit");
   if (unavailable !== undefined && unavailable.inspection.status !== "hit") {
     return unavailableOccurrence(
-      input.occurrence, unavailable.cacheKey, unavailable.inspection
+      input.occurrence, unavailable.cacheKey, unavailable.inspection,
+      input.allowMissingShards === true
     );
   }
   const hits = shards.map(({ inspection }) =>
@@ -264,7 +268,8 @@ function inspectOccurrenceShards(
 function unavailableOccurrence(
   occurrence: ExtractionOccurrence,
   cacheKey: string,
-  cached: Exclude<CachedExtractionInspection, { readonly status: "hit" }>
+  cached: Exclude<CachedExtractionInspection, { readonly status: "hit" }>,
+  allowMissing: boolean
 ): ExtractionReplayOccurrence {
   const prefix = cacheKey.slice(0, 12);
   const reason = cached.status === "missing"
@@ -275,7 +280,9 @@ function unavailableOccurrence(
     rawJsonSha256s: null,
     entries: Object.freeze([{
       index: -1,
-      disposition: "invalid" as const,
+      disposition: cached.status === "missing" && allowMissing
+        ? "deferred" as const
+        : "invalid" as const,
       stage: "cache",
       reason
     }])

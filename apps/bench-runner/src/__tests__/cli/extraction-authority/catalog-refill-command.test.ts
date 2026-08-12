@@ -12,7 +12,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-it("embeds an audited existing-root missing-key set without target selection", async () => {
+it("embeds an audited existing-root missing-key set bound to target selection", async () => {
   const cacheRoot = temporaryRoot();
   const allowlistPath = join(cacheRoot, "allowlist.json");
   writeFileSync(allowlistPath, JSON.stringify({
@@ -31,6 +31,7 @@ it("embeds an audited existing-root missing-key set without target selection", a
     "--limit", "100",
     "--extraction-cache-root", cacheRoot,
     "--catalog-refill-allowlist", allowlistPath,
+    "--extraction-target-selection", join(cacheRoot, "target-selection.json"),
     "--extraction-action", "fill",
     "--extraction-receipt-out", join(cacheRoot, "authority.json"),
     "--extraction-output-token-cap", "512",
@@ -43,7 +44,10 @@ it("embeds an audited existing-root missing-key set without target selection", a
     inspect: vi.fn(async () => inspection()),
     write,
     readRevision: () => "a".repeat(40),
-    readLedger: () => undefined
+    readLedger: () => undefined,
+    readTargetSelection: () => ({ receipt_digest: "9".repeat(64) } as never),
+    assertTargetSelection: () => undefined,
+    assertTargetSelectionWindow: () => undefined
   });
 
   expect(exitCode).toBe(0);
@@ -57,7 +61,8 @@ it("embeds an audited existing-root missing-key set without target selection", a
     catalog_refill: expect.objectContaining({
       shard_count: 1,
       keys: ["2".repeat(64)]
-    })
+    }),
+    target_selection_digest: "9".repeat(64)
   }));
 });
 

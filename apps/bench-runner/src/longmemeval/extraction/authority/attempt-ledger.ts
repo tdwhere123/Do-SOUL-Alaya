@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
 import {
@@ -31,6 +31,7 @@ import {
   commitProviderBackedShard,
   sortedSuccessfulShards
 } from "./attempt-ledger/success.js";
+import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-reader.js";
 
 export { ExtractionAttemptLimitError } from "./attempt-ledger/outcome.js";
 export const computeExtractionAttemptCeiling = computeExtractionFillAttemptCeiling;
@@ -78,7 +79,7 @@ export function readExtractionAttemptLedger(input: {
 }): ExtractionAttemptLedgerSnapshot | undefined {
   assertExtractionAttemptLedgerCacheIdentity(input.cacheIdentity);
   const path = ledgerPath(input.cacheRoot, input.lineageDigest);
-  if (!existsSync(path)) return undefined;
+  if (!boundedArtifactEntryExists(path)) return undefined;
   const envelope = readAttemptLedgerRecordEnvelope(path);
   let current = envelope.record;
   assertLedgerIdentity(current, input.lineageDigest, input.cacheIdentity);
@@ -94,7 +95,9 @@ export function readSettledExtractionAttemptLedger(input: {
 }): ExtractionAttemptLedgerSnapshot {
   assertExtractionAttemptLedgerCacheIdentity(input.cacheIdentity);
   const path = ledgerPath(input.cacheRoot, input.lineageDigest);
-  if (!existsSync(path)) throw new Error("predecessor extraction attempt ledger is missing");
+  if (!boundedArtifactEntryExists(path)) {
+    throw new Error("predecessor extraction attempt ledger is missing");
+  }
   const envelope = readAttemptLedgerRecordEnvelope(path);
   const current = envelope.record;
   assertLedgerIdentity(current, input.lineageDigest, input.cacheIdentity);
@@ -174,7 +177,7 @@ export function discardPristineForkedExtractionAttemptLedger(input: {
   readonly ledgerSha256: string;
 }): void {
   const path = ledgerPath(input.cacheRoot, input.lineageDigest);
-  if (!existsSync(path)) return;
+  if (!boundedArtifactEntryExists(path)) return;
   const record = readAttemptLedgerRecord(path);
   if (record.lineage_digest !== input.lineageDigest ||
       ledgerDigest(record) !== input.ledgerSha256) return;
@@ -186,40 +189,33 @@ export function openExtractionAttemptLedger(input: {
   readonly lineageDigest: string;
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
   readonly startingMissing: number;
-  readonly maximumAttempts?: number;
-  readonly successfulShardCeiling?: number;
+  readonly maximumAttempts?: number; readonly successfulShardCeiling?: number;
 }): {
   readonly reserveAttempt: (cacheKey: string) => void;
   readonly abandonPendingShard: (cacheKey: string) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
   readonly commitDeterministicShard: (cacheKey: string) => void;
-  readonly recordTransportOutcome: (
-    cacheKey: string,
-    input: ExtractionTransportOutcome
-  ) => void;
+  readonly recordTransportOutcome: (cacheKey: string, input: ExtractionTransportOutcome) => void;
   readonly snapshot: () => ExtractionAttemptLedgerSnapshot;
 } {
   const expected = createExpectedRecord(input);
   const path = ledgerPath(input.cacheRoot, input.lineageDigest);
-  const existed = existsSync(path);
+  const existed = boundedArtifactEntryExists(path);
   let current = existed ? readAttemptLedgerRecord(path) : expected;
   assertBoundRecord(current, expected);
   current = reconcilePending(input.cacheRoot, current, path);
   assertSuccessfulShards(input.cacheRoot, current);
   if (!existed) persistAttemptLedgerRecord(path, current);
+  const update = (next: ExtractionAttemptLedgerRecord): void => {
+    current = next;
+    persistAttemptLedgerRecord(path, current);
+  };
   return {
-    reserveAttempt: (cacheKey) => {
-      current = reserveTransportAttempt(current, cacheKey);
-      persistAttemptLedgerRecord(path, current);
-    },
-    abandonPendingShard: (cacheKey) => {
-      current = abandonPendingShard(current, cacheKey);
-      persistAttemptLedgerRecord(path, current);
-    },
+    reserveAttempt: (cacheKey) => update(reserveTransportAttempt(current, cacheKey)),
+    abandonPendingShard: (cacheKey) => update(abandonPendingShard(current, cacheKey)),
     commitSuccessfulShard: (cacheKey) => {
       const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity);
-      current = commitProviderBackedShard(current, shard);
-      persistAttemptLedgerRecord(path, current);
+      update(commitProviderBackedShard(current, shard));
     },
     commitDeterministicShard: (cacheKey) => {
       const shard = readValidDeterministicLedgerShard(
@@ -230,13 +226,10 @@ export function openExtractionAttemptLedger(input: {
           "deterministic extraction shard is not the canonical empty envelope"
         );
       }
-      current = commitDeterministicShard(current, shard);
-      persistAttemptLedgerRecord(path, current);
+      update(commitDeterministicShard(current, shard));
     },
-    recordTransportOutcome: (cacheKey, outcome) => {
-      current = settleTransportOutcome(current, cacheKey, outcome);
-      persistAttemptLedgerRecord(path, current);
-    },
+    recordTransportOutcome: (cacheKey, outcome) =>
+      update(settleTransportOutcome(current, cacheKey, outcome)),
     snapshot: () => toSnapshot(current, path)
   };
 }
@@ -443,7 +436,7 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
 }
 
 function rawLedgerDigest(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  return readAttemptLedgerRecordEnvelope(path).rawSha256;
 }
 
 function isAlreadyExistsError(cause: unknown): boolean {

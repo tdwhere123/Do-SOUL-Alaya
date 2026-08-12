@@ -6,6 +6,8 @@ import { inspectCachedExtraction, writeCachedExtraction } from
   "../../../../../longmemeval/compile-seed/cache/cache-shard.js";
 import { readValidLedgerShard } from
   "../../../../../longmemeval/extraction/authority/attempt-ledger-shards.js";
+import { buildExtractionTransportProvenance } from
+  "../../../../../longmemeval/extraction/transport-route.js";
 
 describe("attempt ledger raw observation validation", () => {
   let root: string | undefined;
@@ -27,7 +29,10 @@ describe("attempt ledger raw observation validation", () => {
         confidence: 2,
         matched_text: "I own Atlas."
       }] }),
-      extracted_at: new Date(0).toISOString()
+      extracted_at: new Date(0).toISOString(),
+      transport_provenance: buildExtractionTransportProvenance({
+        providerUrl: "https://example.test/v1", model: "model"
+      })
     });
 
     expect(inspectCachedExtraction(

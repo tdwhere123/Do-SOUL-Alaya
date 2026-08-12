@@ -1,0 +1,150 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  ensureForkedExtractionAttemptLedger,
+  forkSettledExtractionAttemptLedger,
+  openExtractionAttemptLedger,
+  readExtractionAttemptLedger,
+  readSettledExtractionAttemptLedger
+} from "../../../../../longmemeval/extraction/authority/attempt-ledger.js";
+
+const key = (digit: string): string => digit.repeat(64);
+const cacheIdentity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;
+let cacheRoot = "";
+
+afterEach(async () => {
+  if (cacheRoot !== "") await rm(cacheRoot, { recursive: true, force: true });
+});
+
+describe("extraction attempt ledger lineage isolation", () => {
+  it("isolates a probe ledger from the fresh post-probe fill lineage", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const probe = openLedger("c".repeat(64), 1, 1, 1);
+    await settleAndCommit(probe, key("3"));
+    const fill = openLedger("d".repeat(64), 2);
+
+    expect(readLedger("c".repeat(64))).toMatchObject({ attempts: 1, successfulShards: 1 });
+    expect(fill.snapshot()).toMatchObject({ attempts: 0, successfulShards: 0 });
+  });
+
+  it("forks a durably settled predecessor without resetting spend or successes", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const predecessorLineage = "5".repeat(64);
+    const successorLineage = "6".repeat(64);
+    const predecessor = openLedger(predecessorLineage, 2);
+    await settleAndCommit(predecessor, key("1"));
+    predecessor.reserveAttempt(key("2"));
+    predecessor.recordTransportOutcome(key("2"), {
+      retryCount: 0,
+      rateLimitRetries: 0,
+      terminalRetryClassification: "failure_non_retryable_4xx",
+      transportFailures: [{
+        kind: "http_error", phase: "response_status", httpStatus: 400,
+        fingerprint: key("2"), attempt: 1
+      }]
+    });
+    predecessor.abandonPendingShard(key("2"));
+    const settled = readSettledExtractionAttemptLedger({
+      cacheRoot, lineageDigest: predecessorLineage, cacheIdentity
+    });
+
+    const forked = forkSettledExtractionAttemptLedger({
+      cacheRoot, predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      successorLineageDigest: successorLineage, cacheIdentity
+    });
+
+    expect(forked).toMatchObject({
+      lineageDigest: successorLineage, startingMissing: 2, maximumAttempts: 10,
+      successfulShardCeiling: 2, attempts: 2, successfulShards: 1,
+      successfulKeys: [key("1")]
+    });
+    expect(forked.transportFailures).toEqual(settled.transportFailures);
+    expect(() => forkSettledExtractionAttemptLedger({
+      cacheRoot, predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      successorLineageDigest: successorLineage, cacheIdentity
+    })).toThrow(/exist|exclusive|link/u);
+
+    const resumed = openLedger(successorLineage, 2);
+    await settleAndCommit(resumed, key("3"));
+    expect(resumed.snapshot()).toMatchObject({ attempts: 3, successfulShards: 2 });
+  });
+});
+
+describe("extraction attempt ledger fork recovery", () => {
+  it("refuses a predecessor whose raw ledger still has unresolved work", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "7".repeat(64);
+    openLedger(lineageDigest, 1).reserveAttempt(key("4"));
+
+    expect(() => readSettledExtractionAttemptLedger({
+      cacheRoot, lineageDigest, cacheIdentity
+    })).toThrow(/not durably settled/u);
+  });
+
+  it("recovers only the exact pristine orphan fork", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const predecessorLineage = "8".repeat(64);
+    const successorLineage = "9".repeat(64);
+    const predecessor = openLedger(predecessorLineage, 2);
+    await settleAndCommit(predecessor, key("1"));
+    const settled = readSettledExtractionAttemptLedger({
+      cacheRoot, lineageDigest: predecessorLineage, cacheIdentity
+    });
+    const forked = forkSettledExtractionAttemptLedger({
+      cacheRoot, predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      successorLineageDigest: successorLineage, cacheIdentity
+    });
+
+    expect(ensureForkedExtractionAttemptLedger({
+      cacheRoot, predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      predecessorRawLedgerSha256: settled.rawLedgerSha256,
+      successorLineageDigest: successorLineage, cacheIdentity
+    })).toEqual(forked);
+
+    openLedger(successorLineage, 2).reserveAttempt(key("2"));
+    expect(() => ensureForkedExtractionAttemptLedger({
+      cacheRoot, predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      predecessorRawLedgerSha256: settled.rawLedgerSha256,
+      successorLineageDigest: successorLineage, cacheIdentity
+    })).toThrow(/not a pristine continuation fork/u);
+  });
+});
+
+function openLedger(
+  lineageDigest: string, startingMissing: number,
+  maximumAttempts?: number, successfulShardCeiling?: number
+) {
+  return openExtractionAttemptLedger({
+    cacheRoot, lineageDigest, cacheIdentity, startingMissing,
+    ...(maximumAttempts === undefined ? {} : { maximumAttempts }),
+    ...(successfulShardCeiling === undefined ? {} : { successfulShardCeiling })
+  });
+}
+
+function readLedger(lineageDigest: string) {
+  return readExtractionAttemptLedger({ cacheRoot, lineageDigest, cacheIdentity });
+}
+
+async function settleAndCommit(
+  ledger: ReturnType<typeof openExtractionAttemptLedger>, cacheKey: string
+): Promise<void> {
+  ledger.reserveAttempt(cacheKey);
+  ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0 });
+  const directory = join(cacheRoot, cacheKey.slice(0, 2));
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${cacheKey}.json`), JSON.stringify({
+    model: cacheIdentity.model, request_profile: cacheIdentity.requestProfile,
+    cache_key: cacheKey, raw_json: '{"signals":[]}',
+    transport_provenance: {
+      provider_url_sha256: `sha256:${key("a")}`, model: cacheIdentity.model
+    }
+  }), "utf8");
+  ledger.commitSuccessfulShard(cacheKey);
+}

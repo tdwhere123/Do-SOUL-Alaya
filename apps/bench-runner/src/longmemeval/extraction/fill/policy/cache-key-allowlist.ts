@@ -70,12 +70,15 @@ export function resolveCacheKeyAllowlistedTurns(input: {
   );
   input.writeLease.assertOwned();
   const executable = indexTurns(input.prepared.executionExtractionTurns, input.prepared.config);
+  const executionKeys = input.prepared.questionBatchLimit === undefined
+    ? remainingKeys
+    : remainingKeys.filter((key) => executable.has(key));
   return Object.freeze({
     turns: selectUniqueMissingTurns(
-      remainingKeys, expected, executable, input.cacheRoot, input.prepared.config
+      executionKeys, expected, executable, input.cacheRoot, input.prepared.config
     ),
     skippedCacheHits: pinnedCachedTurns,
-    executionCacheKeys: new Set(remainingKeys)
+    executionCacheKeys: new Set(executionKeys)
   });
 }
 
@@ -166,8 +169,7 @@ function assertAllowlistScope(
 ): NonNullable<CacheKeyAllowlistAuthority["catalog_refill"]> {
   if (authority === undefined || authority.action !== "fill" ||
       authority.direct_spend !== undefined || authority.repair_scope !== undefined ||
-      authority.catalog_refill === undefined || prepared.expansion !== undefined ||
-      prepared.questionBatchLimit !== undefined) {
+      authority.catalog_refill === undefined || prepared.expansion !== undefined) {
     throw new ExtractionCacheInvariantError(
       "cache-key allowlist requires an authority-bound catalog refill"
     );

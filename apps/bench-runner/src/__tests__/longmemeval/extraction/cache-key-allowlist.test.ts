@@ -28,7 +28,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("extraction cache-key allowlist", () => {
+describe("extraction cache-key allowlist selection", () => {
   it("selects exactly the receipt-bound full-window keys that are currently missing", () => {
     const cacheRoot = temporaryRoot();
     const writeLease = { assertOwned: vi.fn() };
@@ -52,6 +52,56 @@ describe("extraction cache-key allowlist", () => {
     expect(writeLease.assertOwned).toHaveBeenCalledOnce();
   });
 
+  it("bounds a catalog question batch without narrowing its receipt allowlist", () => {
+    const cacheRoot = temporaryRoot();
+    const writeLease = { assertOwned: vi.fn() };
+    const firstKey = cacheKey(first);
+    const keys = [firstKey, cacheKey(second)].sort();
+    const authority = catalogAuthority(keys);
+
+    const selected = resolveCacheKeyAllowlistedTurns({
+      allowlist: keys,
+      cacheRoot,
+      prepared: prepared({
+        questionBatchLimit: 1,
+        executionExtractionTurns: [first]
+      }),
+      authority,
+      writeLease
+    });
+    const emptyBatch = resolveCacheKeyAllowlistedTurns({
+      allowlist: keys,
+      cacheRoot,
+      prepared: prepared({
+        questionBatchLimit: 1,
+        executionExtractionTurns: []
+      }),
+      authority,
+      writeLease
+    });
+
+    expect(selected).toEqual({
+      turns: [first],
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set([firstKey])
+    });
+    expect(emptyBatch).toEqual({
+      turns: [],
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set()
+    });
+    expect(() => resolveCacheKeyAllowlistedTurns({
+      allowlist: [firstKey],
+      cacheRoot,
+      prepared: prepared({ questionBatchLimit: 1 }),
+      authority,
+      writeLease
+    })).toThrow(/does not match the catalog refill authority/u);
+    expect(writeLease.assertOwned).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("extraction cache-key allowlist continuation", () => {
   it("is inert when no programmatic allowlist was supplied", () => {
     expect(resolveCacheKeyAllowlistedTurns({
       allowlist: undefined,
@@ -98,8 +148,7 @@ describe("extraction cache-key allowlist", () => {
     ["for direct spend", {
       ...catalogAuthority([cacheKey(first)]), direct_spend: {} as never
     }, prepared()],
-    ["for expansion", catalogAuthority([cacheKey(first)]), prepared({ expansion: {} })],
-    ["for a question batch", catalogAuthority([cacheKey(first)]), prepared({ questionBatchLimit: 1 })]
+    ["for expansion", catalogAuthority([cacheKey(first)]), prepared({ expansion: {} })]
   ])("rejects the allowlist %s", (_label, authority, scopedPrepared) => {
     expect(() => resolveCacheKeyAllowlistedTurns({
       allowlist: [cacheKey(first)],
@@ -109,7 +158,9 @@ describe("extraction cache-key allowlist", () => {
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/authority-bound catalog refill/u);
   });
+});
 
+describe("extraction cache-key allowlist validation", () => {
   it.each([
     ["empty", []],
     ["uppercase", ["A".repeat(64)]],
@@ -134,7 +185,9 @@ describe("extraction cache-key allowlist", () => {
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/pinned manifest cached-turn count/u);
   });
+});
 
+describe("extraction cache-key allowlist production window", () => {
   it("rejects stale or orphan routes outside the production full window", () => {
     expect(() => resolveCacheKeyAllowlistedTurns({
       allowlist: ["f".repeat(64)],
@@ -187,6 +240,7 @@ function prepared(overrides: {
   readonly expansion?: object;
   readonly questionBatchLimit?: number;
   readonly pinnedCachedTurns?: number;
+  readonly executionExtractionTurns?: readonly LongMemEvalExtractionTurn[];
 } = {}) {
   return {
     config,

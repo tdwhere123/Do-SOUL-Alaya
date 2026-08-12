@@ -12,7 +12,7 @@ export function loadReceiptTargetSelection(
   receipt: ExtractionAuthorityReceipt
 ): ExtractionTargetSelectionReceipt | undefined {
   const required = receipt.direct_spend === undefined &&
-    receipt.repair_scope === undefined && receipt.catalog_refill === undefined &&
+    receipt.repair_scope === undefined &&
     options.extractorFactory === undefined &&
     requiresExtractionTargetSelection(receipt.observation);
   if (receipt.target_selection_digest === undefined) {

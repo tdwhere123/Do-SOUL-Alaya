@@ -44,7 +44,8 @@ export type RawExtractionCacheCompatibilityReason =
   | "system_prompt_mismatch"
   | "cache_key_algorithm_mismatch"
   | "raw_closure_mismatch"
-  | "raw_inventory_not_closed";
+  | "raw_inventory_not_closed"
+  | "retired_source_keys";
 
 export type ExtractionProjectionCompatibilityReason =
   | "model_family_mismatch"
@@ -81,9 +82,11 @@ export function decideExtractionCacheCompatibility(input: {
   readonly final: ExtractionCacheCompatibilityIdentity;
   readonly replay: ExtractionReplayClosure;
   readonly rawInventoryClosed?: boolean;
+  readonly retiredSourceKeys?: readonly string[];
 }): ExtractionCacheCompatibilityDecision {
   const rawReasons = rawIdentityDifferences(input.source.raw, input.final.raw);
   if (input.rawInventoryClosed === false) rawReasons.push("raw_inventory_not_closed");
+  if ((input.retiredSourceKeys?.length ?? 0) > 0) rawReasons.push("retired_source_keys");
   const rawAction = rawReasons.length === 0 ? "reuse" as const : "rebuild" as const;
   const semanticReasons = projectionIdentityDifferences(
     input.source.projection,

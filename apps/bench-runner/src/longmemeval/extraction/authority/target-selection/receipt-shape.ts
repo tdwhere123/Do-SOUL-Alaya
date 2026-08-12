@@ -45,6 +45,10 @@ function isSelectionBasis(value: unknown): value is ExtractionTargetSelectionBas
     return isSha256(value.predecessor_target_selection_digest) &&
       isSha256(value.predecessor_authority_receipt_digest);
   }
+  if (value.kind === "materialized_successor") {
+    return isSha256(value.materialization_commit_digest) &&
+      isSha256(value.predecessor_target_selection_digest);
+  }
   return value.kind === "retired_source_rebuild" && typeof value.operator === "string" &&
     value.operator.trim().length > 0 && value.operator.length <= 256;
 }

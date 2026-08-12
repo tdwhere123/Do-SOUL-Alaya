@@ -1,6 +1,6 @@
 import process from "node:process";
 import {
-  EXTRACTION_CACHE_ROOT,
+  resolveEffectiveExtractionCacheRoot,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
 } from "../compile-seed.js";
@@ -20,32 +20,8 @@ import type { LongMemEvalVariant } from "../ingestion/dataset.js";
 import type { LongMemEvalExpansionCapability } from
   "../promotion/expansion/expansion-capability.js";
 import type { R3SpendApproval } from "../promotion/r3-spend-approval.js";
-import {
-  inspectExtractionAuthority,
-  readCurrentExtractionAuthorityRevision
-} from "./authority/inspection.js";
-import {
-  assertExtractionAuthorityReceipt,
-  assertExtractionAuthorityRuntimeReadiness,
-  readExtractionAuthorityReceipt,
-  type ExtractionAuthorityReceipt
-} from "./authority/receipt.js";
-import type { ExtractionAttemptLedgerSnapshot } from "./authority/attempt-ledger.js";
-import {
-  assertLoadedSameRootContinuation,
-  inspectContinuationLedgerState,
-  loadSameRootExtractionContinuation,
-  type LoadedSameRootContinuation
-} from "./authority/continuation/runtime.js";
 import { createExtractionNoProgressWatchdog } from
   "./authority/no-progress-watchdog.js";
-import { assertDirectExtractionSpendRootBinding } from "./authority/direct-deepseek-500.js";
-import {
-  assertExtractionTargetSelectionReceipt,
-  assertExtractionTargetSelectionWindow,
-  type ExtractionTargetSelectionReceipt
-} from "./authority/target-selection/receipt.js";
-import { loadReceiptTargetSelection } from "./fill/target-selection.js";
 import {
   inspectExtractionFillPreparation,
   pinInspectedExtractionFill,
@@ -54,25 +30,22 @@ import {
 } from "./fill/fill-preparation.js";
 import {
   executeExtractionFill,
-  finishExtractionFill,
-  finishExtractionQuestionBatch,
-  finishExtractionProbe,
   refreshIncompleteFill,
 } from "./fill/fill-execution.js";
-import { newFillStats, type FillRetryTelemetry } from "./fill/fill-stats.js";
+import {
+  newFillStats, type FillRetryTelemetry
+} from "./fill/fill-stats.js";
 import { createExtractionExecutionAuthority } from "./fill/execution-authority.js";
 import {
-  catalogRefillTurnsThisRun,
+  hasSettledCatalogRefillLedger,
+  reconcileSettledCatalogRefillCompletion,
   recordCatalogRefillResumeManifest
-} from "./fill/catalog-refill-runtime.js";
-import { assertRemainingRepairShards } from
-  "./authority/repair/repair-scope.js";
-import { assertPreservedValidClosureUnchanged } from
-  "./authority/repair/preserved-valid-closure.js";
-import { assertCatalogRefillScopeMatchesInspection } from
-  "./authority/catalog-refill/scope.js";
-import { readCatalogRefillResumeManifest } from
-  "./authority/catalog-refill/resume-manifest.js";
+} from "./fill/catalog-refill/runtime.js";
+import { finishPreparedExtractionFill } from "./fill/execution/finalization.js";
+import { triggerCatalogRefillResumeTestSigkillAfter } from
+  "./fill/catalog-refill/resume-failpoint.js";
+import { assertCatalogRefillTransportReadiness } from
+  "./fill/catalog-refill/supplemental.js";
 import { isBoundedExistingCacheRepair } from
   "./authority/repair/bounded-existing-cache-repair.js";
 import {
@@ -84,9 +57,12 @@ import {
   resolveExtractionFillInitialConcurrency
 } from "./fill/policy/fill-concurrency.js";
 import {
-  assertDirectExtractionMetadataScope,
   assertReceiptBoundExpansionSpend
 } from "./authority/runtime/scope.js";
+import {
+  loadExtractionAuthority, recoverMissingCatalogRefillResumeManifest,
+  revalidateExtractionAuthority, type ReceiptBoundExtractionAuthority
+} from "./fill/execution/receipt-bound-authority.js";
 export { collectDistinctTurnContents } from "./turn-contents.js";
 export {
   EXTRACTION_FILL_DEFAULT_CONCURRENCY,
@@ -127,34 +103,18 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
 export async function runExtractionFill(
   options: ExtractionFillOptions
 ): Promise<ExtractionFillResult> {
-  const cacheRoot = options.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const cacheRoot = resolveEffectiveExtractionCacheRoot(options.cacheRoot);
   const authority = options.authorityReceiptPath === undefined
     ? undefined
     : await loadExtractionAuthority(options, cacheRoot);
-  if (options.questionBatchLimit !== undefined && authority?.receipt.action === "probe") {
-    throw new ExtractionCacheInvariantError(
-      "question batch extraction cannot be combined with a one-key probe"
-    );
-  }
   const concurrency = resolveExtractionFillConcurrency(options.concurrency);
-  if (authority !== undefined && concurrency > authority.receipt.limits.max_concurrency) {
-    throw new Error(
-      `extraction-fill concurrency ${concurrency} exceeds authority maximum ` +
-      `${authority.receipt.limits.max_concurrency}`
-    );
-  }
+  assertFillAuthorityOptions(options, authority, concurrency);
   const initialConcurrency = resolveExtractionFillInitialConcurrency(
     options.initialConcurrency,
     authority?.receipt.action === "probe" ? 1 : concurrency
   );
   const initialIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const directSpend = authority?.receipt.direct_spend;
-  if (directSpend !== undefined &&
-      (options.expansionCapability !== undefined || options.r3SpendApproval !== undefined)) {
-    throw new ExtractionCacheInvariantError(
-      "direct DeepSeek 500 extraction cannot mix R3 expansion evidence"
-    );
-  }
   const boundedRepair = isBoundedExistingCacheRepair(options, authority?.receipt);
   const expansion = directSpend === undefined && !boundedRepair
     ? await prepareExpansionFillAuthority(options, cacheRoot)
@@ -187,6 +147,30 @@ export async function runExtractionFill(
   );
 }
 
+function assertFillAuthorityOptions(
+  options: ExtractionFillOptions,
+  authority: ReceiptBoundExtractionAuthority | undefined,
+  concurrency: number
+): void {
+  if (options.questionBatchLimit !== undefined && authority?.receipt.action === "probe") {
+    throw new ExtractionCacheInvariantError(
+      "question batch extraction cannot be combined with a one-key probe"
+    );
+  }
+  if (authority !== undefined && concurrency > authority.receipt.limits.max_concurrency) {
+    throw new Error(
+      `extraction-fill concurrency ${concurrency} exceeds authority maximum ` +
+      `${authority.receipt.limits.max_concurrency}`
+    );
+  }
+  if (authority?.receipt.direct_spend !== undefined &&
+      (options.expansionCapability !== undefined || options.r3SpendApproval !== undefined)) {
+    throw new ExtractionCacheInvariantError(
+      "direct DeepSeek 500 extraction cannot mix R3 expansion evidence"
+    );
+  }
+}
+
 async function runLockedExtractionFill(
   options: ExtractionFillOptions,
   cacheRoot: string,
@@ -197,11 +181,19 @@ async function runLockedExtractionFill(
   authority: ReceiptBoundExtractionAuthority | undefined
 ): Promise<ExtractionFillResult> {
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
-  const prepared = authority === undefined
-    ? await prepareExtractionFill(options, cacheRoot, concurrency, log, expansion)
-    : await prepareReceiptBoundExtractionFill(
-      options, cacheRoot, concurrency, log, expansion, authority, writeLease
+  const executionAuthority = authority === undefined
+    ? undefined
+    : createExtractionExecutionAuthority(
+      authority.receipt, cacheRoot, authority.targetSelection, writeLease
     );
+  await recoverMissingCatalogRefillResumeManifest({
+    options, cacheRoot, writeLease, authority, executionAuthority
+  });
+  const recovered = reconcileSettledCatalogRefillCompletion(executionAuthority, cacheRoot);
+  if (recovered !== undefined) return recovered;
+  const prepared = await prepareLockedExtractionFill({
+    options, cacheRoot, concurrency, log, expansion, authority, writeLease, executionAuthority
+  });
   const stats = newFillStats();
   const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({
     requested: options.tolerateProviderTaskFailures === true,
@@ -209,42 +201,95 @@ async function runLockedExtractionFill(
     receipt: authority?.receipt,
     expansion: expansion !== undefined
   });
-  const executionAuthority = authority === undefined
-    ? undefined
-    : createExtractionExecutionAuthority(
-      authority.receipt, cacheRoot, authority.targetSelection, writeLease
+  if (hasSettledCatalogRefillLedger(executionAuthority)) {
+    stats.cacheHits = prepared.requestedTurns;
+    return finishPreparedExtractionFill(
+      prepared, cacheRoot, stats, log, writeLease, executionAuthority,
+      tolerateProviderTaskFailures
     );
+  }
   const watchdog = executionAuthority === undefined
     ? undefined
     : createExtractionNoProgressWatchdog({
       timeoutMs: executionAuthority.receipt.limits.no_progress_timeout_ms,
       ...(options.signal === undefined ? {} : { externalSignal: options.signal })
     });
+  return executeLockedExtractionFill({
+    options, prepared, cacheRoot, concurrency, initialConcurrency, stats, log, writeLease,
+    executionAuthority, tolerateProviderTaskFailures, watchdog
+  });
+}
+
+async function prepareLockedExtractionFill(input: {
+  readonly options: ExtractionFillOptions;
+  readonly cacheRoot: string;
+  readonly concurrency: number;
+  readonly log: (message: string) => void;
+  readonly expansion: PreparedExpansionFillAuthority | undefined;
+  readonly authority: ReceiptBoundExtractionAuthority | undefined;
+  readonly writeLease: ExtractionCacheWriteLease;
+  readonly executionAuthority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined;
+}) {
+  const currentManifest = readExtractionCacheManifestIdentity(input.cacheRoot)?.manifest;
+  assertCatalogRefillTransportReadiness(
+    input.executionAuthority, input.cacheRoot,
+    currentManifest?.schema_version === 3 ? currentManifest : undefined
+  );
+  return input.authority === undefined
+    ? prepareExtractionFill(input.options, input.cacheRoot, input.concurrency, input.log, input.expansion)
+    : prepareReceiptBoundExtractionFill(
+      input.options, input.cacheRoot, input.concurrency, input.log, input.expansion,
+      input.authority, input.writeLease
+    );
+}
+
+async function executeLockedExtractionFill(input: {
+  readonly options: ExtractionFillOptions;
+  readonly prepared: Awaited<ReturnType<typeof prepareExtractionFill>>;
+  readonly cacheRoot: string;
+  readonly concurrency: number;
+  readonly initialConcurrency: number;
+  readonly stats: ReturnType<typeof newFillStats>;
+  readonly log: (message: string) => void;
+  readonly writeLease: ExtractionCacheWriteLease;
+  readonly executionAuthority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined;
+  readonly tolerateProviderTaskFailures: boolean;
+  readonly watchdog: ReturnType<typeof createExtractionNoProgressWatchdog> | undefined;
+}): Promise<ExtractionFillResult> {
   try {
-    await executePreparedExtractionFill({
-      options, prepared, cacheRoot, concurrency, initialConcurrency, stats, log, writeLease,
-      executionAuthority,
-      tolerateProviderTaskFailures,
-      signal: watchdog?.signal ?? options.signal,
-      markProgress: watchdog?.markProgress
-    });
+    await executePreparedExtractionFill({ ...input,
+      signal: input.watchdog?.signal ?? input.options.signal,
+      markProgress: input.watchdog?.markProgress });
     return finishPreparedExtractionFill(
-      prepared, cacheRoot, stats, log, writeLease, executionAuthority,
-      tolerateProviderTaskFailures
+      input.prepared, input.cacheRoot, input.stats, input.log, input.writeLease,
+      input.executionAuthority, input.tolerateProviderTaskFailures
     );
   } catch (cause) {
-    try {
-      const manifestSha256 = refreshIncompleteFill(prepared, cacheRoot, writeLease);
-      recordCatalogRefillResumeManifest(executionAuthority, cacheRoot, manifestSha256);
-    } catch (refreshFailure) {
-      throw new AggregateError(
-        [cause, refreshFailure],
-        "extraction-fill failed and its partial manifest could not be refreshed"
-      );
-    }
+    refreshFailedExtractionFill(input, cause);
     throw cause;
   } finally {
-    watchdog?.dispose();
+    input.watchdog?.dispose();
+  }
+}
+
+function refreshFailedExtractionFill(
+  input: Pick<Parameters<typeof executeLockedExtractionFill>[0],
+    "prepared" | "cacheRoot" | "writeLease" | "executionAuthority">,
+  cause: unknown
+): void {
+  try {
+    const manifestSha256 = refreshIncompleteFill(
+      input.prepared, input.cacheRoot, input.writeLease
+    );
+    triggerCatalogRefillResumeTestSigkillAfter("failure-manifest-published");
+    recordCatalogRefillResumeManifest(
+      input.executionAuthority, input.cacheRoot, manifestSha256
+    );
+  } catch (refreshFailure) {
+    throw new AggregateError(
+      [cause, refreshFailure],
+      "extraction-fill failed and its partial manifest could not be refreshed"
+    );
   }
 }
 async function executePreparedExtractionFill(input: {
@@ -277,31 +322,6 @@ async function executePreparedExtractionFill(input: {
   );
   input.signal?.throwIfAborted();
 }
-function finishPreparedExtractionFill(
-  prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
-  cacheRoot: string,
-  stats: ReturnType<typeof newFillStats>,
-  log: (message: string) => void,
-  writeLease: ExtractionCacheWriteLease,
-  authority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined,
-  allowProviderTaskFailures: boolean
-): ExtractionFillResult {
-  const telemetry = authority?.snapshot();
-  const repairScopeTurns = authority?.receipt.repair_scope?.shard_count;
-  const catalogRefillTurns = catalogRefillTurnsThisRun(authority, telemetry, stats);
-  if (authority?.receipt.action === "probe") {
-    return finishExtractionProbe(prepared, cacheRoot, stats, log, writeLease, telemetry);
-  }
-  return prepared.questionBatchLimit === undefined
-    ? finishExtractionFill(
-      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns,
-      allowProviderTaskFailures, catalogRefillTurns
-    )
-    : finishExtractionQuestionBatch(
-      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
-    );
-}
-
 async function prepareReceiptBoundExtractionFill(
   options: ExtractionFillOptions,
   cacheRoot: string,
@@ -332,167 +352,4 @@ async function prepareReceiptBoundExtractionFill(
     throw cause;
   }
   return prepared;
-}
-
-interface ReceiptBoundExtractionAuthority {
-  readonly receipt: ExtractionAuthorityReceipt;
-  readonly targetSelection?: ExtractionTargetSelectionReceipt;
-  readonly continuation?: LoadedSameRootContinuation;
-}
-
-async function loadExtractionAuthority(
-  options: ExtractionFillOptions,
-  cacheRoot: string
-): Promise<ReceiptBoundExtractionAuthority> {
-  const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
-  assertDirectExtractionMetadataScope(options, receipt);
-  const targetSelection = loadReceiptTargetSelection(options, receipt);
-  const continuation = loadSameRootExtractionContinuation({
-    predecessorAuthorityReceiptPath: options.predecessorAuthorityReceiptPath,
-    cacheRoot,
-    receipt
-  });
-  const inspected = await inspectReceiptAuthority(options, cacheRoot, receipt, continuation);
-  assertAuthorityInspection(
-    receipt, inspected.inspection, cacheRoot, undefined, targetSelection,
-    continuation, inspected.successorLedger, undefined, inspected.resumeManifestSha256
-  );
-  return Object.freeze({
-    receipt,
-    ...(targetSelection === undefined ? {} : { targetSelection }),
-    ...(continuation === undefined ? {} : { continuation })
-  });
-}
-
-async function revalidateExtractionAuthority(
-  options: ExtractionFillOptions,
-  cacheRoot: string,
-  authority: ReceiptBoundExtractionAuthority,
-  writeLease: ExtractionCacheWriteLease,
-  postPinManifestSha256: string | undefined = undefined
-): Promise<void> {
-  writeLease.assertOwned();
-  const inspected = await inspectReceiptAuthority(
-    options, cacheRoot, authority.receipt, authority.continuation
-  );
-  assertAuthorityInspection(
-    authority.receipt, inspected.inspection, cacheRoot, writeLease, authority.targetSelection,
-    authority.continuation, inspected.successorLedger, postPinManifestSha256,
-    inspected.resumeManifestSha256
-  );
-}
-
-async function inspectReceiptAuthority(
-  options: ExtractionFillOptions,
-  cacheRoot: string,
-  receipt: ExtractionAuthorityReceipt,
-  continuation: LoadedSameRootContinuation | undefined
-) {
-  const ledgerState = inspectContinuationLedgerState({ cacheRoot, receipt, continuation });
-  const successfulLedgerKeys = ledgerState.newSuccessfulKeys;
-  const resumeManifestSha256 = receipt.catalog_refill === undefined
-    ? undefined
-    : readCatalogRefillResumeManifest({
-      cacheRoot, receipt, ledger: ledgerState.successorLedger
-    });
-  const preserveSuccessfulLedgerKeys = successfulLedgerKeys.length > 0 &&
-    (receipt.continuation !== undefined || receipt.catalog_refill !== undefined);
-  const inspection = await inspectExtractionAuthority({
-    variant: options.variant,
-    ...(options.limit === undefined ? {} : { limit: options.limit }),
-    ...(options.offset === undefined ? {} : { offset: options.offset }),
-    ...(receipt.repair_scope === undefined || options.questionBatchLimit === undefined ? {} : {
-      questionBatchLimit: options.questionBatchLimit
-    }),
-    cacheRoot,
-    ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
-    ...(options.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: options.pinnedMetaRoot }),
-    // The direct NewAPI receipt binds a separately authorized rebuild root.
-    revision: receipt.direct_spend?.kind === "deepseek_newapi_direct_500"
-      ? receipt.observation.revision
-      : readCurrentExtractionAuthorityRevision(),
-    action: receipt.action,
-    ...(receipt.repair_scope === undefined ? {} : { repairInvalidShards: true }),
-    ...(receipt.repair_scope === undefined ? {} : {
-      preservedValidExclusionKeys: receipt.repair_scope.shards.map(
-        (shard) => shard.cache_key
-      )
-    }),
-    ...(successfulLedgerKeys.length === 0 ? {} : {
-      excludeContentClosureKeys: successfulLedgerKeys
-    }),
-    ...(preserveSuccessfulLedgerKeys ? { preservedValidExclusionKeys: successfulLedgerKeys } : {})
-  });
-  return {
-    inspection,
-    successorLedger: ledgerState.successorLedger,
-    ...(resumeManifestSha256 === undefined ? {} : { resumeManifestSha256 })
-  };
-}
-
-function assertAuthorityInspection(
-  receipt: ExtractionAuthorityReceipt,
-  inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>,
-  cacheRoot: string,
-  writeLease: ExtractionCacheWriteLease | undefined = undefined,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined,
-  continuation: LoadedSameRootContinuation | undefined = undefined,
-  successorLedger: ExtractionAttemptLedgerSnapshot | undefined = undefined,
-  postPinManifestSha256: string | undefined = undefined,
-  resumeManifestSha256: string | undefined = undefined
-): void {
-  assertExtractionAuthorityReceipt(receipt, inspection.observation);
-  if (receipt.catalog_refill !== undefined) {
-    assertCatalogRefillScopeMatchesInspection({
-      scope: receipt.catalog_refill,
-      cacheRoot,
-      inspection,
-      ...(postPinManifestSha256 === undefined ? {} : {
-        pinnedManifestSha256: postPinManifestSha256
-      }),
-      ...(resumeManifestSha256 === undefined ? {} : { resumeManifestSha256 }),
-      ...(successorLedger === undefined ? {} : { ledgerProgress: {
-        attempts: successorLedger.attempts,
-        successfulKeys: successorLedger.successfulKeys
-      } })
-    });
-  }
-  if (receipt.repair_scope !== undefined) {
-    assertRemainingRepairShards(receipt.repair_scope, inspection.invalidShards);
-    assertPreservedValidClosureUnchanged(
-      receipt.repair_scope.preserved_valid_closure,
-      inspection.preservedValidClosure
-    );
-  }
-  writeLease?.assertOwned();
-  if (receipt.direct_spend !== undefined) {
-    assertDirectExtractionSpendRootBinding({
-      authorization: receipt.direct_spend,
-      cacheRoot,
-      ...(writeLease === undefined ? {} : { writeLease })
-    });
-  }
-  if (targetSelection !== undefined) {
-    assertExtractionTargetSelectionReceipt({
-      receipt: targetSelection,
-      cacheRoot,
-      observation: inspection.observation,
-      ...(writeLease === undefined ? {} : { writeLease })
-    });
-    assertExtractionTargetSelectionWindow(targetSelection, inspection.observation);
-  }
-  assertLoadedSameRootContinuation({
-    cacheRoot, receipt, continuation, successorLedger, targetSelection, inspection,
-    ...(postPinManifestSha256 === undefined ? {} : { postPinManifestSha256 })
-  });
-  assertExtractionAuthorityRuntimeReadiness(receipt, {
-    writerLock: inspection.writerLock,
-    disk: inspection.disk,
-    credentialStatus: inspection.credentialStatus,
-    modelReadiness: inspection.modelReadiness
-  }, { allowOwnedWriterLock: writeLease !== undefined });
-  if (receipt.action === "probe" &&
-      (receipt.probe_key === undefined || !inspection.missingKeys.includes(receipt.probe_key))) {
-    throw new Error("extraction probe authority target is no longer a missing cache key");
-  }
 }

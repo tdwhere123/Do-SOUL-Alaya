@@ -1,6 +1,9 @@
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
-import { openExtractionAttemptLedger } from "../authority/attempt-ledger.js";
+import {
+  openExtractionAttemptLedger,
+  type ExtractionAttemptLedgerSnapshot
+} from "../authority/attempt-ledger.js";
 import {
   assertDirectExtractionSpendRootBinding,
   isDirectDeepSeek500Authorization
@@ -79,6 +82,7 @@ function createLedgerExecutionAuthority(
     ? undefined
     : catalogRefillScopeKeys(receipt.catalog_refill);
   const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
+  assertCatalogRefillLedgerIsCurrent(receipt, ledger.snapshot());
   const directPacer = createDirectRequestPacer(receipt, cacheRoot);
   return {
     receipt,
@@ -94,10 +98,29 @@ function createLedgerExecutionAuthority(
     },
     abandonPendingShard: ledger.abandonPendingShard,
     commitSuccessfulShard: ledger.commitSuccessfulShard,
-    commitDeterministicShard: ledger.commitDeterministicShard,
+    commitDeterministicShard: receipt.catalog_refill === undefined
+      ? ledger.commitDeterministicShard
+      : () => {
+          throw new ExtractionCacheInvariantError(
+            "catalog refill cannot commit a deterministic shard"
+          );
+        },
     recordTransportOutcome: ledger.recordTransportOutcome,
     snapshot: ledger.snapshot
   };
+}
+
+function assertCatalogRefillLedgerIsCurrent(
+  receipt: ExtractionAuthorityReceipt,
+  snapshot: ExtractionAttemptLedgerSnapshot
+): void {
+  if (receipt.catalog_refill === undefined ||
+      snapshot.successfulEntries.every((entry) => entry.successKind !== "legacy-unclassified")) {
+    return;
+  }
+  throw new ExtractionCacheInvariantError(
+    "catalog refill cannot resume a legacy attempt ledger without typed transport provenance"
+  );
 }
 
 function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot: string) {

@@ -57,6 +57,7 @@ describe("audit-extraction-cache command", () => {
       "fact_frames=formed:0 ineligible:0 unavailable:0 rejected:0 fact_keys:0"
     );
     expect(receipt.kind).toBe("longmemeval_extraction_cache_projection_decision");
+    expect(receipt.source_manifest_sha256).toBe(hash(fixture.manifestRaw));
     expect(receipt.decision.raw.reasons).toEqual([]);
     expect(receipt.decision.projection.reasons).toEqual(expect.arrayContaining([
       "parser_semantics_mismatch",
@@ -119,6 +120,40 @@ describe("audit-extraction-cache command", () => {
     expect(code).toBe(2);
     expect(errors.join("")).toMatch(/must not overlap/iu);
     expect(existsSync(join(nested, "audit"))).toBe(false);
+  });
+
+  it("rejects a symlinked source manifest before creating audit output", async () => {
+    const fixture = createFixture();
+    const manifestPath = join(fixture.sourceRoot, "manifest.json");
+    const external = join(fixture.root, "external-manifest.json");
+    writeFileSync(external, fixture.manifestRaw, "utf8");
+    rmSync(manifestPath);
+    symlinkSync(external, manifestPath);
+    const errors: string[] = [];
+
+    const code = await runAuditExtractionCacheCommand(commandArgs(fixture), {
+      writeStderr: (text) => errors.push(text)
+    });
+
+    expect(code).toBe(2);
+    expect(errors.join("")).toMatch(/manifest.*(?:symlink|regular|open)/iu);
+    expect(existsSync(fixture.auditOutput)).toBe(false);
+  });
+
+  it("rejects an oversized source manifest before parsing or output", async () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.sourceRoot, "manifest.json"), Buffer.alloc(32 * 1024 * 1024 + 1, 0x20)
+    );
+    const errors: string[] = [];
+
+    const code = await runAuditExtractionCacheCommand(commandArgs(fixture), {
+      writeStderr: (text) => errors.push(text)
+    });
+
+    expect(code).toBe(2);
+    expect(errors.join("")).toMatch(/manifest.*exceeds.*limit/iu);
+    expect(existsSync(fixture.auditOutput)).toBe(false);
   });
 });
 

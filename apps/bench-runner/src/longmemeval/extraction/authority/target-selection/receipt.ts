@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
-  assertFreshExtractionCacheRoot,
-  type ExtractionCacheCompatibilityDecision
+  assertFreshExtractionCacheRoot
 } from "../../cache-audit/compatibility.js";
 import type { ExtractionCacheAuditReceipt } from "../../cache-audit/receipt.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
@@ -20,10 +19,19 @@ import {
   digestExtractionTargetSelectionReceipt,
   isSha256
 } from "./receipt-shape.js";
+import { readBoundedCanonicalUtf8Artifact } from "../../cache-audit/bounded-artifact-reader.js";
+import {
+  assertAuditFinalIdentity,
+  assertContinuationFinalIdentity,
+  assertFinalIdentity,
+  assertMaterializedSuccessorFinalIdentity,
+  extractionTargetFinalIdentity
+} from "./final-identity.js";
 
 export type { ExtractionTargetRootBinding } from "../target-root-binding.js";
 
 const TARGET_SELECTION_SCHEMA_VERSION = 2;
+const MAX_TARGET_SELECTION_RECEIPT_BYTES = 64 * 1024;
 const targetRootMarker = {
   filename: ".alaya-extraction-target-root.json",
   kind: "alaya_extraction_target_root"
@@ -53,6 +61,11 @@ export type ExtractionTargetSelectionBasis =
       readonly kind: "same_root_continuation";
       readonly predecessor_target_selection_digest: string;
       readonly predecessor_authority_receipt_digest: string;
+    }
+  | {
+      readonly kind: "materialized_successor";
+      readonly materialization_commit_digest: string;
+      readonly predecessor_target_selection_digest: string;
     };
 
 export interface ExtractionTargetFinalIdentity {
@@ -218,6 +231,29 @@ export function createSameRootContinuationTargetSelectionReceipt(input: {
   });
 }
 
+export function createMaterializedSuccessorTargetSelectionReceipt(input: {
+  readonly predecessor: ExtractionTargetSelectionReceipt;
+  readonly materializationCommitDigest: string;
+  readonly observation: ExtractionAuthorityObservation;
+  readonly now?: Date;
+}): ExtractionTargetSelectionReceipt {
+  assertReceiptIntegrity(input.predecessor);
+  if (!isSha256(input.materializationCommitDigest)) {
+    throw new Error("materialized successor commit digest is invalid");
+  }
+  assertMaterializedSuccessorFinalIdentity(input.predecessor.final_identity, input.observation);
+  return buildTargetSelectionReceipt({
+    selectionBasis: {
+      kind: "materialized_successor",
+      materialization_commit_digest: input.materializationCommitDigest,
+      predecessor_target_selection_digest: input.predecessor.receipt_digest
+    },
+    targetRoot: input.predecessor.target_root,
+    observation: input.observation,
+    now: input.now
+  });
+}
+
 function createTargetSelectionReceipt(input: {
   readonly selectionBasis: ExtractionTargetSelectionBasis;
   readonly targetRoot: ExtractionTargetRootBinding;
@@ -240,7 +276,7 @@ function buildTargetSelectionReceipt(input: {
     created_at: (input.now ?? new Date()).toISOString(),
     selection_basis: Object.freeze({ ...input.selectionBasis }),
     target_root: Object.freeze({ ...input.targetRoot }),
-    final_identity: finalIdentity(input.observation),
+    final_identity: extractionTargetFinalIdentity(input.observation),
     initial_selection: initialSelection(input.observation)
   };
   return Object.freeze({
@@ -313,7 +349,17 @@ export function assertExtractionTargetSelectionWindow(
 }
 
 export function readExtractionTargetSelectionReceipt(path: string): ExtractionTargetSelectionReceipt {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  return parseExtractionTargetSelectionReceiptContents(readBoundedCanonicalUtf8Artifact({
+    path: path,
+    maxBytes: MAX_TARGET_SELECTION_RECEIPT_BYTES,
+    label: "extraction target selection receipt"
+  }));
+}
+
+export function parseExtractionTargetSelectionReceiptContents(
+  contents: string
+): ExtractionTargetSelectionReceipt {
+  const parsed = JSON.parse(contents) as unknown;
   assertReceiptIntegrity(parsed);
   return parsed;
 }
@@ -375,80 +421,6 @@ function assertFreshInitialSelection(observation: ExtractionAuthorityObservation
       inventory.orphanTurns !== 0) {
     throw new Error("extraction target selection requires a fresh canonical 100Q rebuild root");
   }
-}
-
-function assertAuditFinalIdentity(
-  auditDecision: ExtractionCacheCompatibilityDecision,
-  observation: ExtractionAuthorityObservation
-): void {
-  const current = finalIdentity(observation);
-  const raw = auditDecision.raw.final;
-  if (raw.datasetRevision !== current.dataset_revision_sha256 ||
-      raw.model !== current.model ||
-      auditDecision.projection.final.modelFamily !== current.model_family ||
-      raw.requestProfile !== current.request_profile ||
-      raw.providerUrl !== current.provider_url ||
-      raw.systemPromptSha256 !== current.system_prompt_sha256 ||
-      raw.cacheKeyAlgorithm !== current.cache_key_algorithm) {
-    throw new Error("extraction target selection audit final identity does not match the live target");
-  }
-}
-
-function assertFinalIdentity(
-  expected: ExtractionTargetFinalIdentity,
-  observation: ExtractionAuthorityObservation
-): void {
-  const current = finalIdentity(observation);
-  // A partially populated expansion cannot re-enter the 100Q continuation path
-  // because its already-authorized expansion shards are orphans in that window.
-  if (expected.revision !== current.revision &&
-      observation.dataset.variant === "longmemeval_s" &&
-      observation.dataset.windowOffset === 0 &&
-      observation.dataset.windowLimit === 500) {
-    assertContinuationFinalIdentity(expected, observation);
-    return;
-  }
-  if (expected.revision !== current.revision ||
-      expected.dataset_variant !== current.dataset_variant ||
-      expected.dataset_revision_sha256 !== current.dataset_revision_sha256 ||
-      expected.model !== current.model || expected.model_family !== current.model_family ||
-      expected.request_profile !== current.request_profile ||
-      expected.provider_url !== current.provider_url ||
-      expected.system_prompt_sha256 !== current.system_prompt_sha256 ||
-      expected.cache_key_algorithm !== current.cache_key_algorithm) {
-    throw new Error("extraction target selection final identity drifted");
-  }
-}
-
-function assertContinuationFinalIdentity(
-  predecessor: ExtractionTargetFinalIdentity,
-  observation: ExtractionAuthorityObservation
-): void {
-  const current = finalIdentity(observation);
-  if (predecessor.revision === current.revision ||
-      predecessor.dataset_variant !== current.dataset_variant ||
-      predecessor.dataset_revision_sha256 !== current.dataset_revision_sha256 ||
-      predecessor.model !== current.model || predecessor.model_family !== current.model_family ||
-      predecessor.request_profile !== current.request_profile ||
-      predecessor.provider_url !== current.provider_url ||
-      predecessor.system_prompt_sha256 !== current.system_prompt_sha256 ||
-      predecessor.cache_key_algorithm !== current.cache_key_algorithm) {
-    throw new Error("same-root continuation target identity is not a revision-only successor");
-  }
-}
-
-function finalIdentity(observation: ExtractionAuthorityObservation): ExtractionTargetFinalIdentity {
-  return Object.freeze({
-    revision: observation.revision,
-    dataset_variant: observation.dataset.variant,
-    dataset_revision_sha256: observation.dataset.revisionSha256,
-    model: observation.extraction.model,
-    model_family: observation.extraction.modelFamily,
-    request_profile: observation.extraction.requestProfile,
-    provider_url: observation.extraction.providerUrl,
-    system_prompt_sha256: observation.extraction.systemPromptSha256,
-    cache_key_algorithm: observation.extraction.cacheKeyAlgorithm
-  });
 }
 
 function initialSelection(observation: ExtractionAuthorityObservation): ExtractionTargetInitialSelection {

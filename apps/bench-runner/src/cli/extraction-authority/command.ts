@@ -143,34 +143,52 @@ async function buildAuthorizedReceipt(
   if (catalogRefillScope !== undefined && ledger !== undefined) {
     throw new Error("catalog refill requires an unused existing cache root");
   }
+  return finishAuthorizedReceipt({
+    authority, flags, cacheRoot, directSpend, inspection, ledger, inspectInput,
+    catalogRefillScope, deps
+  });
+}
+
+function finishAuthorizedReceipt(input: {
+  readonly authority: AuthorizeExtractionArgs;
+  readonly flags: ReturnType<typeof parseFlags>;
+  readonly cacheRoot: string;
+  readonly directSpend: DirectExtractionSpendAuthorization | undefined;
+  readonly inspection: ExtractionAuthorityInspection;
+  readonly ledger: ReturnType<typeof readExtractionAttemptLedger>;
+  readonly inspectInput: Parameters<typeof inspectExtractionAuthority>[0];
+  readonly catalogRefillScope: ExtractionCatalogRefillScope | undefined;
+  readonly deps: AuthorizeExtractionDependencies;
+}) {
   const targetSelection = readTargetSelection(
-    authority, directSpend, catalogRefillScope, inspection.observation, deps
+    input.authority, input.directSpend, input.catalogRefillScope,
+    input.inspection.observation, input.deps
   );
   assertTargetSelection(
-    targetSelection, cacheRoot, inspection.observation, deps
+    targetSelection, input.cacheRoot, input.inspection.observation, input.deps
   );
-  const continuation = catalogRefillScope === undefined
+  const continuation = input.catalogRefillScope === undefined
     ? prepareAuthorityContinuation({
-      predecessorAuthorityPath: authority.predecessorAuthorityPath,
-      cacheRoot,
-      inspection,
+      predecessorAuthorityPath: input.authority.predecessorAuthorityPath,
+      cacheRoot: input.cacheRoot,
+      inspection: input.inspection,
       targetSelection,
-      dependencies: deps
+      dependencies: input.deps
     })
     : undefined;
-  if (continuation !== undefined && ledger !== undefined &&
+  if (continuation !== undefined && input.ledger !== undefined &&
       (sameRootContinuationMode(continuation.evidence) !== "output_token_cap_renewal" ||
-       ledger.lineageDigest !== continuation.predecessor.lineage_digest)) {
+       input.ledger.lineageDigest !== continuation.predecessor.lineage_digest)) {
     throw new Error("same-root continuation successor lineage already exists");
   }
   return Object.freeze({
-    cacheRoot,
-    outputPath: authority.outputPath,
-    inspection,
-    inspectionInput: inspectInput,
+    cacheRoot: input.cacheRoot,
+    outputPath: input.authority.outputPath,
+    inspection: input.inspection,
+    inspectionInput: input.inspectInput,
     receipt: createReceipt(
-      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection,
-      catalogRefillScope, continuation
+      input.authority, input.flags.concurrency, input.inspection, input.ledger,
+      input.directSpend, targetSelection, input.catalogRefillScope, continuation
     ),
     ...(continuation === undefined ? {} : { continuation })
   });
@@ -210,7 +228,7 @@ function readTargetSelection(
     }
     return undefined;
   }
-  if (catalogRefillScope !== undefined || authority.repairInvalidShards ||
+  if (authority.repairInvalidShards ||
       !requiresExtractionTargetSelection(observation)) {
     if (authority.targetSelectionPath !== undefined) {
       throw new Error(
@@ -327,31 +345,53 @@ function createReceipt(
       maximumAttempts: inheritedLedger.maximumAttempts,
       successfulShardCeiling: inheritedLedger.successfulShardCeiling
     };
-  return createExtractionAuthorityReceipt({
-    action: authority.action,
-    observation: inspection.observation,
-    outputTokenCap: { field: authority.outputTokenField, value: authority.outputTokenCap },
-    priceEstimate: {
-      inputUsdPerMillion: authority.inputPriceUsdPerMillion,
-      outputUsdPerMillion: authority.outputPriceUsdPerMillion,
-      maximumInputTokensPerAttempt: authority.maximumInputTokens
+  return createExtractionAuthorityReceipt(buildReceiptInput({
+    authority, maxConcurrency, inspection, directSpend, targetSelection,
+    catalogRefillScope, continuation, repairScope, carriedLimits
+  }));
+}
+
+function buildReceiptInput(input: {
+  readonly authority: AuthorizeExtractionArgs;
+  readonly maxConcurrency: number | undefined;
+  readonly inspection: ExtractionAuthorityInspection;
+  readonly directSpend: DirectExtractionSpendAuthorization | undefined;
+  readonly targetSelection: ExtractionTargetSelectionReceipt | undefined;
+  readonly catalogRefillScope: ExtractionCatalogRefillScope | undefined;
+  readonly continuation: PreparedAuthorityContinuation | undefined;
+  readonly repairScope: ReturnType<typeof createExtractionRepairScope> | undefined;
+  readonly carriedLimits: { readonly startingMissing: number; readonly maximumAttempts: number;
+    readonly successfulShardCeiling: number } | undefined;
+}) {
+  return {
+    action: input.authority.action,
+    observation: input.inspection.observation,
+    outputTokenCap: {
+      field: input.authority.outputTokenField, value: input.authority.outputTokenCap
     },
-    diskFloorBytes: authority.diskFloorBytes,
-    ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
-    ...(authority.probeKey === undefined ? {} : { probeKey: authority.probeKey }),
-    ...(carriedLimits === undefined ? {} : { cumulativeLimits: carriedLimits }),
-    inspection: inspectionSummary(inspection),
-    ...(targetSelection === undefined ? {} : {
-      targetSelectionDigest: targetSelection.receipt_digest
+    priceEstimate: {
+      inputUsdPerMillion: input.authority.inputPriceUsdPerMillion,
+      outputUsdPerMillion: input.authority.outputPriceUsdPerMillion,
+      maximumInputTokensPerAttempt: input.authority.maximumInputTokens
+    },
+    diskFloorBytes: input.authority.diskFloorBytes,
+    ...(input.maxConcurrency === undefined ? {} : { maxConcurrency: input.maxConcurrency }),
+    ...(input.authority.probeKey === undefined ? {} : { probeKey: input.authority.probeKey }),
+    ...(input.carriedLimits === undefined ? {} : { cumulativeLimits: input.carriedLimits }),
+    inspection: inspectionSummary(input.inspection),
+    ...(input.targetSelection === undefined ? {} : {
+      targetSelectionDigest: input.targetSelection.receipt_digest
     }),
-    ...(directSpend === undefined ? {} : { directSpend }),
-    ...(repairScope === undefined ? {} : { repairScope }),
-    ...(catalogRefillScope === undefined ? {} : { catalogRefillScope }),
-    ...(continuation === undefined ? {} : { continuation: continuation.evidence }),
-    ...(continuation === undefined || targetSelection === undefined ? {} : {
-      now: new Date(targetSelection.created_at)
+    ...(input.directSpend === undefined ? {} : { directSpend: input.directSpend }),
+    ...(input.repairScope === undefined ? {} : { repairScope: input.repairScope }),
+    ...(input.catalogRefillScope === undefined ? {} : {
+      catalogRefillScope: input.catalogRefillScope
+    }),
+    ...(input.continuation === undefined ? {} : { continuation: input.continuation.evidence }),
+    ...(input.continuation === undefined || input.targetSelection === undefined ? {} : {
+      now: new Date(input.targetSelection.created_at)
     })
-  });
+  };
 }
 
 function inspectionSummary(inspection: ExtractionAuthorityInspection) {
@@ -382,12 +422,12 @@ function assertCatalogRefillFlagScope(
 ): void {
   if (flags.catalogRefillAllowlist === undefined) return;
   if (authority.action !== "fill" || authority.repairInvalidShards ||
-      authority.targetSelectionPath !== undefined || authority.predecessorAuthorityPath !== undefined ||
+      authority.targetSelectionPath === undefined || authority.predecessorAuthorityPath !== undefined ||
       authority.directDeepSeek500Operator !== undefined ||
       authority.directNewApiDeepSeek500Operator !== undefined ||
       flags.questionBatchLimit !== undefined) {
     throw new Error(
-      "catalog refill requires a normal fill without target selection, repair, direct spend, or batching"
+      "catalog refill requires a target selection and a normal fill without repair, direct spend, or batching"
     );
   }
 }

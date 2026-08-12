@@ -85,7 +85,7 @@ it("rejects a replacement root even when its original marker is moved into place
     .toThrow(/target root changed/u);
 });
 
-it("permits inode drift only with the root's active writer lease", () => {
+it("rejects inode drift even with the root's active writer lease", () => {
   const parent = createTemporaryRoot();
   const cacheRoot = join(parent, "cache");
   const authorization = createFreshNewApiDeepSeek500Authorization({
@@ -104,7 +104,7 @@ it("permits inode drift only with the root's active writer lease", () => {
       authorization: driftedAuthorization,
       cacheRoot,
       writeLease: lease
-    })).not.toThrow();
+    })).toThrow(/target root changed/u);
     expect(() => assertNewApiDeepSeek500RootBinding({
       authorization: { ...driftedAuthorization, cache_root_device: "0" },
       cacheRoot,
@@ -115,7 +115,7 @@ it("permits inode drift only with the root's active writer lease", () => {
   }
 });
 
-it("uses inode drift tolerance only after a receipt-bound execution owns the root", () => {
+it("keeps receipt-bound execution pinned to the selected root inode", () => {
   const parent = createTemporaryRoot();
   const cacheRoot = join(parent, "cache");
   const authorization = createFreshNewApiDeepSeek500Authorization({
@@ -143,7 +143,7 @@ it("uses inode drift tolerance only after a receipt-bound execution owns the roo
   try {
     expect(() => createExtractionExecutionAuthority(
       receipt, cacheRoot, undefined, lease
-    )).not.toThrow();
+    )).toThrow(/target root changed/u);
   } finally {
     lease.release();
   }

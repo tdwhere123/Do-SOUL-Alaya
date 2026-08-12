@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import {
@@ -14,10 +14,12 @@ import {
   computeSystemPromptSha256,
   extractionCacheManifestPath,
   extractionModelFamily,
-  readExtractionCacheManifestIdentity,
+  parseExtractionCacheManifestContents,
   type ExtractionCacheManifestV3,
   type ExtractionRequestProfile
 } from "../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { readExtractionCacheManifestBytes } from
+  "../../longmemeval/extraction/cache/io/manifest-byte-reader.js";
 import { loadDatasetWithIdentity } from "../../longmemeval/ingestion/fetch.js";
 import {
   assertFreshExtractionCacheRoot,
@@ -45,6 +47,8 @@ import {
   replayExtractionOccurrences,
   type ExtractionReplayResult
 } from "../../longmemeval/extraction/cache-audit/replay.js";
+import { computeExtractionKeySetSha256 } from
+  "../../longmemeval/extraction/content-closure.js";
 import { writeExtractionCacheAuditBundle } from "./bundle-writer.js";
 
 const TEMPORAL_SCHEMA_REVISION = "relation-assertion-v1";
@@ -185,25 +189,28 @@ function analyzeExtractionCache(input: {
     requestProfile: input.sourceManifest.request_profile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
   });
-  const inventory = inspectExtractionCacheInventory({
+  const inspectedInventory = inspectExtractionCacheInventory({
     cacheRoot: input.sourceRoot,
     cacheKeys: occurrences.flatMap((occurrence) => occurrence.cacheKeys),
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile
   });
+  const inventory = classifyRetiredSourceKeys(input.sourceManifest, inspectedInventory);
   const inventorySha256 = hashExtractionCacheInventory(inventory);
   const replay = replayExtractionOccurrences({
     cacheRoot: input.sourceRoot,
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile,
-    occurrences
+    occurrences,
+    allowMissingShards: true
   });
   const decision = decideExtractionCacheCompatibility({
     sourceRoot: input.sourceRoot,
     source: sourceIdentity(input.sourceManifest, inventorySha256),
     final: finalIdentity(input.args, input.dataset.sha256, inventorySha256),
     replay: replay.closure,
-    rawInventoryClosed: isRawInventoryClosed(inventory)
+    rawInventoryClosed: isRawInventoryClosed(inventory),
+    retiredSourceKeys: inventory.retiredKeys
   });
   return {
     inventory,
@@ -216,18 +223,46 @@ function analyzeExtractionCache(input: {
   };
 }
 
+function classifyRetiredSourceKeys(
+  manifest: ExtractionCacheManifestV3,
+  inventory: ExtractionCacheInventory
+): ExtractionCacheInventory {
+  if (inventory.orphanKeys.length === 0) return inventory;
+  const sourceKeys = [
+    ...inventory.shards
+      .filter((shard) => shard.status !== "missing")
+      .map((shard) => shard.cacheKey),
+    ...inventory.orphanKeys
+  ];
+  if (manifest.expected_turns !== sourceKeys.length ||
+      manifest.expected_key_set_sha256 !== computeExtractionKeySetSha256(sourceKeys)) {
+    return inventory;
+  }
+  const retiredKeys = Object.freeze([...inventory.orphanKeys]);
+  return Object.freeze({
+    ...inventory,
+    orphanKeys: Object.freeze([]),
+    retiredKeys,
+    counts: Object.freeze({ ...inventory.counts, orphan: 0 })
+  });
+}
+
 function readAuditedSource(sourceRoot: string): {
   readonly raw: string;
   readonly manifest: ExtractionCacheManifestV3;
   readonly manifestSha256: string;
 } {
   const manifestPath = extractionCacheManifestPath(sourceRoot);
-  const raw = readFileSync(manifestPath, "utf8");
-  const identity = readExtractionCacheManifestIdentity(sourceRoot);
-  if (identity === undefined || identity.manifest.schema_version !== 3) {
+  const artifact = readExtractionCacheManifestBytes(manifestPath);
+  const manifest = parseExtractionCacheManifestContents(artifact.text, manifestPath);
+  if (manifest.schema_version !== 3) {
     throw new Error("cache audit source requires a schema-version-3 manifest");
   }
-  return { raw, manifest: identity.manifest, manifestSha256: identity.manifestSha256 };
+  return {
+    raw: artifact.text,
+    manifest,
+    manifestSha256: createHash("sha256").update(artifact.bytes).digest("hex")
+  };
 }
 
 function assertSourcePrompt(manifest: ExtractionCacheManifestV3): void {
@@ -439,7 +474,8 @@ function renderRun(run: ExtractionCacheAuditRun): string {
     `receipt=${run.receipt.decision_digest}\n` +
     `  source_manifest=${run.sourceManifestSha256} inventory=${run.inventorySha256}\n` +
     `  occurrences=${run.occurrences.length} expected=${counts.expected} hit=${counts.hit} ` +
-    `missing=${counts.missing} invalid=${counts.invalid} orphan=${counts.orphan}\n` +
+    `missing=${counts.missing} invalid=${counts.invalid} orphan=${counts.orphan} ` +
+    `retired=${run.inventory.retiredKeys.length}\n` +
     `  replay=${run.replaySha256} admitted=${run.replay.closure.admitted} ` +
     `deferred=${run.replay.closure.deferred} rejected=${run.replay.closure.rejected} ` +
     `invalid=${run.replay.closure.invalid}\n` +

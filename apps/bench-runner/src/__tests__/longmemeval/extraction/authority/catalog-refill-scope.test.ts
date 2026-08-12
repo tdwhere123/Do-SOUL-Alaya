@@ -20,7 +20,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("catalog refill authority scope", () => {
+describe("catalog refill authority scope creation", () => {
   it("binds exactly the current missing set, current manifest, and existing root", () => {
     const cacheRoot = temporaryRoot();
     const inspection = inspected([firstKey, secondKey]);
@@ -66,7 +66,9 @@ describe("catalog refill authority scope", () => {
       inspection: inspected([firstKey, "3".repeat(64)])
     })).toThrow(/missing-key set drifted/u);
   });
+});
 
+describe("catalog refill authority scope progress", () => {
   it("accepts only receipt-ledger progress over the original missing set", () => {
     const cacheRoot = temporaryRoot();
     const scope = createExtractionCatalogRefillScope({
@@ -110,8 +112,10 @@ describe("catalog refill authority scope", () => {
       ledgerProgress: { attempts: 1, successfulKeys: ["3".repeat(64)] }
     })).toThrow(/out-of-scope success/u);
   });
+});
 
-  it("cannot mix an existing-root refill with fresh target selection", () => {
+describe("catalog refill authority target selection", () => {
+  it("requires an existing-root refill to bind its adopted target selection", () => {
     const cacheRoot = temporaryRoot();
     const inspection = inspected([firstKey, secondKey]);
     const catalogRefillScope = createExtractionCatalogRefillScope({
@@ -120,7 +124,7 @@ describe("catalog refill authority scope", () => {
       allowlist: allowlist([firstKey, secondKey])
     });
 
-    expect(() => createExtractionAuthorityReceipt({
+    expect(createExtractionAuthorityReceipt({
       action: "fill",
       observation: inspection.observation,
       outputTokenCap: { field: "max_tokens", value: 512 },
@@ -137,6 +141,27 @@ describe("catalog refill authority scope", () => {
         modelReadiness: inspection.modelReadiness
       },
       targetSelectionDigest: "f".repeat(64),
+      catalogRefillScope
+    })).toMatchObject({
+      catalog_refill: catalogRefillScope,
+      target_selection_digest: "f".repeat(64)
+    });
+    expect(() => createExtractionAuthorityReceipt({
+      action: "fill",
+      observation: inspection.observation,
+      outputTokenCap: { field: "max_tokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 0,
+      inspection: {
+        writerLock: inspection.writerLock,
+        disk: inspection.disk,
+        credentialStatus: inspection.credentialStatus,
+        modelReadiness: inspection.modelReadiness
+      },
       catalogRefillScope
     })).toThrow(/existing-root fill authority mode/u);
   });

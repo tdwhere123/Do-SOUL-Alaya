@@ -32,7 +32,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("extraction cache replay", () => {
+describe("extraction cache replay occurrence accounting", () => {
   it("replays each occurrence with its explicit source time even when the raw key repeats", () => {
     const root = cacheRoot();
     const key = "a".repeat(64);
@@ -78,6 +78,28 @@ describe("extraction cache replay", () => {
     expect(result.closure.invalid).toBe(1);
   });
 
+  it("defers a missing shard only when the refill audit explicitly allows it", () => {
+    const calls: unknown[] = [];
+    const result = replayExtractionOccurrences({
+      cacheRoot: cacheRoot(), model, requestProfile,
+      occurrences: [occurrence("q-s0-r0", "b".repeat(64), "2025-01-01T00:00:00.000Z")],
+      allowMissingShards: true,
+      audit: auditor((input) => {
+        calls.push(input);
+        return resultFor([]);
+      })
+    });
+
+    expect(calls).toEqual([]);
+    expect(result.occurrences[0]?.entries).toEqual([{
+      index: -1,
+      disposition: "deferred",
+      stage: "cache",
+      reason: `shard_missing:${"b".repeat(12)}`
+    }]);
+    expect(result.closure).toMatchObject({ deferred: 1, invalid: 0 });
+  });
+
   it("accounts for a valid empty extractor result without inventing a signal", () => {
     const root = cacheRoot();
     const key = "c".repeat(64);
@@ -91,7 +113,9 @@ describe("extraction cache replay", () => {
     expect(result.occurrences[0]?.entries).toEqual([]);
     expect(result.closure).toMatchObject({ occurrenceCount: 1, accountedOccurrences: 1, elementCount: 0, invalid: 0 });
   });
+});
 
+describe("extraction cache replay rejection", () => {
   it("commits graph projection failure for a later rejected candidate", () => {
     const root = cacheRoot();
     const key = "e".repeat(64);
@@ -166,7 +190,9 @@ describe("extraction cache replay", () => {
       }
     }));
   });
+});
 
+describe("extraction cache replay content binding", () => {
   it("commits the final grounded assertion and formed content", () => {
     const root = cacheRoot();
     const key = "d".repeat(64);
@@ -228,7 +254,9 @@ describe("extraction cache replay", () => {
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedContent));
     expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(rejectedProjection));
   });
+});
 
+describe("extraction cache replay formation closure", () => {
   it("closes every admitted signal through the production fact-frame formation states", () => {
     const root = cacheRoot();
     const key = "e".repeat(64);

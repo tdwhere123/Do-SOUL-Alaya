@@ -69,6 +69,7 @@ interface CachingSignalExtractorOptions {
   readonly cacheRoot?: string;
   readonly stats?: CompileSeedExtractionStats;
   readonly allowLiveExtraction?: boolean;
+  readonly requireProviderBackedExtraction?: boolean;
   readonly writeLease?: ExtractionCacheWriteLease;
   /** Aggregate exact shards for the single-threaded snapshot seed loop. */
   readonly trackTurnShards?: boolean;
@@ -146,6 +147,11 @@ async function extractWithCache(
     );
   }
   if (extractionInput.request.source_assertions.length === 0) {
+    if (options.requireProviderBackedExtraction) {
+      throw new ExtractionCacheInvariantError(
+        "catalog refill requires provider-backed extraction for every authorized shard"
+      );
+    }
     return persistDeterministicEmpty(options, cacheRoot, cacheKey, input);
   }
   return extractLive(options, cacheRoot, cacheKey, input);

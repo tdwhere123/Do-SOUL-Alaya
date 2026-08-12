@@ -4,6 +4,8 @@ import { parseFlags, type ParsedFlags } from "./cli-options.js";
 import { runAuthorizeLongMemEvalMatrixCommand } from "./promotion/command.js";
 import { runAuthorizeExtractionCommand } from "./extraction-authority/command.js";
 import { runAuditExtractionCacheCommand } from "./cache-audit/command.js";
+import { runMaterializeAuditedExtractionTargetCommand } from
+  "./cache-audit/materialize-command.js";
 import { runSelectExtractionTargetCommand } from "./target-selection/command.js";
 import { runFactFrameFormationAuditCommand } from
   "./fact-frame-formation-audit/command.js";
@@ -43,10 +45,11 @@ Usage:
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path> [--concurrency N]
   alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--extraction-initial-concurrency N] [--question-batch-limit N] [--tolerate-provider-task-failures] [--data-dir <path>] [--extraction-cache-root <path>] --extraction-authority <receipt.json> [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--pinned-meta-root <path>] [--promotion-contract <json>] [--r3-spend-approval <json>]
   alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--question-batch-limit N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--catalog-refill-allowlist <allowlist.json>] [--direct-deepseek-500-operator <operator>|--direct-newapi-deepseek-500-operator <operator>] [--repair-invalid-shards]
-  alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <target-root> (--cache-audit-receipt <audit-receipt.json> | --retired-source-rebuild-operator <operator> | --predecessor-target-selection <receipt.json> --extraction-predecessor-authority <receipt.json> [--adopt-existing-child-target-selection <receipt.json> --adopt-existing-child-authority <receipt.json>]) --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
+  alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <target-root> (--cache-audit-receipt <audit-receipt.json> | --materialization-receipt <receipt.json> | --retired-source-rebuild-operator <operator> | --predecessor-target-selection <receipt.json> --extraction-predecessor-authority <receipt.json> [--adopt-existing-child-target-selection <receipt.json> --adopt-existing-child-authority <receipt.json>]) --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
   alaya-bench-runner recall-eval --snapshot <db> [--embedding-cache-overlay <receipt.json>] [--experiment [--seed-extraction-system-prompt <txt>] [--rebuild-evidence-search-projections [--backfill-missing-fact-frame-formations|--fact-frame-retrofit-ledger <ndjson>]] [--warm-derived-snapshot-receipt <json>] | --promotion-contract <json> | --legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
   alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
+  alaya-bench-runner materialize-audited-extraction-target --cache-audit-output <audit-dir> --extraction-cache-root <target-root> --extraction-target-selection <receipt.json> --materialization-receipt-out <receipt.json>
   alaya-bench-runner fact-frame-formation-audit --snapshot <db> [--output <json>]
   alaya-bench-runner query-semantic-factor-cache-fill --snapshot <db> --query-semantic-factor-cache <new-cache.json> [--concurrency N]
   alaya-bench-runner embedding-cache-overlay-build --snapshot <db> --source <warmed.db> --snapshot-out <receipt.json> [--variant oracle|s|m] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--pinned-meta-root <path>]
@@ -84,6 +87,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "audit-extraction-cache") {
     return runAuditExtractionCacheCommand(rest);
+  }
+  if (command === "materialize-audited-extraction-target") {
+    return runMaterializeAuditedExtractionTargetCommand(rest);
   }
   if (command === "select-extraction-target") {
     return runSelectExtractionTargetCommand(rest);
