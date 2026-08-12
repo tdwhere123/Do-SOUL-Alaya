@@ -56,6 +56,16 @@ describe("support-set packet plan trace", () => {
     expect(trace.decision).toEqual(observation.decision);
   });
 
+  it("rejects an unknown consensus rank profile from a persisted receipt", () => {
+    const observation = {
+      ...acceptedObservation(),
+      consensus_rank_profile: "unknown"
+    } as unknown as RecallPacketPlanObservation;
+
+    expect(() => assertRecallPacketPlanObservation(observation))
+      .toThrowError("Packet plan consensus rank profile is invalid");
+  });
+
   it("accepts membership consensus without an embedding head", () => {
     const accepted = acceptedObservation();
     const planned = [

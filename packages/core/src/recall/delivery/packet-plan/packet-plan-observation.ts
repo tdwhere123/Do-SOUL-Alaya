@@ -105,6 +105,7 @@ export type RecallPacketPlanObservation = Readonly<{
   }>[];
   readonly consensus_head_candidate_keys: readonly string[];
   readonly immutable_tail_candidate_keys: readonly string[];
+  readonly consensus_rank_profile?: "balanced" | "aggregate_coverage";
   readonly embedding_rank_basis?:
     | "source_semantic_rrf"
     | "source_semantic_rrf_then_packet_relative";
@@ -164,6 +165,10 @@ export function assertRecallPacketPlanObservation(
     throw validationError("Packet plan proposal is inconsistent");
   }
   assertEmbeddingHead(observation);
+  if (observation.consensus_rank_profile !== undefined &&
+      !["balanced", "aggregate_coverage"].includes(observation.consensus_rank_profile)) {
+    throw validationError("Packet plan consensus rank profile is invalid");
+  }
   assertEmbeddingRankBasis(observation);
   assertProtections(observation);
   assertMembershipAuthorizations(observation);
