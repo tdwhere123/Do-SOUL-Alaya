@@ -43,7 +43,8 @@ import {
 import { assertExtractionAuthorityInventoryProgress } from "./receipt/inventory.js";
 import {
   readExtractionAuthorityReceiptArtifact,
-  writeExtractionAuthorityReceiptArtifact
+  writeExtractionAuthorityReceiptArtifact,
+  writeExtractionAuthorityReceiptArtifactExclusive
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
 const LEGACY_RECEIPT_VERSION = 2, PREVIOUS_RECEIPT_VERSION = 3;
@@ -307,6 +308,18 @@ export function writeExtractionAuthorityReceipt(
 ): void {
   assertReceiptShape(receipt);
   writeExtractionAuthorityReceiptArtifact(outputPath, receipt);
+}
+
+export function writeExtractionAuthorityReceiptExclusive(
+  outputPath: string,
+  receipt: ExtractionAuthorityReceipt
+): void {
+  assertExtractionAuthorityReceipt(receipt, receipt.observation);
+  writeExtractionAuthorityReceiptArtifactExclusive(
+    outputPath,
+    receipt,
+    receipt.receipt_digest
+  );
 }
 
 export function readExtractionAuthorityReceipt(outputPath: string): ExtractionAuthorityReceipt {

@@ -102,7 +102,8 @@ export function persistAttemptLedgerRecord(
 
 export function persistAttemptLedgerRecordExclusive(
   path: string,
-  record: ExtractionAttemptLedgerRecord
+  record: ExtractionAttemptLedgerRecord,
+  temporaryDirectory: string = dirname(dirname(path))
 ): void {
   assertStoredAttemptLedgerRecord(record);
   const directory = dirname(path);
@@ -111,7 +112,7 @@ export function persistAttemptLedgerRecordExclusive(
     destination: path,
     bytes: serializeLedger(record),
     ownerIdentity: record.lineage_digest,
-    temporaryDirectory: dirname(directory)
+    temporaryDirectory
   });
 }
 

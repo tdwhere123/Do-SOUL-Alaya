@@ -12,13 +12,12 @@ import {
 import {
   createSameRootExtractionContinuation
 } from "../../longmemeval/extraction/authority/continuation/continuation.js";
-import { writeContinuationAuthorityReceiptExclusive } from
-  "../../longmemeval/extraction/authority/continuation/writer.js";
 import type { ExtractionAuthorityInspection } from
   "../../longmemeval/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   readExtractionAuthorityReceipt,
+  writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt
 } from "../../longmemeval/extraction/authority/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
@@ -36,7 +35,7 @@ export interface AuthorityContinuationDependencies {
   readonly ensureForkedLedger?: typeof ensureForkedExtractionAttemptLedger;
   readonly claimChild?: typeof claimExtractionContinuationChild;
   readonly readManifest?: typeof readExtractionCacheManifestIdentity;
-  readonly writeContinuation?: typeof writeContinuationAuthorityReceiptExclusive;
+  readonly writeContinuation?: typeof writeExtractionAuthorityReceiptExclusive;
 }
 
 export function prepareAuthorityContinuation(input: {
@@ -113,22 +112,9 @@ export function persistContinuationAuthority(input: {
       requestProfile: input.receipt.observation.extraction.requestProfile
     }
   });
-  (deps.writeContinuation ?? writeContinuationAuthorityReceiptExclusive)(
+  (deps.writeContinuation ?? writeExtractionAuthorityReceiptExclusive)(
     input.outputPath, input.receipt
   );
-}
-
-export function assertExactContinuationIssuanceInspection(
-  prepared: ExtractionAuthorityInspection,
-  live: ExtractionAuthorityInspection
-): void {
-  if (JSON.stringify(prepared.observation) !== JSON.stringify(live.observation) ||
-      JSON.stringify(prepared.missingKeys) !== JSON.stringify(live.missingKeys) ||
-      JSON.stringify(prepared.invalidShards) !== JSON.stringify(live.invalidShards) ||
-      JSON.stringify(prepared.preservedValidClosure) !==
-        JSON.stringify(live.preservedValidClosure)) {
-    throw new Error("same-root continuation cache drifted during authority issuance");
-  }
 }
 
 function assertExactPreparedLedger(

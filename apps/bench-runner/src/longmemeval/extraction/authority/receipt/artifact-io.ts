@@ -3,6 +3,8 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
+import { publishBytesExclusiveDurable } from
+  "../../fill/manifest/durable-exclusive-publication.js";
 
 const MAX_EXTRACTION_AUTHORITY_RECEIPT_BYTES = 64 * 1024;
 
@@ -14,6 +16,21 @@ export function writeExtractionAuthorityReceiptArtifact(
   const temporary = `${outputPath}.${randomUUID()}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
   renameSync(temporary, outputPath);
+}
+
+export function writeExtractionAuthorityReceiptArtifactExclusive(
+  outputPath: string,
+  receipt: object,
+  ownerIdentity: string
+): void {
+  mkdirSync(dirname(outputPath), { recursive: true });
+  publishBytesExclusiveDurable({
+    destination: outputPath,
+    bytes: Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8"),
+    ownerIdentity,
+    temporaryDirectory: dirname(outputPath),
+    allowExistingExact: true
+  });
 }
 
 export function readExtractionAuthorityReceiptArtifact(outputPath: string): unknown {

@@ -8,8 +8,7 @@ import {
 } from "../../longmemeval/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
-  computeExtractionAuthorityLineageDigest,
-  writeExtractionAuthorityReceipt
+  computeExtractionAuthorityLineageDigest
 } from "../../longmemeval/extraction/authority/receipt.js";
 import {
   createFreshDirectDeepSeek500Authorization,
@@ -40,22 +39,17 @@ import {
   type AuthorizeExtractionArgs
 } from "./args.js";
 import {
-  acquireExtractionCacheWriteLease,
-  withExtractionCacheWriteLease
-} from "../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
-import {
-  assertExactContinuationIssuanceInspection,
-  persistContinuationAuthority,
   prepareAuthorityContinuation,
-  type AuthorityContinuationDependencies,
   type PreparedAuthorityContinuation
 } from "./continuation.js";
 import { sameRootContinuationMode } from
   "../../longmemeval/extraction/authority/continuation/contract.js";
+import {
+  publishAuthorizedExtractionReceipt,
+  type AuthorityPublicationDependencies
+} from "./publication.js";
 
-interface AuthorizeExtractionDependencies extends AuthorityContinuationDependencies {
-  readonly inspect?: typeof inspectExtractionAuthority;
-  readonly write?: typeof writeExtractionAuthorityReceipt;
+interface AuthorizeExtractionDependencies extends AuthorityPublicationDependencies {
   readonly readRevision?: () => string;
   readonly readLedger?: typeof readExtractionAttemptLedger;
   readonly createDirectSpend?: typeof createFreshDirectDeepSeek500Authorization;
@@ -77,25 +71,7 @@ export async function runAuthorizeExtractionCommand(
       freshDirectSpend = spend;
       freshDirectCacheRoot = cacheRoot;
     });
-    if (authorized.continuation === undefined) {
-      (deps.write ?? writeExtractionAuthorityReceipt)(authorized.outputPath, authorized.receipt);
-    } else {
-      const continuation = authorized.continuation;
-      const lease = acquireExtractionCacheWriteLease(authorized.cacheRoot);
-      await withExtractionCacheWriteLease(lease, async () => {
-        const live = await (deps.inspect ?? inspectExtractionAuthority)(
-          authorized.inspectionInput
-        );
-        assertExactContinuationIssuanceInspection(authorized.inspection, live);
-        persistContinuationAuthority({
-          cacheRoot: authorized.cacheRoot,
-          outputPath: authorized.outputPath,
-          receipt: authorized.receipt,
-          prepared: continuation,
-          dependencies: deps
-        });
-      });
-    }
+    await publishAuthorizedExtractionReceipt(authorized, deps);
     freshDirectSpend = undefined;
     process.stdout.write(renderAuthorizedReceipt(authorized.outputPath, authorized.receipt));
     return 0;
@@ -140,9 +116,6 @@ async function buildAuthorizedReceipt(
       inspection,
       allowlist: readExtractionCatalogRefillAllowlist(flags.catalogRefillAllowlist)
     });
-  if (catalogRefillScope !== undefined && ledger !== undefined) {
-    throw new Error("catalog refill requires an unused existing cache root");
-  }
   return finishAuthorizedReceipt({
     authority, flags, cacheRoot, directSpend, inspection, ledger, inspectInput,
     catalogRefillScope, deps
@@ -186,6 +159,7 @@ function finishAuthorizedReceipt(input: {
     outputPath: input.authority.outputPath,
     inspection: input.inspection,
     inspectionInput: input.inspectInput,
+    targetSelection,
     receipt: createReceipt(
       input.authority, input.flags.concurrency, input.inspection, input.ledger,
       input.directSpend, targetSelection, input.catalogRefillScope, continuation
@@ -388,7 +362,8 @@ function buildReceiptInput(input: {
       catalogRefillScope: input.catalogRefillScope
     }),
     ...(input.continuation === undefined ? {} : { continuation: input.continuation.evidence }),
-    ...(input.continuation === undefined || input.targetSelection === undefined ? {} : {
+    ...(input.targetSelection === undefined ||
+        (input.continuation === undefined && input.catalogRefillScope === undefined) ? {} : {
       now: new Date(input.targetSelection.created_at)
     })
   };
