@@ -69,7 +69,9 @@ parentDescribe("cache-key allowlist runtime completion", () => {
     await prefillFirstQuestion();
     const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
+    const retryModes: Array<string | undefined> = [];
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      retryModes.push(input.retryMode);
       await input.onTransportAttempt?.();
       return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
     });
@@ -87,6 +89,7 @@ parentDescribe("cache-key allowlist runtime completion", () => {
     });
 
     expect(extract).toHaveBeenCalledTimes(2);
+    expect(retryModes).toEqual(["disabled", "disabled"]);
     expect(logs).toContainEqual(expect.stringContaining("2/2"));
     expect(result).toMatchObject({
       requestedTurns: 4,

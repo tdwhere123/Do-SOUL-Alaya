@@ -104,7 +104,10 @@ export async function executeExtractionFill(
     log,
     signal,
     ...(authority === undefined ? {} : { transport: {
-      retryMode: authority.receipt.action === "probe" ? "disabled" : "default",
+      retryMode: authority.receipt.action === "probe" ||
+          authority.receipt.catalog_refill !== undefined
+        ? "disabled"
+        : "default",
       maxOutputTokens: authority.receipt.limits.max_output_tokens,
       outputTokenField: authority.receipt.limits.output_token_field
     } }),
