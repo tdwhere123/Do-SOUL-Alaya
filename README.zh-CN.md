@@ -11,7 +11,7 @@
 ### *给 CLI 编码 agent 的本地优先记忆平面。*
 
 [![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#接下来的方向)
-[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#接下来的方向)
 [![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
@@ -705,4 +705,4 @@ v0.1 之后的弧线是 **以记忆为核心的 agent** —— 它的内循环�
 
 ## License
 
-[MIT](LICENSE) © 2026 Do-SOUL Alaya contributors
+[AGPL-3.0-only](LICENSE) © 2026 Do-SOUL Alaya contributors

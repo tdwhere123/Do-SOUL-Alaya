@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "Daemon-attached bench runner for self-bench, LongMemEval-S, and live strict-real benchmark archives. Owns the harness; eval package stays a zod-only leaf.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

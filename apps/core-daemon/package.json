@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "Local-first memory plane for CLI agents (Codex, Claude Code, similar). Provides MCP attach surface and the alaya CLI (15 verbs).",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",

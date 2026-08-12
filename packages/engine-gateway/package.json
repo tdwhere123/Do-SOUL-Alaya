@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "Compute engine gateway for Do-SOUL Alaya — provider abstraction and routing stance.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",

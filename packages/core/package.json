@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "Truth boundary services for Do-SOUL Alaya — EventPublisher, MemoryService, GardenRuntime.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",

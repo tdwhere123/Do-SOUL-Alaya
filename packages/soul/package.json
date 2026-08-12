@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "soul.* MCP tool surface for Do-SOUL Alaya (recall, propose, review, signals).",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",

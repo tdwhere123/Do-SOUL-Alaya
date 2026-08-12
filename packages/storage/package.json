@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "SQLite storage layer for Do-SOUL Alaya — repos, migrations, EventLog.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/tdwhere123/Do-SOUL-Alaya",
   "repository": {
     "type": "git",

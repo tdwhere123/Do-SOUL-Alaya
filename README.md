@@ -11,7 +11,7 @@
 ### *A local-first memory plane for CLI coding agents.*
 
 [![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#where-this-is-going)
-[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#where-this-is-going)
 [![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
@@ -865,4 +865,4 @@ new axis interaction) — open an issue first to align on shape.
 
 ## License
 
-[MIT](LICENSE) © 2026 Do-SOUL Alaya contributors
+[AGPL-3.0-only](LICENSE) © 2026 Do-SOUL Alaya contributors

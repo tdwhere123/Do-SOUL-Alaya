@@ -2,6 +2,7 @@
   "name": "do-soul-alaya",
   "version": "0.3.11",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "Do-SOUL Alaya — local-first memory plane for CLI agents, ported from do-what-new",
   "engines": {
     "node": ">=24.0.0"

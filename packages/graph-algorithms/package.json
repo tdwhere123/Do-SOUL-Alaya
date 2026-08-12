@@ -3,7 +3,7 @@
   "version": "0.3.11",
   "private": true,
   "description": "Dependency-free graph algorithms shared by Alaya implementation packages.",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
