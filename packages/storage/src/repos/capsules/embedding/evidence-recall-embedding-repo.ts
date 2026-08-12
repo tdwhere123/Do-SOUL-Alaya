@@ -296,7 +296,7 @@ const LIST_OWNER_SOURCES_SQL = `
 
 const LIST_PROJECTION_SOURCES_SQL = `
   SELECT${SOURCE_COLUMNS},
-    'assistant_observation:' || p.projection_id AS document_identity,
+    p.projection_kind || ':' || p.projection_id AS document_identity,
     p.content AS content
   FROM evidence_search_projections p
   INNER JOIN evidence_capsules e
@@ -304,7 +304,7 @@ const LIST_PROJECTION_SOURCES_SQL = `
    AND e.workspace_id = p.workspace_id
    AND e.source_hash = p.source_hash
   WHERE p.workspace_id = ?
-    AND p.projection_kind = 'assistant_observation'
+    AND p.projection_kind IN ('assistant_observation', 'fact_key')
     AND e.lifecycle_state = 'active'
     AND e.created_by = 'garden_compile'
     AND e.evidence_kind = 'conversation_excerpt'

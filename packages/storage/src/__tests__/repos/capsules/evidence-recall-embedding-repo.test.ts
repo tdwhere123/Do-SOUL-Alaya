@@ -36,6 +36,11 @@ describe("evidence recall embedding storage", () => {
       }),
       expect.objectContaining({
         ownerObjectId: "evidence-1",
+        documentIdentity: "fact_key:3",
+        content: "recommended_color=blue"
+      }),
+      expect.objectContaining({
+        ownerObjectId: "evidence-1",
         documentIdentity: "owner",
         content: "User-owned excerpt."
       }),
@@ -165,5 +170,9 @@ function seedEvidence(database: StorageDatabase): void {
   insertProjection.run(
     "evidence-1", 2, "assistant_observation", "workspace-1", SOURCE_HASH,
     "Assistant observation."
+  );
+  insertProjection.run(
+    "evidence-1", 3, "fact_key", "workspace-1", SOURCE_HASH,
+    "recommended_color=blue"
   );
 }
