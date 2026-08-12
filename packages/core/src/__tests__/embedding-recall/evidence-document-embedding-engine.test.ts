@@ -146,6 +146,28 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
     expect(store.upsertMany).not.toHaveBeenCalled();
   });
 
+  it("joins an unordered persisted batch by exact document identity", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => vectorFor(text))
+    );
+    const store = createStore([
+      persistedRecord("second", "object-1", "owner"),
+      persistedRecord("first", "object-0", "owner")
+    ]);
+    const engine = new EvidenceDocumentEmbeddingEngine(
+      createProvider({ embedTexts }),
+      50,
+      store
+    );
+
+    const result = await engine.embedDocuments(request(["first", "second"]), 5_000);
+
+    expect(result.embeddings).toEqual([vectorFor("first"), vectorFor("second")]);
+    expect(result.inferenceCalls).toBe(0);
+    expect(embedTexts).not.toHaveBeenCalled();
+    expect(store.upsertMany).not.toHaveBeenCalled();
+  });
+
   it("embeds one mixed cold batch, preserves order, and persists each missing identity", async () => {
     const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))

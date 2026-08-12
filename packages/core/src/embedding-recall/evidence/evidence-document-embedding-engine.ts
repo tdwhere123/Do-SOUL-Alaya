@@ -120,8 +120,12 @@ export class EvidenceDocumentEmbeddingEngine {
         modelId: this.provider.modelId,
         schemaVersion: this.provider.schemaVersion
       });
+      const documentsByIdentity = new Map(documents.map((document) => [
+        persistentKey(document),
+        document
+      ]));
       for (const record of records) {
-        const document = documents.find((candidate) => matchesRecord(candidate, record));
+        const document = documentsByIdentity.get(persistentKey(record));
         if (document === undefined) continue;
         this.putCached(document.cacheKey, record.embedding);
         this.persistedKeys.add(persistentKey(document));
@@ -249,15 +253,6 @@ export class EvidenceDocumentEmbeddingEngine {
     ].join("\u0000");
     return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
   }
-}
-
-function matchesRecord(
-  document: Readonly<PreparedDocument>,
-  record: Readonly<EvidenceDocumentEmbeddingRecord>
-): boolean {
-  return document.ownerObjectId === record.ownerObjectId &&
-    document.documentIdentity === record.documentIdentity &&
-    document.contentHash === record.contentHash;
 }
 
 function persistentKey(document: Readonly<EvidenceDocumentEmbeddingRef>): string {
