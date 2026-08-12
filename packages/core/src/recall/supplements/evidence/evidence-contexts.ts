@@ -248,7 +248,12 @@ function buildMemoryEvidenceContexts(
   }
   for (const entry of authorityCandidates) {
     const documents = semanticEvidenceDocuments(
-      workspaceId, entry, evidenceById, factKeysByEvidenceId, ranksByRef
+      workspaceId,
+      entry,
+      evidenceById,
+      factKeysByEvidenceId,
+      qualifiedAssertionEvidenceIds,
+      ranksByRef
     );
     if (documents.length > 0) semanticDocuments[entry.object_id] = documents;
     const context = projectUniqueVerifiedContext(
@@ -305,6 +310,7 @@ function semanticEvidenceDocuments(
     string,
     readonly Readonly<RecallQualifiedEvidence>[]
   >,
+  qualifiedAssertionEvidenceIds: ReadonlySet<string>,
   ranksByRef: Readonly<Record<string, number>>
 ): readonly Readonly<RecallEvidenceSemanticDocument>[] {
   return Object.freeze(orderEvidenceRefs(entry, ranksByRef)
@@ -312,7 +318,11 @@ function semanticEvidenceDocuments(
     .flatMap((ref) => {
       const evidence = evidenceById.get(ref)?.evidence;
       if (evidence === undefined) return [];
-      const owner = ownerSemanticDocuments(evidence, workspaceId);
+      const owner = ownerSemanticDocuments(
+        evidence,
+        workspaceId,
+        hasQualifiedSourceReceipt(entry, evidence, qualifiedAssertionEvidenceIds)
+      );
       const factKeys = (factKeysByEvidenceId.get(evidence.object_id) ?? [])
         .flatMap((qualified) => {
           const projection = qualified.matched_projection;

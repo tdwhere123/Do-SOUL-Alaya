@@ -1,4 +1,5 @@
 import {
+  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
   hasGardenSourceTurnFallbackAnyReceiptFormat,
   parseVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
@@ -26,14 +27,19 @@ export function hasDirectEvidenceRecallAuthority(
 
 export function hasEvidenceDocumentEmbeddingAuthority(
   evidence: Readonly<EvidenceRecallAuthority> & { readonly documentIdentity: string },
-  workspaceId: string
+  workspaceId: string,
+  receiptQualifiedAssertionOwner: boolean = false
 ): boolean {
   if (!hasEvidenceRecallEnvelope(evidence, workspaceId)) return false;
   return hasGardenSourceTurnFallbackAnyReceiptFormat({
     artifact_ref: evidence.artifactRef,
     source_hash: evidence.sourceHash
   }) || (
-    evidence.documentIdentity.startsWith("fact_key:") &&
+    (
+      evidence.documentIdentity.startsWith("fact_key:") ||
+      receiptQualifiedAssertionOwner &&
+        evidence.documentIdentity === OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY
+    ) &&
     parseVerifiedUserAssertionSourceHash(evidence.sourceHash) !== null
   );
 }

@@ -29,6 +29,12 @@ export interface EvidenceDocumentEmbeddingBackfillResult {
 
 export interface EvidenceDocumentEmbeddingBackfillDependencies {
   readonly evidenceDocumentEmbeddingRepo: EvidenceDocumentEmbeddingRepoPort;
+  readonly receiptQualification?: Readonly<{
+    findReceiptQualifiedOwnerIds(
+      workspaceId: string,
+      ownerObjectIds: readonly string[]
+    ): readonly string[] | Promise<readonly string[]>;
+  }>;
   readonly provider: EmbeddingProviderPort;
   readonly now?: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
@@ -65,7 +71,15 @@ export class EvidenceDocumentEmbeddingBackfillHandler {
     }
     const sources = await this.dependencies.evidenceDocumentEmbeddingRepo
       .listSourcesByWorkspace(task.workspace_id);
-    const documents = buildBackfillDocuments(sources, task.workspace_id);
+    const qualifiedAssertionOwnerIds = await this.qualifiedAssertionOwnerIds(
+      task.workspace_id,
+      sources
+    );
+    const documents = buildBackfillDocuments(
+      sources,
+      task.workspace_id,
+      qualifiedAssertionOwnerIds
+    );
     if (documents.length === 0) {
       return result(0, ["evidence_embedding_backfill_skipped:no_documents"]);
     }
@@ -77,6 +91,21 @@ export class EvidenceDocumentEmbeddingBackfillHandler {
     );
     const affected = persistedCounts.reduce((total, count) => total + count, 0);
     return result(affected, [`evidence_embedding_backfill:persisted:${affected}`]);
+  }
+
+  private async qualifiedAssertionOwnerIds(
+    workspaceId: string,
+    sources: readonly Readonly<EvidenceDocumentEmbeddingSource>[]
+  ): Promise<ReadonlySet<string>> {
+    const find = this.dependencies.receiptQualification
+      ?.findReceiptQualifiedOwnerIds;
+    if (find === undefined) return new Set();
+    const ownerObjectIds = [...new Set(sources.map(({ ownerObjectId }) => ownerObjectId))];
+    return new Set(await find.call(
+      this.dependencies.receiptQualification,
+      workspaceId,
+      ownerObjectIds
+    ));
   }
 
   private async embedBackfillBatch(
@@ -96,9 +125,14 @@ export class EvidenceDocumentEmbeddingBackfillHandler {
 
 function toBackfillDocument(
   source: Readonly<EvidenceDocumentEmbeddingSource>,
-  workspaceId: string
+  workspaceId: string,
+  qualifiedAssertionOwnerIds: ReadonlySet<string>
 ): readonly BackfillDocument[] {
-  if (!hasEvidenceDocumentEmbeddingAuthority(source, workspaceId)) return [];
+  if (!hasEvidenceDocumentEmbeddingAuthority(
+    source,
+    workspaceId,
+    qualifiedAssertionOwnerIds.has(source.ownerObjectId)
+  )) return [];
   return [{
     ownerObjectId: source.ownerObjectId,
     documentIdentity: source.documentIdentity,
@@ -108,10 +142,11 @@ function toBackfillDocument(
 
 function buildBackfillDocuments(
   sources: readonly Readonly<EvidenceDocumentEmbeddingSource>[],
-  workspaceId: string
+  workspaceId: string,
+  qualifiedAssertionOwnerIds: ReadonlySet<string>
 ): readonly BackfillDocument[] {
   const documents = sources.flatMap((source) =>
-    toBackfillDocument(source, workspaceId)
+    toBackfillDocument(source, workspaceId, qualifiedAssertionOwnerIds)
   );
   return preferOwnerGistDocumentIdentity(
     documents,

@@ -2,8 +2,8 @@ import type { EvidenceCapsule } from "@do-soul/alaya-protocol";
 import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
 import { createBoundedNonMemoryPreview } from
   "../../coarse-filter/non-memory-preview.js";
-import { isDirectRecallEvidence } from
-  "../../coarse-filter/evidence/direct-evidence-candidate.js";
+import { hasEvidenceDocumentEmbeddingAuthority } from
+  "../../../shared/evidence-recall-authority.js";
 import type {
   RecallEvidenceSemanticDocument,
   RecallEvidenceSemanticProjectionReceipt
@@ -33,9 +33,9 @@ export function preferOwnerGistDocumentIdentity<T extends SemanticDocumentIdenti
 
 export function ownerSemanticDocuments(
   evidence: Readonly<EvidenceCapsule>,
-  workspaceId: string
+  workspaceId: string,
+  receiptQualifiedAssertionOwner: boolean = false
 ): readonly Readonly<RecallEvidenceSemanticDocument>[] {
-  if (!isDirectRecallEvidence(evidence, workspaceId)) return [];
   const excerpt = evidence.excerpt === null
     ? ""
     : createBoundedNonMemoryPreview(evidence.excerpt);
@@ -47,7 +47,16 @@ export function ownerSemanticDocuments(
       OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
       gist
     )
-  ];
+  ].filter((document) => hasEvidenceDocumentEmbeddingAuthority({
+    workspaceId: evidence.workspace_id,
+    lifecycleState: evidence.lifecycle_state,
+    createdBy: evidence.created_by,
+    evidenceKind: evidence.evidence_kind,
+    evidenceHealthState: evidence.evidence_health_state,
+    artifactRef: evidence.physical_anchor?.artifact_ref ?? null,
+    sourceHash: evidence.source_hash,
+    documentIdentity: document.documentIdentity
+  }, workspaceId, receiptQualifiedAssertionOwner));
   return preferOwnerGistDocumentIdentity(documents, ({ evidenceRef }) => evidenceRef);
 }
 

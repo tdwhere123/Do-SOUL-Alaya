@@ -35,8 +35,20 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
         sourceHash: ASSERTION_SOURCE_HASH
       }),
       source({
+        ownerObjectId: "evidence-assertion",
+        documentIdentity: "owner_gist_600",
+        content: "User: recommended_color=blue",
+        sourceHash: ASSERTION_SOURCE_HASH
+      }),
+      source({
+        ownerObjectId: "evidence-unqualified-assertion",
+        documentIdentity: "owner_gist_600",
+        content: "Must remain unqualified.",
+        sourceHash: ASSERTION_SOURCE_HASH
+      }),
+      source({
         ownerObjectId: "evidence-forged-assertion",
-        documentIdentity: "fact_key:1",
+        documentIdentity: "owner_gist_600",
         content: "Must not be embedded.",
         sourceHash: "sha256:unknown-receipt"
       }),
@@ -51,6 +63,12 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     );
     const handler = new EvidenceDocumentEmbeddingBackfillHandler({
       evidenceDocumentEmbeddingRepo: repo,
+      receiptQualification: {
+        findReceiptQualifiedOwnerIds: vi.fn(async () => [
+          "evidence-assertion",
+          "evidence-forged-assertion"
+        ])
+      },
       provider: provider(embedTexts),
       now: () => "2026-07-28T00:00:00.000Z"
     });
@@ -58,7 +76,7 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     const first = await handler.handle({ workspace_id: "workspace-1" });
     const second = await handler.handle({ workspace_id: "workspace-1" });
 
-    expect(first.documentsAffected).toBe(5);
+    expect(first.documentsAffected).toBe(6);
     expect(second.documentsAffected).toBe(0);
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(embedTexts).toHaveBeenCalledWith([
@@ -66,14 +84,16 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
       "Whole turn.",
       "Assistant observation.",
       "Same bounded text.",
-      "recommended_color=blue"
+      "recommended_color=blue",
+      "User: recommended_color=blue"
     ], { timeoutMs: 10_000 });
     expect(records.map(({ documentIdentity }) => documentIdentity)).toEqual([
       "owner",
       "owner_gist_600",
       "assistant_observation:2",
       "owner_gist_600",
-      "fact_key:1"
+      "fact_key:1",
+      "owner_gist_600"
     ]);
   });
 

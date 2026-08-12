@@ -15,7 +15,12 @@ import {
   type HqProvider
 } from "@do-soul/alaya-core";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import type { SqliteMemoryEntryRepo, StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  RecallQualifiedEvidenceReader,
+  type SqliteMemoryEntryRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import {
   createEmbeddingStatusService,
   type EmbeddingStatusDegradationSource
@@ -191,8 +196,13 @@ function createEmbeddingBackfillHandler(
     warn: input.warn
   });
   if (providerState.evidenceEmbeddingRepo === null) return memoryHandler;
+  const receiptQualification = new RecallQualifiedEvidenceReader(
+    input.database,
+    verifyOfficialApiSourceLocatorBinding
+  );
   const evidenceHandler = new EvidenceDocumentEmbeddingBackfillHandler({
     evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo,
+    receiptQualification,
     provider: providerState.embeddingProvider,
     warn: input.warn
   });

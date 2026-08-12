@@ -30,6 +30,11 @@ describe("recall verified assertion context authority", () => {
         assertion_text: ASSERTION,
         user_context: ASSERTION
       });
+    expect(contexts.evidenceSemanticDocumentsByMemoryId[entry.object_id])
+      .toEqual([expect.objectContaining({
+        documentIdentity: "owner_gist_600",
+        content: evidence.gist
+      })]);
   });
 
   it("does not derive authority from an unqualified v2 capsule", async () => {
@@ -42,6 +47,7 @@ describe("recall verified assertion context authority", () => {
     const contexts = await collectContexts(evidence, entry, false);
 
     expect(contexts.verifiedUserAssertionContextsByMemoryId).toEqual({});
+    expect(contexts.evidenceSemanticDocumentsByMemoryId).toEqual({});
   });
 });
 
