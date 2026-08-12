@@ -16,9 +16,16 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     const records: EvidenceDocumentEmbeddingRecord[] = [];
     const repo = createRepo([
       source({ documentIdentity: "owner", content: `  ${"x".repeat(650)}  ` }),
+      source({ documentIdentity: "owner_gist_600", content: "Whole turn." }),
       source({
         documentIdentity: "assistant_observation:2",
         content: "Assistant observation."
+      }),
+      source({ ownerObjectId: "evidence-duplicate", content: "Same bounded text." }),
+      source({
+        ownerObjectId: "evidence-duplicate",
+        documentIdentity: "owner_gist_600",
+        content: "  Same bounded text.  "
       }),
       source({
         ownerObjectId: "evidence-untrusted",
@@ -38,16 +45,20 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
     const first = await handler.handle({ workspace_id: "workspace-1" });
     const second = await handler.handle({ workspace_id: "workspace-1" });
 
-    expect(first.documentsAffected).toBe(2);
+    expect(first.documentsAffected).toBe(4);
     expect(second.documentsAffected).toBe(0);
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(embedTexts).toHaveBeenCalledWith([
       `${"x".repeat(600)}…`,
-      "Assistant observation."
+      "Whole turn.",
+      "Assistant observation.",
+      "Same bounded text."
     ], { timeoutMs: 10_000 });
     expect(records.map(({ documentIdentity }) => documentIdentity)).toEqual([
       "owner",
-      "assistant_observation:2"
+      "owner_gist_600",
+      "assistant_observation:2",
+      "owner"
     ]);
   });
 

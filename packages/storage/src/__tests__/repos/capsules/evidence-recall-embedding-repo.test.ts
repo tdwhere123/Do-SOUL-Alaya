@@ -38,6 +38,11 @@ describe("evidence recall embedding storage", () => {
         ownerObjectId: "evidence-1",
         documentIdentity: "owner",
         content: "User-owned excerpt."
+      }),
+      expect.objectContaining({
+        ownerObjectId: "evidence-1",
+        documentIdentity: "owner_gist_600",
+        content: "Whole turn."
       })
     ]);
   });

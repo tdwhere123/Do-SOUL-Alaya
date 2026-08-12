@@ -59,8 +59,6 @@ export interface RecallEvidenceSemanticProjectionReceipt {
   readonly fact_slots?: readonly Readonly<AssociativeFactSlot>[];
 }
 
-export const OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY = "owner_gist_600";
-
 export interface RecallEvidenceSemanticDocument {
   readonly evidenceRef: string;
   readonly documentIdentity: string;

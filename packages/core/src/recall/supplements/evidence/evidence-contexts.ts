@@ -4,6 +4,7 @@ import type {
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import {
+  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX,
   parseVerifiedUserAssertionSourceHash
@@ -28,8 +29,6 @@ import type {
   RecallEvidenceSemanticDocument,
   RecallEvidenceSemanticProjectionReceipt
 } from "../../runtime/recall-service-types.js";
-import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from
-  "../../runtime/recall-service-results.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
 
 const MAX_REFS_PER_MEMORY = 8;

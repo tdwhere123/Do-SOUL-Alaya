@@ -1,4 +1,7 @@
-import type { GardenTaskDescriptor } from "@do-soul/alaya-protocol";
+import {
+  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
+  type GardenTaskDescriptor
+} from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../../config/install-core-config.js";
 import { createBoundedNonMemoryPreview } from "../../recall/coarse-filter/non-memory-preview.js";
 import { hasDirectEvidenceRecallAuthority } from "../../shared/evidence-recall-authority.js";
@@ -62,9 +65,7 @@ export class EvidenceDocumentEmbeddingBackfillHandler {
     }
     const sources = await this.dependencies.evidenceDocumentEmbeddingRepo
       .listSourcesByWorkspace(task.workspace_id);
-    const documents = sources.flatMap((source) =>
-      toBackfillDocument(source, task.workspace_id)
-    );
+    const documents = buildBackfillDocuments(sources, task.workspace_id);
     if (documents.length === 0) {
       return result(0, ["evidence_embedding_backfill_skipped:no_documents"]);
     }
@@ -103,6 +104,23 @@ function toBackfillDocument(
     documentIdentity: source.documentIdentity,
     content: createBoundedNonMemoryPreview(source.content)
   }];
+}
+
+function buildBackfillDocuments(
+  sources: readonly Readonly<EvidenceDocumentEmbeddingSource>[],
+  workspaceId: string
+): readonly BackfillDocument[] {
+  const documents = sources.flatMap((source) =>
+    toBackfillDocument(source, workspaceId)
+  );
+  return documents.filter((document) =>
+    document.documentIdentity !== OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY ||
+    !documents.some((candidate) =>
+      candidate.ownerObjectId === document.ownerObjectId &&
+      candidate.documentIdentity === "owner" &&
+      candidate.content === document.content
+    )
+  );
 }
 
 function buildBatches(

@@ -88,6 +88,8 @@ export const EvidenceSearchProjectionKindSchema = z.enum([
   "fact_key"
 ]);
 
+export const OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY = "owner_gist_600";
+
 export const EvidenceSearchProjectionSchema = z.object({
   projection_id: z.number().int().positive(),
   projection_kind: EvidenceSearchProjectionKindSchema,

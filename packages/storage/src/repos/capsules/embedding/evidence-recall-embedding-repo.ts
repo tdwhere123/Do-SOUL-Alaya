@@ -1,3 +1,4 @@
+import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import {
@@ -271,11 +272,22 @@ const SOURCE_COLUMNS = `
 `;
 
 const LIST_OWNER_SOURCES_SQL = `
+  WITH target(workspace_id) AS (VALUES (?))
   SELECT${SOURCE_COLUMNS},
     'owner' AS document_identity,
     COALESCE(e.excerpt, e.gist) AS content
-  FROM evidence_capsules e
-  WHERE e.workspace_id = ?
+  FROM evidence_capsules e, target t
+  WHERE e.workspace_id = t.workspace_id
+    AND e.lifecycle_state = 'active'
+    AND e.created_by = 'garden_compile'
+    AND e.evidence_kind = 'conversation_excerpt'
+    AND e.evidence_health_state = 'verified'
+  UNION ALL
+  SELECT${SOURCE_COLUMNS},
+    '${OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY}' AS document_identity,
+    e.gist AS content
+  FROM evidence_capsules e, target t
+  WHERE e.workspace_id = t.workspace_id
     AND e.lifecycle_state = 'active'
     AND e.created_by = 'garden_compile'
     AND e.evidence_kind = 'conversation_excerpt'

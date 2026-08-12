@@ -1,5 +1,7 @@
 import { compileRecallAnswerShapePlan } from
   "../../../query/recall-answer-shape-plan.js";
+import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from
+  "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from
   "../../../query/recall-query-probes.js";
 import {
@@ -7,7 +9,6 @@ import {
   normalizeDriftSensitiveRankingScore
 } from "../../../runtime/recall-service-helpers.js";
 import {
-  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
   type RecallEvidenceSemanticActivationReceipt
 } from "../../../runtime/recall-service-results.js";
 import type { SemanticHeadCandidate } from "../semantic-memory-refinement.js";
