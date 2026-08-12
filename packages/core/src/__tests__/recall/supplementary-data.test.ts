@@ -137,6 +137,27 @@ describe("collectSupplementaryData", () => {
           }
         }
       ]);
+
+    const gistOnly = createEvidenceCapsule({
+      object_id: "6c6b478a-3839-4a9b-833f-af2219281acc",
+      gist: "Only the grounded gist is available.",
+      excerpt: null,
+      source_hash: `sha256:garden-source-turn-fallback-v2:${"b".repeat(64)}`,
+      artifact_ref: "alaya:garden-turn-evidence:signal-2"
+    });
+    const gistOnlyResult = await collectWith({
+      candidates: [createMemoryEntry({ evidence_refs: [gistOnly.object_id] })],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds: vi.fn(async () => [gistOnly])
+      }
+    });
+    expect(Object.values(gistOnlyResult.evidenceSemanticDocumentsByMemoryId ?? {})[0])
+      .toEqual([expect.objectContaining({
+        documentIdentity: "owner_gist_600",
+        content: gistOnly.gist
+      })]);
   });
 
   it("collects proposed routing keys without promoting their authority", async () => {

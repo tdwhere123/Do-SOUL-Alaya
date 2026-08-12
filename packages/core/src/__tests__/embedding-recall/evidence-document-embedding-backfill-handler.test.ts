@@ -72,7 +72,7 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
       "owner",
       "owner_gist_600",
       "assistant_observation:2",
-      "owner",
+      "owner_gist_600",
       "fact_key:1"
     ]);
   });

@@ -1,9 +1,8 @@
-import {
-  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
-  type GardenTaskDescriptor
-} from "@do-soul/alaya-protocol";
+import type { GardenTaskDescriptor } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../../config/install-core-config.js";
 import { createBoundedNonMemoryPreview } from "../../recall/coarse-filter/non-memory-preview.js";
+import { preferOwnerGistDocumentIdentity } from
+  "../../recall/supplements/evidence/owner-semantic-documents.js";
 import { hasEvidenceDocumentEmbeddingAuthority } from
   "../../shared/evidence-recall-authority.js";
 import {
@@ -114,13 +113,9 @@ function buildBackfillDocuments(
   const documents = sources.flatMap((source) =>
     toBackfillDocument(source, workspaceId)
   );
-  return documents.filter((document) =>
-    document.documentIdentity !== OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY ||
-    !documents.some((candidate) =>
-      candidate.ownerObjectId === document.ownerObjectId &&
-      candidate.documentIdentity === "owner" &&
-      candidate.content === document.content
-    )
+  return preferOwnerGistDocumentIdentity(
+    documents,
+    ({ ownerObjectId }) => ownerObjectId
   );
 }
 

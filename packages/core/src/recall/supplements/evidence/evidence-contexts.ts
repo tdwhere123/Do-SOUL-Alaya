@@ -4,7 +4,6 @@ import type {
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import {
-  OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
   VERIFIED_USER_ASSERTION_SOURCE_HASH_V2_PREFIX,
   parseVerifiedUserAssertionSourceHash
@@ -13,10 +12,6 @@ import {
   projectVerifiedUserAssertionContext,
   type RecallVerifiedUserAssertionContext
 } from "../../query/recall-user-assertion-context.js";
-import { createBoundedNonMemoryPreview } from
-  "../../coarse-filter/non-memory-preview.js";
-import { isDirectRecallEvidence } from
-  "../../coarse-filter/evidence/direct-evidence-candidate.js";
 import { uniqueStrings } from "../../expansion/path-relations.js";
 import {
   errorNameOf,
@@ -26,10 +21,10 @@ import {
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort,
-  RecallEvidenceSemanticDocument,
-  RecallEvidenceSemanticProjectionReceipt
+  RecallEvidenceSemanticDocument
 } from "../../runtime/recall-service-types.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
+import { ownerSemanticDocuments } from "./owner-semantic-documents.js";
 
 const MAX_REFS_PER_MEMORY = 8;
 
@@ -341,37 +336,6 @@ function semanticEvidenceDocuments(
         });
       return [...owner, ...factKeys];
     }));
-}
-
-function ownerSemanticDocuments(
-  evidence: Readonly<EvidenceCapsule>,
-  workspaceId: string
-): readonly Readonly<RecallEvidenceSemanticDocument>[] {
-  if (!isDirectRecallEvidence(evidence, workspaceId)) return [];
-  const content = createBoundedNonMemoryPreview(evidence.excerpt ?? evidence.gist);
-  const gist = createBoundedNonMemoryPreview(evidence.gist);
-  return Object.freeze([
-    ...(content.length === 0 ? [] : [Object.freeze({
-      evidenceRef: evidence.object_id,
-      documentIdentity: "owner",
-      content,
-      projection: ownerProjectionReceipt()
-    })]),
-    ...(gist.length === 0 || gist === content ? [] : [Object.freeze({
-      evidenceRef: evidence.object_id,
-      documentIdentity: OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
-      content: gist,
-      projection: ownerProjectionReceipt()
-    })])
-  ]);
-}
-
-function ownerProjectionReceipt(): Readonly<RecallEvidenceSemanticProjectionReceipt> {
-  return Object.freeze({
-    projection_id: null,
-    projection_kind: "owner",
-    matched_fact_key_forms: Object.freeze([])
-  });
 }
 
 function buildEvidenceById(
