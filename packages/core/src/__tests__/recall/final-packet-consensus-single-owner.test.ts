@@ -14,6 +14,8 @@ import {
   select,
   withStreamRanks
 } from "./final-strict-tail-consensus-fixtures.js";
+import { evidenceSemanticActivation } from
+  "./fixtures/evidence-semantic-activation.js";
 
 describe("final packet consensus selection ownership", () => {
   it("does not let a channel-specific membership proposal replace final consensus", () => {
@@ -115,6 +117,49 @@ describe("final packet consensus selection ownership", () => {
     expect(new Set(observation.planned_candidate_keys))
       .toHaveLength(observation.planned_candidate_keys.length);
   });
+
+  it("records source-semantic and packet-relative rank ownership", () => {
+    const sourceCandidates = consensusCandidates().map((candidate, index) => ({
+      ...candidate,
+      effectiveFactors: {
+        ...candidate.effectiveFactors,
+        embedding_similarity: candidate.entry.object_id === "challenger"
+          ? 0.99 : 0.9 - index * 0.05
+      }
+    }));
+    const activations = new Map(sourceCandidates.map((candidate, index) => [
+      candidate.fusion.candidate_key,
+      evidenceSemanticActivation(0.9 - Math.abs(5 - index) * 0.05, {
+        documentIdentity: "owner_gist_600"
+      })
+    ]));
+    const plan = resolveFinalPacketConsensusPlan({
+      baseline: sourceCandidates.slice(0, 10),
+      sourceCandidates,
+      protectedCandidates: [],
+      queryProbes: compileRecallQueryProbes("What dog do I own?"),
+      evidenceSemanticActivationsByCandidateKey: activations
+    });
+
+    expect(plan.rankBasis).toBe("source_semantic_rrf_then_packet_relative");
+    const actual = plan.candidates.map(({ sourceCandidate }) => ({
+      object_id: sourceCandidate.entry.object_id,
+      object_kind: sourceCandidate.objectKind,
+      origin_plane: sourceCandidate.originPlane ?? "workspace_local"
+    }));
+    expect(buildFinalPacketConsensusObservation(plan, actual, true))
+      .toMatchObject({
+        embedding_rank_basis: "source_semantic_rrf_then_packet_relative",
+        source_semantic_intermediate_candidate_keys:
+          plan.sourceSemanticIntermediate?.map((candidate) => candidate.candidateKey),
+        packet_relative_embedding_head:
+          plan.packetRelativeEmbeddingHead?.map((entry) => ({
+            candidate_key: entry.candidate.candidateKey,
+            embedding_rank: entry.embeddingRank
+          }))
+      });
+  });
+
 });
 
 function candidateKeys(

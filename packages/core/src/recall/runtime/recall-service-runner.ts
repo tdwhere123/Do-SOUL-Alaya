@@ -64,7 +64,8 @@ import {
   type TimedResult
 } from "./orchestration/recall-phase-latency.js";
 import {
-  capturesRecallAnswerFeatures,
+  resolveRecallReferenceTime,
+  shouldCaptureRecallAnswerFeatures,
   type FineAssessmentResult,
   type FineAssessmentPreparation,
   type PreparedEmbeddingQuery,
@@ -114,7 +115,7 @@ async function prepareRecallRequest(
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = compileRecallQueryProbes(queryText);
-  const answerShapePlan = capturesRecallAnswerFeatures(params.diagnosticCapture)
+  const answerShapePlan = shouldCaptureRecallAnswerFeatures(params)
     ? compileRecallAnswerShapePlan(queryProbes)
     : null;
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
@@ -172,21 +173,6 @@ async function prepareRecallRequest(
     activeConstraints,
     winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots)
   });
-}
-
-function resolveRecallReferenceTime(
-  explicit: string | undefined,
-  now: () => string
-): string {
-  if (explicit === undefined) return now();
-  if (!/(?:z|[+-]\d{2}:\d{2})$/iu.test(explicit)) {
-    throw new Error("recall reference time must include a timezone offset");
-  }
-  const parsed = Date.parse(explicit);
-  if (!Number.isFinite(parsed)) {
-    throw new Error("recall reference time must be a valid date-time");
-  }
-  return explicit;
 }
 
 async function resolveWinnerMemoryIds(

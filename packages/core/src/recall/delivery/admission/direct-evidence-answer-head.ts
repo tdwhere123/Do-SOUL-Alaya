@@ -2,9 +2,7 @@ import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import { scoreQueryEvidenceMatch } from "../../scoring/query-evidence-scoring.js";
 import {
   buildRecallCandidateDedupeKey,
-  compareMemorySemanticIdentity,
-  isWorkspaceMemoryCandidate,
-  normalizeDriftSensitiveRankingScore
+  compareMemorySemanticIdentity
 } from "../../runtime/recall-service-helpers.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../../runtime/recall-service-types.js";
@@ -23,6 +21,10 @@ import {
 } from "./answer-head/answer-head-retention.js";
 import { retainBehaviorAuthorityAnswerHead } from
   "./answer-head/behavior-authority-answer-head.js";
+import {
+  selectUniqueMemorySemanticLeader,
+  selectUniqueSourceSemanticLeader
+} from "./answer-head/source-semantic-answer-head.js";
 
 const DIRECT_EVIDENCE_HEAD_LIMIT = 5;
 const DIRECT_EVIDENCE_FTS_RANK_LIMIT = 25;
@@ -67,9 +69,13 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
   if (headLimit <= 0) return unchangedSelection(candidates);
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
-  const semanticLeader = selectUniqueSemanticLeader(
-    candidates, evidence, evidenceSemanticActivationsByCandidateKey
-  );
+  const semanticLeader = selectUniqueSourceSemanticLeader({
+    candidates,
+    evidence,
+    activations: evidenceSemanticActivationsByCandidateKey,
+    keyOf: candidateKey,
+    compareCandidate: compareStableCandidateIdentity
+  });
   const evidenceSelection = selectEvidenceHead(
     candidates, baseline, evidence, semanticLeader, headLimit,
     publicRelevanceByCandidateKey, queryProbes, selectDelivered, isBehaviorEligible
@@ -137,7 +143,11 @@ function resolveSemanticMemoryRefinementPlan<T extends DirectEvidenceHeadCandida
   const delivered = evidenceSelection.candidates === candidates
     ? baseline
     : selectDelivered(evidenceSelection.candidates);
-  const memoryLeader = selectUniqueSemanticMemoryLeader(candidates);
+  const memoryLeader = selectUniqueMemorySemanticLeader({
+    candidates,
+    keyOf: candidateKey,
+    compareCandidate: compareStableCandidateIdentity
+  });
   if (memoryLeader === undefined) return undefined;
   return candidateKeys(delivered).has(semanticLeader.candidateKey)
     ? Object.freeze({
@@ -369,107 +379,6 @@ function collectEvidenceCandidates<T extends DirectEvidenceHeadCandidate>(
     }));
   });
   return eligible;
-}
-
-function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
-  candidates: readonly T[],
-  evidence: readonly ScoredDirectEvidence<T>[],
-  evidenceActivations: ReadonlyMap<
-    string,
-    Readonly<RecallEvidenceSemanticActivationReceipt>
-  >
-): SemanticHeadCandidate<T> | undefined {
-  const evidenceByKey = new Map(evidence.map((row) => [row.candidateKey, row]));
-  const ranked = candidates.flatMap((candidate, index) => {
-    const candidateKey = buildRecallCandidateDedupeKey(candidate);
-    const evidenceCandidate = evidenceByKey.get(candidateKey);
-    const score = resolveSemanticActivation(
-      candidate, candidateKey, evidenceCandidate, evidenceActivations
-    );
-    return score !== undefined && Number.isFinite(score) && score > 0
-      ? [{
-          candidate,
-          candidateKey,
-          index,
-          score: normalizeDriftSensitiveRankingScore(score),
-          evidenceCandidate
-        }]
-      : [];
-  }).sort((left, right) => {
-    const scoreDelta = right.score - left.score;
-    return scoreDelta !== 0 ? scoreDelta : compareSemanticHeadCandidates(left, right);
-  });
-  if (ranked.length === 0 || ranked[1]?.score === ranked[0]!.score) return undefined;
-  const leader = ranked[0]!;
-  if (leader.evidenceCandidate !== undefined) return leader.evidenceCandidate;
-  return isWorkspaceMemoryCandidate(leader.candidate)
-    ? Object.freeze({
-        candidate: leader.candidate,
-        candidateKey: leader.candidateKey,
-        index: leader.index
-      })
-    : undefined;
-}
-
-function resolveSemanticActivation<T extends DirectEvidenceHeadCandidate>(
-  candidate: T,
-  candidateKey: string,
-  evidenceCandidate: ScoredDirectEvidence<T> | undefined,
-  evidenceActivations: ReadonlyMap<
-    string,
-    Readonly<RecallEvidenceSemanticActivationReceipt>
-  >
-): number | undefined {
-  const linkedEvidenceScore = validSemanticActivation(
-    evidenceActivations.get(candidateKey)?.score
-  );
-  if (candidate.objectKind === "evidence_capsule") {
-    return evidenceCandidate === undefined ? undefined : linkedEvidenceScore;
-  }
-  const memoryContentScore = validSemanticActivation(
-    candidate.effectiveFactors.embedding_similarity
-  );
-  if (memoryContentScore === undefined) return linkedEvidenceScore;
-  if (linkedEvidenceScore === undefined) return memoryContentScore;
-  return Math.max(memoryContentScore, linkedEvidenceScore);
-}
-
-function validSemanticActivation(score: number | undefined): number | undefined {
-  return score !== undefined && Number.isFinite(score) && score > 0
-    ? score
-    : undefined;
-}
-
-function selectUniqueSemanticMemoryLeader<T extends DirectEvidenceHeadCandidate>(
-  candidates: readonly T[]
-): SemanticHeadCandidate<T> | undefined {
-  const ranked = candidates.flatMap((candidate, index) => {
-    const score = candidate.effectiveFactors.embedding_similarity;
-    return isWorkspaceMemoryCandidate(candidate) &&
-      score !== undefined &&
-      Number.isFinite(score) &&
-      score > 0
-      ? [{
-          candidate,
-          candidateKey: buildRecallCandidateDedupeKey(candidate),
-          index,
-          score: normalizeDriftSensitiveRankingScore(score)
-        }]
-      : [];
-  }).sort((left, right) => {
-    const scoreDelta = right.score - left.score;
-    return scoreDelta !== 0 ? scoreDelta : compareSemanticHeadCandidates(left, right);
-  });
-  return ranked.length > 0 && ranked[1]?.score !== ranked[0]!.score
-    ? ranked[0]
-    : undefined;
-}
-
-function compareSemanticHeadCandidates<T extends DirectEvidenceHeadCandidate>(
-  left: Readonly<{ readonly candidate: T; readonly candidateKey: string }>,
-  right: Readonly<{ readonly candidate: T; readonly candidateKey: string }>
-): number {
-  return compareStableCandidateIdentity(left.candidate, right.candidate);
 }
 
 function compareScoredEvidence<T extends DirectEvidenceHeadCandidate>(

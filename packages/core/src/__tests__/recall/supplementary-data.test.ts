@@ -115,16 +115,28 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
-      .toEqual([{
-        evidenceRef: evidence.object_id,
-        documentIdentity: "owner",
-        content: evidence.excerpt,
-        projection: {
-          projection_id: null,
-          projection_kind: "owner",
-          matched_fact_key_forms: []
+      .toEqual([
+        {
+          evidenceRef: evidence.object_id,
+          documentIdentity: "owner",
+          content: evidence.excerpt,
+          projection: {
+            projection_id: null,
+            projection_kind: "owner",
+            matched_fact_key_forms: []
+          }
+        },
+        {
+          evidenceRef: evidence.object_id,
+          documentIdentity: "owner_gist_600",
+          content: evidence.gist,
+          projection: {
+            projection_id: null,
+            projection_kind: "owner",
+            matched_fact_key_forms: []
+          }
         }
-      }]);
+      ]);
   });
 
   it("collects proposed routing keys without promoting their authority", async () => {

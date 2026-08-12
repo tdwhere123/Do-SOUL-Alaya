@@ -51,6 +51,20 @@ export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
     params.selectionBoundaryObserver !== undefined;
 }
 
+export function resolveRecallReferenceTime(
+  explicit: string | undefined,
+  now: () => string
+): string {
+  if (explicit === undefined) return now();
+  if (!/(?:z|[+-]\d{2}:\d{2})$/iu.test(explicit)) {
+    throw new Error("recall reference time must include a timezone offset");
+  }
+  if (!Number.isFinite(Date.parse(explicit))) {
+    throw new Error("recall reference time must be a valid date-time");
+  }
+  return explicit;
+}
+
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly workspaceId: string;

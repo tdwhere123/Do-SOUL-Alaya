@@ -105,6 +105,14 @@ export type RecallPacketPlanObservation = Readonly<{
   }>[];
   readonly consensus_head_candidate_keys: readonly string[];
   readonly immutable_tail_candidate_keys: readonly string[];
+  readonly embedding_rank_basis?:
+    | "source_semantic_rrf"
+    | "source_semantic_rrf_then_packet_relative";
+  readonly source_semantic_intermediate_candidate_keys?: readonly string[];
+  readonly packet_relative_embedding_head?: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly embedding_rank: number;
+  }>[];
   readonly tail_policy?: "head_tail_exchange" | "nested_membership_exchange";
   readonly membership_authorizations: readonly RecallPacketMembershipAuthorization[];
   readonly protected_candidates: readonly Readonly<{
@@ -156,11 +164,48 @@ export function assertRecallPacketPlanObservation(
     throw validationError("Packet plan proposal is inconsistent");
   }
   assertEmbeddingHead(observation);
+  assertEmbeddingRankBasis(observation);
   assertProtections(observation);
   assertMembershipAuthorizations(observation);
   assertTailPolicy(observation);
   assertDecisionReason(observation);
   assertDecision(observation, baseline, planned, actual);
+}
+
+function assertEmbeddingRankBasis(observation: RecallPacketPlanObservation): void {
+  const sourceSemantic = observation.source_semantic_intermediate_candidate_keys;
+  const packetRelative = observation.packet_relative_embedding_head;
+  if (observation.embedding_rank_basis === undefined) {
+    if (sourceSemantic !== undefined || packetRelative !== undefined) {
+      throw validationError("Legacy packet plan carries composite rank evidence");
+    }
+    return;
+  }
+  if (observation.embedding_rank_basis === "source_semantic_rrf") {
+    if (sourceSemantic !== undefined || packetRelative !== undefined) {
+      throw validationError("Source semantic rank evidence carries an unexecuted phase");
+    }
+    return;
+  }
+  if (observation.embedding_rank_basis !== "source_semantic_rrf_then_packet_relative") {
+    throw validationError("Packet plan embedding rank basis is invalid");
+  }
+  if (sourceSemantic === undefined || packetRelative === undefined ||
+      sourceSemantic.length !== observation.baseline_candidate_keys.length ||
+      !sameKeySet(sourceSemantic, observation.planned_candidate_keys)) {
+    throw validationError("Composite packet rank evidence is incomplete");
+  }
+  assertUniqueKeys(sourceSemantic, "source semantic intermediate");
+  assertUniqueKeys(
+    packetRelative.map((entry) => entry.candidate_key),
+    "packet relative embedding head"
+  );
+  if (packetRelative.some((entry) =>
+    !Number.isInteger(entry.embedding_rank) || entry.embedding_rank <= 0 ||
+    entry.embedding_rank > observation.head_width ||
+    !sourceSemantic.includes(entry.candidate_key))) {
+    throw validationError("Packet relative embedding head is invalid");
+  }
 }
 
 function assertMembershipAuthorizations(

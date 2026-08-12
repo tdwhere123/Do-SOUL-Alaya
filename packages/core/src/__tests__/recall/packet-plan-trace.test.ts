@@ -174,6 +174,24 @@ describe("support-set packet plan trace", () => {
   });
 
   it.each([
+    ["intermediate packet", "source_semantic_intermediate_candidate_keys"],
+    ["packet-relative head", "packet_relative_embedding_head"]
+  ])("rejects a composite rank basis without its %s", (_name, omitted) => {
+    const accepted = acceptedObservation();
+    const composite = {
+      ...accepted,
+      embedding_rank_basis: "source_semantic_rrf_then_packet_relative" as const,
+      source_semantic_intermediate_candidate_keys: accepted.planned_candidate_keys,
+      packet_relative_embedding_head: accepted.embedding_head
+    };
+    delete (composite as Record<string, unknown>)[omitted];
+
+    expect(() => assertRecallPacketPlanObservation(
+      composite as RecallPacketPlanObservation
+    )).toThrow();
+  });
+
+  it.each([
     ["embedding stream", { stream: "embedding_similarity" }],
     ["out-of-head direct rank", { rank: 3 }],
     ["zero source-proximity rank", { source_proximity_rank: 0 }],

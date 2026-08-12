@@ -28,6 +28,8 @@ import type {
   RecallEvidenceSemanticDocument,
   RecallEvidenceSemanticProjectionReceipt
 } from "../../runtime/recall-service-types.js";
+import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from
+  "../../runtime/recall-service-results.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
 
 const MAX_REFS_PER_MEMORY = 8;
@@ -316,17 +318,7 @@ function semanticEvidenceDocuments(
     .flatMap((ref) => {
       const evidence = evidenceById.get(ref)?.evidence;
       if (evidence === undefined) return [];
-      const content = createBoundedNonMemoryPreview(
-        evidence.excerpt ?? evidence.gist
-      );
-      const owner = !isDirectRecallEvidence(evidence, workspaceId) || content.length === 0
-        ? []
-        : [Object.freeze({
-            evidenceRef: evidence.object_id,
-            documentIdentity: "owner",
-            content,
-            projection: ownerProjectionReceipt()
-          })];
+      const owner = ownerSemanticDocuments(evidence, workspaceId);
       const factKeys = (factKeysByEvidenceId.get(evidence.object_id) ?? [])
         .flatMap((qualified) => {
           const projection = qualified.matched_projection;
@@ -350,6 +342,29 @@ function semanticEvidenceDocuments(
         });
       return [...owner, ...factKeys];
     }));
+}
+
+function ownerSemanticDocuments(
+  evidence: Readonly<EvidenceCapsule>,
+  workspaceId: string
+): readonly Readonly<RecallEvidenceSemanticDocument>[] {
+  if (!isDirectRecallEvidence(evidence, workspaceId)) return [];
+  const content = createBoundedNonMemoryPreview(evidence.excerpt ?? evidence.gist);
+  const gist = createBoundedNonMemoryPreview(evidence.gist);
+  return Object.freeze([
+    ...(content.length === 0 ? [] : [Object.freeze({
+      evidenceRef: evidence.object_id,
+      documentIdentity: "owner",
+      content,
+      projection: ownerProjectionReceipt()
+    })]),
+    ...(gist.length === 0 || gist === content ? [] : [Object.freeze({
+      evidenceRef: evidence.object_id,
+      documentIdentity: OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY,
+      content: gist,
+      projection: ownerProjectionReceipt()
+    })])
+  ]);
 }
 
 function ownerProjectionReceipt(): Readonly<RecallEvidenceSemanticProjectionReceipt> {

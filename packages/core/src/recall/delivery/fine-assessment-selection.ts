@@ -39,6 +39,8 @@ import type { RecallAdmissionDiagnosticPass } from
   "../runtime/recall-service-diagnostics.js";
 import { createRecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
+import { retainVerifiedTemporalAnswerHead } from
+  "./admission/answer-head/verified-temporal-answer-head.js";
 
 export type {
   FineAssessmentAdmissionReceipt,
@@ -66,11 +68,20 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
+  const temporalHead = retainVerifiedTemporalAnswerHead({
+    selection: evidenceHead,
+    queryProbes: context.supplementaryData.queryProbes,
+    contextsByMemoryId:
+      context.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {},
+    maxEntries: context.config.budgets.max_entries,
+    selectDelivered: (candidates) => collectAdmittedCandidates(candidates, context),
+    keyOf: buildRecallCandidateDedupeKey
+  });
   const selection = resolveAdmissionAwareFinalSelection(
     selectionParams,
-    evidenceHead.candidates,
+    temporalHead.candidates,
     context,
-    evidenceHead.protections
+    temporalHead.protections
   );
   const finalAccumulator = reduceFineAssessmentCandidates(
     selection.order,
@@ -134,7 +145,10 @@ function resolveAdmissionAwareFinalSelection(
   const consensus = resolveFinalPacketConsensusPlan({
     baseline: collectAdmittedCandidates(coverageOrdered, context),
     sourceCandidates: params.orderedCandidates,
-    protectedCandidates
+    protectedCandidates,
+    queryProbes: context.supplementaryData.queryProbes,
+    evidenceSemanticActivationsByCandidateKey:
+      context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });
   const proposedOrder = buildFinalSelectorOrder(consensus, coverageOrdered);
   if (consensus.decision.status !== "accepted") {
