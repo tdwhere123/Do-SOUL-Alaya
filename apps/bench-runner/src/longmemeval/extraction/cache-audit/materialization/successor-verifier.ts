@@ -39,8 +39,9 @@ import {
 import { readStableRegularFileNoFollow } from "./descriptor-io.js";
 import { assertExactTargetTree, assertFileMatches } from "./target-tree.js";
 import { reconcileCommittedMaterializationJournal } from "./transaction-recovery.js";
-
-const TARGET_MARKER = ".alaya-extraction-target-root.json";
+import {
+  assertCompletedSuccessorControls, assertPristineInProgressSuccessor
+} from "./successor/control-history.js";
 
 export function verifyCommittedMaterializationSuccessor(input: {
   readonly targetRoot: string;
@@ -61,14 +62,22 @@ export function verifyCommittedMaterializationSuccessor(input: {
     input.targetLease.assertOwned();
     return commit;
   }
-  assertSuccessorManifest(commit, manifest.manifest, manifest.manifestSha256);
-  const remainingProvenance = readRemainingShardProvenance(targetRoot, commit);
   const inventory = inspectExtractionCacheInventory({
     cacheRoot: targetRoot,
     cacheKeys: [...commit.shards.map((shard) => shard.cache_key), ...commit.remaining_keys],
     model: manifest.manifest.extraction_model,
     requestProfile: manifest.manifest.request_profile
   });
+  if (manifest.manifest.fill_status === "in_progress") {
+    assertPristineInProgressSuccessor({
+      targetRoot, commit, manifest: manifest.manifest,
+      manifestSha256: manifest.manifestSha256, inventory
+    });
+    input.targetLease.assertOwned();
+    return commit;
+  }
+  assertSuccessorManifest(commit, manifest.manifest, manifest.manifestSha256);
+  const remainingProvenance = readRemainingShardProvenance(targetRoot, commit);
   assertClosedInventory(commit, inventory);
   const entries = contentEntries(commit, inventory);
   assertManifestClosure(manifest.manifest, entries);
@@ -77,7 +86,7 @@ export function verifyCommittedMaterializationSuccessor(input: {
   assertCatalogAuthority(targetRoot, input.targetRoot, commit, witness, entries);
   assertSettledLedger(targetRoot, commit, witness, inventory);
   assertSupplementalProvenance(commit, manifest.manifest, witness, remainingProvenance);
-  assertExpectedControls(targetRoot, input.targetRoot, witness, inventory.controlArtifactPaths);
+  assertExpectedControls(targetRoot, input.targetRoot, commit, witness, inventory);
   input.targetLease.assertOwned();
   return commit;
 }
@@ -192,7 +201,6 @@ function assertClosedInventory(
   if (inventory.counts.expected !== commit.expected_turns ||
       inventory.counts.hit !== commit.expected_turns || inventory.counts.missing !== 0 ||
       inventory.counts.invalid !== 0 || inventory.counts.orphan !== 0 ||
-      inventory.unexpectedPaths.length !== 0 ||
       computeExtractionKeySetSha256(inventory.shards.map((shard) => shard.cacheKey)) !==
         commit.expected_key_set_sha256) {
     throw new Error("materialized successor inventory is not exactly complete");
@@ -412,15 +420,16 @@ function assertExactShardTransport(
 function assertExpectedControls(
   targetRoot: string,
   boundRootPath: string,
+  commit: ExtractionCacheMaterializationCommit,
   witness: ReturnType<typeof readCompletionWitness>,
-  controls: readonly string[]
+  inventory: ReturnType<typeof inspectExtractionCacheInventory>
 ): void {
-  const expected = [
-    TARGET_MARKER, MATERIALIZATION_COMMIT_NAME,
-    `${CATALOG_REFILL_COMPLETION_PREFIX}${witness.authority_receipt.receipt_digest}.json`,
-    `extraction-attempt-ledger.${witness.authority_receipt.lineage_digest}.json`
-  ].sort();
-  if (!sameStrings([...controls].sort(), expected) || digest(boundRootPath) !==
+  assertCompletedSuccessorControls({
+    targetRoot, commit, inventory,
+    activeLineageDigest: witness.authority_receipt.lineage_digest,
+    completionReceiptDigest: witness.authority_receipt.receipt_digest
+  });
+  if (digest(boundRootPath) !==
       witness.authority_receipt.catalog_refill?.root_binding.cache_root_sha256) {
     throw new Error("materialized successor contains unknown or mismatched control artifacts");
   }

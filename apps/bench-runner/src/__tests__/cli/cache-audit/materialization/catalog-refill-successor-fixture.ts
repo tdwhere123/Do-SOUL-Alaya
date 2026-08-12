@@ -16,7 +16,7 @@ import { inspectTurnContentKeySpace } from
   "../../../../longmemeval/extraction/turn-contents.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO, computeSystemPromptSha256,
-  writeExtractionCacheManifest
+  readExtractionCacheManifestIdentity, writeExtractionCacheManifest
 } from "../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   inspectExtractionAuthority, readCurrentExtractionAuthorityRevision
@@ -24,6 +24,12 @@ import {
 import {
   readExtractionAuthorityReceipt
 } from "../../../../longmemeval/extraction/authority/receipt.js";
+import { receiptExtractionCacheIdentity } from
+  "../../../../longmemeval/extraction/authority/receipt-cache-identity.js";
+import { openExtractionAttemptLedger } from
+  "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+import { writeCatalogRefillResumeManifest } from
+  "../../../../longmemeval/extraction/authority/catalog-refill/resume-manifest.js";
 import { createFreshExtractionTargetSelection } from
   "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
 import {
@@ -93,6 +99,48 @@ export async function createCatalogRefillSuccessorFixture(
   if (await runCli(commandArgs(roots)) !== 0) throw new Error("initial materialization failed");
   options.mutateInitialTarget?.(roots.targetRoot);
   const authorityReceipt = await fillRemaining(roots, remainingKeys, options);
+  return {
+    ...roots, expectedKeys, remainingKeys, authorityReceipt,
+    cleanup: () => rmSync(roots.root, { recursive: true, force: true })
+  };
+}
+
+export async function createPristineCatalogRefillSuccessorFixture(
+): Promise<CatalogRefillSuccessorFixture> {
+  const roots = createRoots();
+  setEnvironment({});
+  const questions = buildQuestions();
+  const datasetRevision = writeDataset(roots, questions);
+  const expectedKeys = extractionKeys(questions);
+  const remainingKeys = expectedKeys.slice(-2);
+  writeInitialSource(roots.sourceRoot, expectedKeys, remainingKeys, datasetRevision);
+  const sourceInspection = await inspect(roots, roots.sourceRoot);
+  const emptyInspection = await inspect(roots, roots.emptyRoot);
+  const auditReceipt = writeAuditBundle(roots, sourceInspection, emptyInspection, expectedKeys);
+  const targetSelection = createFreshExtractionTargetSelection({
+    cacheRoot: roots.targetRoot, auditReceipt, observation: emptyInspection.observation,
+    now: new Date("2026-08-12T00:00:00.000Z")
+  });
+  writeFileSync(roots.selectionPath, json(targetSelection), "utf8");
+  if (await runCli(commandArgs(roots)) !== 0) throw new Error("initial materialization failed");
+  const authorityReceipt = await authorizeRemaining(roots, remainingKeys);
+  const identity = readExtractionCacheManifestIdentity(roots.targetRoot)!;
+  const pinnedAt = new Date(Date.parse(identity.manifest.built_at) + 60_000).toISOString();
+  writeExtractionCacheManifest(roots.targetRoot, {
+    ...identity.manifest, built_at: pinnedAt, builder: "extraction-fill"
+  });
+  const pinned = readExtractionCacheManifestIdentity(roots.targetRoot)!;
+  const ledger = openExtractionAttemptLedger({
+    cacheRoot: roots.targetRoot, lineageDigest: authorityReceipt.lineage_digest,
+    cacheIdentity: receiptExtractionCacheIdentity(authorityReceipt),
+    startingMissing: authorityReceipt.limits.starting_missing,
+    maximumAttempts: authorityReceipt.limits.maximum_attempts,
+    successfulShardCeiling: authorityReceipt.limits.successful_shard_ceiling
+  }).snapshot();
+  writeCatalogRefillResumeManifest({
+    cacheRoot: roots.targetRoot, receipt: authorityReceipt, ledger,
+    manifestSha256: pinned.manifestSha256
+  });
   return {
     ...roots, expectedKeys, remainingKeys, authorityReceipt,
     cleanup: () => rmSync(roots.root, { recursive: true, force: true })
@@ -266,6 +314,31 @@ async function fillRemaining(
   remainingKeys: readonly string[],
   options: CatalogRefillSuccessorOptions
 ) {
+  const authorityReceipt = await authorizeRemaining(roots, remainingKeys);
+  const targetSelection = JSON.parse(readFileSync(roots.selectionPath, "utf8")) as {
+    readonly receipt_digest: string;
+  };
+  if (authorityReceipt.target_selection_digest !== targetSelection.receipt_digest) {
+    throw new Error("catalog refill authority did not bind the adopted target selection");
+  }
+  const extract = async (input: Parameters<BenchSignalExtractor["extract"]>[0]) => {
+    options.onExtract?.();
+    await input.onTransportAttempt?.();
+    return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
+  };
+  await runExtractionFill({
+    variant, cacheRoot: roots.targetRoot, dataDir: roots.dataDir,
+    pinnedMetaRoot: roots.pinnedMetaRoot, authorityReceiptPath: roots.authorityReceiptPath,
+    targetSelectionReceiptPath: roots.selectionPath,
+    extractorFactory: () => ({ extract }), log: () => undefined
+  });
+  return authorityReceipt;
+}
+
+async function authorizeRemaining(
+  roots: ReturnType<typeof createRoots>,
+  remainingKeys: readonly string[]
+) {
   const targetSelection = await issueMaterializedSuccessorSelection(roots);
   const allowlistPath = join(roots.root, "catalog-refill-allowlist.json");
   const inspection = await inspect(roots, roots.targetRoot);
@@ -295,17 +368,6 @@ async function fillRemaining(
   if (receipt.target_selection_digest !== targetSelection.receipt_digest) {
     throw new Error("catalog refill authority did not bind the adopted target selection");
   }
-  const extract = async (input: Parameters<BenchSignalExtractor["extract"]>[0]) => {
-    options.onExtract?.();
-    await input.onTransportAttempt?.();
-    return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
-  };
-  await runExtractionFill({
-    variant, cacheRoot: roots.targetRoot, dataDir: roots.dataDir,
-    pinnedMetaRoot: roots.pinnedMetaRoot, authorityReceiptPath: roots.authorityReceiptPath,
-    targetSelectionReceiptPath: roots.selectionPath,
-    extractorFactory: () => ({ extract }), log: () => undefined
-  });
   return receipt;
 }
 

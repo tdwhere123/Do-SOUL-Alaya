@@ -13,12 +13,18 @@ import {
 const RESUME_MANIFEST_VERSION = 1;
 const MAX_RESUME_MANIFEST_BYTES = 64 * 1024;
 
-interface CatalogRefillResumeManifest {
+export interface CatalogRefillResumeManifest {
   readonly schema_version: typeof RESUME_MANIFEST_VERSION;
   readonly receipt_digest: string;
   readonly lineage_digest: string;
   readonly ledger_raw_sha256: string;
   readonly manifest_sha256: string;
+}
+
+export function readCatalogRefillResumeManifestRecord(
+  path: string
+): CatalogRefillResumeManifest {
+  return readResumeManifest(path);
 }
 
 export function readCatalogRefillResumeManifest(input: {
