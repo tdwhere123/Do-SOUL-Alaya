@@ -22,6 +22,7 @@ import {
 import { retainBehaviorAuthorityAnswerHead } from
   "./answer-head/behavior-authority-answer-head.js";
 import {
+  constrainSourceSemanticActivationsToAnswerShape,
   selectUniqueMemorySemanticLeader,
   selectUniqueSourceSemanticLeader
 } from "./answer-head/source-semantic-answer-head.js";
@@ -69,10 +70,13 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
   if (headLimit <= 0) return unchangedSelection(candidates);
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
+  const semanticActivations = constrainSourceSemanticActivationsToAnswerShape(
+    queryProbes, evidenceSemanticActivationsByCandidateKey
+  );
   const semanticLeader = selectUniqueSourceSemanticLeader({
     candidates,
     evidence,
-    activations: evidenceSemanticActivationsByCandidateKey,
+    activations: semanticActivations,
     keyOf: candidateKey,
     compareCandidate: compareStableCandidateIdentity
   });

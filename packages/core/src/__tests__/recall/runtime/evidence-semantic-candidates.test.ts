@@ -62,6 +62,38 @@ describe("evidence semantic candidate projection", () => {
     }]);
   });
 
+  it("excludes only owner gist documents when a single semantic leader is disabled", () => {
+    const memory = candidate(createMemoryEntry({ object_id: "memory-1" }));
+    const direct = candidate(createMemoryEntry({ object_id: "evidence-1" }), {
+      objectKind: "evidence_capsule"
+    });
+    const documents = {
+      "memory-1": [{
+        evidenceRef: "evidence-owner",
+        documentIdentity: "owner_gist_600",
+        content: "complete source gist",
+        projection: OWNER_PROJECTION
+      }, {
+        evidenceRef: "evidence-fact",
+        documentIdentity: "fact_key:1",
+        content: "qualified fact key",
+        projection: {
+          ...OWNER_PROJECTION,
+          projection_kind: "fact_key" as const
+        }
+      }]
+    };
+
+    expect(buildEvidenceSemanticCandidates({
+      candidates: [memory, direct],
+      evidenceDocumentsByMemoryId: documents,
+      includeOwnerGist: false
+    }).map((candidate) => candidate.documentIdentity)).toEqual([
+      "fact_key:1",
+      "owner"
+    ]);
+  });
+
   it("attributes every scored document and retains the same deterministic winner", () => {
     const factKey = {
       projection_id: 5,

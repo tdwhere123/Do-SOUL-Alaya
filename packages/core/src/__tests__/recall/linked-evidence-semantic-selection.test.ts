@@ -7,7 +7,10 @@ import { compileRecallQueryProbes } from
 import type { FineAssessmentCandidate } from
   "../../recall/delivery/fine-assessment-selection.js";
 import { createCandidate } from "./fine-assessment-selection-fixtures.js";
-import { evidenceSemanticActivationsFromScores } from
+import {
+  evidenceSemanticActivation,
+  evidenceSemanticActivationsFromScores
+} from
   "./fixtures/evidence-semantic-activation.js";
 
 describe("linked Evidence semantic selection", () => {
@@ -56,6 +59,29 @@ describe("linked Evidence semantic selection", () => {
 
     expect(selection.protections).toEqual([{
       candidateKey: primary.fusion.candidate_key,
+      rankLimit: 1
+    }]);
+  });
+
+  it("keeps owner-gist evidence from choosing one leader for an aggregate answer", () => {
+    const entryLeader = withSemanticActivation(createCandidate("entry-leader"), 0.8);
+    const gistLeader = withSemanticActivation(createCandidate("gist-leader"), 0.2);
+    const selection = selectBoundedDirectEvidenceHead(
+      [entryLeader, gistLeader],
+      compileRecallQueryProbes("How many projects did I lead?"),
+      new Map([[
+        gistLeader.fusion.candidate_key,
+        evidenceSemanticActivation(1, { documentIdentity: "owner_gist_600" })
+      ]]),
+      new Map(),
+      2,
+      new Set(),
+      (ordered) => ordered.slice(0, 2),
+      () => false
+    );
+
+    expect(selection.protections).toEqual([{
+      candidateKey: entryLeader.fusion.candidate_key,
       rankLimit: 1
     }]);
   });

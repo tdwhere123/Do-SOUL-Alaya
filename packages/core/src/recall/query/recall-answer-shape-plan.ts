@@ -56,6 +56,14 @@ export function compileRecallAnswerShapePlan(
   });
 }
 
+export function recallAnswerShapeSupportsSingleSemanticLeader(
+  plan: Readonly<RecallAnswerShapePlan> | null
+): boolean {
+  return plan?.shape !== "count" &&
+    plan?.shape !== "sum" &&
+    plan?.shape !== "distinct_entities";
+}
+
 function detectAnswerShapes(text: string): readonly RecallAnswerShape[] {
   const shapes: RecallAnswerShape[] = [];
   if (PLACE_CUE.test(text)) shapes.push("place");

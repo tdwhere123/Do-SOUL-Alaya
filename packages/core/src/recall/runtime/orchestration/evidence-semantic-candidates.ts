@@ -1,3 +1,4 @@
+import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
 import type { EvidenceEmbeddingCandidate } from
   "../../../embedding-recall/embedding-recall-service.js";
 import type { EvidenceCandidateScoringWinner } from
@@ -20,6 +21,7 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
   readonly evidenceDocumentsByMemoryId: Readonly<
     Record<string, readonly Readonly<RecallEvidenceSemanticDocument>[]>
   >;
+  readonly includeOwnerGist?: boolean;
 }>): readonly Readonly<EvidenceEmbeddingCandidate>[] {
   return Object.freeze(params.candidates.flatMap((candidate) => {
     if (candidate.objectKind === "evidence_capsule") {
@@ -27,7 +29,10 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
     }
     if (!isWorkspaceMemoryCandidate(candidate)) return [];
     const documents = params.evidenceDocumentsByMemoryId[candidate.entry.object_id] ?? [];
-    return documents.map((document) => linkedEvidenceCandidate(candidate, document));
+    return documents
+      .filter((document) => params.includeOwnerGist !== false ||
+        document.documentIdentity !== OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY)
+      .map((document) => linkedEvidenceCandidate(candidate, document));
   }));
 }
 

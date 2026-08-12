@@ -1,4 +1,7 @@
-import { compileRecallAnswerShapePlan } from
+import {
+  compileRecallAnswerShapePlan,
+  recallAnswerShapeSupportsSingleSemanticLeader
+} from
   "../../../query/recall-answer-shape-plan.js";
 import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from
   "@do-soul/alaya-protocol";
@@ -21,13 +24,32 @@ export function sourceSemanticConsensusIsActive(
   queryProbes: Readonly<RecallQueryProbes>,
   activations: ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>>
 ): boolean {
-  const shape = compileRecallAnswerShapePlan(queryProbes).shape;
-  if (shape === "count" || shape === "sum" || shape === "distinct_entities") {
-    return false;
-  }
+  if (!supportsSingleSemanticLeader(queryProbes)) return false;
   return [...activations.values()].some((activation) =>
     activation.observation_completeness === "complete" &&
     activation.observations.some(isOwnerGistObservation));
+}
+
+export function constrainSourceSemanticActivationsToAnswerShape(
+  queryProbes: Readonly<RecallQueryProbes>,
+  activations: ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>>
+): ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>> {
+  if (supportsSingleSemanticLeader(queryProbes)) return activations;
+  return new Map([...activations].flatMap(([candidateKey, activation]) => {
+    const observations = activation.observations.filter(
+      (observation) => !isOwnerGistChannel(observation)
+    );
+    if (observations.length === activation.observations.length) {
+      return [[candidateKey, activation] as const];
+    }
+    const winner = observations[0];
+    return winner === undefined ? [] : [[candidateKey, Object.freeze({
+      ...activation,
+      score: winner.score,
+      winner,
+      observations: Object.freeze(observations)
+    })] as const];
+  }));
 }
 
 export function selectUniqueSourceSemanticLeader<
@@ -135,9 +157,21 @@ function ownerGistScore(
 function isOwnerGistObservation(
   observation: Readonly<RecallEvidenceSemanticActivationReceipt>["observations"][number]
 ): boolean {
-  return observation.documentIdentity === OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY &&
-    observation.projection?.projection_kind === "owner" &&
+  return isOwnerGistChannel(observation) &&
     validScore(observation.score) !== undefined;
+}
+
+function isOwnerGistChannel(
+  observation: Readonly<RecallEvidenceSemanticActivationReceipt>["observations"][number]
+): boolean {
+  return observation.documentIdentity === OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY &&
+    observation.projection?.projection_kind === "owner";
+}
+
+function supportsSingleSemanticLeader(queryProbes: Readonly<RecallQueryProbes>): boolean {
+  return recallAnswerShapeSupportsSingleSemanticLeader(
+    compileRecallAnswerShapePlan(queryProbes)
+  );
 }
 
 function reciprocalRank(rank: number | undefined): number {

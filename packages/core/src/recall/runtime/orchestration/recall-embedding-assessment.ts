@@ -20,6 +20,8 @@ import type {
 } from "../recall-service-types.js";
 import { buildEvidenceSemanticCandidates } from
   "./evidence-semantic-candidates.js";
+import { recallAnswerShapeSupportsSingleSemanticLeader } from
+  "../../query/recall-answer-shape-plan.js";
 import type {
   FineAssessmentResult,
   PreparedEmbeddingQuery,
@@ -109,7 +111,10 @@ export async function collectLegacyEmbeddingAssessmentData(
       queryText: prepared.queryText,
       preparedQuery: preparedEmbeddingQuery.handle,
       fineCandidates,
-      evidenceDocumentsByMemoryId
+      evidenceDocumentsByMemoryId,
+      includeOwnerGist: recallAnswerShapeSupportsSingleSemanticLeader(
+        prepared.answerShapePlan
+      )
     })
   ]);
   throwFirstRejected([supplementResult, poolResult]);
@@ -177,7 +182,10 @@ export async function collectSnapshotEmbeddingAssessmentData(
       queryText: prepared.queryText,
       preparedQuery: null,
       fineCandidates,
-      evidenceDocumentsByMemoryId
+      evidenceDocumentsByMemoryId,
+      includeOwnerGist: recallAnswerShapeSupportsSingleSemanticLeader(
+        prepared.answerShapePlan
+      )
     })
   ]);
   return buildSnapshotEmbeddingAssessment({
@@ -240,6 +248,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly preparedQuery: PreparedEmbeddingQuery["handle"];
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId;
+  readonly includeOwnerGist: boolean;
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const service = params.context.dependencies.embeddingRecallService;
@@ -249,7 +258,8 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   }
   const candidates = buildEvidenceSemanticCandidates({
     candidates: params.fineCandidates,
-    evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId
+    evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId,
+    includeOwnerGist: params.includeOwnerGist
   });
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
   const startedAt = performance.now();
