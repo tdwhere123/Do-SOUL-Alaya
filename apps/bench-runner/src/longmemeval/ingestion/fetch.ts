@@ -194,7 +194,8 @@ export async function loadDatasetWindowWithIdentity(
   assertDatasetWindow(options.offset, options.limit);
   const dataDir = options.dataDir ?? DATA_DIR_ROOT;
   const localPath = path.join(dataDir, `${variant}.json`);
-  const pinnedPath = pinnedMetaPath(variant, options.pinnedMetaRoot);
+  const pinnedMetaRoot = path.resolve(options.pinnedMetaRoot ?? PINNED_META_ROOT);
+  const pinnedPath = pinnedMetaPath(variant, pinnedMetaRoot);
   const pinned = await readPinnedDatasetIdentity(variant, pinnedPath);
   const questions: LongMemEvalQuestion[] = [];
   const assignments: LongMemEvalSelectionAssignment[] = [];
@@ -222,7 +223,7 @@ export async function loadDatasetWindowWithIdentity(
     sha256: identity.sha256,
     checksumSource: pinnedPath,
     sourcePath: localPath,
-    promotionAuthority: options.pinnedMetaRoot === undefined
+    promotionAuthority: pinnedMetaRoot === PINNED_META_ROOT
       ? mintVerifiedDatasetAuthority(identity.sha256, assignments)
       : null
   };

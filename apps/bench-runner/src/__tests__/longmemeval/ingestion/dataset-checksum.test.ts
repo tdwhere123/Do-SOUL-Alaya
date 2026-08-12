@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -172,6 +172,17 @@ describe("loadDataset checksum verification", () => {
     expect(result.checksumSource.replaceAll("\\", "/")).toMatch(
       /\/docs\/bench-history\/datasets\/longmemeval_oracle\.meta\.json$/u
     );
+    expect(result.promotionAuthority).not.toBeNull();
+  });
+
+  it("retains authority when the committed pin root is explicit", async () => {
+    committedPinRead.sha256 = await seedLocalDataset();
+
+    const result = await loadDatasetWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot: resolve("docs/bench-history/datasets")
+    });
+
     expect(result.promotionAuthority).not.toBeNull();
   });
 });
