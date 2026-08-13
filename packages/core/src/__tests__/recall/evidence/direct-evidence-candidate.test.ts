@@ -32,13 +32,9 @@ describe("direct evidence recall candidates", () => {
       excerpt: fullExcerpt,
       source_hash: formatGardenSourceTurnFallbackV2SourceHash("b".repeat(64))
     });
-    const score = vi.fn(
-      async (_query: string, _passages: readonly string[]) => [0.9]
-    );
     const { dependencies, countInboundSupports } = createDependencies([]);
     const service = createFieldBackedRecallService({
       ...dependencies,
-      answerRerankService: { score },
       memoryRepo: {
         ...dependencies.memoryRepo,
         searchByKeyword: vi.fn(async () => []),
@@ -72,7 +68,6 @@ describe("direct evidence recall candidates", () => {
     expect(candidate?.content_preview.endsWith("…")).toBe(true);
     expect(candidate?.content_preview).not.toContain("tail answer");
     expect(candidate?.token_estimate).toBeLessThan(200);
-    expect(score.mock.calls[0]?.[1]).toEqual([candidate?.content_preview]);
     expect(candidate?.score_factors?.graph_support ?? 0).toBe(0);
     expect(candidate?.score_factors?.path_plasticity ?? 0).toBe(0);
     expect(countInboundSupports).not.toHaveBeenCalledWith(EVIDENCE_ID);

@@ -39,6 +39,8 @@ import type { CoverageSelectionObjectiveReceipt } from
   "./coverage-selection.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
+import type { RecallAnswerShapePlan } from
+  "../query/recall-answer-shape-plan.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -50,6 +52,7 @@ export interface FineAssessParams {
   readonly warn: RecallServiceWarnPort;
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
+  readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
@@ -143,6 +146,7 @@ export function deliverFineAssessment(
     coverageObjectiveConfig: params.coverageObjectiveConfig,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
+    answerShapePlan: params.answerShapePlan,
     capturePacketPlanTrace: params.capturePacketPlanTrace,
     deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey,
     selectionBoundaryObserver: params.selectionBoundaryObserver

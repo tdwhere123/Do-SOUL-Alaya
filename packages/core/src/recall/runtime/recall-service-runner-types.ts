@@ -107,7 +107,7 @@ export interface PreparedRecallRequest {
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
-  readonly answerShapePlan: Readonly<RecallAnswerShapePlan> | null;
+  readonly answerShapePlan: Readonly<RecallAnswerShapePlan>;
   readonly referenceTime: string;
   // Only an explicit caller value selects a historical projection. The normal
   // current-recall clock must keep using the active runtime projection.

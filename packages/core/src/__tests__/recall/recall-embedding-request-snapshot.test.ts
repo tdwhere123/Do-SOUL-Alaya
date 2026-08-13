@@ -51,7 +51,7 @@ describe("RecallService embedding request score snapshot", () => {
 
   it.each([
     { label: "cross-off", crossEnabled: false, expectedRerankStatus: "not_requested" },
-    { label: "cross-on", crossEnabled: true, expectedRerankStatus: "returned" }
+    { label: "cross-on", crossEnabled: true, expectedRerankStatus: "not_requested" }
   ] as const)("uses exclusive snapshot phases with $label", async ({
     crossEnabled,
     expectedRerankStatus
@@ -76,7 +76,7 @@ describe("RecallService embedding request score snapshot", () => {
     });
 
     expectExclusiveSnapshotContract(
-      fixture, run, memory.object_id, answerRerankScore, crossEnabled, expectedRerankStatus
+      fixture, run, memory.object_id, answerRerankScore, expectedRerankStatus
     );
   });
 
@@ -395,7 +395,6 @@ function expectExclusiveSnapshotContract(
   run: SnapshotRun,
   memoryId: string,
   answerRerankScore: ReturnType<typeof vi.fn>,
-  crossEnabled: boolean,
   expectedRerankStatus: "not_requested" | "returned"
 ): void {
   expect(fineAssessCalls).not.toHaveBeenCalled();
@@ -412,7 +411,7 @@ function expectExclusiveSnapshotContract(
   expect(run.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
   expect(run.result.diagnostics?.embedding_provider_status).toBe("provider_returned");
   expect(run.result.diagnostics?.answer_rerank_status).toBe(expectedRerankStatus);
-  expect(answerRerankScore).toHaveBeenCalledTimes(crossEnabled ? 1 : 0);
+  expect(answerRerankScore).not.toHaveBeenCalled();
   expectExclusivePhaseLatency(run.result.diagnostics?.phase_latency_ms, run.elapsedMs);
   expect(run.result.candidates.find((candidate) => candidate.object_id === memoryId)
     ?.score_factors?.embedding_similarity).toBeCloseTo(0.91, 5);

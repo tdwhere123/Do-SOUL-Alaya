@@ -31,9 +31,6 @@ describe("Assistant observation direct evidence", () => {
       excerpt: userQuestion,
       source_hash: formatGardenSourceTurnFallbackV2SourceHash("c".repeat(64))
     });
-    const score = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map(() => 0.9)
-    );
     const qualifiedAssistantObservation = Object.freeze({
       capsule: evidence,
       verified_user_projection: true,
@@ -47,7 +44,6 @@ describe("Assistant observation direct evidence", () => {
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
       ...dependencies,
-      answerRerankService: { score },
       memoryRepo: {
         ...dependencies.memoryRepo,
         searchByKeyword: vi.fn(async () => []),
@@ -92,7 +88,6 @@ describe("Assistant observation direct evidence", () => {
         }
       }
     ]);
-    expect(score.mock.calls[0]?.[1]).toEqual([recommendation]);
     expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.selector_observation?.evidence.source_role).toBe("assistant");
@@ -109,13 +104,9 @@ describe("Assistant observation direct evidence", () => {
       excerpt: neutralOwnerExcerpt,
       source_hash: formatGardenSourceTurnFallbackV2SourceHash("d".repeat(64))
     });
-    const score = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map(() => 0.9)
-    );
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
       ...dependencies,
-      answerRerankService: { score },
       memoryRepo: {
         ...dependencies.memoryRepo,
         searchByKeyword: vi.fn(async () => []),
@@ -145,7 +136,6 @@ describe("Assistant observation direct evidence", () => {
     const candidate = result.candidates.find((item) => item.object_id === EVIDENCE_ID);
     expect(candidate?.content_preview).toBe(neutralOwnerExcerpt);
     expect(candidate?.content_preview).not.toContain(recommendation);
-    expect(score.mock.calls[0]?.[1]).toEqual([neutralOwnerExcerpt]);
     expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations).toBeUndefined();

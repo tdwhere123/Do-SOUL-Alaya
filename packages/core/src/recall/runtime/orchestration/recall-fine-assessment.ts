@@ -21,28 +21,19 @@ import { attributeEvidenceSemanticActivations } from
 import { attributeOpenSemanticFactorActivations } from
   "../../field/open-semantic-factors/candidate-attribution.js";
 import {
-  asTimedSpan,
   instantTimedResult,
   measureAsync,
   measureSync,
-  type TimedResult,
-  type TimedSpan
+  type TimedResult
 } from "./recall-phase-latency.js";
 
-export type LegacyInitialAssessment = Readonly<{
-  readonly assessment: FineAssessmentResult;
+export type CollectedFineAssessmentData = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly assessmentSpans: readonly TimedSpan[];
-  readonly deliverySpans: readonly TimedSpan[];
 }>;
 
 type RerankResult = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
   readonly applied: boolean;
-}>;
-
-export type CollectedFineAssessmentData = Readonly<{
-  readonly supplementaryData: FineAssessParams["supplementaryData"];
 }>;
 
 export function collectTimedSupplementaryData(
@@ -73,80 +64,6 @@ export function collectTimedSupplementaryData(
             })
       })
     });
-  });
-}
-
-export async function collectInitialLegacyAssessment(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Promise<LegacyInitialAssessment> {
-  const collected = await collectTimedSupplementaryData(context, params, prepared, coarse);
-  const fineParams = buildFineAssessParams(
-    context,
-    params,
-    prepared,
-    collected.value.supplementaryData,
-    coarse.combinedCoarseCandidates
-  );
-  const preparation = measureSync(() => prepareFineAssessment(fineParams));
-  const delivery = measureSync(() => deliverFineAssessment(fineParams, preparation.value));
-  return Object.freeze({
-    assessment: delivery.value,
-    supplementaryData: collected.value.supplementaryData,
-    assessmentSpans: Object.freeze([asTimedSpan(collected), asTimedSpan(preparation)]),
-    deliverySpans: Object.freeze([asTimedSpan(delivery)])
-  });
-}
-
-function preparationFromAssessment(
-  assessment: FineAssessmentResult
-): FineAssessmentPreparation {
-  return Object.freeze({
-    candidates: assessment.preparedCandidates,
-    prunedCandidates: assessment.prunedCandidates,
-    coarsePoolSize: assessment.coarsePoolSize,
-    fineEvaluated: assessment.fineEvaluated,
-    finePrunedCount: assessment.finePrunedCount,
-    finePriorityOverflowCount: assessment.finePriorityOverflowCount
-  });
-}
-
-export function prepareLegacyReassessment(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  initial: LegacyInitialAssessment,
-  embeddingData: EmbeddingAssessmentData
-): Readonly<{
-  readonly preparedCandidates: FineAssessmentPreparation;
-  readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly reassessmentRequired: boolean;
-}> {
-  const supplementaryData = withEmbeddingSimilarityScores(
-    initial.supplementaryData,
-    embeddingData.supplement.similarityHintsByObjectId,
-    coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores,
-    attributedEvidenceActivations(initial.supplementaryData, embeddingData),
-    embeddingData.retrievalFieldSeal,
-    embeddingData.retrievalFieldRefinementReceipts
-  );
-  const reassessmentRequired = needsEmbeddingReassessment(embeddingData, coarse);
-  return Object.freeze({
-    supplementaryData,
-    reassessmentRequired,
-    preparedCandidates: reassessmentRequired
-      ? prepareFineAssessment(buildFineAssessParams(
-        context,
-        params,
-        prepared,
-        supplementaryData,
-        coarse.combinedCoarseCandidates
-      ))
-      : preparationFromAssessment(initial.assessment)
   });
 }
 
@@ -231,6 +148,7 @@ function buildFineAssessParams(
     warn: context.warn,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
+    answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver
   };
 }
@@ -262,14 +180,4 @@ function buildCoarseAssessmentParams(
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)
   };
-}
-
-function needsEmbeddingReassessment(
-  embeddingData: EmbeddingAssessmentData,
-  coarse: CoarseStageResult
-): boolean {
-  return Object.keys(embeddingData.supplement.similarityHintsByObjectId).length > 0 ||
-    coarse.embeddingCoarseInjection.candidates.length > 0 ||
-    Object.keys(embeddingData.poolRescoreScores).length > 0 ||
-    embeddingData.evidenceScoring.activationsByCandidateKey.size > 0;
 }

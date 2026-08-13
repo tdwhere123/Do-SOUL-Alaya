@@ -1,12 +1,5 @@
-import {
-  compileRecallAnswerShapePlan,
-  recallAnswerShapeSupportsSingleSemanticLeader
-} from
-  "../../../query/recall-answer-shape-plan.js";
 import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from
   "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from
-  "../../../query/recall-query-probes.js";
 import {
   isWorkspaceMemoryCandidate,
   normalizeDriftSensitiveRankingScore
@@ -21,20 +14,20 @@ type KeyOf<T> = (candidate: T) => string;
 type CompareCandidate<T> = (left: T, right: T) => number;
 
 export function sourceSemanticConsensusIsActive(
-  queryProbes: Readonly<RecallQueryProbes>,
+  supportsSingleSemanticLeader: boolean,
   activations: ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>>
 ): boolean {
-  if (!supportsSingleSemanticLeader(queryProbes)) return false;
+  if (!supportsSingleSemanticLeader) return false;
   return [...activations.values()].some((activation) =>
     activation.observation_completeness === "complete" &&
     activation.observations.some(isOwnerGistObservation));
 }
 
 export function constrainSourceSemanticActivationsToAnswerShape(
-  queryProbes: Readonly<RecallQueryProbes>,
+  supportsSingleSemanticLeader: boolean,
   activations: ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>>
 ): ReadonlyMap<string, Readonly<RecallEvidenceSemanticActivationReceipt>> {
-  if (supportsSingleSemanticLeader(queryProbes)) return activations;
+  if (supportsSingleSemanticLeader) return activations;
   return new Map([...activations].flatMap(([candidateKey, activation]) => {
     const observations = activation.observations.filter(
       (observation) => !isOwnerGistChannel(observation)
@@ -166,12 +159,6 @@ function isOwnerGistChannel(
 ): boolean {
   return observation.documentIdentity === OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY &&
     observation.projection?.projection_kind === "owner";
-}
-
-function supportsSingleSemanticLeader(queryProbes: Readonly<RecallQueryProbes>): boolean {
-  return recallAnswerShapeSupportsSingleSemanticLeader(
-    compileRecallAnswerShapePlan(queryProbes)
-  );
 }
 
 function reciprocalRank(rank: number | undefined): number {

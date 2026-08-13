@@ -14,7 +14,7 @@ import {
   resolvePolicy
 } from "./orchestration.js";
 import { compileRecallQueryProbes } from "../query/recall-query-probes.js";
-import { compileRecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
+import { resolvePreparedAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import {
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
@@ -48,24 +48,19 @@ import {
   startEmbeddingAssessmentPreparation,
   type EmbeddingAssessmentData
 } from "./orchestration/recall-embedding-assessment.js";
-import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js";
 import { buildRecallResult } from "./recall-result-builder.js";
 import {
-  collectInitialLegacyAssessment,
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
-  prepareLegacyReassessment,
   prepareSnapshotAssessment
 } from "./orchestration/recall-fine-assessment.js";
 import {
+  instantTimedResult,
   measureAsync,
-  measureSync,
-  sumLatencyExcluding,
-  type TimedResult
+  measureSync
 } from "./orchestration/recall-phase-latency.js";
 import {
   resolveRecallReferenceTime,
-  shouldCaptureRecallAnswerFeatures,
   type FineAssessmentResult,
   type FineAssessmentPreparation,
   type PreparedEmbeddingQuery,
@@ -115,9 +110,7 @@ async function prepareRecallRequest(
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = compileRecallQueryProbes(queryText);
-  const answerShapePlan = shouldCaptureRecallAnswerFeatures(params)
-    ? compileRecallAnswerShapePlan(queryProbes)
-    : null;
+  const answerShapePlan = resolvePreparedAnswerShapePlan(queryProbes);
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
   const retrievalFieldBundle = createRecallRetrievalFieldBundle({
     workspaceId: params.workspaceId,
@@ -209,41 +202,34 @@ async function assessLegacyCandidateStage(
   const embeddingPreparation = startLegacyEmbeddingPreparation(
     context, params, prepared, coarse, coarse.combinedCoarseCandidates
   );
-  const initial = await collectInitialLegacyAssessment(context, params, prepared, coarse);
+  const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const preparedEmbeddingQuery = await embeddingPreparation;
   const embedding = await measureAsync(() => collectLegacyEmbeddingAssessmentData(
     context,
     params,
     prepared,
     coarse,
-    initial.assessment,
-    initial.supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {},
+    base.value.supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {},
     coarse.combinedCoarseCandidates,
     preparedEmbeddingQuery.value
   ));
-  const reassessment = measureSync(() => prepareLegacyReassessment(
-    context, params, prepared, coarse, initial, embedding.value
+  const assessment = measureSync(() => prepareSnapshotAssessment(
+    context, params, prepared, coarse, base.value, embedding.value
   ));
-  const initialAssessmentLatencyMs = sumLatencyExcluding(
-    initial.assessmentSpans, preparedEmbeddingQuery
-  );
-  const initialDeliveryLatencyMs = sumLatencyExcluding(
-    initial.deliverySpans, preparedEmbeddingQuery
-  );
   return completeCandidateAssessment(
     context,
     params,
     prepared,
     coarse,
-    reassessment.value.preparedCandidates,
-    reassessment.value.supplementaryData,
+    assessment.value.preparedCandidates,
+    assessment.value.supplementaryData,
     embedding.value,
     Object.freeze({
       embedding: preparedEmbeddingQuery.latencyMs + embedding.latencyMs,
-      assessment: initialAssessmentLatencyMs + reassessment.latencyMs,
-      delivery: initialDeliveryLatencyMs
+      assessment: base.latencyMs + assessment.latencyMs,
+      delivery: 0
     }),
-    reassessment.value.reassessmentRequired ? undefined : initial.assessment,
+    undefined,
     "legacy"
   );
 }
@@ -314,9 +300,7 @@ async function completeCandidateAssessment(
   assessmentPath: "legacy" | "snapshot"
 ): Promise<AssessmentStageResult> {
   const { preparedEmbeddingQuery } = embeddingData;
-  const rerank = await measureAsync(() => collectAnswerRerankStage(
-    context, prepared, preparedCandidates, supplementaryData
-  ));
+  const rerank = instantTimedResult(collectAnswerRerankStage(supplementaryData));
   const delivery = deliverOrReuseAssessment(
     context, params, prepared, preparedCandidates, rerank.value, reusableAssessment
   );
@@ -361,34 +345,22 @@ function captureAssessmentPacketPlanTrace(
   return undefined;
 }
 
-async function collectAnswerRerankStage(
-  context: RecallExecutionContext,
-  prepared: PreparedRecallRequest,
-  preparedCandidates: FineAssessmentPreparation,
+function collectAnswerRerankStage(
   supplementaryData: FineAssessParams["supplementaryData"]
-): Promise<Readonly<{
+): Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
   readonly diagnostics: AssessmentStageResult["answerRerankDiagnostics"];
   readonly applied: boolean;
-}>> {
-  const rerank = await collectAnswerRelevanceScores({
-    service: context.dependencies.answerRerankService,
-    queryText: prepared.queryText,
-    candidates: preparedCandidates.candidates,
-    maxEntries: prepared.policy.fine_assessment.budgets.max_entries,
-    warn: context.warn
-  });
-  if (rerank.scores.size === 0) {
-    return Object.freeze({ supplementaryData, diagnostics: rerank.diagnostics, applied: false });
-  }
-  const rerankedData = Object.freeze({
-    ...supplementaryData,
-    answerRelevanceScoresByCandidateKey: rerank.scores
-  });
+}> {
   return Object.freeze({
-    supplementaryData: rerankedData,
-    diagnostics: rerank.diagnostics,
-    applied: true
+    supplementaryData,
+    diagnostics: Object.freeze({
+      status: "not_requested" as const,
+      expected_count: 0,
+      scored_count: 0,
+      failure_class: null
+    }),
+    applied: false
   });
 }
 

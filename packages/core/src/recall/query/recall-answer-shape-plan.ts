@@ -29,6 +29,13 @@ const SUM_CUE =
   /\bhow much\s+total\b|\btotal\s+(?:money|amount|cost)\b|\b(?:sum|total)\b.{0,32}\b(?:spent|paid|expenses?|costs?)\b/iu;
 const COUNT_CUE = /\bhow many\b/iu;
 
+export function resolvePreparedAnswerShapePlan(
+  probes: Readonly<RecallQueryProbes>,
+  prepared?: Readonly<RecallAnswerShapePlan> | null
+): Readonly<RecallAnswerShapePlan> {
+  return prepared ?? compileRecallAnswerShapePlan(probes);
+}
+
 export function compileRecallAnswerShapePlan(
   probes: Readonly<RecallQueryProbes>
 ): Readonly<RecallAnswerShapePlan> {

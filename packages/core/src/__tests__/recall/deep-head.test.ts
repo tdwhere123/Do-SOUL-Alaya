@@ -161,7 +161,7 @@ describe("deep head", () => {
     expect(scores.has(candidates.at(-1)!.fusion.candidate_key)).toBe(true);
   });
 
-  it("prefers cross-encoder scores when present and otherwise uses lightweight head", () => {
+  it("does not let a dormant cross-encoder map replace lightweight scores", () => {
     const candidates = [
       fusedCandidate({ objectId: "a", fusedScore: 0.9, fusedRank: 1, embedding: 0.1 }),
       fusedCandidate({ objectId: "b", fusedScore: 0.8, fusedRank: 2, embedding: 0.9 })
@@ -174,7 +174,9 @@ describe("deep head", () => {
     const withCe = resolveDeepHeadScores({
       candidates,
       answerRelevanceScores: ceScores,
-      supplementaryData: emptySupplementary()
+      supplementaryData: emptySupplementary({
+        embeddingSimilarityScores: { a: 0.1, b: 0.9 }
+      })
     });
     const withoutCe = resolveDeepHeadScores({
       candidates,
@@ -184,19 +186,17 @@ describe("deep head", () => {
       })
     });
 
-    expect(withCe.get(candidates[0]!.fusion.candidate_key)).toBe(0.95);
-    expect(withCe).toBe(ceScores);
+    expect(withCe).toEqual(withoutCe);
     expect(withoutCe.get(candidates[1]!.fusion.candidate_key)!)
       .toBeGreaterThan(withoutCe.get(candidates[0]!.fusion.candidate_key)!);
   });
 
-  it("distinguishes a CE-scored head from its zero-relevance unscored tail", () => {
+  it("keeps lightweight traces when a dormant cross-encoder map is present", () => {
     const candidates = [
       fusedCandidate({ objectId: "scored", fusedScore: 0.9 }),
       fusedCandidate({ objectId: "unscored", fusedScore: 0.8 })
     ];
     const scoredKey = candidates[0]!.fusion.candidate_key;
-    const unscoredKey = candidates[1]!.fusion.candidate_key;
     const assessment = resolveDeepHeadAssessment({
       candidates,
       answerRelevanceScores: new Map([[scoredKey, 0.75]]),
@@ -204,15 +204,10 @@ describe("deep head", () => {
       includeTraces: true
     });
 
-    expect(assessment.traceByCandidateKey.get(scoredKey)).toMatchObject({
-      score_source: "cross_encoder",
-      resolved_score: 0.75
-    });
-    expect(assessment.traceByCandidateKey.get(unscoredKey)).toMatchObject({
-      score_source: "cross_encoder_unscored",
-      resolved_score: 0
-    });
-    expect(assessment.scores.has(unscoredKey)).toBe(false);
+    expect(assessment.traceByCandidateKey.get(scoredKey)?.formula_operator_id)
+      .toBe("lightweight_deep_head_prob_or_v1");
+    expect(assessment.traceByCandidateKey.get(scoredKey)?.score_source)
+      .not.toBe("cross_encoder");
   });
 
   it("lets independent semantic support promote a candidate from a distant fused rank", () => {

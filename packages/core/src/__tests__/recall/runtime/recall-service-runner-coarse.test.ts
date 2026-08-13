@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
+import { compileRecallAnswerShapePlan } from "../../../recall/query/recall-answer-shape-plan.js";
 import {
   collectCoarseStage,
   type CoarseFilterResult
@@ -373,7 +374,7 @@ function createStageSetup(memory: Readonly<MemoryEntry>): Readonly<{
       tokenEstimator: Object.freeze({ estimate: () => 1 }),
       queryText: "recall",
       queryProbes: compileRecallQueryProbes("recall"),
-      answerShapePlan: null,
+      answerShapePlan: compileRecallAnswerShapePlan(compileRecallQueryProbes("recall")),
       referenceTime: "2026-03-23T00:00:00.000Z",
       activeConstraints: Object.freeze({ constraints: Object.freeze([]), total_count: 0 }),
       winnerMemoryIds: new Set<string>()

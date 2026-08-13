@@ -4,7 +4,6 @@ import {
   type RecallAnswerSupportObservation,
   type RecallVerifiedUserSupportSource
 } from "../../query/recall-answer-support-observation.js";
-import { compileRecallAnswerShapePlan } from "../../query/recall-answer-shape-plan.js";
 import {
   assessRecallCandidateAnswerCompatibility,
   buildRecallCandidateAnswerSupport,
@@ -48,8 +47,9 @@ export function buildFineAssessmentAnswerSupportContext(params: Readonly<{
   readonly candidates: readonly AnswerSupportCandidate[];
   readonly supplementaryData: RecallSupplementaryData;
   readonly captureObservations: boolean;
+  readonly plan: Readonly<RecallAnswerShapePlan>;
 }>): Readonly<FineAssessmentAnswerSupportContext> {
-  const plan = compileRecallAnswerShapePlan(params.supplementaryData.queryProbes);
+  const plan = params.plan;
   const supportByCandidateKey = new Map<
     string,
     Readonly<RecallCandidateAnswerSupport>

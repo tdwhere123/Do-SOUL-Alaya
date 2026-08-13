@@ -8,6 +8,10 @@ import { materializeConfiguredCoverageSelection } from
 import { buildFineAssessmentAnswerSupportContext } from
   "../answer-support/answer-support-context.js";
 import {
+  recallAnswerShapeSupportsSingleSemanticLeader,
+  resolvePreparedAnswerShapePlan
+} from "../../query/recall-answer-shape-plan.js";
+import {
   createAdmissionState,
   tryRecordAcceptedAdmission
 } from "./admission.js";
@@ -23,10 +27,15 @@ export function createSelectionContext(
   const answerRelevanceRankByCandidateKey =
     params.answerRelevanceRankByCandidateKey ?? new Map();
   const captureAnswerFeatures = params.captureAnswerFeatures ?? false;
+  const answerShapePlan = resolvePreparedAnswerShapePlan(
+    params.supplementaryData.queryProbes,
+    params.answerShapePlan
+  );
   const answerSupport = buildFineAssessmentAnswerSupportContext({
     candidates: params.orderedCandidates,
     supplementaryData: params.supplementaryData,
-    captureObservations: captureAnswerFeatures
+    captureObservations: captureAnswerFeatures,
+    plan: answerShapePlan
   });
   return Object.freeze({
     config: params.config,
@@ -40,6 +49,9 @@ export function createSelectionContext(
     coverageRelevanceUpperBound: params.coverageRelevanceUpperBound ?? null,
     answerRelevanceRankByCandidateKey,
     captureAnswerFeatures,
+    answerShapePlan,
+    supportsSingleSemanticLeader:
+      recallAnswerShapeSupportsSingleSemanticLeader(answerShapePlan),
     answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
     answerSupportObservationsByCandidateKey:
       answerSupport.observationsByCandidateKey,

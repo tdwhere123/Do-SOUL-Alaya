@@ -5,6 +5,10 @@ import {
 } from "../../../recall/delivery/admission/answer-head/source-semantic-answer-head.js";
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
+import {
+  compileRecallAnswerShapePlan,
+  recallAnswerShapeSupportsSingleSemanticLeader
+} from "../../../recall/query/recall-answer-shape-plan.js";
 import { evidenceSemanticActivation } from
   "../fixtures/evidence-semantic-activation.js";
 import { createCandidate } from "../fine-assessment-selection-fixtures.js";
@@ -43,7 +47,10 @@ describe("source semantic answer-head", () => {
     const activations = new Map([["candidate", gistActivation(0.9)]]);
 
     expect(sourceSemanticConsensusIsActive(
-      compileRecallQueryProbes(query), activations
+      recallAnswerShapeSupportsSingleSemanticLeader(
+        compileRecallAnswerShapePlan(compileRecallQueryProbes(query))
+      ),
+      activations
     )).toBe(false);
   });
 
@@ -53,7 +60,7 @@ describe("source semantic answer-head", () => {
       observation_completeness: "winner_only_legacy" as const
     };
     expect(sourceSemanticConsensusIsActive(
-      compileRecallQueryProbes("What dog do I own?"),
+      true,
       new Map([["candidate", activation]])
     )).toBe(false);
   });

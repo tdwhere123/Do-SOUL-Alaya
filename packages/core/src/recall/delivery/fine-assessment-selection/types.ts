@@ -2,6 +2,7 @@ import type { MemoryDimension as MemoryDimensionType, RecallCandidate, RecallPol
 import type { CoarseRecallCandidate, RecallCandidateDiagnostic, RecallCandidateDropReason, RecallFusionBreakdown, RecallSupplementaryData, TokenEstimator } from "../../runtime/recall-service-types.js";
 import type { RecallAnswerSupportObservation } from "../../query/recall-answer-support-observation.js";
 import type { RecallCandidateAnswerSupport } from "../../query/recall-candidate-answer-support.js";
+import type { RecallAnswerShapePlan } from "../../query/recall-answer-shape-plan.js";
 import type { RecallDeepHeadTrace } from "../../rerank/deep-head.js";
 import { materializeFinalPacket } from "../final-order/final-packet-order.js";
 import type { RecallPacketPlanObservation } from "../packet-plan/packet-plan-observation.js";
@@ -76,6 +77,8 @@ export interface FineAssessmentSelectionContext {
     Readonly<RecallRelevanceUpperBoundReceipt> | null;
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures: boolean;
+  readonly answerShapePlan: Readonly<RecallAnswerShapePlan>;
+  readonly supportsSingleSemanticLeader: boolean;
   readonly answerSupportByCandidateKey: ReadonlyMap<
     string,
     Readonly<RecallCandidateAnswerSupport>
@@ -112,6 +115,7 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
+  readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly capturePacketPlanTrace?: boolean;
   readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly selectionBoundaryObserver?: (

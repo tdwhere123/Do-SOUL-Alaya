@@ -1,15 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { RECALL_FUSION_FAMILY_IDS } from "../../recall/delivery/fusion-delivery-families.js";
 import { RecallService } from "../../recall/recall-service.js";
 import {
   createDependencies,
   createMemoryEntry,
-  createTaskSurface,
-  overridePolicy
+  createTaskSurface
 } from "./recall-service-test-fixtures.js";
 
 describe("RecallService answer rerank integration", () => {
-  it("uses the optional scorer after fusion and projects its final scalar", async () => {
+  it("keeps an installed scorer idle and preserves fusion output", async () => {
     const first = createMemoryEntry({
       object_id: "11111111-1111-4111-8111-111111111111",
       content: "Implement recall with the established first approach.",
@@ -21,124 +19,31 @@ describe("RecallService answer rerank integration", () => {
       activation_score: 0.1
     });
     const { dependencies } = createDependencies([first, answer]);
-    const score = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map((passage) => passage.includes("second") ? 0.9 : 0.1)
-    );
-    const service = new RecallService({
+    const score = vi.fn(async () => {
+      throw new Error("secret model path");
+    });
+    const baseline = await new RecallService(dependencies).recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "build"
+    });
+    const installed = await new RecallService({
       ...dependencies,
       answerRerankService: { score }
-    });
-
-    const result = await service.recall({
+    }).recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "build"
     });
 
-    expect(score).toHaveBeenCalledTimes(1);
-    expect(result.candidates[0]?.object_id).toBe(answer.object_id);
-    expect(result.candidates[0]?.relevance_score).toBe(0.9);
-    expect(result.candidates[0]?.score_factors?.content_relevance).not.toBe(0.9);
-    expect(result.diagnostics).toMatchObject({
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: 2,
-      answer_rerank_scored_count: 2,
-      answer_rerank_failure_class: null
-    });
-  });
-
-  it("surfaces a stable failure class while preserving fusion output", async () => {
-    const first = createMemoryEntry({
-      object_id: "11111111-1111-4111-8111-111111111111",
-      content: "first",
-      activation_score: 0.9
-    });
-    const { dependencies } = createDependencies([first]);
-    const baseline = await new RecallService(dependencies).recall({
-      taskSurface: createTaskSurface(), workspaceId: "workspace-1", strategy: "build"
-    });
-    const failed = await new RecallService({
-      ...dependencies,
-      answerRerankService: { score: async () => { throw new Error("secret model path"); } }
-    }).recall({
-      taskSurface: createTaskSurface(), workspaceId: "workspace-1", strategy: "build"
-    });
-
-    expect(failed.candidates).toEqual(baseline.candidates);
-    expect(baseline.diagnostics).toMatchObject({
+    expect(score).not.toHaveBeenCalled();
+    expect(installed.candidates).toEqual(baseline.candidates);
+    expect(installed.diagnostics).toMatchObject({
       answer_rerank_status: "not_requested",
       answer_rerank_expected_count: 0,
       answer_rerank_scored_count: 0,
       answer_rerank_failure_class: null
     });
-    expect(failed.diagnostics).toMatchObject({
-      answer_rerank_status: "failed",
-      answer_rerank_expected_count: 1,
-      answer_rerank_scored_count: 0,
-      answer_rerank_failure_class: "service_error"
-    });
-    expect(JSON.stringify(failed.diagnostics)).not.toContain("secret model path");
-  });
-
-  it("uses the request delivery budget to bound the prepared CE head", async () => {
-    const memories = Array.from({ length: 15 }, (_, index) => createMemoryEntry({
-      object_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-      content: `candidate passage ${index + 1}`,
-      activation_score: 1 - index / 100
-    }));
-    const { dependencies } = createDependencies(memories);
-    const score = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map(() => 0.5)
-    );
-    const service = new RecallService({ ...dependencies, answerRerankService: { score } });
-    const taskSurface = createTaskSurface();
-    const basePolicy = service.buildDefaultPolicy("build", taskSurface.runtime_id);
-    const policy = overridePolicy(basePolicy, {
-      fine_assessment: {
-        ...basePolicy.fine_assessment,
-        budgets: {
-          ...basePolicy.fine_assessment.budgets,
-          max_entries: 2,
-          max_total_tokens: 10_000
-        }
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface,
-      workspaceId: "workspace-1",
-      strategy: "build",
-      policyOverride: policy
-    });
-    const expectedCount = 2 * RECALL_FUSION_FAMILY_IDS.length;
-
-    expect(score.mock.calls[0]?.[1]).toHaveLength(expectedCount);
-    expect(result.diagnostics).toMatchObject({
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: expectedCount,
-      answer_rerank_scored_count: expectedCount
-    });
-    expect(result.diagnostics?.token_economy?.fine_evaluated).toBe(15);
-  });
-
-  it("marks an installed scorer not applicable when the normalized query is empty", async () => {
-    const score = vi.fn(async () => [0.5]);
-    const { dependencies } = createDependencies([]);
-    const result = await new RecallService({
-      ...dependencies,
-      answerRerankService: { score }
-    }).recall({
-      taskSurface: { ...createTaskSurface(), display_name: "   " },
-      workspaceId: "workspace-1",
-      strategy: "build"
-    });
-
-    expect(score).not.toHaveBeenCalled();
-    expect(result.diagnostics).toMatchObject({
-      answer_rerank_status: "not_applicable",
-      answer_rerank_expected_count: 0,
-      answer_rerank_scored_count: 0,
-      answer_rerank_failure_class: null
-    });
+    expect(JSON.stringify(installed.diagnostics)).not.toContain("secret model path");
   });
 });

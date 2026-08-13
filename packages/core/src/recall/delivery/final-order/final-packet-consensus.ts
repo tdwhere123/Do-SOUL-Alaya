@@ -19,7 +19,6 @@ import {
   resolveSourceSemanticRanks,
   sourceSemanticConsensusIsActive
 } from "../admission/answer-head/source-semantic-answer-head.js";
-import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../../runtime/recall-service-results.js";
 
@@ -47,7 +46,7 @@ export function resolveFinalPacketConsensusPlan(
     readonly baseline: readonly FineAssessmentCandidate[];
     readonly sourceCandidates: readonly FineAssessmentCandidate[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-    readonly queryProbes?: Readonly<RecallQueryProbes>;
+    readonly supportsSingleSemanticLeader?: boolean;
     readonly evidenceSemanticActivationsByCandidateKey?: ReadonlyMap<
       string,
       Readonly<RecallEvidenceSemanticActivationReceipt>
@@ -91,15 +90,15 @@ export function resolveFinalPacketConsensusPlan(
 
 function resolveSourceSemanticRankBasis(params: Readonly<{
   readonly sourceCandidates: readonly FineAssessmentCandidate[];
-  readonly queryProbes?: Readonly<RecallQueryProbes>;
+  readonly supportsSingleSemanticLeader?: boolean;
   readonly evidenceSemanticActivationsByCandidateKey?: ReadonlyMap<
     string,
     Readonly<RecallEvidenceSemanticActivationReceipt>
   >;
 }>): ReadonlyMap<string, number> | undefined {
   const activations = params.evidenceSemanticActivationsByCandidateKey ?? new Map();
-  if (params.queryProbes === undefined ||
-      !sourceSemanticConsensusIsActive(params.queryProbes, activations)) {
+  if (params.supportsSingleSemanticLeader !== true ||
+      !sourceSemanticConsensusIsActive(true, activations)) {
     return undefined;
   }
   return resolveSourceSemanticRanks(

@@ -285,9 +285,14 @@ function captureSequentialMembershipBoundary(): FineAssessmentSelectionBoundaryC
         candidate.entry.object_id,
         0.1 + index * 0.12
       ])),
-      answerRelevanceScoresByCandidateKey: new Map(candidates.map(
-        (candidate, index) => [candidate.fusion.candidate_key, 1 - index * 0.12]
-      ))
+      evidenceGistsByMemoryId: Object.fromEntries(candidates.map((candidate, index) => [
+        candidate.entry.object_id,
+        index < 2 ? "shared gist" : `novel-${index}`
+      ])),
+      embeddingSimilarityScores: Object.fromEntries(candidates.map((candidate, index) => [
+        candidate.entry.object_id,
+        index < 2 ? 0.95 - index * 0.05 : 0.1
+      ]))
     }),
     tokenEstimator: { estimate: () => 5 },
     now: () => "2026-07-29T00:00:00.000Z",

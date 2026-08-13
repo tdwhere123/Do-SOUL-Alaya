@@ -77,7 +77,7 @@ async function verifySnapshotAttribution() {
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
     coarse: 0, synthesis: 0, embedding: 5, assessment: 5,
-    cross_rerank: 7, delivery: 11, manifestation: 13
+    cross_rerank: 0, delivery: 11, manifestation: 13
   });
   expect(clock.assessmentCalls).toHaveBeenCalledOnce();
   expect(clock.deliveryCalls).toHaveBeenCalledOnce();
@@ -94,11 +94,11 @@ async function verifyCustomAttribution() {
   const result = await runEmbeddingRecall(service, "Custom fallback procedure");
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 0, synthesis: 0, embedding: 10, assessment: 10,
-    cross_rerank: 7, delivery: 22, manifestation: 0
+    coarse: 0, synthesis: 0, embedding: 10, assessment: 5,
+    cross_rerank: 0, delivery: 11, manifestation: 0
   });
-  expect(clock.assessmentCalls).toHaveBeenCalledTimes(2);
-  expect(clock.deliveryCalls).toHaveBeenCalledTimes(2);
+  expect(clock.assessmentCalls).toHaveBeenCalledOnce();
+  expect(clock.deliveryCalls).toHaveBeenCalledOnce();
 }
 
 async function verifyLegacyAttribution() {
@@ -111,11 +111,11 @@ async function verifyLegacyAttribution() {
   const result = await runEmbeddingRecall(service, "Legacy adapter procedure");
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 0, synthesis: 0, embedding: 17, assessment: 10,
-    cross_rerank: 0, delivery: 22, manifestation: 0
+    coarse: 0, synthesis: 0, embedding: 17, assessment: 8,
+    cross_rerank: 0, delivery: 11, manifestation: 0
   });
-  expect(clock.assessmentCalls).toHaveBeenCalledTimes(2);
-  expect(clock.deliveryCalls).toHaveBeenCalledTimes(2);
+  expect(clock.assessmentCalls).toHaveBeenCalledOnce();
+  expect(clock.deliveryCalls).toHaveBeenCalledOnce();
 }
 
 async function verifyCoarseOwnership() {

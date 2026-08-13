@@ -50,10 +50,8 @@ export function buildRecallResult(
         assessment.supplementaryData.retrievalFieldRefinementReceipts,
       fieldRefinementStopCertificate:
         assessment.finalAssessment.fieldRefinementStopCertificate,
-      ...(prepared.answerShapePlan === null
-        ? {}
-        : { answerShapePlan: prepared.answerShapePlan }),
       querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
+      answerShapePlan: prepared.answerShapePlan,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
       preBudgetCount: manifested.candidateDiagnostics.length,

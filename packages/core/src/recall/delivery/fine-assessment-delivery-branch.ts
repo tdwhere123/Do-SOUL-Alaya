@@ -3,15 +3,12 @@ export type FineAssessmentDeliveryBranch = Readonly<{
 }>;
 
 /**
- * Shared live / composition delivery branch.
- * Composition fidelity must mirror this seam bit-identically.
+ * Live and composition must share this bit; a second branch would fork order.
  */
-export function resolveFineAssessmentDeliveryBranch(input: Readonly<{
+export function resolveFineAssessmentDeliveryBranch(_input: Readonly<{
   readonly answerRelevanceScores: ReadonlyMap<string, number>;
 }>): FineAssessmentDeliveryBranch {
-  // CE present → scores own public relevance. Lightweight head reorders only so
-  // fused_score / 8-factor governance stay visible on RecallCandidate.
   return Object.freeze({
-    replacePublicRelevance: input.answerRelevanceScores.size > 0
+    replacePublicRelevance: false
   });
 }

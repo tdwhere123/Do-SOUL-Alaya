@@ -31,7 +31,9 @@ describe("recall answer-shape selection capture", () => {
       selectionBoundaryObserver
     });
 
-    expect(ordinary.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(ordinary.diagnostics?.answer_shape_plan).toEqual(
+      captured.diagnostics?.answer_shape_plan
+    );
     expect(selectionBoundaryObserver).toHaveBeenCalledOnce();
     expect(captured.diagnostics?.answer_shape_plan).toMatchObject({
       status: "high_confidence",

@@ -177,7 +177,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       expect.objectContaining({
         workspaceId: "workspace-1",
         maxSupplement: 5,
-        baseCandidateIds: ["memory-lexical"],
+        baseCandidateIds: ["memory-lexical", "memory-semantic"],
         eligibleMemories: expect.arrayContaining([
           expect.objectContaining({ object_id: "memory-lexical" }),
           expect.objectContaining({ object_id: "memory-semantic" })

@@ -137,7 +137,7 @@ describe("final packet consensus selection ownership", () => {
       baseline: sourceCandidates.slice(0, 10),
       sourceCandidates,
       protectedCandidates: [],
-      queryProbes: compileRecallQueryProbes("What dog do I own?"),
+      supportsSingleSemanticLeader: true,
       evidenceSemanticActivationsByCandidateKey: activations
     });
 

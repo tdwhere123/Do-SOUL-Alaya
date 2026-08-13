@@ -74,7 +74,8 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   maxEntries: number,
   excludedCandidateKeys: ReadonlySet<string>,
   selectDelivered: SelectDelivered<T>,
-  isBehaviorEligible: IsBehaviorEligible<T>
+  isBehaviorEligible: IsBehaviorEligible<T>,
+  supportsSingleSemanticLeader = true
 ): DirectEvidenceHeadSelection<T> {
   const baseline = selectDelivered(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
@@ -84,7 +85,7 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   }
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
   const semanticActivations = constrainSourceSemanticActivationsToAnswerShape(
-    queryProbes, evidenceSemanticActivationsByCandidateKey
+    supportsSingleSemanticLeader, evidenceSemanticActivationsByCandidateKey
   );
   const semanticLeader = selectUniqueSourceSemanticLeader({
     candidates,

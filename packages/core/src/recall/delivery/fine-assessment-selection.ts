@@ -115,7 +115,8 @@ function applyCanonicalAdmissionPromoters(
     context.config.budgets.max_entries, excludedCandidateKeys,
     (candidates) => collectAdmittedCandidates(candidates, context),
     (candidate) => context.answerSupportByCandidateKey.get(
-      candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
+      candidate.fusion.candidate_key)?.authority?.behavior_eligible === true,
+    context.supportsSingleSemanticLeader
   );
   const evidenceOrder = evidenceHead.orderTransitions.reduce(
     (order, transition) => carryFineAssessmentOrderState(
@@ -223,7 +224,7 @@ function resolveAdmissionAwareFinalSelection(
     baseline: collectAdmittedCandidates(order.candidates, context),
     sourceCandidates: order.birthCandidates,
     protectedCandidates,
-    queryProbes: context.supplementaryData.queryProbes,
+    supportsSingleSemanticLeader: context.supportsSingleSemanticLeader,
     evidenceSemanticActivationsByCandidateKey:
       context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });

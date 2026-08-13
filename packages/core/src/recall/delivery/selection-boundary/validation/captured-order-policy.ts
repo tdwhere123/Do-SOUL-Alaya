@@ -9,18 +9,14 @@ type CapturedOrder = NonNullable<
 export function assertCapturedOrderPolicy(
   input: FineAssessmentSelectionBoundaryInput,
   deepHead: RecallDeepHeadAssessment,
-  answerRelevanceScores: ReadonlyMap<string, number>,
+  _answerRelevanceScores: ReadonlyMap<string, number>,
   onMismatch: () => never
 ): void {
   const capturedOrder = input.final_order_after_coverage;
   const capturedDrop = input.max_head_drop_after_coverage;
   if (capturedOrder === undefined && capturedDrop === undefined) return;
-  const expectedOrder = resolveCapturedOrder(
-    deepHead,
-    answerRelevanceScores.size > 0
-  );
-  const dropPermitted = answerRelevanceScores.size === 0 &&
-    deepHead.embeddingObserved && deepHead.scores.size > 0;
+  const expectedOrder = resolveCapturedOrder(deepHead);
+  const dropPermitted = deepHead.embeddingObserved && deepHead.scores.size > 0;
   if (capturedOrder !== expectedOrder ||
       (capturedDrop !== undefined && (!dropPermitted ||
         !Number.isSafeInteger(capturedDrop) || capturedDrop < 0))) {
@@ -29,10 +25,8 @@ export function assertCapturedOrderPolicy(
 }
 
 function resolveCapturedOrder(
-  deepHead: RecallDeepHeadAssessment,
-  replacesPublicRelevance: boolean
+  deepHead: RecallDeepHeadAssessment
 ): CapturedOrder {
   if (deepHead.scores.size === 0) return "public_relevance";
-  if (replacesPublicRelevance) return "delivery_rank";
   return deepHead.embeddingObserved ? "public_relevance" : "coverage";
 }

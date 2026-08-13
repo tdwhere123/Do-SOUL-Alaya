@@ -6,7 +6,6 @@ import {
 } from "./deep-head-signals.js";
 import type {
   DeepHeadAssessmentFormula,
-  DeepHeadAssessmentParams,
   DeepHeadSupplementary,
   LightweightComponents,
   RecallDeepHeadAssessment,
@@ -16,7 +15,6 @@ import type {
 import { createRecallRelevanceUpperBoundReceipt } from
   "./relevance-upper-bound-receipt.js";
 
-const CROSS_ENCODER_OPERATOR_ID = "cross_encoder_passthrough_v1";
 const LIGHTWEIGHT_OPERATOR_ID = "lightweight_deep_head_prob_or_v1";
 const INDEPENDENT_EMBEDDING_OPERATOR_ID =
   "counterfactual_independent_embedding_evidence_v1";
@@ -30,50 +28,6 @@ export function hasObservedDeepHeadEmbedding(
   return candidates.some(
     (candidate) => embeddingSignal(candidate, supplementaryData) !== null
   );
-}
-
-export function buildCrossEncoderAssessment(
-  params: DeepHeadAssessmentParams,
-  includeTraces: boolean
-): RecallDeepHeadAssessment {
-  const embeddingObserved = hasObservedDeepHeadEmbedding(
-    params.candidates,
-    params.supplementaryData
-  );
-  if (!includeTraces) {
-    return Object.freeze({
-      scores: params.answerRelevanceScores,
-      traceByCandidateKey: new Map(),
-      embeddingObserved,
-      relevanceUpperBoundReceipt: createRecallRelevanceUpperBoundReceipt(
-        CROSS_ENCODER_OPERATOR_ID,
-        params.answerRelevanceScores
-      )
-    });
-  }
-  return Object.freeze({
-    scores: params.answerRelevanceScores,
-    traceByCandidateKey: new Map(params.candidates.map((candidate) => {
-      const candidateKey = candidate.fusion.candidate_key;
-      const scored = params.answerRelevanceScores.has(candidateKey);
-      const components = buildLightweightComponents(candidate, params.supplementaryData);
-      return [
-        candidateKey,
-        buildDeepHeadTrace(
-          components,
-          scored ? params.answerRelevanceScores.get(candidateKey)! : 0,
-          scored ? "cross_encoder" : "cross_encoder_unscored",
-          false,
-          CROSS_ENCODER_OPERATOR_ID
-        )
-      ];
-    })),
-    embeddingObserved,
-    relevanceUpperBoundReceipt: createRecallRelevanceUpperBoundReceipt(
-      CROSS_ENCODER_OPERATOR_ID,
-      params.answerRelevanceScores
-    )
-  });
 }
 
 export function buildComponentsDeepHeadAssessment(

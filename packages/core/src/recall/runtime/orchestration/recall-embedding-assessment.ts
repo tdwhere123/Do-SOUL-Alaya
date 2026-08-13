@@ -24,7 +24,6 @@ import {
 import { recallAnswerShapeSupportsSingleSemanticLeader } from
   "../../query/recall-answer-shape-plan.js";
 import type {
-  FineAssessmentResult,
   PreparedEmbeddingQuery,
   PreparedRecallRequest,
   RecallExecutionContext,
@@ -91,7 +90,6 @@ export async function collectLegacyEmbeddingAssessmentData(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  initialAssessment: FineAssessmentResult,
   evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId,
   fineCandidates: readonly Readonly<CoarseRecallCandidate>[],
   preparedQueryResult: Awaited<NonNullable<PreparedQueryPromise>>
@@ -101,7 +99,7 @@ export async function collectLegacyEmbeddingAssessmentData(
   const fineCandidateObjectIds = localFineCandidates.map((candidate) => candidate.entry.object_id);
   const [supplementResult, poolResult, evidenceScoring] = await Promise.all([
     settle(collectLegacySupplement(
-      context, params, prepared, initialAssessment, preparedEmbeddingQuery, localFineCandidates
+      context, params, prepared, preparedEmbeddingQuery, localFineCandidates
     )),
     settle(collectPoolEmbeddingRescore(context, params, prepared, fineCandidateObjectIds)),
     collectEvidenceSemanticScores({
@@ -324,22 +322,12 @@ async function collectLegacySupplement(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  initialAssessment: FineAssessmentResult,
   preparedEmbeddingQuery: PreparedEmbeddingQuery,
   localEligibleCandidates: readonly Readonly<CoarseRecallCandidate>[]
 ): Promise<CollectedEmbeddingSupplementResult> {
-  const localEligibleIds = new Set(
-    localEligibleCandidates.map((candidate) => candidate.entry.object_id)
-  );
   return collectEmbeddingSupplement({
     dependencies: context.dependencies,
-    baseCandidateIds: initialAssessment.candidates
-      .filter((candidate) =>
-        candidate.origin_plane === "workspace_local" &&
-        candidate.object_kind === "memory_entry" &&
-        localEligibleIds.has(candidate.object_id)
-      )
-      .map((candidate) => candidate.object_id),
+    baseCandidateIds: localEligibleCandidates.map((candidate) => candidate.entry.object_id),
     localEligibleCandidates,
     config: prepared.policy,
     workspaceId: params.workspaceId,
