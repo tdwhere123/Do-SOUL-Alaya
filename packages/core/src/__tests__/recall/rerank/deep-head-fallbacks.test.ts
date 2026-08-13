@@ -60,7 +60,7 @@ describe("deep head fallbacks", () => {
       })
     );
 
-    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.4722);
+    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.51);
   });
 
   it("does not leak memory-keyed signals into same-id synthesis or global candidates", () => {
@@ -126,7 +126,7 @@ describe("deep head fallbacks", () => {
           "path-seed": 0.3, "conflict-only": 0.01 }
       })
     );
-    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.264);
+    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.2);
     expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(1);
     expect(scores.get(conflictOnly.fusion.candidate_key)!)
       .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);

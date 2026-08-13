@@ -1,6 +1,10 @@
 import { resolvePremiseInvalid } from "./abstention.js";
 import { classifyQuestionMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
 import { buildQuestionCohortLedger } from "./diagnostics-cohort.js";
+import {
+  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  composeFamilyGroupedScore
+} from "@do-soul/alaya-core";
 import type {
   CandidateIdentityObservation,
   DiagnosticAnswerShapePlan,
@@ -297,6 +301,9 @@ function hasConsistentDeepHeadDecision(
   if (trace.score_source === "cross_encoder_unscored") {
     return candidate.answer_relevance_score === null;
   }
+  if (trace.formula_operator_id === FAMILY_GROUPED_COMPOSITION_OPERATOR_ID) {
+    return hasConsistentFamilyGroupedDecision(trace);
+  }
   if (
     trace.score_source !== "fusion_evidence" &&
     trace.score_source !== "fusion_embedding_evidence" &&
@@ -310,6 +317,19 @@ function hasConsistentDeepHeadDecision(
     trace.resolved_score,
     probabilisticOr(resident, trace.resolved_evidence)
   );
+}
+
+function hasConsistentFamilyGroupedDecision(
+  trace: NonNullable<LongMemEvalReplayCandidate["deep_head_trace"]>
+): boolean {
+  const families = trace.family_scores;
+  if (families === undefined || trace.resolved_score === null) return false;
+  const composed = composeFamilyGroupedScore({
+    lexicalEvidence: families.lexical_evidence,
+    semantic: families.semantic,
+    fusion: families.fusion
+  });
+  return approximatelyEqual(trace.resolved_score, composed.resolvedScore);
 }
 
 function probabilisticOr(left: number, right: number): number {

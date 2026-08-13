@@ -119,6 +119,11 @@ export {
   type SelectionCompositionReconstruction
 } from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
 export {
+  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  composeFamilyGroupedScore,
+  type FamilyGroupedScores
+} from "./recall/rerank/family-grouped-composition.js";
+export {
   INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
   NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
   counterfactualDeliveredCandidateKeys,

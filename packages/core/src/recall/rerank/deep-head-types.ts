@@ -4,6 +4,7 @@ import type { CandidateActivationReceipt } from
   "../scoring/candidate-semantic-activation.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../runtime/recall-service-types.js";
+import type { FamilyGroupedScores } from "./family-grouped-composition.js";
 import type { RecallRelevanceUpperBoundReceipt } from
   "./relevance-upper-bound-receipt.js";
 
@@ -39,6 +40,8 @@ export type RecallDeepHeadTrace = Readonly<{
   readonly score_source: RecallDeepHeadScoreSource;
   /** Optional for replaying pre-operator-identity boundary artifacts. */
   readonly formula_operator_id?: string;
+  /** Optional for replaying pre-family-receipt boundary artifacts. */
+  readonly family_scores?: FamilyGroupedScores;
   /** Optional for replaying pre-receipt boundary artifacts. */
   readonly activation?: CandidateActivationReceipt;
   /** Optional for replaying boundaries captured before projection observations. */
