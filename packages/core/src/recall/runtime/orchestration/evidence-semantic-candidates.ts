@@ -22,6 +22,7 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
     Record<string, readonly Readonly<RecallEvidenceSemanticDocument>[]>
   >;
   readonly includeOwnerGist?: boolean;
+  readonly ownerGistMemoryIds?: ReadonlySet<string>;
 }>): readonly Readonly<EvidenceEmbeddingCandidate>[] {
   return Object.freeze(params.candidates.flatMap((candidate) => {
     if (candidate.objectKind === "evidence_capsule") {
@@ -29,11 +30,44 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
     }
     if (!isWorkspaceMemoryCandidate(candidate)) return [];
     const documents = params.evidenceDocumentsByMemoryId[candidate.entry.object_id] ?? [];
-    return documents
-      .filter((document) => params.includeOwnerGist !== false ||
-        document.documentIdentity !== OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY)
+    const allowGist = params.includeOwnerGist !== false &&
+      (params.ownerGistMemoryIds === undefined ||
+        params.ownerGistMemoryIds.has(candidate.entry.object_id));
+    return selectDistinctEvidenceDocuments(documents, allowGist)
       .map((document) => linkedEvidenceCandidate(candidate, document));
   }));
+}
+
+export function selectOwnerGistMemoryIds(
+  scoresByObjectId: Readonly<Record<string, number>> | undefined,
+  limit = 16
+): ReadonlySet<string> | undefined {
+  if (scoresByObjectId === undefined) return undefined;
+  const ranked = Object.entries(scoresByObjectId)
+    .filter(([, score]) => Number.isFinite(score) && score > 0)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  if (ranked.length === 0) return undefined;
+  return new Set(ranked.slice(0, limit).map(([objectId]) => objectId));
+}
+
+function selectDistinctEvidenceDocuments(
+  documents: readonly Readonly<RecallEvidenceSemanticDocument>[],
+  allowGist: boolean
+): readonly Readonly<RecallEvidenceSemanticDocument>[] {
+  const selected: RecallEvidenceSemanticDocument[] = [];
+  const seenContent = new Set<string>();
+  for (const document of documents) {
+    if (
+      document.documentIdentity === OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY &&
+      !allowGist
+    ) {
+      continue;
+    }
+    if (seenContent.has(document.content)) continue;
+    seenContent.add(document.content);
+    selected.push(document);
+  }
+  return selected;
 }
 
 export function attributeEvidenceSemanticActivations(params: Readonly<{

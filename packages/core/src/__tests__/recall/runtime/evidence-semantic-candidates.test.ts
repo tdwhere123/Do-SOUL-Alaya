@@ -94,6 +94,45 @@ describe("evidence semantic candidate projection", () => {
     ]);
   });
 
+  it("scores owner gist only for selected leaders and drops duplicate content", () => {
+    const leader = candidate(createMemoryEntry({ object_id: "memory-leader" }));
+    const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
+    const shared = "same grounded source gist";
+
+    expect(buildEvidenceSemanticCandidates({
+      candidates: [leader, follower],
+      evidenceDocumentsByMemoryId: {
+        "memory-leader": [{
+          evidenceRef: "evidence-leader",
+          documentIdentity: "owner_gist_600",
+          content: shared,
+          projection: OWNER_PROJECTION
+        }, {
+          evidenceRef: "evidence-leader",
+          documentIdentity: "owner",
+          content: shared,
+          projection: OWNER_PROJECTION
+        }],
+        "memory-follower": [{
+          evidenceRef: "evidence-follower",
+          documentIdentity: "owner_gist_600",
+          content: "other gist",
+          projection: OWNER_PROJECTION
+        }, {
+          evidenceRef: "evidence-follower",
+          documentIdentity: "owner",
+          content: "other owner excerpt",
+          projection: OWNER_PROJECTION
+        }]
+      },
+      includeOwnerGist: true,
+      ownerGistMemoryIds: new Set(["memory-leader"])
+    }).map((row) => `${row.candidateKey}:${row.documentIdentity}`)).toEqual([
+      "workspace_local:memory_entry:memory-leader:owner_gist_600",
+      "workspace_local:memory_entry:memory-follower:owner"
+    ]);
+  });
+
   it("attributes every scored document and retains the same deterministic winner", () => {
     const factKey = {
       projection_id: 5,

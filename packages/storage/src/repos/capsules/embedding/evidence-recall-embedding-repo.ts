@@ -69,11 +69,13 @@ interface EmbeddingRow {
 export class SqliteEvidenceRecallEmbeddingRepo {
   private readonly listOwnerSources;
   private readonly listProjectionSources;
+  private readonly findByDocumentsStatement;
   private readonly upsert;
 
   public constructor(private readonly db: StorageDatabase) {
     this.listOwnerSources = db.connection.prepare(LIST_OWNER_SOURCES_SQL);
     this.listProjectionSources = db.connection.prepare(LIST_PROJECTION_SOURCES_SQL);
+    this.findByDocumentsStatement = db.connection.prepare(FIND_BY_DOCUMENTS_SQL);
     this.upsert = db.connection.prepare(UPSERT_SQL);
   }
 
@@ -105,8 +107,12 @@ export class SqliteEvidenceRecallEmbeddingRepo {
   }): Promise<readonly Readonly<EvidenceRecallEmbeddingRecord>[]> {
     if (input.documents.length === 0) return Object.freeze([]);
     try {
-      const rows = this.db.connection.prepare(FIND_BY_DOCUMENTS_SQL).all(
-        JSON.stringify(input.documents),
+      const rows = this.findByDocumentsStatement.all(
+        JSON.stringify(input.documents.map((document) => ({
+          ownerObjectId: document.ownerObjectId,
+          documentIdentity: document.documentIdentity,
+          contentHash: document.contentHash
+        }))),
         input.workspaceId,
         input.documentRole,
         input.providerKind,

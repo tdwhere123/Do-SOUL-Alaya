@@ -18,8 +18,10 @@ import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../recall-service-types.js";
-import { buildEvidenceSemanticCandidates } from
-  "./evidence-semantic-candidates.js";
+import {
+  buildEvidenceSemanticCandidates,
+  selectOwnerGistMemoryIds
+} from "./evidence-semantic-candidates.js";
 import { recallAnswerShapeSupportsSingleSemanticLeader } from
   "../../query/recall-answer-shape-plan.js";
 import type {
@@ -185,7 +187,8 @@ export async function collectSnapshotEmbeddingAssessmentData(
       evidenceDocumentsByMemoryId,
       includeOwnerGist: recallAnswerShapeSupportsSingleSemanticLeader(
         prepared.answerShapePlan
-      )
+      ),
+      ownerGistMemoryIds: selectOwnerGistMemoryIds(snapshot.poolScoresByObjectId)
     })
   ]);
   return buildSnapshotEmbeddingAssessment({
@@ -249,6 +252,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId;
   readonly includeOwnerGist: boolean;
+  readonly ownerGistMemoryIds?: ReadonlySet<string>;
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const service = params.context.dependencies.embeddingRecallService;
@@ -259,7 +263,8 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   const candidates = buildEvidenceSemanticCandidates({
     candidates: params.fineCandidates,
     evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId,
-    includeOwnerGist: params.includeOwnerGist
+    includeOwnerGist: params.includeOwnerGist,
+    ownerGistMemoryIds: params.ownerGistMemoryIds
   });
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
   const startedAt = performance.now();
