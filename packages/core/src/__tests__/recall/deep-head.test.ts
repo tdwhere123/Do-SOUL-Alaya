@@ -191,6 +191,35 @@ describe("deep head", () => {
       .toBe(trace.resolved_score);
   });
 
+  it("does not discard a fusion leader because raw RRF and unit embedding use different scales", () => {
+    const leader = fusedCandidate({
+      objectId: "fusion-leader",
+      fusedScore: 0.114,
+      fusedRank: 1,
+      embedding: 0.42,
+      contributions: { lexical_fts: 0.016, embedding_similarity: 0.015 }
+    });
+    const neighbor = fusedCandidate({
+      objectId: "lexical-neighbor",
+      fusedScore: 0.065,
+      fusedRank: 8,
+      embedding: 0.78,
+      contributions: { lexical_fts: 0.008, embedding_similarity: 0.016 }
+    });
+    const scores = computeLightweightDeepHeadScores(
+      [leader, neighbor],
+      emptySupplementary({
+        embeddingSimilarityScores: {
+          "fusion-leader": 0.42,
+          "lexical-neighbor": 0.78
+        }
+      })
+    );
+
+    expect(scores.get(leader.fusion.candidate_key)!)
+      .toBeGreaterThan(scores.get(neighbor.fusion.candidate_key)!);
+  });
+
   it("activates a source-bound field baseline without inventing embedding evidence", () => {
     const candidate = fusedCandidate({
       objectId: "inactive",

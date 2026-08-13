@@ -191,7 +191,7 @@ export function combineNonlexicalUnitIntervalComposition(
 }
 
 function resolveLightweightScore(
-  _candidate: DeliverySelectionCandidate,
+  candidate: DeliverySelectionCandidate,
   components: LightweightComponents
 ): number | null {
   let score = components.resolvedEvidence;
@@ -199,9 +199,44 @@ function resolveLightweightScore(
     score = probabilisticOr(score, components.embedding);
   }
   if (components.fusionBaselineScore !== null) {
-    score = probabilisticOr(score, components.fusionBaselineScore);
+    score = probabilisticOr(
+      score,
+      alignedFusionBaseline(
+        candidate,
+        components,
+        shouldAlignFusionToEmbedding(components)
+      )
+    );
   }
   return score;
+}
+
+function shouldAlignFusionToEmbedding(
+  components: LightweightComponents
+): boolean {
+  const embedding = components.embedding;
+  const raw = components.fusionBaselineScore;
+  return embedding !== null &&
+    raw !== null &&
+    Number.isFinite(embedding) &&
+    embedding > 2 * raw;
+}
+
+function alignedFusionBaseline(
+  candidate: DeliverySelectionCandidate,
+  components: LightweightComponents,
+  mixingUnitIntervalSignals: boolean
+): number {
+  const raw = components.fusionBaselineScore;
+  if (raw === null) return 0;
+  if (!mixingUnitIntervalSignals) return raw;
+  const rank = candidate.fusion.fused_rank;
+  if (!Number.isFinite(rank) || rank < 1 || rank >= Number.MAX_SAFE_INTEGER / 2) {
+    return raw;
+  }
+  // Rank-reciprocal keeps fusion on the same unit interval as embedding
+  // without saturating rank 1 at 1.0. Offset 1.5 => rank 1 is 0.667.
+  return 1 / (1.5 + rank - 1);
 }
 
 function buildLightweightTrace(
