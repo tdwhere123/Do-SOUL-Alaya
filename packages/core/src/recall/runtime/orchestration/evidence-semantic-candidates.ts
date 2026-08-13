@@ -1,4 +1,7 @@
 import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
+
+export const OWNER_GIST_MEMORY_LIMIT = 16;
+export const EVIDENCE_FULL_MEMORY_LIMIT = 32;
 import type { EvidenceEmbeddingCandidate } from
   "../../../embedding-recall/embedding-recall-service.js";
 import type { EvidenceCandidateScoringWinner } from
@@ -23,24 +26,35 @@ export function buildEvidenceSemanticCandidates(params: Readonly<{
   >;
   readonly includeOwnerGist?: boolean;
   readonly ownerGistMemoryIds?: ReadonlySet<string>;
+  readonly fullEvidenceMemoryIds?: ReadonlySet<string>;
 }>): readonly Readonly<EvidenceEmbeddingCandidate>[] {
   return Object.freeze(params.candidates.flatMap((candidate) => {
     if (candidate.objectKind === "evidence_capsule") {
       return [directEvidenceCandidate(candidate)];
     }
     if (!isWorkspaceMemoryCandidate(candidate)) return [];
-    const documents = params.evidenceDocumentsByMemoryId[candidate.entry.object_id] ?? [];
+    const memoryId = candidate.entry.object_id;
+    const documents = params.evidenceDocumentsByMemoryId[memoryId] ?? [];
     const allowGist = params.includeOwnerGist !== false &&
       (params.ownerGistMemoryIds === undefined ||
-        params.ownerGistMemoryIds.has(candidate.entry.object_id));
-    return selectDistinctEvidenceDocuments(documents, allowGist)
+        params.ownerGistMemoryIds.has(memoryId));
+    const allowLeaveOneOut = params.fullEvidenceMemoryIds === undefined ||
+      params.fullEvidenceMemoryIds.has(memoryId);
+    return selectDistinctEvidenceDocuments(documents, allowGist, allowLeaveOneOut)
       .map((document) => linkedEvidenceCandidate(candidate, document));
   }));
 }
 
 export function selectOwnerGistMemoryIds(
   scoresByObjectId: Readonly<Record<string, number>> | undefined,
-  limit = 16
+  limit = OWNER_GIST_MEMORY_LIMIT
+): ReadonlySet<string> | undefined {
+  return selectTopPoolMemoryIds(scoresByObjectId, limit);
+}
+
+export function selectTopPoolMemoryIds(
+  scoresByObjectId: Readonly<Record<string, number>> | undefined,
+  limit: number
 ): ReadonlySet<string> | undefined {
   if (scoresByObjectId === undefined) return undefined;
   const ranked = Object.entries(scoresByObjectId)
@@ -52,7 +66,8 @@ export function selectOwnerGistMemoryIds(
 
 function selectDistinctEvidenceDocuments(
   documents: readonly Readonly<RecallEvidenceSemanticDocument>[],
-  allowGist: boolean
+  allowGist: boolean,
+  allowLeaveOneOut: boolean
 ): readonly Readonly<RecallEvidenceSemanticDocument>[] {
   const selected: RecallEvidenceSemanticDocument[] = [];
   const seenContent = new Set<string>();
@@ -63,11 +78,20 @@ function selectDistinctEvidenceDocuments(
     ) {
       continue;
     }
+    if (!allowLeaveOneOut && isLeaveOneSlotOutDocument(document)) continue;
     if (seenContent.has(document.content)) continue;
     seenContent.add(document.content);
     selected.push(document);
   }
   return selected;
+}
+
+function isLeaveOneSlotOutDocument(
+  document: Readonly<RecallEvidenceSemanticDocument>
+): boolean {
+  const forms = document.projection.matched_fact_key_forms;
+  return forms.some((form) => form.kind === "leave_one_slot_out") &&
+    !forms.some((form) => form.kind === "complete");
 }
 
 export function attributeEvidenceSemanticActivations(params: Readonly<{

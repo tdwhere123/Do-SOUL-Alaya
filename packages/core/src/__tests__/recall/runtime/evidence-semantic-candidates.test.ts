@@ -133,6 +133,57 @@ describe("evidence semantic candidate projection", () => {
     ]);
   });
 
+  it("scores leave-one-out fact keys only for selected full-evidence memories", () => {
+    const leader = candidate(createMemoryEntry({ object_id: "memory-leader" }));
+    const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
+    const leaveOneOut = {
+      projection_id: 2,
+      projection_kind: "fact_key" as const,
+      matched_fact_key_forms: Object.freeze([{
+        kind: "leave_one_slot_out" as const,
+        omitted_slot: Object.freeze({ slot_index: 0, role: "subject" as const })
+      }])
+    };
+    const complete = {
+      projection_id: 1,
+      projection_kind: "fact_key" as const,
+      matched_fact_key_forms: Object.freeze([{ kind: "complete" as const }])
+    };
+
+    expect(buildEvidenceSemanticCandidates({
+      candidates: [leader, follower],
+      evidenceDocumentsByMemoryId: {
+        "memory-leader": [{
+          evidenceRef: "evidence-leader",
+          documentIdentity: "fact_key:1",
+          content: "complete leader fact",
+          projection: complete
+        }, {
+          evidenceRef: "evidence-leader",
+          documentIdentity: "fact_key:2",
+          content: "leave-one-out leader fact",
+          projection: leaveOneOut
+        }],
+        "memory-follower": [{
+          evidenceRef: "evidence-follower",
+          documentIdentity: "fact_key:1",
+          content: "complete follower fact",
+          projection: complete
+        }, {
+          evidenceRef: "evidence-follower",
+          documentIdentity: "fact_key:2",
+          content: "leave-one-out follower fact",
+          projection: leaveOneOut
+        }]
+      },
+      fullEvidenceMemoryIds: new Set(["memory-leader"])
+    }).map((row) => `${row.candidateKey}:${row.documentIdentity}`)).toEqual([
+      "workspace_local:memory_entry:memory-leader:fact_key:1",
+      "workspace_local:memory_entry:memory-leader:fact_key:2",
+      "workspace_local:memory_entry:memory-follower:fact_key:1"
+    ]);
+  });
+
   it("attributes every scored document and retains the same deterministic winner", () => {
     const factKey = {
       projection_id: 5,

@@ -20,7 +20,9 @@ import type {
 } from "../recall-service-types.js";
 import {
   buildEvidenceSemanticCandidates,
-  selectOwnerGistMemoryIds
+  EVIDENCE_FULL_MEMORY_LIMIT,
+  selectOwnerGistMemoryIds,
+  selectTopPoolMemoryIds
 } from "./evidence-semantic-candidates.js";
 import { recallAnswerShapeSupportsSingleSemanticLeader } from
   "../../query/recall-answer-shape-plan.js";
@@ -188,7 +190,10 @@ export async function collectSnapshotEmbeddingAssessmentData(
       includeOwnerGist: recallAnswerShapeSupportsSingleSemanticLeader(
         prepared.answerShapePlan
       ),
-      ownerGistMemoryIds: selectOwnerGistMemoryIds(snapshot.poolScoresByObjectId)
+      ownerGistMemoryIds: selectOwnerGistMemoryIds(snapshot.poolScoresByObjectId),
+      fullEvidenceMemoryIds: selectTopPoolMemoryIds(
+        snapshot.poolScoresByObjectId, EVIDENCE_FULL_MEMORY_LIMIT
+      )
     })
   ]);
   return buildSnapshotEmbeddingAssessment({
@@ -253,6 +258,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId;
   readonly includeOwnerGist: boolean;
   readonly ownerGistMemoryIds?: ReadonlySet<string>;
+  readonly fullEvidenceMemoryIds?: ReadonlySet<string>;
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const service = params.context.dependencies.embeddingRecallService;
@@ -264,7 +270,8 @@ async function collectEvidenceSemanticScores(params: Readonly<{
     candidates: params.fineCandidates,
     evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId,
     includeOwnerGist: params.includeOwnerGist,
-    ownerGistMemoryIds: params.ownerGistMemoryIds
+    ownerGistMemoryIds: params.ownerGistMemoryIds,
+    fullEvidenceMemoryIds: params.fullEvidenceMemoryIds
   });
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
   const startedAt = performance.now();
