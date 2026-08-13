@@ -36,16 +36,21 @@ import { restoreCapturedPacketCandidates } from
   "./validation/packet-order.js";
 import { assertCapturedOrderPolicy } from
   "./validation/captured-order-policy.js";
+import {
+  assertCapturedVsLive,
+  CAPTURED_SCORE_FIDELITY_ASSERT,
+  CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+  type CapturedScoreFidelityMode
+} from "./replay-identity-contract.js";
 
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
 
-export const CAPTURED_SCORE_FIDELITY_ASSERT = "assert" as const;
-export const CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE = "recompute_live" as const;
-
-export type CapturedScoreFidelityMode =
-  | typeof CAPTURED_SCORE_FIDELITY_ASSERT
-  | typeof CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE;
+export {
+  CAPTURED_SCORE_FIDELITY_ASSERT,
+  CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+  type CapturedScoreFidelityMode
+};
 
 export type SelectionCompositionOptions = Readonly<{
   readonly capturedScoreFidelity?: CapturedScoreFidelityMode;
@@ -60,7 +65,7 @@ export type SelectionCompositionReconstruction = Readonly<{
 
 /**
  * Reconstruct selection from a captured boundary via the live delivery seam.
- * Must stay bit-identical to `deliverFineAssessment` branch + apply + select.
+ * recompute-live frees captured-vs-live output identity; input identity stays closed.
  */
 export function reconstructFineAssessmentComposition(
   boundary: FineAssessmentSelectionBoundaryCase,
@@ -79,9 +84,9 @@ export function reconstructFineAssessmentComposition(
       }
     })
   });
-  if (capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_ASSERT) {
+  assertCapturedVsLive(capturedScoreFidelity, "expected_membership", () => {
     assertCompositionExpected(boundary, selected, pending?.preProjection);
-  }
+  });
   return Object.freeze({
     result: selected,
     branch: prepared.branch,
@@ -112,12 +117,14 @@ function prepareComposition(
   const delivery = applyDeliverySelection(candidates, deepHead.scores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
-  assertCapturedOrderPolicy(
-    input,
-    deepHead,
-    answerRelevanceScores,
-    () => throwCompositionMismatch("captured_order_policy")
-  );
+  assertCapturedVsLive(capturedScoreFidelity, "captured_order_policy", () => {
+    assertCapturedOrderPolicy(
+      input,
+      deepHead,
+      answerRelevanceScores,
+      () => throwCompositionMismatch("captured_order_policy")
+    );
+  });
   assertCompositionInputs(input, delivery, deepHead, capturedScoreFidelity);
   const selectionParams = buildCompositionSelectionParams(
     input,
@@ -175,40 +182,59 @@ function assertCompositionInputs(
   deepHead: RecallDeepHeadAssessment,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ): void {
-  assertCandidatePopulation(delivery.orderedCandidates, input.ordered_candidates);
-  assertNumberMapEquals(
-    delivery.finalRelevanceByCandidateKey,
-    input.final_relevance_by_candidate_key,
-    "final_relevance"
+  assertCapturedVsLive(capturedScoreFidelity, "candidate_population", () => {
+    assertCandidatePopulation(delivery.orderedCandidates, input.ordered_candidates);
+  });
+  assertCapturedVsLive(capturedScoreFidelity, "final_relevance", () => {
+    assertNumberMapEquals(
+      delivery.finalRelevanceByCandidateKey,
+      input.final_relevance_by_candidate_key,
+      "final_relevance"
+    );
+  });
+  assertCapturedVsLive(capturedScoreFidelity, "answer_relevance_rank", () => {
+    assertNumberMapEquals(
+      delivery.answerRelevanceRankByCandidateKey,
+      input.answer_relevance_rank_by_candidate_key,
+      "answer_relevance_rank"
+    );
+  });
+  assertCapturedVsLive(capturedScoreFidelity, "candidate_order", () => {
+    assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
+  });
+  assertCapturedVsLive(capturedScoreFidelity, "delivery_rank", () => {
+    assertNumberMapEquals(
+      delivery.rankByCandidateKey,
+      input.rank_by_candidate_key,
+      "delivery_rank"
+    );
+  });
+  assertCapturedVsLive(capturedScoreFidelity, "coverage_relevance", () => {
+    assertNumberMapEquals(
+      deepHead.scores,
+      input.coverage_relevance_by_candidate_key,
+      "coverage_relevance"
+    );
+  });
+  assertCapturedVsLive(
+    capturedScoreFidelity,
+    "coverage_relevance_upper_bound",
+    () => {
+      if (selectionBoundaryJsonSha256(deepHead.relevanceUpperBoundReceipt) !==
+          selectionBoundaryJsonSha256(
+            input.coverage_relevance_upper_bound ?? null
+          )) {
+        throwCompositionMismatch("coverage_relevance_upper_bound");
+      }
+    }
   );
-  assertNumberMapEquals(
-    delivery.answerRelevanceRankByCandidateKey,
-    input.answer_relevance_rank_by_candidate_key,
-    "answer_relevance_rank"
-  );
-  if (capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE) return;
-  assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
-  assertNumberMapEquals(
-    delivery.rankByCandidateKey,
-    input.rank_by_candidate_key,
-    "delivery_rank"
-  );
-  assertNumberMapEquals(
-    deepHead.scores,
-    input.coverage_relevance_by_candidate_key,
-    "coverage_relevance"
-  );
-  if (selectionBoundaryJsonSha256(deepHead.relevanceUpperBoundReceipt) !==
-      selectionBoundaryJsonSha256(
-        input.coverage_relevance_upper_bound ?? null
-      )) {
-    throwCompositionMismatch("coverage_relevance_upper_bound");
-  }
-  assertDeepHeadTraces(
-    deepHead.traceByCandidateKey,
-    input.deep_head_trace_by_candidate_key,
-    input.capture_answer_features === true
-  );
+  assertCapturedVsLive(capturedScoreFidelity, "deep_head_traces", () => {
+    assertDeepHeadTraces(
+      deepHead.traceByCandidateKey,
+      input.deep_head_trace_by_candidate_key,
+      input.capture_answer_features === true
+    );
+  });
 }
 
 function assertCompositionExpected(
@@ -275,6 +301,7 @@ function resolveCompositionTokenEstimator(
   input: FineAssessmentSelectionBoundaryInput,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ): FineAssessmentSelectionParams["tokenEstimator"] {
+  // Token *function* identity stays fail-closed; miss compute is not an output skip.
   return createCapturedTokenEstimator(input.token_estimates_by_content, {
     onMiss: capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
       ? "compute"
