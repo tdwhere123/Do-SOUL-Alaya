@@ -205,6 +205,8 @@ function buildRecallTelemetryFields(
       diagnostics?.evidenceEmbeddingLatencyMs ?? null,
     evidence_embedding_failure_class:
       diagnostics?.evidenceEmbeddingFailureClass ?? null,
+    evidence_embedding_selection_receipt:
+      diagnostics?.evidenceEmbeddingSelectionReceipt ?? null,
     graph_expansion_plane_count_per_hop: diagnostics?.graphExpansionPlaneCountPerHop ??
       createEmptyGraphExpansionPlaneCountPerHop(),
     graph_expansion_plane_count_per_edge_type:

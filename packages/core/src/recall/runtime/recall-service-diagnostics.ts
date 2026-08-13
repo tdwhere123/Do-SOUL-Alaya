@@ -13,6 +13,16 @@ import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
+import type { RecallAnswerRerankDiagnostics, RecallAnswerRerankFailureClass,
+  RecallAnswerRerankStatus, RecallEvidenceEmbeddingFailureClass,
+  RecallEvidenceEmbeddingStatus } from "./diagnostics/stage-status.js";
+export type {
+  RecallAnswerRerankDiagnostics,
+  RecallAnswerRerankFailureClass,
+  RecallAnswerRerankStatus,
+  RecallEvidenceEmbeddingFailureClass,
+  RecallEvidenceEmbeddingStatus
+} from "./diagnostics/stage-status.js";
 
 export type RecallAdmissionPlane =
   | "activation"
@@ -390,30 +400,6 @@ export interface RecallGraphExpansionDiagnostics {
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
 }
 
-export type RecallAnswerRerankStatus =
-  | "not_requested"
-  | "not_applicable"
-  | "returned"
-  | "failed";
-
-export type RecallAnswerRerankFailureClass =
-  | "invalid_score_count"
-  | "invalid_score_value"
-  | "service_error";
-
-export type RecallEvidenceEmbeddingStatus =
-  import("../../embedding-recall/embedding-recall-service.js").EvidenceCandidateScoringStatus;
-
-export type RecallEvidenceEmbeddingFailureClass =
-  import("../../embedding-recall/embedding-recall-service.js").EvidenceCandidateScoringFailureClass;
-
-export interface RecallAnswerRerankDiagnostics {
-  readonly status: RecallAnswerRerankStatus;
-  readonly expected_count: number;
-  readonly scored_count: number;
-  readonly failure_class: RecallAnswerRerankFailureClass | null;
-}
-
 export interface RecallDiagnostics {
   readonly query_probes: {
     readonly normalized_query: string | null;
@@ -480,6 +466,9 @@ export interface RecallDiagnostics {
   readonly evidence_embedding_inference_calls: number;
   readonly evidence_embedding_latency_ms: number;
   readonly evidence_embedding_failure_class: RecallEvidenceEmbeddingFailureClass | null;
+  readonly evidence_embedding_selection_receipt?: Readonly<
+    import("../../embedding-recall/types.js").EvidenceCandidateScoringSelectionReceipt
+  >;
   readonly provider_degradation_reason: string | null;
   readonly answer_rerank_status: RecallAnswerRerankStatus;
   readonly answer_rerank_expected_count: number;

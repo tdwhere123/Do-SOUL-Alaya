@@ -129,8 +129,8 @@ export const lightweightDeepHeadFormula: DeepHeadAssessmentFormula = Object.free
     components.embedding !== null ||
     components.resolvedEvidence > 0 ||
     components.fusionBaselineScore !== null,
-  resolveScore: (candidate, components, active) =>
-    active ? resolveLightweightScore(candidate, components)! : 0,
+  resolveScore: (_candidate, components, active) =>
+    active ? resolveLightweightScore(components)! : 0,
   buildTrace: (candidate, components, active) =>
     buildLightweightTrace(candidate, components, active, LIGHTWEIGHT_OPERATOR_ID)
 });
@@ -190,53 +190,15 @@ export function combineNonlexicalUnitIntervalComposition(
     : evidenceAgreement;
 }
 
-function resolveLightweightScore(
-  candidate: DeliverySelectionCandidate,
-  components: LightweightComponents
-): number | null {
+function resolveLightweightScore(components: LightweightComponents): number | null {
   let score = components.resolvedEvidence;
   if (components.embedding !== null) {
     score = probabilisticOr(score, components.embedding);
   }
   if (components.fusionBaselineScore !== null) {
-    score = probabilisticOr(
-      score,
-      alignedFusionBaseline(
-        candidate,
-        components,
-        shouldAlignFusionToEmbedding(components)
-      )
-    );
+    score = probabilisticOr(score, components.fusionBaselineScore);
   }
   return score;
-}
-
-function shouldAlignFusionToEmbedding(
-  components: LightweightComponents
-): boolean {
-  const embedding = components.embedding;
-  const raw = components.fusionBaselineScore;
-  return embedding !== null &&
-    raw !== null &&
-    Number.isFinite(embedding) &&
-    embedding > 2 * raw;
-}
-
-function alignedFusionBaseline(
-  candidate: DeliverySelectionCandidate,
-  components: LightweightComponents,
-  mixingUnitIntervalSignals: boolean
-): number {
-  const raw = components.fusionBaselineScore;
-  if (raw === null) return 0;
-  if (!mixingUnitIntervalSignals) return raw;
-  const rank = candidate.fusion.fused_rank;
-  if (!Number.isFinite(rank) || rank < 1 || rank >= Number.MAX_SAFE_INTEGER / 2) {
-    return raw;
-  }
-  // Rank-reciprocal keeps fusion on the same unit interval as embedding
-  // without saturating rank 1 at 1.0. Offset 1.5 => rank 1 is 0.667.
-  return 1 / (1.5 + rank - 1);
 }
 
 function buildLightweightTrace(
@@ -249,7 +211,7 @@ function buildLightweightTrace(
     return buildDeepHeadTrace(components, null, "inactive", false, operatorId);
   }
   const fusionBaselineUsed = components.fusionBaselineScore !== null;
-  const resolvedScore = resolveLightweightScore(candidate, components)!;
+  const resolvedScore = resolveLightweightScore(components)!;
   const scoreSource: RecallDeepHeadScoreSource = components.embedding !== null
     ? fusionBaselineUsed ? "fusion_embedding_evidence" : "embedding_evidence"
     : fusionBaselineUsed

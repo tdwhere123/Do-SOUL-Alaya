@@ -19,10 +19,7 @@ import type {
   RecallSupplementaryData
 } from "../recall-service-types.js";
 import {
-  buildEvidenceSemanticCandidates,
-  EVIDENCE_FULL_MEMORY_LIMIT,
-  selectOwnerGistMemoryIds,
-  selectTopPoolMemoryIds
+  buildEvidenceSemanticCandidateSelection
 } from "./evidence-semantic-candidates.js";
 import { recallAnswerShapeSupportsSingleSemanticLeader } from
   "../../query/recall-answer-shape-plan.js";
@@ -189,10 +186,6 @@ export async function collectSnapshotEmbeddingAssessmentData(
       evidenceDocumentsByMemoryId,
       includeOwnerGist: recallAnswerShapeSupportsSingleSemanticLeader(
         prepared.answerShapePlan
-      ),
-      ownerGistMemoryIds: selectOwnerGistMemoryIds(snapshot.poolScoresByObjectId),
-      fullEvidenceMemoryIds: selectTopPoolMemoryIds(
-        snapshot.poolScoresByObjectId, EVIDENCE_FULL_MEMORY_LIMIT
       )
     })
   ]);
@@ -257,8 +250,6 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId;
   readonly includeOwnerGist: boolean;
-  readonly ownerGistMemoryIds?: ReadonlySet<string>;
-  readonly fullEvidenceMemoryIds?: ReadonlySet<string>;
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const service = params.context.dependencies.embeddingRecallService;
@@ -266,14 +257,18 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   if (score === undefined || params.queryText === null) {
     return emptyEvidenceScoring("not_requested", 0);
   }
-  const candidates = buildEvidenceSemanticCandidates({
+  const selection = buildEvidenceSemanticCandidateSelection({
     candidates: params.fineCandidates,
     evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId,
-    includeOwnerGist: params.includeOwnerGist,
-    ownerGistMemoryIds: params.ownerGistMemoryIds,
-    fullEvidenceMemoryIds: params.fullEvidenceMemoryIds
+    includeOwnerGist: params.includeOwnerGist
   });
-  if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
+  const candidates = selection.candidates;
+  if (candidates.length === 0) {
+    return Object.freeze({
+      ...emptyEvidenceScoring("not_applicable", 0),
+      selectionReceipt: selection.receipt
+    });
+  }
   const startedAt = performance.now();
   try {
     return await score.call(service, {
@@ -281,7 +276,8 @@ async function collectEvidenceSemanticScores(params: Readonly<{
       runId: params.runId,
       queryText: params.queryText,
       preparedQuery: params.preparedQuery,
-      candidates
+      candidates,
+      selectionReceipt: selection.receipt
     });
   } catch (error) {
     params.context.warn("transient evidence embedding degraded", {
@@ -292,6 +288,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
     });
     return Object.freeze({
       ...emptyEvidenceScoring("failed", candidates.length),
+      selectionReceipt: selection.receipt,
       latencyMs: Math.max(0, performance.now() - startedAt),
       failureClass: "service_error" as const
     });

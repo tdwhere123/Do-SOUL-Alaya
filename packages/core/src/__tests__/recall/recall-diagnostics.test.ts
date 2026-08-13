@@ -131,6 +131,30 @@ describe("recall diagnostics", () => {
       deliveredCount: 1,
       embeddingProviderStatus: "provider_not_requested",
       embeddingSupplementStatus: "disabled",
+      evidenceEmbeddingScoring: {
+        activationsByCandidateKey: new Map(),
+        status: "not_applicable",
+        expectedCount: 0,
+        scoredCount: 0,
+        inferenceCalls: 0,
+        latencyMs: 0,
+        failureClass: null,
+        selectionReceipt: {
+          schema_version: 1,
+          operator_id: "ordered_candidate_prefix_v1",
+          input_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          owner_gist_enabled: true,
+          owner_gist_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          full_evidence_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          owner_gist_limit: 16,
+          full_evidence_limit: 32,
+          input_memory_count: 1,
+          owner_gist_selected_count: 1,
+          full_evidence_selected_count: 1,
+          owner_gist_excluded_count: 0,
+          full_evidence_excluded_count: 0
+        }
+      },
       providerDegradationReason: null,
       answerRerankDiagnostics: {
         status: "not_requested",
@@ -177,5 +201,11 @@ describe("recall diagnostics", () => {
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
     expect(diagnostics.query_entity_extraction?.status).toBe("ineligible");
     expect(diagnostics.retrieval_field_captures).toHaveLength(16);
+    expect(diagnostics.evidence_embedding_selection_receipt).toMatchObject({
+      operator_id: "ordered_candidate_prefix_v1",
+      input_memory_count: 1,
+      owner_gist_selected_count: 1,
+      full_evidence_selected_count: 1
+    });
   });
 });

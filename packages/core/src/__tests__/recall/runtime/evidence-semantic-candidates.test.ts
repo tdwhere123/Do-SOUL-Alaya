@@ -2,7 +2,7 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import {
   attributeEvidenceSemanticActivations,
-  buildEvidenceSemanticCandidates
+  buildEvidenceSemanticCandidateSelection
 } from
   "../../../recall/runtime/orchestration/evidence-semantic-candidates.js";
 import type { CoarseRecallCandidate } from
@@ -16,7 +16,7 @@ describe("evidence semantic candidate projection", () => {
       evidence_refs: ["evidence-b", "evidence-a"]
     }));
 
-    expect(buildEvidenceSemanticCandidates({
+    expect(buildEvidenceSemanticCandidateSelection({
       candidates: [memory],
       evidenceDocumentsByMemoryId: {
         "memory-1": [{
@@ -26,7 +26,7 @@ describe("evidence semantic candidate projection", () => {
           projection: OWNER_PROJECTION
         }]
       }
-    })).toEqual([{
+    }).candidates).toEqual([{
       candidateKey: "workspace_local:memory_entry:memory-1",
       evidenceObjectId: "evidence-a",
       documentIdentity: "owner",
@@ -44,7 +44,7 @@ describe("evidence semantic candidate projection", () => {
       originPlane: "global"
     });
 
-    expect(buildEvidenceSemanticCandidates({
+    expect(buildEvidenceSemanticCandidateSelection({
       candidates: [direct, local, global],
       evidenceDocumentsByMemoryId: {
         "memory-2": [{
@@ -54,7 +54,7 @@ describe("evidence semantic candidate projection", () => {
           projection: OWNER_PROJECTION
         }]
       }
-    })).toEqual([{
+    }).candidates).toEqual([{
       candidateKey: "workspace_local:evidence_capsule:evidence-1",
       evidenceObjectId: "evidence-1",
       documentIdentity: "assistant:1",
@@ -84,25 +84,28 @@ describe("evidence semantic candidate projection", () => {
       }]
     };
 
-    expect(buildEvidenceSemanticCandidates({
+    expect(buildEvidenceSemanticCandidateSelection({
       candidates: [memory, direct],
       evidenceDocumentsByMemoryId: documents,
       includeOwnerGist: false
-    }).map((candidate) => candidate.documentIdentity)).toEqual([
+    }).candidates.map((candidate) => candidate.documentIdentity)).toEqual([
       "fact_key:1",
       "owner"
     ]);
   });
 
-  it("scores owner gist only for selected leaders and drops duplicate content", () => {
-    const leader = candidate(createMemoryEntry({ object_id: "memory-leader" }));
+  it("uses candidate order for gist budget and retains document identities", () => {
+    const leaders = Array.from({ length: 16 }, (_, index) => candidate(
+      createMemoryEntry({ object_id: `memory-leader-${index}` })
+    ));
+    const leader = leaders[0]!;
     const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
     const shared = "same grounded source gist";
 
-    expect(buildEvidenceSemanticCandidates({
-      candidates: [leader, follower],
+    const selection = buildEvidenceSemanticCandidateSelection({
+      candidates: [...leaders, follower],
       evidenceDocumentsByMemoryId: {
-        "memory-leader": [{
+        "memory-leader-0": [{
           evidenceRef: "evidence-leader",
           documentIdentity: "owner_gist_600",
           content: shared,
@@ -125,16 +128,66 @@ describe("evidence semantic candidate projection", () => {
           projection: OWNER_PROJECTION
         }]
       },
-      includeOwnerGist: true,
-      ownerGistMemoryIds: new Set(["memory-leader"])
-    }).map((row) => `${row.candidateKey}:${row.documentIdentity}`)).toEqual([
-      "workspace_local:memory_entry:memory-leader:owner_gist_600",
+      includeOwnerGist: true
+    });
+
+    expect(selection.candidates.map((row) =>
+      `${row.candidateKey}:${row.documentIdentity}`
+    )).toEqual([
+      "workspace_local:memory_entry:memory-leader-0:owner_gist_600",
+      "workspace_local:memory_entry:memory-leader-0:owner",
       "workspace_local:memory_entry:memory-follower:owner"
     ]);
+    expect(selection.receipt).toMatchObject({
+      operator_id: "ordered_candidate_prefix_v1",
+      input_candidate_keys: [
+        "workspace_local:memory_entry:memory-leader-0",
+        "workspace_local:memory_entry:memory-leader-1",
+        "workspace_local:memory_entry:memory-leader-2",
+        "workspace_local:memory_entry:memory-leader-3",
+        "workspace_local:memory_entry:memory-leader-4",
+        "workspace_local:memory_entry:memory-leader-5",
+        "workspace_local:memory_entry:memory-leader-6",
+        "workspace_local:memory_entry:memory-leader-7",
+        "workspace_local:memory_entry:memory-leader-8",
+        "workspace_local:memory_entry:memory-leader-9",
+        "workspace_local:memory_entry:memory-leader-10",
+        "workspace_local:memory_entry:memory-leader-11",
+        "workspace_local:memory_entry:memory-leader-12",
+        "workspace_local:memory_entry:memory-leader-13",
+        "workspace_local:memory_entry:memory-leader-14",
+        "workspace_local:memory_entry:memory-leader-15",
+        "workspace_local:memory_entry:memory-follower"
+      ],
+      owner_gist_candidate_keys: [
+        "workspace_local:memory_entry:memory-leader-0",
+        "workspace_local:memory_entry:memory-leader-1",
+        "workspace_local:memory_entry:memory-leader-2",
+        "workspace_local:memory_entry:memory-leader-3",
+        "workspace_local:memory_entry:memory-leader-4",
+        "workspace_local:memory_entry:memory-leader-5",
+        "workspace_local:memory_entry:memory-leader-6",
+        "workspace_local:memory_entry:memory-leader-7",
+        "workspace_local:memory_entry:memory-leader-8",
+        "workspace_local:memory_entry:memory-leader-9",
+        "workspace_local:memory_entry:memory-leader-10",
+        "workspace_local:memory_entry:memory-leader-11",
+        "workspace_local:memory_entry:memory-leader-12",
+        "workspace_local:memory_entry:memory-leader-13",
+        "workspace_local:memory_entry:memory-leader-14",
+        "workspace_local:memory_entry:memory-leader-15"
+      ],
+      owner_gist_limit: 16,
+      owner_gist_selected_count: 16,
+      owner_gist_excluded_count: 1
+    });
   });
 
   it("scores leave-one-out fact keys only for selected full-evidence memories", () => {
-    const leader = candidate(createMemoryEntry({ object_id: "memory-leader" }));
+    const leaders = Array.from({ length: 32 }, (_, index) => candidate(
+      createMemoryEntry({ object_id: `memory-leader-${index}` })
+    ));
+    const leader = leaders[0]!;
     const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
     const leaveOneOut = {
       projection_id: 2,
@@ -150,10 +203,10 @@ describe("evidence semantic candidate projection", () => {
       matched_fact_key_forms: Object.freeze([{ kind: "complete" as const }])
     };
 
-    expect(buildEvidenceSemanticCandidates({
-      candidates: [leader, follower],
+    const selection = buildEvidenceSemanticCandidateSelection({
+      candidates: [...leaders, follower],
       evidenceDocumentsByMemoryId: {
-        "memory-leader": [{
+        "memory-leader-0": [{
           evidenceRef: "evidence-leader",
           documentIdentity: "fact_key:1",
           content: "complete leader fact",
@@ -175,13 +228,55 @@ describe("evidence semantic candidate projection", () => {
           content: "leave-one-out follower fact",
           projection: leaveOneOut
         }]
-      },
-      fullEvidenceMemoryIds: new Set(["memory-leader"])
-    }).map((row) => `${row.candidateKey}:${row.documentIdentity}`)).toEqual([
-      "workspace_local:memory_entry:memory-leader:fact_key:1",
-      "workspace_local:memory_entry:memory-leader:fact_key:2",
+      }
+    });
+
+    expect(selection.candidates.map((row) =>
+      `${row.candidateKey}:${row.documentIdentity}`
+    )).toEqual([
+      "workspace_local:memory_entry:memory-leader-0:fact_key:1",
+      "workspace_local:memory_entry:memory-leader-0:fact_key:2",
       "workspace_local:memory_entry:memory-follower:fact_key:1"
     ]);
+    expect(selection.receipt).toMatchObject({
+      full_evidence_candidate_keys: [
+        "workspace_local:memory_entry:memory-leader-0",
+        "workspace_local:memory_entry:memory-leader-1",
+        "workspace_local:memory_entry:memory-leader-2",
+        "workspace_local:memory_entry:memory-leader-3",
+        "workspace_local:memory_entry:memory-leader-4",
+        "workspace_local:memory_entry:memory-leader-5",
+        "workspace_local:memory_entry:memory-leader-6",
+        "workspace_local:memory_entry:memory-leader-7",
+        "workspace_local:memory_entry:memory-leader-8",
+        "workspace_local:memory_entry:memory-leader-9",
+        "workspace_local:memory_entry:memory-leader-10",
+        "workspace_local:memory_entry:memory-leader-11",
+        "workspace_local:memory_entry:memory-leader-12",
+        "workspace_local:memory_entry:memory-leader-13",
+        "workspace_local:memory_entry:memory-leader-14",
+        "workspace_local:memory_entry:memory-leader-15",
+        "workspace_local:memory_entry:memory-leader-16",
+        "workspace_local:memory_entry:memory-leader-17",
+        "workspace_local:memory_entry:memory-leader-18",
+        "workspace_local:memory_entry:memory-leader-19",
+        "workspace_local:memory_entry:memory-leader-20",
+        "workspace_local:memory_entry:memory-leader-21",
+        "workspace_local:memory_entry:memory-leader-22",
+        "workspace_local:memory_entry:memory-leader-23",
+        "workspace_local:memory_entry:memory-leader-24",
+        "workspace_local:memory_entry:memory-leader-25",
+        "workspace_local:memory_entry:memory-leader-26",
+        "workspace_local:memory_entry:memory-leader-27",
+        "workspace_local:memory_entry:memory-leader-28",
+        "workspace_local:memory_entry:memory-leader-29",
+        "workspace_local:memory_entry:memory-leader-30",
+        "workspace_local:memory_entry:memory-leader-31"
+      ],
+      full_evidence_limit: 32,
+      full_evidence_selected_count: 32,
+      full_evidence_excluded_count: 1
+    });
   });
 
   it("attributes every scored document and retains the same deterministic winner", () => {

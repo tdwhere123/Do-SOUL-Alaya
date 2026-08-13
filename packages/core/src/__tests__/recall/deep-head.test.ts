@@ -1,108 +1,14 @@
 import { describe, expect, it } from "vitest";
-import {
-  MemoryDimension,
-  ScopeClass,
-  type MemoryEntry,
-  type RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import { applyDeliverySelection, type DeliverySelectionCandidate } from "../../recall/delivery/delivery-selection.js";
 import { orderByCoverageMarginalGain } from "../../recall/delivery/coverage-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import type { RecallFusionBreakdown } from "../../recall/runtime/recall-service-types.js";
+import { applyDeliverySelection } from
+  "../../recall/delivery/delivery-selection.js";
 import {
   computeLightweightDeepHeadScores,
   resolveDeepHeadAssessment,
   resolveDeepHeadScores
 } from "../../recall/rerank/deep-head.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-
-function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
-  return {
-    object_id: "obj",
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.FACT,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "memory content",
-    domain_tags: [],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null,
-    ...overrides
-  };
-}
-
-function fusedCandidate(input: {
-  readonly objectId: string;
-  readonly fusedScore: number;
-  readonly fusedRank?: number;
-  readonly embedding?: number;
-  readonly evidenceFts?: number;
-  readonly contributions?: Partial<Record<string, number>>;
-}): DeliverySelectionCandidate {
-  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
-  const fusion: RecallFusionBreakdown = Object.freeze({
-    ...breakdown,
-    fused_rank: input.fusedRank ?? breakdown.fused_rank,
-    fused_score: input.fusedScore,
-    ...(input.contributions === undefined
-      ? {}
-      : {
-          fused_rank_contribution_per_stream: Object.freeze({
-            ...breakdown.fused_rank_contribution_per_stream,
-            ...input.contributions
-          })
-        })
-  });
-  const factors = {
-    ...(input.embedding === undefined ? {} : { embedding_similarity: input.embedding })
-  } as RecallScoreFactors;
-  return Object.freeze({
-    entry: memory({ object_id: input.objectId }),
-    effectiveScore: input.fusedScore,
-    effectiveFactors: factors,
-    fusion
-  });
-}
-
-function emptySupplementary(overrides: {
-  readonly embeddingSimilarityScores?: Record<string, number>;
-  readonly ftsRanks?: Record<string, number>;
-  readonly trigramFtsRanks?: Record<string, number>;
-  readonly evidenceFtsRanks?: Record<string, number>;
-  readonly structuralScores?: Record<string, number>;
-  readonly sourceProximityScores?: Record<string, number>;
-} = {}) {
-  return {
-    queryProbes: compileRecallQueryProbes(null),
-    embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
-    evidenceSemanticActivationsByCandidateKey: new Map(),
-    ftsRanks: overrides.ftsRanks ?? {},
-    trigramFtsRanks: overrides.trigramFtsRanks ?? {},
-    evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},
-    structuralScores: overrides.structuralScores ?? {},
-    sourceProximityScores: overrides.sourceProximityScores ?? {}
-  };
-}
+import { emptySupplementary, fusedCandidate } from
+  "./rerank/deep-head-fixtures.js";
 
 describe("deep head", () => {
   it("traces the exact live lightweight score composition", () => {
@@ -191,7 +97,7 @@ describe("deep head", () => {
       .toBe(trace.resolved_score);
   });
 
-  it("does not discard a fusion leader because raw RRF and unit embedding use different scales", () => {
+  it("keeps the canonical raw fusion baseline when embedding is stronger", () => {
     const leader = fusedCandidate({
       objectId: "fusion-leader",
       fusedScore: 0.114,
@@ -199,25 +105,23 @@ describe("deep head", () => {
       embedding: 0.42,
       contributions: { lexical_fts: 0.016, embedding_similarity: 0.015 }
     });
-    const neighbor = fusedCandidate({
-      objectId: "lexical-neighbor",
-      fusedScore: 0.065,
-      fusedRank: 8,
-      embedding: 0.78,
-      contributions: { lexical_fts: 0.008, embedding_similarity: 0.016 }
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [leader, neighbor],
-      emptySupplementary({
-        embeddingSimilarityScores: {
-          "fusion-leader": 0.42,
-          "lexical-neighbor": 0.78
-        }
-      })
+    const assessment = resolveDeepHeadAssessment(
+      {
+        candidates: [leader],
+        answerRelevanceScores: new Map(),
+        supplementaryData: emptySupplementary({
+          embeddingSimilarityScores: { "fusion-leader": 0.42 }
+        }),
+        includeTraces: true
+      }
     );
+    const trace = assessment.traceByCandidateKey.get(leader.fusion.candidate_key)!;
 
-    expect(scores.get(leader.fusion.candidate_key)!)
-      .toBeGreaterThan(scores.get(neighbor.fusion.candidate_key)!);
+    expect(trace.resolved_score).toBeCloseTo(
+      1 - (1 - 0.42) * (1 - 0.114)
+    );
+    expect(assessment.scores.get(leader.fusion.candidate_key))
+      .toBe(trace.resolved_score);
   });
 
   it("activates a source-bound field baseline without inventing embedding evidence", () => {
@@ -483,188 +387,4 @@ describe("deep head", () => {
     expect([...scores.values()]).toEqual([0.09, 0.08]);
   });
 
-  it("keeps missing and invalid embeddings cold beside an observed supplementary zero", () => {
-    const observedZero = fusedCandidate({
-      objectId: "observed-zero",
-      fusedScore: 0.9,
-      contributions: { lexical_fts: 0.016 }
-    });
-    const missing = fusedCandidate({
-      objectId: "missing",
-      fusedScore: 0.08,
-      contributions: { lexical_fts: 0.015 }
-    });
-    const invalid = fusedCandidate({
-      objectId: "invalid",
-      fusedScore: 0.07,
-      embedding: Number.NaN,
-      contributions: { lexical_fts: 0.014 }
-    });
-    const candidates = [observedZero, missing, invalid];
-    const scores = computeLightweightDeepHeadScores(
-      candidates,
-      emptySupplementary({ embeddingSimilarityScores: { "observed-zero": 0 } })
-    );
-    const packed = orderByCoverageMarginalGain({
-      candidates,
-      relevanceByCandidateKey: scores,
-      supplementaryData: { evidenceGistsByMemoryId: {} }
-    });
-
-    expect(scores.get(observedZero.fusion.candidate_key)).toBeCloseTo(0.9);
-    expect(scores.get(missing.fusion.candidate_key)).toBeCloseTo(0.08);
-    expect(scores.get(invalid.fusion.candidate_key)).toBeCloseTo(0.07);
-    expect(packed.map((candidate) => candidate.entry.object_id))
-      .toEqual(["observed-zero", "missing", "invalid"]);
-  });
-
-  it("falls back from a non-finite factor to a finite supplementary embedding", () => {
-    const candidate = fusedCandidate({
-      objectId: "supplementary-fallback",
-      fusedScore: 0.09,
-      embedding: Number.NaN,
-      contributions: { lexical_fts: 0.016 }
-    });
-
-    const scores = computeLightweightDeepHeadScores(
-      [candidate],
-      emptySupplementary({
-        embeddingSimilarityScores: { "supplementary-fallback": 0.42 }
-      })
-    );
-
-    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.4722);
-  });
-
-  it("does not leak memory-keyed signals into same-id synthesis or global candidates", () => {
-    const local = fusedCandidate({ objectId: "shared", fusedScore: 0.3 });
-    const synthesisBase = fusedCandidate({ objectId: "shared", fusedScore: 0.2 });
-    const globalBase = fusedCandidate({ objectId: "shared", fusedScore: 0.1 });
-    const synthesis: DeliverySelectionCandidate = Object.freeze({
-      ...synthesisBase,
-      objectKind: "synthesis_capsule",
-      fusion: Object.freeze({
-        ...synthesisBase.fusion,
-        candidate_key: "workspace_local:synthesis_capsule:shared"
-      })
-    });
-    const global: DeliverySelectionCandidate = Object.freeze({
-      ...globalBase,
-      originPlane: "global",
-      fusion: Object.freeze({
-        ...globalBase.fusion,
-        candidate_key: "global:memory_entry:shared"
-      })
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [synthesis, global, local],
-      emptySupplementary({
-        embeddingSimilarityScores: { shared: 0.8 },
-        ftsRanks: { shared: 1 },
-        trigramFtsRanks: { shared: 1 },
-        evidenceFtsRanks: { shared: 1 },
-        structuralScores: { shared: 1 },
-        sourceProximityScores: { shared: 1 }
-      })
-    );
-
-    expect(scores.get(local.fusion.candidate_key)).toBe(1);
-    expect(scores.get(synthesis.fusion.candidate_key)).toBe(0);
-    expect(scores.get(global.fusion.candidate_key)).toBe(0);
-  });
-
-  it("keeps query-supported fusion wins when emb is cold and agreement-gates conflict-only piles", () => {
-    // Path rescue with a lexical foothold must keep fused mass; content-disjoint
-    // path piles stay agreement-gated so they cannot lead over lexical hits.
-    const lexicalRescue = fusedCandidate({
-      objectId: "lexical-rescue",
-      fusedScore: 0.08,
-      fusedRank: 2,
-      contributions: { path_expansion: 0.016, lexical_fts: 0.012 }
-    });
-    const conflictOnly = fusedCandidate({
-      objectId: "conflict-only",
-      fusedScore: 0.07,
-      fusedRank: 3,
-      contributions: { path_expansion: 0.016, existing_score: 0.014 }
-    });
-    const lexicalPeer = fusedCandidate({
-      objectId: "lexical-peer",
-      fusedScore: 0.04,
-      fusedRank: 4,
-      contributions: { lexical_fts: 0.013, existing_score: 0.015 }
-    });
-    const seed = fusedCandidate({
-      objectId: "path-seed",
-      fusedScore: 0.09,
-      fusedRank: 1,
-      contributions: { path_expansion: 0.015, lexical_fts: 0.014 }
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer],
-      emptySupplementary({
-        evidenceFtsRanks: {
-          "lexical-peer": 1,
-          "lexical-rescue": 0.2,
-          "path-seed": 0.3,
-          "conflict-only": 0.01
-        },
-        structuralScores: {
-          "lexical-peer": 1,
-          "lexical-rescue": 0.2,
-          "path-seed": 0.3,
-          "conflict-only": 0.01
-        }
-      })
-    );
-    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.264);
-    expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(1);
-    expect(scores.get(conflictOnly.fusion.candidate_key)!)
-      .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);
-
-    const result = applyDeliverySelection(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer],
-      scores,
-      { replacePublicRelevance: false }
-    );
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["lexical-peer", "path-seed", "lexical-rescue", "conflict-only"]);
-  });
-
-  it("keeps field-only baselines in the existing fused order", () => {
-    // A field baseline is now part of the shared composition. With no other
-    // channel it is an order-preserving identity, including path-only hits.
-    const pathOnly = fusedCandidate({
-      objectId: "path-only",
-      fusedScore: 0.07,
-      fusedRank: 2,
-      contributions: { path_expansion: 0.016 }
-    });
-    const lexicalHead = fusedCandidate({
-      objectId: "lexical-head",
-      fusedScore: 0.09,
-      fusedRank: 1,
-      contributions: { lexical_fts: 0.014 }
-    });
-    const lexicalTail = fusedCandidate({
-      objectId: "lexical-tail",
-      fusedScore: 0.05,
-      fusedRank: 3,
-      contributions: { lexical_fts: 0.012 }
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [lexicalHead, pathOnly, lexicalTail],
-      emptySupplementary()
-    );
-    expect(scores.size).toBe(3);
-    expect(scores.get(lexicalHead.fusion.candidate_key)).toBeCloseTo(0.09);
-    expect(scores.get(pathOnly.fusion.candidate_key)).toBeCloseTo(0.07);
-    expect(scores.get(lexicalTail.fusion.candidate_key)).toBeCloseTo(0.05);
-
-    const result = applyDeliverySelection([lexicalHead, pathOnly, lexicalTail], scores, {
-      replacePublicRelevance: false
-    });
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["lexical-head", "path-only", "lexical-tail"]);
-  });
 });

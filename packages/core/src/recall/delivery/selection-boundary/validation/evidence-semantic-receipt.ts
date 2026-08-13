@@ -101,6 +101,7 @@ function hasReceiptHeader(receipt: Record<string, unknown>): boolean {
     isUnitNumber(receipt.score) &&
     receipt.missing_channel_policy === "no_op" &&
     (receipt.observation_completeness === "complete" ||
+      receipt.observation_completeness === "bounded_candidate_prefix" ||
       receipt.observation_completeness === "winner_only_legacy");
 }
 

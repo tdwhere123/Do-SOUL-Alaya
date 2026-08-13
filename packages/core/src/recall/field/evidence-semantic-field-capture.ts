@@ -25,6 +25,7 @@ export function buildEvidenceSemanticFieldCapture(params: Readonly<{
         model: params.provider.modelId,
         schema_version: params.provider.schemaVersion
       },
+      selection_receipt: params.request.selectionReceipt ?? null,
       candidates: candidateInventory(params.request.candidates)
     }),
     channel

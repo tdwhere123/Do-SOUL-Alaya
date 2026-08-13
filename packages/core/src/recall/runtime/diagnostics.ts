@@ -178,6 +178,7 @@ function buildEvidenceEmbeddingDiagnostics(
   | "evidence_embedding_inference_calls"
   | "evidence_embedding_latency_ms"
   | "evidence_embedding_failure_class"
+  | "evidence_embedding_selection_receipt"
 > {
   return {
     evidence_embedding_status: scoring?.status ?? "not_requested",
@@ -185,7 +186,10 @@ function buildEvidenceEmbeddingDiagnostics(
     evidence_embedding_scored_count: scoring?.scoredCount ?? 0,
     evidence_embedding_inference_calls: scoring?.inferenceCalls ?? 0,
     evidence_embedding_latency_ms: scoring?.latencyMs ?? 0,
-    evidence_embedding_failure_class: scoring?.failureClass ?? null
+    evidence_embedding_failure_class: scoring?.failureClass ?? null,
+    ...(scoring?.selectionReceipt === undefined
+      ? {}
+      : { evidence_embedding_selection_receipt: scoring.selectionReceipt })
   };
 }
 

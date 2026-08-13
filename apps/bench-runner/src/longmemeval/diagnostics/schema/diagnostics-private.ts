@@ -1,5 +1,4 @@
 import { DELIVERY_BUDGET_LOSS_RANK } from "../miss/delivery-miss-taxonomy.js";
-import { z } from "zod";
 import type {
   BenchEmbeddingProviderState,
   LongMemEvalGoldDiagnostic,
@@ -15,27 +14,31 @@ import {
   readNumber,
   readNumberRecord,
   readRecord,
-  readString,
-  readStringArray
+  readString
 } from "../artifacts/diagnostics-candidate-readers.js";
-import { RecallAnswerShapePlanSchema } from "../../../harness/recall/answer-trace-schema.js";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
+import { readDiagnosticFields } from "./field/diagnostic-field-readers.js";
 import {
-  RecallFieldRefinementStopCertificateSchema,
-  RecallFiniteFieldChannelCaptureSchema,
-  RecallQueryEntityExtractionCaptureSchema,
-  RecallQueryFactFrameExtractionCaptureSchema,
-  RecallRetrievalFieldRefinementReceiptSchema
-} from "../../../harness/recall/field-capture-schema.js";
-import {
-  OpenSemanticFactorActivationReceiptSchema,
-  OpenSemanticFactorCompatibilityTraceSchema,
-  OpenSemanticFactorCompositionReceiptSchema,
-  OpenSemanticFactorFormationCaptureSchema
-} from "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
+  readAnswerRerankFailureClass,
+  readAnswerRerankStatus,
+  readEvidenceEmbeddingFailureClass,
+  readEvidenceEmbeddingSelectionReceipt,
+  readEvidenceEmbeddingStatus
+} from "./stage/evidence-stage-readers.js";
 
 export { buildObjectIdentityKey };
+
+type DiagnosticStages = Pick<NarrowRecallDiagnostics,
+  | "providerState" | "providerDegradationReason"
+  | "embeddingWorkspaceScannedCount" | "embeddingWorkspaceTruncated"
+  | "embeddingWorkspaceProviderKind" | "embeddingWorkspaceModelId"
+  | "embeddingWorkspaceSchemaVersion" | "answerRerankStatus"
+  | "answerRerankExpectedCount" | "answerRerankScoredCount"
+  | "answerRerankFailureClass" | "evidenceEmbeddingStatus"
+  | "evidenceEmbeddingExpectedCount" | "evidenceEmbeddingScoredCount"
+  | "evidenceEmbeddingInferenceCalls" | "evidenceEmbeddingLatencyMs"
+  | "evidenceEmbeddingFailureClass" | "evidenceEmbeddingSelectionReceipt">;
 
 // Recall admission-plane label for the multi-session cohort plane. Cohort
 // fan-in KPIs key on this plane to measure how the session cohort
@@ -52,67 +55,36 @@ export function readRecallDiagnostics(
   const raw = (recallResult as { readonly diagnostics?: unknown }).diagnostics;
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
-  const queryProbes = readDiagnosticQueryProbes(record.query_probes);
-  const retrievalFieldCaptures = readRetrievalFieldCaptures(record.retrieval_field_captures);
-  const retrievalFieldRefinementReceipts = readRetrievalFieldRefinementReceipts(
-    record.retrieval_field_refinement_receipts
-  );
-  const fieldRefinementStopCertificate = readFieldRefinementStopCertificate(
-    record.field_refinement_stop_certificate
-  );
-  const queryEntityExtraction = readQueryEntityExtraction(record.query_entity_extraction);
-  const queryFactFrameExtraction = readQueryFactFrameExtraction(
-    record.query_fact_frame_extraction
-  );
-  const queryOpenSemanticFactorFormation = readQueryOpenSemanticFactorFormation(
-    record.query_open_semantic_factor_formation
-  );
-  const openSemanticFactorCompatibilityTrace = readOpenSemanticFactorCompatibilityTrace(
-    record.open_semantic_factor_compatibility_trace
-  );
-  const openSemanticFactorComposition = readOpenSemanticFactorComposition(
-    record.open_semantic_factor_composition
-  );
-  const openSemanticFactorActivation = readOpenSemanticFactorActivation(
-    record.open_semantic_factor_activation
-  );
-  const answerShapePlan = readAnswerShapePlan(record.answer_shape_plan);
-  const querySoughtFacets = readStringArray(record.query_sought_facets);
-  if (record.query_probes !== undefined && queryProbes === null) return null;
-  if (record.retrieval_field_captures !== undefined && retrievalFieldCaptures === null) return null;
-  if (record.retrieval_field_refinement_receipts !== undefined &&
-      retrievalFieldRefinementReceipts === null) return null;
-  if (record.field_refinement_stop_certificate !== undefined &&
-      fieldRefinementStopCertificate === null) return null;
-  if (record.query_entity_extraction !== undefined && queryEntityExtraction === null) return null;
-  if (record.query_fact_frame_extraction !== undefined &&
-      queryFactFrameExtraction === null) return null;
-  if (record.query_open_semantic_factor_formation !== undefined &&
-      queryOpenSemanticFactorFormation === null) return null;
-  if (record.open_semantic_factor_compatibility_trace !== undefined &&
-      openSemanticFactorCompatibilityTrace === null) return null;
-  if (record.open_semantic_factor_composition !== undefined &&
-      openSemanticFactorComposition === null) return null;
-  if (record.open_semantic_factor_activation !== undefined &&
-      openSemanticFactorActivation === null) return null;
-  if (record.answer_shape_plan != null && answerShapePlan === null) return null;
-  if (record.query_sought_facets !== undefined && querySoughtFacets === null) return null;
+  const fields = readDiagnosticFields(record);
+  const stages = readDiagnosticStages(record, embeddingMode);
+  if (fields === null || stages === null) return null;
   const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
-    queryProbes,
-    retrievalFieldCaptures,
-    retrievalFieldRefinementReceipts,
-    fieldRefinementStopCertificate,
-    queryEntityExtraction,
-    queryFactFrameExtraction,
-    queryOpenSemanticFactorFormation,
-    openSemanticFactorCompatibilityTrace,
-    openSemanticFactorComposition,
-    openSemanticFactorActivation,
-    answerShapePlan,
-    querySoughtFacets,
+    ...fields,
     ...buildNarrowCandidateEvidence(candidates),
+    ...stages,
+    packetPlanTrace: readPacketPlanTrace(record.packet_plan_trace),
+    graphExpansionPlaneCountPerHop:
+      readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
+      createEmptyGraphExpansionPlaneCountPerHop(),
+    graphExpansionPlaneCountPerEdgeType:
+      readGraphExpansionPlaneCountPerEdgeType(record.graph_expansion_plane_count_per_edge_type) ??
+      createEmptyGraphExpansionPlaneCountPerEdgeType(),
+    phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
+  };
+}
+
+function readDiagnosticStages(
+  record: Readonly<Record<string, unknown>>,
+  embeddingMode: "disabled" | "env"
+): DiagnosticStages | null {
+  const evidenceEmbeddingSelectionReceipt = readEvidenceEmbeddingSelectionReceipt(
+    record.evidence_embedding_selection_receipt
+  );
+  if (record.evidence_embedding_selection_receipt !== undefined &&
+      evidenceEmbeddingSelectionReceipt === null) return null;
+  return {
     providerState: readProviderState(record, embeddingMode),
     providerDegradationReason: readProviderDegradationReason(record),
     embeddingWorkspaceScannedCount:
@@ -141,88 +113,8 @@ export function readRecallDiagnostics(
     evidenceEmbeddingFailureClass: readEvidenceEmbeddingFailureClass(
       record.evidence_embedding_failure_class
     ),
-    packetPlanTrace: readPacketPlanTrace(record.packet_plan_trace),
-    graphExpansionPlaneCountPerHop:
-      readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
-      createEmptyGraphExpansionPlaneCountPerHop(),
-    graphExpansionPlaneCountPerEdgeType:
-      readGraphExpansionPlaneCountPerEdgeType(record.graph_expansion_plane_count_per_edge_type) ??
-      createEmptyGraphExpansionPlaneCountPerEdgeType(),
-    phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
+    evidenceEmbeddingSelectionReceipt
   };
-}
-
-function readRetrievalFieldCaptures(
-  value: unknown
-): NarrowRecallDiagnostics["retrievalFieldCaptures"] {
-  if (value === undefined) return null;
-  const parsed = z.array(RecallFiniteFieldChannelCaptureSchema).readonly().safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readRetrievalFieldRefinementReceipts(
-  value: unknown
-): NarrowRecallDiagnostics["retrievalFieldRefinementReceipts"] {
-  if (value === undefined) return null;
-  const parsed = z.array(RecallRetrievalFieldRefinementReceiptSchema)
-    .readonly().safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readFieldRefinementStopCertificate(
-  value: unknown
-): NarrowRecallDiagnostics["fieldRefinementStopCertificate"] {
-  if (value === undefined) return null;
-  const parsed = RecallFieldRefinementStopCertificateSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readQueryEntityExtraction(
-  value: unknown
-): NarrowRecallDiagnostics["queryEntityExtraction"] {
-  if (value === undefined) return null;
-  const parsed = RecallQueryEntityExtractionCaptureSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readQueryFactFrameExtraction(
-  value: unknown
-): NarrowRecallDiagnostics["queryFactFrameExtraction"] {
-  if (value === undefined) return null;
-  const parsed = RecallQueryFactFrameExtractionCaptureSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readQueryOpenSemanticFactorFormation(
-  value: unknown
-): NarrowRecallDiagnostics["queryOpenSemanticFactorFormation"] {
-  if (value === undefined) return null;
-  const parsed = OpenSemanticFactorFormationCaptureSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readOpenSemanticFactorCompatibilityTrace(
-  value: unknown
-): NarrowRecallDiagnostics["openSemanticFactorCompatibilityTrace"] {
-  if (value === undefined) return null;
-  const parsed = OpenSemanticFactorCompatibilityTraceSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readOpenSemanticFactorComposition(
-  value: unknown
-): NarrowRecallDiagnostics["openSemanticFactorComposition"] {
-  if (value === undefined) return null;
-  const parsed = OpenSemanticFactorCompositionReceiptSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function readOpenSemanticFactorActivation(
-  value: unknown
-): NarrowRecallDiagnostics["openSemanticFactorActivation"] {
-  if (value === undefined) return null;
-  const parsed = OpenSemanticFactorActivationReceiptSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
 }
 
 function readPacketPlanTrace(
@@ -230,14 +122,6 @@ function readPacketPlanTrace(
 ): NarrowRecallDiagnostics["packetPlanTrace"] {
   if (value == null) return null;
   return RecallPacketPlanTraceSchema.parse(value);
-}
-
-function readAnswerShapePlan(
-  value: unknown
-): NarrowRecallDiagnostics["answerShapePlan"] {
-  if (value == null) return null;
-  const parsed = RecallAnswerShapePlanSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
 }
 
 function buildNarrowCandidateEvidence(
@@ -267,51 +151,6 @@ function buildNarrowCandidateEvidence(
     candidatesByCandidateKey: candidates.byCandidateKey,
     candidateIdentityObservations: candidates.identityObservations
   };
-}
-
-function readAnswerRerankStatus(
-  value: unknown
-): NarrowRecallDiagnostics["answerRerankStatus"] {
-  const status = readString(value);
-  if (
-    status === "not_requested" || status === "not_applicable" ||
-    status === "returned" || status === "failed"
-  ) return status;
-  return null;
-}
-
-function readAnswerRerankFailureClass(
-  value: unknown
-): NarrowRecallDiagnostics["answerRerankFailureClass"] {
-  if (value === null) return null;
-  const failure = readString(value);
-  if (
-    failure === "invalid_score_count" || failure === "invalid_score_value" ||
-    failure === "service_error"
-  ) return failure;
-  return null;
-}
-
-function readEvidenceEmbeddingStatus(
-  value: unknown
-): NarrowRecallDiagnostics["evidenceEmbeddingStatus"] {
-  return value === "not_requested" ||
-    value === "not_applicable" ||
-    value === "returned" ||
-    value === "failed"
-    ? value
-    : null;
-}
-
-function readEvidenceEmbeddingFailureClass(
-  value: unknown
-): NarrowRecallDiagnostics["evidenceEmbeddingFailureClass"] {
-  return value === "provider_unavailable" ||
-    value === "query_embedding_failed" ||
-    value === "candidate_embedding_failed" ||
-    value === "service_error"
-    ? value
-    : null;
 }
 
 function readNonnegativeInteger(value: unknown): number | null {

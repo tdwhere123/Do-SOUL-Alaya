@@ -11,11 +11,11 @@ import {
 import {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
-  BenchEvidenceEmbeddingFailureClassSchema,
-  BenchEvidenceEmbeddingStatusSchema,
   RecallMultiSeedGraphFanInDiagnosticsSchema,
   RecallPacketPlanTraceSchema
 } from "./recall-diagnostics-support-schema.js";
+import { EvidenceEmbeddingDiagnosticsSchemaShape } from
+  "./evidence/evidence-scoring-schema.js";
 import {
   RecallFloodEdgeTraceV1Schema,
   RecallH1FuelCoverageSchemaShape,
@@ -43,6 +43,8 @@ export {
   BenchEvidenceEmbeddingFailureClassSchema,
   BenchEvidenceEmbeddingStatusSchema
 } from "./recall-diagnostics-support-schema.js";
+export { EvidenceCandidateScoringSelectionReceiptSchema } from
+  "./evidence/evidence-scoring-schema.js";
 
 const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
 const RecallFusionStreamRankSchema = z
@@ -360,14 +362,7 @@ export const BenchRecallDiagnosticsSchema = z
       "not_attempted",
       "requested"
     ]).optional(),
-    evidence_embedding_status:
-      BenchEvidenceEmbeddingStatusSchema.default("not_requested"),
-    evidence_embedding_expected_count: z.number().int().nonnegative().default(0),
-    evidence_embedding_scored_count: z.number().int().nonnegative().default(0),
-    evidence_embedding_inference_calls: z.number().int().nonnegative().default(0),
-    evidence_embedding_latency_ms: z.number().nonnegative().default(0),
-    evidence_embedding_failure_class:
-      BenchEvidenceEmbeddingFailureClassSchema.nullable().default(null),
+    ...EvidenceEmbeddingDiagnosticsSchemaShape,
     provider_degradation_reason: z.string().nullable(),
     answer_rerank_status: BenchAnswerRerankStatusSchema,
     answer_rerank_expected_count: z.number().int().nonnegative(),

@@ -41,8 +41,6 @@ import { createRecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
 import { retainVerifiedTemporalAnswerHead } from
   "./admission/answer-head/verified-temporal-answer-head.js";
-import { retainUniqueFusionFieldLeader } from
-  "./admission/answer-head/fusion-field-leader.js";
 
 export type {
   FineAssessmentAdmissionReceipt,
@@ -70,14 +68,8 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
-  const fusionHead = retainUniqueFusionFieldLeader({
-    selection: evidenceHead,
-    maxEntries: context.config.budgets.max_entries,
-    selectDelivered: (candidates) => collectAdmittedCandidates(candidates, context),
-    keyOf: buildRecallCandidateDedupeKey
-  });
   const temporalHead = retainVerifiedTemporalAnswerHead({
-    selection: fusionHead,
+    selection: evidenceHead,
     queryProbes: context.supplementaryData.queryProbes,
     contextsByMemoryId:
       context.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {},

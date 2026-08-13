@@ -80,7 +80,10 @@ export interface RecallEvidenceSemanticActivationReceipt {
   readonly score: number;
   readonly winner: Readonly<RecallEvidenceSemanticWinnerReceipt>;
   readonly observations: readonly Readonly<RecallEvidenceSemanticWinnerReceipt>[];
-  readonly observation_completeness: "complete" | "winner_only_legacy";
+  readonly observation_completeness:
+    | "complete"
+    | "bounded_candidate_prefix"
+    | "winner_only_legacy";
   readonly missing_channel_policy: "no_op";
 }
 

@@ -86,7 +86,11 @@ export const EvidenceSemanticActivationReceiptSchema = z.object({
   score: z.number().min(0).max(1),
   winner: EvidenceSemanticObservationSchema,
   observations: z.array(EvidenceSemanticObservationSchema).min(1).readonly(),
-  observation_completeness: z.enum(["complete", "winner_only_legacy"]),
+  observation_completeness: z.enum([
+    "complete",
+    "bounded_candidate_prefix",
+    "winner_only_legacy"
+  ]),
   missing_channel_policy: z.literal("no_op")
 }).strict().superRefine((receipt, context) => {
   if (!sameSemanticObservation(receipt.winner, receipt.observations[0]!)) {

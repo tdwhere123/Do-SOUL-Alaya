@@ -37,6 +37,9 @@ export async function scoreTransientEvidenceCandidates(
   const result = await scoreEvidenceCandidates(params, dependencies);
   return Object.freeze({
     ...result,
+    ...(params.selectionReceipt === undefined
+      ? {}
+      : { selectionReceipt: params.selectionReceipt }),
     fieldChannelCapture: buildEvidenceSemanticFieldCapture({
       request: params,
       provider: dependencies.provider,
@@ -83,7 +86,8 @@ async function scoreEvidenceCandidates(
     const activations = aggregateCandidateActivations(
       candidates,
       embeddings,
-      scoreCosine
+      scoreCosine,
+      params.selectionReceipt
     );
     return scoringResult(
       "returned",
@@ -107,8 +111,10 @@ async function scoreEvidenceCandidates(
 function aggregateCandidateActivations(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
   embeddings: readonly Float32Array[],
-  scoreCosine: (embedding: Float32Array) => number
+  scoreCosine: (embedding: Float32Array) => number,
+  selectionReceipt: ScoreEvidenceCandidatesParams["selectionReceipt"]
 ): ReadonlyMap<string, Readonly<EvidenceCandidateScoringReceipt>> {
+  const completeness = buildObservationCompletenessLookup(selectionReceipt);
   const observations = new Map<
     string,
     Map<string, Readonly<EvidenceCandidateScoringWinner>>
@@ -137,10 +143,24 @@ function aggregateCandidateActivations(
       score: winner.score,
       winner,
       observations: ranked,
-      observation_completeness: "complete",
+      observation_completeness: completeness(candidateKey),
       missing_channel_policy: "no_op"
     })] as const;
   }));
+}
+
+function buildObservationCompletenessLookup(
+  receipt: ScoreEvidenceCandidatesParams["selectionReceipt"]
+): (candidateKey: string) => EvidenceCandidateScoringReceipt["observation_completeness"] {
+  if (receipt === undefined) return () => "complete";
+  const inputs = new Set(receipt.input_candidate_keys);
+  const fullEvidence = new Set(receipt.full_evidence_candidate_keys);
+  const ownerGist = new Set(receipt.owner_gist_candidate_keys);
+  return (candidateKey) => !inputs.has(candidateKey) ||
+    (fullEvidence.has(candidateKey) &&
+      (!receipt.owner_gist_enabled || ownerGist.has(candidateKey)))
+    ? "complete"
+    : "bounded_candidate_prefix";
 }
 
 function observationIdentity(

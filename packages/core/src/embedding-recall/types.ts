@@ -255,6 +255,23 @@ export interface EvidenceCandidateScoringResult {
   readonly latencyMs: number;
   readonly failureClass: EvidenceCandidateScoringFailureClass | null;
   readonly fieldChannelCapture?: Readonly<RecallFiniteFieldChannelCapture>;
+  readonly selectionReceipt?: Readonly<EvidenceCandidateScoringSelectionReceipt>;
+}
+
+export interface EvidenceCandidateScoringSelectionReceipt {
+  readonly schema_version: 1;
+  readonly operator_id: "ordered_candidate_prefix_v1";
+  readonly input_candidate_keys: readonly string[];
+  readonly owner_gist_enabled: boolean;
+  readonly owner_gist_candidate_keys: readonly string[];
+  readonly full_evidence_candidate_keys: readonly string[];
+  readonly owner_gist_limit: 16;
+  readonly full_evidence_limit: 32;
+  readonly input_memory_count: number;
+  readonly owner_gist_selected_count: number;
+  readonly full_evidence_selected_count: number;
+  readonly owner_gist_excluded_count: number;
+  readonly full_evidence_excluded_count: number;
 }
 
 export interface EvidenceCandidateScoringWinner {
@@ -270,7 +287,7 @@ export interface EvidenceCandidateScoringReceipt {
   readonly score: number;
   readonly winner: Readonly<EvidenceCandidateScoringWinner>;
   readonly observations: readonly Readonly<EvidenceCandidateScoringWinner>[];
-  readonly observation_completeness: "complete";
+  readonly observation_completeness: "complete" | "bounded_candidate_prefix";
   readonly missing_channel_policy: "no_op";
 }
 
@@ -280,6 +297,7 @@ export interface ScoreEvidenceCandidatesParams {
   readonly queryText: string;
   readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
   readonly candidates: readonly Readonly<EvidenceEmbeddingCandidate>[];
+  readonly selectionReceipt?: Readonly<EvidenceCandidateScoringSelectionReceipt>;
 }
 
 export interface EmbeddingRecallRequestScoreSnapshot {

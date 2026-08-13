@@ -247,6 +247,7 @@ export function stripReplayCandidatePoolsForGateWrite(
       field_refinement_stop_certificate: null,
       query_entity_extraction: null,
       query_fact_frame_extraction: null,
+      evidence_embedding_selection_receipt: null,
       query_sought_facets: null,
       ...(question.cohort_ledger === undefined
         ? {}

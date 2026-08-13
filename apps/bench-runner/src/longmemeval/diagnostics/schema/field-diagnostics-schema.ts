@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { EvidenceCandidateScoringSelectionReceiptSchema } from
+  "../../../harness/recall/evidence/evidence-scoring-schema.js";
 import {
   RecallFieldRefinementStopCertificateSchema,
   RecallFiniteFieldChannelCaptureSchema,
@@ -14,6 +16,8 @@ import {
 } from "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
 
 export const LongMemEvalFieldDiagnosticSchemaShape = {
+  evidence_embedding_selection_receipt:
+    EvidenceCandidateScoringSelectionReceiptSchema.nullable().optional(),
   retrieval_field_captures:
     z.array(RecallFiniteFieldChannelCaptureSchema).readonly().nullable().optional(),
   retrieval_field_refinement_receipts:
