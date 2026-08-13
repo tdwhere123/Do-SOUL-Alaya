@@ -11,17 +11,12 @@ export type EmbeddingRankConsensusProtection = Readonly<{
   readonly rankLimit: number;
 }>;
 
-export type EmbeddingRankConsensusProfile =
-  | "balanced"
-  | "aggregate_coverage";
-
 export type EmbeddingRankConsensusParams<
   T extends EmbeddingRankConsensusCandidate
 > = Readonly<{
   readonly baseline: readonly T[];
   readonly candidates: readonly T[];
   readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-  readonly rankProfile?: EmbeddingRankConsensusProfile;
 }>;
 
 export type EmbeddingRankConsensusDecision =
@@ -57,7 +52,6 @@ export type EmbeddingRankConsensusPlan<
   readonly consensusHead: readonly T[];
   readonly immutableTail: readonly T[];
   readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-  readonly rankProfile: EmbeddingRankConsensusProfile;
   readonly decision: EmbeddingRankConsensusDecision;
 }>;
 
@@ -78,7 +72,6 @@ type ScheduledProtection<T> = Readonly<{
 export function resolveEmbeddingRankConsensusPlan<
   T extends EmbeddingRankConsensusCandidate
 >(params: EmbeddingRankConsensusParams<T>): EmbeddingRankConsensusPlan<T> {
-  const rankProfile = params.rankProfile ?? "balanced";
   const headWidth = resolveHeadWidth(params.baseline.length);
   const baselineHead = params.baseline.slice(0, headWidth);
   const baselineTail = params.baseline.slice(headWidth);
@@ -89,9 +82,7 @@ export function resolveEmbeddingRankConsensusPlan<
   );
   const embeddingHead = [...embeddingHeadByKey.values()]
     .sort(compareEmbeddingHeadEntries);
-  const rankedConsensusHead = rankConsensusHead(
-    baselineHead, embeddingHeadByKey, rankProfile
-  )
+  const rankedConsensusHead = rankConsensusHead(baselineHead, embeddingHeadByKey)
     .slice(0, headWidth)
     .map((entry) => entry.candidate);
   const consensusHead = composeProtectedConsensusHead(
@@ -112,38 +103,22 @@ export function resolveEmbeddingRankConsensusPlan<
     protectedCandidates,
     headWidth
   });
-  return freezeConsensusPlan({
+  const candidates = decision.status === "accepted"
+    ? proposedCandidates
+    : params.baseline;
+  const immutableTail = proposedCandidates.slice(headWidth);
+
+  return deepFreeze({
     baseline: params.baseline,
     proposedCandidates,
+    candidates,
     headWidth,
     baselineHead,
     embeddingHead,
     consensusHead,
+    immutableTail,
     protectedCandidates,
-    rankProfile,
     decision
-  });
-}
-
-function freezeConsensusPlan<T extends EmbeddingRankConsensusCandidate>(
-  plan: Readonly<{
-    readonly baseline: readonly T[];
-    readonly proposedCandidates: readonly T[];
-    readonly headWidth: number;
-    readonly baselineHead: readonly T[];
-    readonly embeddingHead: readonly EmbeddingRankConsensusHeadEntry<T>[];
-    readonly consensusHead: readonly T[];
-    readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-    readonly rankProfile: EmbeddingRankConsensusProfile;
-    readonly decision: EmbeddingRankConsensusDecision;
-  }>
-): EmbeddingRankConsensusPlan<T> {
-  return deepFreeze({
-    ...plan,
-    candidates: plan.decision.status === "accepted"
-      ? plan.proposedCandidates
-      : plan.baseline,
-    immutableTail: plan.proposedCandidates.slice(plan.headWidth)
   });
 }
 
@@ -190,7 +165,7 @@ export function entersEmbeddingRankConsensusHead<
     new Set()
   );
   return embeddingHead.has(contender.candidateKey) &&
-    rankConsensusHead(baselineHead, embeddingHead, "balanced")
+    rankConsensusHead(baselineHead, embeddingHead)
       .slice(0, baselineHead.length)
       .some((entry) => entry.candidateKey === contender.candidateKey);
 }
@@ -315,10 +290,8 @@ function isEligibleEmbeddingRank(
 
 function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   baselineHead: readonly T[],
-  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>,
-  rankProfile: EmbeddingRankConsensusProfile
+  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>
 ): readonly ConsensusEntry<T>[] {
-  const baselineWeight = rankProfile === "aggregate_coverage" ? 0.5 : 1;
   const entries = new Map<string, ConsensusEntry<T>>();
   baselineHead.forEach((candidate, index) => {
     if (entries.has(candidate.candidateKey)) return;
@@ -326,7 +299,7 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
     entries.set(candidate.candidateKey, Object.freeze({
       candidate,
       candidateKey: candidate.candidateKey,
-      reciprocalScore: baselineWeight / (index + 1) +
+      reciprocalScore: 1 / (index + 1) +
         (embedding === undefined ? 0 : 1 / embedding.embeddingRank),
       ...(embedding === undefined
         ? {}

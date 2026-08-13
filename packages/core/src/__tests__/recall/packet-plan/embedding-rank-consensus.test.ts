@@ -90,35 +90,6 @@ describe("embedding-rank consensus packet plan", () => {
     expect(keys(planned)).toEqual(["b", "a", "tail"]);
   });
 
-  it("uses the aggregate coverage profile inside the same protected consensus owner", () => {
-    const baseline = packet(
-      "a", "b", "c", "d", "e", "tail-a", "tail-b", "tail-c", "tail-d", "tail-e"
-    );
-    const candidates = [
-      ...baseline,
-      candidate("c", 0, 1),
-      candidate("novel-a", 0, 2),
-      candidate("novel-b", 0, 3),
-      candidate("novel-c", 0, 4),
-      candidate("novel-d", 0, 5)
-    ];
-
-    const resolved = resolveEmbeddingRankConsensusPlan({
-      baseline,
-      candidates,
-      protectedCandidates: [{ candidateKey: "a", rankLimit: 1 }],
-      rankProfile: "aggregate_coverage"
-    });
-
-    expect(resolved.rankProfile).toBe("aggregate_coverage");
-    expect(keys(resolved.consensusHead)).toEqual([
-      "a", "c", "novel-a", "novel-b", "novel-c"
-    ]);
-    expect(keys(resolved.candidates).slice(0, 5)).toEqual(
-      keys(resolved.consensusHead)
-    );
-  });
-
   it("orders equal reciprocal-rank scores by fused score, then key, independent of input order", () => {
     const baseline = packet(
       "incumbent-a",

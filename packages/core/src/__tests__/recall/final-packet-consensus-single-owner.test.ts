@@ -149,7 +149,6 @@ describe("final packet consensus selection ownership", () => {
     }));
     expect(buildFinalPacketConsensusObservation(plan, actual, true))
       .toMatchObject({
-        consensus_rank_profile: "balanced",
         embedding_rank_basis: "source_semantic_rrf_then_packet_relative",
         source_semantic_intermediate_candidate_keys:
           plan.sourceSemanticIntermediate?.map((candidate) => candidate.candidateKey),
@@ -159,27 +158,6 @@ describe("final packet consensus selection ownership", () => {
             embedding_rank: entry.embeddingRank
           }))
       });
-  });
-
-  it("records aggregate coverage as a profile of the single consensus owner", () => {
-    const sourceCandidates = consensusCandidates();
-    const plan = resolveFinalPacketConsensusPlan({
-      baseline: sourceCandidates.slice(0, 10),
-      sourceCandidates,
-      protectedCandidates: [],
-      queryProbes: compileRecallQueryProbes(
-        "How many different doctors did I visit?"
-      )
-    });
-    const actual = plan.candidates.map(({ sourceCandidate }) => ({
-      object_id: sourceCandidate.entry.object_id,
-      object_kind: sourceCandidate.objectKind,
-      origin_plane: sourceCandidate.originPlane ?? "workspace_local"
-    }));
-
-    expect(plan.rankProfile).toBe("aggregate_coverage");
-    expect(buildFinalPacketConsensusObservation(plan, actual, true))
-      .toMatchObject({ consensus_rank_profile: "aggregate_coverage" });
   });
 
 });

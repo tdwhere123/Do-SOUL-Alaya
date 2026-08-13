@@ -22,10 +22,6 @@ import {
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../../runtime/recall-service-results.js";
-import {
-  compileRecallAnswerShapePlan,
-  recallAnswerShapeSupportsSingleSemanticLeader
-} from "../../query/recall-answer-shape-plan.js";
 
 export type FinalPacketConsensusCandidate = Readonly<{
   readonly candidateKey: string;
@@ -69,8 +65,7 @@ export function resolveFinalPacketConsensusPlan(
   const embeddingPlan = resolveEmbeddingRankConsensusPlan({
     baseline,
     candidates: consensusCandidates,
-    protectedCandidates: baselineProtections,
-    rankProfile: resolveRankProfile(params.queryProbes)
+    protectedCandidates: baselineProtections
   });
   const nestedPlan = sourceSemanticRanks === undefined ||
     embeddingPlan.decision.status === "rejected"
@@ -153,7 +148,6 @@ export function buildFinalPacketConsensusObservation(
       candidate_key: entry.candidateKey,
       rank_limit: entry.rankLimit
     })),
-    consensus_rank_profile: plan.rankProfile,
     decision
   });
   assertRecallPacketPlanObservation(observation);
@@ -246,19 +240,8 @@ function resolvePacketRelativeConsensus(
   return resolveEmbeddingRankConsensusPlan({
     baseline: relativePacket,
     candidates: relativePacket,
-    protectedCandidates: initial.protectedCandidates,
-    rankProfile: initial.rankProfile
+    protectedCandidates: initial.protectedCandidates
   });
-}
-
-function resolveRankProfile(
-  queryProbes: Readonly<RecallQueryProbes> | undefined
-) {
-  if (queryProbes === undefined) return "balanced" as const;
-  const answerShape = compileRecallAnswerShapePlan(queryProbes);
-  return recallAnswerShapeSupportsSingleSemanticLeader(answerShape)
-    ? "balanced" as const
-    : "aggregate_coverage" as const;
 }
 
 function composeSourceSemanticPlan(
