@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAPTURE_PARITY_GEOMETRY_BASIS,
   compareCaptureParity,
   createCaptureParityView,
   type CaptureParityView
@@ -12,17 +13,23 @@ describe("capture-parity contract", () => {
   it("reports parity for identical arms from an extracted eval fixture", () => {
     const view = extractCaptureParityViewFromEval(evalFixture());
 
-    const report = compareCaptureParity([view], [view]);
+    const report = compareCaptureParity([view], [view], 1);
 
     expect(view.geometry.answer_shape_plan).toMatchObject({
       status: "high_confidence",
       shape: "place"
     });
+    expect("demand" in view.geometry).toBe(false);
     expect(view.membership).toEqual([
       { object_kind: "memory_entry", object_id: "memory-yoga" }
     ]);
     expect(report.parity).toBe(true);
+    expect(report.schema_version).toBe(2);
+    expect(report.geometry_basis).toBe(CAPTURE_PARITY_GEOMETRY_BASIS);
+    expect(report.sidecar_question_count).toBe(1);
+    expect(report.window_length).toBe(1);
     expect(report.first_difference).toBeNull();
+    expect(report.questions[0]?.digests.off.geometry).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 
   it("fails closed when membership is injected on one arm", () => {
@@ -35,11 +42,44 @@ describe("capture-parity contract", () => {
       ]
     });
 
-    const report = compareCaptureParity([off], [on]);
+    const report = compareCaptureParity([off], [on], 1);
 
     expect(report.parity).toBe(false);
     expect(report.summary.membership).toBe("fail");
     expect(report.first_difference?.message).toContain("injected-member");
+  });
+
+  it("fails closed when two eval fixtures differ only in delivered_results", () => {
+    const off = extractCaptureParityViewFromEval(evalFixture());
+    const on = extractCaptureParityViewFromEval(evalFixture({
+      delivered_results: [
+        { object_id: "memory-yoga", object_kind: "memory_entry" },
+        { object_id: "injected-member", object_kind: "memory_entry" }
+      ]
+    }));
+
+    const report = compareCaptureParity([off], [on], 1);
+
+    expect(report.parity).toBe(false);
+    expect(report.summary.membership).toBe("fail");
+    expect(report.first_difference?.axis).toBe("membership");
+    expect(report.first_difference?.message).toContain("injected-member");
+  });
+
+  it("fails closed when two eval fixtures differ only in observation_keys", () => {
+    const off = extractCaptureParityViewFromEval(evalFixture({
+      retrieval_field_captures: [fieldCapture("lexical_relaxed_exact", ["yoga-key"])]
+    }));
+    const on = extractCaptureParityViewFromEval(evalFixture({
+      retrieval_field_captures: [fieldCapture("lexical_relaxed_exact", ["drifted-key"])]
+    }));
+
+    const report = compareCaptureParity([off], [on], 1);
+
+    expect(report.parity).toBe(false);
+    expect(report.summary.channels).toBe("fail");
+    expect(report.first_difference?.axis).toBe("channels");
+    expect(report.first_difference?.message).toContain("drifted-key");
   });
 
   it("does not fail an embedding-absence mask difference", () => {
@@ -51,10 +91,43 @@ describe("capture-parity contract", () => {
       )
     });
 
-    const report = compareCaptureParity([observed], [absent]);
+    const report = compareCaptureParity([observed], [absent], 1);
 
     expect(report.parity).toBe(true);
     expect(report.summary.exercised_masks).toContain("embedding_observation");
+    expect(report.questions[0]?.exercised_masks).toContain("embedding_observation");
+  });
+
+  it("does not excuse a lexical channel mismatch when embedding observation is masked", () => {
+    const observed = withLexical(
+      withEmbedding(extractCaptureParityViewFromEval(evalFixture())),
+      ["lexical-original"]
+    );
+    const maskedAndDrifted = withLexical(
+      createCaptureParityView({
+        ...observed,
+        channels: observed.channels.filter(
+          (channel) => channel.channel_id !== "object_embedding_pool"
+        )
+      }),
+      ["lexical-drifted"]
+    );
+
+    const report = compareCaptureParity([observed], [maskedAndDrifted], 1);
+
+    expect(report.parity).toBe(false);
+    expect(report.summary.channels).toBe("fail");
+    expect(report.questions[0]?.exercised_masks).toContain("embedding_observation");
+    expect(report.first_difference?.message).toContain("lexical-drifted");
+  });
+
+  it("throws when retrieval_field_captures are null or absent", () => {
+    expect(() => extractCaptureParityViewFromEval(evalFixture({
+      retrieval_field_captures: null
+    }))).toThrow(/retrieval_field_captures missing/);
+    expect(() => extractCaptureParityViewFromEval(evalFixture({
+      retrieval_field_captures: undefined
+    }))).toThrow(/retrieval_field_captures missing/);
   });
 });
 
@@ -72,7 +145,13 @@ describe("capture-parity CLI", () => {
   });
 });
 
-function evalFixture() {
+function evalFixture(patch: {
+  delivered_results?: readonly Readonly<{
+    object_id: string;
+    object_kind: string;
+  }>[];
+  retrieval_field_captures?: unknown;
+} = {}): Parameters<typeof extractCaptureParityViewFromEval>[0] {
   return {
     questionId: "yoga-place",
     diagnostics: {
@@ -80,7 +159,9 @@ function evalFixture() {
         normalized_query: "where do i take yoga classes",
         lexical_terms: ["yoga", "classes"]
       },
-      retrieval_field_captures: [],
+      ...("retrieval_field_captures" in patch
+        ? { retrieval_field_captures: patch.retrieval_field_captures }
+        : { retrieval_field_captures: [] }),
       answer_shape_plan: {
         schema_version: 1 as const,
         status: "high_confidence" as const,
@@ -89,13 +170,27 @@ function evalFixture() {
         relation_terms: []
       },
       query_sought_facets: [],
-      delivered_results: [{
+      delivered_results: patch.delivered_results ?? [{
         object_id: "memory-yoga",
         object_kind: "memory_entry"
       }],
       packet_plan_trace: null
     }
   } as Parameters<typeof extractCaptureParityViewFromEval>[0];
+}
+
+function fieldCapture(channelId: string, keys: readonly string[]) {
+  return {
+    channel: {
+      channel_id: channelId,
+      status: "complete",
+      observations: keys.map((candidate_key, index) => ({
+        candidate_key,
+        observation_id: `${channelId}-${index}`,
+        rank: index + 1
+      }))
+    }
+  };
 }
 
 function withEmbedding(view: CaptureParityView): CaptureParityView {
@@ -107,6 +202,23 @@ function withEmbedding(view: CaptureParityView): CaptureParityView {
         channel_id: "object_embedding_pool",
         status: "complete",
         observation_keys: ["embedding-candidate"]
+      }
+    ]
+  });
+}
+
+function withLexical(
+  view: CaptureParityView,
+  observationKeys: readonly string[]
+): CaptureParityView {
+  return createCaptureParityView({
+    ...view,
+    channels: [
+      ...view.channels.filter((channel) => channel.channel_id !== "lexical_relaxed_exact"),
+      {
+        channel_id: "lexical_relaxed_exact",
+        status: "complete",
+        observation_keys: [...observationKeys]
       }
     ]
   });

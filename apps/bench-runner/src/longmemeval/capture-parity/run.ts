@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  assertCaptureParityWindow,
   compareCaptureParity,
   type CaptureParityReport,
   type CaptureParityView
@@ -45,14 +46,26 @@ export async function runCaptureParity(
 ): Promise<Readonly<CaptureParityReport>> {
   const captureOff = await collectArm(options, ambientEnv, false);
   const captureOn = await collectArm(options, ambientEnv, true);
-  return compareCaptureParity(captureOff, captureOn);
+  if (captureOff.sidecarQuestionCount !== captureOn.sidecarQuestionCount) {
+    throw new Error(
+      `capture parity sidecar_question_count differs: off=${captureOff.sidecarQuestionCount} on=${captureOn.sidecarQuestionCount}`
+    );
+  }
+  return compareCaptureParity(
+    captureOff.views,
+    captureOn.views,
+    captureOff.sidecarQuestionCount
+  );
 }
 
 async function collectArm(
   options: CaptureParityRunOptions,
   ambientEnv: Readonly<Record<string, string | undefined>>,
   captureOn: boolean
-): Promise<readonly CaptureParityView[]> {
+): Promise<Readonly<{
+  views: readonly CaptureParityView[];
+  sidecarQuestionCount: number;
+}>> {
   const arm = captureOn ? "capture-on" : "capture-off";
   const dataDirRoot = join(options.dataDirRoot, arm);
   const historyRoot = join(options.historyRoot, arm);
@@ -64,7 +77,14 @@ async function collectArm(
     undefined,
     env
   );
-  return collectArmQuestions(context, arm);
+  assertCaptureParityWindow(context.window.length, context.sidecarQuestionCount);
+  const views = await collectArmQuestions(context, arm);
+  if (views.length !== context.window.length) {
+    throw new Error(
+      `capture parity collected ${views.length} questions for window_length=${context.window.length}`
+    );
+  }
+  return { views, sidecarQuestionCount: context.sidecarQuestionCount };
 }
 
 async function collectArmQuestions(

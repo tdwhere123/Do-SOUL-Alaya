@@ -80,15 +80,22 @@ export * from "./recall/recall-service.js";
 export * from "./recall/query/recall-query-probes.js";
 export { compileRecallQueryDemand } from "./recall/query/recall-query-demand.js";
 export {
+  CAPTURE_PARITY_GEOMETRY_BASIS,
+  assertCaptureParityWindow,
   compareCaptureParity,
   createCaptureParityView,
   extractCaptureParityView,
+  mapCaptureParityChannels,
+  requireRetrievalFieldCaptures,
   type CaptureParityAxis,
+  type CaptureParityAxisDigests,
   type CaptureParityChannel,
   type CaptureParityDifference,
   type CaptureParityGeometry,
+  type CaptureParityGeometryBasis,
   type CaptureParityMask,
   type CaptureParityMember,
+  type CaptureParityQuestionDigests,
   type CaptureParityQuestionVerdict,
   type CaptureParityReport,
   type CaptureParityView

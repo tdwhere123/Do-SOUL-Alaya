@@ -22,6 +22,9 @@ export async function runCaptureParityCommand(
     process.stdout.write(`${JSON.stringify({
       parity: report.parity,
       question_count: report.question_count,
+      sidecar_question_count: report.sidecar_question_count,
+      window_length: report.window_length,
+      geometry_basis: report.geometry_basis,
       channels: report.summary.channels,
       geometry: report.summary.geometry,
       membership: report.summary.membership,
