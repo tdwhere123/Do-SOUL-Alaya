@@ -121,6 +121,7 @@ export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
 export {
+  assertFineAssessmentOrderLedgerAttribution,
   buildFineAssessmentOrderLedger,
   type FineAssessmentMembershipOwner,
   type FineAssessmentOrderLedger

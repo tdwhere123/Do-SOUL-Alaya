@@ -12,27 +12,44 @@ export type FineAssessmentMembershipOwner =
   | "final_budget"
   | "unavailable";
 
+type FineAssessmentOrderLedgerCandidate = Readonly<{
+  readonly candidate_key: string;
+  readonly ranks: Readonly<{
+    readonly coarse: number | null;
+    readonly fusion: number;
+    readonly deep_head: number;
+    readonly coverage: number;
+    readonly consensus: number;
+    readonly final: number;
+  }>;
+  readonly first_membership_changing_owner:
+    FineAssessmentMembershipOwner | null;
+  readonly membership_changing_owners:
+    readonly FineAssessmentMembershipOwner[];
+}>;
+
 export type FineAssessmentOrderLedger = Readonly<{
   readonly schema_version: 1;
   readonly candidate_count: number;
   readonly delivered_count: number;
   readonly coarse_identity: "captured" | "unavailable";
-  readonly candidates: readonly Readonly<{
-    readonly candidate_key: string;
-    readonly ranks: Readonly<{
-      readonly coarse: number | null;
-      readonly fusion: number;
-      readonly deep_head: number;
-      readonly coverage: number;
-      readonly consensus: number;
-      readonly final: number;
-    }>;
-    readonly first_membership_changing_owner:
-      FineAssessmentMembershipOwner | null;
-    readonly membership_changing_owners:
-      readonly FineAssessmentMembershipOwner[];
-  }>[];
+  readonly candidates: readonly FineAssessmentOrderLedgerCandidate[];
 }>;
+
+const CANONICAL_MEMBERSHIP_OWNERS: readonly FineAssessmentMembershipOwner[] = [
+  "fusion",
+  "deep_head",
+  "coverage",
+  "direct_evidence_promotion",
+  "semantic_memory_refinement",
+  "behavior_authority_promotion",
+  "verified_temporal_head",
+  "consensus",
+  "final_budget"
+];
+
+const SIMULTANEOUS_MEMBERSHIP_OWNERS =
+  "selection order ledger has multiple simultaneous membership-changing owners";
 
 export function buildFineAssessmentOrderLedger(
   sequence: FineAssessmentOrderSequence,
@@ -43,11 +60,11 @@ export function buildFineAssessmentOrderLedger(
   const coarseAvailable = [...sequence.ranks.coarse.values()].every(
     (rank) => rank !== null
   );
-  return Object.freeze({
-    schema_version: 1,
+  const ledger = Object.freeze({
+    schema_version: 1 as const,
     candidate_count: sequence.birthOrder.length,
     delivered_count: deliveredCount,
-    coarse_identity: coarseAvailable ? "captured" : "unavailable",
+    coarse_identity: coarseAvailable ? "captured" as const : "unavailable" as const,
     candidates: Object.freeze(sequence.birthOrder.map((candidateKey) => {
       const ranks = ranksForCandidate(sequence, candidateKey);
       const membershipOwners = membershipChangingOwners(
@@ -63,6 +80,51 @@ export function buildFineAssessmentOrderLedger(
       });
     }))
   });
+  assertFineAssessmentOrderLedgerAttribution(ledger);
+  return ledger;
+}
+
+// Sequential flips keep the first owner; a first-owner tie is simultaneous.
+export function assertFineAssessmentOrderLedgerAttribution(
+  ledger: FineAssessmentOrderLedger
+): void {
+  for (const candidate of ledger.candidates) {
+    assertCandidateMembershipAttribution(candidate);
+  }
+}
+
+function assertCandidateMembershipAttribution(
+  candidate: FineAssessmentOrderLedgerCandidate
+): void {
+  const owners = candidate.membership_changing_owners;
+  const first = candidate.first_membership_changing_owner;
+  if (owners.length === 0) {
+    if (first !== null) {
+      throw new Error("selection order ledger membership owner identity mismatch");
+    }
+    return;
+  }
+  if (
+    first === null ||
+    first !== owners[0] ||
+    new Set(owners).size !== owners.length ||
+    !isCanonicalOwnerSequence(owners)
+  ) {
+    throw new Error(SIMULTANEOUS_MEMBERSHIP_OWNERS);
+  }
+}
+
+function isCanonicalOwnerSequence(
+  owners: readonly FineAssessmentMembershipOwner[]
+): boolean {
+  if (owners.length === 1 && owners[0] === "unavailable") return true;
+  let previous = -1;
+  for (const owner of owners) {
+    const index = CANONICAL_MEMBERSHIP_OWNERS.indexOf(owner);
+    if (index <= previous) return false;
+    previous = index;
+  }
+  return true;
 }
 
 function ranksForCandidate(

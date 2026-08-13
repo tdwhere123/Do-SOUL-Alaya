@@ -4,6 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertFineAssessmentOrderLedgerAttribution } from
+  "@do-soul/alaya-core";
+import { fineAssess } from
+  "../../../../../../packages/core/src/recall/delivery/fine-assessment.js";
+import { buildDefaultPolicy } from
+  "../../../../../../packages/core/src/recall/runtime/orchestration.js";
+import { materializeFineAssessmentSelectionBoundary } from
+  "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-capture.js";
+import type { FineAssessmentSelectionBoundaryCase } from
+  "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-types.js";
+import {
+  createRankedCandidate,
+  createSupplementaryData
+} from "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
 import { captureFineAssessmentSelectionBoundary } from
   "../../../../../../packages/core/src/__tests__/recall/selection-boundary-live-capture-fixture.js";
 
@@ -160,10 +174,131 @@ describe("selection order ledger artifact", () => {
     );
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("publishes sequential membership flips with a unique first owner", async () => {
+    const root = await temporaryRoot();
+    const sourcePath = join(root, "sequential-selection-boundaries.ndjson.gz");
+    const outputPath = join(root, "sequential-ledger.ndjson.gz");
+    const boundary = captureSequentialMembershipBoundary();
+    const source = gzipSync(`${JSON.stringify({
+      question_id: "sequential-question",
+      invocation_index: 0,
+      authoritative: true,
+      boundary
+    })}\n`);
+    await writeFile(sourcePath, source, { flag: "wx" });
+    const sourceSha256 = createHash("sha256").update(source).digest("hex");
+
+    const identity = await materializeSelectionOrderLedgerArtifact({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      outputPath,
+      checkoutRoot: root
+    });
+    const rows = gunzipSync(await readFile(outputPath)).toString("utf8")
+      .trim().split("\n").map((line) => JSON.parse(line) as {
+        record_type: string;
+        ledger?: {
+          candidates: readonly Readonly<{
+            first_membership_changing_owner: string | null;
+            membership_changing_owners: readonly string[];
+          }>[];
+        };
+      });
+    const candidates = rows[1]?.ledger?.candidates ?? [];
+    const sequential = candidates.filter(
+      (candidate) => candidate.membership_changing_owners.length > 1
+    );
+
+    expect(identity.question_count).toBe(1);
+    expect(
+      sequential.length,
+      JSON.stringify(candidates.map((candidate) => ({
+        first: candidate.first_membership_changing_owner,
+        owners: candidate.membership_changing_owners
+      })))
+    ).toBeGreaterThan(0);
+    expect(sequential.every((candidate) =>
+      candidate.first_membership_changing_owner ===
+        candidate.membership_changing_owners[0]
+    )).toBe(true);
+  });
+
+  it("still refuses a candidate with simultaneous membership owners", () => {
+    expect(() => assertFineAssessmentOrderLedgerAttribution({
+      schema_version: 1,
+      candidate_count: 1,
+      delivered_count: 1,
+      coarse_identity: "captured",
+      candidates: [{
+        candidate_key: "tied-candidate",
+        ranks: {
+          coarse: 1,
+          fusion: 2,
+          deep_head: 1,
+          coverage: 1,
+          consensus: 1,
+          final: 1
+        },
+        first_membership_changing_owner: null,
+        membership_changing_owners: ["fusion", "deep_head"]
+      }]
+    })).toThrow(
+      /selection order ledger has multiple simultaneous membership-changing owners/u
+    );
+  });
 });
 
 async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "selection-order-ledger-test-"));
   roots.push(root);
   return root;
+}
+
+function captureSequentialMembershipBoundary(): FineAssessmentSelectionBoundaryCase {
+  const candidates = Object.freeze(Array.from({ length: 6 }, (_, index) =>
+    createRankedCandidate(`seq-${index + 1}`, index + 1, 1 - index * 0.05)
+  ));
+  const policy = buildDefaultPolicy({
+    strategy: "chat",
+    taskSurfaceRef: "ledger-sequential",
+    now: () => "2026-07-29T00:00:00.000Z",
+    generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
+  });
+  let captured: FineAssessmentSelectionBoundaryCase | undefined;
+  fineAssess({
+    candidates,
+    policy: {
+      ...policy,
+      fine_assessment: {
+        ...policy.fine_assessment,
+        budgets: { ...policy.fine_assessment.budgets, max_entries: 2 }
+      }
+    },
+    winnerMemoryIds: new Set(),
+    supplementaryData: createSupplementaryData({
+      ftsRanks: Object.fromEntries(candidates.map((candidate, index) => [
+        candidate.entry.object_id,
+        0.1 + index * 0.15
+      ])),
+      trigramFtsRanks: Object.fromEntries(candidates.map((candidate, index) => [
+        candidate.entry.object_id,
+        0.1 + index * 0.12
+      ])),
+      answerRelevanceScoresByCandidateKey: new Map(candidates.map(
+        (candidate, index) => [candidate.fusion.candidate_key, 1 - index * 0.12]
+      ))
+    }),
+    tokenEstimator: { estimate: () => 5 },
+    now: () => "2026-07-29T00:00:00.000Z",
+    warn: vi.fn(),
+    captureAnswerFeatures: true,
+    capturePacketPlanTrace: true,
+    selectionBoundaryObserver: (pending) => {
+      captured = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }
+  });
+  if (captured === undefined) throw new Error("sequential boundary is missing");
+  return captured;
 }

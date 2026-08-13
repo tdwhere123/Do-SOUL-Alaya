@@ -217,7 +217,7 @@ describe("one ordering sequence", () => {
     ]);
   });
 
-  it("rejects multiple membership owners at the artifact gate contract", () => {
+  it("records sequential membership-changing owners with a unique first owner", () => {
     const first = createRankedCandidate("multi-owner-first", 1, 0.9);
     const second = createRankedCandidate("multi-owner-second", 2, 0.8);
     const result = selectFineAssessmentCandidates({
@@ -241,6 +241,7 @@ describe("one ordering sequence", () => {
       1
     ).candidates.find((candidate) => candidate.candidate_key === key);
 
+    expect(row?.first_membership_changing_owner).toBe("fusion");
     expect(row?.membership_changing_owners).toEqual([
       "fusion", "deep_head", "coverage", "direct_evidence_promotion"
     ]);
