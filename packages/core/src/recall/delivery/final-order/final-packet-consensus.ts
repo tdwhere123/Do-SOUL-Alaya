@@ -247,21 +247,48 @@ function composeSourceSemanticPlan(
   initial: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>,
   nested: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>
 ): EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate> {
-  const changed = !sameCandidateOrder(initial.baseline, nested.proposedCandidates);
-  const decision = nested.decision.status === "rejected"
-    ? nested.decision
-    : changed
-      ? { status: "accepted", reason: "strict_tail_consensus" } as const
-      : initial.embeddingHead.length === 0
-        ? { status: "no_op", reason: "no_finite_embedding_head" } as const
-        : { status: "no_op", reason: "unchanged_consensus" } as const;
+  // Published heads, not the full packet, own strict_tail_consensus.
+  if (nested.decision.status === "rejected") {
+    return publishNestedProposal(initial, nested, nested.decision);
+  }
+  if (sameCandidateOrder(initial.baselineHead, nested.consensusHead)) {
+    return publishOriginalBaseline(initial);
+  }
+  return publishNestedProposal(initial, nested, {
+    status: "accepted",
+    reason: "strict_tail_consensus"
+  });
+}
+
+function publishNestedProposal(
+  initial: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>,
+  nested: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>,
+  decision: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>["decision"]
+): EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate> {
   return Object.freeze({
     ...initial,
     proposedCandidates: nested.proposedCandidates,
-    candidates: decision.status === "accepted" ? nested.proposedCandidates : initial.baseline,
+    candidates: decision.status === "accepted"
+      ? nested.proposedCandidates
+      : initial.baseline,
     consensusHead: nested.consensusHead,
     immutableTail: nested.immutableTail,
     decision
+  });
+}
+
+function publishOriginalBaseline(
+  initial: EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>
+): EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate> {
+  return Object.freeze({
+    ...initial,
+    proposedCandidates: initial.baseline,
+    candidates: initial.baseline,
+    consensusHead: initial.baselineHead,
+    immutableTail: initial.baseline.slice(initial.headWidth),
+    decision: initial.embeddingHead.length === 0
+      ? { status: "no_op" as const, reason: "no_finite_embedding_head" as const }
+      : { status: "no_op" as const, reason: "unchanged_consensus" as const }
   });
 }
 

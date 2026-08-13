@@ -118,6 +118,43 @@ describe("final packet consensus selection ownership", () => {
       .toHaveLength(observation.planned_candidate_keys.length);
   });
 
+  it("publishes the original baseline when nested consensus restores the original head", () => {
+    const baseline = baselineCandidates().slice(0, 4);
+    const sourceCandidates = baseline.map((candidate, index) => ({
+      ...candidate,
+      effectiveFactors: {
+        ...candidate.effectiveFactors,
+        embedding_similarity: 0.9 - index * 0.1
+      }
+    }));
+    const activations = new Map(sourceCandidates.map((candidate) => [
+      candidate.fusion.candidate_key,
+      evidenceSemanticActivation(0.5, {
+        documentIdentity: "owner_gist_600"
+      })
+    ]));
+    const plan = resolveFinalPacketConsensusPlan({
+      baseline,
+      sourceCandidates,
+      protectedCandidates: [],
+      supportsSingleSemanticLeader: true,
+      evidenceSemanticActivationsByCandidateKey: activations
+    });
+    const actual = plan.candidates.map(({ sourceCandidate }) => ({
+      object_id: sourceCandidate.entry.object_id,
+      object_kind: sourceCandidate.objectKind,
+      origin_plane: sourceCandidate.originPlane ?? "workspace_local"
+    }));
+
+    expect(plan.rankBasis).toBe("source_semantic_rrf_then_packet_relative");
+    expect(candidateKeys(plan)).toEqual(
+      baseline.map((candidate) => candidate.fusion.candidate_key)
+    );
+    expect(plan.decision.status).toBe("no_op");
+    expect(buildFinalPacketConsensusObservation(plan, actual, true).decision)
+      .toEqual(plan.decision);
+  });
+
   it("records source-semantic and packet-relative rank ownership", () => {
     const sourceCandidates = consensusCandidates().map((candidate, index) => ({
       ...candidate,

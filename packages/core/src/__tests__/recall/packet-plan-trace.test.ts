@@ -273,6 +273,22 @@ describe("support-set packet plan trace", () => {
       .toEqual(observation.decision);
   });
 
+  it("rejects strict_tail_consensus when published heads are unchanged", () => {
+    const accepted = acceptedObservation();
+    const planned = [
+      ...accepted.baseline_head_candidate_keys,
+      ...accepted.immutable_tail_candidate_keys
+    ];
+    expect(() => assertRecallPacketPlanObservation({
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: planned,
+      consensus_head_candidate_keys: accepted.baseline_head_candidate_keys,
+      membership_authorizations: [],
+      decision: { status: "accepted", reason: "strict_tail_consensus" }
+    })).toThrow(/Changed consensus decision is inconsistent/u);
+  });
+
   it("rejects a decision reason that contradicts its observed proposal", () => {
     const accepted = acceptedObservation();
     expect(() => buildSupportSetPacketPlanTrace("snapshot", {
