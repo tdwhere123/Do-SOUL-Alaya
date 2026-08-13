@@ -26,9 +26,7 @@ type FamilyGroupedCompositionInput = Readonly<{
   readonly fusion: number | null;
 }>;
 
-// Independent lexical and embedding mix additively; fusion already bundles
-// correlated lexical/embedding RRF children, so the outer max gives each
-// underlying signal at most one vote on every path.
+// Dual-saturated mixes still tie at 1.0 when both fusions are <1; outer max has no second clamp.
 export function composeFamilyGroupedScore(
   input: FamilyGroupedCompositionInput
 ): FamilyGroupedComposition {
