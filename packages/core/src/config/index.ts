@@ -26,9 +26,6 @@ export {
   readRecallRatio,
   readRecallUnitFloat,
   recallAnswersWithEnabled,
-  recallEnvFlagEnabled,
   recallEnvRaw,
-  recallIntentV2Enabled,
-  recallProjectionScoringEnabled,
-  recallSessionRouteEnabled
+  recallProjectionScoringEnabled
 } from "./recall-env-access.js";

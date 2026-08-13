@@ -256,7 +256,6 @@ function createRecallService(input: {
     },
     claimResolverPort: input.input.claimFormRepo,
     embeddingRecallService: input.embeddingRuntime.embeddingRecallService,
-    answerRerankService: input.embeddingRuntime.answerRerankService,
     manifestationSidecarPort: input.manifestationSidecarPort as never,
     ...(input.embeddingRuntime.defaultPolicyDecorator === undefined
       ? {}

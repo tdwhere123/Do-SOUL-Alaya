@@ -183,22 +183,6 @@ describe("LongMemEval question-type provenance contracts", () => {
     })).toThrow(/manifest-free.*full execution window/u);
   });
 
-  it("rejects a slice experiment without seeded semantic endpoint projections", () => {
-    const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
-    const withoutFacetCapability = (value: unknown) => {
-      const typed = value as { seed_capabilities?: unknown };
-      const { seed_capabilities: _omitted, ...rest } = typed;
-      return rest;
-    };
-    expect(() => compareLongMemEvalQuestionTypes({
-      dataset,
-      control: kpi(rows),
-      treatment: kpi(rows),
-      controlProvenance: withoutFacetCapability(provenance(false)),
-      treatmentProvenance: withoutFacetCapability(provenance(true))
-    })).toThrow(/ALAYA_RECALL_FACET_TAGS/u);
-  });
-
   it("rejects non-sequential paired provenance", () => {
     const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
     expect(() => compareLongMemEvalQuestionTypes({

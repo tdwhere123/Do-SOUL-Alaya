@@ -75,7 +75,7 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   excludedCandidateKeys: ReadonlySet<string>,
   selectDelivered: SelectDelivered<T>,
   isBehaviorEligible: IsBehaviorEligible<T>,
-  supportsSingleSemanticLeader = true
+  supportsSingleSemanticLeader: boolean
 ): DirectEvidenceHeadSelection<T> {
   const baseline = selectDelivered(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);

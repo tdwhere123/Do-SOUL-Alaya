@@ -49,35 +49,23 @@ describe("RecallService embedding request score snapshot", () => {
     fineAssessCalls.mockClear();
   });
 
-  it.each([
-    { label: "cross-off", crossEnabled: false, expectedRerankStatus: "not_requested" },
-    { label: "cross-on", crossEnabled: true, expectedRerankStatus: "not_requested" }
-  ] as const)("uses exclusive snapshot phases with $label", async ({
-    crossEnabled,
-    expectedRerankStatus
-  }) => {
+  it("uses exclusive snapshot phases without answer rerank", async () => {
     const memory = createMemoryEntry({
       object_id: "snapshot-pool-memory",
       content: "Snapshot query procedure"
     });
     const { dependencies } = createDependencies([memory]);
     const fixture = createExclusiveSnapshotPort(memory.object_id);
-    const answerRerankScore = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map(() => 0.75)
-    );
     const service = new RecallService({
       ...dependencies,
-      embeddingRecallService: fixture.port,
-      ...(crossEnabled ? { answerRerankService: { score: answerRerankScore } } : {})
+      embeddingRecallService: fixture.port
     });
     const run = await runSnapshotRecall(service, "Snapshot query", {
       maxSupplement: 5,
       injectionCap: 0
     });
 
-    expectExclusiveSnapshotContract(
-      fixture, run, memory.object_id, answerRerankScore, expectedRerankStatus
-    );
+    expectExclusiveSnapshotContract(fixture, run, memory.object_id);
   });
 
   it("keeps built-in pool scoring when supplement and injection caps are zero", async () => {
@@ -393,9 +381,7 @@ async function runSnapshotRecall(
 function expectExclusiveSnapshotContract(
   fixture: ReturnType<typeof createExclusiveSnapshotPort>,
   run: SnapshotRun,
-  memoryId: string,
-  answerRerankScore: ReturnType<typeof vi.fn>,
-  expectedRerankStatus: "not_requested" | "returned"
+  memoryId: string
 ): void {
   expect(fineAssessCalls).not.toHaveBeenCalled();
   expect(completeAssessmentCalls).toHaveBeenCalledOnce();
@@ -410,8 +396,7 @@ function expectExclusiveSnapshotContract(
   expect(fixture.scorePoolCandidates).not.toHaveBeenCalled();
   expect(run.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
   expect(run.result.diagnostics?.embedding_provider_status).toBe("provider_returned");
-  expect(run.result.diagnostics?.answer_rerank_status).toBe(expectedRerankStatus);
-  expect(answerRerankScore).not.toHaveBeenCalled();
+  expect(run.result.diagnostics?.answer_rerank_status).toBe("not_requested");
   expectExclusivePhaseLatency(run.result.diagnostics?.phase_latency_ms, run.elapsedMs);
   expect(run.result.candidates.find((candidate) => candidate.object_id === memoryId)
     ?.score_factors?.embedding_similarity).toBeCloseTo(0.91, 5);

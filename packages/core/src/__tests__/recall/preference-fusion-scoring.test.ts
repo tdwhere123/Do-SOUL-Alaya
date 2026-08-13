@@ -13,8 +13,7 @@ const PREFERENCE_QUERY = compileRecallQueryProbes("what coffee do I prefer?");
 beforeAll(() => {
   resetCoreConfigForTests();
   installCoreConfigFromProcessEnv({
-    ALAYA_RECALL_PROJECTIONS: "on",
-    ALAYA_RECALL_INTENT_V2: "on"
+    ALAYA_RECALL_PROJECTIONS: "on"
   });
 });
 

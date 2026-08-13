@@ -13,17 +13,16 @@ export type DeliverySelectionCandidate = Readonly<CoarseRecallCandidate & {
 
 export type DeliverySelectionOptions = Readonly<{
   /**
-   * When true (cross-encoder path), scores own the public relevance scalar.
-   * Lightweight deep-head reorder must leave fused_score as the public scalar so
-   * 8-factor / plasticity / conflict governance stay visible on RecallCandidate.
+   * When true, scores own the public relevance scalar.
+   * Product delivery passes false so fused_score stays the public scalar.
    */
-  readonly replacePublicRelevance?: boolean;
+  readonly replacePublicRelevance: boolean;
 }>;
 
 export function applyDeliverySelection(
   scoredCandidates: readonly DeliverySelectionCandidate[],
-  answerRelevanceScores: ReadonlyMap<string, number> = new Map(),
-  options: DeliverySelectionOptions = {}
+  answerRelevanceScores: ReadonlyMap<string, number>,
+  options: DeliverySelectionOptions
 ): Readonly<{
   readonly orderedCandidates: readonly DeliverySelectionCandidate[];
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
@@ -34,8 +33,7 @@ export function applyDeliverySelection(
     [...scoredCandidates].sort(compareFusedRecallCandidates)
   );
   const rankedCandidates = rankByAnswerRelevance(fusionOrdered, answerRelevanceScores);
-  // Default true preserves CE/test callers that pass scores without options.
-  const replacePublicRelevance = options.replacePublicRelevance ?? true;
+  const replacePublicRelevance = options.replacePublicRelevance;
   return Object.freeze({
     orderedCandidates: rankedCandidates,
     rankByCandidateKey: new Map(

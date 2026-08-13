@@ -458,13 +458,6 @@ export interface RecallServiceEmbeddingRecallPort {
   }): Promise<ReadonlyMap<string, number>>;
 }
 
-export interface RecallServiceAnswerRerankPort {
-  score(
-    query: string,
-    passages: readonly string[]
-  ): Promise<readonly number[]>;
-}
-
 export interface RecallServiceDependencies {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
   readonly slotRepo: RecallServiceSlotRepoPort;
@@ -476,7 +469,6 @@ export interface RecallServiceDependencies {
   readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
-  readonly answerRerankService?: RecallServiceAnswerRerankPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;

@@ -24,7 +24,6 @@ export type FloodEdgeTransferInput = Readonly<{
   readonly rhoPath: number;
   readonly traceLimit?: number;
   readonly sliceCompatibilityByPathId?: ReadonlyMap<string, Readonly<SliceCompatibilityV2>>;
-  readonly enforceSliceCompatibility?: boolean;
 }>;
 
 function traceForEdge(
@@ -32,19 +31,14 @@ function traceForEdge(
   targetObjectId: string,
   inputPotential: number,
   capPerSource: number,
-  sliceCompatibility: Readonly<SliceCompatibilityV2> | undefined,
-  enforceSliceCompatibility: boolean
+  sliceCompatibility: Readonly<SliceCompatibilityV2> | undefined
 ): Readonly<RecallFloodEdgeTraceV1> {
-  const tracePotential = enforceSliceCompatibility ? clamp01(inputPotential) : inputPotential;
-  const traceConductance = enforceSliceCompatibility ? clamp01(edge.weight) : edge.weight;
   const remoteness = evaluateSingleHopRemoteness({
-    inputPotential: tracePotential,
-    edgeConductance: traceConductance,
+    inputPotential,
+    edgeConductance: edge.weight,
     capPerSource,
     selfLoop: edge.seedObjectId === targetObjectId,
-    sliceCompatibility,
-    enforceSliceCompatibility,
-    edgeProvenanceValid: hasValidSliceProvenance(edge)
+    sliceCompatibility
   });
   return Object.freeze({
     schema_version: 1,
@@ -52,25 +46,14 @@ function traceForEdge(
     relation_kind: edge.relationKind ?? "unknown",
     seed_object_id: edge.seedObjectId,
     target_object_id: edge.targetObjectId ?? targetObjectId,
-    input_potential: tracePotential,
-    edge_conductance: traceConductance,
+    input_potential: inputPotential,
+    edge_conductance: edge.weight,
     slice_compatibility: remoteness.sliceCompatibility,
     raw_transfer: remoteness.rawTransfer,
     capped_transfer: remoteness.cappedTransfer,
     decision: remoteness.decision,
     reason: remoteness.reason
   });
-}
-
-function hasValidSliceProvenance(edge: Readonly<PathInflowEdge>): boolean {
-  return hasText(edge.pathId) &&
-    edge.seedAnchor !== undefined && edge.seedAnchor !== null &&
-    edge.targetAnchor !== undefined && edge.targetAnchor !== null &&
-    hasText(edge.pathSourceVersion);
-}
-
-function hasText(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function compareTrace(
@@ -161,8 +144,7 @@ export function evaluateFloodEdgeTraces(
       input.targetObjectId,
       inputPotential,
       input.capPerSource,
-      sliceCompatibility,
-      input.enforceSliceCompatibility === true
+      sliceCompatibility
     );
     traces.push(trace);
   }

@@ -6,7 +6,10 @@ import {
   SqliteMemoryEntryRepo
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
-import { readEmbeddingRuntimeConfig } from "../../ai/daemon-embedding-runtime-config.js";
+import {
+  LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR,
+  readEmbeddingRuntimeConfig
+} from "../../ai/daemon-embedding-runtime-config.js";
 
 function createRuntime(
   configEnv: ReadonlyMap<string, string>,
@@ -149,15 +152,30 @@ describe("daemon local embedding product default", () => {
   });
 
   it.each([
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "yes"],
     ["ALAYA_RECALL_D2Q", "enabled"]
   ])("rejects invalid %s boolean configuration", (name, value) => {
     expect(() => createRuntime(new Map([[name, value]]))).toThrow(new RegExp(name));
   });
 
+  it.each(["true", "1", "yes", "  TrUe  ", "on"])(
+    "fails loud when local cross-encoder rerank is set to %s",
+    (value) => {
+      expect(() => createRuntime(new Map([
+        ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
+      ]))).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
+    }
+  );
+
+  it("allows an explicit false local cross-encoder flag", () => {
+    expect(() => readEmbeddingRuntimeConfig(new Map([
+      ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0"]
+    ]), vi.fn())).not.toThrow();
+    expect(() => readEmbeddingRuntimeConfig(new Map([
+      ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "false"]
+    ]), vi.fn())).not.toThrow();
+  });
+
   it.each([
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "  TrUe  ", "localAnswerRerankEnabled", true],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0", "localAnswerRerankEnabled", false],
     ["ALAYA_RECALL_D2Q", "1", "d2qEnabled", true],
     ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false]
   ] as const)("parses strict %s=%s", (name, value, field, expected) => {

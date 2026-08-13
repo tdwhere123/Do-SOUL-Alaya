@@ -10,10 +10,6 @@ import { buildDefaultPolicy } from
   "../../../recall/runtime/orchestration.js";
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
-import {
-  classifyRecallIntent,
-  extractRecallAnchors
-} from "../../../recall/query/recall-query-plan.js";
 import { createCandidate } from "../fine-assessment-selection-fixtures.js";
 
 describe("request-scoped retrieval field bundle", () => {
@@ -401,8 +397,6 @@ function createSemanticAdmissionFixture(
     queryProbes,
     tier: "hot",
     tierScopedSearchEligible: true,
-    anchors: extractRecallAnchors(queryProbes),
-    intent: classifyRecallIntent(queryProbes),
     byId: new Map(entries.map((entry) => [entry.object_id, entry])),
     addCandidate,
     ftsRanks: new Map(),

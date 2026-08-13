@@ -7,6 +7,9 @@ import {
 
 export type EmbeddingProviderKind = "openai" | "local_onnx";
 
+export const LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR =
+  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK is set, but local cross-encoder rerank was removed. Unset the flag; it no longer changes ranking.";
+
 export interface EmbeddingRuntimeConfig {
   readonly embeddingApiKey: string | null;
   readonly configuredEmbeddingModel: string | null;
@@ -14,9 +17,6 @@ export interface EmbeddingRuntimeConfig {
   readonly embeddingProviderKind: EmbeddingProviderKind;
   readonly localEmbeddingCacheDir: string | null;
   readonly localEmbeddingModel: string | null;
-  readonly localAnswerRerankEnabled: boolean;
-  readonly localAnswerRerankCacheDir: string | null;
-  readonly localAnswerRerankModel: string | null;
   readonly embeddingSupplementEnabled: boolean;
   readonly recallPolicyEmbeddingEnabled: boolean;
   readonly d2qEnabled: boolean;
@@ -26,6 +26,7 @@ export function readEmbeddingRuntimeConfig(
   configEnv: ReadonlyMap<string, string>,
   warn: (message: string, meta: Record<string, unknown>) => void
 ): EmbeddingRuntimeConfig {
+  refuseRetiredLocalCrossEncoderRerank(configEnv);
   const providerKind = resolveEmbeddingProviderKind(readExplicitEmbeddingProvider(configEnv));
   const embeddingEnabled = readEmbeddingSupplementEnabled(configEnv, providerKind);
   const secretRef = readConfigEnvValue(configEnv, "ALAYA_OPENAI_SECRET_REF");
@@ -46,20 +47,22 @@ export function readEmbeddingRuntimeConfig(
     localEmbeddingModel: readNonEmptyEnv(
       readConfigEnvValue(configEnv, "ALAYA_LOCAL_EMBEDDING_MODEL")
     ),
-    localAnswerRerankEnabled: readStrictBooleanConfig(
-      configEnv,
-      "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-    ),
-    localAnswerRerankCacheDir: readNonEmptyEnv(
-      readConfigEnvValue(configEnv, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR")
-    ),
-    localAnswerRerankModel: readNonEmptyEnv(
-      readConfigEnvValue(configEnv, "ALAYA_LOCAL_CROSS_ENCODER_MODEL")
-    ),
     embeddingSupplementEnabled: embeddingEnabled,
     recallPolicyEmbeddingEnabled: embeddingEnabled,
     d2qEnabled: readStrictBooleanConfig(configEnv, "ALAYA_RECALL_D2Q")
   };
+}
+
+function refuseRetiredLocalCrossEncoderRerank(
+  configEnv: ReadonlyMap<string, string>
+): void {
+  const raw = readNonEmptyEnv(
+    readConfigEnvValue(configEnv, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK")
+  );
+  if (raw === null) return;
+  const normalized = raw.toLowerCase();
+  if (normalized === "false" || normalized === "0") return;
+  throw new Error(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
 }
 
 export function isD2qActive(config: EmbeddingRuntimeConfig): boolean {

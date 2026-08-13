@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
 import { dirname, resolve } from "node:path";
-import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
 import { z } from "zod";
 import {
   readOptionalOnnxThreadCount,
@@ -260,9 +259,8 @@ function buildExecutionIdentity(
 function buildRunRecallConfig(
   input: Parameters<typeof buildLongMemEvalRunProvenance>[0]
 ) {
-  const recall = parseRecallRuntimeConfigFromEnv(input.env);
   return {
-    conf_slice_compatibility: recall.confSliceCompatibility,
+    conf_slice_compatibility: false,
     ...buildEffectiveRecallConfigIdentity(input.env, input.recallOptions ?? {
       maxResults: 10,
       conflictAwareness: (input.opts.policyShape ?? "stress") !== "chat"

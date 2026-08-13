@@ -54,7 +54,8 @@ describe("behavior authority answer head", () => {
       10,
       new Set(),
       (ordered) => ordered,
-      (candidate) => candidate === opportunity
+      (candidate) => candidate === opportunity,
+      true
     );
 
     expect(selection.protections).toContainEqual({
@@ -84,7 +85,8 @@ describe("behavior authority answer head", () => {
       10,
       new Set(),
       (ordered) => ordered,
-      (candidate) => candidate === candidates[5] || candidate === candidates[6]
+      (candidate) => candidate === candidates[5] || candidate === candidates[6],
+      true
     );
 
     expect(selection.protections).toEqual([]);
@@ -128,7 +130,8 @@ describe("behavior authority answer head", () => {
       10,
       new Set(),
       (ordered) => ordered.slice(0, 10),
-      () => false
+      () => false,
+      true
     );
 
     expect(selection.protections).not.toContainEqual({
@@ -173,7 +176,8 @@ function promotedEvidenceSource(params: Readonly<{
     1,
     new Set(),
     (ordered) => ordered.slice(0, 1),
-    () => false
+    () => false,
+    true
   );
   return selection.candidates[0]?.evidenceSourceIdentity;
 }
@@ -204,7 +208,8 @@ function promotedEvidenceContent(params: Readonly<{
     1,
     new Set(),
     (ordered) => ordered.slice(0, 1),
-    () => false
+    () => false,
+    true
   );
   return selection.candidates[0]?.entry.content;
 }

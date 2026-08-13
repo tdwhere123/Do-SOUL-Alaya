@@ -36,7 +36,6 @@ export * from "./embedding-recall/embedding-recall-service.js";
 export { assertValidEmbeddingBatch } from "./embedding-recall/helpers.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
-export * from "./embedding-recall/cross-encoder/local-onnx-client.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export * from "./runs/engine-binding-service.js";
 export * from "./shared/errors.js";

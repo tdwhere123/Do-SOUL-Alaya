@@ -1,38 +1,25 @@
 import {
   CORE_CONFIG_ENV_KEYS,
-  CORE_CONFIG_ENV_PREFIXES
+  CORE_CONFIG_ENV_PREFIXES,
+  isCoreConfigEnvironmentKey
 } from "./core-config-environment.js";
 
 export interface RecallRuntimeConfig {
-  readonly facetSlice: string | undefined;
   readonly confRhoPath: number | undefined;
   readonly confRhoEvidence: number | undefined;
   readonly confWPath: number | undefined;
   readonly confEvidenceBeta: number | undefined;
   readonly confFloodCap: number | undefined;
   readonly confFloodCapTotal: number | undefined;
-  readonly confSliceCompatibility: boolean;
-  readonly confH1MaxProduct: boolean;
   readonly pathEmbModulation: string | undefined;
   readonly projectionsEnabled: boolean;
-  readonly lexicalDecorr: string | undefined;
-  readonly intentV2: boolean;
   readonly extraSynonymClusters: string | undefined;
-  readonly sessionRoute: boolean;
   readonly finalAuthorityMaxHeadDrop: number | undefined;
   readonly coarseFilterSemanticFlags: Readonly<Record<string, string | undefined>>;
 }
 
-function flagEnabled(raw: string | undefined): boolean {
-  return raw === "on" || raw === "1" || raw === "true";
-}
-
 function defaultOn(raw: string | undefined): boolean {
   return !/^(?:0|false|off|no|disabled)$/iu.test(raw ?? "on");
-}
-
-function yesEnabled(raw: string | undefined): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(raw ?? "");
 }
 
 function readOptionalNumber(raw: string | undefined): number | undefined {
@@ -62,7 +49,7 @@ function collectPrefixedEnv(
 ): Readonly<Record<string, string | undefined>> {
   const out: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith(prefix)) {
+    if (key.startsWith(prefix) && isCoreConfigEnvironmentKey(key)) {
       out[key] = value;
     }
   }
@@ -72,11 +59,7 @@ function collectPrefixedEnv(
 function collectRecallSemanticEnv(
   env: Readonly<Record<string, string | undefined>>
 ): Readonly<Record<string, string | undefined>> {
-  return Object.freeze({
-    ...collectPrefixedEnv(env, CORE_CONFIG_ENV_PREFIXES.recallSemantic),
-    ALAYA_RECALL_ANCHOR_LANE: env.ALAYA_RECALL_ANCHOR_LANE,
-    ALAYA_RECALL_SUBQUERY: env.ALAYA_RECALL_SUBQUERY
-  });
+  return collectPrefixedEnv(env, CORE_CONFIG_ENV_PREFIXES.recallSemantic);
 }
 
 export function parseRecallRuntimeConfigFromEnv(
@@ -84,21 +67,15 @@ export function parseRecallRuntimeConfigFromEnv(
 ): RecallRuntimeConfig {
   const keys = CORE_CONFIG_ENV_KEYS.recall;
   return Object.freeze({
-    facetSlice: env[keys.facetSlice],
     confRhoPath: readOptionalNumber(env[keys.confRhoPath]),
     confRhoEvidence: readOptionalNumber(env[keys.confRhoEvidence]),
     confWPath: readOptionalNumber(env[keys.confWPath]),
     confEvidenceBeta: readOptionalNumber(env[keys.confEvidenceBeta]),
     confFloodCap: readOptionalNumber(env[keys.confFloodCap]),
     confFloodCapTotal: readOptionalNumber(env[keys.confFloodCapTotal]),
-    confSliceCompatibility: flagEnabled(env[keys.confSliceCompatibility]),
-    confH1MaxProduct: flagEnabled(env[keys.confH1MaxProduct]),
     pathEmbModulation: env[keys.pathEmbModulation],
     projectionsEnabled: defaultOn(env[keys.projections]),
-    lexicalDecorr: env[keys.lexicalDecorr],
-    intentV2: /^(?:1|true|on|yes)$/iu.test(env[keys.intentV2] ?? ""),
     extraSynonymClusters: env[keys.extraSynonymClusters],
-    sessionRoute: yesEnabled(env[keys.sessionRoute]),
     finalAuthorityMaxHeadDrop: readOptionalNonNegativeSafeInt(
       env[keys.finalAuthorityMaxHeadDrop],
       keys.finalAuthorityMaxHeadDrop

@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyRecallIntent,
-  extractRecallAnchors,
-  hasTemporalQuerySignal,
-  intentSplitsByAnchor
+  hasTemporalQuerySignal
 } from "../../recall/query/recall-query-plan.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 
-const anchorsFor = (query: string) => extractRecallAnchors(compileRecallQueryProbes(query));
 const intentFor = (query: string) => classifyRecallIntent(compileRecallQueryProbes(query));
 const temporalSignalFor = (query: string) =>
   hasTemporalQuerySignal(compileRecallQueryProbes(query));
@@ -46,35 +43,15 @@ describe("classifyRecallIntent", () => {
     expect(temporalSignalFor("What changed on this date?")).toBe(true);
   });
 
-  it("only splits fact-spread intents by anchor", () => {
-    expect(intentSplitsByAnchor("multi_fact")).toBe(true);
-    expect(intentSplitsByAnchor("temporal")).toBe(true);
-    expect(intentSplitsByAnchor("preference")).toBe(false);
-    expect(intentSplitsByAnchor("single_fact")).toBe(false);
-  });
-});
-
-describe("extractRecallAnchors", () => {
-  it("treats a long content word as a required anchor", () => {
-    expect(anchorsFor("who attended the conference").required).toContain("conference");
-  });
-
-  it("promotes a date term to a required anchor", () => {
-    expect(anchorsFor("what happened on 2024-03-15").required.some((t) => t.includes("2024"))).toBe(
-      true
-    );
-  });
-
-  it("keeps the lane firing on short-word queries via the longest-term fallback", () => {
-    expect(anchorsFor("where is the cat now").required.length).toBeGreaterThan(0);
-  });
-
-  it("yields no anchor when there is no content term", () => {
-    expect(anchorsFor("what is it").required).toHaveLength(0);
-  });
-
-  it("does not repeat a required anchor in the optional set", () => {
-    const anchors = anchorsFor("who attended the conference dinner");
-    expect(anchors.optional.filter((t) => anchors.required.includes(t))).toHaveLength(0);
+  it("keeps recommend-style queries as single_fact", () => {
+    expect(intentFor("recommend a good coffee shop")).toBe("single_fact");
+    expect(intentFor("can you suggest a restaurant for tonight")).toBe("single_fact");
+    expect(intentFor("would you recommend a laptop for travel")).toBe("single_fact");
+    expect(intentFor("any advice on which espresso machine to buy")).toBe("single_fact");
+    expect(intentFor("help me find a good pour-over kettle")).toBe("single_fact");
+    expect(intentFor("what should I order at the cafe")).toBe("single_fact");
+    expect(intentFor("求推荐一款适合家用的咖啡机")).toBe("single_fact");
+    expect(intentFor("给我一些关于咖啡豆的建议")).toBe("single_fact");
+    expect(intentFor("what is my API key for service X")).toBe("single_fact");
   });
 });

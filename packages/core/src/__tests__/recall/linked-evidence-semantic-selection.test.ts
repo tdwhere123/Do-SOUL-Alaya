@@ -31,7 +31,8 @@ describe("linked Evidence semantic selection", () => {
       2,
       new Set(),
       (ordered) => ordered.slice(0, 2),
-      () => false
+      () => false,
+      true
     );
 
     expect(selection.protections).toEqual([{
@@ -54,7 +55,8 @@ describe("linked Evidence semantic selection", () => {
       2,
       new Set(),
       (ordered) => ordered.slice(0, 2),
-      () => false
+      () => false,
+      true
     );
 
     expect(selection.protections).toEqual([{
@@ -100,7 +102,8 @@ describe("linked Evidence semantic selection", () => {
       2,
       new Set(),
       (ordered) => ordered.slice(0, 2),
-      () => false
+      () => false,
+      true
     );
 
     expect(selection.protections).toEqual([{

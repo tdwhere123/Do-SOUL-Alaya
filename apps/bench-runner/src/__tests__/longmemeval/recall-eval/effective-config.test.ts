@@ -42,10 +42,10 @@ describe("effective recall config identity", () => {
 
     expect(equivalent.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(equivalentAdapter.effective_config_sha256).toBe(base.effective_config_sha256);
-    expect(runtimeDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+    expect(runtimeDrift.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(requestDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(adapterDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
-    expect(h1Drift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+    expect(h1Drift.effective_config_sha256).toBe(base.effective_config_sha256);
   });
 
   it("binds result budgets into provenance without a pre-selection field cap", () => {
@@ -145,14 +145,14 @@ describe("effective recall config identity", () => {
     }, undefined, treatment)).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
   });
 
-  it("allows attributed H1 max-product experiments before reading inputs", async () => {
+  it("ignores retired H1 max-product env before reading inputs", async () => {
     const treatment = {
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
     };
     expect(buildEffectiveRecallConfigIdentity(treatment, {
       maxResults: 10,
       conflictAwareness: true
-    }).effective_config_sha256).not.toBe(buildEffectiveRecallConfigIdentity({}, {
+    }).effective_config_sha256).toBe(buildEffectiveRecallConfigIdentity({}, {
       maxResults: 10,
       conflictAwareness: true
     }).effective_config_sha256);

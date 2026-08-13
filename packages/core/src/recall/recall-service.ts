@@ -29,7 +29,6 @@ export type {
   RecallResult,
   RecallServiceBudgetPenaltyPort,
   RecallServiceActiveConstraintsPort,
-  RecallServiceAnswerRerankPort,
   RecallServiceClaimResolverPort,
   RecallServiceDependencies,
   RecallServiceEvidenceSearchPort,

@@ -70,7 +70,6 @@ async function verifySnapshotAttribution() {
   const service = createFieldBackedRecallService({
     ...dependencies,
     embeddingRecallService: createSnapshotPort(memory.object_id),
-    answerRerankService: createCrossReranker(7),
     manifestationSidecarPort: createManifestationSidecar(13)
   });
   const result = await runEmbeddingRecall(service, "Snapshot phase procedure", "phase-run");
@@ -88,8 +87,7 @@ async function verifyCustomAttribution() {
   const { dependencies } = createDependencies([memory]);
   const service = createFieldBackedRecallService({
     ...dependencies,
-    embeddingRecallService: createCustomPort(memory.object_id),
-    answerRerankService: createCrossReranker(7)
+    embeddingRecallService: createCustomPort(memory.object_id)
   });
   const result = await runEmbeddingRecall(service, "Custom fallback procedure");
 
@@ -210,15 +208,6 @@ function createLegacyPort(memoryId: string): RecallServiceEmbeddingRecallPort {
       return new Map([[memoryId, 0.8]]);
     }),
     querySupplement: vi.fn(async () => embeddingSupplement(memoryId, 0))
-  };
-}
-
-function createCrossReranker(cost: number) {
-  return {
-    score: vi.fn(async (_query: string, passages: readonly string[]) => {
-      clock.value += cost;
-      return passages.map(() => 0.6);
-    })
   };
 }
 

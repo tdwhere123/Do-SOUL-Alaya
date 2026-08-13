@@ -222,17 +222,6 @@ function validatePairedProvenance(
   if (controlProvenance.question_manifest !== null && input.manifest === undefined) {
     throw new Error("manifest-attributed comparison requires the supplied question manifest");
   }
-  if (controlProvenance.recall_config.conf_slice_compatibility) {
-    throw new Error("control provenance must disable confSliceCompatibility");
-  }
-  if (!treatmentProvenance.recall_config.conf_slice_compatibility) {
-    throw new Error("treatment provenance must enable confSliceCompatibility");
-  }
-  if (treatmentProvenance.seed_capabilities?.facet_tags_enabled !== true) {
-    throw new Error(
-      "attributed slice comparison requires snapshot seed capability ALAYA_RECALL_FACET_TAGS=1"
-    );
-  }
   return "paired_attributed";
 }
 

@@ -229,7 +229,6 @@ async function assessLegacyCandidateStage(
       assessment: base.latencyMs + assessment.latencyMs,
       delivery: 0
     }),
-    undefined,
     "legacy"
   );
 }
@@ -282,7 +281,6 @@ async function assessSnapshotCandidateStage(
       assessment: base.latencyMs + assessment.latencyMs,
       delivery: 0
     }),
-    undefined,
     "snapshot"
   );
 }
@@ -296,13 +294,12 @@ async function completeCandidateAssessment(
   supplementaryData: FineAssessParams["supplementaryData"],
   embeddingData: EmbeddingAssessmentData,
   phaseLatency: AssessmentPhaseSeed,
-  reusableAssessment: FineAssessmentResult | undefined,
   assessmentPath: "legacy" | "snapshot"
 ): Promise<AssessmentStageResult> {
   const { preparedEmbeddingQuery } = embeddingData;
   const rerank = instantTimedResult(collectAnswerRerankStage(supplementaryData));
   const delivery = deliverOrReuseAssessment(
-    context, params, prepared, preparedCandidates, rerank.value, reusableAssessment
+    context, params, prepared, preparedCandidates, rerank.value
   );
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
   if (embeddingData.evidenceScoring.status === "failed") {

@@ -1,5 +1,4 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { recallEnvFlagEnabled } from "../../config/recall-env-access.js";
 import type { RecallFusionStream } from "../runtime/recall-service-types.js";
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
@@ -19,10 +18,6 @@ export const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, 
   entity_seed: 1, path_expansion: 1, temporal_recency: 0, workspace_activation: 0,
   facet_overlap: 1
 });
-
-export function facetSliceEnabled(): boolean {
-  return recallEnvFlagEnabled("ALAYA_RECALL_FACET_SLICE");
-}
 
 export function activeFusionStreams(): readonly RecallFusionStream[] {
   return RECALL_FUSION_STREAMS;

@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "node:util";
-import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
 import type { BenchRecallWeightOverrides } from
   "../../../harness/recall/recall-weight-overrides.js";
 import {
@@ -64,9 +63,8 @@ export function canonicalProductRecallConfig() {
 }
 
 export function canonicalProductRecallProvenanceConfig() {
-  const runtimeRecall = parseRecallRuntimeConfigFromEnv(PRODUCT_DEFAULT_ENV);
   return Object.freeze({
-    conf_slice_compatibility: runtimeRecall.confSliceCompatibility,
+    conf_slice_compatibility: false,
     ...canonicalProductRecallConfig()
   });
 }

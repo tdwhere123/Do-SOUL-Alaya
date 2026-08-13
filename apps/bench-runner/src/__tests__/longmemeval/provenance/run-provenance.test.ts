@@ -14,7 +14,7 @@ import {
 const roots = registerRunProvenanceRootCleanup();
 
 describe("LongMemEval run provenance", () => {
-  it("archives the validated manifest identity, sequential protocol, and slice switch", async () => {
+  it("archives the validated manifest identity and sequential protocol", async () => {
     const fixture = await createRunProvenanceFixture(roots);
     const { provenance, manifest, crossEncoderCacheRoot } = fixture;
 
@@ -26,7 +26,7 @@ describe("LongMemEval run provenance", () => {
       limit: null,
       evaluated_count: 1
     });
-    expect(provenance.recall_config.conf_slice_compatibility).toBe(true);
+    expect(provenance.recall_config.conf_slice_compatibility).toBe(false);
     expect(provenance.recall_config.schema_version).toBe(2);
     expect(provenance.seed_capabilities).toEqual({ facet_tags_enabled: true });
     expect(provenance.code).toEqual({

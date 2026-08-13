@@ -12,8 +12,6 @@ import {
   buildConformantAxisContext,
   type ConformantAxisContext
 } from "../scoring/conformant-fusion-scoring.js";
-import type { H1MaxProductTransferResult } from
-  "../flood/h1-max-product.js";
 import {
   buildFloodFuelCoverageSummary,
   computeIntegratedFloodScore
@@ -43,7 +41,6 @@ import type {
   RecallSupplementaryData,
   IntegratedFloodCandidateDiagnostics
 } from "../runtime/recall-service-types.js";
-import { recallEnvFlagEnabled } from "../../config/recall-env-access.js";
 
 export {
   activeFusionStreams,
@@ -57,7 +54,6 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
-  readonly h1MaxProduct?: boolean;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
   const resolved = resolveRrfFusionWeights({
     policy: params.policy,
@@ -78,9 +74,7 @@ export function buildRecallFusionDetails(params: Readonly<{
     ranksByStream,
     resolved,
     supplementaryData: params.supplementaryData,
-    nowIso: params.nowIso,
-    h1MaxProduct: params.h1MaxProduct ??
-      recallEnvFlagEnabled("ALAYA_RECALL_CONF_H1_MAX_PRODUCT")
+    nowIso: params.nowIso
   });
   const prelim = buildPreliminaryFusionCandidates(streamSnapshots, params.supplementaryData, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
@@ -254,10 +248,6 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
   readonly axisContext: ConformantAxisContext;
 }>): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
   const ra = params.axisContext.raByKey.get(params.candidateKey);
-  const h1 = params.axisContext.h1MaxProductByKey.get(params.candidateKey);
-  if (h1 !== undefined) {
-    return scoreH1MaxProductCandidate(params, ra, h1);
-  }
   const scored = computeIntegratedFloodScore({
     entry: params.candidate.entry,
     memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
@@ -278,83 +268,6 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
       ...scored.diagnostics,
       edge_traces: trace.traces,
       edge_trace_truncated_count: trace.truncatedCount
-    })
-  });
-}
-
-function scoreH1MaxProductCandidate(
-  params: Readonly<{
-    readonly candidate: RecallFusionCandidateInput;
-    readonly supplementaryData: RecallSupplementaryData;
-    readonly candidateKey: string;
-    readonly axisContext: ConformantAxisContext;
-  }>,
-  ra: Readonly<Record<"object" | "path" | "evidence" | "temporal" | "control", number>> | undefined,
-  h1: Readonly<H1MaxProductTransferResult>
-): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
-  const baseline = computeIntegratedFloodScore({
-    entry: params.candidate.entry,
-    memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
-    axisInputs: {
-      R_obj: ra?.object ?? 0,
-      A_path: ra?.path ?? 0,
-      B_evidence: ra?.evidence ?? 0
-    },
-    supplementaryData: params.supplementaryData
-  });
-  const overlayApplied =
-    h1.winner !== null && h1.strongestTransfer > baseline.score;
-  const score = overlayApplied ? h1.strongestTransfer : baseline.score;
-  const h1Diagnostics = buildH1ScoringDiagnostics({
-    h1,
-    directPotential: ra?.object ?? 0,
-    baselineScore: baseline.score,
-    score,
-    overlayApplied,
-    frontierAdmitted:
-      params.candidate.firstAdmissionPlane === "graph_expansion"
-  });
-  return Object.freeze({
-    score,
-    diagnostics: Object.freeze({
-      ...baseline.diagnostics,
-      final_score: score,
-      edge_traces: h1.traces,
-      edge_trace_truncated_count: h1.truncatedCount,
-      score_mode: "rrf_seeded_h1_max_product",
-      ...h1Diagnostics
-    })
-  });
-}
-
-function buildH1ScoringDiagnostics(params: Readonly<{
-  readonly h1: Readonly<H1MaxProductTransferResult>;
-  readonly directPotential: number;
-  readonly baselineScore: number;
-  readonly score: number;
-  readonly overlayApplied: boolean;
-  readonly frontierAdmitted: boolean;
-}>) {
-  return Object.freeze({
-    h1_max_product: Object.freeze({
-      schema_version: 1 as const,
-      seed_basis: "rrf_family_base" as const,
-      direct_potential: params.directPotential,
-      strongest_transfer: params.h1.strongestTransfer,
-      winner: params.h1.winner === null ? "direct" as const : "edge" as const,
-      winning_edge_trace: params.h1.winner,
-      frontier_admitted: params.frontierAdmitted,
-      transition_counts: params.h1.transitionCounts
-    }),
-    h1_overlay: Object.freeze({
-      schema_version: 1 as const,
-      baseline_score: params.baselineScore,
-      edge_score: params.h1.strongestTransfer,
-      final_score: params.score,
-      delta: params.score - params.baselineScore,
-      applied: params.overlayApplied,
-      winner: params.overlayApplied ? "edge" as const : "baseline" as const,
-      winning_edge_trace: params.overlayApplied ? params.h1.winner : null
     })
   });
 }

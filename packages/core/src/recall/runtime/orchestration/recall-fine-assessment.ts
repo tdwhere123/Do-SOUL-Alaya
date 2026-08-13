@@ -21,7 +21,6 @@ import { attributeEvidenceSemanticActivations } from
 import { attributeOpenSemanticFactorActivations } from
   "../../field/open-semantic-factors/candidate-attribution.js";
 import {
-  instantTimedResult,
   measureAsync,
   measureSync,
   type TimedResult
@@ -117,12 +116,8 @@ export function deliverOrReuseAssessment(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   preparedCandidates: FineAssessmentPreparation,
-  rerank: RerankResult,
-  reusableAssessment?: FineAssessmentResult
+  rerank: RerankResult
 ): TimedResult<FineAssessmentResult> {
-  if (!rerank.applied && reusableAssessment !== undefined) {
-    return instantTimedResult(reusableAssessment);
-  }
   return measureSync(() => deliverFineAssessment(
     buildFineAssessParams(
       context, params, prepared, rerank.supplementaryData, preparedCandidates.candidates

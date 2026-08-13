@@ -264,7 +264,8 @@ describe("effective bench daemon environment", () => {
         tokenFactory: () => "test-review-token"
       });
       const claimed = parseRecallRuntimeConfigFromEnv(launch.environment);
-      expect(claimed.confSliceCompatibility).toBe(false);
+      expect(claimed).not.toHaveProperty("confSliceCompatibility");
+      expect(launch.environment.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY).toBeUndefined();
       expect(launch.environment.ALAYA_RECALL_D2Q).toBeUndefined();
       expect(launch.environment.ALAYA_LOCAL_EMBEDDING_MODEL).toBeUndefined();
       expect(launch.environment.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK).toBeUndefined();
@@ -274,8 +275,7 @@ describe("effective bench daemon environment", () => {
         embeddingMode: "disabled",
         embeddingProviderKind: "local_onnx"
       }, launch);
-      expect(getCoreConfig().recall.confSliceCompatibility)
-        .toBe(claimed.confSliceCompatibility);
+      expect(getCoreConfig().recall).not.toHaveProperty("confSliceCompatibility");
       await expect(
         daemon.runtime.services.embeddingStatusService.getStatus(daemon.workspaceId)
       ).resolves.toMatchObject({ embedding_enabled: false, model_id: null });

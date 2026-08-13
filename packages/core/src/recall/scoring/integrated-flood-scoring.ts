@@ -1,6 +1,5 @@
 import type { ManifestationState, MemoryEntry } from "@do-soul/alaya-protocol";
 import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
-import { facetOverlapCountFor, facetSliceEnabled } from "../delivery/fusion-delivery-streams.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { RECALL_FLOOD_EDGE_REASONS } from
   "../runtime/recall-service-types.js";
@@ -61,25 +60,8 @@ function manifestationOmega(
 
 // Slice pass_through / no_slice mean "gate open" (feature off or no query facets),
 // unlike path pass_through which means "no path graph present" and withholds fuel.
-function resolveSliceAxis(
-  entry: Readonly<MemoryEntry>,
-  querySoughtFacets: readonly string[] | undefined
-): ResolvedFloodFuelAxis {
-  if (!facetSliceEnabled()) {
-    return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
-  }
-  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return { value: 1, status: "inactive:no_slice", countsAsFuel: true };
-  }
-  const overlap = facetOverlapCountFor(entry, querySoughtFacets);
-  if (overlap === 0) {
-    return { value: 0, status: "inactive:no_fuel", countsAsFuel: false };
-  }
-  return {
-    value: clamp01(overlap / querySoughtFacets.length),
-    status: "active",
-    countsAsFuel: true
-  };
+function resolveSliceAxis(): ResolvedFloodFuelAxis {
+  return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
 }
 
 function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodFuelAxis {
@@ -164,7 +146,7 @@ function resolveIntegratedFloodScore(
   const lambda = resolveConformantPathWeight();
   const beta = resolveConformantEvidenceBeta();
   const memorySupplementEligible = params.memorySupplementEligible ?? true;
-  const slice = resolveSliceAxis(params.entry, params.supplementaryData.querySoughtFacets);
+  const slice = resolveSliceAxis();
   const path = resolvePathAxis(
     params.axisInputs.A_path,
     memorySupplementEligible &&

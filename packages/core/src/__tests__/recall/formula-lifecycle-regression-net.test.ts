@@ -42,7 +42,6 @@ const NOW = "2026-03-20T10:20:30.000Z";
 const QUERY = "how does staging rotate database credentials";
 
 const MANAGED_ENV = [
-  "ALAYA_RECALL_FACET_SLICE",
   "ALAYA_RECALL_CONF_EVIDENCE_BETA"
 ] as const;
 
@@ -340,8 +339,7 @@ describe("formula and lifecycle regression net", () => {
     expect(candidate.fused_score).toBeCloseTo(candidate.per_axis_contribution!.object, 12);
   });
 
-  it("protects fuel gating: inactive reasons name missing slice, path, and evidence fuel", () => {
-    process.env.ALAYA_RECALL_FACET_SLICE = "1";
+  it("protects fuel gating: inactive reasons name missing path and evidence fuel", () => {
     const entry = createRecallFixtureEntry({
       object_id: "11111111-1111-4111-8111-111111111111",
       facet_tags: []
@@ -353,7 +351,7 @@ describe("formula and lifecycle regression net", () => {
         querySoughtFacets: ["location_place"]
       })
     });
-    expect(cold.diagnostics.slice_status).toBe("inactive:no_fuel");
+    expect(cold.diagnostics.slice_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.path_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.evidence_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.fuel_verified).toBe(false);

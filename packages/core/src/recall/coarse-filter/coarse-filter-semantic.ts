@@ -15,11 +15,6 @@ import type { RecallEvidenceProjectionMatchReceipt } from
   "../runtime/recall-service-results.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
-  intentSplitsByAnchor,
-  type RecallQueryAnchors,
-  type RecallQueryIntent
-} from "../query/recall-query-plan.js";
-import {
   EXPANDED_QUERY_RANK_DISCOUNT,
   buildExpandedKeywordQuery
 } from "./coarse-candidates.js";
@@ -41,8 +36,6 @@ export interface SemanticSupplementParams {
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly tier: MemoryEntry["storage_tier"];
   readonly tierScopedSearchEligible: boolean;
-  readonly anchors: RecallQueryAnchors;
-  readonly intent: RecallQueryIntent;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly addCandidate: AddCoarseCandidate;
   readonly ftsRanks: Map<string, number>;
@@ -82,7 +75,6 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
     params.addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
   }
 
-  await addAnchorLaneCandidates(params, objectIds);
   await addExpandedKeywordCandidates(params, searchScoped);
   await addEvidenceFtsCandidates(params);
 }
@@ -92,7 +84,6 @@ type ScopedKeywordSearch = (
   queryText: string,
   limit: number
 ) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
-type ScopedKeywordSearchResult = Awaited<ReturnType<ScopedKeywordSearch>>;
 
 function createScopedKeywordSearch(
   params: SemanticSupplementParams,
@@ -108,119 +99,6 @@ function createScopedKeywordSearch(
       limit,
       scope
     });
-}
-
-const MAX_SUBQUERY_ANCHORS = 4;
-const MIN_SUBQUERY_ANCHOR_QUOTA = 8;
-
-import { recallEnvFlagEnabled } from "../../config/recall-env-access.js";
-
-// Opt-in flags, default OFF: the anchor lane is recall-neutral and slower.
-function envOptIn(...names: readonly string[]): boolean {
-  return names.some(recallEnvFlagEnabled);
-}
-
-type AnchorSearchFn = (
-  workspaceId: string,
-  anchorTokens: readonly string[],
-  optionalTokens: readonly string[],
-  limit: number,
-  objectIds: readonly string[]
-) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
-
-// Additive; no-op (relaxed lane stands) when there is no anchor or no repo support.
-async function addAnchorLaneCandidates(
-  params: SemanticSupplementParams,
-  objectIds: readonly string[]
-): Promise<void> {
-  if (
-    params.anchors.required.length === 0 ||
-    !envOptIn("ALAYA_RECALL_SEMANTIC_ANCHOR_LANE", "ALAYA_RECALL_ANCHOR_LANE")
-  ) {
-    return;
-  }
-  const searchByAnchor = resolveAnchorSearch(params);
-  if (searchByAnchor === undefined) return;
-  const quota = params.config.semantic_supplement.max_supplement;
-  if (shouldSplitAnchors(params)) {
-    await addSplitAnchorLaneCandidates(params, objectIds, searchByAnchor, quota);
-    return;
-  }
-  const matches = await searchByAnchor(
-    params.workspaceId,
-    params.anchors.required,
-    params.anchors.optional,
-    quota,
-    objectIds
-  );
-  admitAnchorMatches(params, matches);
-}
-
-function resolveAnchorSearch(params: SemanticSupplementParams): AnchorSearchFn | undefined {
-  return async (
-    _workspaceId,
-    anchorTokens,
-    optionalTokens,
-    limit,
-    objectIds
-  ) => await params.retrievalFieldBundle.searchMemoryAnchor({
-    anchorTokens,
-    optionalTokens,
-    limit,
-    scope: params.tierScopedSearchEligible
-      ? Object.freeze({ tier: params.tier })
-      : Object.freeze({ objectIds: Object.freeze([...objectIds]) })
-  });
-}
-
-async function addSplitAnchorLaneCandidates(
-  params: SemanticSupplementParams,
-  objectIds: readonly string[],
-  searchByAnchor: AnchorSearchFn,
-  quota: number
-): Promise<void> {
-  const perAnchorQuota = Math.max(
-    MIN_SUBQUERY_ANCHOR_QUOTA,
-    Math.ceil(quota / params.anchors.required.length)
-  );
-  const matchesByAnchor = await Promise.allSettled(
-    params.anchors.required.slice(0, MAX_SUBQUERY_ANCHORS).map((anchor) =>
-      searchByAnchor(params.workspaceId, [anchor], params.anchors.optional, perAnchorQuota, objectIds)
-    )
-  );
-  for (const result of matchesByAnchor) {
-    if (result.status === "rejected") throw result.reason;
-    admitAnchorMatches(params, result.value);
-  }
-}
-
-// Split a multi-fact query into one anchor lane per anchor so the first cannot crowd the others out. Reserved-quota recall, not delivery.
-function shouldSplitAnchors(params: SemanticSupplementParams): boolean {
-  return (
-    params.anchors.required.length >= 2 &&
-    intentSplitsByAnchor(params.intent) &&
-    envOptIn("ALAYA_RECALL_SEMANTIC_SUBQUERY", "ALAYA_RECALL_SUBQUERY")
-  );
-}
-
-function admitAnchorMatches(
-  params: SemanticSupplementParams,
-  matches: Awaited<ReturnType<AnchorSearchFn>>
-): void {
-  for (const match of matches) {
-    const ranked = clamp01(match.normalized_rank);
-    params.ftsRanks.set(match.object_id, Math.max(params.ftsRanks.get(match.object_id) ?? 0, ranked));
-    if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
-      params.trigramFtsRanks.set(
-        match.object_id,
-        Math.max(params.trigramFtsRanks.get(match.object_id) ?? 0, clamp01(match.trigram_rank))
-      );
-    }
-    const entry = params.byId.get(match.object_id);
-    if (entry !== undefined) {
-      params.addCandidate(entry, "lexical_anchor", ranked, "lexical_anchor");
-    }
-  }
 }
 
 async function addExpandedKeywordCandidates(

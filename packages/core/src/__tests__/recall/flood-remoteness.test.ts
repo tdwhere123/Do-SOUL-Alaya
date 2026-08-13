@@ -18,13 +18,12 @@ describe("single-hop flood remoteness", () => {
     });
   });
 
-  it("treats no query key as neutral even when enforcement is enabled", () => {
+  it("treats no query key as a neutral pass-through", () => {
     const result = evaluateSingleHopRemoteness({
       inputPotential: 0.8,
       edgeConductance: 0.5,
       capPerSource: 1,
       selfLoop: false,
-      enforceSliceCompatibility: true,
       sliceCompatibility: { decision: "pass_through", reason: "no_query_key", matches: [] }
     });
 
@@ -47,7 +46,6 @@ describe("single-hop flood remoteness", () => {
       edgeConductance: 0.5,
       capPerSource: 1,
       selfLoop: false,
-      enforceSliceCompatibility: true,
       sliceCompatibility: { decision: "pass_through", reason, matches: [] }
     });
 
@@ -101,18 +99,6 @@ describe("single-hop flood remoteness", () => {
     });
   });
 
-  it("bounds experimental transfer inputs when slice enforcement is enabled", () => {
-    const result = evaluateSingleHopRemoteness({
-      inputPotential: 2,
-      edgeConductance: 2,
-      capPerSource: 4,
-      selfLoop: false,
-      enforceSliceCompatibility: true
-    });
-
-    expect(result.rawTransfer).toBe(1);
-    expect(result.cappedTransfer).toBe(1);
-  });
 
   it("is monotone until the configured per-source bound", () => {
     const transfer = (inputPotential: number) => evaluateSingleHopRemoteness({
@@ -124,7 +110,7 @@ describe("single-hop flood remoteness", () => {
     expect(transfer(1)).toBeLessThanOrEqual(0.5);
   });
 
-  it("observes a mismatch by default and rejects it only when explicitly enforced", () => {
+  it("observes a mismatch by default without changing transfer", () => {
     const base = {
       inputPotential: 0.8,
       edgeConductance: 0.5,
@@ -133,40 +119,13 @@ describe("single-hop flood remoteness", () => {
       sliceCompatibility: { decision: "rejected", reason: "no_slice_match", matches: [] }
     } as const;
 
-    expect(evaluateSingleHopRemoteness(base).decision).toBe("transferred");
-    expect(evaluateSingleHopRemoteness({ ...base, enforceSliceCompatibility: true })).toEqual({
+    expect(evaluateSingleHopRemoteness(base)).toEqual({
       rawTransfer: 0.4,
-      cappedTransfer: 0,
+      cappedTransfer: 0.4,
       sliceCompatibility: "no_slice_match",
-      decision: "rejected",
-      reason: "no_slice_match"
+      decision: "transferred",
+      reason: "transferred"
     });
   });
 
-  it("normalizes non-finite and out-of-range experimental inputs", () => {
-    expect(evaluateSingleHopRemoteness({
-      inputPotential: Number.POSITIVE_INFINITY,
-      edgeConductance: 2,
-      capPerSource: 4,
-      selfLoop: false,
-      enforceSliceCompatibility: true
-    })).toMatchObject({
-      rawTransfer: 0,
-      cappedTransfer: 0,
-      decision: "rejected",
-      reason: "missing_or_zero_input"
-    });
-
-    expect(evaluateSingleHopRemoteness({
-      inputPotential: 2,
-      edgeConductance: 2,
-      capPerSource: 4,
-      selfLoop: false,
-      enforceSliceCompatibility: true
-    })).toMatchObject({
-      rawTransfer: 1,
-      cappedTransfer: 1,
-      decision: "transferred"
-    });
-  });
 });

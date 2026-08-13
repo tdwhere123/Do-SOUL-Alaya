@@ -43,11 +43,6 @@ import {
 } from
   "./temporal/temporal-window-candidates.js";
 import {
-  resolveRoutedSurfaceIds,
-  sessionRouteEnabled,
-  withRoutedSurfaceIds
-} from "./session-route.js";
-import {
   captureRecallQueryEntities,
   type RecallQueryEntityExtractionCapture
 } from "../field/query-entity-attribution-producer.js";
@@ -364,7 +359,7 @@ export async function runCoarseFilter(
         error: toErrorMessage(error)
       })
     });
-  const queryProbes = routeQueryToSession(input.tierMemories, input.queryProbes);
+  const queryProbes = input.queryProbes;
   const retrievalFieldBundle = options.retrievalFieldBundle ??
     createRecallRetrievalFieldBundle({
       workspaceId,
@@ -424,16 +419,6 @@ export async function runCoarseFilter(
     state,
     dynamic
   });
-}
-
-function routeQueryToSession(
-  tierMemories: readonly Readonly<MemoryEntry>[],
-  queryProbes: Readonly<RecallQueryProbes>
-): Readonly<RecallQueryProbes> {
-  if (!sessionRouteEnabled()) {
-    return queryProbes;
-  }
-  return withRoutedSurfaceIds(queryProbes, resolveRoutedSurfaceIds(tierMemories, queryProbes));
 }
 
 async function loadCoarseFilterInput(

@@ -20,7 +20,6 @@ import {
 import {
   addSemanticSupplementCandidates
 } from "./coarse-filter-semantic.js";
-import { classifyRecallIntent, extractRecallAnchors } from "../query/recall-query-plan.js";
 import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
   resolveSourceProximityAdmissionLimit,
@@ -241,8 +240,6 @@ async function admitSemanticAndContentCandidates(
     queryProbes: params.queryProbes,
     tier: params.tier,
     tierScopedSearchEligible: params.tierScopedSearchEligible,
-    anchors: extractRecallAnchors(params.queryProbes),
-    intent: classifyRecallIntent(params.queryProbes),
     byId: params.byId,
     addCandidate: params.state.addCandidate,
     ftsRanks: params.state.ftsRanks,

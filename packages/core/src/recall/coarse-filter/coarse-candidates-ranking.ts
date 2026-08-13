@@ -1,6 +1,5 @@
 import type { RecallAdmissionPlane } from "../runtime/recall-service-types.js";
 import { compareMemoryEntriesForActivationAdmission } from "../runtime/recall-service-helpers.js";
-import { sessionRouteEnabled } from "./session-route.js";
 import type { CoarseCandidateDraft } from "./coarse-candidates.js";
 
 export function rankCoarseCandidateDrafts(
@@ -25,10 +24,6 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   }
   if (draft.admissionPlanes.includes("object_probe")) {
     return 4;
-  }
-  // invariant: session route certainty ranks just above lexical evidence.
-  if (sessionRouteEnabled() && draft.admissionPlanes.includes("session_surface_cohort")) {
-    return 3.5;
   }
   if (draft.admissionPlanes.some((plane) =>
     plane === "evidence_anchor" ||

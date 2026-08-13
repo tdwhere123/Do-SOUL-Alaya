@@ -3,7 +3,6 @@ import {
   EmbeddingBackfillHandler,
   EmbeddingRecallService,
   EvidenceDocumentEmbeddingBackfillHandler,
-  LocalOnnxCrossEncoderClient,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
   applyRecallPolicyEmbeddingState,
@@ -61,7 +60,6 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingApiKey: runtimeConfig.embeddingApiKey,
     embeddingStatusService: services.embeddingStatusService,
     embeddingRecallService: services.embeddingRecallService,
-    answerRerankService: createAnswerRerankService(runtimeConfig),
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
@@ -76,18 +74,6 @@ interface EmbeddingProviderState {
   readonly embeddingProvider: EmbeddingProviderPort | null;
   readonly embeddingModelId: string | null;
   readonly readiness: EmbeddingProviderReadiness;
-}
-
-function createAnswerRerankService(
-  config: EmbeddingRuntimeConfig
-): LocalOnnxCrossEncoderClient | undefined {
-  if (!config.localAnswerRerankEnabled) return undefined;
-  return new LocalOnnxCrossEncoderClient({
-    cacheDir: config.localAnswerRerankCacheDir ?? defaultLocalOnnxCacheDir(),
-    ...(config.localAnswerRerankModel === null
-      ? {}
-      : { modelId: config.localAnswerRerankModel })
-  });
 }
 
 function createEmbeddingProviderState(
