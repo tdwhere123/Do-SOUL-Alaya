@@ -1,7 +1,6 @@
 import {
   buildFineAssessmentComponentLedger,
-  reconstructFineAssessmentComposition,
-  type SelectionCompositionOptions
+  reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
 import {
   forEachSelectionBoundaryGzipRecord
@@ -25,7 +24,7 @@ const SELECTION_LEDGER_ARTIFACT_ERRORS = Object.freeze({
  */
 export async function verifyLongMemEvalSelectionBoundaryLedgerSample(
   artifactPath: string,
-  options: SelectionCompositionOptions & {
+  options: {
     readonly maxArtifactBytes?: number;
     readonly sampleLimit?: number;
   } = {}
@@ -55,9 +54,7 @@ export async function verifyLongMemEvalSelectionBoundaryLedgerSample(
       ) {
         throw new Error("selection ledger candidate count mismatch");
       }
-      reconstructFineAssessmentComposition(record.boundary, {
-        finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
-      });
+      reconstructFineAssessmentComposition(record.boundary);
       ledgerCandidateCount += ledger.candidates.length;
       sampleCount += 1;
     }

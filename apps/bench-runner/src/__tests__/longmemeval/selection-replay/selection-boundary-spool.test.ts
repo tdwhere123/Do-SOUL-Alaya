@@ -316,7 +316,6 @@ function capturedBoundaryV2(
       candidate.fusion.candidate_key,
       candidate.fusion.fused_score
     ])),
-    finalOrderAfterCoverage: "public_relevance",
     captureAnswerFeatures: true,
     capturePacketPlanTrace: true,
     selectionBoundaryObserver: (pending) => {

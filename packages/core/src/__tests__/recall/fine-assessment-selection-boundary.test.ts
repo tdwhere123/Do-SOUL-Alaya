@@ -461,7 +461,6 @@ describe("fine-assessment selection boundary fidelity", () => {
       supplementaryData: createSupplementaryData(),
       tokenEstimator: { estimate: () => 5 },
       rankByCandidateKey: rankMap(candidates),
-      finalOrderAfterCoverage: "coverage",
       selectionBoundaryObserver: (pending) => {
         boundary = materializeFineAssessmentSelectionBoundary(pending);
         return undefined;
@@ -552,6 +551,7 @@ describe("fine-assessment selection boundary fidelity", () => {
     const diagnostic = visibleResult.diagnostics[0]!;
     const {
       coverageSelectionObjective: _coverageSelectionObjective,
+      orderSequence: _orderSequence,
       ...visiblePayload
     } = visibleResult;
     const candidateDrift = {
@@ -800,7 +800,6 @@ function selectFixture(
       candidate.fusion.fused_score
     ])),
     coverageObjectiveConfig,
-    finalOrderAfterCoverage: "public_relevance",
     captureAnswerFeatures,
     capturePacketPlanTrace: true,
     selectionBoundaryObserver: observer

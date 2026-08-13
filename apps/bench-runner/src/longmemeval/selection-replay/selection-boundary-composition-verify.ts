@@ -1,6 +1,5 @@
 import {
-  reconstructFineAssessmentComposition,
-  type SelectionCompositionOptions
+  reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
 import {
   forEachSelectionBoundaryGzipRecord
@@ -20,7 +19,7 @@ const SELECTION_COMPOSITION_ARTIFACT_ERRORS = Object.freeze({
 
 export async function verifyLongMemEvalSelectionBoundaryCompositionArtifact(
   artifactPath: string,
-  options: SelectionCompositionOptions & {
+  options: {
     readonly maxArtifactBytes?: number;
     readonly authoritativeOnly?: boolean;
   } = {}
@@ -38,9 +37,7 @@ export async function verifyLongMemEvalSelectionBoundaryCompositionArtifact(
     SELECTION_COMPOSITION_ARTIFACT_ERRORS,
     (record) => {
       if (authoritativeOnly && !record.authoritative) return;
-      reconstructFineAssessmentComposition(record.boundary, {
-        finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
-      });
+      reconstructFineAssessmentComposition(record.boundary);
       compositionCount += 1;
     }
   );

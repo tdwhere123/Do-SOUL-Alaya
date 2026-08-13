@@ -97,10 +97,6 @@ export function recallSessionRouteEnabled(): boolean {
   return getCoreConfig().recall.sessionRoute;
 }
 
-export function recallFinalAuthorityMaxHeadDrop(): number | undefined {
-  return getCoreConfig().recall.finalAuthorityMaxHeadDrop;
-}
-
 /** answers_with / flood path fuel is always on; no closable off-switch. */
 export function recallAnswersWithEnabled(): boolean {
   return true;

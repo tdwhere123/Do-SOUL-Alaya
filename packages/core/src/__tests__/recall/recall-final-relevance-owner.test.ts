@@ -99,7 +99,7 @@ describe("final recall relevance ownership", () => {
       [`workspace_local:memory_entry:${FUSION_WINNER_ID}`, 0.1],
       [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.9]
     ]);
-    const fixture = buildRelevanceFixture(answerScores, 0);
+    const fixture = buildRelevanceFixture(answerScores);
 
     expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
       .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
@@ -348,8 +348,7 @@ describe("final recall relevance ownership", () => {
 });
 
 function buildRelevanceFixture(
-  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>,
-  finalAuthorityMaxHeadDrop?: number
+  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>
 ) {
   const fusionWinner = createMemory(FUSION_WINNER_ID, 0.1, [
     { facet: "occupation_work" }, { facet: "location_place" }
@@ -361,8 +360,7 @@ function buildRelevanceFixture(
     candidates: [createCoarseCandidate(activationWinner), createCoarseCandidate(fusionWinner)],
     policy: buildPolicy(), winnerMemoryIds: new Set(),
     supplementaryData: createSupplementaryData(answerRelevanceScoresByCandidateKey), tokenEstimator: { estimate: () => 4 },
-    now: () => NOW, warn: vi.fn(),
-    finalAuthorityMaxHeadDrop
+    now: () => NOW, warn: vi.fn()
   });
   return { fusionWinner, activationWinner, assessed };
 }

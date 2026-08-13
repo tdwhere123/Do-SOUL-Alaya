@@ -28,8 +28,6 @@ import {
   type TimedResult,
   type TimedSpan
 } from "./recall-phase-latency.js";
-import { recallFinalAuthorityMaxHeadDrop } from
-  "../../../config/recall-env-access.js";
 
 export type LegacyInitialAssessment = Readonly<{
   readonly assessment: FineAssessmentResult;
@@ -233,7 +231,6 @@ function buildFineAssessParams(
     warn: context.warn,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
-    finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop(),
     selectionBoundaryObserver: params.selectionBoundaryObserver
   };
 }

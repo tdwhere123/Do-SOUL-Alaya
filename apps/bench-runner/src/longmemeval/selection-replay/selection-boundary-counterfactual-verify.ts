@@ -10,7 +10,6 @@ import {
   auxiliaryEstimatesToMap,
   type CounterfactualCompositionOptions,
   type FineAssessmentSelectionBoundaryCase,
-  type SelectionCompositionOptions,
   type SelectionCompositionReconstruction
 } from "@do-soul/alaya-core";
 import {
@@ -69,7 +68,7 @@ type CounterfactualReconstruct = (
   options?: CounterfactualCompositionOptions
 ) => SelectionCompositionReconstruction;
 
-type EvaluateOptions = SelectionCompositionOptions & {
+type EvaluateOptions = {
   readonly maxArtifactBytes?: number;
   readonly authoritativeOnly?: boolean;
   readonly cfTokenCompanion?: CfTokenCompanionLoad;
@@ -101,7 +100,6 @@ export async function evaluateSelectionCounterfactual(
         const evaluation = evaluateCounterfactualRecord(
           record,
           goldByQuestion,
-          options,
           options.cfTokenCompanion,
           reconstruct
         );
@@ -281,13 +279,10 @@ export function toQuestionTransition(
 function evaluateCounterfactualRecord(
   record: SelectionBoundaryArtifactRecord,
   goldByQuestion: ReadonlyMap<string, GoldQuestion>,
-  options: SelectionCompositionOptions,
   cfTokenCompanion: CfTokenCompanionLoad | undefined,
   reconstruct: CounterfactualReconstruct
 ): CounterfactualRecordEvaluation {
-  reconstructFineAssessmentComposition(record.boundary, {
-    finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
-  });
+  reconstructFineAssessmentComposition(record.boundary);
   const baselineKeys = record.boundary.expected.candidate_keys;
   let counterfactualKeys: readonly string[] | null = null;
   let unseenTokenFailure = false;
@@ -296,7 +291,6 @@ function evaluateCounterfactualRecord(
   );
   try {
     const reconstructed = reconstruct(record.boundary, {
-      finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop,
       ...(companionSlice === undefined ? {} : {
         cfTokenCompanionAuxiliaryByContentSha256: auxiliaryEstimatesToMap(
           companionSlice.auxiliary_estimates

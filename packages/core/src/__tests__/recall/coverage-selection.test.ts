@@ -723,8 +723,7 @@ describe("coverage-aware delivery", () => {
         [highFusedDupA.fusion.candidate_key, 0.2],
         [highFusedDupB.fusion.candidate_key, 0.15],
         [lowFusedNovel.fusion.candidate_key, 0.95]
-      ]),
-      finalOrderAfterCoverage: "public_relevance"
+      ])
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
@@ -770,9 +769,7 @@ describe("coverage-aware delivery", () => {
         [headA.fusion.candidate_key, 1],
         [publicA.fusion.candidate_key, 2],
         [publicB.fusion.candidate_key, 3]
-      ]),
-      finalOrderAfterCoverage: "public_relevance",
-      maxHeadDropAfterCoverage: 1
+      ])
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([

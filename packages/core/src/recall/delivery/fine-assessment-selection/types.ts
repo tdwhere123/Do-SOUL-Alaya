@@ -13,6 +13,7 @@ import type { RecallFieldRefinementStopCertificate } from
   "../../field/refinement/field-refinement-stop-certificate.js";
 import type { RecallRelevanceUpperBoundReceipt } from
   "../../rerank/relevance-upper-bound-receipt.js";
+import type { FineAssessmentOrderSequence } from "./order-sequence.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -97,6 +98,8 @@ export interface FineAssessmentAdmission {
 
 export type FineAssessmentSelectionParams = Readonly<{
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
+  /** Coarse ranks need pre-delivery packet order after delivery has already reordered the select input. */
+  readonly packetCandidates?: readonly FineAssessmentCandidate[];
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;
@@ -107,8 +110,6 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly coverageRelevanceUpperBound?:
     Readonly<RecallRelevanceUpperBoundReceipt> | null;
   readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
-  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
-  readonly maxHeadDropAfterCoverage?: number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
@@ -123,4 +124,5 @@ export type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPa
   readonly fieldRefinementStopCertificate?:
     Readonly<RecallFieldRefinementStopCertificate>;
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
+  readonly orderSequence: FineAssessmentOrderSequence;
 }>;

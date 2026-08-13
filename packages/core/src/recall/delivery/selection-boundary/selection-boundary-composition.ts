@@ -36,10 +36,8 @@ import type { FineAssessmentSelectionBoundaryPendingCapture } from
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
 
-export type SelectionCompositionOptions = Readonly<{
-  /** Same optional bound live `deliverFineAssessment` receives. */
-  readonly finalAuthorityMaxHeadDrop?: number;
-}>;
+/** Reconstruct no longer accepts a second order policy; the exported name stays for callers. */
+export type SelectionCompositionOptions = Readonly<{}>;
 
 export type SelectionCompositionReconstruction = Readonly<{
   readonly result: FineAssessmentSelectionResult;
@@ -53,8 +51,7 @@ export type SelectionCompositionReconstruction = Readonly<{
  * Must stay bit-identical to `deliverFineAssessment` branch + apply + select.
  */
 export function reconstructFineAssessmentComposition(
-  boundary: FineAssessmentSelectionBoundaryCase,
-  options: SelectionCompositionOptions = {}
+  boundary: FineAssessmentSelectionBoundaryCase
 ): SelectionCompositionReconstruction {
   validateSelectionBoundary(boundary);
   const input = boundary.input;
@@ -69,24 +66,18 @@ export function reconstructFineAssessmentComposition(
     captureAnswerFeatures: input.capture_answer_features
   });
   const branch = resolveFineAssessmentDeliveryBranch({
-    answerRelevanceScores,
-    candidates,
-    supplementaryData,
-    deepHeadScores: deepHead.scores,
-    embeddingObserved: deepHead.embeddingObserved,
-    finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
+    answerRelevanceScores
   });
   const delivery = applyDeliverySelection(candidates, deepHead.scores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
-  assertCompositionInputs(input, delivery, deepHead, branch);
+  assertCompositionInputs(input, delivery, deepHead);
   let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const selectionParams = buildCompositionSelectionParams(
     input,
     supplementaryData,
     delivery,
-    deepHead,
-    branch
+    deepHead
   );
   const selected = selectFineAssessmentCandidates({
     ...selectionParams,
@@ -112,7 +103,6 @@ export function buildCompositionSelectionParams(
   supplementaryData: ReturnType<typeof restoreSupplementaryData>,
   delivery: ReturnType<typeof applyDeliverySelection>,
   deepHead: RecallDeepHeadAssessment,
-  branch: FineAssessmentDeliveryBranch,
   tokenEstimator: FineAssessmentSelectionParams["tokenEstimator"] =
     createCapturedTokenEstimator(input.token_estimates_by_content)
 ): FineAssessmentSelectionParams {
@@ -128,10 +118,6 @@ export function buildCompositionSelectionParams(
     ...(input.coverage_objective_config === undefined ? {} : {
       coverageObjectiveConfig: input.coverage_objective_config
     }),
-    finalOrderAfterCoverage: branch.finalOrderAfterCoverage,
-    ...(branch.maxHeadDropAfterCoverage === undefined ? {} : {
-      maxHeadDropAfterCoverage: branch.maxHeadDropAfterCoverage
-    }),
     answerRelevanceRankByCandidateKey:
       delivery.answerRelevanceRankByCandidateKey,
     ...(input.capture_answer_features === undefined ? {} : {
@@ -145,8 +131,7 @@ export function buildCompositionSelectionParams(
 function assertCompositionInputs(
   input: FineAssessmentSelectionBoundaryInput,
   delivery: ReturnType<typeof applyDeliverySelection>,
-  deepHead: RecallDeepHeadAssessment,
-  branch: FineAssessmentDeliveryBranch
+  deepHead: RecallDeepHeadAssessment
 ): void {
   assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
   assertNumberMapEquals(
@@ -169,12 +154,6 @@ function assertCompositionInputs(
       selectionBoundaryJsonSha256(
         input.coverage_relevance_upper_bound ?? null
       )) {
-    throwCompositionMismatch();
-  }
-  if (branch.finalOrderAfterCoverage !== input.final_order_after_coverage) {
-    throwCompositionMismatch();
-  }
-  if (branch.maxHeadDropAfterCoverage !== input.max_head_drop_after_coverage) {
     throwCompositionMismatch();
   }
   assertDeepHeadTraces(

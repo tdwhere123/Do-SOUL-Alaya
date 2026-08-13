@@ -16,7 +16,6 @@ describe("selection boundary replay fidelity", () => {
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;
     select(consensusCandidates(), {
       capturePacketPlanTrace: true,
-      finalOrderAfterCoverage: "public_relevance",
       selectionBoundaryObserver: (captured) => {
         boundary = materializeFineAssessmentSelectionBoundary(captured);
       }

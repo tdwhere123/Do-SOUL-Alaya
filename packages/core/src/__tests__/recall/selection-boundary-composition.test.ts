@@ -20,9 +20,6 @@ describe("fine-assessment selection composition reconstruction", () => {
     const reconstructed = reconstructFineAssessmentComposition(boundary);
 
     expect(reconstructed.branch.replacePublicRelevance).toBe(false);
-    expect(reconstructed.branch.finalOrderAfterCoverage).toBe(
-      boundary.input.final_order_after_coverage
-    );
     expect(reconstructed.result.candidates.map((candidate) =>
       candidate.object_id
     )).toEqual(

@@ -50,7 +50,6 @@ export interface FineAssessParams {
   readonly warn: RecallServiceWarnPort;
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
-  readonly finalAuthorityMaxHeadDrop?: number;
   readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
@@ -124,18 +123,14 @@ export function deliverFineAssessment(
   });
   const deepHeadScores = deepHead.scores;
   const branch = resolveFineAssessmentDeliveryBranch({
-    answerRelevanceScores,
-    candidates: preparation.candidates,
-    supplementaryData: params.supplementaryData,
-    deepHeadScores,
-    embeddingObserved: deepHead.embeddingObserved,
-    finalAuthorityMaxHeadDrop: params.finalAuthorityMaxHeadDrop
+    answerRelevanceScores
   });
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates({
     orderedCandidates: delivery.orderedCandidates,
+    packetCandidates: preparation.candidates,
     config: params.policy.fine_assessment,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
@@ -146,8 +141,6 @@ export function deliverFineAssessment(
     coverageRelevanceByCandidateKey: deepHeadScores,
     coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
     coverageObjectiveConfig: params.coverageObjectiveConfig,
-    finalOrderAfterCoverage: branch.finalOrderAfterCoverage,
-    maxHeadDropAfterCoverage: branch.maxHeadDropAfterCoverage,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
     capturePacketPlanTrace: params.capturePacketPlanTrace,

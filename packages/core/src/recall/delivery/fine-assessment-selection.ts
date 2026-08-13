@@ -27,6 +27,11 @@ import {
 } from "./fine-assessment-selection/coverage-order.js";
 import { captureFineAssessmentPreProjection } from
   "./selection-boundary/pre-projection/observation.js";
+import {
+  advanceFineAssessmentOrderSequence,
+  birthFineAssessmentOrderSequence,
+  stampFineAssessmentFinalRanks
+} from "./fine-assessment-selection/order-sequence.js";
 import type {
   FineAssessmentAccumulator,
   FineAssessmentAdmissionReceipt,
@@ -58,6 +63,15 @@ export function selectFineAssessmentCandidates(
   const context = createSelectionContext(selectionParams);
   const coverageSelection = prepareCoverageSelection(selectionParams, context);
   const coverageOrdered = coverageSelection.candidates;
+  const coverageSequence = advanceFineAssessmentOrderSequence(
+    birthFineAssessmentOrderSequence(
+      selectionParams.orderedCandidates,
+      selectionParams.rankByCandidateKey,
+      selectionParams.packetCandidates
+    ),
+    coverageOrdered,
+    "coverage"
+  );
   const excludedCandidateKeys = new Set<string>();
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
@@ -83,6 +97,11 @@ export function selectFineAssessmentCandidates(
     context,
     temporalHead.protections
   );
+  const consensusSequence = advanceFineAssessmentOrderSequence(
+    coverageSequence,
+    selection.order,
+    "consensus"
+  );
   const finalAccumulator = reduceFineAssessmentCandidates(
     selection.order,
     context,
@@ -105,6 +124,11 @@ export function selectFineAssessmentCandidates(
     selection.consensus,
     delivered,
     coverageSelection.objective,
+    stampFineAssessmentFinalRanks(
+      consensusSequence,
+      delivered.candidates,
+      selection.order
+    ),
     refinementStopCertificate,
     boundaryCapture?.tokenEstimatesByContent,
     preProjection

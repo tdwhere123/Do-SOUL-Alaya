@@ -25,7 +25,6 @@ export type SelectionOverrides = Readonly<{
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly evidenceSemanticScoresByCandidateKey?: ReadonlyMap<string, number>;
-  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly maxTotalTokens?: number;
   readonly pathInflowByTarget?: RecallSupplementaryData["pathInflowByTarget"];
   readonly pathInflowAvailability?: RecallSupplementaryData["pathInflowAvailability"];
@@ -90,7 +89,6 @@ export function select(
     rankByCandidateKey: rankMap(candidates),
     finalRelevanceByCandidateKey: relevanceMap(candidates),
     coverageRelevanceByCandidateKey: relevanceMap(candidates),
-    finalOrderAfterCoverage: overrides.finalOrderAfterCoverage ?? "delivery_rank",
     captureAnswerFeatures: overrides.captureAnswerFeatures,
     capturePacketPlanTrace: overrides.capturePacketPlanTrace,
     selectionBoundaryObserver: overrides.selectionBoundaryObserver

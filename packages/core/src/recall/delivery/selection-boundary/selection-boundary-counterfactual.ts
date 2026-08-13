@@ -25,7 +25,6 @@ import type {
 } from "./selection-boundary-types.js";
 import {
   buildCompositionSelectionParams,
-  type SelectionCompositionOptions,
   type SelectionCompositionReconstruction
 } from "./selection-boundary-composition.js";
 import {
@@ -38,14 +37,13 @@ export const INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR =
 export const NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR =
   "nonlexical_unit_interval_composition" as const;
 
-export type CounterfactualCompositionOptions = SelectionCompositionOptions &
-  Readonly<{
-    /** Companion waist estimates keyed by content sha256; F0 live map unchanged. */
-    readonly cfTokenCompanionAuxiliaryByContentSha256?: ReadonlyMap<
-      string,
-      number
-    >;
-  }>;
+export type CounterfactualCompositionOptions = Readonly<{
+  /** Companion waist estimates keyed by content sha256; F0 live map unchanged. */
+  readonly cfTokenCompanionAuxiliaryByContentSha256?: ReadonlyMap<
+    string,
+    number
+  >;
+}>;
 
 /**
  * Counterfactual composition: same delivery seam as baseline reconstruction,
@@ -110,12 +108,7 @@ function reconstructCounterfactualComposition(
     resolveAssessment
   );
   const branch = resolveFineAssessmentDeliveryBranch({
-    answerRelevanceScores,
-    candidates,
-    supplementaryData,
-    deepHeadScores: deepHead.scores,
-    embeddingObserved: deepHead.embeddingObserved,
-    finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
+    answerRelevanceScores
   });
   const delivery = applyDeliverySelection(candidates, deepHead.scores, {
     replacePublicRelevance: branch.replacePublicRelevance
@@ -126,7 +119,6 @@ function reconstructCounterfactualComposition(
       supplementaryData,
       delivery,
       deepHead,
-      branch,
       createLivePlusCompanionTokenEstimator(
         input.token_estimates_by_content,
         options.cfTokenCompanionAuxiliaryByContentSha256

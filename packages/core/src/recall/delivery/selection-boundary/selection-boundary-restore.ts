@@ -189,12 +189,6 @@ export function restoreSelectionParams(
     ...(input.coverage_objective_config === undefined ? {} : {
       coverageObjectiveConfig: input.coverage_objective_config
     }),
-    ...(input.final_order_after_coverage === undefined ? {} : {
-      finalOrderAfterCoverage: input.final_order_after_coverage
-    }),
-    ...(input.max_head_drop_after_coverage === undefined ? {} : {
-      maxHeadDropAfterCoverage: input.max_head_drop_after_coverage
-    }),
     ...(input.answer_relevance_rank_by_candidate_key === undefined ? {} : {
       answerRelevanceRankByCandidateKey: new Map(
         input.answer_relevance_rank_by_candidate_key

@@ -152,7 +152,6 @@ type CaptureFixture = Readonly<{
   readonly supplementaryData?: RecallSupplementaryData;
   readonly tokenEstimator?: (content: string) => number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
-  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
 }>;
 
 function captureBoundary(
@@ -177,8 +176,6 @@ function captureBoundary(
     rankByCandidateKey: rankMap(fixture.candidates),
     finalRelevanceByCandidateKey: relevanceMap(fixture.candidates),
     coverageRelevanceByCandidateKey: relevanceMap(fixture.candidates),
-    finalOrderAfterCoverage:
-      fixture.finalOrderAfterCoverage ?? "coverage",
     answerRelevanceRankByCandidateKey:
       fixture.answerRelevanceRankByCandidateKey,
     capturePacketPlanTrace: true,
@@ -244,8 +241,7 @@ function consensusFixture(): CaptureFixture {
           candidate.entry.object_id === "challenger" ? 0.1 : 0.9
         ]
       ))
-    }),
-    finalOrderAfterCoverage: "delivery_rank"
+    })
   };
 }
 

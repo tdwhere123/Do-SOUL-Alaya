@@ -169,12 +169,6 @@ function serializeOptionalSelectionInputs(
         params.coverageObjectiveConfig
       )
     }),
-    ...(params.finalOrderAfterCoverage === undefined ? {} : {
-      final_order_after_coverage: params.finalOrderAfterCoverage
-    }),
-    ...(params.maxHeadDropAfterCoverage === undefined ? {} : {
-      max_head_drop_after_coverage: params.maxHeadDropAfterCoverage
-    }),
     ...(params.answerRelevanceRankByCandidateKey === undefined ? {} : {
       answer_relevance_rank_by_candidate_key:
         stableNumberEntries(params.answerRelevanceRankByCandidateKey)
