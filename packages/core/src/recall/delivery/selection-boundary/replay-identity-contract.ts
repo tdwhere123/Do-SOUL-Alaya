@@ -68,7 +68,7 @@ export const CAPTURED_VS_LIVE_ASSERTIONS = Object.freeze({
   deep_head_traces: {
     class: "output",
     site: "selection-boundary-composition.ts:assertDeepHeadTraces",
-    reason: "Traces carry family_scores and the live formula operator."
+    reason: "Traces carry the live formula operator and resolved score fields."
   },
   expected_membership: {
     class: "output",
@@ -247,8 +247,8 @@ export const ALWAYS_FAIL_CLOSED_ASSERTIONS: readonly ReplayIdentityRow[] = Objec
   },
   {
     class: "input",
-    site: "apps/bench-runner/.../selection-order-ledger-recompute.ts:126,167,195,202,208,248,253,282",
-    reason: "Gold QID, formula_operator_id, and family_scores are live receipt completeness."
+    site: "apps/bench-runner/.../selection-order-ledger-recompute.ts:126,167,195,202,208,248,282",
+    reason: "Gold QID and formula_operator_id are live receipt completeness; missing traces fail closed."
   },
   {
     class: "input",

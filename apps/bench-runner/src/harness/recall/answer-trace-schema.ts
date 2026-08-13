@@ -1,10 +1,5 @@
 import { z } from "zod";
 import {
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScoreByOperatorId
-} from "@do-soul/alaya-core";
-import {
   CandidateActivationReceiptSchema,
   EvidenceSemanticActivationReceiptSchema
 } from "./answer-trace/semantic-activation-schema.js";
@@ -184,11 +179,6 @@ const RecallDeepHeadTraceFieldsSchema = z
     fusion_baseline_used: z.boolean(),
     resolved_score: z.number().min(0).max(1).nullable(),
     formula_operator_id: z.string().min(1).optional(),
-    family_scores: z.object({
-      lexical_evidence: z.number().min(0).max(1),
-      semantic: z.number().min(0).max(1).nullable(),
-      fusion: z.number().min(0).max(1).nullable()
-    }).strict().optional(),
     activation: CandidateActivationReceiptSchema.optional(),
     evidence_semantic_activation:
       EvidenceSemanticActivationReceiptSchema.nullable().optional(),
@@ -322,12 +312,6 @@ function validateLightweightSource(
   trace: DeepHeadTrace
 ): boolean {
   if (trace.resolved_score === null) return false;
-  if (
-    trace.formula_operator_id === FAMILY_GROUPED_COMPOSITION_OPERATOR_ID ||
-    trace.formula_operator_id === LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
-  ) {
-    return validateFamilyGroupedSource(trace);
-  }
   if (trace.score_source === "fusion_embedding_evidence") {
     return trace.embedding_signal !== null && trace.fusion_baseline_used;
   }
@@ -352,55 +336,6 @@ function validateLightweightSource(
     trace.embedding_signal === null &&
     !trace.fusion_baseline_used &&
     approximatelyEqual(trace.resolved_score, trace.resolved_evidence);
-}
-
-function validateFamilyGroupedSource(trace: DeepHeadTrace): boolean {
-  const families = trace.family_scores;
-  if (families === undefined || trace.resolved_score === null) return false;
-  if (!approximatelyEqual(families.lexical_evidence, trace.resolved_evidence)) {
-    return false;
-  }
-  if (!sameNullableUnit(families.semantic, trace.embedding_signal)) return false;
-  if ((families.fusion !== null) !== trace.fusion_baseline_used) return false;
-  if (!sourceFlagsMatch(trace)) return false;
-  const composed = composeFamilyGroupedScoreByOperatorId(
-    trace.formula_operator_id,
-    {
-      lexicalEvidence: families.lexical_evidence,
-      semantic: families.semantic,
-      fusion: families.fusion
-    }
-  );
-  return approximatelyEqual(trace.resolved_score, composed.resolvedScore);
-}
-
-function sourceFlagsMatch(trace: DeepHeadTrace): boolean {
-  if (trace.score_source === "fusion_embedding_evidence") {
-    return trace.embedding_signal !== null && trace.fusion_baseline_used;
-  }
-  if (trace.score_source === "embedding_evidence") {
-    return trace.embedding_signal !== null && !trace.fusion_baseline_used;
-  }
-  if (trace.score_source === "fusion_evidence") {
-    return trace.embedding_signal === null &&
-      trace.fusion_baseline_used &&
-      trace.resolved_evidence > 0;
-  }
-  if (trace.score_source === "field_baseline") {
-    return trace.embedding_signal === null &&
-      trace.fusion_baseline_used &&
-      trace.resolved_evidence === 0 &&
-      trace.resolved_score !== null &&
-      trace.resolved_score > 0;
-  }
-  return trace.score_source === "evidence_only" &&
-    trace.embedding_signal === null &&
-    !trace.fusion_baseline_used;
-}
-
-function sameNullableUnit(left: number | null, right: number | null): boolean {
-  if (left === null || right === null) return left === right;
-  return approximatelyEqual(left, right);
 }
 
 function probabilisticOr(left: number, right: number): number {

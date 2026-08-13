@@ -245,13 +245,11 @@ function familyScoresByCandidateKey(
 ): Readonly<Record<string, FamilyGroupedScores>> {
   const traces = reconstruction.deepHead.traceByCandidateKey;
   if (traces.size === 0 && reconstruction.deepHead.scores.size > 0) {
-    throw new Error("recompute_live missing family score receipts");
+    throw new Error("recompute_live missing deep-head traces");
   }
   const receipts: Record<string, FamilyGroupedScores> = {};
   for (const [key, trace] of traces) {
-    if (trace.family_scores === undefined) {
-      throw new Error(`recompute_live missing family_scores for ${key}`);
-    }
+    if (trace.family_scores === undefined) continue;
     receipts[key] = trace.family_scores;
   }
   return Object.freeze(receipts);

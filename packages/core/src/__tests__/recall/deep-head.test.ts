@@ -11,7 +11,7 @@ import { emptySupplementary, fusedCandidate } from
   "./rerank/deep-head-fixtures.js";
 
 describe("deep head", () => {
-  it("traces the exact live family-grouped score composition", () => {
+  it("traces the exact live lightweight score composition", () => {
     const candidate = fusedCandidate({
       objectId: "traced",
       fusedScore: 0.2,
@@ -42,13 +42,10 @@ describe("deep head", () => {
       winner: { channel: "effective_factor", score: 0.4 },
       missing_channel_policy: "no_op"
     });
-    expect(trace.formula_operator_id).toBe("family_grouped_composition_v2");
+    expect(trace.formula_operator_id).toBe("lightweight_deep_head_prob_or_v1");
     expect(trace.fusion_baseline_used).toBe(false);
     expect(trace.score_source).toBe("embedding_evidence");
-    expect(trace.family_scores?.lexical_evidence).toBeCloseTo(0.9);
-    expect(trace.family_scores?.semantic).toBeCloseTo(0.4);
-    expect(trace.family_scores?.fusion).toBeNull();
-    expect(trace.resolved_score).toBeCloseTo(1);
+    expect(trace.resolved_score).toBeCloseTo(0.94);
     expect(assessment.scores.get(candidate.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -75,7 +72,7 @@ describe("deep head", () => {
     expect(trace.lexical_agreement).toBeCloseTo(0.9);
     expect(trace.evidence_agreement).toBeCloseTo(0.9);
     expect(trace.resolved_evidence).toBeCloseTo(0.9);
-    expect(trace.resolved_score).toBeCloseTo(1);
+    expect(trace.resolved_score).toBeCloseTo(0.94);
   });
 
   it("keeps the fused opportunity channel beside observed embedding support", () => {
@@ -95,8 +92,7 @@ describe("deep head", () => {
 
     expect(trace.fusion_baseline_used).toBe(true);
     expect(trace.score_source).toBe("fusion_embedding_evidence");
-    expect(trace.family_scores?.fusion).toBeCloseTo(0.2);
-    expect(trace.resolved_score).toBeCloseTo(0.4);
+    expect(trace.resolved_score).toBeCloseTo(1 - (1 - 0.4) * (1 - 0.2));
     expect(assessment.scores.get(candidate.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -121,7 +117,9 @@ describe("deep head", () => {
     );
     const trace = assessment.traceByCandidateKey.get(leader.fusion.candidate_key)!;
 
-    expect(trace.resolved_score).toBeCloseTo(0.42);
+    expect(trace.resolved_score).toBeCloseTo(
+      1 - (1 - 0.42) * (1 - 0.114)
+    );
     expect(assessment.scores.get(leader.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -207,7 +205,7 @@ describe("deep head", () => {
     });
 
     expect(assessment.traceByCandidateKey.get(scoredKey)?.formula_operator_id)
-      .toBe("family_grouped_composition_v2");
+      .toBe("lightweight_deep_head_prob_or_v1");
     expect(assessment.traceByCandidateKey.get(scoredKey)?.score_source)
       .not.toBe("cross_encoder");
   });
@@ -253,7 +251,7 @@ describe("deep head", () => {
     );
 
     expect(scores.get(semanticOnly.fusion.candidate_key)).toBeCloseTo(0.6);
-    expect(scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(1);
+    expect(scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(0.84);
   });
 
   it("treats concurrence between two lexical lanes as answer evidence", () => {
@@ -301,7 +299,7 @@ describe("deep head", () => {
     );
 
     expect(scores.get(direct.fusion.candidate_key)).toBeCloseTo(
-      Math.sqrt(0.9 * 0.81)
+      1 - (1 - 0.4) * (1 - Math.sqrt(0.9 * 0.81))
     );
     expect(scores.get(contextual.fusion.candidate_key)).toBeCloseTo(0.6);
   });

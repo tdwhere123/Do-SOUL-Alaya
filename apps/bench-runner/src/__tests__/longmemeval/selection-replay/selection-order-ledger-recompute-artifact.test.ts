@@ -6,7 +6,6 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
   SELECTION_COMPOSITION_FIDELITY_MISMATCH,
   counterfactualDeliveredCandidateKeys,
   reconstructFineAssessmentComposition
@@ -92,7 +91,7 @@ describe("selection order ledger recompute_live", () => {
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("recomputes live membership and family receipts under recompute_live", async () => {
+  it("recomputes live membership under recompute_live", async () => {
     const root = await temporaryRoot();
     const original = captureFineAssessmentSelectionBoundary("recompute-live");
     const boundary = withInjectedEmbeddings(original);
@@ -116,11 +115,6 @@ describe("selection order ledger recompute_live", () => {
     const question = rows[1] as {
       live_delivered_keys: readonly string[];
       captured_delivered_keys: readonly string[];
-      family_scores: Record<string, {
-        lexical_evidence: number;
-        semantic: number | null;
-        fusion: number | null;
-      }>;
       gold: { any_at_5: boolean };
     };
     const summary = rows[2] as {
@@ -138,19 +132,11 @@ describe("selection order ledger recompute_live", () => {
 
     expect(identity.captured_score_fidelity).toBe("recompute_live");
     expect(identity.recompute?.formula_operator_id).toBe(
-      FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
+      "lightweight_deep_head_prob_or_v1"
     );
     expect(question.live_delivered_keys.length).toBeGreaterThan(0);
     expect(question.captured_delivered_keys).toEqual(original.expected.candidate_keys);
-    expect(Object.values(question.family_scores).every((family) =>
-      typeof family.lexical_evidence === "number" &&
-      (family.semantic === null || typeof family.semantic === "number") &&
-      (family.fusion === null || typeof family.fusion === "number")
-    )).toBe(true);
-    expect(Object.values(question.family_scores).some((family) =>
-      family.semantic !== null
-    )).toBe(true);
-    expect(summary.formula_operator_id).toBe(FAMILY_GROUPED_COMPOSITION_OPERATOR_ID);
+    expect(summary.formula_operator_id).toBe("lightweight_deep_head_prob_or_v1");
     expect(summary.any_at_1).toBe(1);
     expect(summary.any_at_5).toBe(1);
     expect(summary.any_at_10).toBe(1);

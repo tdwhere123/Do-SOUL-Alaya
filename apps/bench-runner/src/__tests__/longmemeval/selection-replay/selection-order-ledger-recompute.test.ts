@@ -2,7 +2,6 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FAMILY_GROUPED_COMPOSITION_OPERATOR_ID } from "@do-soul/alaya-core";
 import { loadSelectionReplayGoldMap } from
   "../../../longmemeval/selection-replay/selection-boundary-gold-map.js";
 import {
@@ -53,11 +52,11 @@ describe("captured-to-live membership owner", () => {
 describe("recompute_live formula operator receipts", () => {
   it("reads the operator from traces and fails on mixed or missing ids", () => {
     expect(formulaOperatorIdFromTraces([
-      { formula_operator_id: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID },
-      { formula_operator_id: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID }
-    ])).toBe(FAMILY_GROUPED_COMPOSITION_OPERATOR_ID);
+      { formula_operator_id: "op_a" },
+      { formula_operator_id: "op_a" }
+    ])).toBe("op_a");
     expect(() => formulaOperatorIdFromTraces([
-      { formula_operator_id: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID },
+      { formula_operator_id: "op_a" },
       { formula_operator_id: "other_operator" }
     ])).toThrow(/mixed formula_operator_id/u);
     expect(() => formulaOperatorIdFromTraces([{ }])).toThrow(

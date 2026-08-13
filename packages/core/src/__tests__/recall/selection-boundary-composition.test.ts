@@ -147,11 +147,6 @@ describe("fine-assessment selection composition reconstruction", () => {
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
     });
 
-    expect(
-      [...reconstructed.deepHead.traceByCandidateKey.values()].every(
-        (trace) => trace.family_scores !== undefined
-      )
-    ).toBe(true);
     expect(reconstructed.result.candidates.map((candidate) =>
       candidate.object_id
     )).toEqual(

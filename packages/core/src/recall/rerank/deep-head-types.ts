@@ -4,9 +4,14 @@ import type { CandidateActivationReceipt } from
   "../scoring/candidate-semantic-activation.js";
 import type { RecallEvidenceSemanticActivationReceipt } from
   "../runtime/recall-service-types.js";
-import type { FamilyGroupedScores } from "./family-grouped-composition.js";
 import type { RecallRelevanceUpperBoundReceipt } from
   "./relevance-upper-bound-receipt.js";
+
+export type FamilyGroupedScores = Readonly<{
+  readonly lexical_evidence: number;
+  readonly semantic: number | null;
+  readonly fusion: number | null;
+}>;
 
 export type DeepHeadSupplementary = Readonly<Pick<
   RecallSupplementaryData,
@@ -40,7 +45,7 @@ export type RecallDeepHeadTrace = Readonly<{
   readonly score_source: RecallDeepHeadScoreSource;
   /** Optional for replaying pre-operator-identity boundary artifacts. */
   readonly formula_operator_id?: string;
-  /** Optional for replaying pre-family-receipt boundary artifacts. */
+  /** Live noisy-OR omits this; published family-grouped artifacts may still carry it. */
   readonly family_scores?: FamilyGroupedScores;
   /** Optional for replaying pre-receipt boundary artifacts. */
   readonly activation?: CandidateActivationReceipt;

@@ -4,10 +4,6 @@ import {
   embeddingSignal,
   probabilisticOr
 } from "./deep-head-signals.js";
-import {
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScore
-} from "./family-grouped-composition.js";
 import type {
   DeepHeadAssessmentFormula,
   DeepHeadSupplementary,
@@ -19,6 +15,7 @@ import type {
 import { createRecallRelevanceUpperBoundReceipt } from
   "./relevance-upper-bound-receipt.js";
 
+const LIGHTWEIGHT_OPERATOR_ID = "lightweight_deep_head_prob_or_v1";
 const INDEPENDENT_EMBEDDING_OPERATOR_ID =
   "counterfactual_independent_embedding_evidence_v1";
 const NONLEXICAL_OPERATOR_ID =
@@ -81,20 +78,15 @@ export function buildComponentsDeepHeadAssessment(
 }
 
 export const lightweightDeepHeadFormula: DeepHeadAssessmentFormula = Object.freeze({
-  operatorId: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  operatorId: LIGHTWEIGHT_OPERATOR_ID,
   isActive: (components) =>
     components.embedding !== null ||
     components.resolvedEvidence > 0 ||
     components.fusionBaselineScore !== null,
   resolveScore: (_candidate, components, active) =>
-    active ? resolveLightweightScore(components) : 0,
+    active ? resolveLightweightScore(components)! : 0,
   buildTrace: (candidate, components, active) =>
-    buildLightweightTrace(
-      candidate,
-      components,
-      active,
-      FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
-    )
+    buildLightweightTrace(candidate, components, active, LIGHTWEIGHT_OPERATOR_ID)
 });
 
 export const independentEmbeddingEvidenceFormula: DeepHeadAssessmentFormula =
@@ -152,36 +144,28 @@ export function combineNonlexicalUnitIntervalComposition(
     : evidenceAgreement;
 }
 
-function resolveLightweightScore(components: LightweightComponents): number {
-  return composeFamilyGroupedScore({
-    lexicalEvidence: components.resolvedEvidence,
-    semantic: components.embedding,
-    fusion: components.fusionBaselineScore
-  }).resolvedScore;
+function resolveLightweightScore(components: LightweightComponents): number | null {
+  let score = components.resolvedEvidence;
+  if (components.embedding !== null) {
+    score = probabilisticOr(score, components.embedding);
+  }
+  if (components.fusionBaselineScore !== null) {
+    score = probabilisticOr(score, components.fusionBaselineScore);
+  }
+  return score;
 }
 
 function buildLightweightTrace(
-  _candidate: DeliverySelectionCandidate,
+  candidate: DeliverySelectionCandidate,
   components: LightweightComponents,
   active: boolean,
   operatorId: string
 ): RecallDeepHeadTrace {
-  const composed = composeFamilyGroupedScore({
-    lexicalEvidence: components.resolvedEvidence,
-    semantic: components.embedding,
-    fusion: components.fusionBaselineScore
-  });
   if (!active) {
-    return buildDeepHeadTrace(
-      components,
-      null,
-      "inactive",
-      false,
-      operatorId,
-      composed.familyScores
-    );
+    return buildDeepHeadTrace(components, null, "inactive", false, operatorId);
   }
   const fusionBaselineUsed = components.fusionBaselineScore !== null;
+  const resolvedScore = resolveLightweightScore(components)!;
   const scoreSource: RecallDeepHeadScoreSource = components.embedding !== null
     ? fusionBaselineUsed ? "fusion_embedding_evidence" : "embedding_evidence"
     : fusionBaselineUsed
@@ -189,11 +173,10 @@ function buildLightweightTrace(
       : "evidence_only";
   return buildDeepHeadTrace(
     components,
-    composed.resolvedScore,
+    resolvedScore,
     scoreSource,
     fusionBaselineUsed,
-    operatorId,
-    composed.familyScores
+    operatorId
   );
 }
 
@@ -264,8 +247,7 @@ function buildDeepHeadTrace(
   resolvedScore: number | null,
   scoreSource: RecallDeepHeadScoreSource,
   fusionBaselineUsed: boolean,
-  formulaOperatorId: string,
-  familyScores?: RecallDeepHeadTrace["family_scores"]
+  formulaOperatorId: string
 ): RecallDeepHeadTrace {
   return Object.freeze({
     lexical_agreement: components.lexicalAgreement,
@@ -276,7 +258,6 @@ function buildDeepHeadTrace(
     resolved_score: resolvedScore,
     score_source: scoreSource,
     formula_operator_id: formulaOperatorId,
-    ...(familyScores === undefined ? {} : { family_scores: familyScores }),
     activation: components.activation,
     evidence_semantic_activation: components.evidenceSemanticActivation
   });

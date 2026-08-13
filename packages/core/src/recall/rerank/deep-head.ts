@@ -12,6 +12,7 @@ import type {
 } from "./deep-head-types.js";
 
 export type {
+  FamilyGroupedScores,
   RecallDeepHeadScoreSource,
   RecallDeepHeadTrace,
   RecallDeepHeadAssessment
@@ -22,17 +23,6 @@ export {
   combineNonlexicalUnitIntervalComposition,
   hasObservedDeepHeadEmbedding
 } from "./deep-head-assessment-builder.js";
-export {
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScore,
-  composeFamilyGroupedScoreByOperatorId,
-  composeLegacyFamilyGroupedScoreV1
-} from "./family-grouped-composition.js";
-export type {
-  FamilyGroupedComposition,
-  FamilyGroupedScores
-} from "./family-grouped-composition.js";
 
 export function resolveDeepHeadScores(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
