@@ -318,7 +318,7 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>,
   rankProfile: EmbeddingRankConsensusProfile
 ): readonly ConsensusEntry<T>[] {
-  const baselineWeight = rankProfile === "aggregate_coverage" ? 0.75 : 1;
+  const baselineWeight = rankProfile === "aggregate_coverage" ? 0.5 : 1;
   const entries = new Map<string, ConsensusEntry<T>>();
   baselineHead.forEach((candidate, index) => {
     if (entries.has(candidate.candidateKey)) return;
