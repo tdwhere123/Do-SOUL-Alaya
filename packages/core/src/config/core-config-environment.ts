@@ -1,10 +1,5 @@
 type ConfigEnvironment = Readonly<Record<string, string | undefined>>;
 
-const RETIRED_SEMANTIC_KEYS: ReadonlySet<string> = new Set([
-  "ALAYA_RECALL_SEMANTIC_ANCHOR_LANE",
-  "ALAYA_RECALL_SEMANTIC_SUBQUERY"
-]);
-
 export const CORE_CONFIG_ENV_KEYS = Object.freeze({
   recall: Object.freeze({
     confRhoPath: "ALAYA_RECALL_CONF_RHO_PATH",
@@ -28,21 +23,15 @@ export const CORE_CONFIG_ENV_KEYS = Object.freeze({
   })
 } as const);
 
-export const CORE_CONFIG_ENV_PREFIXES = Object.freeze({
-  recallSemantic: "ALAYA_RECALL_SEMANTIC_"
-} as const);
-
 const EXACT_KEYS = Object.freeze([
   ...Object.values(CORE_CONFIG_ENV_KEYS.recall),
   ...Object.values(CORE_CONFIG_ENV_KEYS.embedding),
   ...Object.values(CORE_CONFIG_ENV_KEYS.pathGraph)
 ]);
 const EXACT_KEY_SET: ReadonlySet<string> = new Set(EXACT_KEYS);
-const PREFIXES = Object.freeze(Object.values(CORE_CONFIG_ENV_PREFIXES));
 
 export function isCoreConfigEnvironmentKey(name: string): boolean {
-  if (RETIRED_SEMANTIC_KEYS.has(name)) return false;
-  return EXACT_KEY_SET.has(name) || PREFIXES.some((prefix) => name.startsWith(prefix));
+  return EXACT_KEY_SET.has(name);
 }
 
 export function resolveCoreConfigEnvironmentKeys(

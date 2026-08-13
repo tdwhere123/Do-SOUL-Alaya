@@ -204,13 +204,6 @@ describe("single-hop SliceKey wiring", () => {
     }));
   });
 
-  it("keeps the default path value identical across calls", () => {
-    const defaultPath = sliceContext("2026-04-20T00:00:00.000Z").raByKey.get("target")?.path;
-    const secondPath = sliceContext("2026-04-20T00:00:00.000Z").raByKey.get("target")?.path;
-
-    expect(Object.is(defaultPath, secondPath)).toBe(true);
-  });
-
   it("transfers through a matching typed event-time slice", () => {
     const context = sliceContext("2026-03-19T22:00:00.000Z");
 

@@ -16,8 +16,7 @@ const RECALL_ENV_FIXTURE = Object.freeze({
   ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
   ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
   ALAYA_RECALL_PROJECTIONS: "off",
-  ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms",
-  ALAYA_RECALL_SEMANTIC_CUSTOM: "semantic-custom"
+  ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms"
 });
 
 const EXPECTED_RECALL_ENV = Object.freeze({
@@ -91,7 +90,7 @@ describe("installCoreConfigFromProcessEnv", () => {
 });
 
 describe("core config environment contract", () => {
-  it("enumerates exact keys and discovers supported dynamic prefixes", () => {
+  it("enumerates exact keys and ignores unread semantic prefixes", () => {
     const keys = resolveCoreConfigEnvironmentKeys({
       ...RECALL_ENV_FIXTURE,
       ALAYA_RECALL_SEMANTIC_LATE_BOUND: "0.5",
@@ -107,6 +106,7 @@ describe("core config environment contract", () => {
     ]) {
       expect(keys, name).toContain(name);
     }
+    expect(keys).not.toContain("ALAYA_RECALL_SEMANTIC_LATE_BOUND");
     expect(keys).not.toContain("ALAYA_UNRELATED_RUNTIME_SETTING");
   });
 });

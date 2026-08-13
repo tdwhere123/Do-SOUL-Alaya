@@ -1,8 +1,4 @@
-import {
-  CORE_CONFIG_ENV_KEYS,
-  CORE_CONFIG_ENV_PREFIXES,
-  isCoreConfigEnvironmentKey
-} from "./core-config-environment.js";
+import { CORE_CONFIG_ENV_KEYS } from "./core-config-environment.js";
 
 export interface RecallRuntimeConfig {
   readonly confRhoPath: number | undefined;
@@ -15,7 +11,6 @@ export interface RecallRuntimeConfig {
   readonly projectionsEnabled: boolean;
   readonly extraSynonymClusters: string | undefined;
   readonly finalAuthorityMaxHeadDrop: number | undefined;
-  readonly coarseFilterSemanticFlags: Readonly<Record<string, string | undefined>>;
 }
 
 function defaultOn(raw: string | undefined): boolean {
@@ -43,25 +38,6 @@ function readOptionalNonNegativeSafeInt(
   return value;
 }
 
-function collectPrefixedEnv(
-  env: Readonly<Record<string, string | undefined>>,
-  prefix: string
-): Readonly<Record<string, string | undefined>> {
-  const out: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith(prefix) && isCoreConfigEnvironmentKey(key)) {
-      out[key] = value;
-    }
-  }
-  return Object.freeze(out);
-}
-
-function collectRecallSemanticEnv(
-  env: Readonly<Record<string, string | undefined>>
-): Readonly<Record<string, string | undefined>> {
-  return collectPrefixedEnv(env, CORE_CONFIG_ENV_PREFIXES.recallSemantic);
-}
-
 export function parseRecallRuntimeConfigFromEnv(
   env: Readonly<Record<string, string | undefined>>
 ): RecallRuntimeConfig {
@@ -79,7 +55,6 @@ export function parseRecallRuntimeConfigFromEnv(
     finalAuthorityMaxHeadDrop: readOptionalNonNegativeSafeInt(
       env[keys.finalAuthorityMaxHeadDrop],
       keys.finalAuthorityMaxHeadDrop
-    ),
-    coarseFilterSemanticFlags: collectRecallSemanticEnv(env)
+    )
   });
 }

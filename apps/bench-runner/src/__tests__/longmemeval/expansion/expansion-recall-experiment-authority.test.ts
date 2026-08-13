@@ -30,13 +30,11 @@ describe("local expansion recall experiment authority", () => {
   afterEach(clearFrozenReuseRoots);
 
   it.each([
-    ["H0", "A", "disabled", undefined],
-    ["H0", "B", "env", undefined],
-    ["H1", "A", "disabled", "on"],
-    ["H1", "B", "env", "on"]
+    ["A", "disabled"],
+    ["B", "env"]
   ] as const)(
-    "allows %s cell %s without promotion or consumer-gate authority",
-    async (_hypothesis, _cell, embedding, h1MaxProduct) => {
+    "allows cell %s without promotion or consumer-gate authority",
+    async (_cell, embedding) => {
       const fixture = await completeExpansionFixture();
       await expect(assertExpansionRecallAuthority({
         options: { ...BASE_OPTIONS, experiment: true },
@@ -44,10 +42,7 @@ describe("local expansion recall experiment authority", () => {
         recallWeightOverrides: undefined,
         env: {
           ...BASE_ENV,
-          ALAYA_RECALL_EVAL_EMBEDDING: embedding,
-          ...(h1MaxProduct === undefined ? {} : {
-            ALAYA_RECALL_CONF_H1_MAX_PRODUCT: h1MaxProduct
-          })
+          ALAYA_RECALL_EVAL_EMBEDDING: embedding
         }
       })).resolves.toBeUndefined();
 
@@ -57,35 +52,51 @@ describe("local expansion recall experiment authority", () => {
     }
   );
 
-  it("rejects a non-canonical H1 experiment flag value", async () => {
+  it("does not treat the retired H1 flag as an experiment operator", async () => {
     const fixture = await completeExpansionFixture();
 
-    await expect(assertExpansionRecallAuthority({
-      options: { ...BASE_OPTIONS, experiment: true },
-      bundle: recallBundle(fixture),
-      recallWeightOverrides: undefined,
-      env: {
-        ...BASE_ENV,
-        ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true"
-      }
-    })).rejects.toThrow(/H1|product-default recall policy/u);
+    for (const h1MaxProduct of [undefined, "on", "true"] as const) {
+      await expect(assertExpansionRecallAuthority({
+        options: { ...BASE_OPTIONS, experiment: true },
+        bundle: recallBundle(fixture),
+        recallWeightOverrides: undefined,
+        env: {
+          ...BASE_ENV,
+          ...(h1MaxProduct === undefined ? {} : {
+            ALAYA_RECALL_CONF_H1_MAX_PRODUCT: h1MaxProduct
+          })
+        }
+      })).resolves.toBeUndefined();
+    }
   });
 
-  it("keeps production recall on the default policy when the H1 flag is present", async () => {
+  it("does not let the retired H1 flag change production recall authority", async () => {
     const fixture = await completeExpansionFixture();
-
-    await expect(assertExpansionRecallAuthority({
-      options: {
-        ...BASE_OPTIONS,
-        expansionCapability: fixture.capability
-      },
-      bundle: recallBundle(fixture),
-      recallWeightOverrides: undefined,
-      env: {
-        ...BASE_ENV,
-        ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
+    const options = {
+      ...BASE_OPTIONS,
+      expansionCapability: fixture.capability
+    };
+    const bundle = recallBundle(fixture);
+    const outcome = async (
+      env: Readonly<Record<string, string | undefined>>
+    ): Promise<string | null> => {
+      try {
+        await assertExpansionRecallAuthority({
+          options,
+          bundle,
+          recallWeightOverrides: undefined,
+          env
+        });
+        return null;
+      } catch (cause) {
+        return cause instanceof Error ? cause.message : String(cause);
       }
-    })).rejects.toThrow(/product-default recall policy/u);
+    };
+
+    expect(await outcome({
+      ...BASE_ENV,
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
+    })).toBe(await outcome(BASE_ENV));
   });
 
   it("allows a bounded slice without weakening production or policy guards", async () => {

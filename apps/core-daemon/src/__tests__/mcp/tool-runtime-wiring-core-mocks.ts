@@ -19,8 +19,7 @@ function createStubCoreConfig(): CoreConfig {
       pathEmbModulation: undefined,
       projectionsEnabled: true,
       extraSynonymClusters: undefined,
-      finalAuthorityMaxHeadDrop: undefined,
-      coarseFilterSemanticFlags: {}
+      finalAuthorityMaxHeadDrop: undefined
     },
     embedding: {
       backfillConcurrency: undefined,

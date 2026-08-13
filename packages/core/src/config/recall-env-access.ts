@@ -14,7 +14,7 @@ export function recallEnvRaw(name: string): string | undefined {
   if (lookup.matched) return lookup.value;
   lookup = readRecallDeliveryEnv(recall, name);
   if (lookup.matched) return lookup.value;
-  return recall.coarseFilterSemanticFlags[name];
+  return undefined;
 }
 
 function readRecallFloodEnv(recall: RecallConfig, name: string): RecallEnvLookup {

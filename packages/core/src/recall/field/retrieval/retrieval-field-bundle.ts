@@ -39,12 +39,6 @@ export interface RecallRetrievalFieldBundle {
     readonly limit: number;
     readonly scope: Readonly<KeywordSearchLaneScope>;
   }>) => Promise<readonly Readonly<KeywordSearchResult>[]>;
-  readonly searchMemoryAnchor: (params: Readonly<{
-    readonly anchorTokens: readonly string[];
-    readonly optionalTokens: readonly string[];
-    readonly limit: number;
-    readonly scope: Readonly<KeywordSearchLaneScope>;
-  }>) => Promise<readonly Readonly<KeywordSearchResult>[]>;
   readonly searchEvidenceKeyword: (params: Readonly<{
     readonly queryText: string;
     readonly limit: number;
@@ -133,13 +127,10 @@ function createMemoryFieldSearches(
   params: RecallRetrievalFieldBundleSource,
   store: Readonly<RetrievalFieldRequestStore>,
   view: RecallRetrievalFieldObservationView
-): Pick<RecallRetrievalFieldBundle, "searchMemoryKeyword" | "searchMemoryAnchor"> {
+): Pick<RecallRetrievalFieldBundle, "searchMemoryKeyword"> {
   return Object.freeze({
     searchMemoryKeyword: async (input) => selectObservationMatches(
       await store.search(memoryKeywordRequest(params, input)), view
-    ),
-    searchMemoryAnchor: async (input) => selectObservationMatches(
-      await store.search(memoryAnchorRequest(params, input)), view
     )
   });
 }
@@ -222,37 +213,6 @@ function memoryKeywordRequest(
         : await params.memoryRepo.searchByKeywordField!(
             params.workspaceId, input.queryText, input.limit, input.scope,
             refinementDepths
-          )
-  };
-}
-
-function memoryAnchorRequest(
-  params: RecallRetrievalFieldBundleSource,
-  input: Parameters<RecallRetrievalFieldBundle["searchMemoryAnchor"]>[0]
-): RetrievalFieldRequest {
-  const refinementDepths = resolveRefinementDepths(params, input.limit);
-  return {
-    prefix: "lexical_anchor",
-    source: "memory",
-    objectKind: "memory_entry",
-    identity: {
-      ...input,
-      ...(refinementDepths === undefined ? {} : {
-        refinement_depths: refinementDepths
-      })
-    },
-    operation: "lexical_anchor_field",
-    maxMatches: input.limit,
-    invoke: params.memoryRepo.searchByAnchorField === undefined
-      ? undefined
-      : async () => refinementDepths === undefined
-        ? await params.memoryRepo.searchByAnchorField!(
-            params.workspaceId, input.anchorTokens, input.optionalTokens,
-            input.limit, input.scope
-          )
-        : await params.memoryRepo.searchByAnchorField!(
-            params.workspaceId, input.anchorTokens, input.optionalTokens,
-            input.limit, input.scope, refinementDepths
           )
   };
 }
