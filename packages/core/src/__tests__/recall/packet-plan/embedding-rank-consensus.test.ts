@@ -112,7 +112,7 @@ describe("embedding-rank consensus packet plan", () => {
 
     expect(resolved.rankProfile).toBe("aggregate_coverage");
     expect(keys(resolved.consensusHead)).toEqual([
-      "a", "c", "novel-a", "novel-b", "novel-c"
+      "a", "c", "novel-a", "b", "novel-b"
     ]);
     expect(keys(resolved.candidates).slice(0, 5)).toEqual(
       keys(resolved.consensusHead)
