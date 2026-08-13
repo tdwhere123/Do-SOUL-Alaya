@@ -78,6 +78,21 @@ export * from "./governance/proposals/resolution-service.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
 export * from "./recall/query/recall-query-probes.js";
+export { compileRecallQueryDemand } from "./recall/query/recall-query-demand.js";
+export {
+  compareCaptureParity,
+  createCaptureParityView,
+  extractCaptureParityView,
+  type CaptureParityAxis,
+  type CaptureParityChannel,
+  type CaptureParityDifference,
+  type CaptureParityGeometry,
+  type CaptureParityMask,
+  type CaptureParityMember,
+  type CaptureParityQuestionVerdict,
+  type CaptureParityReport,
+  type CaptureParityView
+} from "./recall/runtime/capture-parity.js";
 export {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase

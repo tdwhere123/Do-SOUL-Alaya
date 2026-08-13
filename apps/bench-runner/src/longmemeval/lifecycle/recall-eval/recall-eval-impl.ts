@@ -8,8 +8,7 @@ import {
 } from "@do-soul/alaya-eval";
 import {
   startBenchDaemon,
-  type BenchDaemonHandle,
-  type BenchRecallOptions
+  type BenchDaemonHandle
 } from "../../../harness/daemon.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
@@ -55,6 +54,7 @@ import {
 } from "./recall-eval-selection-replay.js";
 import { recallEvalOneQuestion } from
   "./question/recall-eval-question.js";
+import { recallOptionsForQuestion } from "./recall-eval-question-options.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 
@@ -228,27 +228,6 @@ function buildFirstWarmupProfiler(
       });
       profiled.value = true;
     }
-  };
-}
-
-function recallOptionsForQuestion(
-  context: RecallEvalRunContext,
-  questionText: string,
-  selectionBoundaryObserver: BenchRecallOptions["selectionBoundaryObserver"]
-): BenchRecallOptions {
-  if (context.querySemanticFactorCache === null) {
-    return selectionBoundaryObserver === undefined
-      ? context.recallOptions
-      : { ...context.recallOptions, selectionBoundaryObserver };
-  }
-  const capture = context.querySemanticFactorCache.captures_by_source_text.get(questionText);
-  if (capture === undefined) {
-    throw new Error("query semantic factor cache lost a required query source");
-  }
-  return {
-    ...context.recallOptions,
-    ...(selectionBoundaryObserver === undefined ? {} : { selectionBoundaryObserver }),
-    querySemanticFactorFormationCapture: capture
   };
 }
 

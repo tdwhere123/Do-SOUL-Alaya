@@ -15,6 +15,7 @@ import { runEmbeddingCacheOverlayBuildCommand } from
   "./embedding-cache-overlay/command.js";
 import { runSelectionOrderLedgerCommand } from
   "./selection-order-ledger/command.js";
+import { runCaptureParityCommand } from "./capture-parity/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -54,6 +55,7 @@ Usage:
   alaya-bench-runner materialize-audited-extraction-target --cache-audit-output <audit-dir> --extraction-cache-root <target-root> --extraction-target-selection <receipt.json> --materialization-receipt-out <receipt.json>
   alaya-bench-runner fact-frame-formation-audit --snapshot <db> [--output <json>]
   alaya-bench-runner selection-order-ledger --selection-boundaries <ndjson.gz> --selection-boundaries-sha256 <sha256> --output <ledger.ndjson.gz>
+  alaya-bench-runner capture-parity --snapshot <db> --output <json> [--query-semantic-factor-cache <json>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--data-dir-root <path>] [--history-root <path>]
   alaya-bench-runner query-semantic-factor-cache-fill --snapshot <db> --query-semantic-factor-cache <new-cache.json> [--concurrency N]
   alaya-bench-runner embedding-cache-overlay-build --snapshot <db> --source <warmed.db> --snapshot-out <receipt.json> [--variant oracle|s|m] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--pinned-meta-root <path>]
   alaya-bench-runner --help
@@ -102,6 +104,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "selection-order-ledger") {
     return runSelectionOrderLedgerCommand(rest);
+  }
+  if (command === "capture-parity") {
+    return runCaptureParityCommand(rest);
   }
   const opts = parseCommandFlags(rest);
   if (opts === null) return 2;
