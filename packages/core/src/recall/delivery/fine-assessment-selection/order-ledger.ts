@@ -104,14 +104,22 @@ function assertCandidateMembershipAttribution(
     }
     return;
   }
-  if (
-    first === null ||
-    first !== owners[0] ||
-    new Set(owners).size !== owners.length ||
-    !isCanonicalOwnerSequence(owners)
-  ) {
-    throw new Error(SIMULTANEOUS_MEMBERSHIP_OWNERS);
+  if (first === null) {
+    throwSimultaneousMembershipOwners("missing first-owner identity");
   }
+  if (first !== owners[0]) {
+    throwSimultaneousMembershipOwners("first owner is not owners[0]");
+  }
+  if (new Set(owners).size !== owners.length) {
+    throwSimultaneousMembershipOwners("duplicate owners");
+  }
+  if (!isCanonicalOwnerSequence(owners)) {
+    throwSimultaneousMembershipOwners("non-canonical stage order");
+  }
+}
+
+function throwSimultaneousMembershipOwners(detail: string): never {
+  throw new Error(`${SIMULTANEOUS_MEMBERSHIP_OWNERS}: ${detail}`);
 }
 
 function isCanonicalOwnerSequence(

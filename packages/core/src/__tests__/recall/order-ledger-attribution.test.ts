@@ -33,6 +33,24 @@ describe("order ledger attribution", () => {
       attributionLedger("fusion", ["fusion", "fusion"])
     )).toThrow(SIMULTANEOUS);
   });
+
+  it("refuses a non-null first owner when the owner list is empty", () => {
+    expect(() => assertFineAssessmentOrderLedgerAttribution(
+      attributionLedger("fusion", [])
+    )).toThrow(/selection order ledger membership owner identity mismatch/u);
+  });
+
+  it("refuses a first owner that is not in the owner list", () => {
+    expect(() => assertFineAssessmentOrderLedgerAttribution(
+      attributionLedger("coverage", ["fusion", "deep_head"])
+    )).toThrow(/first owner is not owners\[0\]/u);
+  });
+
+  it("refuses owners listed out of canonical stage order", () => {
+    expect(() => assertFineAssessmentOrderLedgerAttribution(
+      attributionLedger("deep_head", ["deep_head", "fusion"])
+    )).toThrow(/non-canonical stage order/u);
+  });
 });
 
 function attributionLedger(

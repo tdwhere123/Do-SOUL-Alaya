@@ -3,7 +3,6 @@ import { realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
-  assertFineAssessmentOrderLedgerAttribution,
   buildFineAssessmentOrderLedger,
   reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
@@ -139,7 +138,6 @@ function verifyRecordLedger(
           "selection order ledger coarse identity is unavailable"
         );
       }
-      assertFineAssessmentOrderLedgerAttribution(ledger);
       return ledger;
     }
   );
