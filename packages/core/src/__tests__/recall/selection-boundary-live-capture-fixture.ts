@@ -8,8 +8,17 @@ import {
   makeTokenEstimator,
   type RecallSupplementaryData
 } from "../../recall/runtime/recall-service-types.js";
-import { materializeFineAssessmentSelectionBoundary } from
-  "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
+import {
+  buildSelectionBoundaryExpected,
+  materializeFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryPendingCapture
+} from "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
+import { selectFineAssessmentCandidates } from
+  "../../recall/delivery/fine-assessment-selection.js";
+import {
+  restoreSelectionParams,
+  validateSelectionBoundary
+} from "../../recall/delivery/selection-boundary/selection-boundary-restore.js";
 import {
   createRankedCandidate,
   createSupplementaryData
@@ -53,6 +62,71 @@ export function withLiveComputeTokenEstimates(
         )
       )
     }
+  };
+}
+
+export function withDivergentCandidatePopulation(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  const [first, ...rest] = boundary.input.ordered_candidates;
+  if (first === undefined) {
+    throw new Error("ordered_candidates were not captured");
+  }
+  const poisonedKey = `${first.fusion.candidate_key}:divergent`;
+  const packet = boundary.input.packet_candidate_keys;
+  return {
+    ...boundary,
+    input: {
+      ...boundary.input,
+      ordered_candidates: [
+        {
+          ...first,
+          fusion: {
+            ...first.fusion,
+            candidate_key: poisonedKey
+          }
+        },
+        ...rest
+      ],
+      ...(packet === undefined ? {} : {
+        packet_candidate_keys: packet.map((key) =>
+          key === first.fusion.candidate_key ? poisonedKey : key
+        )
+      })
+    }
+  };
+}
+
+// Spool asserts captured-order digest before composition; drifted input must still reconstitute.
+export function withCapturedOrderAlignedExpected(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  validateSelectionBoundary(boundary);
+  const params = restoreSelectionParams(boundary.input);
+  let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
+  const replayed = selectFineAssessmentCandidates({
+    ...params,
+    capturePacketPlanTrace: true,
+    ...(boundary.expected.pre_projection === undefined ? {} : {
+      selectionBoundaryObserver: (capture) => {
+        pending = capture;
+        return undefined;
+      }
+    })
+  });
+  const packetConsensus = replayed.packetPlanObservation;
+  if (packetConsensus === undefined) {
+    throw new Error("expected packetPlanObservation, actual absent");
+  }
+  return {
+    ...boundary,
+    expected: buildSelectionBoundaryExpected(
+      replayed,
+      packetConsensus,
+      boundary.input.capture_packet_plan_trace === true,
+      pending?.preProjection,
+      boundary.expected.coverage_objective !== undefined
+    )
   };
 }
 

@@ -14,6 +14,8 @@ import type {
   RecallDeepHeadAssessment,
   RecallDeepHeadTrace
 } from "../../rerank/deep-head.js";
+import { buildRecallCandidateDedupeKey } from
+  "../../runtime/recall-service-helpers.js";
 import { buildSelectionBoundaryExpected } from
   "./selection-boundary-capture.js";
 import {
@@ -274,7 +276,8 @@ function assertCandidatePopulation(
     throwCompositionMismatch("candidate_population");
   }
   for (const candidate of actual) {
-    if (!capturedKeys.has(candidate.fusion.candidate_key)) {
+    // Live identity, not a spoofable fusion.candidate_key on the same objects.
+    if (!capturedKeys.has(buildRecallCandidateDedupeKey(candidate))) {
       throwCompositionMismatch("candidate_population");
     }
   }
@@ -305,7 +308,9 @@ function resolveCompositionTokenEstimator(
   return createCapturedTokenEstimator(input.token_estimates_by_content, {
     onMiss: capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
       ? "compute"
-      : "fail"
+      : "fail",
+    wrapIdentity: (run) =>
+      assertCapturedVsLive(capturedScoreFidelity, "token_function", run)
   });
 }
 

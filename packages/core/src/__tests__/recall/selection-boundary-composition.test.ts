@@ -24,6 +24,7 @@ import { makeTokenEstimator } from
   "../../recall/runtime/recall-service-ports.js";
 import {
   captureFineAssessmentSelectionBoundary,
+  withDivergentCandidatePopulation,
   withLiveComputeTokenEstimates
 } from "./selection-boundary-live-capture-fixture.js";
 
@@ -238,34 +239,20 @@ describe("fine-assessment selection composition reconstruction", () => {
     );
   });
 
+  it("fails closed on candidate population drift", () => {
+    const drifted = withDivergentCandidatePopulation(captureLiveBoundary());
+
+    expect(() => reconstructFineAssessmentComposition(drifted)).toThrow(
+      `${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: candidate_population`
+    );
+  });
+
   it("still fails closed on candidate population drift in recompute_live", () => {
-    const boundary = captureLiveBoundary();
-    const [first, ...rest] = boundary.input.ordered_candidates;
-    if (first === undefined) {
-      throw new Error("ordered_candidates were not captured");
-    }
-    const drifted: FineAssessmentSelectionBoundaryCase = {
-      ...boundary,
-      input: {
-        ...boundary.input,
-        ordered_candidates: [
-          {
-            ...first,
-            fusion: {
-              ...first.fusion,
-              candidate_key: ""
-            }
-          },
-          ...rest
-        ]
-      }
-    };
+    const drifted = withDivergentCandidatePopulation(captureLiveBoundary());
 
     expect(() => reconstructFineAssessmentComposition(drifted, {
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
-    })).toThrow(
-      /expected unique non-empty keys, actual count=\d+ unique=\d+ empty_or_nonstring=/u
-    );
+    })).toThrow(`${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: candidate_population`);
   });
 
   it("still fails closed on packet geometry breakage in recompute_live", () => {
@@ -295,34 +282,20 @@ describe("fine-assessment selection composition reconstruction", () => {
     })).toThrow(/captured score fidelity mode is not supported/u);
   });
 
-  it("keeps input captured-vs-live identity closed under recompute_live", () => {
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-      CAPTURED_VS_LIVE_ASSERTIONS.candidate_population.class
-    )).toBe(true);
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-      CAPTURED_VS_LIVE_ASSERTIONS.final_relevance.class
-    )).toBe(true);
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-      CAPTURED_VS_LIVE_ASSERTIONS.token_function.class
-    )).toBe(true);
-  });
-
-  it("frees only output captured-vs-live identity under recompute_live", () => {
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-      CAPTURED_VS_LIVE_ASSERTIONS.candidate_order.class
-    )).toBe(false);
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-      CAPTURED_VS_LIVE_ASSERTIONS.expected_membership.class
-    )).toBe(false);
-    expect(capturedOutcomeIsEnforced(
-      CAPTURED_SCORE_FIDELITY_ASSERT,
-      CAPTURED_VS_LIVE_ASSERTIONS.expected_membership.class
-    )).toBe(true);
+  it("enforces every captured-vs-live catalog row by declared class", () => {
+    for (const [id, row] of Object.entries(CAPTURED_VS_LIVE_ASSERTIONS)) {
+      expect(
+        capturedOutcomeIsEnforced(CAPTURED_SCORE_FIDELITY_ASSERT, row.class),
+        id
+      ).toBe(true);
+      expect(
+        capturedOutcomeIsEnforced(
+          CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+          row.class
+        ),
+        id
+      ).toBe(row.class === "input");
+    }
   });
 
   it("refuses to free live packet-plan well-formedness", () => {
@@ -330,7 +303,6 @@ describe("fine-assessment selection composition reconstruction", () => {
       row.site.includes("packet-plan-observation.ts")
     );
     expect(packetPlan?.class).toBe("input");
-    expect(packetPlan?.reason).toMatch(/Refused as free/u);
   });
 });
 

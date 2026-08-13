@@ -42,7 +42,7 @@ export const CAPTURED_VS_LIVE_ASSERTIONS = Object.freeze({
   },
   token_function: {
     class: "input",
-    site: "restoration/selection-params.ts:assertCapturedEstimatesMatchLiveCompute",
+    site: "selection-boundary-composition.ts:resolveCompositionTokenEstimator",
     reason: "Stored token pairs must equal makeTokenEstimator(); that is the function."
   },
   candidate_order: {

@@ -104,11 +104,15 @@ export function createCapturedTokenEstimator(
   entries: SelectionBoundaryNumberMap,
   options: Readonly<{
     readonly onMiss?: "fail" | "compute";
+    readonly wrapIdentity?: (run: () => void) => void;
   }> = {}
 ): FineAssessmentSelectionParams["tokenEstimator"] {
   const tokenEstimates = new Map(entries);
   if (options.onMiss === "compute") {
-    return createComputingCapturedTokenEstimator(tokenEstimates);
+    return createComputingCapturedTokenEstimator(
+      tokenEstimates,
+      options.wrapIdentity ?? ((run) => run())
+    );
   }
   return createFailClosedCapturedTokenEstimator(tokenEstimates);
 }
@@ -132,10 +136,13 @@ function createFailClosedCapturedTokenEstimator(
 // Live reorder can admit captured candidates the original walk never
 // estimated; compute is the same provider-free function as live capture.
 function createComputingCapturedTokenEstimator(
-  tokenEstimates: ReadonlyMap<string, number>
+  tokenEstimates: ReadonlyMap<string, number>,
+  wrapIdentity: (run: () => void) => void
 ): FineAssessmentSelectionParams["tokenEstimator"] {
   const liveCompute = makeTokenEstimator();
-  assertCapturedEstimatesMatchLiveCompute(tokenEstimates, liveCompute);
+  wrapIdentity(() =>
+    assertCapturedEstimatesMatchLiveCompute(tokenEstimates, liveCompute)
+  );
   return {
     estimate: (content) => {
       const captured = tokenEstimates.get(content);

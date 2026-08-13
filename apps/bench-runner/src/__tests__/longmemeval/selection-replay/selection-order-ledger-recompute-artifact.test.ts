@@ -7,12 +7,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
   FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  SELECTION_COMPOSITION_FIDELITY_MISMATCH,
   counterfactualDeliveredCandidateKeys,
   reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-types.js";
-import { captureFineAssessmentSelectionBoundary } from
+import {
+  captureFineAssessmentSelectionBoundary,
+  withCapturedOrderAlignedExpected,
+  withDivergentCandidatePopulation
+} from
   "../../../../../../packages/core/src/__tests__/recall/selection-boundary-live-capture-fixture.js";
 
 const { measureGitState } = vi.hoisted(() => ({
@@ -218,7 +223,7 @@ describe("selection order ledger recompute_live", () => {
       throw new Error("final relevance was not captured");
     }
     const [first, ...rest] = relevance;
-    const boundary = {
+    const boundary = withCapturedOrderAlignedExpected({
       ...captured,
       input: {
         ...captured.input,
@@ -227,7 +232,7 @@ describe("selection order ledger recompute_live", () => {
           ...rest
         ]
       }
-    };
+    });
     const { sourcePath, sourceSha256, outputPath } = await writeBoundaryGzip(
       root,
       "fused-question",
@@ -246,7 +251,35 @@ describe("selection order ledger recompute_live", () => {
       checkoutRoot: root,
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
       goldMapPath
-    })).rejects.toThrow(/fidelity mismatch|final_relevance/u);
+    })).rejects.toThrow(`${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: final_relevance`);
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails closed on candidate population drift in recompute_live without publishing", async () => {
+    const root = await temporaryRoot();
+    const captured = captureFineAssessmentSelectionBoundary("recompute-population");
+    const boundary = withCapturedOrderAlignedExpected(
+      withDivergentCandidatePopulation(captured)
+    );
+    const { sourcePath, sourceSha256, outputPath } = await writeBoundaryGzip(
+      root,
+      "population-question",
+      boundary
+    );
+    const goldMapPath = await writeGoldMap(
+      root,
+      "population-question",
+      objectIdFromKey(captured.expected.candidate_keys[0]!)
+    );
+
+    await expect(materializeSelectionOrderLedgerArtifact({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      outputPath,
+      checkoutRoot: root,
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+      goldMapPath
+    })).rejects.toThrow(`${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: candidate_population`);
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 

@@ -40,6 +40,14 @@ describe("captured-to-live membership owner", () => {
     expect(firstCapturedToLiveMembershipOwner(captured, live, "a"))
       .toBe("direct_evidence_promotion");
   });
+
+  it("fails closed when captured-to-live coarse membership diverges", () => {
+    expect(() => firstCapturedToLiveMembershipOwner(
+      [stage("coarse", ["a", "b"])],
+      [stage("coarse", ["a"])],
+      "b"
+    )).toThrow(/captured-to-live coarse membership diverged/u);
+  });
 });
 
 describe("recompute_live formula operator receipts", () => {

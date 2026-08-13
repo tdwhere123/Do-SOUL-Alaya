@@ -4,6 +4,8 @@ import {
   resolveFinalPacketConsensusPlan
 } from
   "../../recall/delivery/final-order/final-packet-consensus.js";
+import { resolveEmbeddingRankConsensusPlan } from
+  "../../recall/delivery/packet-plan/embedding-rank-consensus.js";
 import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
 import {
@@ -119,27 +121,30 @@ describe("final packet consensus selection ownership", () => {
   });
 
   it("publishes the original baseline when nested consensus restores the original head", () => {
-    const baseline = baselineCandidates().slice(0, 4);
-    const sourceCandidates = baseline.map((candidate, index) => ({
+    const gistByIndex = [0.1, 0.2, 0.3, 0.9];
+    const baseline = baselineCandidates().slice(0, 4).map((candidate, index) => ({
       ...candidate,
       effectiveFactors: {
         ...candidate.effectiveFactors,
         embedding_similarity: 0.9 - index * 0.1
       }
     }));
-    const activations = new Map(sourceCandidates.map((candidate) => [
+    const activations = new Map(baseline.map((candidate, index) => [
       candidate.fusion.candidate_key,
-      evidenceSemanticActivation(0.5, {
+      evidenceSemanticActivation(gistByIndex[index]!, {
         documentIdentity: "owner_gist_600"
       })
     ]));
     const plan = resolveFinalPacketConsensusPlan({
       baseline,
-      sourceCandidates,
+      sourceCandidates: baseline,
       protectedCandidates: [],
       supportsSingleSemanticLeader: true,
       evidenceSemanticActivationsByCandidateKey: activations
     });
+    const originalKeys = baseline.map((candidate) => candidate.fusion.candidate_key);
+    const headWidth = plan.headWidth;
+    const nested = packetRelativeProposal(plan.sourceSemanticIntermediate ?? []);
     const actual = plan.candidates.map(({ sourceCandidate }) => ({
       object_id: sourceCandidate.entry.object_id,
       object_kind: sourceCandidate.objectKind,
@@ -147,9 +152,15 @@ describe("final packet consensus selection ownership", () => {
     }));
 
     expect(plan.rankBasis).toBe("source_semantic_rrf_then_packet_relative");
-    expect(candidateKeys(plan)).toEqual(
-      baseline.map((candidate) => candidate.fusion.candidate_key)
-    );
+    expect(keysOf(plan.sourceSemanticIntermediate)).not.toEqual(originalKeys);
+    expect(keysOf(plan.sourceSemanticIntermediate).slice(headWidth))
+      .not.toEqual(originalKeys.slice(headWidth));
+    expect(keysOf(nested.proposedCandidates)).not.toEqual(originalKeys);
+    expect(keysOf(nested.proposedCandidates).slice(headWidth))
+      .not.toEqual(originalKeys.slice(headWidth));
+    expect(keysOf(nested.consensusHead)).toEqual(originalKeys.slice(0, headWidth));
+    expect(candidateKeys(plan)).toEqual(originalKeys);
+    expect(keysOf(plan.consensusHead)).toEqual(originalKeys.slice(0, headWidth));
     expect(plan.decision.status).toBe("no_op");
     expect(buildFinalPacketConsensusObservation(plan, actual, true).decision)
       .toEqual(plan.decision);
@@ -203,4 +214,39 @@ function candidateKeys(
   plan: ReturnType<typeof resolveFinalPacketConsensusPlan>
 ): readonly string[] {
   return plan.candidates.map(({ candidateKey }) => candidateKey);
+}
+
+function keysOf(
+  candidates: readonly { readonly candidateKey: string }[] | undefined
+): readonly string[] {
+  return (candidates ?? []).map((candidate) => candidate.candidateKey);
+}
+
+function packetRelativeProposal(
+  intermediate: readonly ReturnType<
+    typeof resolveFinalPacketConsensusPlan
+  >["candidates"][number][]
+) {
+  const relativeRanks = new Map([...intermediate]
+    .filter((candidate) => {
+      const score = candidate.sourceCandidate.effectiveFactors.embedding_similarity;
+      return score !== undefined && Number.isFinite(score) && score > 0;
+    })
+    .sort((left, right) =>
+      (right.sourceCandidate.effectiveFactors.embedding_similarity ?? 0) -
+        (left.sourceCandidate.effectiveFactors.embedding_similarity ?? 0) ||
+      left.candidateKey.localeCompare(right.candidateKey)
+    )
+    .map((candidate, index) => [candidate.candidateKey, index + 1]));
+  const relativePacket = intermediate.map((candidate) => Object.freeze({
+    ...candidate,
+    ...(relativeRanks.has(candidate.candidateKey)
+      ? { rawEmbeddingRank: relativeRanks.get(candidate.candidateKey) }
+      : {})
+  }));
+  return resolveEmbeddingRankConsensusPlan({
+    baseline: relativePacket,
+    candidates: relativePacket,
+    protectedCandidates: []
+  });
 }
