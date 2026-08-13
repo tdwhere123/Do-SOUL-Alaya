@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { FAMILY_GROUPED_COMPOSITION_OPERATOR_ID } from "@do-soul/alaya-core";
+import {
+  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
+} from "@do-soul/alaya-core";
 import { RecallDeepHeadTraceSchema } from
   "../../../harness/recall/answer-trace-schema.js";
 
 describe("family-grouped deep-head trace schema", () => {
-  it("recomposes family_grouped_composition_v1 from per-family receipts", () => {
+  it("recomposes family_grouped_composition_v2 from per-family receipts", () => {
     expect(RecallDeepHeadTraceSchema.safeParse({
       lexical_agreement: 0.5,
       evidence_agreement: 0.4,
@@ -22,22 +25,40 @@ describe("family-grouped deep-head trace schema", () => {
     }).success).toBe(true);
   });
 
-  it("rejects a noisy-OR score under the family-grouped operator", () => {
+  it("rejects fusion-win double-count under the family-grouped operator", () => {
     expect(RecallDeepHeadTraceSchema.safeParse({
       lexical_agreement: 0,
       evidence_agreement: 0,
       resolved_evidence: 0,
       embedding_signal: 0.4,
       fusion_baseline_used: true,
-      resolved_score: 0.52,
+      resolved_score: 1,
       score_source: "fusion_embedding_evidence",
       formula_operator_id: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
       family_scores: {
         lexical_evidence: 0,
         semantic: 0.4,
-        fusion: 0.2
+        fusion: 0.8
       }
     }).success).toBe(false);
+  });
+
+  it("still accepts legacy family_grouped_composition_v1 receipts", () => {
+    expect(RecallDeepHeadTraceSchema.safeParse({
+      lexical_agreement: 0,
+      evidence_agreement: 0,
+      resolved_evidence: 0,
+      embedding_signal: 0.4,
+      fusion_baseline_used: true,
+      resolved_score: 1,
+      score_source: "fusion_embedding_evidence",
+      formula_operator_id: LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+      family_scores: {
+        lexical_evidence: 0,
+        semantic: 0.4,
+        fusion: 0.8
+      }
+    }).success).toBe(true);
   });
 
   it("still accepts pre-family-receipt probabilistic-or traces", () => {

@@ -42,7 +42,7 @@ describe("deep head", () => {
       winner: { channel: "effective_factor", score: 0.4 },
       missing_channel_policy: "no_op"
     });
-    expect(trace.formula_operator_id).toBe("family_grouped_composition_v1");
+    expect(trace.formula_operator_id).toBe("family_grouped_composition_v2");
     expect(trace.fusion_baseline_used).toBe(false);
     expect(trace.score_source).toBe("embedding_evidence");
     expect(trace.family_scores?.lexical_evidence).toBeCloseTo(0.9);
@@ -96,7 +96,7 @@ describe("deep head", () => {
     expect(trace.fusion_baseline_used).toBe(true);
     expect(trace.score_source).toBe("fusion_embedding_evidence");
     expect(trace.family_scores?.fusion).toBeCloseTo(0.2);
-    expect(trace.resolved_score).toBeCloseTo(0.6);
+    expect(trace.resolved_score).toBeCloseTo(0.4);
     expect(assessment.scores.get(candidate.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -121,7 +121,7 @@ describe("deep head", () => {
     );
     const trace = assessment.traceByCandidateKey.get(leader.fusion.candidate_key)!;
 
-    expect(trace.resolved_score).toBeCloseTo(0.534);
+    expect(trace.resolved_score).toBeCloseTo(0.42);
     expect(assessment.scores.get(leader.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -207,7 +207,7 @@ describe("deep head", () => {
     });
 
     expect(assessment.traceByCandidateKey.get(scoredKey)?.formula_operator_id)
-      .toBe("family_grouped_composition_v1");
+      .toBe("family_grouped_composition_v2");
     expect(assessment.traceByCandidateKey.get(scoredKey)?.score_source)
       .not.toBe("cross_encoder");
   });

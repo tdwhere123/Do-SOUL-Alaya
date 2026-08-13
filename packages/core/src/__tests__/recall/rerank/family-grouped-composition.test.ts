@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScore
+  composeFamilyGroupedScore,
+  composeLegacyFamilyGroupedScoreV1
 } from "../../../recall/rerank/family-grouped-composition.js";
 
-describe("family_grouped_composition_v1", () => {
-  it("maxes correlated lexical evidence with the fusion channel", () => {
+describe("family_grouped_composition_v2", () => {
+  it("maxes fusion over the independent lexical/embedding mix", () => {
     const composed = composeFamilyGroupedScore({
       lexicalEvidence: 0.5,
       semantic: null,
@@ -46,11 +47,31 @@ describe("family_grouped_composition_v1", () => {
     expect(composed.resolvedScore).toBeCloseTo(0.2);
   });
 
-  it("mixes independent embedding additively under the unit bound", () => {
+  it("mixes independent embedding additively before the fusion max", () => {
     const composed = composeFamilyGroupedScore({
       lexicalEvidence: 0.5,
       semantic: 0.4,
       fusion: null
+    });
+
+    expect(composed.resolvedScore).toBeCloseTo(0.9);
+  });
+
+  it("gives embedding exactly one vote when fusion wins with observed semantic", () => {
+    const composed = composeFamilyGroupedScore({
+      lexicalEvidence: 0.05,
+      semantic: 0.4,
+      fusion: 0.8
+    });
+
+    expect(composed.resolvedScore).toBeCloseTo(0.8);
+  });
+
+  it("lets lexical-win plus semantic beat a weaker fusion channel", () => {
+    const composed = composeFamilyGroupedScore({
+      lexicalEvidence: 0.5,
+      semantic: 0.4,
+      fusion: 0.2
     });
 
     expect(composed.resolvedScore).toBeCloseTo(0.9);
@@ -74,13 +95,60 @@ describe("family_grouped_composition_v1", () => {
     expect(observedZero.resolvedScore).toBeCloseTo(0.5);
   });
 
-  it("clamps the across-family mix to the unit envelope", () => {
-    const composed = composeFamilyGroupedScore({
-      lexicalEvidence: 0.9,
-      semantic: 0.4,
-      fusion: 0.2
+  it("skips ineligible fusion instead of mixing an observed zero", () => {
+    const skipped = composeFamilyGroupedScore({
+      lexicalEvidence: 0.5,
+      semantic: 0.2,
+      fusion: null
+    });
+    const observedZero = composeFamilyGroupedScore({
+      lexicalEvidence: 0.5,
+      semantic: 0.2,
+      fusion: 0
     });
 
-    expect(composed.resolvedScore).toBe(1);
+    expect(skipped.familyScores.fusion).toBeNull();
+    expect(observedZero.familyScores.fusion).toBe(0);
+    expect(skipped.resolvedScore).toBeCloseTo(0.7);
+    expect(observedZero.resolvedScore).toBeCloseTo(0.7);
+  });
+
+  it("uses only lexical evidence when both optional families are absent", () => {
+    const composed = composeFamilyGroupedScore({
+      lexicalEvidence: 0.35,
+      semantic: null,
+      fusion: null
+    });
+
+    expect(composed.resolvedScore).toBeCloseTo(0.35);
+  });
+
+  it("clamps only the independent mix and preserves order via the fusion max", () => {
+    const saturatedMix = composeFamilyGroupedScore({
+      lexicalEvidence: 0.9,
+      semantic: 0.4,
+      fusion: 0.3
+    });
+    const fusionDominant = composeFamilyGroupedScore({
+      lexicalEvidence: 0.5,
+      semantic: 0.3,
+      fusion: 0.85
+    });
+
+    expect(saturatedMix.resolvedScore).toBeCloseTo(1);
+    expect(fusionDominant.resolvedScore).toBeCloseTo(0.85);
+    expect(fusionDominant.resolvedScore).toBeLessThan(saturatedMix.resolvedScore);
+  });
+});
+
+describe("family_grouped_composition_v1 dual-read", () => {
+  it("preserves the rejected additive-after-max formula for legacy traces", () => {
+    const composed = composeLegacyFamilyGroupedScoreV1({
+      lexicalEvidence: 0.05,
+      semantic: 0.4,
+      fusion: 0.8
+    });
+
+    expect(composed.resolvedScore).toBeCloseTo(1);
   });
 });

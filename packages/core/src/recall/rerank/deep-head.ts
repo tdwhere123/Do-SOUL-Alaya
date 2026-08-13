@@ -24,7 +24,10 @@ export {
 } from "./deep-head-assessment-builder.js";
 export {
   FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScore
+  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  composeFamilyGroupedScore,
+  composeFamilyGroupedScoreByOperatorId,
+  composeLegacyFamilyGroupedScoreV1
 } from "./family-grouped-composition.js";
 export type {
   FamilyGroupedComposition,

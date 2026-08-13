@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
   FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
-  composeFamilyGroupedScore
+  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  composeFamilyGroupedScoreByOperatorId
 } from "@do-soul/alaya-core";
 import {
   CandidateActivationReceiptSchema,
@@ -321,7 +322,10 @@ function validateLightweightSource(
   trace: DeepHeadTrace
 ): boolean {
   if (trace.resolved_score === null) return false;
-  if (trace.formula_operator_id === FAMILY_GROUPED_COMPOSITION_OPERATOR_ID) {
+  if (
+    trace.formula_operator_id === FAMILY_GROUPED_COMPOSITION_OPERATOR_ID ||
+    trace.formula_operator_id === LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
+  ) {
     return validateFamilyGroupedSource(trace);
   }
   if (trace.score_source === "fusion_embedding_evidence") {
@@ -359,11 +363,14 @@ function validateFamilyGroupedSource(trace: DeepHeadTrace): boolean {
   if (!sameNullableUnit(families.semantic, trace.embedding_signal)) return false;
   if ((families.fusion !== null) !== trace.fusion_baseline_used) return false;
   if (!sourceFlagsMatch(trace)) return false;
-  const composed = composeFamilyGroupedScore({
-    lexicalEvidence: families.lexical_evidence,
-    semantic: families.semantic,
-    fusion: families.fusion
-  });
+  const composed = composeFamilyGroupedScoreByOperatorId(
+    trace.formula_operator_id,
+    {
+      lexicalEvidence: families.lexical_evidence,
+      semantic: families.semantic,
+      fusion: families.fusion
+    }
+  );
   return approximatelyEqual(trace.resolved_score, composed.resolvedScore);
 }
 

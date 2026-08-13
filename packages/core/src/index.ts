@@ -120,7 +120,10 @@ export {
 } from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
 export {
   FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  LEGACY_FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
   composeFamilyGroupedScore,
+  composeFamilyGroupedScoreByOperatorId,
+  composeLegacyFamilyGroupedScoreV1,
   type FamilyGroupedScores
 } from "./recall/rerank/family-grouped-composition.js";
 export {

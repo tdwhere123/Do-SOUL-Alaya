@@ -60,7 +60,7 @@ describe("deep head fallbacks", () => {
       })
     );
 
-    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.51);
+    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.42);
   });
 
   it("does not leak memory-keyed signals into same-id synthesis or global candidates", () => {
