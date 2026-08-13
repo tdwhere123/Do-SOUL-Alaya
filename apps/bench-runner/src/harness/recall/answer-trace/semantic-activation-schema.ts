@@ -66,6 +66,7 @@ const EvidenceSemanticObservationSchema = z.object({
   score: z.number().min(0).max(1),
   evidenceObjectId: z.string().min(1),
   documentIdentity: z.string().min(1),
+  contentHash: z.string().min(1).optional(),
   projection: EvidenceSemanticProjectionSchema.nullable()
 }).strict().superRefine((observation, context) => {
   if (observation.projection?.projection_kind === "fact_key" &&

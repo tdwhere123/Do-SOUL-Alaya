@@ -160,6 +160,20 @@ describe("capture-parity CLI", () => {
     expect(help.stdout).not.toMatch(/capture-parity[^\n]*--limit/u);
     expect(help.stdout).not.toMatch(/capture-parity[^\n]*--offset/u);
   });
+
+  it("refuses --offset at parse time", async () => {
+    const sliced = await captureCli([
+      "capture-parity",
+      "--snapshot",
+      "snapshot.sqlite",
+      "--output",
+      "parity.json",
+      "--offset",
+      "1"
+    ]);
+    expect(sliced.exit).toBe(2);
+    expect(sliced.stderr).toContain("refuses --limit and --offset");
+  });
 });
 
 function evalFixture(patch: {
