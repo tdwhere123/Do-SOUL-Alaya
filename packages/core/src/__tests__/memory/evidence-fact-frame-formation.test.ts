@@ -85,15 +85,26 @@ describe("evidence fact-frame formation", () => {
   });
 
   it("derives fact_key projections for a leading-adjunct first-person assertion", () => {
+    const sourceAssertion =
+      "By the way, I took my niece to the Natural History Museum on 2/8";
     const result = materializeEvidenceFactFrameFormation({
-      sourceAssertion:
-        "By the way, I took my niece to the Natural History Museum on 2/8",
+      sourceAssertion,
       sourceHash: "sha256:source",
       normalizer: RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER
     });
 
     expect(result.capture.status).toBe("formed");
-    expect(result.searchProjections.length).toBeGreaterThan(0);
+    expect(result.capture.fact_frame?.slots).toEqual([
+      { role: "subject", text: "I" },
+      { role: "relation", text: "took" },
+      { role: "value", text: "my niece to the Natural History Museum on 2/8" }
+    ]);
+    expect(result.searchProjections.map(({ content }) => content)).toEqual([
+      "I took my niece to the Natural History Museum on 2/8",
+      "took my niece to the Natural History Museum on 2/8",
+      "I my niece to the Natural History Museum on 2/8",
+      "I took"
+    ]);
     expect(result.searchProjections.every(
       (projection) => projection.projection_kind === "fact_key"
     )).toBe(true);

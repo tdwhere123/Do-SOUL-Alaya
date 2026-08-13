@@ -9,6 +9,12 @@ import type {
 } from
   "./query-fact-frame-extraction-port.js";
 import {
+  AUXILIARIES,
+  BE_AUXILIARIES,
+  CLAUSE_BOUNDARIES,
+  WH_WORDS
+} from "./fact-frame-grammar/clause-boundaries.js";
+import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
   type FactFrameSourceToken
@@ -238,17 +244,6 @@ const MAX_QUALIFIER_TOKENS = 3;
 const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
   text: "", normalized: "", start: 0, end: 0
 });
-const WH_WORDS: ReadonlySet<string> = new Set([
-  "what", "which", "who", "whom", "where", "when", "why", "how"
-]);
-const BE_AUXILIARIES: ReadonlySet<string> = new Set([
-  "am", "is", "are", "was", "were", "be", "been", "being"
-]);
-const AUXILIARIES: ReadonlySet<string> = new Set([
-  ...BE_AUXILIARIES,
-  "do", "does", "did", "has", "have", "had", "can", "could", "will",
-  "would", "shall", "should", "may", "might", "must"
-]);
 const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
   "i", "you", "he", "she", "it", "we", "they"
 ]);
@@ -261,10 +256,6 @@ const PRE_RELATION_QUALIFIERS: ReadonlySet<string> = new Set([
   "usually", "always", "then"
 ]);
 const NEGATIONS: ReadonlySet<string> = new Set(["not", "never"]);
-const CLAUSE_BOUNDARIES: ReadonlySet<string> = new Set([
-  "after", "before", "because", "if", "since", "that", "when", "where",
-  "while", "who", "which", "until", "than"
-]);
 const NOUN_PHRASE_BOUNDARIES: ReadonlySet<string> = new Set([
   ...CLAUSE_BOUNDARIES,
   "of", "to", "for", "from", "in", "on", "at", "by", "with", "about",

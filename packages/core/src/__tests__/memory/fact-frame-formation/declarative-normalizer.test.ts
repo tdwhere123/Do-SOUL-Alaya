@@ -89,6 +89,15 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     ]);
   });
 
+  it("treats determiner that as NP material rather than a complementizer", () => {
+    expect(normalizer.propose("On that day I visited the museum.")?.fact_frame.slots)
+      .toEqual([
+        { role: "subject", text: "I" },
+        { role: "relation", text: "visited" },
+        { role: "value", text: "the museum" }
+      ]);
+  });
+
   it("keeps a contracted subject after a leading prepositional adjunct", () => {
     const assertion = "By the way, I've been listening to audiobooks during my commute.";
 
@@ -105,10 +114,29 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose("On Tuesday")).toBeUndefined();
     expect(normalizer.propose("After I visited the museum.")).toBeUndefined();
     expect(normalizer.propose("Something I bought at Target.")).toBeUndefined();
+    expect(normalizer.propose("Thing I bought at Target was useful.")).toBeUndefined();
     expect(normalizer.propose("I am the sole member.")).toBeUndefined();
     expect(normalizer.propose("I listened.")).toBeUndefined();
     expect(normalizer.propose(
       "I have really always still preferred quiet rooms."
+    )).toBeUndefined();
+  });
+
+  it("fails closed when a leading adjunct span opens another finite or interrogative clause", () => {
+    expect(normalizer.propose(
+      "By the way, after I visited the museum, I ate lunch."
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, The Book of Mormon is another musical theater soundtrack I've been listening to on my daily commute"
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, do you know of any good resources for learning Spanish?"
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, last Sunday was a lot of fun - we played Scattergories at my place."
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "Considering I've had success with spinner baits, I'm thinking of trying them again."
     )).toBeUndefined();
   });
 
@@ -124,13 +152,9 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     ]);
   });
 
-  it("skips a leading CJK token only when an English subject follows", () => {
-    expect(normalizer.propose("对了 I took my niece to the museum.")?.fact_frame.slots)
-      .toEqual([
-        { role: "subject", text: "I" },
-        { role: "relation", text: "took" },
-        { role: "value", text: "my niece to the museum" }
-      ]);
+  it("leaves a CJK topic before an English subject unavailable", () => {
+    expect(normalizer.propose("对了 I took my niece to the museum.")).toBeUndefined();
+    expect(normalizer.propose("博物馆 I visited the Louvre yesterday.")).toBeUndefined();
   });
 
   it("returns deterministic deeply frozen proposals", () => {

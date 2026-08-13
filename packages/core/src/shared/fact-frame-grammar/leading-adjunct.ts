@@ -1,3 +1,8 @@
+import {
+  AUXILIARIES,
+  CLAUSE_BOUNDARIES,
+  WH_WORDS
+} from "./clause-boundaries.js";
 import type { FactFrameSourceToken } from "./source-text.js";
 
 // Position 0 is not the subject test: a fronted PP or participial disjunct
@@ -7,15 +12,13 @@ export function skipLeadingAdjunctSpan(
   isSubjectStart: (index: number) => boolean
 ): number {
   let index = 0;
-  let skipped = 0;
-  while (index < tokens.length && skipped < MAX_LEADING_ADJUNCTS) {
+  while (index < tokens.length) {
     if (isSubjectStart(index)) return index;
     const next = consumeOneAdjunct(tokens, index, isSubjectStart);
-    if (next === null) return index;
+    if (next === null) return 0;
     index = next;
-    skipped += 1;
   }
-  return index;
+  return 0;
 }
 
 function consumeOneAdjunct(
@@ -31,10 +34,6 @@ function consumeOneAdjunct(
   if (isPresentParticiple(token)) {
     return consumeParticipialAdjunct(tokens, start, isSubjectStart);
   }
-  // Unspaced CJK is one token; English P/-ing tests must not look inside it.
-  if (CJK_SCRIPT.test(token.text) && isSubjectStart(start + 1)) {
-    return start + 1;
-  }
   return null;
 }
 
@@ -44,8 +43,7 @@ function consumeParticipialAdjunct(
   isSubjectStart: (index: number) => boolean
 ): number | null {
   const afterHead = start + 1;
-  if (afterHead >= tokens.length) return null;
-  if (isSubjectStart(afterHead)) return afterHead;
+  if (afterHead >= tokens.length || isSubjectStart(afterHead)) return null;
   const next = tokens[afterHead];
   if (next !== undefined && PREPOSITIONS.has(next.normalized)) {
     return consumePrepositionalAdjunct(tokens, afterHead, isSubjectStart);
@@ -60,28 +58,59 @@ function consumePrepositionalAdjunct(
 ): number | null {
   let index = start + 1;
   if (index >= tokens.length || isSubjectStart(index)) return null;
-  const limit = Math.min(tokens.length, start + MAX_PREPOSITIONAL_SPAN_TOKENS);
-  while (index < limit && !isSubjectStart(index)) {
+  let seenNp = false;
+  while (index < tokens.length) {
+    if (isSubjectStart(index)) return index;
+    if (seenNp) {
+      if (spanCut(tokens, index, isSubjectStart) === "reject") return null;
+    } else if (opensFiniteClause(tokens, index, isSubjectStart)) {
+      return null;
+    }
+    seenNp = true;
     index += 1;
   }
-  if (index === limit && limit < tokens.length && !isSubjectStart(index)) {
-    return null;
+  return null;
+}
+
+function spanCut(
+  tokens: readonly FactFrameSourceToken[],
+  index: number,
+  isSubjectStart: (index: number) => boolean
+): "reject" | "continue" {
+  const token = tokens[index];
+  if (token === undefined) return "reject";
+  if (isFiniteOrInterrogativeHead(token)) return "reject";
+  if (CLAUSE_BOUNDARIES.has(token.normalized) && isSubjectStart(index + 1)) {
+    return "reject";
   }
-  return index;
+  return "continue";
+}
+
+function opensFiniteClause(
+  tokens: readonly FactFrameSourceToken[],
+  index: number,
+  isSubjectStart: (index: number) => boolean
+): boolean {
+  const token = tokens[index];
+  if (token === undefined) return false;
+  if (isFiniteOrInterrogativeHead(token)) return true;
+  return CLAUSE_BOUNDARIES.has(token.normalized) && isSubjectStart(index + 1);
+}
+
+function isFiniteOrInterrogativeHead(token: FactFrameSourceToken): boolean {
+  return AUXILIARIES.has(token.normalized) ||
+    WH_WORDS.has(token.normalized) ||
+    /n't$/u.test(token.normalized);
 }
 
 function isPresentParticiple(token: FactFrameSourceToken): boolean {
   return token.normalized.endsWith("ing") &&
     !PREPOSITIONS.has(token.normalized) &&
-    !INDEFINITE_ING_PRONOUNS.has(token.normalized);
+    !ING_SPELLING_COLLISIONS.has(token.normalized);
 }
 
-const MAX_LEADING_ADJUNCTS = 3;
-const MAX_PREPOSITIONAL_SPAN_TOKENS = 12;
-const CJK_SCRIPT =
-  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-const INDEFINITE_ING_PRONOUNS: ReadonlySet<string> = new Set([
-  "something", "anything", "nothing", "everything"
+const ING_SPELLING_COLLISIONS: ReadonlySet<string> = new Set([
+  "something", "anything", "nothing", "everything", "thing"
 ]);
 const PREPOSITIONS: ReadonlySet<string> = new Set([
   "about", "above", "across", "after", "against", "along", "amid", "among",
