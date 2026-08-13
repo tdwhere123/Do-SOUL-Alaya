@@ -13,13 +13,19 @@ import {
   createSupplementaryData
 } from "./fine-assessment-selection-fixtures.js";
 
+type LiveCaptureOptions = Readonly<{
+  readonly maxEntries?: number;
+  readonly captureAnswerFeatures?: boolean;
+}>;
+
 export function captureFineAssessmentSelectionBoundary(
   taskSurfaceRef: string,
-  supplementaryOverrides: Partial<RecallSupplementaryData> = {}
+  supplementaryOverrides: Partial<RecallSupplementaryData> = {},
+  options: LiveCaptureOptions = {}
 ): FineAssessmentSelectionBoundaryCase {
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   fineAssess({
-    ...buildLiveCaptureBase(taskSurfaceRef, supplementaryOverrides),
+    ...buildLiveCaptureBase(taskSurfaceRef, supplementaryOverrides, options),
     selectionBoundaryObserver: (pending) => {
       boundary = materializeFineAssessmentSelectionBoundary(pending);
       return undefined;
@@ -33,17 +39,30 @@ export function captureFineAssessmentSelectionBoundary(
 
 function buildLiveCaptureBase(
   taskSurfaceRef: string,
-  supplementaryOverrides: Partial<RecallSupplementaryData>
+  supplementaryOverrides: Partial<RecallSupplementaryData>,
+  options: LiveCaptureOptions
 ) {
   const candidates = buildLiveCaptureCandidates();
+  const policy = buildDefaultPolicy({
+    strategy: "chat",
+    taskSurfaceRef,
+    now: () => "2026-07-29T00:00:00.000Z",
+    generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
+  });
   return {
     candidates,
-    policy: buildDefaultPolicy({
-      strategy: "chat",
-      taskSurfaceRef,
-      now: () => "2026-07-29T00:00:00.000Z",
-      generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
-    }),
+    policy: options.maxEntries === undefined
+      ? policy
+      : {
+          ...policy,
+          fine_assessment: {
+            ...policy.fine_assessment,
+            budgets: {
+              ...policy.fine_assessment.budgets,
+              max_entries: options.maxEntries
+            }
+          }
+        },
     winnerMemoryIds: new Set<string>(),
     supplementaryData: buildLiveCaptureSupplementary(
       candidates,
@@ -52,7 +71,7 @@ function buildLiveCaptureBase(
     tokenEstimator: { estimate: () => 5 },
     now: () => "2026-07-29T00:00:00.000Z",
     warn: vi.fn(),
-    captureAnswerFeatures: true as const
+    captureAnswerFeatures: options.captureAnswerFeatures ?? true
   };
 }
 

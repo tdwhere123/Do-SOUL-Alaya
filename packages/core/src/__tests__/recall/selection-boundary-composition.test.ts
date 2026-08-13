@@ -120,11 +120,12 @@ describe("fine-assessment selection composition reconstruction", () => {
       .toThrow(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
   });
 
-  it("fails loud when captured coverage scores drift from the live formula", () => {
+  it("names the coverage-score assert on captured-score fidelity", () => {
     const drifted = withDriftedCoverageScores(captureLiveBoundary());
 
-    expect(() => reconstructFineAssessmentComposition(drifted))
-      .toThrow(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
+    expect(() => reconstructFineAssessmentComposition(drifted)).toThrow(
+      `${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: coverage_relevance`
+    );
   });
 
   it("recomputes live composition when captured-score fidelity is skipped", () => {
@@ -144,6 +145,26 @@ describe("fine-assessment selection composition reconstruction", () => {
     )).toEqual(
       original.expected.candidate_keys.map((key) => key.split(":").at(-1))
     );
+  });
+
+  it("still fails closed on fused-score drift in recompute_live", () => {
+    const drifted = withDriftedFinalRelevance(captureLiveBoundary());
+
+    expect(() => reconstructFineAssessmentComposition(drifted, {
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+    })).toThrow(`${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: final_relevance`);
+  });
+
+  it("refuses recompute_live when capture_answer_features is off", () => {
+    const boundary = captureFineAssessmentSelectionBoundary(
+      "surface-selection-composition-features-off",
+      {},
+      { captureAnswerFeatures: false }
+    );
+
+    expect(() => reconstructFineAssessmentComposition(boundary, {
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+    })).toThrow(/recompute_live requires capture_answer_features/u);
   });
 
   it("still fails closed on missing token estimates in recompute_live", () => {
@@ -211,6 +232,26 @@ function withDriftedCoverageScores(
     input: {
       ...boundary.input,
       coverage_relevance_by_candidate_key: [
+        [first![0], first![1] + 0.01],
+        ...rest
+      ]
+    }
+  };
+}
+
+function withDriftedFinalRelevance(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  const captured = boundary.input.final_relevance_by_candidate_key;
+  if (captured === undefined || captured.length === 0) {
+    throw new Error("final relevance was not captured");
+  }
+  const [first, ...rest] = captured;
+  return {
+    ...boundary,
+    input: {
+      ...boundary.input,
+      final_relevance_by_candidate_key: [
         [first![0], first![1] + 0.01],
         ...rest
       ]

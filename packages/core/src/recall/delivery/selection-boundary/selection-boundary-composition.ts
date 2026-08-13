@@ -94,6 +94,7 @@ function prepareComposition(
   input: FineAssessmentSelectionBoundaryInput,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ) {
+  assertRecomputeLiveFeatureCapture(input, capturedScoreFidelity);
   const packetCandidates = restoreCapturedPacketCandidates(input);
   const candidates = packetCandidates ?? input.ordered_candidates;
   const supplementaryData = restoreSupplementaryData(input.supplementary_data);
@@ -103,9 +104,7 @@ function prepareComposition(
     candidates,
     answerRelevanceScores,
     supplementaryData,
-    captureAnswerFeatures:
-      capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE ||
-      input.capture_answer_features
+    captureAnswerFeatures: input.capture_answer_features
   });
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores
@@ -117,7 +116,7 @@ function prepareComposition(
     input,
     deepHead,
     answerRelevanceScores,
-    throwCompositionMismatch
+    () => throwCompositionMismatch("captured_order_policy")
   );
   assertCompositionInputs(input, delivery, deepHead, capturedScoreFidelity);
   const selectionParams = buildCompositionSelectionParams(
@@ -179,27 +178,31 @@ function assertCompositionInputs(
   assertCandidatePopulation(delivery.orderedCandidates, input.ordered_candidates);
   assertNumberMapEquals(
     delivery.finalRelevanceByCandidateKey,
-    input.final_relevance_by_candidate_key
+    input.final_relevance_by_candidate_key,
+    "final_relevance"
   );
   assertNumberMapEquals(
     delivery.answerRelevanceRankByCandidateKey,
-    input.answer_relevance_rank_by_candidate_key
+    input.answer_relevance_rank_by_candidate_key,
+    "answer_relevance_rank"
   );
   if (capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE) return;
   assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
   assertNumberMapEquals(
     delivery.rankByCandidateKey,
-    input.rank_by_candidate_key
+    input.rank_by_candidate_key,
+    "delivery_rank"
   );
   assertNumberMapEquals(
     deepHead.scores,
-    input.coverage_relevance_by_candidate_key
+    input.coverage_relevance_by_candidate_key,
+    "coverage_relevance"
   );
   if (selectionBoundaryJsonSha256(deepHead.relevanceUpperBoundReceipt) !==
       selectionBoundaryJsonSha256(
         input.coverage_relevance_upper_bound ?? null
       )) {
-    throwCompositionMismatch();
+    throwCompositionMismatch("coverage_relevance_upper_bound");
   }
   assertDeepHeadTraces(
     deepHead.traceByCandidateKey,
@@ -214,7 +217,9 @@ function assertCompositionExpected(
   preProjection?: FineAssessmentPreProjectionCapture
 ): void {
   const packetConsensus = selected.packetPlanObservation;
-  if (packetConsensus === undefined) throwCompositionMismatch();
+  if (packetConsensus === undefined) {
+    throwCompositionMismatch("packet_plan_observation");
+  }
   const actual = buildSelectionBoundaryExpected(
     selected,
     packetConsensus,
@@ -225,7 +230,7 @@ function assertCompositionExpected(
     selectionBoundaryJsonSha256(actual) !==
     selectionBoundaryJsonSha256(boundary.expected)
   ) {
-    throwCompositionMismatch();
+    throwCompositionMismatch("expected_membership");
   }
 }
 
@@ -233,14 +238,18 @@ function assertCandidatePopulation(
   actual: ReturnType<typeof applyDeliverySelection>["orderedCandidates"],
   captured: FineAssessmentSelectionBoundaryInput["ordered_candidates"]
 ): void {
-  if (actual.length !== captured.length) throwCompositionMismatch();
+  if (actual.length !== captured.length) {
+    throwCompositionMismatch("candidate_population");
+  }
   const capturedKeys = new Set(captured.map((candidate) =>
     candidate.fusion.candidate_key
   ));
-  if (capturedKeys.size !== captured.length) throwCompositionMismatch();
+  if (capturedKeys.size !== captured.length) {
+    throwCompositionMismatch("candidate_population");
+  }
   for (const candidate of actual) {
     if (!capturedKeys.has(candidate.fusion.candidate_key)) {
-      throwCompositionMismatch();
+      throwCompositionMismatch("candidate_population");
     }
   }
 }
@@ -249,13 +258,15 @@ function assertCandidateOrder(
   actual: ReturnType<typeof applyDeliverySelection>["orderedCandidates"],
   captured: FineAssessmentSelectionBoundaryInput["ordered_candidates"]
 ): void {
-  if (actual.length !== captured.length) throwCompositionMismatch();
+  if (actual.length !== captured.length) {
+    throwCompositionMismatch("candidate_order");
+  }
   for (let index = 0; index < actual.length; index += 1) {
     if (
       actual[index]!.fusion.candidate_key !==
       captured[index]!.fusion.candidate_key
     ) {
-      throwCompositionMismatch();
+      throwCompositionMismatch("candidate_order");
     }
   }
 }
@@ -273,14 +284,24 @@ function resolveCapturedScoreFidelity(
   throw new Error(`captured score fidelity mode is not supported: ${String(mode)}`);
 }
 
+function assertRecomputeLiveFeatureCapture(
+  input: FineAssessmentSelectionBoundaryInput,
+  capturedScoreFidelity: CapturedScoreFidelityMode
+): void {
+  if (capturedScoreFidelity !== CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE) return;
+  if (input.capture_answer_features === true) return;
+  throw new Error("recompute_live requires capture_answer_features");
+}
+
 function assertNumberMapEquals(
   actual: ReadonlyMap<string, number>,
-  captured: SelectionBoundaryNumberMap | undefined
+  captured: SelectionBoundaryNumberMap | undefined,
+  assertName: string
 ): void {
   const entries = captured ?? [];
-  if (actual.size !== entries.length) throwCompositionMismatch();
+  if (actual.size !== entries.length) throwCompositionMismatch(assertName);
   for (const [key, value] of entries) {
-    if (actual.get(key) !== value) throwCompositionMismatch();
+    if (actual.get(key) !== value) throwCompositionMismatch(assertName);
   }
 }
 
@@ -290,27 +311,27 @@ function assertDeepHeadTraces(
   captureAnswerFeatures: boolean
 ): void {
   if (!captureAnswerFeatures) {
-    if (actual.size !== 0) throwCompositionMismatch();
+    if (actual.size !== 0) throwCompositionMismatch("deep_head_traces");
     if (captured !== undefined && captured.length > 0) {
-      throwCompositionMismatch();
+      throwCompositionMismatch("deep_head_traces");
     }
     return;
   }
   if (captured === undefined || actual.size !== captured.length) {
-    throwCompositionMismatch();
+    throwCompositionMismatch("deep_head_traces");
   }
   for (const [key, value] of captured) {
     const recomputed = actual.get(key);
-    if (recomputed === undefined) throwCompositionMismatch();
+    if (recomputed === undefined) throwCompositionMismatch("deep_head_traces");
     if (
       selectionBoundaryJsonSha256(recomputed) !==
       selectionBoundaryJsonSha256(value)
     ) {
-      throwCompositionMismatch();
+      throwCompositionMismatch("deep_head_traces");
     }
   }
 }
 
-function throwCompositionMismatch(): never {
-  throw new Error(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
+function throwCompositionMismatch(assertName: string): never {
+  throw new Error(`${SELECTION_COMPOSITION_FIDELITY_MISMATCH}: ${assertName}`);
 }
