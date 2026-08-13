@@ -89,6 +89,27 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     ]);
   });
 
+  it("forms after a fused-WH complement of a participial adjunct", () => {
+    expect(normalizer.propose(
+      "Speaking of which, I still cook pasta on Sundays"
+    )?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" },
+      { role: "qualifier", text: "still" },
+      { role: "relation", text: "cook" },
+      { role: "value", text: "pasta on Sundays" }
+    ]);
+  });
+
+  it("forms after an infinitival to-be adjunct", () => {
+    expect(normalizer.propose(
+      "To be honest, I prefer quiet rooms at night."
+    )?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" },
+      { role: "relation", text: "prefer" },
+      { role: "value", text: "quiet rooms at night" }
+    ]);
+  });
+
   it("treats determiner that as NP material rather than a complementizer", () => {
     expect(normalizer.propose("On that day I visited the museum.")?.fact_frame.slots)
       .toEqual([
@@ -137,6 +158,42 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     )).toBeUndefined();
     expect(normalizer.propose(
       "Considering I've had success with spinner baits, I'm thinking of trying them again."
+    )).toBeUndefined();
+  });
+
+  it("fails closed on a reduced relative after a second NP", () => {
+    expect(normalizer.propose(
+      "By the way, that book I bought was great."
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, the book I bought was great."
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, the first house I saw was listed for $425,000"
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, the lecture series I attended downtown was held at a location downtown, and the speaker, Dr. Khan, was really engaging."
+    )).toBeUndefined();
+  });
+
+  it("does not treat a title-internal WH word as a fused PP complement", () => {
+    expect(normalizer.propose(
+      "Under \"How We Met\", I'll include the location where I met them."
+    )).toBeUndefined();
+  });
+
+  it("fails closed when a preposition is followed by a bare verb rather than a simple NP", () => {
+    expect(normalizer.propose(
+      "To ensure I arrived on time, I woke up 1 hour before I needed to be at the office."
+    )).toBeUndefined();
+  });
+
+  it("fails closed on a later pronoun after a lexical finite in a second clause", () => {
+    expect(normalizer.propose(
+      "By the way, my Instagram post about trying sushi for the first time got 57 likes and 12 comments, so I'm guessing I'm not the only one who loves sushi!"
+    )).toBeUndefined();
+    expect(normalizer.propose(
+      "By the way, speaking of family, my sister just got engaged last weekend, and we had a big celebration at a restaurant."
     )).toBeUndefined();
   });
 

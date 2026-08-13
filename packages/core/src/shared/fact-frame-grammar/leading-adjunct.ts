@@ -1,104 +1,83 @@
-import {
-  AUXILIARIES,
-  CLAUSE_BOUNDARIES,
-  WH_WORDS
-} from "./clause-boundaries.js";
+import { AUXILIARIES, WH_WORDS } from "./clause-boundaries.js";
 import type { FactFrameSourceToken } from "./source-text.js";
 
-// Position 0 is not the subject test: a fronted PP or participial disjunct
-// displaces the matrix subject without deleting it.
+// Only shapes whose next token after one simple NP must be the matrix subject.
 export function skipLeadingAdjunctSpan(
   tokens: readonly FactFrameSourceToken[],
   isSubjectStart: (index: number) => boolean
 ): number {
-  let index = 0;
-  while (index < tokens.length) {
-    if (isSubjectStart(index)) return index;
-    const next = consumeOneAdjunct(tokens, index, isSubjectStart);
-    if (next === null) return 0;
-    index = next;
-  }
-  return 0;
+  if (isSubjectStart(0)) return 0;
+  return matchInfinitivalBeAdjunct(tokens, 0, isSubjectStart) ??
+    matchParticipialAdjunct(tokens, 0, isSubjectStart) ??
+    matchPrepositionalAdjunct(tokens, 0, isSubjectStart) ??
+    0;
 }
 
-function consumeOneAdjunct(
+function matchInfinitivalBeAdjunct(
   tokens: readonly FactFrameSourceToken[],
   start: number,
   isSubjectStart: (index: number) => boolean
 ): number | null {
-  const token = tokens[start];
-  if (token === undefined) return null;
-  if (PREPOSITIONS.has(token.normalized)) {
-    return consumePrepositionalAdjunct(tokens, start, isSubjectStart);
+  if (tokens[start]?.normalized !== "to") return null;
+  if (tokens[start + 1]?.normalized !== "be") return null;
+  const complement = tokens[start + 2];
+  const subjectAt = start + 3;
+  if (complement === undefined || isSubjectStart(start + 2)) return null;
+  if (DETERMINERS.has(complement.normalized) ||
+      PREPOSITIONS.has(complement.normalized) ||
+      AUXILIARIES.has(complement.normalized)) {
+    return null;
   }
-  if (isPresentParticiple(token)) {
-    return consumeParticipialAdjunct(tokens, start, isSubjectStart);
-  }
-  return null;
+  return isSubjectStart(subjectAt) ? subjectAt : null;
 }
 
-function consumeParticipialAdjunct(
+function matchParticipialAdjunct(
   tokens: readonly FactFrameSourceToken[],
   start: number,
   isSubjectStart: (index: number) => boolean
 ): number | null {
+  const head = tokens[start];
+  if (head === undefined || !isPresentParticiple(head)) return null;
   const afterHead = start + 1;
   if (afterHead >= tokens.length || isSubjectStart(afterHead)) return null;
-  const next = tokens[afterHead];
-  if (next !== undefined && PREPOSITIONS.has(next.normalized)) {
-    return consumePrepositionalAdjunct(tokens, afterHead, isSubjectStart);
-  }
-  return null;
+  return matchPrepositionalAdjunct(tokens, afterHead, isSubjectStart);
 }
 
-function consumePrepositionalAdjunct(
+function matchPrepositionalAdjunct(
   tokens: readonly FactFrameSourceToken[],
   start: number,
   isSubjectStart: (index: number) => boolean
 ): number | null {
+  if (!PREPOSITIONS.has(tokens[start]?.normalized ?? "")) return null;
+  const afterNp = consumeSimpleNp(tokens, start + 1, isSubjectStart);
+  return afterNp !== null && isSubjectStart(afterNp) ? afterNp : null;
+}
+
+function consumeSimpleNp(
+  tokens: readonly FactFrameSourceToken[],
+  start: number,
+  isSubjectStart: (index: number) => boolean
+): number | null {
+  const first = tokens[start];
+  if (first === undefined || isSubjectStart(start)) return null;
+  if (first.normalized === "which") return start + 1;
+  if (!DETERMINERS.has(first.normalized)) return null;
   let index = start + 1;
-  if (index >= tokens.length || isSubjectStart(index)) return null;
-  let seenNp = false;
+  if (tokens[index] === undefined || isSubjectStart(index)) return null;
+  let content = 0;
   while (index < tokens.length) {
-    if (isSubjectStart(index)) return index;
-    if (seenNp) {
-      if (spanCut(tokens, index, isSubjectStart) === "reject") return null;
-    } else if (opensFiniteClause(tokens, index, isSubjectStart)) {
-      return null;
-    }
-    seenNp = true;
+    if (isSubjectStart(index)) return content > 0 ? index : null;
+    if (isSimpleNpBreaker(tokens[index]!)) return null;
     index += 1;
+    content += 1;
   }
   return null;
 }
 
-function spanCut(
-  tokens: readonly FactFrameSourceToken[],
-  index: number,
-  isSubjectStart: (index: number) => boolean
-): "reject" | "continue" {
-  const token = tokens[index];
-  if (token === undefined) return "reject";
-  if (isFiniteOrInterrogativeHead(token)) return "reject";
-  if (CLAUSE_BOUNDARIES.has(token.normalized) && isSubjectStart(index + 1)) {
-    return "reject";
-  }
-  return "continue";
-}
-
-function opensFiniteClause(
-  tokens: readonly FactFrameSourceToken[],
-  index: number,
-  isSubjectStart: (index: number) => boolean
-): boolean {
-  const token = tokens[index];
-  if (token === undefined) return false;
-  if (isFiniteOrInterrogativeHead(token)) return true;
-  return CLAUSE_BOUNDARIES.has(token.normalized) && isSubjectStart(index + 1);
-}
-
-function isFiniteOrInterrogativeHead(token: FactFrameSourceToken): boolean {
-  return AUXILIARIES.has(token.normalized) ||
+function isSimpleNpBreaker(token: FactFrameSourceToken): boolean {
+  return DETERMINERS.has(token.normalized) ||
+    PREPOSITIONS.has(token.normalized) ||
+    AUXILIARIES.has(token.normalized) ||
     WH_WORDS.has(token.normalized) ||
     /n't$/u.test(token.normalized);
 }
@@ -111,6 +90,10 @@ function isPresentParticiple(token: FactFrameSourceToken): boolean {
 
 const ING_SPELLING_COLLISIONS: ReadonlySet<string> = new Set([
   "something", "anything", "nothing", "everything", "thing"
+]);
+const DETERMINERS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "this", "that", "these", "those",
+  "my", "your", "his", "her", "its", "our", "their", "some", "any"
 ]);
 const PREPOSITIONS: ReadonlySet<string> = new Set([
   "about", "above", "across", "after", "against", "along", "amid", "among",

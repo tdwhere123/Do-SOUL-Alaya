@@ -54,9 +54,30 @@ describe("skipLeadingAdjunctSpan", () => {
     expect(subjectIndex("对了 I took my niece to the museum.")).toBe(0);
   });
 
-  it("keeps walking through a following PP until the matrix subject", () => {
-    const source = "By the way on Tuesday I went to the museum";
+  it("does not continue past one simple NP into a following PP", () => {
+    expect(subjectIndex("By the way on Tuesday I went to the museum")).toBe(0);
+  });
+
+  it("locates a subject after a fused-WH PP complement", () => {
+    const source = "Speaking of which, I still cook pasta on Sundays";
     const tokens = tokenizeFactFrameSource(source);
     expect(tokens[subjectIndex(source)]?.normalized).toBe("i");
+  });
+
+  it("locates a subject after to-be plus a single complement", () => {
+    const source = "To be honest, I prefer quiet rooms at night";
+    const tokens = tokenizeFactFrameSource(source);
+    expect(tokens[subjectIndex(source)]?.normalized).toBe("i");
+  });
+
+  it("does not treat a bare verb after to as a simple NP", () => {
+    expect(subjectIndex(
+      "To ensure I arrived on time, I woke up before the meeting"
+    )).toBe(0);
+  });
+
+  it("does not walk into a reduced relative after a second NP", () => {
+    expect(subjectIndex("By the way, the book I bought was great.")).toBe(0);
+    expect(subjectIndex("By the way, that book I bought was great.")).toBe(0);
   });
 });
