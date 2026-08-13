@@ -158,6 +158,32 @@ describe("capture parity comparer", () => {
         retrieval_field_captures: null as never
       }
     })).toThrow(/retrieval_field_captures missing/);
+    expect(() => extractCaptureParityView("yoga-place", {
+      ...result,
+      diagnostics: {
+        ...result.diagnostics!,
+        retrieval_field_captures: []
+      }
+    })).toThrow(/retrieval_field_captures missing/);
+  });
+
+  it("throws when query_probes are absent", async () => {
+    const result = await recallYoga();
+
+    expect(() => extractCaptureParityView("yoga-place", {
+      ...result,
+      diagnostics: {
+        ...result.diagnostics!,
+        query_probes: null as never
+      }
+    })).toThrow(/query probes missing/);
+    expect(() => extractCaptureParityView("yoga-place", {
+      ...result,
+      diagnostics: {
+        ...result.diagnostics!,
+        query_probes: undefined as never
+      }
+    })).toThrow(/query probes missing/);
   });
 });
 

@@ -283,6 +283,7 @@ export function evaluateCoverageSelectionCandidateStates<
   return Object.freeze({ score, state });
 }
 
+// Document-identity gistKey would ungroup same-text memories and change order.
 export function resolveCoverageIdentity(
   candidate: CoverageSelectableCandidate,
   supplementaryData: CoverageSelectionSupplementary

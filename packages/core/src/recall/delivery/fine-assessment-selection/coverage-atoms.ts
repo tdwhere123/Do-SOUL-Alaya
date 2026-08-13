@@ -10,7 +10,6 @@ import type {
   RecallEvidenceProjectionMatchReceipt,
   RecallEvidenceSemanticActivationReceipt,
   RecallEvidenceSemanticProjectionReceipt,
-  RecallEvidenceSemanticWinnerReceipt,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
 import type { CandidateActivationReceipt } from
@@ -20,6 +19,10 @@ import {
   type RecallCandidateActivationInput,
   type RecallCandidateActivationSupplementary
 } from "../../scoring/activation/candidate-semantic-activation-context.js";
+import {
+  scoredObservationTable,
+  type ScoredObservationRow
+} from "../../scoring/observation-table.js";
 
 export const COVERAGE_ATOM_OPERATOR_ID =
   "attributed_coverage_atoms_v1";
@@ -111,6 +114,7 @@ export function materializeCandidateCoverageReceipt(params: Readonly<{
 }>): CandidateCoverageReceipt {
   const objectAtom = logicalObjectAtom(params.candidate);
   const observations = coverageAtomObservations(
+    params.candidate.fusion.candidate_key,
     params.evidenceSemanticActivation,
     params.evidenceProjectionMatches
   );
@@ -231,21 +235,26 @@ function prefersObservation(
 }
 
 function coverageAtomObservations(
+  candidateKey: string,
   semantic: Readonly<RecallEvidenceSemanticActivationReceipt> | null,
   projectionMatches: readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
 ): readonly CoverageAtomObservation[] {
+  const rows = semantic === null ? [] : scoredObservationTable(candidateKey, semantic);
   return Object.freeze([
-    ...(semantic?.observations ?? []).map(semanticObservation),
+    ...rows.map(semanticObservation),
     ...projectionMatches.map(projectionMatchObservation)
   ]);
 }
 
 function semanticObservation(
-  observation: Readonly<RecallEvidenceSemanticWinnerReceipt>
+  row: ScoredObservationRow
 ): CoverageAtomObservation {
   return Object.freeze({
-    ...observation,
     channel: "evidence_semantic",
+    score: row.score,
+    evidenceObjectId: row.evidenceObjectId,
+    documentIdentity: row.documentIdentity,
+    projection: row.projection,
     matchedFtsLanes: Object.freeze([])
   });
 }

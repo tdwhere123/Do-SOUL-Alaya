@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { hashMemoryContent } from "../../embedding-recall/helpers.js";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import { createProvider } from "./embedding-recall-test-helpers.js";
 
@@ -163,7 +164,8 @@ describe("EmbeddingRecallService evidence document cache", () => {
     expect(readWinningDocuments(result).get("memory:1")).toEqual({
       score: 1,
       evidenceObjectId: "evidence-strong",
-      documentIdentity: "evidence-strong"
+      documentIdentity: "evidence-strong",
+      contentHash: hashMemoryContent("strong")
     });
     expect(result.activationsByCandidateKey.get("memory:1")).toEqual({
       schema_version: 1,
@@ -173,16 +175,19 @@ describe("EmbeddingRecallService evidence document cache", () => {
       winner: {
         score: 1,
         evidenceObjectId: "evidence-strong",
-        documentIdentity: "evidence-strong"
+        documentIdentity: "evidence-strong",
+        contentHash: hashMemoryContent("strong")
       },
       observations: [{
         score: 1,
         evidenceObjectId: "evidence-strong",
-        documentIdentity: "evidence-strong"
+        documentIdentity: "evidence-strong",
+        contentHash: hashMemoryContent("strong")
       }, {
         score: 0,
         evidenceObjectId: "evidence-weak",
-        documentIdentity: "evidence-weak"
+        documentIdentity: "evidence-weak",
+        contentHash: hashMemoryContent("weak")
       }],
       observation_completeness: "complete",
       missing_channel_policy: "no_op"
@@ -219,7 +224,8 @@ describe("EmbeddingRecallService evidence document cache", () => {
     expect(result.activationsByCandidateKey.get("memory:1")?.observations).toEqual([{
       score: 1,
       evidenceObjectId: "evidence-1",
-      documentIdentity: "owner"
+      documentIdentity: "owner",
+      contentHash: hashMemoryContent("duplicate-a")
     }]);
   });
 
@@ -244,7 +250,8 @@ describe("EmbeddingRecallService evidence document cache", () => {
     const expected = {
       score: 1,
       evidenceObjectId: "evidence-1",
-      documentIdentity: "fact-key:a"
+      documentIdentity: "fact-key:a",
+      contentHash: hashMemoryContent("equal-a")
     };
 
     expect(readWinningDocuments(forward).get("memory:1")).toEqual(expected);
@@ -393,6 +400,7 @@ type ExpectedWinningDocument = Readonly<{
   score: number;
   evidenceObjectId: string;
   documentIdentity: string;
+  contentHash?: string;
 }>;
 
 function readWinningDocuments(

@@ -2,6 +2,7 @@ import {
   assertValidEmbeddingBatch,
   clamp01,
   createCosineBatchScorer,
+  hashMemoryContent,
   toErrorMessage
 } from "../helpers.js";
 import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../constants.js";
@@ -123,7 +124,8 @@ function aggregateCandidateActivations(
     const observation = Object.freeze({
       score: clamp01(scoreCosine(embeddings[index]!)),
       evidenceObjectId: candidate.evidenceObjectId,
-      documentIdentity: candidate.documentIdentity
+      documentIdentity: candidate.documentIdentity,
+      contentHash: hashMemoryContent(candidate.content.trim())
     });
     const byIdentity = observations.get(candidate.candidateKey) ?? new Map();
     const identity = observationIdentity(observation);

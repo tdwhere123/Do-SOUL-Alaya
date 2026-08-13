@@ -128,6 +128,9 @@ describe("capture-parity contract", () => {
     expect(() => extractCaptureParityViewFromEval(evalFixture({
       retrieval_field_captures: undefined
     }))).toThrow(/retrieval_field_captures missing/);
+    expect(() => extractCaptureParityViewFromEval(evalFixture({
+      retrieval_field_captures: []
+    }))).toThrow(/retrieval_field_captures missing/);
   });
 });
 
@@ -142,6 +145,20 @@ describe("capture-parity CLI", () => {
     const missing = await captureCli(["capture-parity"]);
     expect(missing.exit).toBe(2);
     expect(missing.stderr).toContain("--snapshot <value> required");
+
+    const sliced = await captureCli([
+      "capture-parity",
+      "--snapshot",
+      "snapshot.sqlite",
+      "--output",
+      "parity.json",
+      "--limit",
+      "1"
+    ]);
+    expect(sliced.exit).toBe(2);
+    expect(sliced.stderr).toContain("refuses --limit and --offset");
+    expect(help.stdout).not.toMatch(/capture-parity[^\n]*--limit/u);
+    expect(help.stdout).not.toMatch(/capture-parity[^\n]*--offset/u);
   });
 });
 
@@ -161,7 +178,7 @@ function evalFixture(patch: {
       },
       ...("retrieval_field_captures" in patch
         ? { retrieval_field_captures: patch.retrieval_field_captures }
-        : { retrieval_field_captures: [] }),
+        : { retrieval_field_captures: [fieldCapture("lexical_relaxed_exact", ["yoga-key"])] }),
       answer_shape_plan: {
         schema_version: 1 as const,
         status: "high_confidence" as const,

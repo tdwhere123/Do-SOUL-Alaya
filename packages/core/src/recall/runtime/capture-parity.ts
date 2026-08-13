@@ -100,7 +100,7 @@ export function requireRetrievalFieldCaptures<T>(
   questionId: string,
   captures: readonly T[] | null | undefined
 ): readonly T[] {
-  if (captures === null || captures === undefined) {
+  if (captures === null || captures === undefined || captures.length === 0) {
     throw new Error(
       `capture parity retrieval_field_captures missing (question_id=${questionId})`
     );
@@ -155,7 +155,7 @@ export function extractCaptureParityView(
     ),
     geometry: {
       answer_shape_plan: diagnostics.answer_shape_plan ?? null,
-      probes: diagnostics.query_probes
+      probes: requireQueryProbes(questionId, diagnostics.query_probes)
     },
     membership: result.candidates.map((candidate) => ({
       object_kind: candidate.object_kind,
@@ -163,6 +163,16 @@ export function extractCaptureParityView(
     })),
     assessment_path: diagnostics.packet_plan_trace?.assessment_path ?? null
   });
+}
+
+function requireQueryProbes(
+  questionId: string,
+  probes: CaptureParityGeometry["probes"] | null | undefined
+): NonNullable<CaptureParityGeometry["probes"]> {
+  if (probes === null || probes === undefined) {
+    throw new Error(`capture parity query probes missing (question_id=${questionId})`);
+  }
+  return probes;
 }
 
 export function assertCaptureParityWindow(

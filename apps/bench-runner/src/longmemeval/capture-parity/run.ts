@@ -35,8 +35,6 @@ export interface CaptureParityRunOptions {
   readonly historyRoot: string;
   readonly dataDirRoot: string;
   readonly policyShape?: RecallEvalOptions["policyShape"];
-  readonly limit?: number;
-  readonly offset?: number;
   readonly querySemanticFactorCachePath?: string;
 }
 
@@ -159,8 +157,6 @@ function recallEvalOptions(
     historyRoot,
     dataDirRoot,
     ...(options.policyShape === undefined ? {} : { policyShape: options.policyShape }),
-    ...(options.limit === undefined ? {} : { limit: options.limit }),
-    ...(options.offset === undefined ? {} : { offset: options.offset }),
     ...(options.querySemanticFactorCachePath === undefined
       ? {}
       : { querySemanticFactorCachePath: options.querySemanticFactorCachePath })

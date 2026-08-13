@@ -70,6 +70,7 @@ export interface RecallEvidenceSemanticWinnerReceipt {
   readonly score: number;
   readonly evidenceObjectId: string;
   readonly documentIdentity: string;
+  readonly contentHash?: string;
   readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt> | null;
 }
 

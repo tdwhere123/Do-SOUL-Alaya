@@ -14,6 +14,7 @@ import {
   resolveCandidateSemanticActivationScope,
   type CandidateActivationReceipt
 } from "../candidate-semantic-activation.js";
+import { evidenceSemanticScoreFromObservations } from "../observation-table.js";
 
 export type RecallCandidateActivationInput = Readonly<{
   readonly entry: Readonly<{ readonly object_id: string }>;
@@ -47,7 +48,7 @@ export function resolveRecallCandidateSemanticActivation(
       objectKind: candidate.objectKind,
       workspaceMemoryEligible: isWorkspaceMemoryCandidate(candidate)
     }),
-    evidenceSemantic: evidenceActivation?.score,
+    evidenceSemantic: evidenceSemanticScoreFromObservations(evidenceActivation),
     openSemanticSolution: openSemanticActivation?.score,
     effectiveEmbedding: candidate.effectiveFactors.embedding_similarity,
     objectEmbedding: supplementaryData.embeddingSimilarityScores[

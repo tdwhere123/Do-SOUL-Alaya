@@ -47,8 +47,6 @@ async function parseCaptureParityOptions(args: readonly string[]): Promise<{
   readonly historyRoot: string;
   readonly dataDirRoot: string;
   readonly policyShape?: BenchPolicyShape;
-  readonly limit?: number;
-  readonly offset?: number;
   readonly querySemanticFactorCachePath?: string;
 }> {
   const values = parseFlagPairs(args);
@@ -66,8 +64,6 @@ async function parseCaptureParityOptions(args: readonly string[]): Promise<{
     dataDirRoot,
     historyRoot,
     ...(policyShape === undefined ? {} : { policyShape }),
-    ...optionalInt(values, "--limit"),
-    ...optionalInt(values, "--offset"),
     ...(values.get("--query-semantic-factor-cache") === undefined
       ? {}
       : { querySemanticFactorCachePath: values.get("--query-semantic-factor-cache") })
@@ -85,6 +81,9 @@ function parseFlagPairs(args: readonly string[]): ReadonlyMap<string, string> {
     }
     values.set(flag, value);
   }
+  if (values.has("--limit") || values.has("--offset")) {
+    throw new Error("capture-parity refuses --limit and --offset");
+  }
   const allowed = new Set([
     "--snapshot",
     "--output",
@@ -92,9 +91,7 @@ function parseFlagPairs(args: readonly string[]): ReadonlyMap<string, string> {
     "--data-dir-root",
     "--history-root",
     "--variant",
-    "--policy-shape",
-    "--limit",
-    "--offset"
+    "--policy-shape"
   ]);
   if ([...values.keys()].some((flag) => !allowed.has(flag))) {
     throw new Error("unknown capture-parity flag");
@@ -108,19 +105,6 @@ function required(values: ReadonlyMap<string, string>, flag: string): string {
     throw new Error(`${flag} <value> required`);
   }
   return value;
-}
-
-function optionalInt(
-  values: ReadonlyMap<string, string>,
-  flag: "--limit" | "--offset"
-): { readonly limit: number } | { readonly offset: number } | Record<string, never> {
-  const raw = values.get(flag);
-  if (raw === undefined) return {};
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${flag} must be a non-negative integer`);
-  }
-  return flag === "--limit" ? { limit: parsed } : { offset: parsed };
 }
 
 function optionalVariant(raw: string | undefined): LongMemEvalVariant {

@@ -278,6 +278,7 @@ export interface EvidenceCandidateScoringWinner {
   readonly score: number;
   readonly evidenceObjectId: string;
   readonly documentIdentity: string;
+  readonly contentHash?: string;
 }
 
 export interface EvidenceCandidateScoringReceipt {

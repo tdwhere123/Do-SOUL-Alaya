@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { hashMemoryContent } from "../../../embedding-recall/helpers.js";
 import { EmbeddingRecallService } from
   "../../../embedding-recall/embedding-recall-service.js";
 import type { EvidenceCandidateScoringSelectionReceipt } from
@@ -21,8 +22,14 @@ describe("evidence scoring selection receipt", () => {
     expect(embedTexts.mock.calls.map(([texts]) => texts)).toEqual([
       ["query"], ["shared evidence"]
     ]);
-    expect(result.activationsByCandidateKey.get("memory:1")?.observations)
-      .toHaveLength(2);
+    const observations = result.activationsByCandidateKey.get("memory:1")?.observations;
+    expect(observations).toHaveLength(2);
+    expect(new Set(observations?.map((row) => row.documentIdentity))).toEqual(
+      new Set(["owner_gist_600", "owner"])
+    );
+    expect(new Set(observations?.map((row) => row.contentHash))).toEqual(
+      new Set([hashMemoryContent("shared evidence")])
+    );
   });
 
   it("marks candidates outside a receipt prefix as bounded observations", async () => {
