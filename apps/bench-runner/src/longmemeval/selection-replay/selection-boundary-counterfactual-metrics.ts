@@ -147,6 +147,44 @@ export function anyGoldInHead(
   );
 }
 
+export function fullGoldInHead(
+  candidateKeys: readonly string[],
+  goldObjectIds: readonly string[],
+  head: number
+): boolean {
+  return goldObjectIds.length > 0 &&
+    goldObjectsInHead(candidateKeys, goldObjectIds, head) === goldObjectIds.length;
+}
+
+export function goldObjectsInHead(
+  candidateKeys: readonly string[],
+  goldObjectIds: readonly string[],
+  head: number
+): number {
+  if (goldObjectIds.length === 0) return 0;
+  const delivered = new Set(
+    candidateKeys.slice(0, head).map(objectIdFromCandidateKey)
+  );
+  return goldObjectIds.filter((objectId) => delivered.has(objectId)).length;
+}
+
+export function sameMembership(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((key) => rightSet.has(key));
+}
+
+export function sameOrder(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((key, index) => key === right[index]);
+}
+
 function accumulateAnswerableGoldMetrics(
   acc: CounterfactualCellAccumulator,
   evaluation: CounterfactualRecordEvaluation
@@ -207,36 +245,7 @@ function collectCellBlockers(input: Readonly<{
   return Object.freeze(blockers);
 }
 
-function sameMembership(
-  left: readonly string[],
-  right: readonly string[]
-): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((key) => rightSet.has(key));
-}
-
-function sameOrder(
-  left: readonly string[],
-  right: readonly string[]
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((key, index) => key === right[index]);
-}
-
 function objectIdFromCandidateKey(candidateKey: string): string {
   const parts = candidateKey.split(":");
   return parts[parts.length - 1]!;
-}
-
-function fullGoldInHead(
-  candidateKeys: readonly string[],
-  goldObjectIds: readonly string[],
-  head: number
-): boolean {
-  if (goldObjectIds.length === 0) return false;
-  const delivered = new Set(
-    candidateKeys.slice(0, head).map(objectIdFromCandidateKey)
-  );
-  return goldObjectIds.every((objectId) => delivered.has(objectId));
 }

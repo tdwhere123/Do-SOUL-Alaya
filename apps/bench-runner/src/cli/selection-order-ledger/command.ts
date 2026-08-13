@@ -1,4 +1,9 @@
 import process from "node:process";
+import {
+  CAPTURED_SCORE_FIDELITY_ASSERT,
+  CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+  type CapturedScoreFidelityMode
+} from "@do-soul/alaya-core";
 import { materializeSelectionOrderLedgerArtifact } from
   "../../longmemeval/selection-replay/selection-order-ledger-artifact.js";
 
@@ -14,7 +19,13 @@ export async function runSelectionOrderLedgerCommand(
         "--selection-boundaries-sha256"
       ),
       outputPath: required(values, "--output"),
-      checkoutRoot: process.cwd()
+      checkoutRoot: process.cwd(),
+      capturedScoreFidelity: parseCapturedScoreFidelity(
+        values.get("--captured-score-fidelity")
+      ),
+      ...(values.get("--gold-map") === undefined
+        ? {}
+        : { goldMapPath: values.get("--gold-map") })
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
@@ -39,12 +50,26 @@ function parseArgs(args: readonly string[]): ReadonlyMap<string, string> {
   const allowed = new Set([
     "--selection-boundaries",
     "--selection-boundaries-sha256",
-    "--output"
+    "--output",
+    "--captured-score-fidelity",
+    "--gold-map"
   ]);
   if ([...values.keys()].some((flag) => !allowed.has(flag))) {
     throw new Error("unknown selection order ledger flag");
   }
   return values;
+}
+
+function parseCapturedScoreFidelity(
+  raw: string | undefined
+): CapturedScoreFidelityMode {
+  if (raw === undefined || raw === "assert") {
+    return CAPTURED_SCORE_FIDELITY_ASSERT;
+  }
+  if (raw === "recompute-live") return CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE;
+  throw new Error(
+    "--captured-score-fidelity must be assert or recompute-live"
+  );
 }
 
 function required(values: ReadonlyMap<string, string>, flag: string): string {

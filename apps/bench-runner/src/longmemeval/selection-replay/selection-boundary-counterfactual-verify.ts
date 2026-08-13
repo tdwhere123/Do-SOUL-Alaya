@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import {
   counterfactualDeliveredCandidateKeys,
   INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
@@ -32,6 +31,10 @@ import {
   type CounterfactualRecordEvaluation,
   type SelectionCounterfactualCellMetricsBase
 } from "./selection-boundary-counterfactual-metrics.js";
+import {
+  loadSelectionReplayGoldMap,
+  type SelectionReplayGoldQuestion
+} from "./selection-boundary-gold-map.js";
 
 const COUNTERFACTUAL_ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -58,10 +61,7 @@ export type CounterfactualQuestionTransition = Readonly<{
   readonly unseenTokenFailure: boolean;
 }>;
 
-type GoldQuestion = Readonly<{
-  readonly answerable: boolean;
-  readonly goldObjectIds: readonly string[];
-}>;
+type GoldQuestion = SelectionReplayGoldQuestion;
 
 type CounterfactualReconstruct = (
   boundary: FineAssessmentSelectionBoundaryCase,
@@ -82,7 +82,7 @@ export async function evaluateSelectionCounterfactual(
   reconstruct: CounterfactualReconstruct,
   options: EvaluateOptions = {}
 ): Promise<SelectionCounterfactualCellMetrics> {
-  const goldByQuestion = await loadGoldByQuestion(goldMapPath);
+  const goldByQuestion = await loadSelectionReplayGoldMap(goldMapPath);
   const maxArtifactBytes = options.maxArtifactBytes ??
     LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES;
   const authoritativeOnly = options.authoritativeOnly ?? true;
@@ -322,24 +322,4 @@ function evaluateCounterfactualRecord(
 
 function isUnseenTokenFailure(error: unknown): boolean {
   return error instanceof SelectionBoundaryFidelityMismatchError;
-}
-
-async function loadGoldByQuestion(
-  goldMapPath: string
-): Promise<ReadonlyMap<string, GoldQuestion>> {
-  const payload = JSON.parse(await readFile(goldMapPath, "utf8")) as Readonly<{
-    readonly questions: readonly Readonly<{
-      readonly question_id: string;
-      readonly is_abstention: boolean;
-      readonly premise_invalid: boolean;
-      readonly gold_object_ids: readonly string[];
-    }>[];
-  }>;
-  return new Map(payload.questions.map((question) => [
-    question.question_id,
-    Object.freeze({
-      answerable: !question.is_abstention && !question.premise_invalid,
-      goldObjectIds: Object.freeze([...question.gold_object_ids])
-    })
-  ]));
 }

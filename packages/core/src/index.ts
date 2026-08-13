@@ -114,7 +114,10 @@ export {
 } from "./recall/delivery/selection-boundary/selection-boundary-restore.js";
 export {
   reconstructFineAssessmentComposition,
+  CAPTURED_SCORE_FIDELITY_ASSERT,
+  CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
   SELECTION_COMPOSITION_FIDELITY_MISMATCH,
+  type CapturedScoreFidelityMode,
   type SelectionCompositionOptions,
   type SelectionCompositionReconstruction
 } from "./recall/delivery/selection-boundary/selection-boundary-composition.js";

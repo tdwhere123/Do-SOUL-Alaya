@@ -40,8 +40,16 @@ import { assertCapturedOrderPolicy } from
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
 
-/** Reconstruct no longer accepts a second order policy; the exported name stays for callers. */
-export type SelectionCompositionOptions = Readonly<{}>;
+export const CAPTURED_SCORE_FIDELITY_ASSERT = "assert" as const;
+export const CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE = "recompute_live" as const;
+
+export type CapturedScoreFidelityMode =
+  | typeof CAPTURED_SCORE_FIDELITY_ASSERT
+  | typeof CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE;
+
+export type SelectionCompositionOptions = Readonly<{
+  readonly capturedScoreFidelity?: CapturedScoreFidelityMode;
+}>;
 
 export type SelectionCompositionReconstruction = Readonly<{
   readonly result: FineAssessmentSelectionResult;
@@ -55,10 +63,12 @@ export type SelectionCompositionReconstruction = Readonly<{
  * Must stay bit-identical to `deliverFineAssessment` branch + apply + select.
  */
 export function reconstructFineAssessmentComposition(
-  boundary: FineAssessmentSelectionBoundaryCase
+  boundary: FineAssessmentSelectionBoundaryCase,
+  options: SelectionCompositionOptions = {}
 ): SelectionCompositionReconstruction {
+  const capturedScoreFidelity = resolveCapturedScoreFidelity(options);
   validateSelectionBoundary(boundary);
-  const prepared = prepareComposition(boundary.input);
+  const prepared = prepareComposition(boundary.input, capturedScoreFidelity);
   let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const selected = selectFineAssessmentCandidates({
     ...prepared.selectionParams,
@@ -69,7 +79,9 @@ export function reconstructFineAssessmentComposition(
       }
     })
   });
-  assertCompositionExpected(boundary, selected, pending?.preProjection);
+  if (capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_ASSERT) {
+    assertCompositionExpected(boundary, selected, pending?.preProjection);
+  }
   return Object.freeze({
     result: selected,
     branch: prepared.branch,
@@ -78,7 +90,10 @@ export function reconstructFineAssessmentComposition(
   });
 }
 
-function prepareComposition(input: FineAssessmentSelectionBoundaryInput) {
+function prepareComposition(
+  input: FineAssessmentSelectionBoundaryInput,
+  capturedScoreFidelity: CapturedScoreFidelityMode
+) {
   const packetCandidates = restoreCapturedPacketCandidates(input);
   const candidates = packetCandidates ?? input.ordered_candidates;
   const supplementaryData = restoreSupplementaryData(input.supplementary_data);
@@ -88,7 +103,9 @@ function prepareComposition(input: FineAssessmentSelectionBoundaryInput) {
     candidates,
     answerRelevanceScores,
     supplementaryData,
-    captureAnswerFeatures: input.capture_answer_features
+    captureAnswerFeatures:
+      capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE ||
+      input.capture_answer_features
   });
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores
@@ -102,7 +119,7 @@ function prepareComposition(input: FineAssessmentSelectionBoundaryInput) {
     answerRelevanceScores,
     throwCompositionMismatch
   );
-  assertCompositionInputs(input, delivery, deepHead);
+  assertCompositionInputs(input, delivery, deepHead, capturedScoreFidelity);
   const selectionParams = buildCompositionSelectionParams(
     input,
     supplementaryData,
@@ -156,13 +173,10 @@ export function buildCompositionSelectionParams(
 function assertCompositionInputs(
   input: FineAssessmentSelectionBoundaryInput,
   delivery: ReturnType<typeof applyDeliverySelection>,
-  deepHead: RecallDeepHeadAssessment
+  deepHead: RecallDeepHeadAssessment,
+  capturedScoreFidelity: CapturedScoreFidelityMode
 ): void {
-  assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
-  assertNumberMapEquals(
-    delivery.rankByCandidateKey,
-    input.rank_by_candidate_key
-  );
+  assertCandidatePopulation(delivery.orderedCandidates, input.ordered_candidates);
   assertNumberMapEquals(
     delivery.finalRelevanceByCandidateKey,
     input.final_relevance_by_candidate_key
@@ -170,6 +184,12 @@ function assertCompositionInputs(
   assertNumberMapEquals(
     delivery.answerRelevanceRankByCandidateKey,
     input.answer_relevance_rank_by_candidate_key
+  );
+  if (capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE) return;
+  assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
+  assertNumberMapEquals(
+    delivery.rankByCandidateKey,
+    input.rank_by_candidate_key
   );
   assertNumberMapEquals(
     deepHead.scores,
@@ -209,6 +229,22 @@ function assertCompositionExpected(
   }
 }
 
+function assertCandidatePopulation(
+  actual: ReturnType<typeof applyDeliverySelection>["orderedCandidates"],
+  captured: FineAssessmentSelectionBoundaryInput["ordered_candidates"]
+): void {
+  if (actual.length !== captured.length) throwCompositionMismatch();
+  const capturedKeys = new Set(captured.map((candidate) =>
+    candidate.fusion.candidate_key
+  ));
+  if (capturedKeys.size !== captured.length) throwCompositionMismatch();
+  for (const candidate of actual) {
+    if (!capturedKeys.has(candidate.fusion.candidate_key)) {
+      throwCompositionMismatch();
+    }
+  }
+}
+
 function assertCandidateOrder(
   actual: ReturnType<typeof applyDeliverySelection>["orderedCandidates"],
   captured: FineAssessmentSelectionBoundaryInput["ordered_candidates"]
@@ -222,6 +258,19 @@ function assertCandidateOrder(
       throwCompositionMismatch();
     }
   }
+}
+
+function resolveCapturedScoreFidelity(
+  options: SelectionCompositionOptions
+): CapturedScoreFidelityMode {
+  const mode = options.capturedScoreFidelity ?? CAPTURED_SCORE_FIDELITY_ASSERT;
+  if (
+    mode === CAPTURED_SCORE_FIDELITY_ASSERT ||
+    mode === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+  ) {
+    return mode;
+  }
+  throw new Error(`captured score fidelity mode is not supported: ${String(mode)}`);
 }
 
 function assertNumberMapEquals(

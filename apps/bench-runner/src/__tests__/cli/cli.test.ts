@@ -97,6 +97,48 @@ describe("bench-runner CLI", () => {
     expect(stderrBuf).toContain("--selection-boundaries <value> required");
   });
 
+  it("documents captured-score fidelity flags and rejects an unknown mode", async () => {
+    expect(await runCli(["--help"])).toBe(0);
+    expect(stdoutBuf).toContain("--captured-score-fidelity assert|recompute-live");
+    expect(stdoutBuf).toContain("--gold-map <gold.json>");
+
+    stdoutBuf = "";
+    expect(await runCli([
+      "selection-order-ledger",
+      "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
+      "--selection-boundaries-sha256", "0".repeat(64),
+      "--output", "/tmp/ledger.ndjson.gz",
+      "--captured-score-fidelity", "recompute_live"
+    ])).toBe(2);
+    expect(stderrBuf).toContain(
+      "--captured-score-fidelity must be assert or recompute-live"
+    );
+  });
+
+  it("refuses a gold map on the default selection-order-ledger path", async () => {
+    expect(await runCli([
+      "selection-order-ledger",
+      "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
+      "--selection-boundaries-sha256", "0".repeat(64),
+      "--output", "/tmp/ledger.ndjson.gz",
+      "--gold-map", "/tmp/gold.json"
+    ])).toBe(2);
+    expect(stderrBuf).toContain(
+      "gold map applies only to captured-score-fidelity recompute-live"
+    );
+  });
+
+  it("refuses recompute-live without a gold map", async () => {
+    expect(await runCli([
+      "selection-order-ledger",
+      "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
+      "--selection-boundaries-sha256", "0".repeat(64),
+      "--output", "/tmp/ledger.ndjson.gz",
+      "--captured-score-fidelity", "recompute-live"
+    ])).toBe(2);
+    expect(stderrBuf).toContain("recompute_live requires a gold map");
+  });
+
   it("dispatches the extraction cache audit command", async () => {
     const exitCode = await runCli(["audit-extraction-cache"]);
 
