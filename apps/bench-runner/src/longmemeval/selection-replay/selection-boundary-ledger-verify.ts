@@ -1,5 +1,5 @@
 import {
-  buildFineAssessmentComponentLedger,
+  buildFineAssessmentOrderLedger,
   reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
 import {
@@ -44,7 +44,13 @@ export async function verifyLongMemEvalSelectionBoundaryLedgerSample(
     SELECTION_LEDGER_ARTIFACT_ERRORS,
     async (record) => {
       if (!record.authoritative || sampleCount >= sampleLimit) return;
-      const ledger = buildFineAssessmentComponentLedger(record.boundary);
+      const reconstruction = reconstructFineAssessmentComposition(
+        record.boundary
+      );
+      const ledger = buildFineAssessmentOrderLedger(
+        reconstruction.result.orderSequence,
+        reconstruction.result.candidates.length
+      );
       if (ledger.schema_version !== 1) {
         throw new Error("selection ledger schema_version mismatch");
       }
@@ -54,7 +60,6 @@ export async function verifyLongMemEvalSelectionBoundaryLedgerSample(
       ) {
         throw new Error("selection ledger candidate count mismatch");
       }
-      reconstructFineAssessmentComposition(record.boundary);
       ledgerCandidateCount += ledger.candidates.length;
       sampleCount += 1;
     }

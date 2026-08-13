@@ -98,8 +98,8 @@ export interface FineAssessmentAdmission {
 
 export type FineAssessmentSelectionParams = Readonly<{
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
-  /** Coarse ranks need pre-delivery packet order after delivery has already reordered the select input. */
-  readonly packetCandidates?: readonly FineAssessmentCandidate[];
+  /** Null means a prior boundary did not capture the pre-delivery packet order. */
+  readonly packetCandidates?: readonly FineAssessmentCandidate[] | null;
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;

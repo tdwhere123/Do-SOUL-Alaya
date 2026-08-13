@@ -47,7 +47,17 @@ type SemanticMemoryRefinementPlan<T> = Readonly<{
   readonly replacementProtectedCandidateKeys?: readonly string[];
 }>;
 
-export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T>;
+export type DirectEvidenceHeadOrderOwner =
+  | "direct_evidence_promotion"
+  | "semantic_memory_refinement"
+  | "behavior_authority_promotion";
+
+export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T> & Readonly<{
+  readonly orderTransitions: readonly Readonly<{
+    readonly owner: DirectEvidenceHeadOrderOwner;
+    readonly candidates: readonly T[];
+  }>[];
+}>;
 export { retainBoundedAnswerHeads };
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
@@ -68,7 +78,10 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
 ): DirectEvidenceHeadSelection<T> {
   const baseline = selectDelivered(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
-  if (headLimit <= 0) return unchangedSelection(candidates);
+  if (headLimit <= 0) {
+    const unchanged = unchangedSelection(candidates);
+    return withOrderTransitions(unchanged, unchanged, unchanged);
+  }
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
   const semanticActivations = constrainSourceSemanticActivationsToAnswerShape(
     queryProbes, evidenceSemanticActivationsByCandidateKey
@@ -91,12 +104,41 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
     evidenceSelection, refinement, headLimit, publicRelevanceByCandidateKey,
     queryProbes, selectDelivered, isBehaviorEligible
   });
-  return retainBehaviorAuthorityAnswerHead({
+  const behaviorSelection = retainBehaviorAuthorityAnswerHead({
     selection: semanticSelection,
     rankLimit: headLimit,
     selectDelivered,
     keyOf: candidateKey,
     isBehaviorEligible
+  });
+  return withOrderTransitions(
+    behaviorSelection,
+    evidenceSelection,
+    semanticSelection
+  );
+}
+
+function withOrderTransitions<T>(
+  behavior: AnswerHeadSelection<T>,
+  evidence: AnswerHeadSelection<T>,
+  semantic: AnswerHeadSelection<T>
+): DirectEvidenceHeadSelection<T> {
+  return Object.freeze({
+    ...behavior,
+    orderTransitions: Object.freeze([
+      Object.freeze({
+        owner: "direct_evidence_promotion" as const,
+        candidates: evidence.candidates
+      }),
+      Object.freeze({
+        owner: "semantic_memory_refinement" as const,
+        candidates: semantic.candidates
+      }),
+      Object.freeze({
+        owner: "behavior_authority_promotion" as const,
+        candidates: behavior.candidates
+      })
+    ])
   });
 }
 
@@ -173,7 +215,7 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   queryProbes: Readonly<RecallQueryProbes>,
   selectDelivered: SelectDelivered<T>,
   isBehaviorEligible: IsBehaviorEligible<T>
-): DirectEvidenceHeadSelection<T> {
+): AnswerHeadSelection<T> {
   const scored = evidence
     .filter((row) => row.queryScore >= DIRECT_EVIDENCE_SCORE_FLOOR)
     .sort(compareScoredEvidence);
@@ -258,7 +300,7 @@ function protectionPermitsPublicVictim<T extends DirectEvidenceHeadCandidate>(
 }
 
 function protectedEvidencePermitsVictim<T extends DirectEvidenceHeadCandidate>(
-  selection: DirectEvidenceHeadSelection<T>,
+  selection: AnswerHeadSelection<T>,
   victim: T,
   queryProbes: Readonly<RecallQueryProbes>
 ): boolean {
@@ -410,7 +452,7 @@ function compareEvidenceSourceIdentity(
   return (left.evidenceSourceIdentity ?? "").localeCompare(right.evidenceSourceIdentity ?? "");
 }
 
-function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSelection<T> {
+function unchangedSelection<T>(candidates: readonly T[]): AnswerHeadSelection<T> {
   return Object.freeze({
     candidates,
     protections: Object.freeze([]),
@@ -422,8 +464,8 @@ function protectedSelection<T>(
   candidates: readonly T[],
   protectedEvidence: Readonly<{ readonly candidateKey: string }>,
   protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT,
-  protections: DirectEvidenceHeadSelection<T>["protections"] = []
-): DirectEvidenceHeadSelection<T> {
+  protections: AnswerHeadSelection<T>["protections"] = []
+): AnswerHeadSelection<T> {
   const selection = Object.freeze({
     candidates,
     protections,

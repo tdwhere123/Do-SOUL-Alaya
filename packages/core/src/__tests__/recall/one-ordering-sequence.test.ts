@@ -11,6 +11,8 @@ import {
 } from "../../recall/delivery/fine-assessment-selection.js";
 import type { FineAssessmentOrderSequence } from
   "../../recall/delivery/fine-assessment-selection/order-sequence.js";
+import { buildFineAssessmentOrderLedger } from
+  "../../recall/delivery/fine-assessment-selection/order-ledger.js";
 import { restoreSelectionParams } from
   "../../recall/delivery/selection-boundary/selection-boundary-restore.js";
 import {
@@ -27,6 +29,8 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 import { captureFineAssessmentSelectionBoundary } from
   "./selection-boundary-live-capture-fixture.js";
+import { materializeFineAssessmentSelectionBoundary } from
+  "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 
 describe("one ordering sequence", () => {
   it("exposes a unique order sequence over every candidate key", () => {
@@ -42,6 +46,7 @@ describe("one ordering sequence", () => {
     const keys = candidateKeys(candidates);
     const result = selectFineAssessmentCandidates({
       orderedCandidates: candidates,
+      packetCandidates: Object.freeze([first, second, third]),
       config: createConfig(),
       supplementaryData: createSupplementaryData({
         evidenceGistsByMemoryId: {
@@ -70,6 +75,9 @@ describe("one ordering sequence", () => {
     expectUniquePermutation(sequence.birthOrder, keys);
     expect(sequence.birthOrder).toEqual(keys);
     expectUniquePermutation(sequence.currentOrder, keys);
+    expect(sequence.ranks.coarse.get(first.fusion.candidate_key)).toBe(1);
+    expect(sequence.ranks.coarse.get(second.fusion.candidate_key)).toBe(2);
+    expect(sequence.ranks.coarse.get(third.fusion.candidate_key)).toBe(3);
     for (const ranks of rankMaps(sequence)) expectPermutationRanks(ranks, keys);
     for (const [key, rank] of rankByCandidateKey) {
       expect(sequence.ranks.deepHead.get(key)).toBe(rank);
@@ -78,6 +86,27 @@ describe("one ordering sequence", () => {
       expect(sequence.ranks.final.get(keyByObjectId.get(candidate.object_id) ?? ""))
         .toBe(index + 1);
     }
+    const ledger = buildFineAssessmentOrderLedger(
+      sequence,
+      result.candidates.length
+    );
+    expect(sequence.transitions.map((transition) => transition.owner)).toEqual([
+      "coarse",
+      "fusion",
+      "deep_head",
+      "coverage",
+      "direct_evidence_promotion",
+      "semantic_memory_refinement",
+      "behavior_authority_promotion",
+      "verified_temporal_head",
+      "consensus",
+      "final_budget"
+    ]);
+    expect(ledger.coarse_identity).toBe("captured");
+    expect(ledger.candidates).toHaveLength(candidates.length);
+    expect(ledger.candidates.find(
+      (candidate) => candidate.candidate_key === first.fusion.candidate_key
+    )?.ranks.coarse).toBe(1);
   });
 
   it("keeps the existing coverage walk without a post-coverage reorder param", () => {
@@ -120,6 +149,103 @@ describe("one ordering sequence", () => {
       .toBe(1);
   });
 
+  it("rejects duplicate, gapped, and out-of-range stage ranks", () => {
+    const first = createRankedCandidate("rank-first", 1, 0.9);
+    const second = createRankedCandidate("rank-second", 2, 0.8);
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [first, second],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: deliveryRanks([first, second])
+    });
+    const sequence = readOrderSequence(result);
+    const keys = sequence.birthOrder;
+    for (const invalid of [
+      new Map([[keys[0]!, 1], [keys[1]!, 1]]),
+      new Map([[keys[0]!, 1], [keys[1]!, 3]]),
+      new Map([[keys[0]!, 0], [keys[1]!, 2]])
+    ]) {
+      expect(() => buildFineAssessmentOrderLedger({
+        ...sequence,
+        ranks: { ...sequence.ranks, fusion: invalid }
+      }, result.candidates.length)).toThrow(/rank permutation mismatch/u);
+    }
+  });
+
+  it("attributes membership from explicit receipts instead of rank prefixes", () => {
+    const first = createRankedCandidate("membership-first", 1, 0.9);
+    const second = createRankedCandidate("membership-second", 2, 0.8);
+    const third = createRankedCandidate("membership-third", 3, 0.7);
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [first, second, third],
+      packetCandidates: [first, second, third],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: deliveryRanks([first, second, third])
+    });
+    const sequence = readOrderSequence(result);
+    const keys = sequence.birthOrder;
+    const transitions = sequence.transitions.map((transition, index) => ({
+      ...transition,
+      memberKeys: index === 0
+        ? [keys[0]!, keys[2]!]
+        : index === 1
+          ? [keys[0]!, keys[1]!]
+          : [keys[0]!, keys[2]!]
+    }));
+    const ledger = buildFineAssessmentOrderLedger(
+      { ...sequence, transitions },
+      2
+    );
+    const secondRow = ledger.candidates.find(
+      (candidate) => candidate.candidate_key === keys[1]
+    );
+    const thirdRow = ledger.candidates.find(
+      (candidate) => candidate.candidate_key === keys[2]
+    );
+
+    expect(secondRow?.ranks.coarse).toBe(2);
+    expect(secondRow?.first_membership_changing_owner).toBe("fusion");
+    expect(secondRow?.membership_changing_owners).toEqual([
+      "fusion", "deep_head"
+    ]);
+    expect(thirdRow?.first_membership_changing_owner).toBe("fusion");
+    expect(thirdRow?.membership_changing_owners).toEqual([
+      "fusion", "deep_head"
+    ]);
+  });
+
+  it("rejects multiple membership owners at the artifact gate contract", () => {
+    const first = createRankedCandidate("multi-owner-first", 1, 0.9);
+    const second = createRankedCandidate("multi-owner-second", 2, 0.8);
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [first, second],
+      packetCandidates: [first, second],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: deliveryRanks([first, second])
+    });
+    const sequence = readOrderSequence(result);
+    const key = sequence.birthOrder[1]!;
+    const transitions = sequence.transitions.map((transition, index) => ({
+      ...transition,
+      memberKeys: index === 1 || index === 3
+        ? [sequence.birthOrder[0]!, key]
+        : [sequence.birthOrder[0]!]
+    }));
+    const row = buildFineAssessmentOrderLedger(
+      { ...sequence, transitions },
+      1
+    ).candidates.find((candidate) => candidate.candidate_key === key);
+
+    expect(row?.membership_changing_owners).toEqual([
+      "fusion", "deep_head", "coverage", "direct_evidence_promotion"
+    ]);
+  });
+
   it("does not require dead post-coverage params to keep delivered membership", () => {
     const publicA = createRankedCandidate("public-a", 2, 0.99);
     const publicB = createRankedCandidate("public-b", 3, 0.98);
@@ -156,7 +282,7 @@ describe("one ordering sequence", () => {
     expect("maxHeadDropAfterCoverage" in restored).toBe(false);
   });
 
-  it("reconstructs when leftover order keys disagree with the live branch", () => {
+  it("fails closed when captured compatibility order keys disagree", () => {
     const captured = captureLiveBoundary();
     const mismatched: FineAssessmentSelectionBoundaryCase = {
       ...captured,
@@ -171,7 +297,8 @@ describe("one ordering sequence", () => {
       }
     };
 
-    expect(() => reconstructFineAssessmentComposition(mismatched)).not.toThrow();
+    expect(() => reconstructFineAssessmentComposition(mismatched))
+      .toThrow(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
   });
 
   it("fails loud when a captured delivery rank drifts", () => {
@@ -193,6 +320,42 @@ describe("one ordering sequence", () => {
     const captured = captureLiveBoundary();
     expect(captured.input.final_order_after_coverage).toBeUndefined();
     expect(captured.input.max_head_drop_after_coverage).toBeUndefined();
+  });
+
+  it("persists the pre-delivery packet order for exact reconstruction", () => {
+    const first = createRankedCandidate("packet-first", 1, 0.9);
+    const second = createRankedCandidate("packet-second", 2, 0.8);
+    const packet = Object.freeze([first, second]);
+    const delivery = Object.freeze([second, first]);
+    let captured: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFineAssessmentCandidates({
+      orderedCandidates: delivery,
+      packetCandidates: packet,
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: deliveryRanks(delivery),
+      capturePacketPlanTrace: true,
+      selectionBoundaryObserver: (pending) => {
+        captured = materializeFineAssessmentSelectionBoundary(pending);
+        return undefined;
+      }
+    });
+    expect(captured).toBeDefined();
+    if (captured === undefined) throw new Error("boundary is missing");
+    const packetKeys = captured.input.packet_candidate_keys;
+    expect(packetKeys).toBeDefined();
+    if (packetKeys === undefined) throw new Error("packet order is missing");
+
+    const restored = restoreSelectionParams(captured.input);
+    expect(restored.packetCandidates?.map(
+      (candidate) => candidate.fusion.candidate_key
+    )).toEqual(packetKeys);
+    expect(packetKeys).not.toEqual(
+      captured.input.ordered_candidates.map(
+        (candidate) => candidate.fusion.candidate_key
+      )
+    );
   });
 
   it("has no production importer of bounded-head displacement", () => {
@@ -220,7 +383,7 @@ function readOrderSequence(
 
 function rankMaps(
   sequence: FineAssessmentOrderSequence
-): readonly ReadonlyMap<string, number>[] {
+): readonly ReadonlyMap<string, number | null>[] {
   return [
     sequence.ranks.coarse,
     sequence.ranks.fusion,
@@ -232,11 +395,13 @@ function rankMaps(
 }
 
 function expectPermutationRanks(
-  ranks: ReadonlyMap<string, number>,
+  ranks: ReadonlyMap<string, number | null>,
   keys: readonly string[]
 ): void {
   expect([...ranks.keys()].sort()).toEqual([...keys].sort());
-  expect([...ranks.values()].sort((left, right) => left - right)).toEqual(
+  expect([...ranks.values()].sort(
+    (left, right) => (left ?? 0) - (right ?? 0)
+  )).toEqual(
     keys.map((_key, index) => index + 1)
   );
 }

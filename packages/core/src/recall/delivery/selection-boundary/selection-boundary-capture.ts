@@ -139,6 +139,13 @@ function buildSelectionBoundaryInput(
 ): FineAssessmentSelectionBoundaryInput {
   return Object.freeze({
     ordered_candidates: cloneSelectionBoundaryJson(params.orderedCandidates),
+    ...(params.packetCandidates === undefined || params.packetCandidates === null
+      ? {}
+      : {
+          packet_candidate_keys: params.packetCandidates.map(
+            (candidate) => candidate.fusion.candidate_key
+          )
+        }),
     config: cloneSelectionBoundaryJson(params.config),
     supplementary_data: serializeSupplementaryData(params.supplementaryData),
     token_estimates_by_content: stableNumberEntries(tokenEstimatesByContent),

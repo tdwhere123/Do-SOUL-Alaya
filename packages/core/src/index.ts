@@ -120,6 +120,11 @@ export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
 export {
+  buildFineAssessmentOrderLedger,
+  type FineAssessmentMembershipOwner,
+  type FineAssessmentOrderLedger
+} from "./recall/delivery/fine-assessment-selection/order-ledger.js";
+export {
   resolveCandidateSemanticActivation,
   resolveCandidateSemanticActivationScope,
   type CandidateActivationObservation,

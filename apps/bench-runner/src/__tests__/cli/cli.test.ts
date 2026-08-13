@@ -86,6 +86,17 @@ describe("bench-runner CLI", () => {
     );
   });
 
+  it("documents and dispatches the selection order ledger", async () => {
+    expect(await runCli(["--help"])).toBe(0);
+    expect(stdoutBuf).toContain(
+      "selection-order-ledger --selection-boundaries <ndjson.gz>"
+    );
+
+    stdoutBuf = "";
+    expect(await runCli(["selection-order-ledger"])).toBe(2);
+    expect(stderrBuf).toContain("--selection-boundaries <value> required");
+  });
+
   it("dispatches the extraction cache audit command", async () => {
     const exitCode = await runCli(["audit-extraction-cache"]);
 

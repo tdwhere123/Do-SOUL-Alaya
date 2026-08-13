@@ -62,6 +62,14 @@ describe("behavior authority answer head", () => {
       rankLimit: 5
     });
     expect(selection.candidates[4]).toBe(opportunity);
+    expect(selection.orderTransitions.map((transition) => ({
+      owner: transition.owner,
+      first: transition.candidates[0]?.entry.object_id
+    }))).toEqual([
+      { owner: "direct_evidence_promotion", first: "candidate-1" },
+      { owner: "semantic_memory_refinement", first: "candidate-1" },
+      { owner: "behavior_authority_promotion", first: "candidate-1" }
+    ]);
   });
 
   it("does not choose between ambiguous verified opportunities", () => {

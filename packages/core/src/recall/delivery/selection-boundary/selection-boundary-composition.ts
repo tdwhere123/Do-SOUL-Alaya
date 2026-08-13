@@ -32,6 +32,10 @@ import {
 } from "./selection-boundary-json.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "./selection-boundary-capture.js";
+import { restoreCapturedPacketCandidates } from
+  "./validation/packet-order.js";
+import { assertCapturedOrderPolicy } from
+  "./validation/captured-order-policy.js";
 
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
@@ -54,8 +58,29 @@ export function reconstructFineAssessmentComposition(
   boundary: FineAssessmentSelectionBoundaryCase
 ): SelectionCompositionReconstruction {
   validateSelectionBoundary(boundary);
-  const input = boundary.input;
-  const candidates = input.ordered_candidates;
+  const prepared = prepareComposition(boundary.input);
+  let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
+  const selected = selectFineAssessmentCandidates({
+    ...prepared.selectionParams,
+    ...(boundary.expected.pre_projection === undefined ? {} : {
+      selectionBoundaryObserver: (capture) => {
+        pending = capture;
+        return undefined;
+      }
+    })
+  });
+  assertCompositionExpected(boundary, selected, pending?.preProjection);
+  return Object.freeze({
+    result: selected,
+    branch: prepared.branch,
+    deepHead: prepared.deepHead,
+    delivery: prepared.delivery
+  });
+}
+
+function prepareComposition(input: FineAssessmentSelectionBoundaryInput) {
+  const packetCandidates = restoreCapturedPacketCandidates(input);
+  const candidates = packetCandidates ?? input.ordered_candidates;
   const supplementaryData = restoreSupplementaryData(input.supplementary_data);
   const answerRelevanceScores =
     supplementaryData.answerRelevanceScoresByCandidateKey ?? new Map();
@@ -71,29 +96,26 @@ export function reconstructFineAssessmentComposition(
   const delivery = applyDeliverySelection(candidates, deepHead.scores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
+  assertCapturedOrderPolicy(
+    input,
+    deepHead,
+    answerRelevanceScores,
+    throwCompositionMismatch
+  );
   assertCompositionInputs(input, delivery, deepHead);
-  let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const selectionParams = buildCompositionSelectionParams(
     input,
     supplementaryData,
     delivery,
-    deepHead
+    deepHead,
+    createCapturedTokenEstimator(input.token_estimates_by_content),
+    packetCandidates
   );
-  const selected = selectFineAssessmentCandidates({
-    ...selectionParams,
-    ...(boundary.expected.pre_projection === undefined ? {} : {
-      selectionBoundaryObserver: (capture) => {
-        pending = capture;
-        return undefined;
-      }
-    })
-  });
-  assertCompositionExpected(boundary, selected, pending?.preProjection);
   return Object.freeze({
-    result: selected,
     branch,
     deepHead,
-    delivery
+    delivery,
+    selectionParams
   });
 }
 
@@ -104,10 +126,13 @@ export function buildCompositionSelectionParams(
   delivery: ReturnType<typeof applyDeliverySelection>,
   deepHead: RecallDeepHeadAssessment,
   tokenEstimator: FineAssessmentSelectionParams["tokenEstimator"] =
-    createCapturedTokenEstimator(input.token_estimates_by_content)
+    createCapturedTokenEstimator(input.token_estimates_by_content),
+  packetCandidates: FineAssessmentSelectionParams["orderedCandidates"] | null =
+    restoreCapturedPacketCandidates(input)
 ): FineAssessmentSelectionParams {
   return {
     orderedCandidates: delivery.orderedCandidates,
+    packetCandidates,
     config: input.config,
     supplementaryData,
     tokenEstimator,

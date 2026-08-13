@@ -28,10 +28,13 @@ import {
 import { captureFineAssessmentPreProjection } from
   "./selection-boundary/pre-projection/observation.js";
 import {
-  advanceFineAssessmentOrderSequence,
-  birthFineAssessmentOrderSequence,
+  advanceFineAssessmentOrderState,
+  birthFineAssessmentOrderState,
+  carryFineAssessmentOrderState,
   stampFineAssessmentFinalRanks
 } from "./fine-assessment-selection/order-sequence.js";
+import type { FineAssessmentOrderState } from
+  "./fine-assessment-selection/order-sequence.js";
 import type {
   FineAssessmentAccumulator,
   FineAssessmentAdmissionReceipt,
@@ -61,20 +64,52 @@ export function selectFineAssessmentCandidates(
   const boundaryCapture = createSelectionBoundary(params);
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
-  const coverageSelection = prepareCoverageSelection(selectionParams, context);
-  const coverageOrdered = coverageSelection.candidates;
-  const coverageSequence = advanceFineAssessmentOrderSequence(
-    birthFineAssessmentOrderSequence(
-      selectionParams.orderedCandidates,
-      selectionParams.rankByCandidateKey,
-      selectionParams.packetCandidates
-    ),
-    coverageOrdered,
-    "coverage"
+  const coverage = prepareCanonicalCoverage(selectionParams, context);
+  const promoted = applyCanonicalAdmissionPromoters(coverage.order, context);
+  const selection = resolveAdmissionAwareFinalSelection(
+    promoted.order,
+    context,
+    promoted.protections
   );
+  return finalizeCanonicalSelection(
+    selectionParams,
+    context,
+    coverage.selection,
+    selection,
+    boundaryCapture
+  );
+}
+
+function prepareCanonicalCoverage(
+  selectionParams: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext
+) {
+  const deliveryOrder = birthFineAssessmentOrderState(
+    selectionParams.orderedCandidates,
+    selectionParams.rankByCandidateKey,
+    (candidates) => collectMembershipKeys(candidates, context),
+    selectionParams.packetCandidates
+  );
+  const coverageSelection = prepareCoverageSelection({
+    ...selectionParams,
+    orderedCandidates: deliveryOrder.candidates
+  }, context);
+  const coverageOrder = advanceFineAssessmentOrderState(
+    deliveryOrder,
+    coverageSelection.candidates,
+    "coverage",
+    collectMembershipKeys(coverageSelection.candidates, context)
+  );
+  return Object.freeze({ selection: coverageSelection, order: coverageOrder });
+}
+
+function applyCanonicalAdmissionPromoters(
+  coverageOrder: FineAssessmentOrderState,
+  context: FineAssessmentSelectionContext
+) {
   const excludedCandidateKeys = new Set<string>();
   const evidenceHead = selectBoundedDirectEvidenceHead(
-    coverageOrdered, context.supplementaryData.queryProbes,
+    coverageOrder.candidates, context.supplementaryData.queryProbes,
     context.supplementaryData.evidenceSemanticActivationsByCandidateKey,
     context.finalRelevanceByCandidateKey,
     context.config.budgets.max_entries, excludedCandidateKeys,
@@ -82,8 +117,20 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
+  const evidenceOrder = evidenceHead.orderTransitions.reduce(
+    (order, transition) => carryFineAssessmentOrderState(
+      order,
+      transition.candidates,
+      transition.owner,
+      collectMembershipKeys(transition.candidates, context)
+    ),
+    coverageOrder
+  );
   const temporalHead = retainVerifiedTemporalAnswerHead({
-    selection: evidenceHead,
+    selection: {
+      ...evidenceHead,
+      candidates: evidenceOrder.candidates
+    },
     queryProbes: context.supplementaryData.queryProbes,
     contextsByMemoryId:
       context.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {},
@@ -91,19 +138,27 @@ export function selectFineAssessmentCandidates(
     selectDelivered: (candidates) => collectAdmittedCandidates(candidates, context),
     keyOf: buildRecallCandidateDedupeKey
   });
-  const selection = resolveAdmissionAwareFinalSelection(
-    selectionParams,
+  const promotedOrder = carryFineAssessmentOrderState(
+    evidenceOrder,
     temporalHead.candidates,
-    context,
-    temporalHead.protections
+    "verified_temporal_head",
+    collectMembershipKeys(temporalHead.candidates, context)
   );
-  const consensusSequence = advanceFineAssessmentOrderSequence(
-    coverageSequence,
-    selection.order,
-    "consensus"
-  );
+  return Object.freeze({
+    order: promotedOrder,
+    protections: temporalHead.protections
+  });
+}
+
+function finalizeCanonicalSelection(
+  selectionParams: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext,
+  coverageSelection: ReturnType<typeof prepareCoverageSelection>,
+  selection: ReturnType<typeof resolveAdmissionAwareFinalSelection>,
+  boundaryCapture: ReturnType<typeof createSelectionBoundary>
+): FineAssessmentSelectionResult {
   const finalAccumulator = reduceFineAssessmentCandidates(
-    selection.order,
+    selection.order.candidates,
     context,
     boundaryCapture !== undefined
   );
@@ -125,9 +180,8 @@ export function selectFineAssessmentCandidates(
     delivered,
     coverageSelection.objective,
     stampFineAssessmentFinalRanks(
-      consensusSequence,
-      delivered.candidates,
-      selection.order
+      selection.order,
+      delivered.candidates
     ),
     refinementStopCertificate,
     boundaryCapture?.tokenEstimatesByContent,
@@ -161,28 +215,55 @@ function buildRefinementStopCertificate(
 }
 
 function resolveAdmissionAwareFinalSelection(
-  params: FineAssessmentSelectionParams,
-  coverageOrdered: readonly FineAssessmentCandidate[],
+  order: FineAssessmentOrderState,
   context: FineAssessmentSelectionContext,
   protectedCandidates: Parameters<typeof resolveFinalPacketConsensusPlan>[0]["protectedCandidates"]
 ) {
   const consensus = resolveFinalPacketConsensusPlan({
-    baseline: collectAdmittedCandidates(coverageOrdered, context),
-    sourceCandidates: params.orderedCandidates,
+    baseline: collectAdmittedCandidates(order.candidates, context),
+    sourceCandidates: order.birthCandidates,
     protectedCandidates,
     queryProbes: context.supplementaryData.queryProbes,
     evidenceSemanticActivationsByCandidateKey:
       context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });
-  const proposedOrder = buildFinalSelectorOrder(consensus, coverageOrdered);
+  const proposedOrder = buildFinalSelectorOrder(consensus, order.candidates);
   if (consensus.decision.status !== "accepted") {
-    return Object.freeze({ consensus, order: proposedOrder });
+    return Object.freeze({
+      consensus,
+      order: advanceFineAssessmentOrderState(
+        order,
+        proposedOrder,
+        "consensus",
+        collectMembershipKeys(proposedOrder, context)
+      )
+    });
   }
   const feasiblePacket = collectAdmittedCandidates(proposedOrder, context);
-  const order = fineAssessmentPacketMatchesPlannedMembership(consensus, feasiblePacket)
+  const finalCandidates = fineAssessmentPacketMatchesPlannedMembership(
+    consensus,
+    feasiblePacket
+  )
     ? proposedOrder
-    : coverageOrdered;
-  return Object.freeze({ consensus, order });
+    : order.candidates;
+  return Object.freeze({
+    consensus,
+    order: advanceFineAssessmentOrderState(
+      order,
+      finalCandidates,
+      "consensus",
+      collectMembershipKeys(finalCandidates, context)
+    )
+  });
+}
+
+function collectMembershipKeys(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): readonly string[] {
+  return Object.freeze(collectAdmittedCandidates(candidates, context).map(
+    (candidate) => candidate.fusion.candidate_key
+  ));
 }
 
 function reduceFineAssessmentCandidates(
