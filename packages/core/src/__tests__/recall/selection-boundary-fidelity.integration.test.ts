@@ -43,8 +43,12 @@ describe("selection boundary replay fidelity", () => {
     };
 
     expect(() => replayFineAssessmentSelectionBoundary(inputTamper))
-      .toThrow(/selection boundary fidelity mismatch/u);
+      .toThrow(
+        /selection boundary fidelity mismatch: expected replay digest sha256:[0-9a-f]{64}, actual sha256:[0-9a-f]{64}/u
+      );
     expect(() => replayFineAssessmentSelectionBoundary(outputTamper))
-      .toThrow(/selection boundary fidelity mismatch/u);
+      .toThrow(
+        /selection boundary fidelity mismatch: expected identical final and consensus candidate_keys, actual lengths \d+\/\d+ first_mismatch_index=\d+/u
+      );
   });
 });

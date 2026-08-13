@@ -11,6 +11,6 @@ export class SelectionBoundaryFidelityMismatchError extends Error {
   }
 }
 
-export function throwSelectionBoundaryFidelityMismatch(detail?: string): never {
+export function throwSelectionBoundaryFidelityMismatch(detail: string): never {
   throw new SelectionBoundaryFidelityMismatchError(detail);
 }

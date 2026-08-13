@@ -10,7 +10,11 @@ export function assertOpenSemanticCandidateActivations(
   const entries = data.openSemanticFactorCandidateActivationsByCandidateKey;
   if (entries === undefined) return;
   for (const [, receipt] of entries) {
-    if (!isValidReceipt(receipt)) throwSelectionBoundaryFidelityMismatch();
+    if (!isValidReceipt(receipt)) {
+      throwSelectionBoundaryFidelityMismatch(
+        "expected valid open_semantic_factor_candidate_activation_v1 receipt, actual invalid"
+      );
+    }
   }
 }
 

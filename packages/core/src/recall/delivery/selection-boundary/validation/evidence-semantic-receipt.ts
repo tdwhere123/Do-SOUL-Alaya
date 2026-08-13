@@ -22,7 +22,9 @@ export function assertEvidenceSemanticReceipts(
   if (data.evidenceSemanticActivationsByCandidateKey !== undefined) {
     if (data.evidenceSemanticScoresByCandidateKey !== undefined ||
         data.evidenceSemanticWinnersByCandidateKey !== undefined) {
-      throwSelectionBoundaryFidelityMismatch();
+      throwSelectionBoundaryFidelityMismatch(
+        "expected exclusive evidence-semantic activation map, actual legacy winner or score map also present"
+      );
     }
     for (const [, receipt] of data.evidenceSemanticActivationsByCandidateKey) {
       assertEvidenceSemanticActivation(receipt);
@@ -57,16 +59,26 @@ function assertLegacyEvidenceSemanticWinners(
   scoreEntries: SelectionBoundaryNumberMap
 ): void {
   if (entries === undefined) {
-    if (scoreEntries.length !== 0) throwSelectionBoundaryFidelityMismatch();
+    if (scoreEntries.length !== 0) {
+      throwSelectionBoundaryFidelityMismatch(
+        `expected empty evidenceSemanticScoresByCandidateKey without winners, actual ${scoreEntries.length} scores`
+      );
+    }
     return;
   }
   if (entries.length !== scoreEntries.length) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected winner/score map lengths equal, actual winners=${entries.length} scores=${scoreEntries.length}`
+    );
   }
   const scores = new Map(scoreEntries);
   for (const [candidateKey, winner] of entries) {
     const score = scores.get(candidateKey);
-    if (score === undefined) throwSelectionBoundaryFidelityMismatch();
+    if (score === undefined) {
+      throwSelectionBoundaryFidelityMismatch(
+        `expected score for each winner candidate, actual absent among ${scores.size} scores`
+      );
+    }
     assertEvidenceSemanticWinner(winner, score);
   }
 }
@@ -74,7 +86,9 @@ function assertLegacyEvidenceSemanticWinners(
 function assertEvidenceSemanticActivation(receipt: unknown): void {
   if (!isRecord(receipt) || !hasReceiptHeader(receipt) ||
       !Array.isArray(receipt.observations) || receipt.observations.length === 0) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected evidence_document_max_v1 activation receipt, actual invalid header or empty observations"
+    );
   }
   assertEvidenceSemanticWinner(receipt.winner, receipt.score as number);
   for (const observation of receipt.observations) {
@@ -90,7 +104,9 @@ function assertEvidenceSemanticActivation(receipt: unknown): void {
       !semanticObservationsAreRanked(observations) ||
       (receipt.observation_completeness === "winner_only_legacy" &&
         receipt.observations.length !== 1)) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected ranked observations with one winner match, actual matches=${matching.length} observations=${receipt.observations.length}`
+    );
   }
 }
 
@@ -110,15 +126,27 @@ function assertEvidenceSemanticWinner(winner: unknown, expectedScore?: number): 
       (expectedScore !== undefined && expectedScore !== winner.score) ||
       !isNonEmptyString(winner.evidenceObjectId) ||
       !isNonEmptyString(winner.documentIdentity)) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      expectedScore === undefined
+        ? "expected unit-score evidence-semantic winner with identities, actual invalid"
+        : `expected winner.score=${expectedScore}, actual ${String(
+          isRecord(winner) ? winner.score : typeof winner
+        )}`
+    );
   }
   if (winner.projection === null) {
     if (winner.documentIdentity.startsWith("fact_key:")) {
-      throwSelectionBoundaryFidelityMismatch();
+      throwSelectionBoundaryFidelityMismatch(
+        "expected null projection only for non-fact_key identity, actual fact_key prefix"
+      );
     }
     return;
   }
-  if (!isRecord(winner.projection)) throwSelectionBoundaryFidelityMismatch();
+  if (!isRecord(winner.projection)) {
+    throwSelectionBoundaryFidelityMismatch(
+      "expected object or null winner.projection, actual non-record"
+    );
+  }
   assertEvidenceSemanticProjection(winner.documentIdentity, winner.projection);
 }
 
@@ -128,19 +156,27 @@ function assertEvidenceSemanticProjection(
 ): void {
   const forms = projection.matched_fact_key_forms;
   if (!Array.isArray(forms) || forms.some((form) => !isFactKeyForm(form))) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected matched_fact_key_forms array of fact-key forms, actual invalid"
+    );
   }
   const kind = projection.projection_kind;
   const id = projection.projection_id;
   const slots = projection.fact_slots;
   if (slots !== undefined && (!Array.isArray(slots) || !validFactSlots(slots))) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected valid fact_slots when present, actual invalid"
+    );
   }
   const ownerValid = kind === "owner" && id === null && forms.length === 0 &&
     slots === undefined;
   const factKeyValid = kind === "fact_key" && Number.isInteger(id) &&
     (id as number) > 0 && documentIdentity === `fact_key:${String(id)}`;
-  if (!ownerValid && !factKeyValid) throwSelectionBoundaryFidelityMismatch();
+  if (!ownerValid && !factKeyValid) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected owner or positive fact_key projection, actual kind=${String(kind)} id=${String(id)}`
+    );
+  }
 }
 
 function sameSemanticObservation(

@@ -37,7 +37,9 @@ export function replayFineAssessmentSelectionBoundary(
   });
   const packetConsensus = replayed.packetPlanObservation;
   if (packetConsensus === undefined) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected packetPlanObservation, actual absent"
+    );
   }
   const actual = buildSelectionBoundaryExpected(
     replayed,
@@ -46,11 +48,12 @@ export function replayFineAssessmentSelectionBoundary(
     pending?.preProjection,
     boundary.expected.coverage_objective !== undefined
   );
-  if (
-    selectionBoundaryJsonSha256(actual) !==
-    selectionBoundaryJsonSha256(boundary.expected)
-  ) {
-    throwSelectionBoundaryFidelityMismatch();
+  const expectedDigest = selectionBoundaryJsonSha256(boundary.expected);
+  const actualDigest = selectionBoundaryJsonSha256(actual);
+  if (expectedDigest !== actualDigest) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected replay digest ${expectedDigest}, actual ${actualDigest}`
+    );
   }
   if (boundary.input.capture_packet_plan_trace === true) return replayed;
   return Object.freeze({

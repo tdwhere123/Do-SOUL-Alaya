@@ -14,7 +14,9 @@ export function assertEvidenceFtsReceipts(
       (receipt.matched_fts_lanes !== undefined &&
         !isCanonicalFtsLaneIds(receipt.matched_fts_lanes))
     )) {
-      throwSelectionBoundaryFidelityMismatch();
+      throwSelectionBoundaryFidelityMismatch(
+        "expected evidence_ref-matching canonical FTS lanes, actual mismatch"
+      );
     }
   }
 }

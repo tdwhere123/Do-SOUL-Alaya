@@ -44,6 +44,25 @@ describe("fine-assessment selection composition reconstruction", () => {
     );
   });
 
+  it("fails loud when packet_candidate_keys omit an ordered candidate", () => {
+    const boundary = captureLiveBoundary();
+    const keys = boundary.input.packet_candidate_keys;
+    if (keys === undefined || keys.length === 0) {
+      throw new Error("packet_candidate_keys was not captured");
+    }
+    const stripped: FineAssessmentSelectionBoundaryCase = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        packet_candidate_keys: keys.slice(1)
+      }
+    };
+
+    expect(() => reconstructFineAssessmentComposition(stripped)).toThrow(
+      /expected packet_candidate_keys length \d+ unique, actual length \d+ unique \d+/u
+    );
+  });
+
   it("fails loud when a captured delivery rank drifts from recomputation", () => {
     const boundary = captureLiveBoundary();
     const [first, ...rest] = boundary.input.rank_by_candidate_key;

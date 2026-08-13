@@ -1,6 +1,7 @@
 import type {
   FineAssessmentSelectionBoundaryCase,
   FineAssessmentSelectionBoundaryInput,
+  FineAssessmentPreProjectionObservation,
   SelectionBoundaryNumberMap,
   SerializedRecallSupplementaryData
 } from "./selection-boundary-types.js";
@@ -53,12 +54,20 @@ export {
 export function validateSelectionBoundary(
   boundary: FineAssessmentSelectionBoundaryCase
 ): void {
-  if (boundary.schema_version !== 2) throwSelectionBoundaryFidelityMismatch();
+  if (boundary.schema_version !== 2) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected schema_version=2, actual ${String(boundary.schema_version)}`
+    );
+  }
   assertSelectionBoundaryJsonValue(boundary);
   if (!/^sha256:[0-9a-f]{64}$/u.test(
     boundary.expected.visible_result_sha256
   )) {
-    throwSelectionBoundaryFidelityMismatch();
+    const digest = boundary.expected.visible_result_sha256;
+    throwSelectionBoundaryFidelityMismatch(
+      "expected visible_result_sha256 matching sha256:<64 hex>, actual " +
+      (typeof digest === "string" ? `chars=${digest.length}` : typeof digest)
+    );
   }
   assertUniqueKeys(
     boundary.input.ordered_candidates.map(
@@ -94,16 +103,23 @@ export function validateSelectionBoundary(
   }
 }
 
+function requireValidReceipt(detail: string, verify: () => void): void {
+  try {
+    verify();
+  } catch {
+    throwSelectionBoundaryFidelityMismatch(detail);
+  }
+}
+
 function assertCoverageRelevanceUpperBound(
   input: FineAssessmentSelectionBoundaryInput
 ): void {
-  if (input.coverage_relevance_upper_bound === undefined ||
-      input.coverage_relevance_upper_bound === null) return;
-  try {
-    verifyRecallRelevanceUpperBoundReceipt(input.coverage_relevance_upper_bound);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const receipt = input.coverage_relevance_upper_bound;
+  if (receipt === undefined || receipt === null) return;
+  requireValidReceipt(
+    "expected valid coverage_relevance_upper_bound receipt, actual invalid",
+    () => verifyRecallRelevanceUpperBoundReceipt(receipt)
+  );
 }
 
 function assertFieldRefinementStopCertificate(
@@ -111,60 +127,57 @@ function assertFieldRefinementStopCertificate(
 ): void {
   const receipt = boundary.expected.field_refinement_stop_certificate;
   if (receipt === undefined) return;
-  try {
-    verifyRecallFieldRefinementStopCertificate(receipt);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  requireValidReceipt(
+    "expected valid field_refinement_stop_certificate, actual invalid",
+    () => verifyRecallFieldRefinementStopCertificate(receipt)
+  );
 }
 
 function assertCoverageObjectiveConfig(input: FineAssessmentSelectionBoundaryInput): void {
-  if (input.coverage_objective_config === undefined) return;
-  try {
-    verifyCoverageSelectionOperatorConfig(input.coverage_objective_config);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const config = input.coverage_objective_config;
+  if (config === undefined) return;
+  requireValidReceipt(
+    "expected valid coverage_objective_config, actual invalid",
+    () => verifyCoverageSelectionOperatorConfig(config)
+  );
 }
 
 function assertQueryFieldAttribution(data: SerializedRecallSupplementaryData): void {
-  if (data.queryFieldAttribution === undefined) return;
-  try {
-    verifyRecallQueryFieldAttributionReceipt(data.queryFieldAttribution);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const receipt = data.queryFieldAttribution;
+  if (receipt === undefined) return;
+  requireValidReceipt(
+    "expected valid queryFieldAttribution receipt, actual invalid",
+    () => verifyRecallQueryFieldAttributionReceipt(receipt)
+  );
 }
 
 function assertQueryFactFrameExtraction(
   data: SerializedRecallSupplementaryData
 ): void {
-  if (data.queryFactFrameExtraction === undefined) return;
-  try {
-    verifyRecallQueryFactFrameExtractionCapture(data.queryFactFrameExtraction);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const capture = data.queryFactFrameExtraction;
+  if (capture === undefined) return;
+  requireValidReceipt(
+    "expected valid queryFactFrameExtraction capture, actual invalid",
+    () => verifyRecallQueryFactFrameExtractionCapture(capture)
+  );
 }
 
 function assertRetrievalFieldSeal(data: SerializedRecallSupplementaryData): void {
-  if (data.retrievalFieldSeal === undefined) return;
-  try {
-    verifyRecallFiniteFieldSeal(data.retrievalFieldSeal);
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const seal = data.retrievalFieldSeal;
+  if (seal === undefined) return;
+  requireValidReceipt(
+    "expected valid retrievalFieldSeal, actual invalid",
+    () => verifyRecallFiniteFieldSeal(seal)
+  );
 }
 
 function assertRetrievalFieldRefinements(data: SerializedRecallSupplementaryData): void {
-  if (data.retrievalFieldRefinementReceipts === undefined) return;
-  try {
-    data.retrievalFieldRefinementReceipts.forEach(
-      verifyRecallRetrievalFieldRefinementReceipt
-    );
-  } catch {
-    throwSelectionBoundaryFidelityMismatch();
-  }
+  const receipts = data.retrievalFieldRefinementReceipts;
+  if (receipts === undefined) return;
+  requireValidReceipt(
+    "expected valid retrievalFieldRefinementReceipts, actual invalid",
+    () => receipts.forEach(verifyRecallRetrievalFieldRefinementReceipt)
+  );
 }
 
 function serializedNumberMaps(
@@ -214,18 +227,24 @@ function serializedSupplementaryMaps(
 }
 
 function assertUniqueKeys(keys: readonly string[]): void {
-  if (
-    keys.some((key) => typeof key !== "string" || key.length === 0) ||
-    new Set(keys).size !== keys.length
-  ) {
-    throwSelectionBoundaryFidelityMismatch();
+  const emptyOrNonString = keys.filter(
+    (key) => typeof key !== "string" || key.length === 0
+  ).length;
+  const unique = new Set(keys).size;
+  if (emptyOrNonString !== 0 || unique !== keys.length) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected unique non-empty keys, actual count=${keys.length} ` +
+      `unique=${unique} empty_or_nonstring=${emptyOrNonString}`
+    );
   }
 }
 
 function assertNumberMapEntries(entries: SelectionBoundaryNumberMap): void {
   assertUniqueEntryKeys(entries);
   if (entries.some((entry) => typeof entry[1] !== "number")) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected number map values, actual non-number among ${entries.length} entries`
+    );
   }
 }
 
@@ -233,7 +252,9 @@ function assertUniqueEntryKeys(
   entries: readonly (readonly [string, unknown])[]
 ): void {
   if (entries.some((entry) => !Array.isArray(entry) || entry.length !== 2)) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected [key, value] entries, actual malformed among ${entries.length} entries`
+    );
   }
   assertUniqueKeys(entries.map((entry) => entry[0]));
 }
@@ -248,17 +269,24 @@ function assertFinalCandidateIdentity(
     !Array.isArray(finalCandidateKeys) ||
     !Array.isArray(consensusCandidateKeys)
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected candidate_keys arrays, actual final=${Array.isArray(finalCandidateKeys)} consensus=${Array.isArray(consensusCandidateKeys)}`
+    );
   }
   assertUniqueKeys(finalCandidateKeys);
   assertUniqueKeys(consensusCandidateKeys);
+  const firstMismatch = finalCandidateKeys.findIndex((key, index) =>
+    key !== consensusCandidateKeys[index]
+  );
   if (
     finalCandidateKeys.length !== consensusCandidateKeys.length ||
-    finalCandidateKeys.some((key, index) =>
-      key !== consensusCandidateKeys[index]
-    )
+    firstMismatch !== -1
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected identical final and consensus candidate_keys, actual lengths ` +
+      `${finalCandidateKeys.length}/${consensusCandidateKeys.length} ` +
+      `first_mismatch_index=${firstMismatch}`
+    );
   }
 }
 
@@ -277,9 +305,7 @@ function assertPreProjection(
 
 function parsePreProjection(
   observation: unknown
-): NonNullable<
-  FineAssessmentSelectionBoundaryCase["expected"]["pre_projection"]
-> {
+): FineAssessmentPreProjectionObservation {
   if (
     !isRecord(observation) ||
     observation.schema_version !== 1 ||
@@ -291,24 +317,24 @@ function parsePreProjection(
     typeof observation.ordered_subsequence !== "boolean" ||
     typeof observation.qualified_ordered_subsequence !== "boolean"
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected pre_projection schema_version=1 with action arrays, actual invalid"
+    );
   }
-  const parsed = observation as NonNullable<
-    FineAssessmentSelectionBoundaryCase["expected"]["pre_projection"]
-  >;
+  const parsed = observation as FineAssessmentPreProjectionObservation;
   if (
     parsed.admission_actions.some((action) => !isRecord(action)) ||
     parsed.projection_actions.some((action) => !isRecord(action))
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      "expected record admission/projection actions, actual non-record"
+    );
   }
   return parsed;
 }
 
 function assertAdmissionActions(
-  parsed: NonNullable<
-    FineAssessmentSelectionBoundaryCase["expected"]["pre_projection"]
-  >
+  parsed: FineAssessmentPreProjectionObservation
 ): void {
   let retainedIndex = 0;
   let retainedTokenTotal = 0;
@@ -317,43 +343,73 @@ function assertAdmissionActions(
       !Number.isInteger(action.selection_order) ||
       action.selection_order !== index + 1
     ) {
-      throwSelectionBoundaryFidelityMismatch();
-    }
-    if (action.action === "retain") {
-      retainedIndex += 1;
-      if (
-        action.dropped_reason !== null ||
-        action.pre_projection_rank !== retainedIndex ||
-        parsed.candidate_keys[retainedIndex - 1] !== action.candidate_key
-      ) {
-        throwSelectionBoundaryFidelityMismatch();
-      }
-      retainedTokenTotal = assertRetainedWitness(
-        action.witness,
-        retainedIndex - 1,
-        retainedTokenTotal
+      throwSelectionBoundaryFidelityMismatch(
+        `expected admission selection_order=${index + 1}, actual ${String(action.selection_order)}`
       );
-    } else if (
-      action.action !== "exclude" ||
-      action.dropped_reason === null ||
-      action.pre_projection_rank !== null ||
-      !witnessMatchesExclusion(action.witness, action.dropped_reason)
-    ) {
-      throwSelectionBoundaryFidelityMismatch();
     }
+    const next = applyAdmissionAction(
+      parsed,
+      action,
+      retainedIndex,
+      retainedTokenTotal
+    );
+    retainedIndex = next.retainedIndex;
+    retainedTokenTotal = next.retainedTokenTotal;
   }
   if (
     retainedIndex !== parsed.candidate_keys.length ||
     retainedTokenTotal !== parsed.token_total
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected retainedIndex=${parsed.candidate_keys.length} ` +
+      `token_total=${parsed.token_total}, actual retainedIndex=${retainedIndex} ` +
+      `token_total=${retainedTokenTotal}`
+    );
   }
 }
 
+function applyAdmissionAction(
+  parsed: FineAssessmentPreProjectionObservation,
+  action: FineAssessmentPreProjectionObservation["admission_actions"][number],
+  retainedIndex: number,
+  retainedTokenTotal: number
+): { retainedIndex: number; retainedTokenTotal: number } {
+  if (action.action === "retain") {
+    const nextIndex = retainedIndex + 1;
+    if (
+      action.dropped_reason !== null ||
+      action.pre_projection_rank !== nextIndex ||
+      parsed.candidate_keys[nextIndex - 1] !== action.candidate_key
+    ) {
+      throwSelectionBoundaryFidelityMismatch(
+        `expected retain rank=${nextIndex} matching candidate_keys, ` +
+        `actual rank=${String(action.pre_projection_rank)}`
+      );
+    }
+    return {
+      retainedIndex: nextIndex,
+      retainedTokenTotal: assertRetainedWitness(
+        action.witness,
+        nextIndex - 1,
+        retainedTokenTotal
+      )
+    };
+  }
+  if (
+    action.action !== "exclude" ||
+    action.dropped_reason === null ||
+    action.pre_projection_rank !== null ||
+    !witnessMatchesExclusion(action.witness, action.dropped_reason)
+  ) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected exclude with dropped_reason witness, actual action=${String(action.action)}`
+    );
+  }
+  return { retainedIndex, retainedTokenTotal };
+}
+
 function assertProjectionActions(
-  observation: NonNullable<
-    FineAssessmentSelectionBoundaryCase["expected"]["pre_projection"]
-  >,
+  observation: FineAssessmentPreProjectionObservation,
   deliveredCandidateKeys: readonly string[]
 ): void {
   const expected = completeFineAssessmentPreProjection({
@@ -362,11 +418,12 @@ function assertProjectionActions(
     token_total: observation.token_total,
     admission_actions: observation.admission_actions
   }, deliveredCandidateKeys);
-  if (
-    selectionBoundaryJsonSha256(observation) !==
-    selectionBoundaryJsonSha256(expected)
-  ) {
-    throwSelectionBoundaryFidelityMismatch();
+  const expectedDigest = selectionBoundaryJsonSha256(expected);
+  const actualDigest = selectionBoundaryJsonSha256(observation);
+  if (expectedDigest !== actualDigest) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected pre_projection digest ${expectedDigest}, actual ${actualDigest}`
+    );
   }
 }
 
@@ -382,7 +439,10 @@ function assertRetainedWitness(
     witness.token_total_before !== tokenTotalBefore ||
     !isNonNegativeFinite(witness.token_estimate)
   ) {
-    throwSelectionBoundaryFidelityMismatch();
+    throwSelectionBoundaryFidelityMismatch(
+      `expected retained witness selected_count_before=${selectedCountBefore} ` +
+      `token_total_before=${tokenTotalBefore}, actual invalid`
+    );
   }
   return tokenTotalBefore + witness.token_estimate;
 }

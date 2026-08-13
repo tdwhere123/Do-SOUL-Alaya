@@ -20,6 +20,8 @@ import {
   verifyLongMemEvalSelectionBoundaryArtifact
 } from
   "./selection-boundary-spool.js";
+import { withSelectionBoundaryRecordIdentity } from
+  "./selection-boundary-record-identity.js";
 
 const ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -121,35 +123,31 @@ function verifyRecordLedger(
   record: SelectionBoundaryArtifactRecord,
   recordIndex: number
 ): ReturnType<typeof buildFineAssessmentOrderLedger> {
-  try {
-    const reconstruction = reconstructFineAssessmentComposition(record.boundary);
-    const ledger = buildFineAssessmentOrderLedger(
-      reconstruction.result.orderSequence,
-      reconstruction.result.candidates.length
-    );
-    if (ledger.coarse_identity === "unavailable") {
-      throw new Error(
-        "selection order ledger coarse identity is unavailable"
+  return withSelectionBoundaryRecordIdentity(
+    "selection order ledger record verification failed",
+    record,
+    recordIndex,
+    () => {
+      const reconstruction = reconstructFineAssessmentComposition(record.boundary);
+      const ledger = buildFineAssessmentOrderLedger(
+        reconstruction.result.orderSequence,
+        reconstruction.result.candidates.length
       );
+      if (ledger.coarse_identity === "unavailable") {
+        throw new Error(
+          "selection order ledger coarse identity is unavailable"
+        );
+      }
+      if (ledger.candidates.some(
+        (candidate) => candidate.membership_changing_owners.length > 1
+      )) {
+        throw new Error(
+          "selection order ledger has multiple membership-changing owners"
+        );
+      }
+      return ledger;
     }
-    if (ledger.candidates.some(
-      (candidate) => candidate.membership_changing_owners.length > 1
-    )) {
-      throw new Error(
-        "selection order ledger has multiple membership-changing owners"
-      );
-    }
-    return ledger;
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(
-      "selection order ledger record verification failed " +
-      `(question_id=${record.question_id}, ` +
-      `invocation_index=${record.invocation_index}, ` +
-      `record_index=${recordIndex}): ${message}`,
-      { cause }
-    );
-  }
+  );
 }
 
 async function publishLedgerArtifact(

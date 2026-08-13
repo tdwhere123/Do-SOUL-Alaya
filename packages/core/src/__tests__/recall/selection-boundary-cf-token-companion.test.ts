@@ -103,7 +103,7 @@ describe("cf token companion auxiliary waist coverage", () => {
     expect(estimator.estimate("hello")).toBe(2);
     expect(estimator.estimate("world")).toBe(2);
     expect(() => estimator.estimate("missing")).toThrow(
-      SELECTION_BOUNDARY_FIDELITY_MISMATCH
+      /expected companion token estimate for content sha256:[0-9a-f]{64}, actual absent among 1 auxiliary estimates/u
     );
   });
 
@@ -114,7 +114,7 @@ describe("cf token companion auxiliary waist coverage", () => {
       new Map([[digest, 999]])
     );
     expect(() => estimator.estimate("world")).toThrow(
-      SELECTION_BOUNDARY_FIDELITY_MISMATCH
+      /expected companion estimate 999 for content sha256:[0-9a-f]{64}, actual declared=\d+/u
     );
   });
 });

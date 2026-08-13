@@ -24,6 +24,8 @@ import {
   forEachSelectionBoundaryGzipRecord,
   type SelectionBoundaryArtifactRecord
 } from "./selection-boundary-artifact-reader.js";
+import { withSelectionBoundaryRecordIdentity } from
+  "./selection-boundary-record-identity.js";
 
 // Keep full 500Q selector inputs bounded while allowing 4x the original headroom.
 export const LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES =
@@ -119,18 +121,12 @@ function replayRecordWithIdentity(
   record: SelectionBoundaryRecord,
   recordIndex: number
 ): void {
-  try {
-    replayFineAssessmentSelectionBoundary(record.boundary);
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(
-      "selection replay record verification failed " +
-      `(question_id=${record.question_id}, ` +
-      `invocation_index=${record.invocation_index}, ` +
-      `record_index=${recordIndex}): ${message}`,
-      { cause }
-    );
-  }
+  withSelectionBoundaryRecordIdentity(
+    "selection replay record verification failed",
+    record,
+    recordIndex,
+    () => replayFineAssessmentSelectionBoundary(record.boundary)
+  );
 }
 
 class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {

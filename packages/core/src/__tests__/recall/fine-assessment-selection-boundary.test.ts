@@ -537,7 +537,9 @@ describe("fine-assessment selection boundary fidelity", () => {
     };
 
     expect(() => replayFineAssessmentSelectionBoundary(digestDrift))
-      .toThrow(/selection boundary fidelity mismatch/u);
+      .toThrow(
+        /selection boundary fidelity mismatch: expected replay digest sha256:[0-9a-f]{64}, actual sha256:[0-9a-f]{64}/u
+      );
   });
 
   it("changes the visible-result digest for nested candidate or diagnostic drift", () => {

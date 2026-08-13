@@ -120,7 +120,10 @@ export function buildCfTokenCompanionAuxiliaryEstimates(
     const estimate = CF_TOKEN_COMPANION_ESTIMATOR.estimate(content);
     const prior = auxiliary.get(digest);
     if (prior !== undefined && prior !== estimate) {
-      throwSelectionBoundaryFidelityMismatch();
+      throwSelectionBoundaryFidelityMismatch(
+        `expected stable companion estimate for content sha256:${digest}, ` +
+        `actual prior=${prior} estimate=${estimate}`
+      );
     }
     auxiliary.set(digest, estimate);
   }
@@ -159,9 +162,18 @@ export function createLivePlusCompanionTokenEstimator(
       }
       const digest = selectionBoundaryContentSha256(content);
       const auxiliary = auxiliaryByContentSha256.get(digest);
-      if (auxiliary === undefined) throwSelectionBoundaryFidelityMismatch();
-      if (CF_TOKEN_COMPANION_ESTIMATOR.estimate(content) !== auxiliary) {
-        throwSelectionBoundaryFidelityMismatch();
+      if (auxiliary === undefined) {
+        throwSelectionBoundaryFidelityMismatch(
+          `expected companion token estimate for content sha256:${digest}, ` +
+          `actual absent among ${auxiliaryByContentSha256.size} auxiliary estimates`
+        );
+      }
+      const declared = CF_TOKEN_COMPANION_ESTIMATOR.estimate(content);
+      if (declared !== auxiliary) {
+        throwSelectionBoundaryFidelityMismatch(
+          `expected companion estimate ${auxiliary} for content sha256:${digest}, ` +
+          `actual declared=${declared}`
+        );
       }
       return auxiliary;
     }

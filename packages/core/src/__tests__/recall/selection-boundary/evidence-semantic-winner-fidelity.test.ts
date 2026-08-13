@@ -45,7 +45,9 @@ describe("selection boundary evidence-semantic winner fidelity", () => {
     });
 
     expect(() => replayFineAssessmentSelectionBoundary(boundary))
-      .toThrow(/selection boundary fidelity mismatch/u);
+      .toThrow(
+        /selection boundary fidelity mismatch: expected owner or positive fact_key projection, actual kind=fact_key id=0/u
+      );
   });
 
   it("rejects winner forms that diverge from the first observation", () => {
@@ -78,7 +80,9 @@ describe("selection boundary evidence-semantic winner fidelity", () => {
     } as unknown as FineAssessmentSelectionBoundaryCase;
 
     expect(() => replayFineAssessmentSelectionBoundary(boundary))
-      .toThrow(/selection boundary fidelity mismatch/u);
+      .toThrow(
+        /selection boundary fidelity mismatch: expected ranked observations with one winner match, actual matches=\d+ observations=\d+/u
+      );
   });
 
   it("normalizes a legacy score and winner pair as an incomplete receipt", () => {
