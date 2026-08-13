@@ -1,5 +1,4 @@
 import {
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
   counterfactualDeliveredCandidateKeys,
   type FamilyGroupedScores,
   type FineAssessmentMembershipOwner,
@@ -40,11 +39,17 @@ export type FeasibilityProtectionDeltas = Readonly<
   Record<FineAssessmentMembershipOwner, FeasibilityProtectionDelta>
 >;
 
+export type StageMembership = Readonly<{
+  readonly owner: string;
+  readonly memberKeys: readonly string[];
+}>;
+
 export type SelectionOrderLedgerRecomputeQuestion = Readonly<{
   readonly ledger: FineAssessmentOrderLedger;
   readonly captured_delivered_keys: readonly string[];
   readonly live_delivered_keys: readonly string[];
   readonly family_scores: Readonly<Record<string, FamilyGroupedScores>>;
+  readonly formula_operator_id: string;
   readonly gold: Readonly<{
     readonly answerable: boolean;
     readonly gold_object_ids: readonly string[];
@@ -58,7 +63,7 @@ export type SelectionOrderLedgerRecomputeQuestion = Readonly<{
 }>;
 
 export type SelectionOrderLedgerRecomputeSummary = Readonly<{
-  readonly formula_operator_id: typeof FAMILY_GROUPED_COMPOSITION_OPERATOR_ID;
+  readonly formula_operator_id: string;
   readonly answerable_count: number;
   readonly any_at_1: number;
   readonly any_at_5: number;
@@ -74,6 +79,7 @@ export type SelectionOrderLedgerRecomputeSummary = Readonly<{
 }>;
 
 type RecomputeAccumulator = {
+  formulaOperatorId: string | null;
   answerableCount: number;
   anyAt1: number;
   anyAt5: number;
@@ -92,6 +98,7 @@ type RecomputeAccumulator = {
 
 export function createRecomputeAccumulator(): RecomputeAccumulator {
   return {
+    formulaOperatorId: null,
     answerableCount: 0,
     anyAt1: 0,
     anyAt5: 0,
@@ -122,20 +129,25 @@ export function buildRecomputeQuestionPayload(
   }
   const capturedKeys = record.boundary.expected.candidate_keys;
   const liveKeys = counterfactualDeliveredCandidateKeys(reconstruction.result);
+  const traces = reconstruction.deepHead.traceByCandidateKey;
   return Object.freeze({
     ledger,
     captured_delivered_keys: capturedKeys,
     live_delivered_keys: liveKeys,
     family_scores: familyScoresByCandidateKey(reconstruction),
+    formula_operator_id: formulaOperatorIdFromTraces(traces.values()),
     gold: goldReceipt(liveKeys, gold)
   });
 }
 
 export function accumulateRecomputeQuestion(
   acc: RecomputeAccumulator,
-  question: SelectionOrderLedgerRecomputeQuestion
+  question: SelectionOrderLedgerRecomputeQuestion,
+  capturedStages: readonly StageMembership[],
+  liveStages: readonly StageMembership[]
 ): void {
-  accumulateMembershipDeltas(acc, question);
+  recordFormulaOperator(acc, question.formula_operator_id);
+  accumulateMembershipDeltas(acc, question, capturedStages, liveStages);
   if (!question.gold.answerable) return;
   acc.answerableCount += 1;
   if (question.gold.any_at_1) acc.anyAt1 += 1;
@@ -151,8 +163,11 @@ export function accumulateRecomputeQuestion(
 export function rollupRecomputeSummary(
   acc: RecomputeAccumulator
 ): SelectionOrderLedgerRecomputeSummary {
+  if (acc.formulaOperatorId === null) {
+    throw new Error("recompute_live missing formula_operator_id");
+  }
   return Object.freeze({
-    formula_operator_id: FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+    formula_operator_id: acc.formulaOperatorId,
     answerable_count: acc.answerableCount,
     any_at_1: acc.anyAt1,
     any_at_5: acc.anyAt5,
@@ -168,6 +183,61 @@ export function rollupRecomputeSummary(
     order_churn_questions: acc.orderChurnQuestions,
     feasibility_protection_deltas: freezeProtectionDeltas(acc.protection)
   });
+}
+
+export function formulaOperatorIdFromTraces(
+  traces: Iterable<Readonly<{ readonly formula_operator_id?: string }>>
+): string {
+  let operatorId: string | undefined;
+  for (const trace of traces) {
+    const id = trace.formula_operator_id;
+    if (id === undefined || id.length === 0) {
+      throw new Error("recompute_live missing formula_operator_id");
+    }
+    if (operatorId === undefined) {
+      operatorId = id;
+      continue;
+    }
+    if (operatorId !== id) {
+      throw new Error(
+        `recompute_live mixed formula_operator_id ${operatorId} vs ${id}`
+      );
+    }
+  }
+  if (operatorId === undefined) {
+    throw new Error("recompute_live missing formula_operator_id");
+  }
+  return operatorId;
+}
+
+export function firstCapturedToLiveMembershipOwner(
+  capturedStages: readonly StageMembership[],
+  liveStages: readonly StageMembership[],
+  candidateKey: string
+): FineAssessmentMembershipOwner {
+  if (capturedStages.length !== liveStages.length) {
+    throw new Error("captured-to-live stage walks have different lengths");
+  }
+  for (let index = 0; index < capturedStages.length; index += 1) {
+    const captured = capturedStages[index]!;
+    const live = liveStages[index]!;
+    if (captured.owner !== live.owner) {
+      throw new Error(
+        `captured-to-live stage owner mismatch: ${captured.owner} vs ${live.owner}`
+      );
+    }
+    const capturedIn = captured.memberKeys.includes(candidateKey);
+    const liveIn = live.memberKeys.includes(candidateKey);
+    if (capturedIn === liveIn) continue;
+    if (captured.owner === "coarse") {
+      throw new Error("captured-to-live coarse membership diverged");
+    }
+    if (!isMembershipStageOwner(captured.owner)) {
+      throw new Error(`captured-to-live unnamed stage owner ${captured.owner}`);
+    }
+    return captured.owner;
+  }
+  return "unavailable";
 }
 
 function familyScoresByCandidateKey(
@@ -203,9 +273,23 @@ function goldReceipt(
   });
 }
 
+function recordFormulaOperator(acc: RecomputeAccumulator, operatorId: string): void {
+  if (acc.formulaOperatorId === null) {
+    acc.formulaOperatorId = operatorId;
+    return;
+  }
+  if (acc.formulaOperatorId !== operatorId) {
+    throw new Error(
+      `recompute_live mixed formula_operator_id ${acc.formulaOperatorId} vs ${operatorId}`
+    );
+  }
+}
+
 function accumulateMembershipDeltas(
   acc: RecomputeAccumulator,
-  question: SelectionOrderLedgerRecomputeQuestion
+  question: SelectionOrderLedgerRecomputeQuestion,
+  capturedStages: readonly StageMembership[],
+  liveStages: readonly StageMembership[]
 ): void {
   const captured = question.captured_delivered_keys;
   const live = question.live_delivered_keys;
@@ -214,12 +298,25 @@ function accumulateMembershipDeltas(
   const capturedSet = new Set(captured);
   const liveSet = new Set(live);
   for (const candidate of question.ledger.candidates) {
-    const owner = candidate.first_membership_changing_owner ?? "unavailable";
     const wasCaptured = capturedSet.has(candidate.candidate_key);
     const isLive = liveSet.has(candidate.candidate_key);
-    if (isLive && !wasCaptured) acc.protection[owner].gained += 1;
-    if (wasCaptured && !isLive) acc.protection[owner].lost += 1;
+    if (wasCaptured === isLive) continue;
+    // Live-walk first_owner is not captured→live causal.
+    const owner = firstCapturedToLiveMembershipOwner(
+      capturedStages,
+      liveStages,
+      candidate.candidate_key
+    );
+    if (isLive) acc.protection[owner].gained += 1;
+    else acc.protection[owner].lost += 1;
   }
+}
+
+function isMembershipStageOwner(
+  owner: string
+): owner is Exclude<FineAssessmentMembershipOwner, "unavailable"> {
+  return owner !== "unavailable" &&
+    (PROTECTION_OWNERS as readonly string[]).includes(owner);
 }
 
 function freezeProtectionDeltas(

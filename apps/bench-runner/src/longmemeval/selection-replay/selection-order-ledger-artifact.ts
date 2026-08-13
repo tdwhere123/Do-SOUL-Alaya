@@ -7,6 +7,7 @@ import {
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
   buildFineAssessmentOrderLedger,
   reconstructFineAssessmentComposition,
+  replayFineAssessmentSelectionBoundary,
   type CapturedScoreFidelityMode
 } from "@do-soul/alaya-core";
 import { publishBytesExclusiveDurable } from
@@ -32,7 +33,8 @@ import {
   createRecomputeAccumulator,
   rollupRecomputeSummary,
   type SelectionOrderLedgerRecomputeQuestion,
-  type SelectionOrderLedgerRecomputeSummary
+  type SelectionOrderLedgerRecomputeSummary,
+  type StageMembership
 } from "./selection-order-ledger-recompute.js";
 
 const ARTIFACT_ERRORS = Object.freeze({
@@ -189,22 +191,32 @@ function appendQuestionRow(
   capturedScoreFidelity: CapturedScoreFidelityMode,
   goldByQuestion: Awaited<ReturnType<typeof loadSelectionReplayGoldMap>> | null
 ): void {
-  const question = verifyRecordLedger(
+  const verified = verifyRecordLedger(
     record,
     recordIndex,
     capturedScoreFidelity,
     goldByQuestion
   );
   collected.questionCount += 1;
-  collected.candidateCount += question.ledger.candidate_count;
-  if (collected.recomputeAcc !== null && isRecomputeQuestion(question)) {
-    accumulateRecomputeQuestion(collected.recomputeAcc, question);
+  collected.candidateCount += verified.published.ledger.candidate_count;
+  if (
+    collected.recomputeAcc !== null &&
+    isRecomputeQuestion(verified.published) &&
+    verified.capturedStages !== undefined &&
+    verified.liveStages !== undefined
+  ) {
+    accumulateRecomputeQuestion(
+      collected.recomputeAcc,
+      verified.published,
+      verified.capturedStages,
+      verified.liveStages
+    );
   }
   collected.rows.push(JSON.stringify({
     record_type: "question",
     question_id: record.question_id,
     invocation_index: record.invocation_index,
-    ...question
+    ...verified.published
   }));
 }
 
@@ -243,8 +255,7 @@ function verifyRecordLedger(
   recordIndex: number,
   capturedScoreFidelity: CapturedScoreFidelityMode,
   goldByQuestion: Awaited<ReturnType<typeof loadSelectionReplayGoldMap>> | null
-): { ledger: ReturnType<typeof buildFineAssessmentOrderLedger> } |
-  SelectionOrderLedgerRecomputeQuestion {
+): VerifiedLedgerRow {
   return withSelectionBoundaryRecordIdentity(
     "selection order ledger record verification failed",
     record,
@@ -263,16 +274,28 @@ function verifyRecordLedger(
           "selection order ledger coarse identity is unavailable"
         );
       }
-      if (goldByQuestion === null) return { ledger };
-      return buildRecomputeQuestionPayload(
-        record,
-        reconstruction,
-        ledger,
-        goldByQuestion
-      );
+      if (goldByQuestion === null) return { published: { ledger } };
+      const capturedWalk = replayFineAssessmentSelectionBoundary(record.boundary);
+      return {
+        published: buildRecomputeQuestionPayload(
+          record,
+          reconstruction,
+          ledger,
+          goldByQuestion
+        ),
+        capturedStages: capturedWalk.orderSequence.transitions,
+        liveStages: reconstruction.result.orderSequence.transitions
+      };
     }
   );
 }
+
+type VerifiedLedgerRow = Readonly<{
+  readonly published: { ledger: ReturnType<typeof buildFineAssessmentOrderLedger> } |
+    SelectionOrderLedgerRecomputeQuestion;
+  readonly capturedStages?: readonly StageMembership[];
+  readonly liveStages?: readonly StageMembership[];
+}>;
 
 async function publishLedgerArtifact(
   requestedOutputPath: string,

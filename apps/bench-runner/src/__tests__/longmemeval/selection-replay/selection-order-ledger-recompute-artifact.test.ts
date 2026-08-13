@@ -6,7 +6,9 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID
+  FAMILY_GROUPED_COMPOSITION_OPERATOR_ID,
+  counterfactualDeliveredCandidateKeys,
+  reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-types.js";
@@ -144,13 +146,108 @@ describe("selection order ledger recompute_live", () => {
       family.semantic !== null
     )).toBe(true);
     expect(summary.formula_operator_id).toBe(FAMILY_GROUPED_COMPOSITION_OPERATOR_ID);
-    expect(summary.any_at_1).toBeGreaterThanOrEqual(0);
-    expect(summary.any_at_5 + summary.any_at_10).toBeGreaterThanOrEqual(0);
-    expect(summary.coverage_at_5).toBeGreaterThanOrEqual(0);
+    expect(summary.any_at_1).toBe(1);
+    expect(summary.any_at_5).toBe(1);
+    expect(summary.any_at_10).toBe(1);
+    expect(question.gold.any_at_5).toBe(true);
+    expect(summary.coverage_at_5).toBe(1);
     expect(summary.feasibility_protection_deltas.final_budget).toMatchObject({
       gained: expect.any(Number),
       lost: expect.any(Number)
     });
+  });
+
+  it("publishes when live membership diverges and Any@5 follows the live head", async () => {
+    const published = await publishDivergentRecompute((liveKeys) =>
+      objectIdFromKey(liveKeys[0]!)
+    );
+    const question = published.question;
+    const summary = published.summary;
+
+    expect(question.live_delivered_keys).not.toEqual(question.captured_delivered_keys);
+    expect(question.gold.any_at_5).toBe(true);
+    expect(summary.any_at_5).toBe(1);
+    expect(summary.any_at_1).toBe(1);
+    expect(deltaTotal(summary.feasibility_protection_deltas)).toBe(
+      symmetricDifferenceSize(
+        question.captured_delivered_keys,
+        question.live_delivered_keys
+      )
+    );
+    expect(summary.feasibility_protection_deltas.unavailable).toEqual({
+      gained: 0,
+      lost: 0
+    });
+  });
+
+  it("counts Any@5 as 0 when gold is outside the live head", async () => {
+    const published = await publishDivergentRecompute(() => "absent-gold-object");
+    expect(published.question.live_delivered_keys)
+      .not.toEqual(published.question.captured_delivered_keys);
+    expect(published.question.gold.any_at_5).toBe(false);
+    expect(published.summary.any_at_1).toBe(0);
+    expect(published.summary.any_at_5).toBe(0);
+    expect(published.summary.any_at_10).toBe(0);
+  });
+
+  it("fails closed on a missing gold map QID without publishing", async () => {
+    const root = await temporaryRoot();
+    const { sourcePath, sourceSha256, outputPath } = await writeBoundaryGzip(
+      root,
+      "question-1",
+      captureFineAssessmentSelectionBoundary("recompute-missing-gold")
+    );
+    const goldMapPath = await writeGoldMap(root, "other-question", "gold-1");
+
+    await expect(materializeSelectionOrderLedgerArtifact({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      outputPath,
+      checkoutRoot: root,
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+      goldMapPath
+    })).rejects.toThrow(/missing gold map entry for question-1/u);
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails closed on fused-score drift in recompute_live without publishing", async () => {
+    const root = await temporaryRoot();
+    const captured = captureFineAssessmentSelectionBoundary("recompute-fused");
+    const relevance = captured.input.final_relevance_by_candidate_key;
+    if (relevance === undefined || relevance.length === 0) {
+      throw new Error("final relevance was not captured");
+    }
+    const [first, ...rest] = relevance;
+    const boundary = {
+      ...captured,
+      input: {
+        ...captured.input,
+        final_relevance_by_candidate_key: [
+          [first![0], first![1] + 0.01],
+          ...rest
+        ]
+      }
+    };
+    const { sourcePath, sourceSha256, outputPath } = await writeBoundaryGzip(
+      root,
+      "fused-question",
+      boundary
+    );
+    const goldMapPath = await writeGoldMap(
+      root,
+      "fused-question",
+      objectIdFromKey(captured.expected.candidate_keys[0]!)
+    );
+
+    await expect(materializeSelectionOrderLedgerArtifact({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      outputPath,
+      checkoutRoot: root,
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+      goldMapPath
+    })).rejects.toThrow(/fidelity mismatch|final_relevance/u);
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not swallow a hydrate failure in recompute_live", async () => {
@@ -261,6 +358,126 @@ function withInjectedEmbeddings(
       }
     }
   };
+}
+
+function withCompleteTokenEstimates(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  const estimates = new Map(boundary.input.token_estimates_by_content);
+  for (const candidate of boundary.input.ordered_candidates) {
+    const content = candidate.entry.content;
+    if (typeof content === "string" && !estimates.has(content)) {
+      estimates.set(content, 5);
+    }
+  }
+  return {
+    ...boundary,
+    input: {
+      ...boundary.input,
+      token_estimates_by_content: [...estimates]
+    }
+  };
+}
+
+function withTailDominantEmbeddings(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  const count = Math.max(1, boundary.input.ordered_candidates.length - 1);
+  const embeddingSimilarityScores = Object.fromEntries(
+    boundary.input.ordered_candidates.map((candidate, index) => [
+      candidate.entry.object_id,
+      0.05 + (index / count) * 0.9
+    ])
+  );
+  return {
+    ...boundary,
+    input: {
+      ...boundary.input,
+      supplementary_data: {
+        ...boundary.input.supplementary_data,
+        embeddingSimilarityScores
+      }
+    }
+  };
+}
+
+async function publishDivergentRecompute(
+  goldObjectId: (liveKeys: readonly string[]) => string
+) {
+  const root = await temporaryRoot();
+  const original = captureFineAssessmentSelectionBoundary(
+    "recompute-divergent",
+    {},
+    { maxEntries: 2 }
+  );
+  const boundary = withCompleteTokenEstimates(
+    withTailDominantEmbeddings(original)
+  );
+  const live = reconstructFineAssessmentComposition(boundary, {
+    capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+  });
+  const liveKeys = counterfactualDeliveredCandidateKeys(live.result);
+  const capturedKeys = original.expected.candidate_keys;
+  if (liveKeys.length === capturedKeys.length &&
+      liveKeys.every((key, index) => key === capturedKeys[index])) {
+    throw new Error("expected live delivered keys to diverge from captured");
+  }
+  const { sourcePath, sourceSha256, outputPath } = await writeBoundaryGzip(
+    root,
+    "question-1",
+    boundary
+  );
+  const goldMapPath = await writeGoldMap(
+    root,
+    "question-1",
+    goldObjectId(liveKeys)
+  );
+  await materializeSelectionOrderLedgerArtifact({
+    sourcePath,
+    expectedSourceSha256: sourceSha256,
+    outputPath,
+    checkoutRoot: root,
+    capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
+    goldMapPath
+  });
+  const rows = await readLedgerRows(outputPath);
+  return {
+    question: rows[1] as {
+      live_delivered_keys: readonly string[];
+      captured_delivered_keys: readonly string[];
+      gold: { any_at_5: boolean };
+    },
+    summary: rows[2] as {
+      any_at_1: number;
+      any_at_5: number;
+      any_at_10: number;
+      feasibility_protection_deltas: Record<string, {
+        gained: number;
+        lost: number;
+      }>;
+    }
+  };
+}
+
+function symmetricDifferenceSize(
+  captured: readonly string[],
+  live: readonly string[]
+): number {
+  const capturedSet = new Set(captured);
+  const liveSet = new Set(live);
+  let count = 0;
+  for (const key of capturedSet) if (!liveSet.has(key)) count += 1;
+  for (const key of liveSet) if (!capturedSet.has(key)) count += 1;
+  return count;
+}
+
+function deltaTotal(
+  deltas: Record<string, { gained: number; lost: number }>
+): number {
+  return Object.values(deltas).reduce(
+    (sum, delta) => sum + delta.gained + delta.lost,
+    0
+  );
 }
 
 function objectIdFromKey(candidateKey: string): string {
