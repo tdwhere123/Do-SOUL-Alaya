@@ -76,6 +76,23 @@ describe("skipLeadingAdjunctSpan", () => {
     )).toBe(0);
   });
 
+  it("does not walk through a coordinator into a later subject conjunct", () => {
+    expect(subjectIndex("By the way, Rachel and I had an improv session")).toBe(0);
+  });
+
+  it("still locates a subject after a temporal leftover inside one NP walk", () => {
+    const source = "By the way, last Saturday, I slept in until 9:00 AM";
+    const tokens = tokenizeFactFrameSource(source);
+    expect(tokens[subjectIndex(source)]?.normalized).toBe("i");
+  });
+
+  it("does not treat noun-noun coordination inside the adjunct NP as a subject cut", () => {
+    const source =
+      "During my CPS125 Digital Computation and Programming course, I led a group";
+    const tokens = tokenizeFactFrameSource(source);
+    expect(tokens[subjectIndex(source)]?.normalized).toBe("i");
+  });
+
   it("does not walk into a reduced relative after a second NP", () => {
     expect(subjectIndex("By the way, the book I bought was great.")).toBe(0);
     expect(subjectIndex("By the way, that book I bought was great.")).toBe(0);

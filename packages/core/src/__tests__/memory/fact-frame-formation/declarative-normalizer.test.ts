@@ -182,6 +182,29 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     )).toBeUndefined();
   });
 
+  it("fails closed on a coordinated subject after a leading adjunct", () => {
+    expect(normalizer.propose(
+      "By the way, Rachel and I had a particularly hilarious improv session today."
+    )).toBeUndefined();
+  });
+
+  it("still forms when a temporal leftover sits between the adjunct NP and the subject", () => {
+    expect(normalizer.propose(
+      "By the way, last Saturday, I slept in until 9:00 AM, which was really nice"
+    )?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" },
+      { role: "relation", text: "slept" },
+      { role: "value", text: "in until 9:00 AM, which was really nice" }
+    ]);
+    expect(normalizer.propose(
+      "By the way, today I sold homemade baked goods at the Farmers' Market."
+    )?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" },
+      { role: "relation", text: "sold" },
+      { role: "value", text: "homemade baked goods at the Farmers' Market" }
+    ]);
+  });
+
   it("fails closed when a preposition is followed by a bare verb rather than a simple NP", () => {
     expect(normalizer.propose(
       "To ensure I arrived on time, I woke up 1 hour before I needed to be at the office."
@@ -212,6 +235,40 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
   it("leaves a CJK topic before an English subject unavailable", () => {
     expect(normalizer.propose("对了 I took my niece to the museum.")).toBeUndefined();
     expect(normalizer.propose("博物馆 I visited the Louvre yesterday.")).toBeUndefined();
+  });
+
+  // Token-identical to admitted shapes. A POS tagger is the separator.
+  // Flipping any of these to unavailable is a residual close, not a drive-by.
+  describe("known residuals (currently form a wrong frame)", () => {
+    it("to-be + adjective + finite clause currently latches the embedded subject", () => {
+      expect(normalizer.propose(
+        "To be sure I arrived on time, I woke up early."
+      )?.fact_frame.slots).toEqual([
+        { role: "subject", text: "I" },
+        { role: "relation", text: "arrived" },
+        { role: "value", text: "on time, I woke up early" }
+      ]);
+    });
+
+    it("fused which currently latches a relativizer reading", () => {
+      expect(normalizer.propose(
+        "Speaking of which I bought last year, I still use it."
+      )?.fact_frame.slots).toEqual([
+        { role: "subject", text: "I" },
+        { role: "relation", text: "bought" },
+        { role: "value", text: "last year, I still use it" }
+      ]);
+    });
+
+    it("comma-less reduced relative currently latches the relative subject", () => {
+      expect(normalizer.propose(
+        "On the house I saw was listed"
+      )?.fact_frame.slots).toEqual([
+        { role: "subject", text: "I" },
+        { role: "relation", text: "saw" },
+        { role: "value", text: "was listed" }
+      ]);
+    });
   });
 
   it("returns deterministic deeply frozen proposals", () => {

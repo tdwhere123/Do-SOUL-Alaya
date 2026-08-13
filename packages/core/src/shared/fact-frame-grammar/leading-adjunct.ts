@@ -67,11 +67,21 @@ function consumeSimpleNp(
   let content = 0;
   while (index < tokens.length) {
     if (isSubjectStart(index)) return content > 0 ? index : null;
+    if (opensCoordinatedSubject(tokens, index, isSubjectStart)) return null;
     if (isSimpleNpBreaker(tokens[index]!)) return null;
     index += 1;
     content += 1;
   }
   return null;
+}
+
+function opensCoordinatedSubject(
+  tokens: readonly FactFrameSourceToken[],
+  index: number,
+  isSubjectStart: (index: number) => boolean
+): boolean {
+  return COORDINATORS.has(tokens[index]?.normalized ?? "") &&
+    isSubjectStart(index + 1);
 }
 
 function isSimpleNpBreaker(token: FactFrameSourceToken): boolean {
@@ -91,6 +101,7 @@ function isPresentParticiple(token: FactFrameSourceToken): boolean {
 const ING_SPELLING_COLLISIONS: ReadonlySet<string> = new Set([
   "something", "anything", "nothing", "everything", "thing"
 ]);
+const COORDINATORS: ReadonlySet<string> = new Set(["and", "or"]);
 const DETERMINERS: ReadonlySet<string> = new Set([
   "a", "an", "the", "this", "that", "these", "those",
   "my", "your", "his", "her", "its", "our", "their", "some", "any"
