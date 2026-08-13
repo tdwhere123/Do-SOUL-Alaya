@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import type { RecallSupplementaryData } from
-  "../../../runtime/recall-service-types.js";
+import {
+  makeTokenEstimator,
+  type RecallSupplementaryData,
+  type TokenEstimator
+} from "../../../runtime/recall-service-types.js";
 import type { FineAssessmentSelectionParams } from
   "../../fine-assessment-selection.js";
 import type {
@@ -98,9 +101,21 @@ export function restoreSupplementaryData(
 }
 
 export function createCapturedTokenEstimator(
-  entries: SelectionBoundaryNumberMap
+  entries: SelectionBoundaryNumberMap,
+  options: Readonly<{
+    readonly onMiss?: "fail" | "compute";
+  }> = {}
 ): FineAssessmentSelectionParams["tokenEstimator"] {
   const tokenEstimates = new Map(entries);
+  if (options.onMiss === "compute") {
+    return createComputingCapturedTokenEstimator(tokenEstimates);
+  }
+  return createFailClosedCapturedTokenEstimator(tokenEstimates);
+}
+
+function createFailClosedCapturedTokenEstimator(
+  tokenEstimates: ReadonlyMap<string, number>
+): FineAssessmentSelectionParams["tokenEstimator"] {
   return {
     estimate: (content) => {
       const estimate = tokenEstimates.get(content);
@@ -114,15 +129,57 @@ export function createCapturedTokenEstimator(
   };
 }
 
+// Live reorder can admit captured candidates the original walk never
+// estimated; compute is the same provider-free function as live capture.
+function createComputingCapturedTokenEstimator(
+  tokenEstimates: ReadonlyMap<string, number>
+): FineAssessmentSelectionParams["tokenEstimator"] {
+  const liveCompute = makeTokenEstimator();
+  assertCapturedEstimatesMatchLiveCompute(tokenEstimates, liveCompute);
+  return {
+    estimate: (content) => {
+      const captured = tokenEstimates.get(content);
+      if (captured !== undefined) return captured;
+      return liveCompute.estimate(content);
+    }
+  };
+}
+
+function assertCapturedEstimatesMatchLiveCompute(
+  tokenEstimates: ReadonlyMap<string, number>,
+  liveCompute: TokenEstimator
+): void {
+  for (const [content, captured] of tokenEstimates) {
+    const computed = liveCompute.estimate(content);
+    if (captured !== computed) {
+      throwSelectionBoundaryFidelityMismatch(
+        capturedTokenEstimateIdentityDetail(content, captured, computed)
+      );
+    }
+  }
+}
+
 // Content is hashed, never echoed, so memory text cannot leak into gate output.
 function missingTokenEstimateDetail(
   content: string,
   capturedContents: number
 ): string {
-  const contentSha256 = createHash("sha256")
-    .update(content, "utf8").digest("hex");
   return "captured token estimate missing: expected " +
-    `token_estimates_by_content entry for content sha256:${contentSha256} ` +
+    `token_estimates_by_content entry for content sha256:${hashContent(content)} ` +
     `(chars=${content.length}), actual absent among ` +
     `${capturedContents} captured contents`;
+}
+
+function capturedTokenEstimateIdentityDetail(
+  content: string,
+  captured: number,
+  computed: number
+): string {
+  return "captured token estimate disagrees with live compute: " +
+    `content sha256:${hashContent(content)} (chars=${content.length}), ` +
+    `captured=${captured}, live_compute=${computed}`;
+}
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }

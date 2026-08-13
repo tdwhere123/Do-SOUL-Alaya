@@ -360,25 +360,6 @@ function withInjectedEmbeddings(
   };
 }
 
-function withCompleteTokenEstimates(
-  boundary: FineAssessmentSelectionBoundaryCase
-): FineAssessmentSelectionBoundaryCase {
-  const estimates = new Map(boundary.input.token_estimates_by_content);
-  for (const candidate of boundary.input.ordered_candidates) {
-    const content = candidate.entry.content;
-    if (typeof content === "string" && !estimates.has(content)) {
-      estimates.set(content, 5);
-    }
-  }
-  return {
-    ...boundary,
-    input: {
-      ...boundary.input,
-      token_estimates_by_content: [...estimates]
-    }
-  };
-}
-
 function withTailDominantEmbeddings(
   boundary: FineAssessmentSelectionBoundaryCase
 ): FineAssessmentSelectionBoundaryCase {
@@ -410,9 +391,7 @@ async function publishDivergentRecompute(
     {},
     { maxEntries: 2 }
   );
-  const boundary = withCompleteTokenEstimates(
-    withTailDominantEmbeddings(original)
-  );
+  const boundary = withTailDominantEmbeddings(original);
   const live = reconstructFineAssessmentComposition(boundary, {
     capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
   });

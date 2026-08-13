@@ -124,7 +124,7 @@ function prepareComposition(
     supplementaryData,
     delivery,
     deepHead,
-    createCapturedTokenEstimator(input.token_estimates_by_content),
+    resolveCompositionTokenEstimator(input, capturedScoreFidelity),
     packetCandidates
   );
   return Object.freeze({
@@ -269,6 +269,17 @@ function assertCandidateOrder(
       throwCompositionMismatch("candidate_order");
     }
   }
+}
+
+function resolveCompositionTokenEstimator(
+  input: FineAssessmentSelectionBoundaryInput,
+  capturedScoreFidelity: CapturedScoreFidelityMode
+): FineAssessmentSelectionParams["tokenEstimator"] {
+  return createCapturedTokenEstimator(input.token_estimates_by_content, {
+    onMiss: capturedScoreFidelity === CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+      ? "compute"
+      : "fail"
+  });
 }
 
 function resolveCapturedScoreFidelity(

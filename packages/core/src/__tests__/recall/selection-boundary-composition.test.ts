@@ -13,8 +13,12 @@ import {
   "../../recall/delivery/selection-boundary/selection-boundary-restore.js";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
-import { captureFineAssessmentSelectionBoundary } from
-  "./selection-boundary-live-capture-fixture.js";
+import { makeTokenEstimator } from
+  "../../recall/runtime/recall-service-ports.js";
+import {
+  captureFineAssessmentSelectionBoundary,
+  withLiveComputeTokenEstimates
+} from "./selection-boundary-live-capture-fixture.js";
 
 describe("fine-assessment selection composition reconstruction", () => {
   it("rebuilds delivery inputs and packet identity from a live fineAssess capture", () => {
@@ -129,7 +133,7 @@ describe("fine-assessment selection composition reconstruction", () => {
   });
 
   it("recomputes live composition when captured-score fidelity is skipped", () => {
-    const original = captureLiveBoundary();
+    const original = withLiveComputeTokenEstimates(captureLiveBoundary());
     const drifted = withDriftedCoverageScores(original);
     const reconstructed = reconstructFineAssessmentComposition(drifted, {
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
@@ -167,22 +171,64 @@ describe("fine-assessment selection composition reconstruction", () => {
     })).toThrow(/recompute_live requires capture_answer_features/u);
   });
 
-  it("still fails closed on missing token estimates in recompute_live", () => {
-    const boundary = captureLiveBoundary();
-    const missingTokens: FineAssessmentSelectionBoundaryCase = {
-      ...boundary,
+  it("recomputes missing captured token estimates from live compute", () => {
+    const original = withLiveComputeTokenEstimates(captureLiveBoundary());
+    const kept = original.input.token_estimates_by_content[0];
+    if (kept === undefined) {
+      throw new Error("token estimates were not captured");
+    }
+    const stripped: FineAssessmentSelectionBoundaryCase = {
+      ...original,
       input: {
-        ...boundary.input,
-        token_estimates_by_content: []
+        ...original.input,
+        token_estimates_by_content: [kept]
+      }
+    };
+    const compute = makeTokenEstimator();
+    const reconstructed = reconstructFineAssessmentComposition(stripped, {
+      capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
+    });
+    const contentByObjectId = new Map(
+      original.input.ordered_candidates.map((candidate) => [
+        candidate.entry.object_id,
+        candidate.entry.content
+      ])
+    );
+    expect(reconstructed.result.candidates.length).toBeGreaterThan(0);
+    for (const delivered of reconstructed.result.candidates) {
+      const content = contentByObjectId.get(delivered.object_id);
+      if (content === undefined) {
+        throw new Error(`delivered object ${delivered.object_id} missing`);
+      }
+      expect(delivered.token_estimate).toBe(compute.estimate(content));
+    }
+  });
+
+  it("fails loud when a captured token estimate disagrees with live compute", () => {
+    const original = withLiveComputeTokenEstimates(captureLiveBoundary());
+    const [first, ...rest] = original.input.token_estimates_by_content;
+    if (first === undefined) {
+      throw new Error("token estimates were not captured");
+    }
+    const poisoned: FineAssessmentSelectionBoundaryCase = {
+      ...original,
+      input: {
+        ...original.input,
+        token_estimates_by_content: [
+          [first[0], first[1] + 1],
+          ...rest
+        ]
       }
     };
 
-    expect(() => reconstructFineAssessmentComposition(missingTokens, {
+    expect(() => reconstructFineAssessmentComposition(poisoned, {
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
     })).toThrow(SELECTION_BOUNDARY_FIDELITY_MISMATCH);
-    expect(() => reconstructFineAssessmentComposition(missingTokens, {
+    expect(() => reconstructFineAssessmentComposition(poisoned, {
       capturedScoreFidelity: CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE
-    })).toThrow(/captured token estimate missing/u);
+    })).toThrow(
+      /captured token estimate disagrees with live compute: content sha256:[0-9a-f]{64} \(chars=\d+\), captured=\d+, live_compute=\d+/u
+    );
   });
 
   it("still fails closed on packet geometry breakage in recompute_live", () => {

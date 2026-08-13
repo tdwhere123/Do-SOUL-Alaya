@@ -4,8 +4,10 @@ import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
-import type { RecallSupplementaryData } from
-  "../../recall/runtime/recall-service-types.js";
+import {
+  makeTokenEstimator,
+  type RecallSupplementaryData
+} from "../../recall/runtime/recall-service-types.js";
 import { materializeFineAssessmentSelectionBoundary } from
   "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 import {
@@ -35,6 +37,23 @@ export function captureFineAssessmentSelectionBoundary(
     throw new Error("selection boundary was not observed");
   }
   return boundary;
+}
+
+export function withLiveComputeTokenEstimates(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  const compute = makeTokenEstimator();
+  return {
+    ...boundary,
+    input: {
+      ...boundary.input,
+      token_estimates_by_content: Object.freeze(
+        boundary.input.token_estimates_by_content.map(([content]) =>
+          Object.freeze([content, compute.estimate(content)] as const)
+        )
+      )
+    }
+  };
 }
 
 function buildLiveCaptureBase(
@@ -68,7 +87,7 @@ function buildLiveCaptureBase(
       candidates,
       supplementaryOverrides
     ),
-    tokenEstimator: { estimate: () => 5 },
+    tokenEstimator: makeTokenEstimator(),
     now: () => "2026-07-29T00:00:00.000Z",
     warn: vi.fn(),
     captureAnswerFeatures: options.captureAnswerFeatures ?? true
