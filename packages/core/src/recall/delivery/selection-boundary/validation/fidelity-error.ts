@@ -1,6 +1,16 @@
 export const SELECTION_BOUNDARY_FIDELITY_MISMATCH =
   "selection boundary fidelity mismatch";
 
-export function throwSelectionBoundaryFidelityMismatch(): never {
-  throw new Error(SELECTION_BOUNDARY_FIDELITY_MISMATCH);
+// Consumers dispatch on this class; message detail may vary per invariant.
+export class SelectionBoundaryFidelityMismatchError extends Error {
+  constructor(detail?: string) {
+    super(detail === undefined
+      ? SELECTION_BOUNDARY_FIDELITY_MISMATCH
+      : `${SELECTION_BOUNDARY_FIDELITY_MISMATCH}: ${detail}`);
+    this.name = "SelectionBoundaryFidelityMismatchError";
+  }
+}
+
+export function throwSelectionBoundaryFidelityMismatch(detail?: string): never {
+  throw new SelectionBoundaryFidelityMismatchError(detail);
 }

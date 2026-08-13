@@ -17,6 +17,7 @@ import { assertEvidenceFtsReceipts } from
   "./validation/evidence-fts-receipt.js";
 import {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  SelectionBoundaryFidelityMismatchError,
   throwSelectionBoundaryFidelityMismatch
 } from "./validation/fidelity-error.js";
 import { verifyRecallFiniteFieldSeal } from "../../field/finite-field-seal.js";
@@ -45,6 +46,7 @@ export {
 
 export {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  SelectionBoundaryFidelityMismatchError,
   throwSelectionBoundaryFidelityMismatch
 };
 

@@ -39,6 +39,9 @@ describe("fine-assessment selection composition reconstruction", () => {
 
     expect(() => reconstructFineAssessmentComposition(stripped))
       .toThrow(SELECTION_BOUNDARY_FIDELITY_MISMATCH);
+    expect(() => reconstructFineAssessmentComposition(stripped)).toThrow(
+      /captured token estimate missing: expected token_estimates_by_content entry for content sha256:[0-9a-f]{64} \(chars=\d+\), actual absent among 0 captured contents/u
+    );
   });
 
   it("fails loud when a captured delivery rank drifts from recomputation", () => {

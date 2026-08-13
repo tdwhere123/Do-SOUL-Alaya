@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RecallSupplementaryData } from
   "../../../runtime/recall-service-types.js";
 import type { FineAssessmentSelectionParams } from
@@ -103,8 +104,25 @@ export function createCapturedTokenEstimator(
   return {
     estimate: (content) => {
       const estimate = tokenEstimates.get(content);
-      if (estimate === undefined) throwSelectionBoundaryFidelityMismatch();
+      if (estimate === undefined) {
+        throwSelectionBoundaryFidelityMismatch(
+          missingTokenEstimateDetail(content, tokenEstimates.size)
+        );
+      }
       return estimate;
     }
   };
+}
+
+// Content is hashed, never echoed, so memory text cannot leak into gate output.
+function missingTokenEstimateDetail(
+  content: string,
+  capturedContents: number
+): string {
+  const contentSha256 = createHash("sha256")
+    .update(content, "utf8").digest("hex");
+  return "captured token estimate missing: expected " +
+    `token_estimates_by_content entry for content sha256:${contentSha256} ` +
+    `(chars=${content.length}), actual absent among ` +
+    `${capturedContents} captured contents`;
 }

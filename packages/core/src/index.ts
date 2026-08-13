@@ -88,7 +88,8 @@ export {
   type FineAssessmentSelectionBoundaryPendingCapture
 } from "./recall/delivery/selection-boundary/selection-boundary-capture.js";
 export {
-  SELECTION_BOUNDARY_FIDELITY_MISMATCH
+  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  SelectionBoundaryFidelityMismatchError
 } from "./recall/delivery/selection-boundary/selection-boundary-restore.js";
 export {
   reconstructFineAssessmentComposition,

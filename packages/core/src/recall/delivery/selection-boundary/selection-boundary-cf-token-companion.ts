@@ -6,7 +6,7 @@ import type {
   SelectionBoundaryNumberMap
 } from "./selection-boundary-types.js";
 import {
-  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  SelectionBoundaryFidelityMismatchError,
   createCapturedTokenEstimator,
   throwSelectionBoundaryFidelityMismatch
 } from "./selection-boundary-restore.js";
@@ -153,8 +153,7 @@ export function createLivePlusCompanionTokenEstimator(
       try {
         return liveEstimator.estimate(content);
       } catch (error) {
-        if (!(error instanceof Error) ||
-          error.message !== SELECTION_BOUNDARY_FIDELITY_MISMATCH) {
+        if (!(error instanceof SelectionBoundaryFidelityMismatchError)) {
           throw error;
         }
       }

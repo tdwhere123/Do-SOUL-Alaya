@@ -117,7 +117,47 @@ describe("selection order ledger artifact", () => {
       expectedSourceSha256: sourceSha256,
       outputPath,
       checkoutRoot: root
-    })).rejects.toThrow(/coarse identity is unavailable/u);
+    })).rejects.toThrow(
+      /selection order ledger record verification failed \(question_id=legacy-question, invocation_index=0, record_index=0\): .*coarse identity is unavailable/u
+    );
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("names the first reconstruction mismatch record before publication", async () => {
+    const root = await temporaryRoot();
+    const sourcePath = join(root, "mismatch-selection-boundaries.ndjson.gz");
+    const outputPath = join(root, "mismatch-ledger.ndjson.gz");
+    const captured = captureFineAssessmentSelectionBoundary("mismatch-ledger");
+    const boundary = {
+      ...captured,
+      input: { ...captured.input, token_estimates_by_content: [] }
+    };
+    const source = gzipSync([
+      JSON.stringify({
+        question_id: "healthy-question",
+        invocation_index: 0,
+        authoritative: true,
+        boundary: captureFineAssessmentSelectionBoundary("mismatch-ledger")
+      }),
+      JSON.stringify({
+        question_id: "mismatch-question",
+        invocation_index: 0,
+        authoritative: true,
+        boundary
+      }),
+      ""
+    ].join("\n"));
+    await writeFile(sourcePath, source, { flag: "wx" });
+    const sourceSha256 = createHash("sha256").update(source).digest("hex");
+
+    await expect(materializeSelectionOrderLedgerArtifact({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      outputPath,
+      checkoutRoot: root
+    })).rejects.toThrow(
+      /selection replay record verification failed \(question_id=mismatch-question, invocation_index=0, record_index=1\): selection boundary fidelity mismatch: captured token estimate missing: expected token_estimates_by_content entry for content sha256:[0-9a-f]{64} \(chars=\d+\), actual absent among 0 captured contents/u
+    );
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

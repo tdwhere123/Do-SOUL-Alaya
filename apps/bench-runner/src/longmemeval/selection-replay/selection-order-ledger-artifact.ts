@@ -11,8 +11,10 @@ import { publishBytesExclusiveDurable } from
 import { measureGitState } from
   "../provenance/contract/frozen-code-contract.js";
 import { sha256File } from "../snapshot/integrity.js";
-import { forEachSelectionBoundaryGzipRecord } from
-  "./selection-boundary-artifact-reader.js";
+import {
+  forEachSelectionBoundaryGzipRecord,
+  type SelectionBoundaryArtifactRecord
+} from "./selection-boundary-artifact-reader.js";
 import {
   LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES,
   verifyLongMemEvalSelectionBoundaryArtifact
@@ -88,27 +90,11 @@ async function collectLedgerRows(
     sourcePath,
     LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES,
     ARTIFACT_ERRORS,
-    (record) => {
+    (record, recordIndex) => {
       if (!record.authoritative) return;
-      const reconstruction = reconstructFineAssessmentComposition(record.boundary);
-      const ledger = buildFineAssessmentOrderLedger(
-        reconstruction.result.orderSequence,
-        reconstruction.result.candidates.length
-      );
+      const ledger = verifyRecordLedger(record, recordIndex);
       questionCount += 1;
       candidateCount += ledger.candidate_count;
-      if (ledger.coarse_identity === "unavailable") {
-        throw new Error(
-          "selection order ledger coarse identity is unavailable"
-        );
-      }
-      if (ledger.candidates.some(
-        (candidate) => candidate.membership_changing_owners.length > 1
-      )) {
-        throw new Error(
-          "selection order ledger has multiple membership-changing owners"
-        );
-      }
       rows.push(JSON.stringify({
         record_type: "question",
         question_id: record.question_id,
@@ -128,6 +114,42 @@ async function collectLedgerRows(
     questionCount,
     candidateCount
   });
+}
+
+/** The first mismatch must stay attributable to one frozen source record. */
+function verifyRecordLedger(
+  record: SelectionBoundaryArtifactRecord,
+  recordIndex: number
+): ReturnType<typeof buildFineAssessmentOrderLedger> {
+  try {
+    const reconstruction = reconstructFineAssessmentComposition(record.boundary);
+    const ledger = buildFineAssessmentOrderLedger(
+      reconstruction.result.orderSequence,
+      reconstruction.result.candidates.length
+    );
+    if (ledger.coarse_identity === "unavailable") {
+      throw new Error(
+        "selection order ledger coarse identity is unavailable"
+      );
+    }
+    if (ledger.candidates.some(
+      (candidate) => candidate.membership_changing_owners.length > 1
+    )) {
+      throw new Error(
+        "selection order ledger has multiple membership-changing owners"
+      );
+    }
+    return ledger;
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      "selection order ledger record verification failed " +
+      `(question_id=${record.question_id}, ` +
+      `invocation_index=${record.invocation_index}, ` +
+      `record_index=${recordIndex}): ${message}`,
+      { cause }
+    );
+  }
 }
 
 async function publishLedgerArtifact(

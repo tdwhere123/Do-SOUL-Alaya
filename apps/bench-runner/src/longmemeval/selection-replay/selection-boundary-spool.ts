@@ -102,9 +102,9 @@ async function verifySelectionBoundaryArtifact(
     artifactPath,
     maxArtifactBytes,
     SELECTION_REPLAY_ARTIFACT_ERRORS,
-    (record) => {
+    (record, recordIndex) => {
       assertRecordSequence(record, previous);
-      replayFineAssessmentSelectionBoundary(record.boundary);
+      replayRecordWithIdentity(record, recordIndex);
       previous = record;
     }
   );
@@ -112,6 +112,25 @@ async function verifySelectionBoundaryArtifact(
     throw new Error("selection replay question has no authoritative invocation");
   }
   return { recordCount };
+}
+
+/** The first replay mismatch must stay attributable to one source record. */
+function replayRecordWithIdentity(
+  record: SelectionBoundaryRecord,
+  recordIndex: number
+): void {
+  try {
+    replayFineAssessmentSelectionBoundary(record.boundary);
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      "selection replay record verification failed " +
+      `(question_id=${record.question_id}, ` +
+      `invocation_index=${record.invocation_index}, ` +
+      `record_index=${recordIndex}): ${message}`,
+      { cause }
+    );
+  }
 }
 
 class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {

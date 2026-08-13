@@ -6,7 +6,7 @@ import {
   reconstructFineAssessmentComposition,
   reconstructIndependentEmbeddingEvidenceComposition,
   reconstructNonlexicalUnitIntervalComposition,
-  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  SelectionBoundaryFidelityMismatchError,
   auxiliaryEstimatesToMap,
   type CounterfactualCompositionOptions,
   type FineAssessmentSelectionBoundaryCase,
@@ -321,8 +321,7 @@ function evaluateCounterfactualRecord(
 }
 
 function isUnseenTokenFailure(error: unknown): boolean {
-  return error instanceof Error &&
-    error.message === SELECTION_BOUNDARY_FIDELITY_MISMATCH;
+  return error instanceof SelectionBoundaryFidelityMismatchError;
 }
 
 async function loadGoldByQuestion(
