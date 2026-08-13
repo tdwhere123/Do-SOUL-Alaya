@@ -3,6 +3,8 @@ import {
   type AssociativeFactSlot,
   type EvidenceFactFrameFormationProposal
 } from "@do-soul/alaya-protocol";
+import { skipLeadingAdjunctSpan } from
+  "../../shared/fact-frame-grammar/leading-adjunct.js";
 import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
@@ -32,7 +34,11 @@ implements EvidenceFactFrameProposalNormalizer {
   ): Readonly<EvidenceFactFrameFormationProposal> | undefined {
     const assertion = sourceAssertion.trim();
     const tokens = tokenizeFactFrameSource(assertion);
-    const subject = readSubject(assertion, tokens);
+    const subjectStart = skipLeadingAdjunctSpan(
+      tokens,
+      (index) => readSubject(assertion, tokens, index) !== null
+    );
+    const subject = readSubject(assertion, tokens, subjectStart);
     if (subject === null) return undefined;
     const predicate = readPredicate(tokens, subject.nextIndex);
     if (predicate === null) return undefined;
@@ -66,32 +72,36 @@ Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
 
 function readSubject(
   source: string,
-  tokens: readonly FactFrameSourceToken[]
+  tokens: readonly FactFrameSourceToken[],
+  start: number
 ): SubjectSpan | null {
-  const first = tokens[0];
+  const first = tokens[start];
   if (first === undefined) return null;
-  const contraction = contractedPronounSubject(first);
+  const contraction = contractedPronounSubject(first, start);
   if (contraction !== null) return contraction;
   if (SUBJECT_PRONOUNS.has(first.normalized)) {
-    return Object.freeze({ text: first.text, nextIndex: 1 });
+    return Object.freeze({ text: first.text, nextIndex: start + 1 });
   }
-  if (first.normalized === "the" && tokens[1]?.normalized === "user") {
+  if (first.normalized === "the" && tokens[start + 1]?.normalized === "user") {
     return Object.freeze({
-      text: sliceFactFrameTokens(source, tokens, 0, 2),
-      nextIndex: 2
+      text: sliceFactFrameTokens(source, tokens, start, start + 2),
+      nextIndex: start + 2
     });
   }
   return null;
 }
 
-function contractedPronounSubject(token: FactFrameSourceToken): SubjectSpan | null {
+function contractedPronounSubject(
+  token: FactFrameSourceToken,
+  start: number
+): SubjectSpan | null {
   const apostropheIndex = token.text.search(/['\u2019]/u);
   if (apostropheIndex <= 0) return null;
   const subject = token.text.slice(0, apostropheIndex);
   const suffix = token.normalized.slice(apostropheIndex + 1);
   return SUBJECT_PRONOUNS.has(subject.toLowerCase()) &&
     SUBJECT_AUXILIARY_CONTRACTIONS.has(suffix)
-    ? Object.freeze({ text: subject, nextIndex: 1 })
+    ? Object.freeze({ text: subject, nextIndex: start + 1 })
     : null;
 }
 

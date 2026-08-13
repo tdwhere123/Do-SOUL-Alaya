@@ -84,6 +84,21 @@ describe("evidence fact-frame formation", () => {
     expect(result.searchProjections).toEqual([]);
   });
 
+  it("derives fact_key projections for a leading-adjunct first-person assertion", () => {
+    const result = materializeEvidenceFactFrameFormation({
+      sourceAssertion:
+        "By the way, I took my niece to the Natural History Museum on 2/8",
+      sourceHash: "sha256:source",
+      normalizer: RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER
+    });
+
+    expect(result.capture.status).toBe("formed");
+    expect(result.searchProjections.length).toBeGreaterThan(0);
+    expect(result.searchProjections.every(
+      (projection) => projection.projection_kind === "fact_key"
+    )).toBe(true);
+  });
+
   it("leaves formation unavailable until a normalizer is explicitly injected", () => {
     const normalized = materializeEvidenceFactFrameFormation({
       sourceAssertion: "I bought a bookshelf from Target.",
