@@ -29,27 +29,38 @@ export async function forEachSelectionBoundaryGzipRecord(
   ) => void | Promise<void>
 ): Promise<{ readonly recordCount: number }> {
   let recordCount = 0;
-  await pipeline(
-    createReadStream(artifactPath),
-    createCompressedSizeLimit(maxArtifactBytes, errors.gzipExceeded),
-    createGunzip(),
-    async (source) => {
-      for await (const encoded of readLfDelimitedRecords(source)) {
-        if (encoded.byteLength === 0) continue;
-        const record = parseSelectionBoundaryRecord(
-          decodeSelectionBoundaryRecord(
-            encoded,
+  let callbackError: unknown;
+  try {
+    await pipeline(
+      createReadStream(artifactPath),
+      createCompressedSizeLimit(maxArtifactBytes, errors.gzipExceeded),
+      createGunzip(),
+      async (source) => {
+        for await (const encoded of readLfDelimitedRecords(source)) {
+          if (encoded.byteLength === 0) continue;
+          const record = parseSelectionBoundaryRecord(
+            decodeSelectionBoundaryRecord(
+              encoded,
+              recordCount,
+              errors.utf8Invalid
+            ),
             recordCount,
-            errors.utf8Invalid
-          ),
-          recordCount,
-          errors.jsonInvalid
-        );
-        await onRecord(record, recordCount);
-        recordCount += 1;
+            errors.jsonInvalid
+          );
+          try {
+            await onRecord(record, recordCount);
+          } catch (error) {
+            callbackError = error;
+            throw error;
+          }
+          recordCount += 1;
+        }
       }
-    }
-  );
+    );
+  } catch (error) {
+    if (callbackError !== undefined) throw callbackError;
+    throw error;
+  }
   return { recordCount };
 }
 

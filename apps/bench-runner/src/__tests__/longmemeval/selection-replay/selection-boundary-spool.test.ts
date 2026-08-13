@@ -24,6 +24,8 @@ import {
   rankMap
 } from
   "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
+import { forEachSelectionBoundaryGzipRecord } from
+  "../../../longmemeval/selection-replay/selection-boundary-artifact-reader.js";
 
 const { replayBoundary } = vi.hoisted(() => ({
   replayBoundary: vi.fn<
@@ -246,6 +248,27 @@ describe("LongMemEval selection-boundary spool", () => {
     ).rejects.toThrow(
       "selection replay gzip exceeds the 1 byte size limit"
     );
+  });
+
+  it("preserves a consumer failure when the pipeline aborts upstream", async () => {
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-consumer.ndjson.gz");
+    const rows = Array.from({ length: 100 }, (_, index) => JSON.stringify(
+      record(`question-${index}`, 0, true, boundary(`consumer-${index}`))
+    ));
+    await writeFile(artifactPath, gzipSync(`${rows.join("\n")}\n`));
+    const expected = new Error("consumer authority rejection");
+
+    await expect(forEachSelectionBoundaryGzipRecord(
+      artifactPath,
+      256 * 1024 * 1024,
+      {
+        utf8Invalid: () => "invalid UTF-8",
+        jsonInvalid: () => "invalid JSON",
+        gzipExceeded: () => "gzip exceeded"
+      },
+      () => { throw expected; }
+    )).rejects.toBe(expected);
   });
 
   it("fails loud and leaves no artifact when the gzip limit is exceeded", async () => {
