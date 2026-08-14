@@ -37,17 +37,22 @@ Gap evidence: `.do-it/findings/associative-field-landing-gap.md`.
 
 ## Current Truth
 
-- Git HEAD: `8dd1752f599b8cafe1135bb75ab70a84d514551d` on
-  `recall-any5-evidence-first`. Ranking/flood/composition citations stay
-  at `10da1318`. No new ranking weights, caps, or cutoffs.
-- Phase A source is closed: `3f474eeb` (landing) → `03abe34b`
-  (review 1 remediation) → `8dd1752f` (review 2 remediation). Two
-  independent review rounds; round 2 reported zero new findings. Not
-  `gate passed`. Not ready to merge or push. Do not open Phase B source
-  work until the Phase A stop-gate decision.
-- Phase A provider-free gate on a scratch copy of remat `7cac6e0d…00a6a`
-  is an honest failure (exit 2, socket 0/0, no KPI, path-axis
-  `NOT_MEASURED`).
+- Git HEAD: `ac032f4c0ed1589cc350303955b1e26944a8fd71` on
+  `recall-any5-evidence-first` (Phase A reopen: historical as-of miss
+  seals `index_unavailable` instead of aborting). Ranking/flood/
+  composition citations stay at `10da1318`. No new ranking weights,
+  caps, or cutoffs.
+- Phase A source: `3f474eeb` (landing) → `03abe34b` (review 1) →
+  `8dd1752f` (review 2) → `0b9ea9b4` (failed-gate bookkeeping) →
+  `ac032f4c` (as-of miss seal). Stop: `STOP_SOURCE_REVIEW`. Not
+  `gate passed`. Not ready to merge or push. Do not open Phase B.
+- Phase A provider-free gate rerun on a scratch copy of remat
+  `7cac6e0d…00a6a` completed 100/100 (socket 0/0). Wrapper exit 1 is
+  archive attribution ineligible, not an abort. Path-axis is observed:
+  100/100 questions `inactive:index_unavailable`; memory rows 16277
+  `inactive:index_unavailable`; 3154 `inactive:pass_through` are
+  `evidence_capsule` only (`selector not_observed`). KPI matches
+  incumbent Any/full-gold/coverage; P95 696.27 ms vs 669.89 ms.
 - Last scored 100Q remains the `10da1318` new-population dump
   `rematerialize-10da1318-20260814/eval-B/history/public/2026-08-13T190217Z-10da131-policy-stress-recall-eval-snapshot/`
   (snapshot sha256 `7cac6e0d…00a6a`, B KPI `ed061c00…642a`, A KPI
@@ -166,27 +171,34 @@ Exit: path fuel is observed with source-attributed edge receipts, or every
 inactive row carries a truthful seal such as `index_unavailable`. A pass-through
 row with no fuel proof is not closure. Do not increase path weights to fake it.
 
-Source status: **closed** at `8dd1752f`. Default temporal bind is
-test-locked. Honest seals `index_unavailable` / `storage_error` round-trip
-through production and the bench selector schema. In-process production
-receipt on a scratch copy of remat `7cac6e0d…00a6a`: `A_path` /
-`edge_conductance` `0.75` from `strength=0.5` / `recall_bias=0.5`
-`answers_with` (`decision: transferred`). Frozen snapshot bytes were not
-written.
+Source status: **closed** at `ac032f4c` pending independent review
+(`STOP_SOURCE_REVIEW`). Default temporal bind remains test-locked.
+Honest seals `index_unavailable` / `storage_error` remain distinct;
+`pass_through` is not used for a missing named as-of generation.
+In-process production receipt on a scratch copy of remat `7cac6e0d…00a6a`
+at current as-of: `A_path` / `edge_conductance` `0.75` from
+`strength=0.5` / `recall_bias=0.5` `answers_with` (`decision:
+transferred`). Frozen snapshot bytes were not written.
 
-After source review, Gate Protocol step 8 is the named provider-free
-observability measurement of this Exit on a **scratch copy** of that remat
-snapshot (public `recall-eval`, cache-only, local ONNX). That measurement
-is not the Scored Gates 100Q (`STOP_100Q_AUTHORIZATION` stays closed) and
-is not Phase F. Neutral KPI vs the `10da1318` dump is acceptable; do not
-retune weights.
+Write-side contract: a verified generation is keyed by the named rebuild
+`as_of` (`hash(historyDigest|asOf)`). Exact `as_of = ?` lookup is
+intended. Historical filtering is owned by rebuild
+(`isRelationValidityActiveAt` / resolutions-at-or-before), not by serving
+a later generation. Cache-only 100Q therefore seals
+`inactive:index_unavailable` when question as-of (2023-05-30) has no
+verified generation (only 2026 build-time rows exist).
 
-Gate status: **honest failure** at `8dd1752f` (scratch
-`gate-phase-a-path-axis-20260814-8dd1752f`, exit 2, socket 0/0, wall
-0:57). Abort: no verified temporal projection for as-of
-`2023-05-30T23:40:00.000Z`. No KPI. Path-axis observability
-`NOT_MEASURED`. Frozen remat bytes untouched. Do not rematerialize. Do
-not open Phase B.
+Gate rerun at `ac032f4c` (scratch
+`gate-phase-a-path-axis-20260814-ac032f4c`, public
+`2026-08-14T041524Z-ac032f4-policy-stress-recall-eval-snapshot`): 100/100,
+socket 0/0, wrapper exit 1 (attribution ineligible, not abort). Any@1/5/10
+`66/88/89` of 94, full-gold@5 `34/94`, coverage@5 `145/354`, P50/P95
+`555.66/696.27 ms`. Path: 0 active; 100/100 questions
+`inactive:index_unavailable`; 16277 memory rows
+`inactive:index_unavailable` / selector `unavailable`; 3154
+`inactive:pass_through` are evidence capsules only. Frozen remat
+`7cac6e0d…00a6a` and query-factor `68684540…82c27` unchanged. Do not
+retune weights. Do not open Phase B.
 
 ### B. Write-Side Key, Projection, and Facet Supply
 
@@ -252,10 +264,11 @@ and no structural regression. Never push or promote automatically.
 
 ## Not Verified
 
-- Phase A measurement Exit on the remat 100Q population (`path_status`
-  active vs `inactive:*` per question). The provider-free gate aborted
-  before Q1.
+- Independent review of `ac032f4c` (`STOP_SOURCE_REVIEW`).
+- Whether cache-only / LongMemEval should rebuild a named question as-of
+  generation so the path channel can be live (open product decision; not
+  "use latest 2026 generation").
 - Phase B–F source work.
 - Scored Gates 100Q / 500Q (`STOP_100Q_AUTHORIZATION` not entered).
-- A fresh public ledger or capture-parity artifact from `8dd1752f`.
+- A fresh public ledger or capture-parity artifact from `ac032f4c`.
 - Merge or push.

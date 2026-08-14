@@ -10,15 +10,16 @@ per-commit narrative remain in Git, archived plans, and `.do-it/findings/`.
 - Branch: `recall-any5-evidence-first`.
 - Parent of this landing: `25f992d84f7c05cb3f134c956e27c648e339e116` (docs).
 - HEAD chain: `10da1318` → `aaf72851` → `25f992d8` → `3f474eeb` →
-  `03abe34b` → `8dd1752f`.
+  `03abe34b` → `8dd1752f` → `0b9ea9b4` → `ac032f4c`.
 - Phase A landing: `3f474eeb0044852250d70f12cb6ccccc10ea1847`.
 - Phase A review 1 remediation: `03abe34b5102d2317303bf6b856ffcef50fdac4c`.
 - Phase A review 2 remediation: `8dd1752f599b8cafe1135bb75ab70a84d514551d`.
-- Phase A typed path transfer is **implemented** and **source-closed**.
-  Not `gate passed`. Not ready to merge or push. Do not open Phase B
-  source work.
-- Stop: `STOP_GATE_REVIEW` (honest failed gate). Scored 100Q remains
-  closed (`STOP_100Q_AUTHORIZATION` not entered). Do not open Phase B.
+- Phase A reopen (historical as-of miss seal):
+  `ac032f4c0ed1589cc350303955b1e26944a8fd71`.
+- Phase A typed path transfer is **implemented**. Stop:
+  `STOP_SOURCE_REVIEW`. Not `gate passed`. Not ready to merge or push.
+  Do not open Phase B.
+- Scored 100Q remains closed (`STOP_100Q_AUTHORIZATION` not entered).
 - No push, merge, or provider/LLM call. Frozen remat snapshot
   `7cac6e0d…00a6a` was not written. Query-factor cache
   `68684540…82c27` was not written.
@@ -175,8 +176,9 @@ Vs incumbent B (`10da1318` dump): Any@1/5/10 `66/88/89` of 94,
 full-gold `34/94`, coverage `145/354`, P95 `669.89 ms`. This run
 produced no replacement numbers.
 
-Verdict: honest failed gate. Phase A measurement Exit is not closed.
-The path channel is not live in 100Q measurement.
+Verdict (superseded by `ac032f4c`): honest failed gate. The abort is
+the named reopen; do not rematerialize; do not retune weights; do not
+serve a later generation for a missing named as-of.
 
 Verification (this worktree, after remediation):
 
@@ -191,6 +193,99 @@ Verification (this worktree, after remediation):
   (`decision: transferred`, `A_path ≈ 0.016`, `path_status: active`,
   retired `ALAYA_RECALL_CONF_SLICE_COMPATIBILITY`). Isolated re-run
   confirmed. First two edge-trace cases still pass.
+
+## Phase A reopen (historical as-of miss)
+
+Fix choice: **(a)** honest fail-safe seal, not **(b)** latest-generation
+read.
+
+A verified temporal projection generation at as-of T is a cache rebuilt
+**for named T** (`generationId = temporal-${sha256(historyDigest|asOf)}`,
+`createdAt = asOf`). `verifyAndRebuild(asOf?)` uses `asOf ?? now()`.
+Rebuild filters assertions with `isRelationValidityActiveAt` and
+resolutions-at-or-before **at rebuild time**. `findVerifiedGenerationAtAsOf`
+is exact `as_of = ?` plus current `history_digest` and `status='verified'`.
+Handbook §12b / Temporal Major-Cutover: PathRelation is derived for
+current or named as-of; rebuild is for a named `as_of`.
+
+Which layer owns historical filtering: the **projection builder**. Per-edge
+validity is baked into which rows exist in that generation. Serving the
+2026 generation for a 2023 question as-of would invent temporal semantics.
+Exact-as-of lookup is the write-side contract, not a binding bug.
+
+The abort: `SqliteTemporalPathProjectionReader` threw `StorageError
+CONFLICT`. That escaped `loadActiveConstraints` (recall start, `asOf:
+referenceTime`, no try/catch) via `constraints.findActive`. Governance
+already caught and would have mapped the throw to `storage_error`, which
+is the wrong seal. Before Phase A, default bind was legacy so 100Q never
+hit this path (incumbent 19431 `inactive:pass_through`).
+
+Implemented at `ac032f4c`: named
+`TemporalProjectionGenerationMissingError` (`NOT_FOUND`). Exact lookup
+unchanged. `classifyPathIndexReadFailure` maps that name to
+`index_unbound`. `loadActiveConstraints` and `findActiveByWorkspace`
+return empty on `index_unbound`. `findByAnchors` still throws so
+governance can seal `unavailable` / `inactive:index_unavailable`. Do not
+reintroduce `pass_through` for this miss. Do not collapse
+`storage_error` and `index_unavailable`.
+
+Open product decision (not implemented): whether a later phase should
+**rebuild a verified generation at question as-of T** so the path channel
+can be live under LongMemEval historical as-of, vs keep the read fail-safe
+seal. Cache-only / `query_only` workers cannot rebuild. Rematerializing
+Frozen Inputs is forbidden. This is not "serve the latest 2026
+generation."
+
+Verification (this worktree, after `ac032f4c`):
+
+- Failing test first (real better-sqlite3): 2026 verified generation,
+  query at 2023 as-of, asserted the throw, then flipped consumption to
+  seal / empty constraints.
+- Combined targeted vitest after `rtk pnpm build`: 11 files / 62 tests /
+  exit 0 (core flood, path-expansion, graph-frontier, selector,
+  load-active-constraints, unbound-error, storage temporal reader,
+  projection read-bind, daemon recall-path-read-bind, recall-path-readers,
+  recall-read-worker-temporal).
+- `rtk pnpm build`: exit 0 (existing inspector chunk-size warning only).
+- `rtk git diff --check`: exit 0.
+
+## Phase A provider-free gate rerun (`ac032f4c`)
+
+Scratch (gitignored, uncommitted):
+`.do-it/bench-runs/recall-any5-evidence-first/gate-phase-a-path-axis-20260814-ac032f4c/`.
+Dump:
+`eval-B/history/public/2026-08-14T041524Z-ac032f4-policy-stress-recall-eval-snapshot/`.
+Same recipe as the failed `8dd1752f` gate: cache-only 100Q B, public
+`recall-eval`, local ONNX, keys unset, query-factor
+`p217-.../query-factors-439d065.json`. Scratch copy includes sqlite +
+sidecars; distinct inode from frozen. Frozen sqlite sha256
+`7cac6e0d1ebdb89761546c26516a1a6722556f0e4f617145436ff38a51500a6a`
+unchanged. Query-factor sha `68684540…82c27` unchanged.
+
+Completed 100/100 (94 answerable). Socket 0/0. Garden `llm_calls=0`,
+cache_hits=25658. Embedding `provider_returned` 100/100, local ONNX.
+Watchdog peak 3789412 KiB / 4194304, exceeded=0. Wall ~23:03. Wrapper
+exit 1 (measurement attribution ineligible / archive hard gate), not
+abort.
+
+| Item | This run | Incumbent B (`10da1318`) |
+| --- | --- | --- |
+| Any@1/5/10 | 66/88/89 of 94 | 66/88/89 |
+| full-gold@5 | 34/94 | 34 |
+| coverage@5 | 145/354 | 145/354 |
+| P50/P95 | 555.66 / 696.27 ms | 519.17 / 669.89 ms |
+
+Path-axis observability:
+
+- Questions: 0 active; 100/100 primary `inactive:index_unavailable`.
+- Rows (19431): 16277 `inactive:index_unavailable` (all `memory_entry`,
+  selector `unavailable`); 3154 `inactive:pass_through` (all
+  `evidence_capsule`, selector `not_observed`).
+- `fuel_verified=false` 19431; 0 `active`; 0 `storage_error`.
+- vs incumbent path: 19431 `inactive:pass_through`.
+
+Neutral KPI with an honestly sealed path channel is the Phase A gate
+answer. Abort is gone. Do not retune P95. Do not open Phase B.
 
 ## Source Closeout `aaf7285`
 
