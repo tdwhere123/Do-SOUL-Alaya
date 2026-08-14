@@ -27,6 +27,9 @@ export interface RecallQueryProbes {
   readonly date_terms: readonly string[];
 }
 
+const CJK_LEXICAL_KEEP =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
 const STOP_WORDS = new Set([
   "a",
   "am",
@@ -186,16 +189,23 @@ function normalizeQuery(queryText: string | null): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+/** Shared extractLexicalTerms keep rule so OSF extras cannot fork a second stop list. */
+export function isAdmittedLexicalTerm(term: string): boolean {
+  return isLexicalKeepLength(term) && !STOP_WORDS.has(term);
+}
+
+/** Drop the surface when no token survives lexical admission so stop tokens cannot enter FTS. */
+export function admitLexicalExpandedSurface(value: string): string | null {
+  const tokens = unique(lexicalSurfacePieces(value).filter(isAdmittedLexicalTerm));
+  return tokens.length === 0 ? null : tokens.join(" ");
+}
+
 /**
  * Deterministic lowercased terms (shared split regex, length>2-or-CJK keep rule); keeps stop words. Reused by the feature-rerank tokenizer so query and candidate tokenize identically.
  * invariant: a CJK-bearing surface token yields its surface chunk first then deduped jieba word-pieces — keeps trigram substring coverage while exposing word boundaries. see also: shared/cjk-segmentation.ts.
  */
 export function splitLexicalTokens(value: string): readonly string[] {
-  const surfaceTokens = value
-    .split(/[^\p{L}\p{N}_./@#-]+/u)
-    .map((term) => term.trim().toLocaleLowerCase())
-    .filter((term) => term.length > 0)
-    .filter((term) => term.length > 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(term));
+  const surfaceTokens = lexicalSurfacePieces(value).filter(isLexicalKeepLength);
   // invariant: surface tokens keep their duplicates so downstream occurrence-count features keep pre-jieba numerator behaviour; only jieba pieces are deduped against the output.
   const output: string[] = [];
   const seenJiebaPieces = new Set<string>();
@@ -211,9 +221,7 @@ export function splitLexicalTokens(value: string): readonly string[] {
         continue;
       }
       // invariant: only CJK-bearing jieba pieces enter lexical_terms; emitting jieba's ASCII pieces would split compound tokens (`admin_passwords你好`) and bypass surface-boundary integrity, so ASCII pieces are discarded.
-      if (
-        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(normalized)
-      ) {
+      if (CJK_LEXICAL_KEEP.test(normalized)) {
         output.push(normalized);
         seenJiebaPieces.add(normalized);
       }
@@ -223,8 +231,19 @@ export function splitLexicalTokens(value: string): readonly string[] {
 }
 
 function extractLexicalTerms(value: string): readonly string[] {
-  const terms = splitLexicalTokens(value).filter((term) => !STOP_WORDS.has(term));
+  const terms = splitLexicalTokens(value).filter(isAdmittedLexicalTerm);
   return unique(terms).slice(0, 48);
+}
+
+function lexicalSurfacePieces(value: string): readonly string[] {
+  return value
+    .split(/[^\p{L}\p{N}_./@#-]+/u)
+    .map((term) => term.trim().toLocaleLowerCase())
+    .filter((term) => term.length > 0);
+}
+
+function isLexicalKeepLength(term: string): boolean {
+  return term.length > 2 || CJK_LEXICAL_KEEP.test(term);
 }
 
 // Conservative bidirectional synonym/abbreviation clusters keep product vocabulary aligned.

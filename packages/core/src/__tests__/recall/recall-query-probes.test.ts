@@ -1,6 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { buildSynonymExpansionTable, compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/query/recall-query-probes.js";
+import {
+  admitLexicalExpandedSurface,
+  buildSynonymExpansionTable,
+  compileRecallQueryProbes,
+  expandLexicalTerms,
+  isAdmittedLexicalTerm,
+  splitLexicalTokens
+} from "../../recall/query/recall-query-probes.js";
 import {
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,
@@ -106,6 +113,20 @@ describe("expandLexicalTerms", () => {
     for (const expanded of probes.expanded_terms) {
       expect(probes.lexical_terms).not.toContain(expanded);
     }
+  });
+});
+
+describe("admitLexicalExpandedSurface", () => {
+  it("drops copular stop identities and keeps CJK plus contentful phrase tokens", () => {
+    expect(isAdmittedLexicalTerm("be")).toBe(false);
+    expect(isAdmittedLexicalTerm("i")).toBe(false);
+    expect(isAdmittedLexicalTerm("was")).toBe(false);
+    expect(admitLexicalExpandedSurface("be")).toBeNull();
+    expect(admitLexicalExpandedSurface("i")).toBeNull();
+    expect(admitLexicalExpandedSurface("was")).toBeNull();
+    expect(admitLexicalExpandedSurface("2月")).toBe("2月");
+    expect(admitLexicalExpandedSurface("in japan")).toBe("japan");
+    expect(admitLexicalExpandedSurface("learn to cook")).toBe("learn cook");
   });
 });
 

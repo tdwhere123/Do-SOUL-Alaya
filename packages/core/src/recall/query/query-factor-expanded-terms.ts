@@ -2,7 +2,10 @@ import {
   normalizeMemoryObjectKeySurface,
   type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from "./recall-query-probes.js";
+import {
+  admitLexicalExpandedSurface,
+  type RecallQueryProbes
+} from "./recall-query-probes.js";
 
 export function extendQueryProbesWithOpenSemanticFactors(
   probes: Readonly<RecallQueryProbes>,
@@ -17,10 +20,10 @@ export function extendQueryProbesWithOpenSemanticFactors(
   const extras: string[] = [];
   for (const factor of capture.graph.factors) {
     for (const raw of [factor.semantic_identity, factor.surface]) {
-      const normalized = normalizeMemoryObjectKeySurface(raw);
-      if (normalized.length === 0 || present.has(normalized)) continue;
-      present.add(normalized);
-      extras.push(normalized);
+      const admitted = admitLexicalExpandedSurface(normalizeMemoryObjectKeySurface(raw));
+      if (admitted === null || present.has(admitted)) continue;
+      present.add(admitted);
+      extras.push(admitted);
     }
   }
   if (extras.length === 0) return probes;
