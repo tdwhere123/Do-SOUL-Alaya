@@ -335,7 +335,12 @@ function mergeSolutions(
       });
     })),
     evidence_ids: uniqueSorted([...left.evidence_ids, ...right.evidence_ids]),
-    proposition_matches: left.proposition_matches
+    // Same result key can arise from distinct evidence; dropping the
+    // later matches leaves evidence_ids without supporting propositions.
+    proposition_matches: uniqueSortedMatches([
+      ...left.proposition_matches,
+      ...right.proposition_matches
+    ])
   });
 }
 
@@ -436,8 +441,30 @@ function bindingObservationKey(
   ].join("\0");
 }
 
+type SolutionPropositionMatch =
+  OpenSemanticFactorCompositionSolution["proposition_matches"][number];
+
 function uniqueSorted(values: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(values)].sort(compareText));
+}
+
+function uniqueSortedMatches(
+  matches: readonly SolutionPropositionMatch[]
+): readonly SolutionPropositionMatch[] {
+  const unique = new Map<string, SolutionPropositionMatch>();
+  for (const match of matches) {
+    const key = [
+      match.query_proposition_id,
+      match.evidence_id,
+      match.evidence_proposition_id
+    ].join("\0");
+    if (!unique.has(key)) unique.set(key, match);
+  }
+  return Object.freeze([...unique.values()].sort((left, right) =>
+    compareText(left.query_proposition_id, right.query_proposition_id) ||
+    compareText(left.evidence_id, right.evidence_id) ||
+    compareText(left.evidence_proposition_id, right.evidence_proposition_id)
+  ));
 }
 
 function compareBindings(
