@@ -351,7 +351,7 @@ describe("formula and lifecycle regression net", () => {
         querySoughtFacets: ["location_place"]
       })
     });
-    expect(cold.diagnostics.slice_status).toBe("inactive:pass_through");
+    expect(cold.diagnostics.slice_status).toBe("inactive:no_slice");
     expect(cold.diagnostics.path_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.evidence_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.fuel_verified).toBe(false);

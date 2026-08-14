@@ -52,6 +52,7 @@ export function evaluateSingleHopRemoteness(
 function rejectionReason(
   input: Readonly<SingleHopRemotenessInput>
 ): SingleHopRemotenessReason | null {
+  if (input.sliceCompatibility?.decision === "rejected") return "no_slice_match";
   if (input.selfLoop) return "self_loop";
   if (input.inputPotential <= 0) return "missing_or_zero_input";
   if (input.edgeConductance <= 0) return "non_positive_conductance";

@@ -194,13 +194,14 @@ describe("P2 — Φ path-flood identity (collapsePathInflow)", () => {
 });
 
 describe("single-hop SliceKey wiring", () => {
-  it("observes a typed event-time mismatch while default transfer stays enabled", () => {
+  it("withholds typed path transfer when the event-time fiber rejects the edge", () => {
     const context = sliceContext("2026-04-20T00:00:00.000Z");
 
-    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
+    expect(context.raByKey.get("target")?.path).toBe(0);
     expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
       slice_compatibility: "no_slice_match",
-      decision: "transferred"
+      decision: "rejected",
+      reason: "no_slice_match"
     }));
   });
 

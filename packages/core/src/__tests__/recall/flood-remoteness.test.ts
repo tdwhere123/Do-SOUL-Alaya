@@ -57,7 +57,7 @@ describe("single-hop flood remoteness", () => {
     });
   });
 
-  it("preserves legacy arithmetic while slice enforcement is disabled", () => {
+  it("preserves legacy arithmetic at the per-source cap", () => {
     const result = evaluateSingleHopRemoteness({
       inputPotential: 0.8,
       edgeConductance: 2,
@@ -110,21 +110,21 @@ describe("single-hop flood remoteness", () => {
     expect(transfer(1)).toBeLessThanOrEqual(0.5);
   });
 
-  it("observes a mismatch by default without changing transfer", () => {
+  it("rejects a fiber mismatch instead of transferring across it", () => {
     const base = {
       inputPotential: 0.8,
       edgeConductance: 0.5,
       capPerSource: 1,
       selfLoop: false,
-      sliceCompatibility: { decision: "rejected", reason: "no_slice_match", matches: [] }
-    } as const;
+      sliceCompatibility: { decision: "rejected" as const, reason: "no_slice_match" as const, matches: [] }
+    };
 
     expect(evaluateSingleHopRemoteness(base)).toEqual({
       rawTransfer: 0.4,
-      cappedTransfer: 0.4,
+      cappedTransfer: 0,
       sliceCompatibility: "no_slice_match",
-      decision: "transferred",
-      reason: "transferred"
+      decision: "rejected",
+      reason: "no_slice_match"
     });
   });
 

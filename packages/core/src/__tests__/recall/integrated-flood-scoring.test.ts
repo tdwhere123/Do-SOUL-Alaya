@@ -7,6 +7,7 @@ import {
 } from "../../recall/scoring/integrated-flood-scoring.js";
 import { resolveConformantPathWeight } from "../../recall/scoring/conformant-fusion-scoring.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+import { createSelectedSliceKeyV2 } from "../../recall/flood/slice-key-contract.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const CONF_ENV = [
@@ -48,6 +49,21 @@ function supplementary(overrides: Partial<RecallSupplementaryData> = {}): Recall
   };
 }
 
+function entityQueryKey(workspaceId: string, value: string) {
+  return createSelectedSliceKeyV2({
+    workspace_id: workspaceId,
+    owner_id: null,
+    dimension: "entity",
+    value,
+    authority: "derived_query",
+    reliability: 1,
+    independence_group: `query:${workspaceId}`,
+    provenance: { kind: "query_probe", source_ref: `query:entity:${value}` },
+    source_version: "v1",
+    freshness: { state: "fresh", as_of_ms: 1 }
+  });
+}
+
 describe("computeIntegratedFloodScore", () => {
   it("cold-start output equals R_obj when no verified fuel", () => {
     const entry = createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" });
@@ -64,7 +80,7 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("inactive:pass_through");
   });
 
-  it("default slice pass-through still allows fuel_verified when path+evidence fuel present", () => {
+  it("absent query fiber stays identity and still allows fuel_verified when path+evidence fuel present", () => {
     const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-slice"] });
@@ -80,10 +96,64 @@ describe("computeIntegratedFloodScore", () => {
         }
       })
     });
-    expect(result.diagnostics.slice_status).toBe("inactive:pass_through");
+    expect(result.diagnostics.slice_status).toBe("inactive:no_slice");
     expect(result.diagnostics.Slice).toBe(1);
     expect(result.diagnostics.fuel_verified).toBe(true);
     expect(result.score).toBeGreaterThan(0.2);
+  });
+
+  it("activates the slice axis on a matching entity fiber", () => {
+    const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const target = createMemoryEntry({
+      object_id: targetId,
+      canonical_entities: ["Ada Lovelace"],
+      evidence_refs: ["ev-fiber"]
+    });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0.7 },
+      supplementaryData: supplementary({
+        queryRoutingKeys: [entityQueryKey(target.workspace_id, "Ada Lovelace")],
+        pathInflowByTarget: {
+          [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+        },
+        evidenceSupportVectorsByMemoryId: {
+          [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-fiber", support: 0.7 }]
+        }
+      })
+    });
+    expect(result.diagnostics.slice_status).toBe("active");
+    expect(result.diagnostics.Slice).toBe(1);
+    expect(result.diagnostics.fuel_verified).toBe(true);
+    expect(result.score).toBeGreaterThan(0.2);
+  });
+
+  it("withholds flood fuel when the candidate is off the query fiber", () => {
+    const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const target = createMemoryEntry({
+      object_id: targetId,
+      canonical_entities: ["Charles Babbage"],
+      evidence_refs: ["ev-fiber"]
+    });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0.7 },
+      supplementaryData: supplementary({
+        queryRoutingKeys: [entityQueryKey(target.workspace_id, "Ada Lovelace")],
+        pathInflowByTarget: {
+          [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+        },
+        evidenceSupportVectorsByMemoryId: {
+          [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-fiber", support: 0.7 }]
+        }
+      })
+    });
+    expect(result.diagnostics.slice_status).toBe("inactive:no_slice_match");
+    expect(result.diagnostics.Slice).toBe(0);
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.2, 12);
   });
 
   it("path fuel changes only eligible candidates with verified path and evidence inflow", () => {

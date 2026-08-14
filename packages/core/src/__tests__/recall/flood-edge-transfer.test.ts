@@ -180,10 +180,9 @@ describe("flood edge transfer trace", () => {
     });
   });
 
-  it("observes a slice mismatch without changing default transfer math", () => {
+  it("withholds transfer when the fiber rejects the edge", () => {
     const inflow = [edge("path-a", "seed", "target", 0.5)];
     const potentials = new Map([["seed", 0.8]]);
-    const expected = legacyCollapse(inflow, "target", potentials, 1, 3, 0.5);
     const result = computeFloodEdgeTransfer({
       inflow,
       targetObjectId: "target",
@@ -197,11 +196,11 @@ describe("flood edge transfer trace", () => {
       ]])
     });
 
-    expect(Object.is(result.value, expected)).toBe(true);
+    expect(result.value).toBe(0);
     expect(result.traces[0]).toEqual(expect.objectContaining({
       slice_compatibility: "no_slice_match",
-      decision: "transferred",
-      reason: "transferred"
+      decision: "rejected",
+      reason: "no_slice_match"
     }));
   });
 

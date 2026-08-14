@@ -102,6 +102,7 @@ export type FloodAxisInactiveReason =
   | "active"
   | "inactive:no_fuel"
   | "inactive:no_slice"
+  | "inactive:no_slice_match"
   | "inactive:no_path"
   | "inactive:no_evidence"
   | "inactive:pass_through"

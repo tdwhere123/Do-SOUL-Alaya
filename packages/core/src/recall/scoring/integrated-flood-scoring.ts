@@ -15,6 +15,7 @@ import {
   resolveConformantEvidenceBeta,
   resolveConformantPathWeight
 } from "./conformant-fusion-scoring.js";
+import { resolveSliceAxis } from "./flood-slice-axis.js";
 
 export type {
   FloodAxisInactiveReason,
@@ -57,12 +58,6 @@ function manifestationOmega(
     default:
       return 0.5;
   }
-}
-
-// Slice pass_through / no_slice mean "gate open" (feature off or no query facets),
-// unlike path pass_through which means "no path graph present" and withholds fuel.
-function resolveSliceAxis(): ResolvedFloodFuelAxis {
-  return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
 }
 
 function resolvePathAxis(
@@ -162,7 +157,7 @@ function resolveIntegratedFloodScore(
   const lambda = resolveConformantPathWeight();
   const beta = resolveConformantEvidenceBeta();
   const memorySupplementEligible = params.memorySupplementEligible ?? true;
-  const slice = resolveSliceAxis();
+  const slice = resolveSliceAxis(params.entry, params.supplementaryData);
   const path = resolvePathAxis(
     params.axisInputs.A_path,
     hasPathInflow(params.entry.object_id, params.supplementaryData),

@@ -11,7 +11,10 @@ import {
 import type {
   SliceCompatibilityV2
 } from "../flood/slice-key-selector.js";
-import type { SelectedSliceKeyV2 } from "../flood/slice-key-contract.js";
+import {
+  mergeSelectedSliceKeysV2,
+  type SelectedSliceKeyV2
+} from "../flood/slice-key-contract.js";
 import { projectedRoutingKeyOwnerIdentity } from "../flood/projected-routing-keys.js";
 import {
   resolveFusionContribution as resolveAdaptiveFusionContribution,
@@ -272,7 +275,7 @@ function buildSliceSelectionContext(
     ) ?? EMPTY_SLICE_KEYS;
     memoryKeysByWorkspaceObject.set(
       memoryProjectionKey(workspaceId, candidate.entry.object_id),
-      mergeSliceKeys(currentKeys, projectedKeys)
+      mergeSelectedSliceKeysV2(currentKeys, projectedKeys)
     );
   }
   return Object.freeze({ queryKeysByWorkspace, memoryKeysByWorkspaceObject, asOfMs });
@@ -289,11 +292,11 @@ function selectCompatibilityByPathId(
   const targetMemoryKeys = memoryKeysFor(context, workspaceId, target.object_id);
   for (const edge of inflow ?? []) {
     if (edge.pathId === undefined) continue;
-    const sourceKeys = mergeSliceKeys(
+    const sourceKeys = mergeSelectedSliceKeysV2(
       memoryKeysFor(context, workspaceId, edge.seedObjectId),
       pathAnchorKeys(edge, "source", workspaceId, context.asOfMs)
     );
-    const targetKeys = mergeSliceKeys(
+    const targetKeys = mergeSelectedSliceKeysV2(
       targetMemoryKeys,
       pathAnchorKeys(edge, "target", workspaceId, context.asOfMs)
     );
@@ -337,16 +340,6 @@ function pathAnchorKeys(
     sourceVersion: edge.pathSourceVersion,
     asOfMs
   });
-}
-
-function mergeSliceKeys(
-  left: readonly SelectedSliceKeyV2[],
-  right: readonly SelectedSliceKeyV2[]
-): readonly SelectedSliceKeyV2[] {
-  if (right.length === 0) return left;
-  const byId = new Map(left.map((key) => [key.key_id, key]));
-  for (const key of right) byId.set(key.key_id, key);
-  return Object.freeze([...byId.values()]);
 }
 
 function buildObjectPotentialById(

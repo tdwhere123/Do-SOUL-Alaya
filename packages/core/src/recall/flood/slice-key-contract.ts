@@ -220,6 +220,15 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+export function mergeSelectedSliceKeysV2(
+  left: readonly SelectedSliceKeyV2[],
+  right: readonly SelectedSliceKeyV2[]
+): readonly SelectedSliceKeyV2[] {
+  if (right.length === 0) return left;
+  if (left.length === 0) return right;
+  return sortUniqueSelectedKeys([...left, ...right]);
+}
+
 function sortUniqueSelectedKeys(
   keys: readonly SelectedSliceKeyV2[]
 ): readonly SelectedSliceKeyV2[] {
