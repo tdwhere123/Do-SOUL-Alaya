@@ -14,6 +14,8 @@ import {
   resolvePolicy
 } from "./orchestration.js";
 import { compileRecallQueryProbes } from "../query/recall-query-probes.js";
+import { extendQueryProbesWithOpenSemanticFactors } from
+  "../query/query-factor-expanded-terms.js";
 import { resolvePreparedAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import {
   finalizeRecallCandidateDiagnostics,
@@ -109,7 +111,10 @@ async function prepareRecallRequest(
   });
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
-  const queryProbes = compileRecallQueryProbes(queryText);
+  const queryProbes = extendQueryProbesWithOpenSemanticFactors(
+    compileRecallQueryProbes(queryText),
+    params.querySemanticFactorFormationCapture
+  );
   const answerShapePlan = resolvePreparedAnswerShapePlan(queryProbes);
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
   const retrievalFieldBundle = createRecallRetrievalFieldBundle({
