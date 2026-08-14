@@ -5,6 +5,11 @@ sanitized live-check snapshots across every Alaya release that touches
 recall, embedding, tier, or governance behavior. It is the durable
 contract that v0.3.6 establishes for v0.3.7+ and beyond.
 
+KPI archives here are evidence, not the algorithm definition. Current
+recall target vs live: [`docs/handbook/recall.md`](../handbook/recall.md).
+Do not treat a dated `report.md` or baseline writeup as the live ranking
+recipe.
+
 v0.3.7 introduces the `live/strict-real` and `public-multiturn` archive
 **contracts and import commands**. The first archive entries under
 `docs/bench-history/live/` and `docs/bench-history/public-multiturn/`

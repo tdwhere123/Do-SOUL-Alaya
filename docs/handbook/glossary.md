@@ -202,13 +202,27 @@ before the trigger is called consumable.
 
 ## Recall
 
-**Lexical Recall** — BM25 / FTS-based search.
-**Path-Aware Recall** — Recall that incorporates `PathRelation`
-proximity.
-**Embedding Supplement** — Vector ranking that supplements lexical and path
-recall. The bundled local ONNX provider is enabled by default after verified
-startup warmup; operators can explicitly disable it. It never decides durable
-truth.
+**UGAF** — Unified Governed Associative Field. The intended recall
+algorithm: one continuous governed associative-memory field, not a
+stack of post-processors. In-repo owner: `docs/handbook/recall.md`.
+Hopfield / Lyapunov / attractor wording is a design lens, not a
+proved runtime.
+
+**Lexical Recall** — BM25 / FTS-based search. Live family-max RRF
+still moves scores (`fusion-delivery-families.ts`).
+
+**Path-Aware Recall** — Intended runtime manifestation of
+`PathRelation` via typed transfer \(G_L\). On HEAD `10da1318` the
+path axis is `inactive:pass_through` and does not count as flood fuel
+(`integrated-flood-scoring.ts:67-76`). Do not describe this as a
+connected ranking channel.
+
+**Embedding Supplement** — Vector signal that may score or, in the
+target, seed \(\Omega\). The bundled local ONNX provider is enabled
+by default after verified startup warmup; operators can explicitly
+disable it. It never decides durable truth (invariant §18). On the
+2026-08-14 B dump it scored widely and first-admitted 9/19431
+candidates — a scorer, almost not a discoverer. See `recall.md`.
 
 **API Embedding Provider** — A network-backed embedding supplement. API use is
 always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires

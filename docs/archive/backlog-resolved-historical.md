@@ -6,6 +6,70 @@ Open issues and permanently rejected items remain in the handbook backlog.
 
 ---
 
+## Superseded 2026-08-14 (docs-governance)
+
+### #BL-047 — `multi_hop_path` as a dedicated recall fusion stream
+
+**Status**: Superseded (2026-08-14). Do not reopen as a fusion-lane add.
+
+v0.3.11 deferred a dedicated `multi_hop_path` fusion stream on the
+premise that 2-hop BFS already folded into `graph_expansion`. Adding
+another fusion ranker is the UGAF §1.1 failure mode (stacking
+post-processors). On HEAD `10da1318` / the 2026-08-14 B dump,
+`graph_expansion` and `path_expansion` contributed 0 ranks; the work
+is connecting typed \(G_L\) transfer, not a new stream. See
+`docs/handbook/recall.md`.
+
+---
+
+## Closed 2026-08-14 (docs-governance triage)
+
+### #BL-053 — Edge `llm_supports` LOCAL pair-classifier (host-worker / ONNX)
+
+**Status**: Close condition met (host-worker path; 2026-08-14 triage). Do not
+reopen as an in-process ONNX pair-classifier unless product reverses
+the MCP/CLI compute form.
+
+Default wiring is `host_worker_defer` with cloud LLM off
+(`apps/core-daemon/src/runtime/daemon/lifecycle/daemon-runtime-support.ts:203-244`;
+regression `apps/core-daemon/src/__tests__/garden/compute-config-wiring.test.ts:117-126`).
+Host-worker `applyVerdict` / `submitHostVerdict` stamps
+`EdgeProposalTriggerSource.LLM_SUPPORTS` after `LLM_CONFIDENCE_FLOOR`
+(`packages/core/src/path-graph/producers/edge-auto-producer-service.ts:361,375-417`).
+No-network regression:
+`apps/core-daemon/src/__tests__/garden/edge-classify-no-network.test.ts:5-18`.
+Product form is MCP/CLI attached-agent compute, not in-process cloud
+(`packages/core/src/path-graph/producers/edge-auto-producer-types.ts:94-97`).
+ONNX in this repo is the embedding provider (`local_onnx`), not a pair
+classifier. Landed in spirit by `291e79bc` (2026-06-03) plus later
+wiring splits.
+
+### #BL-064 — LongMemEval source tree organization
+
+**Status**: Close condition met for the layout (2026-08-14 triage).
+
+HEAD `10da1318` `apps/bench-runner/src/longmemeval/` is domain-split
+(85 subdirectories, 388 `.ts` files, 7 top-level barrels). The
+"currently flat / do not move 70+ files during audit" premise is
+false. Layout rebuild: `5269155e` (2026-07-18). Tracked
+`docs/bench-history/public/latest-*.json` pointers exist.
+Recall-only preflight plus targeted LongMemEval tests were **not**
+re-run this pass (`NOT_VERIFIED`).
+
+---
+
+## Resolved 2026-07-30
+
+### #BL-060 — SQLite worker queue for blocking storage operations
+
+**Status**: Close condition met (2026-07-30) — queue infra + EventLog standalone hot-path migration.
+
+S7 witnessed main-thread `better-sqlite3` writes inflating concurrent recall tail latency. Worker-thread queue lands under `packages/storage/src/sqlite/` (default-on via daemon `installDefaultSqliteWriteQueue`; opt out `ALAYA_SQLITE_WRITE_QUEUE=0|false|off|disabled`). Standalone `SqliteEventLogRepo.append` now enqueues payload SQL (`event-log-queue-append.ts`) with revision CAS as a scalar subquery on the worker connection; callers that already `await append` yield the event loop. In-transaction / `transactional()` appends stay synchronous on the caller connection so EventLog-first multi-table CAS (`EventPublisher.decideAppendThenApply` / `mutateThenAppendMany`) remains one SQLite txn. Proof: `event-log-write-queue.test.ts` (CAS + sync-in-txn + production-shaped read responsiveness) and `concurrent-sqlite-tail-latency.test.ts`.
+
+**Remaining gap (honest, not a reopen of this issue):** Ontology / memory-entry / garden-task writes that are not part of a queued EventLog standalone append still sync on the main connection (required when co-committed with EventLog inside `transactional()`). Further ontology-only hot paths can migrate later without reopening the EventLog-first seam.
+
+---
+
 ## Resolved in audit branch (2026-07-07)
 
 ### #BL-065 — Finish strict-index test-suite cleanup

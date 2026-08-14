@@ -5,8 +5,9 @@ Superseded handbook content. **Not current truth.**
 | Archived | Replaced by |
 |---|---|
 | `runtime-status.md` | `docs/handbook/runtime-snapshot.md` |
-| `code-map.md` | `docs/handbook/architecture.md` + `rg` / GitNexus |
-| `maintenance.md` | `docs/handbook/README.md` §Maintenance |
+| `code-map.md` | `docs/handbook/architecture.md` + `rg` / CodeGraph |
+| `recall-routing-projections-pre-ugaf.md` | `docs/handbook/recall.md` |
+| `maintenance.md` | `docs/handbook/README.md` |
 | `workflow/governance-routes.md` | `docs/handbook/architecture.md` §Governance Route Families |
 | `workflow/agent-workflow.md` | do-it skills (`do-it-router`, …) |
 | `workflow/review-protocol.md` | `do-it-review-loop` skill |

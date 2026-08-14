@@ -108,30 +108,20 @@ SemVer major. Offline migration may read a prior version to construct a
 new copy; runtime formation and recall must fail closed rather than
 operate a compatibility mixture.
 
-## Recall Routing Projections
+## Recall algorithm
 
-`PathRelation` is the derived, governed current/as-of conditional-routing
-projection. It is rebuilt from accepted `RelationAssertion` records and
-their appended EventLog resolutions; it is not a durable relation claim
-or historical record. Flood transfer is a query-time decision to carry
-potential along one directed edge under the current routing conditions.
-The object's `fused_score` is the aggregate projection produced after
-those edge decisions; it is not the flood or a new durable fact.
+Do not implement recall from flood / SliceKey / fused-score prose.
+The intended algorithm is the UGAF read path; the live runtime is a
+degenerate projection of that path (typed \(G_L\) transfer is not
+connected; family-max RRF plus stacked reorders are). Owner:
 
-SliceKey is a workspace-scoped, versioned, rebuildable routing view over
-existing projections. Its seed taxonomy is extensible and keeps typed
-provenance: event time stays a time interval or bucket, canonical entities
-and object anchors stay typed identities, spatial values stay spatial, and
-`facet_tags` contribute semantic facets rather than acting as a universal
-container. Query-time compatibility is the intersection of query, source,
-and target keys. A query with no valid key follows the neutral existing path;
-a keyed query with no three-way match may reject only the experimental edge
-decision, never rewrite the underlying evidence or `RelationAssertion`.
+[`recall.md`](recall.md)
 
-Single-edge transfer is the required baseline. Any bounded two-edge traversal
-must be earned by miss evidence, remain deterministic and budgeted, and pass
-the same governance and release gates; it is not implied by the existence of
-projected paths.
+`PathRelation` remains a derived current/as-of routing projection over
+immutable `RelationAssertion` history (invariant §12). That ontology
+constraint is not a claim that query-time flood or SliceKey matching
+is live. The pre-UGAF wording is archived at
+`docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
 
 ## Package Shape
 
@@ -246,7 +236,7 @@ export interface RuntimeNotifier {
 `EventPublisher` calls `notifyEntry` after every successful
 `EventLog.append` + DB mutate, never before. `notify` is reserved for
 already-decoded `Phase0Event` payloads (e.g. run-scoped listeners that
-do not need the full envelope). Phase 4 daemon wiring instantiates one
+do not need the full envelope). Daemon wiring instantiates one
 concrete `RuntimeNotifier` and registers it on `EventPublisher` at
 startup step 3 of `Daemon Startup Ordering` below.
 
@@ -287,7 +277,7 @@ review finding:
    - HealthJournalService, EventPublisher
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`)
+   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`). Helper presence is not connectedness — graph/path fusion streams and flood fuel are degenerate on HEAD `10da1318`; see [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)

@@ -1,16 +1,41 @@
 # Runtime Snapshot
 
-Current release and readiness truth for **v0.3.11** on `main`.
-Last anchored: 2026-07-08 (`60fed2f`).
+Package version is still `0.3.11` (`package.json` on committed
+`10da1318`). This file is readiness vocabulary and dated snapshots.
+It is **not** a claim that the associative field has landed, that a
+KPI gate passed, or that the tree is ready to merge.
 
-Update this file when a version bump, gate result, or surface witness changes.
+Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Release posture
+## Recall posture (2026-08-14 docs-governance pass)
+
+Source: committed `10da1318`. Counts: B-arm dump bound in
+[`recall.md`](recall.md) (19431 candidates / 18344 answerable;
+snapshot `7cac6e0d…00a6a`; B KPI `ed061c00…642a`). That dump is not
+`gate passed`.
 
 | Fact | Status |
 |---|---|
+| Target algorithm | UGAF read path. In-repo owner: [`recall.md`](recall.md) |
+| Live composition operator | `lightweight_deep_head_prob_or_v1` (`packages/core/src/recall/rerank/deep-head-assessment-builder.ts:18`) |
+| `family_grouped_composition_v2` | Deleted (no `packages/` / `apps/` hit at `10da1318`) |
+| Typed path transfer \(G_L\) | Not connected (`path_status = inactive:pass_through`, `fuel_verified = false` on 19431/19431 in that dump) |
+| Evidence flood axis | Not uniformly dead (`active` 16277 / `inactive:pass_through` 3154). Fuel still fails because path withholds. |
+| Direct activation | Family-max RRF is live |
+| Coverage selector | Live on that dump |
+| Official 100Q / 500Q promotion | **Not claimed** |
+
+## v0.3.11 card snapshot (2026-07-08, `60fed2f`) — not re-verified here
+
+The table below is the last handbook snapshot of the v0.3.11 *card set*.
+Surface-level labels were not re-probed in the 2026-08-14 docs pass
+(`NOT_CHECKED`). Do not read "implementation complete" as "UGAF field
+connected."
+
+| Fact | Status at 2026-07-08 |
+|---|---|
 | Package version | `0.3.11` (`package.json`) |
-| Implementation | Complete for the v0.3.11 card set |
+| v0.3.11 card-set implementation | Complete for that card set |
 | Big-machine 500q KPI gate | **Pending** — local 7.6 GB WSL2 OOMs at 500q (`#BL-052`) |
 | R@5 → 90% claim | **Not claimed** |
 | Audit cleanup | Merged (`audit-2026-07-07-nice-cleanup`) |
@@ -23,13 +48,14 @@ Use these four labels on new claims:
 |---|---|
 | `schema_only` | Types / migration only; no daemon producer+consumer |
 | `implementation_wired` | Wired at startup; tests prove fixture path |
-| `live_event_proven` | Durable artefact in real workspace, attach session, or bench E2E |
+| `live_event_proven` | Durable artefact in a real workspace, attach session, or bench E2E |
 | `agent_used` | Host agent autonomously invoked surface with EventLog chain |
 
-Retired labels (`schema-ready`, `mcp-callable`, `live-event-ready`, …) must
-not appear on new rows.
+Retired labels (`schema-ready`, `mcp-callable`, `live-event-ready`, …)
+must not appear on new rows. `implementation_wired` is not connectedness
+and is not `gate passed`.
 
-## Surfaces
+## Surfaces (2026-07-08 snapshot — `NOT_CHECKED` this pass)
 
 | Surface | Level | Notes |
 |---|---|---|
@@ -42,9 +68,10 @@ not appear on new rows.
 
 Do not infer readiness from source presence or profile-file writes.
 
-## v0.3.11 subsystems touched
+## v0.3.11 subsystems touched (2026-07-08)
 
-All **`implementation_wired`** until R5 500q or live attach witness:
+All **`implementation_wired`** until R5 500q or live attach witness.
+Not re-verified here.
 
 - Garden compute default `host_worker`; cloud opt-in only
 - `EDGE_CLASSIFY` Garden task with required `edge_verdict`
@@ -57,7 +84,7 @@ All **`implementation_wired`** until R5 500q or live attach witness:
 
 | Issue | Blocks |
 |---|---|
-| `#BL-052` | Full LongMemEval CI sample-floor |
-| `#BL-051` | Abstention calibration on 500q |
+| `#BL-052` | Wire LongMemEval CI sample-floor |
+| `#BL-051` | Abstention calibration verdict on a 500q archive |
 | `#BL-057` | Warm-workspace recall prior witness |
-| `#BL-053` | LOCAL `llm_supports` pair-classifier |
+| UGAF field landing | Typed \(G_L\), write-side Keys, open-semantic candidate comparison, embedding-as-\(\Omega\)-seed — see `recall.md`. Not a `#BL-NNN`. |
