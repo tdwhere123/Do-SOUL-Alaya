@@ -5,6 +5,7 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
+import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
   PathInflowEdge,
@@ -61,7 +62,9 @@ export async function collectGovernancePathDerivations(params: {
     return Object.freeze({
       governanceCeilingByMemoryId: buildGovernanceFailsafeCeilings(candidateIds),
       pathInflowByTarget: Object.freeze({}),
-      pathInflowAvailability: "unavailable" as const
+      pathInflowAvailability: classifyPathIndexReadFailure(error) === "index_unbound"
+        ? "unavailable" as const
+        : "storage_error" as const
     });
   }
   const contributionsByMemoryId = collectGovernanceContributions(paths, candidateIds);

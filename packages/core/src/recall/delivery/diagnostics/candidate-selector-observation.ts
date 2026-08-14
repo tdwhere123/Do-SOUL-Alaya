@@ -281,6 +281,9 @@ function buildPathObservation(
   if (availability === "unavailable") {
     return Object.freeze({ status: "unavailable", receipts: Object.freeze([]) });
   }
+  if (availability === "storage_error") {
+    return Object.freeze({ status: "storage_error", receipts: Object.freeze([]) });
+  }
   if (inflow === undefined || availability === "not_observed") {
     return Object.freeze({ status: "not_observed", receipts: Object.freeze([]) });
   }

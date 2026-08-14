@@ -83,7 +83,14 @@ export interface RecallCandidateSelectorObservation {
   }>;
   readonly coverage: Readonly<{ readonly marginal_gain: number | null }>;
   readonly path: Readonly<{
-    readonly status: "not_observed" | "unavailable" | "none" | "partial" | "complete";
+    readonly status:
+      | "not_observed"
+      | "unavailable"
+      | "storage_error"
+      | "none"
+      | "partial"
+      | "complete";
+
     readonly receipts: readonly Readonly<RecallSelectorPathReceipt>[];
   }>;
 }

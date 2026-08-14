@@ -1,7 +1,7 @@
-import { copyFileSync, existsSync, linkSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
   MemoryDimension,
@@ -11,12 +11,22 @@ import {
 import { compileRecallQueryProbes } from "../../../../../../packages/core/src/recall/query/recall-query-probes.js";
 import { collectGovernancePathDerivations } from "../../../../../../packages/core/src/recall/supplements/supplementary-data-governance-paths.js";
 import { computeIntegratedFloodScore } from "../../../../../../packages/core/src/recall/scoring/integrated-flood-scoring.js";
+import { computeFloodEdgeTransfer } from "../../../../../../packages/core/src/recall/flood/edge-transfer.js";
+import {
+  resolveConformantFloodCapPerSource,
+  resolveConformantFloodCapTotal,
+  resolveConformantRhoPath
+} from "../../../../../../packages/core/src/recall/scoring/conformant-fusion-scoring.js";
 import type { RecallSupplementaryData } from "../../../../../../packages/core/src/recall/runtime/recall-service-types.js";
 import {
   StorageDatabase,
+  initDatabase,
   isTemporalProjectionSelected
 } from "@do-soul/alaya-storage";
-import { createBoundRecallPathReadPorts } from "../../../runtime/recall/recall-path-read-bind.js";
+import {
+  createBoundRecallPathReadPorts,
+  resolveRecallPathReadBind
+} from "../../../runtime/recall/recall-path-read-bind.js";
 
 const SNAPSHOT = path.resolve(
   process.cwd(),
@@ -28,69 +38,101 @@ const TARGET_ID = "c430e48a-3d08-4893-9b50-cf1b06049f97";
 const PATH_ID = "relation_assertion_0003fe6d0f2d78f4e1ef18ba0cf0b16e0c5472de62a5999d";
 
 const openDatabases: StorageDatabase[] = [];
-const scratchRoots: string[] = [];
+let snapshotScratch: string | null = null;
+let snapshotCopy: string | null = null;
+
+beforeAll(() => {
+  if (!existsSync(SNAPSHOT)) {
+    throw new Error(`readonly snapshot missing: ${SNAPSHOT}`);
+  }
+  snapshotScratch = mkdtempSync(path.join(tmpdir(), "alaya-path-bind-"));
+  snapshotCopy = path.join(snapshotScratch, "snapshot.sqlite");
+  copyFileSync(SNAPSHOT, snapshotCopy);
+  if (statSync(SNAPSHOT).ino === statSync(snapshotCopy).ino) {
+    throw new Error("snapshot scratch must not share an inode with the frozen file");
+  }
+});
 
 afterEach(() => {
   for (const database of openDatabases) {
     if (!database.isClosed()) database.close();
   }
   openDatabases.length = 0;
-  for (const scratch of scratchRoots) {
-    rmSync(scratch, { recursive: true, force: true });
+});
+
+afterAll(() => {
+  if (snapshotScratch !== null) {
+    rmSync(snapshotScratch, { recursive: true, force: true });
   }
-  scratchRoots.length = 0;
 });
 
 describe("typed path transfer bind seam", () => {
-  it("does not observe an empty legacy table as available pass-through when temporal projections exist", async () => {
+  it("defaults to the temporal projection and returns the locator edge on this snapshot", async () => {
     const database = openSnapshotReadonly();
     expect(isTemporalProjectionSelected(database)).toBe(false);
     expect(countRows(database, "path_relations")).toBe(0);
     expect(countActivePathProjections(database)).toBeGreaterThan(0);
+    expect(resolveRecallPathReadBind({ database })).toBe("temporal");
 
-    const ports = createBoundRecallPathReadPorts({ database });
-    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
-    const derivations = await collectGovernancePathDerivations({
-      dependencies: { pathExpansionPort: ports.pathExpansionPort },
-      warn: () => undefined,
-      workspaceId: WORKSPACE_ID,
-      candidates
-    });
+    const derivations = await collectLocatorDerivations(database);
+    const inflow = derivations.pathInflowByTarget[TARGET_ID] ?? [];
+    expect(derivations.pathInflowAvailability).toBe("available");
+    expect(inflow).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pathId: PATH_ID, seedObjectId: SOURCE_ID, targetObjectId: TARGET_ID })
+    ]));
+
     const flood = computeIntegratedFloodScore({
-      entry: candidates[1]!,
+      entry: memory(TARGET_ID),
       axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
       supplementaryData: supplementary({
         pathInflowByTarget: derivations.pathInflowByTarget,
         pathInflowAvailability: derivations.pathInflowAvailability
       })
     });
+    expect(flood.diagnostics.path_status).toBe("active");
+  }, 60_000);
 
-    const emptyInflow = (derivations.pathInflowByTarget[TARGET_ID] ?? []).length === 0;
-    expect(
-      derivations.pathInflowAvailability === "available" &&
-        emptyInflow &&
-        flood.diagnostics.path_status === "inactive:pass_through"
-    ).toBe(false);
-
+  it("attributes a production transfer receipt without injecting A_path", async () => {
+    const database = openSnapshotReadonly();
+    const derivations = await collectLocatorDerivations(database);
     const inflow = derivations.pathInflowByTarget[TARGET_ID] ?? [];
-    if (inflow.length > 0) {
-      expect(flood.diagnostics.path_status).toBe("active");
-      expect(inflow).toEqual(expect.arrayContaining([
-        expect.objectContaining({ pathId: PATH_ID, seedObjectId: SOURCE_ID, targetObjectId: TARGET_ID })
-      ]));
-      return;
-    }
+    expect(inflow.length).toBeGreaterThan(0);
 
-    expect(["unavailable", "index_unavailable"]).toContain(derivations.pathInflowAvailability);
-    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
-    expect(flood.diagnostics.A_path).not.toBe(1);
+    const transfer = computeFloodEdgeTransfer({
+      inflow,
+      targetObjectId: TARGET_ID,
+      rObjectById: new Map([[SOURCE_ID, 1], [TARGET_ID, 1]]),
+      capPerSource: resolveConformantFloodCapPerSource(),
+      capTotal: resolveConformantFloodCapTotal(),
+      rhoPath: resolveConformantRhoPath()
+    });
+    expect(transfer.traces).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path_id: PATH_ID,
+        relation_kind: "answers_with",
+        seed_object_id: SOURCE_ID,
+        target_object_id: TARGET_ID
+      })
+    ]));
+    expect(transfer.value).toBeGreaterThan(0);
+
+    const flood = computeIntegratedFloodScore({
+      entry: memory(TARGET_ID),
+      axisInputs: { R_obj: 0.2, A_path: transfer.value, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: derivations.pathInflowByTarget,
+        pathInflowAvailability: derivations.pathInflowAvailability
+      })
+    });
+    expect(flood.diagnostics.path_status).toBe("active");
+    expect(flood.diagnostics.A_path).toBe(transfer.value);
   }, 60_000);
 
   it("seals a forced legacy bind as index_unavailable instead of pass-through identity", async () => {
     const database = openSnapshotReadonly();
     const ports = createBoundRecallPathReadPorts({
       database,
-      temporalProjectionSelected: false
+      pathReadBind: "legacy"
     });
     const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
     const derivations = await collectGovernancePathDerivations({
@@ -113,28 +155,58 @@ describe("typed path transfer bind seam", () => {
   }, 60_000);
 });
 
-function openSnapshotReadonly(): StorageDatabase {
-  if (!existsSync(SNAPSHOT)) {
-    throw new Error(`readonly snapshot missing: ${SNAPSHOT}`);
-  }
-  const scratch = mkdtempSync(path.join(tmpdir(), "alaya-path-bind-"));
-  scratchRoots.push(scratch);
-  const scratchSqlite = path.join(scratch, "snapshot.sqlite");
-  try {
-    linkSync(SNAPSHOT, scratchSqlite);
-  } catch (error) {
-    if (!isCrossDeviceLinkError(error)) throw error;
-    copyFileSync(SNAPSHOT, scratchSqlite);
-  }
-  const connection = new BetterSqlite3(scratchSqlite, { readonly: true, fileMustExist: true });
-  connection.pragma("query_only = ON");
-  const database = new StorageDatabase(scratchSqlite, connection);
-  openDatabases.push(database);
-  return database;
+describe("refresh-required path index", () => {
+  it("seals instead of empty-legacy pass-through when a ready projection needs refresh", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    openDatabases.push(database);
+    database.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_refresh_required = 1, projection_count = 1
+      WHERE state_id = 1
+    `).run();
+    expect(resolveRecallPathReadBind({ database })).toBe("legacy");
+
+    const ports = createBoundRecallPathReadPorts({ database });
+    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
+    const derivations = await collectGovernancePathDerivations({
+      dependencies: { pathExpansionPort: ports.pathExpansionPort },
+      warn: () => undefined,
+      workspaceId: WORKSPACE_ID,
+      candidates
+    });
+    const flood = computeIntegratedFloodScore({
+      entry: candidates[1]!,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: derivations.pathInflowByTarget,
+        pathInflowAvailability: derivations.pathInflowAvailability
+      })
+    });
+    expect(derivations.pathInflowAvailability).toBe("unavailable");
+    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
+    expect(flood.diagnostics.A_path).not.toBe(1);
+  });
+});
+
+async function collectLocatorDerivations(database: StorageDatabase) {
+  const ports = createBoundRecallPathReadPorts({ database });
+  return await collectGovernancePathDerivations({
+    dependencies: { pathExpansionPort: ports.pathExpansionPort },
+    warn: () => undefined,
+    workspaceId: WORKSPACE_ID,
+    candidates: [memory(SOURCE_ID), memory(TARGET_ID)]
+  });
 }
 
-function isCrossDeviceLinkError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EXDEV";
+function openSnapshotReadonly(): StorageDatabase {
+  if (snapshotCopy === null) {
+    throw new Error("snapshot scratch copy was not prepared");
+  }
+  const connection = new BetterSqlite3(snapshotCopy, { readonly: true, fileMustExist: true });
+  connection.pragma("query_only = ON");
+  const database = new StorageDatabase(snapshotCopy, connection);
+  openDatabases.push(database);
+  return database;
 }
 
 function countRows(database: StorageDatabase, table: string): number {

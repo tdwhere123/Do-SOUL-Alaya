@@ -31,7 +31,12 @@ export interface PathInflowEdge {
   readonly weight: number;
 }
 
-export type RecallPathInflowAvailability = "not_observed" | "available" | "unavailable";
+export type RecallPathInflowAvailability =
+  | "not_observed"
+  | "available"
+  | "unavailable"
+  | "storage_error";
+
 
 export interface EvidenceSupportVector {
   readonly source_kind: "evidence_ref";

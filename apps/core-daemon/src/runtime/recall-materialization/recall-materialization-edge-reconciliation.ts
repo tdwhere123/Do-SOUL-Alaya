@@ -29,7 +29,6 @@ type EdgeRuntimeWiring = Pick<
   | "memoryEntryRepo"
   | "pathRelationRepo"
   | "rawConfigService"
-  | "temporalProjectionSelected"
   | "warn"
 >;
 

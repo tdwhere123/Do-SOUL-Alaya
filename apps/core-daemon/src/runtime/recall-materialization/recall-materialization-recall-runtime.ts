@@ -278,7 +278,7 @@ function createRecallGraphSupportPort(
 ) {
   if (resolveRecallPathReadBind({
     database: input.database,
-    temporalProjectionSelected: input.temporalProjectionSelected
+    pathReadBind: input.pathReadBind
   }) !== "temporal") {
     return input.graphExploreService;
   }

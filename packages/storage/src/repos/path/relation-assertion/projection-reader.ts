@@ -39,7 +39,8 @@ export function isRelationProjectionReadable(db: StorageDatabase): boolean {
 }
 
 export function isLegacyPathIndexUnbound(db: StorageDatabase): boolean {
-  return isRelationProjectionPopulated(db) && isPathRelationsTableEmpty(db);
+  return (isRelationProjectionPopulated(db) || isRelationProjectionRefreshPending(db))
+    && isPathRelationsTableEmpty(db);
 }
 
 export function readActiveProjectionGeneration(
@@ -159,6 +160,21 @@ function isRelationProjectionPopulated(db: StorageDatabase): boolean {
   } catch (error) {
     if (isMissingTableError(error)) return false;
     throw wrapRelationAssertionStorageError("inspect relation projection population", error);
+  }
+}
+
+function isRelationProjectionRefreshPending(db: StorageDatabase): boolean {
+  try {
+    const row = db.connection.prepare(`
+      SELECT projection_refresh_required
+      FROM temporal_schema_state
+      WHERE state_id = 1 AND status = 'ready'
+      LIMIT 1
+    `).get() as Readonly<{ readonly projection_refresh_required: number }> | undefined;
+    return row !== undefined && row.projection_refresh_required !== 0;
+  } catch (error) {
+    if (isMissingTableError(error)) return false;
+    throw wrapRelationAssertionStorageError("inspect relation projection refresh", error);
   }
 }
 

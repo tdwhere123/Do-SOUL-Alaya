@@ -6,6 +6,9 @@ import { collectGovernancePathDerivations } from
 import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
 import {
+  LegacyPathIndexUnboundError
+} from "../../recall/runtime/legacy-path-index-unbound-error.js";
+import {
   createCandidate,
   createConfig,
   createSupplementaryData,
@@ -117,6 +120,13 @@ describe("candidate selector observation", () => {
     const observation = selectObservation(memory, [], "unavailable");
 
     expect(observation.path).toEqual({ status: "unavailable", receipts: [] });
+  });
+
+  it("preserves a path-index storage fault instead of reporting no edges", () => {
+    const memory = createCandidate("memory-1");
+    const observation = selectObservation(memory, [], "storage_error");
+
+    expect(observation.path).toEqual({ status: "storage_error", receipts: [] });
   });
 
   it("records demand atoms with their content, Key, or Evidence source", () => {
@@ -236,7 +246,45 @@ describe("candidate selector observation", () => {
     );
   });
 
-  it("marks a failed governance Path lookup as unavailable", async () => {
+  it("marks an unbound legacy Path index as unavailable", async () => {
+    const memory = createCandidate("memory-1");
+    const result = await collectGovernancePathDerivations({
+      dependencies: {
+        pathExpansionPort: {
+          findByAnchors: vi.fn(async () => {
+            throw new LegacyPathIndexUnboundError();
+          })
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      candidates: [memory.entry]
+    });
+
+    expect(result.pathInflowAvailability).toBe("unavailable");
+  });
+
+  it("marks a reconstructed unbound error by name after worker serialization", async () => {
+    const memory = createCandidate("memory-1");
+    const serialized = new Error("Temporal path projection is populated but recall is bound to an empty legacy path_relations table.");
+    serialized.name = "LegacyPathIndexUnboundError";
+    const result = await collectGovernancePathDerivations({
+      dependencies: {
+        pathExpansionPort: {
+          findByAnchors: vi.fn(async () => {
+            throw serialized;
+          })
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      candidates: [memory.entry]
+    });
+
+    expect(result.pathInflowAvailability).toBe("unavailable");
+  });
+
+  it("marks a path-index storage fault as storage_error instead of unavailable", async () => {
     const memory = createCandidate("memory-1");
     const result = await collectGovernancePathDerivations({
       dependencies: {
@@ -251,14 +299,15 @@ describe("candidate selector observation", () => {
       candidates: [memory.entry]
     });
 
-    expect(result.pathInflowAvailability).toBe("unavailable");
+    expect(result.pathInflowAvailability).toBe("storage_error");
   });
 });
 
 function selectObservation(
   memory: ReturnType<typeof createCandidate>,
   pathInflow: readonly ReturnType<typeof completePathReceipt>[],
-  pathInflowAvailability: "available" | "unavailable" = "available"
+  pathInflowAvailability: "available" | "unavailable" | "storage_error" = "available"
+
 ) {
   const result = selectFineAssessmentCandidates({
     orderedCandidates: [memory],

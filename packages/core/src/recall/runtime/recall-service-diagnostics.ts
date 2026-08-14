@@ -107,7 +107,9 @@ export type FloodAxisInactiveReason =
   | "inactive:no_evidence"
   | "inactive:pass_through"
   | "inactive:index_unavailable"
+  | "inactive:storage_error"
   | "inactive:beta_disabled";
+
 
 export const RECALL_FLOOD_EDGE_REASONS = [
   "transferred",

@@ -115,7 +115,7 @@ describe("selected temporal recall read worker", () => {
 
       const legacyClient = createRecallReadWorkerClient({
         databaseFilename: databasePath,
-        temporalProjectionSelected: false,
+        pathReadBind: "legacy",
         workerUrl: builtWorkerUrl
       });
       expect(legacyClient).not.toBeNull();
@@ -130,13 +130,13 @@ describe("selected temporal recall read worker", () => {
 
       expect(() => createRecallReadWorkerClient({
         databaseFilename: databasePath,
-        temporalProjectionSelected: true,
+        pathReadBind: "temporal",
         workerUrl: builtWorkerUrl
       })).toThrow("selected temporal recall worker requires parent projection preparation");
 
       const selectedClient = createRecallReadWorkerClient({
         databaseFilename: databasePath,
-        temporalProjectionSelected: true,
+        pathReadBind: "temporal",
         prepareTemporalProjection: async () => undefined,
         workerUrl: builtWorkerUrl
       });
@@ -265,7 +265,7 @@ describe("selected temporal recall read worker", () => {
       });
       const selectedClient = createRecallReadWorkerClient({
         databaseFilename: databasePath,
-        temporalProjectionSelected: true,
+        pathReadBind: "temporal",
         prepareTemporalProjection,
         workerUrl: builtWorkerUrl
       });

@@ -54,9 +54,9 @@ function buildRecallRuntimeInput(input: RecallCoreStartupInput) {
   const { bootstrap, foundation, repositories } = input;
   return {
     database: bootstrap.database,
-    temporalProjectionSelected: resolveRecallPathReadBind({
+    pathReadBind: resolveRecallPathReadBind({
       database: bootstrap.database
-    }) === "temporal",
+    }),
     relationProjectionAdmissionMode: input.relationProjectionAdmissionMode,
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,

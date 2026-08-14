@@ -64,7 +64,7 @@ describe("createRecallPathReadPorts", () => {
     ]);
   });
 
-  it("keeps the legacy reader as the default mode", async () => {
+  it("uses an explicit legacy reader on the lower helper when no temporal reader is supplied", async () => {
     const legacy = {
       findByAnchors: vi.fn(async () => [path]),
       findByWorkspaceAll: vi.fn(async () => [path]),

@@ -47,10 +47,7 @@ const EVIDENCE_ID = "44444444-4444-4444-8444-444444444444";
 // evidence plus a trusted source EventLog anchor. The background drain must
 // reject those nominations rather than write the legacy projection.
 describe("edge auto producer daemon wiring", () => {
-  it.each([
-    ["fresh default", undefined],
-    ["preselected temporal projection", true]
-  ] as const)("keeps BULK_ENRICH candidates out of legacy path_relations for %s", async (_mode, temporalProjectionSelected) => {
+  it("keeps BULK_ENRICH candidates out of legacy path_relations", async () => {
     const database = initDatabase({ filename: ":memory:" });
     const previousEdgeClassifyHostWorker = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER;
     const previousIngestReconciliation = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
@@ -145,7 +142,6 @@ describe("edge auto producer daemon wiring", () => {
         },
         reconciliationLeaseRepo: new SqliteReconciliationLeaseRepo(database),
         runLookup: runRepo,
-        ...(temporalProjectionSelected === undefined ? {} : { temporalProjectionSelected }),
         warn
       });
       const router = new MaterializationRouter({

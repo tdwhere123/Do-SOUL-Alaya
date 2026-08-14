@@ -73,6 +73,9 @@ function resolvePathAxis(
   if (availability === "unavailable") {
     return { value: 0, status: "inactive:index_unavailable", countsAsFuel: false };
   }
+  if (availability === "storage_error") {
+    return { value: 0, status: "inactive:storage_error", countsAsFuel: false };
+  }
   if (!hasInflow) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }

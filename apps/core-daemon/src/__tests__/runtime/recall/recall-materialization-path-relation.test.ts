@@ -28,10 +28,7 @@ afterEach(() => {
 });
 
 describe("Garden temporal relation runtime", () => {
-  it.each([
-    ["fresh default", undefined],
-    ["selected temporal projection", true]
-  ] as const)("exposes only temporal assertion admission for %s", async (_mode, temporalProjectionSelected) => {
+  it("exposes only temporal assertion admission", async () => {
     const database = initDatabase({ filename: ":memory:" });
     let pathRelationEvictionTimer: NodeJS.Timeout | null = null;
     try {
@@ -54,7 +51,6 @@ describe("Garden temporal relation runtime", () => {
         proposalRepo: new SqliteProposalRepo(database),
         relationAssertionRepo: new SqliteRelationAssertionRepo(database),
         runtimeNotifier,
-        ...(temporalProjectionSelected === undefined ? {} : { temporalProjectionSelected }),
         warn
       });
       pathRelationEvictionTimer = runtime.pathRelationEvictionTimer;
@@ -175,7 +171,6 @@ async function createAdmissionHarness(
     proposalRepo: new SqliteProposalRepo(database),
     relationAssertionRepo: relationRepo,
     runtimeNotifier,
-    temporalProjectionSelected: true,
     warn: vi.fn(),
     ...(relationProjectionAdmissionMode === undefined ? {} : { relationProjectionAdmissionMode })
   } as Parameters<typeof createPathRelationRuntime>[0];

@@ -25,6 +25,7 @@ import {
   uniqueStrings
 } from "./path-relations.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import { isLegacyPathIndexUnboundError } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
@@ -170,14 +171,16 @@ async function loadSeededPathExpansionPaths(
       (options) => pathExpansionPort.findByAnchors(workspaceId, anchors, options)
     );
   } catch (error) {
-    recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
-    warn(warningMessage, {
-      workspace_id: workspaceId,
-      seed_count: seeds.length,
-      operation: "path_expansion_seed_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
+    if (!isLegacyPathIndexUnboundError(error)) {
+      recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
+      warn(warningMessage, {
+        workspace_id: workspaceId,
+        seed_count: seeds.length,
+        operation: "path_expansion_seed_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+    }
     return [];
   }
 }
@@ -280,14 +283,16 @@ async function loadTimeConcernPathExpansionPaths(
       (options) => reader.call(port, params.workspaceId, windowDigests, options)
     );
   } catch (error) {
-    params.warn("time concern path expansion lookup failed", {
-      workspace_id: params.workspaceId,
-      window_digest_count: windowDigests.length,
-      operation: "time_concern_path_expansion_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    recordRecallDegradation(params, "path_expansion_failed");
+    if (!isLegacyPathIndexUnboundError(error)) {
+      params.warn("time concern path expansion lookup failed", {
+        workspace_id: params.workspaceId,
+        window_digest_count: windowDigests.length,
+        operation: "time_concern_path_expansion_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+      recordRecallDegradation(params, "path_expansion_failed");
+    }
     return [];
   }
 }

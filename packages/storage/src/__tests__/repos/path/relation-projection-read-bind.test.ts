@@ -31,6 +31,17 @@ describe("relation projection read bind", () => {
     expect(isRelationProjectionReadable(database)).toBe(true);
     expect(isLegacyPathIndexUnbound(database)).toBe(true);
   });
+
+  it("names a refresh-required ready projection unbound when legacy is empty", () => {
+    const database = openMemory();
+    database.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_refresh_required = 1, projection_count = 1
+      WHERE state_id = 1
+    `).run();
+    expect(isRelationProjectionReadable(database)).toBe(false);
+    expect(isLegacyPathIndexUnbound(database)).toBe(true);
+  });
 });
 
 function openMemory(): StorageDatabase {

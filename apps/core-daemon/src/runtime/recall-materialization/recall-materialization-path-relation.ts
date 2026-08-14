@@ -57,7 +57,6 @@ type PathRelationRuntimeInput = Pick<
   | "relationProjectionAdmissionMode"
   | "relationAssertionRepo"
   | "runtimeNotifier"
-  | "temporalProjectionSelected"
   | "warn"
 >;
 

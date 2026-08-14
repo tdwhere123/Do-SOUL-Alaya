@@ -18,7 +18,8 @@ import type {
   RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
 import {
-  createBoundRecallPathReadPorts
+  createBoundRecallPathReadPorts,
+  type RecallPathReadBind
 } from "./recall-path-read-bind.js";
 import type {
   RecallPathProjectionReadOptions
@@ -66,7 +67,7 @@ const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const claimFormRepo = new SqliteClaimFormRepo(database);
 const recallPathReadPorts = createBoundRecallPathReadPorts({
   database,
-  temporalProjectionSelected: readTemporalProjectionSelected(workerData)
+  pathReadBind: readPathReadBind(workerData)
 });
 const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
@@ -420,16 +421,16 @@ function readDatabaseFilename(value: unknown): string {
   return readString(payload.databaseFilename, "databaseFilename");
 }
 
-function readTemporalProjectionSelected(value: unknown): boolean | undefined {
+function readPathReadBind(value: unknown): RecallPathReadBind | undefined {
   const payload = asPayload(value);
-  const selected = payload.temporalProjectionSelected;
-  if (selected === undefined) {
+  const bind = payload.pathReadBind;
+  if (bind === undefined) {
     return undefined;
   }
-  if (typeof selected !== "boolean") {
-    throw new Error("worker payload temporalProjectionSelected must be a boolean");
+  if (bind !== "temporal" && bind !== "legacy") {
+    throw new Error("worker payload pathReadBind must be temporal or legacy");
   }
-  return selected;
+  return bind;
 }
 function readPathProjectionReadOptions(
   payload: Record<string, unknown>

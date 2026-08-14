@@ -50,6 +50,12 @@ export * from "./tooling/extension-registry-service.js";
 export * from "./shared/file-path.js";
 export * from "./recall/runtime/global-memory-recall-port.js";
 export * from "./recall/runtime/global-memory-recall-service.js";
+export {
+  LegacyPathIndexUnboundError,
+  classifyPathIndexReadFailure,
+  isLegacyPathIndexUnboundError
+} from "./recall/runtime/legacy-path-index-unbound-error.js";
+
 export * from "./health/garden-backlog-telemetry-service.js";
 export * from "./path-graph/path-relations/graph-contract-service.js";
 export * from "./governance/policy/governance-lease-service.js";

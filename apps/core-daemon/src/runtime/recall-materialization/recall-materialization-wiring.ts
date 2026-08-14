@@ -46,14 +46,15 @@ import type { CreateRecallMaterializationWiringInput } from "./recall-materializ
 
 export async function createRecallMaterializationWiring(input: CreateRecallMaterializationWiringInput) {
   const globalMemoryRuntime = createGlobalMemoryRuntime(input);
-  const bindTemporalPathReads = resolveRecallPathReadBind({
+  const pathReadBind = resolveRecallPathReadBind({
     database: input.database,
-    temporalProjectionSelected: input.temporalProjectionSelected
-  }) === "temporal";
+    pathReadBind: input.pathReadBind
+  });
+  const bindTemporalPathReads = pathReadBind === "temporal";
   const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads);
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
-    temporalProjectionSelected: bindTemporalPathReads,
+    pathReadBind,
     ...(bindTemporalPathReads
       ? { prepareTemporalProjection: directPathReadPorts.ensureTemporalProjection }
       : {}),

@@ -1,3 +1,4 @@
+import { LegacyPathIndexUnboundError } from "@do-soul/alaya-core";
 import {
   isLegacyPathIndexUnbound,
   isRelationProjectionReadable,
@@ -18,10 +19,9 @@ export type RecallPathReadBind = "temporal" | "legacy";
 
 export function resolveRecallPathReadBind(input: {
   readonly database: StorageDatabase;
-  readonly temporalProjectionSelected?: boolean;
+  readonly pathReadBind?: RecallPathReadBind;
 }): RecallPathReadBind {
-  if (input.temporalProjectionSelected === false) return "legacy";
-  if (input.temporalProjectionSelected === true) return "temporal";
+  if (input.pathReadBind !== undefined) return input.pathReadBind;
   // Ready unselected projections are the live path index; the selected bit is write-side protocol.
   if (isTemporalProjectionSelected(input.database) || isRelationProjectionReadable(input.database)) {
     return "temporal";
@@ -31,7 +31,7 @@ export function resolveRecallPathReadBind(input: {
 
 export function createBoundRecallPathReadPorts(input: {
   readonly database: StorageDatabase;
-  readonly temporalProjectionSelected?: boolean;
+  readonly pathReadBind?: RecallPathReadBind;
 }): RecallPathReadPorts {
   if (resolveRecallPathReadBind(input) === "temporal") {
     return createPreparedTemporalRecallPathReadPorts(
@@ -52,9 +52,7 @@ export function wrapLegacyPathReaderForIndexHealth(
 ): LegacyRecallPathReader {
   const assertBound = (): void => {
     if (inspect() === "index_unavailable") {
-      throw new Error(
-        "Temporal path projection is populated but recall is bound to an empty legacy path_relations table."
-      );
+      throw new LegacyPathIndexUnboundError();
     }
   };
   return {

@@ -39,10 +39,11 @@ import type {
 import type { AppConfigService } from "../../services/config/config-service.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
 import type { RelationProjectionAdmissionMode } from "./relation-projection/mode.js";
+import type { RecallPathReadBind } from "../recall/recall-path-read-bind.js";
 
 export type CreateRecallMaterializationWiringInput = {
   readonly database: StorageDatabase;
-  readonly temporalProjectionSelected?: boolean;
+  readonly pathReadBind?: RecallPathReadBind;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly rawConfigService: Pick<AppConfigService, "getRuntimeGardenComputeConfig">;
