@@ -95,7 +95,9 @@ export interface EmbeddingWorkspaceNeighborResult {
     | "provider_returned"
     | "provider_pending"
     | "provider_failed"
-    | "provider_not_requested";
+    | "provider_not_requested"
+    // Ready-but-unusable is not a provider failure; scoring must not treat it as observed empty.
+    | "query_embedding_unusable";
   readonly query_embedding_degradation_reason?: string | null;
   // Fresh query-embedding inference calls consumed by this workspace-neighbor
   // scan. A cache hit or unavailable provider contributes 0; a successful

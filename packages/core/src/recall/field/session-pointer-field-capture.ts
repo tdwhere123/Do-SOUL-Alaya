@@ -70,6 +70,7 @@ function completeChannel(
   })));
   return Object.freeze({
     channel_id: channelId,
+    // Complete names the admitted-pool plane projection, not a session/pointer index scan.
     status: "complete" as const,
     depth: observations.length,
     observations,

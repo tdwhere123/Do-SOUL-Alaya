@@ -404,6 +404,9 @@ export function resolveEmbeddingProviderStatus(
   preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null,
   degradedReason: string | null
 ): RecallEmbeddingProviderStatus {
+  if (degradedReason === "query_embedding_unusable") {
+    return "query_embedding_unusable";
+  }
   if (degradedReason !== null) {
     return "provider_failed";
   }

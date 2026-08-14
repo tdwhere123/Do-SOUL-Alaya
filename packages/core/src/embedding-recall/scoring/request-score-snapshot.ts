@@ -403,7 +403,7 @@ function resolveQuerySnapshot(
       return Object.freeze({
         handle,
         embedding: null,
-        status: "provider_failed",
+        status: "query_embedding_unusable",
         degradationReason: "query_embedding_unusable",
         inferenceCalls: handle.cacheHit ? 0 : 1,
         cacheHit: handle.cacheHit

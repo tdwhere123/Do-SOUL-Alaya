@@ -7,8 +7,19 @@ import {
 import {
   type RecallEvidenceSemanticActivationReceipt
 } from "../../../runtime/recall-service-results.js";
-import type { SemanticHeadCandidate } from "../semantic-memory-refinement.js";
-import type { AnswerHeadSourceCandidate } from "./answer-head-retention.js";
+import type { CoarseRecallCandidate, RecallFusionBreakdown } from
+  "../../../runtime/recall-service-types.js";
+
+export type SemanticHeadCandidate<T> = Readonly<{
+  readonly candidate: T;
+  readonly candidateKey: string;
+  readonly index: number;
+}>;
+
+export type AnswerHeadSourceCandidate = Readonly<CoarseRecallCandidate & {
+  readonly effectiveFactors: Readonly<{ readonly embedding_similarity?: number }>;
+  readonly fusion: RecallFusionBreakdown;
+}>;
 
 type KeyOf<T> = (candidate: T) => string;
 type CompareCandidate<T> = (left: T, right: T) => number;

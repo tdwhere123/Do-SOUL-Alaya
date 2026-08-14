@@ -55,7 +55,8 @@ export type RecallEmbeddingProviderStatus =
   | "provider_returned"
   | "provider_pending"
   | "provider_failed"
-  | "provider_not_requested";
+  | "provider_not_requested"
+  | "query_embedding_unusable";
 
 export type RecallDegradationReason =
   | "evidence_fts_failed"

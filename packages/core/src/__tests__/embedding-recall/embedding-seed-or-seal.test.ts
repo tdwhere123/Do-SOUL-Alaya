@@ -58,7 +58,7 @@ describe("embedding seed-or-seal", () => {
 
     expect(snapshot.degradedReason).toBe("query_embedding_unusable");
     expect(snapshot.poolScoresByObjectId).toEqual({});
-    expect(snapshot.workspaceNeighbors.query_embedding_status).toBe("provider_failed");
+    expect(snapshot.workspaceNeighbors.query_embedding_status).toBe("query_embedding_unusable");
     expect(snapshot.fieldChannelCaptures?.find(({ channel }) =>
       channel.channel_id === "object_embedding_pool")?.channel.status).toBe("unavailable");
   });
