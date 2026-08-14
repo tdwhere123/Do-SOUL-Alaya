@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
   MemoryDimension,
@@ -9,6 +9,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes } from "../../../../../../packages/core/src/recall/query/recall-query-probes.js";
+import { loadActiveConstraints } from "../../../../../../packages/core/src/recall/runtime/orchestration.js";
 import { collectGovernancePathDerivations } from "../../../../../../packages/core/src/recall/supplements/supplementary-data-governance-paths.js";
 import { computeIntegratedFloodScore } from "../../../../../../packages/core/src/recall/scoring/integrated-flood-scoring.js";
 import { computeFloodEdgeTransfer } from "../../../../../../packages/core/src/recall/flood/edge-transfer.js";
@@ -23,6 +24,7 @@ import {
   initDatabase,
   isTemporalProjectionSelected
 } from "@do-soul/alaya-storage";
+import { createRecallActiveConstraintsPort } from "../../../runtime/recall-materialization/recall-materialization-recall-runtime.js";
 import {
   createBoundRecallPathReadPorts,
   resolveRecallPathReadBind
@@ -183,8 +185,30 @@ describe("typed path transfer bind seam", () => {
     expect(derivations.pathInflowAvailability).toBe("unavailable");
     expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
     expect(flood.diagnostics.A_path).not.toBe(1);
+
+    const warn = vi.fn();
+    const constraints = await loadActiveConstraints({
+      workspaceId: WORKSPACE_ID,
+      cap: null,
+      asOf: historicalAsOf,
+      warn,
+      activeConstraintsPort: createRecallActiveConstraintsPort({
+        memoryEntryRepo: { findByIds: vi.fn(async () => []) },
+        claimFormRepo: { findByStatus: vi.fn(async () => []) }
+      }, ports)
+    });
+    expect(constraints).toEqual({ constraints: [], total_count: 0 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "active constraints lookup skipped",
+      expect.objectContaining({
+        workspace_id: WORKSPACE_ID,
+        operation: "active_constraints",
+        errorName: "TemporalProjectionGenerationMissingError"
+      })
+    );
     await expect(ports.findActiveByWorkspace(WORKSPACE_ID, { asOf: historicalAsOf }))
-      .resolves.toEqual([]);
+      .rejects.toMatchObject({ name: "TemporalProjectionGenerationMissingError" });
   }, 60_000);
 });
 
