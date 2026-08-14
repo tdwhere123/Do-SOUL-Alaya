@@ -29,6 +29,30 @@ describe("path expansion index faults", () => {
     expect(degradationReasons.size).toBe(0);
   });
 
+  it("does not record path_expansion_failed for a missing historical projection generation", async () => {
+    const seed = createMemoryEntry({ object_id: "seed-a" });
+    const neighbor = createMemoryEntry({ object_id: "neighbor-a" });
+    const warn = vi.fn();
+    const degradationReasons = new Set<"path_expansion_failed">();
+    const addCandidate = vi.fn(() => true);
+    const missing = new Error(
+      "No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z; rebuild it before recall."
+    );
+    missing.name = "TemporalProjectionGenerationMissingError";
+    const findByAnchors = vi.fn(async () => {
+      throw missing;
+    });
+
+    await addPathExpansionCandidates({
+      ...seededParams(seed, neighbor, findByAnchors, warn, degradationReasons, addCandidate),
+      pathProjectionAsOf: "2023-05-30T23:40:00.000Z"
+    });
+
+    expect(addCandidate).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(degradationReasons.size).toBe(0);
+  });
+
   it("still degrades a storage fault during path expansion", async () => {
     const seed = createMemoryEntry({ object_id: "seed-a" });
     const neighbor = createMemoryEntry({ object_id: "neighbor-a" });

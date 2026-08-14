@@ -5,6 +5,7 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
+import { classifyPathIndexReadFailure } from "@do-soul/alaya-core";
 import { normalizeRecallTimeConcernWindowDigest } from "../garden-wiring/garden-compute-support.js";
 
 export type RecallPathProjectionReadOptions = Readonly<{
@@ -208,8 +209,16 @@ function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPath
   };
   const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId, options = {}) => {
     await mode.ensureTemporalProjection(options);
-    const paths = await mode.reader.findByWorkspace(workspaceId, options);
-    return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+    try {
+      const paths = await mode.reader.findByWorkspace(workspaceId, options);
+      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+    } catch (error) {
+      // Constraint reads fail open when the named as-of generation was never rebuilt.
+      if (classifyPathIndexReadFailure(error) === "index_unbound") {
+        return Object.freeze([]);
+      }
+      throw error;
+    }
   };
   return buildRecallPathReadPorts({
     findByAnchors,

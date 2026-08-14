@@ -158,6 +158,34 @@ describe("typed path transfer bind seam", () => {
     expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
     expect(flood.diagnostics.A_path).not.toBe(1);
   }, 60_000);
+
+  it("seals a historical as-of miss instead of aborting recall", async () => {
+    const database = openSnapshotReadonly();
+    const historicalAsOf = "2023-05-30T23:40:00.000Z";
+    const ports = createBoundRecallPathReadPorts({ database });
+    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
+    const derivations = await collectGovernancePathDerivations({
+      dependencies: { pathExpansionPort: ports.pathExpansionPort },
+      warn: () => undefined,
+      workspaceId: WORKSPACE_ID,
+      pathProjectionAsOf: historicalAsOf,
+      candidates
+    });
+    const flood = computeIntegratedFloodScore({
+      entry: candidates[1]!,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: derivations.pathInflowByTarget,
+        pathInflowAvailability: derivations.pathInflowAvailability
+      })
+    });
+
+    expect(derivations.pathInflowAvailability).toBe("unavailable");
+    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
+    expect(flood.diagnostics.A_path).not.toBe(1);
+    await expect(ports.findActiveByWorkspace(WORKSPACE_ID, { asOf: historicalAsOf }))
+      .resolves.toEqual([]);
+  }, 60_000);
 });
 
 describe("refresh-required path index", () => {

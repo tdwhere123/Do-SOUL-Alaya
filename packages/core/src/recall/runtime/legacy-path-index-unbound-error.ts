@@ -12,8 +12,17 @@ export function isLegacyPathIndexUnboundError(error: unknown): boolean {
   return error instanceof Error && error.name === "LegacyPathIndexUnboundError";
 }
 
+const TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME =
+  "TemporalProjectionGenerationMissingError";
+
+function isTemporalProjectionGenerationMissingError(error: unknown): boolean {
+  return error instanceof Error && error.name === TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME;
+}
+
 export type PathIndexReadFailureKind = "index_unbound" | "storage_fault";
 
 export function classifyPathIndexReadFailure(error: unknown): PathIndexReadFailureKind {
-  return isLegacyPathIndexUnboundError(error) ? "index_unbound" : "storage_fault";
+  return isLegacyPathIndexUnboundError(error) || isTemporalProjectionGenerationMissingError(error)
+    ? "index_unbound"
+    : "storage_fault";
 }

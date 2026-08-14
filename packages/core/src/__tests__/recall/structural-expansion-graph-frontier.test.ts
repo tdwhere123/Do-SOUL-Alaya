@@ -178,6 +178,31 @@ describe("batched entity-seed graph frontier", () => {
     expect(degradationReasons.size).toBe(0);
   });
 
+  it("does not record graph_expansion_failed for a missing historical projection generation", async () => {
+    const entries = ["seed-a", "neighbor-a"].map((object_id) => createMemoryEntry({ object_id }));
+    const warn = vi.fn();
+    const degradationReasons = new Set<"graph_expansion_failed">();
+    const missing = new Error(
+      "No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z; rebuild it before recall."
+    );
+    missing.name = "TemporalProjectionGenerationMissingError";
+    const findByAnchors = vi.fn<PathReader>(async () => {
+      throw missing;
+    });
+
+    await expandGraphFrontiersBySeed({
+      ...traversalParams(entries, findByAnchors),
+      seedEntries: entries.slice(0, 1),
+      pathProjectionAsOf: "2023-05-30T23:40:00.000Z",
+      warn,
+      degradationReasons,
+      onCandidate: () => undefined
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(degradationReasons.size).toBe(0);
+  });
+
   it("still degrades a storage fault during graph expansion", async () => {
     const entries = ["seed-a", "neighbor-a"].map((object_id) => createMemoryEntry({ object_id }));
     const warn = vi.fn();

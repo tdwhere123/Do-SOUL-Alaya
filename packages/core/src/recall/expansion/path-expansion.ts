@@ -25,7 +25,7 @@ import {
   uniqueStrings
 } from "./path-relations.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { isLegacyPathIndexUnboundError } from "../runtime/legacy-path-index-unbound-error.js";
+import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
@@ -171,7 +171,7 @@ async function loadSeededPathExpansionPaths(
       (options) => pathExpansionPort.findByAnchors(workspaceId, anchors, options)
     );
   } catch (error) {
-    if (!isLegacyPathIndexUnboundError(error)) {
+    if (classifyPathIndexReadFailure(error) !== "index_unbound") {
       recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
       warn(warningMessage, {
         workspace_id: workspaceId,
@@ -283,7 +283,7 @@ async function loadTimeConcernPathExpansionPaths(
       (options) => reader.call(port, params.workspaceId, windowDigests, options)
     );
   } catch (error) {
-    if (!isLegacyPathIndexUnboundError(error)) {
+    if (classifyPathIndexReadFailure(error) !== "index_unbound") {
       params.warn("time concern path expansion lookup failed", {
         workspace_id: params.workspaceId,
         window_digest_count: windowDigests.length,

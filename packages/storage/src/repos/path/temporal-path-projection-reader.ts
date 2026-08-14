@@ -6,6 +6,19 @@ import {
 import { StorageError } from "../../shared/errors.js";
 import type { RelationAssertionRepo } from "./relation-assertion-repo.js";
 
+const TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME =
+  "TemporalProjectionGenerationMissingError";
+
+export class TemporalProjectionGenerationMissingError extends StorageError {
+  public constructor(asOf: string) {
+    super(
+      "NOT_FOUND",
+      `No verified temporal projection exists for as-of ${asOf}; rebuild it before recall.`
+    );
+    this.name = TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME;
+  }
+}
+
 export interface TemporalProjectionReadOptions {
   readonly asOf?: string;
 }
@@ -67,10 +80,8 @@ export class SqliteTemporalPathProjectionReader {
     }
     const projection = await this.relationAssertions.findProjectionByWorkspaceAtAsOf(workspaceId, asOf);
     if (projection === null) {
-      throw new StorageError(
-        "CONFLICT",
-        `No verified temporal projection exists for as-of ${asOf}; rebuild it before recall.`
-      );
+      // Exact as_of is the generation key; a later verified cache must not stand in.
+      throw new TemporalProjectionGenerationMissingError(asOf);
     }
     return projection;
   }

@@ -181,6 +181,7 @@ export {
 } from "./repos/path/index.js";
 export {
   SqliteTemporalPathProjectionReader,
+  TemporalProjectionGenerationMissingError,
   type TemporalProjectionReadOptions
 } from "./repos/path/index.js";
 export {

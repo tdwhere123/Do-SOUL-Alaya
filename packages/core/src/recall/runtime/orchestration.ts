@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../../conversation/task-surface-builder.js";
 import { parseRecallPolicy } from "../../shared/recall-policy.js";
+import { classifyPathIndexReadFailure } from "./legacy-path-index-unbound-error.js";
 import {
   applyManifestationBiasEntries,
   collectManifestationAnchorMemoryObjectIds,
@@ -101,11 +102,22 @@ export async function loadActiveConstraints(params: Readonly<{
       total_count: 0
     });
   }
-  return port.findActiveConstraints({
-    workspaceId: params.workspaceId,
-    cap: params.cap,
-    asOf: params.asOf
-  });
+  try {
+    return await port.findActiveConstraints({
+      workspaceId: params.workspaceId,
+      cap: params.cap,
+      asOf: params.asOf
+    });
+  } catch (error) {
+    // A missing named as-of generation is an absent index, not a constraint-store fault.
+    if (classifyPathIndexReadFailure(error) === "index_unbound") {
+      return Object.freeze({
+        constraints: Object.freeze([]),
+        total_count: 0
+      });
+    }
+    throw error;
+  }
 }
 
 export async function applyManifestationBiasSidecar(params: Readonly<{

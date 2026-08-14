@@ -16,6 +16,18 @@ describe("legacy path index unbound error", () => {
     expect(classifyPathIndexReadFailure(reconstructed)).toBe("index_unbound");
   });
 
+  it("classifies a missing historical projection generation as unbound, not a storage fault", () => {
+    const liveName = "TemporalProjectionGenerationMissingError";
+    const missing = new Error(
+      "No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z; rebuild it before recall."
+    );
+    missing.name = liveName;
+    const reconstructed = new Error(missing.message);
+    reconstructed.name = liveName;
+    expect(classifyPathIndexReadFailure(missing)).toBe("index_unbound");
+    expect(classifyPathIndexReadFailure(reconstructed)).toBe("index_unbound");
+  });
+
   it("classifies storage and sqlite faults separately from an unbound index", () => {
     const storage = new Error("Failed to inspect relation projection population.");
     storage.name = "StorageError";

@@ -284,6 +284,33 @@ describe("candidate selector observation", () => {
     expect(result.pathInflowAvailability).toBe("unavailable");
   });
 
+  it("marks a missing historical projection generation as unavailable, not storage_error", async () => {
+    const memory = createCandidate("memory-1");
+    const missing = new Error(
+      "No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z; rebuild it before recall."
+    );
+    missing.name = "TemporalProjectionGenerationMissingError";
+    const result = await collectGovernancePathDerivations({
+      dependencies: {
+        pathExpansionPort: {
+          findByAnchors: vi.fn(async () => {
+            throw missing;
+          })
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      pathProjectionAsOf: "2023-05-30T23:40:00.000Z",
+      candidates: [memory.entry]
+    });
+
+    expect(result.pathInflowAvailability).toBe("unavailable");
+    expect(selectObservation(memory, [], result.pathInflowAvailability).path).toEqual({
+      status: "unavailable",
+      receipts: []
+    });
+  });
+
   it("marks a path-index storage fault as storage_error instead of unavailable", async () => {
     const memory = createCandidate("memory-1");
     const result = await collectGovernancePathDerivations({

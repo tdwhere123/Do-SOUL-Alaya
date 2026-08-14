@@ -128,7 +128,7 @@ function findVerifiedGenerationAtAsOf(
   db: StorageDatabase,
   asOf: string
 ): string | null {
-  // Historical projections are caches: only current verified history may serve.
+  // Exact as_of is the generation key; a later verified cache must not stand in.
   const row = db.connection.prepare(`
     SELECT generation
     FROM temporal_projection_generations

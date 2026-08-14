@@ -35,6 +35,7 @@ export {
 } from "./relation-assertion/source-digest.js";
 export {
   SqliteTemporalPathProjectionReader,
+  TemporalProjectionGenerationMissingError,
   type TemporalProjectionReadOptions
 } from "./temporal-path-projection-reader.js";
 export {
