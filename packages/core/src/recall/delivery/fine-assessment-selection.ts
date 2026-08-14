@@ -2,6 +2,8 @@ import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
 import {
+  buildFinalSelectorOrder,
+  fineAssessmentPacketMatchesPlannedMembership,
   resolveFinalPacketConsensusPlan
 } from "./final-order/final-packet-consensus.js";
 import {
@@ -169,13 +171,18 @@ function resolveAdmissionAwareFinalSelection(
     evidenceSemanticActivationsByCandidateKey:
       context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });
+  const proposedOrder = buildFinalSelectorOrder(consensus, order.candidates);
+  const feasiblePacket = collectAdmittedCandidates(proposedOrder, context);
+  const applied = consensus.decision.status === "accepted" &&
+    fineAssessmentPacketMatchesPlannedMembership(consensus, feasiblePacket);
+  const finalCandidates = applied ? proposedOrder : order.candidates;
   return Object.freeze({
     consensus,
     order: advanceFineAssessmentOrderState(
       order,
-      order.candidates,
+      finalCandidates,
       "consensus",
-      collectMembershipKeys(order.candidates, context)
+      collectMembershipKeys(finalCandidates, context)
     )
   });
 }
