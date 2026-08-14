@@ -79,10 +79,12 @@ export {
 } from "./repos/capsules/index.js";
 export {
   SqliteMemoryEntryRepo,
+  SqliteMemoryObjectKeyRepo,
   type MemoryEntryRepo,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
-  type MemoryEntryRepoUpdateFields
+  type MemoryEntryRepoUpdateFields,
+  type MemoryObjectKeyRepo
 } from "./repos/memory-entry/index.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,

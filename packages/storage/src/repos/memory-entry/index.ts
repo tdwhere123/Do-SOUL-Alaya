@@ -1,5 +1,9 @@
 export { SqliteMemoryEntryRepo } from "./sqlite-memory-entry-repo.js";
 export {
+  SqliteMemoryObjectKeyRepo,
+  type MemoryObjectKeyRepo
+} from "./object-key-repo.js";
+export {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
   FIND_BY_EVIDENCE_REFS_ROW_LIMIT,
   type AutonomousTombstoneInput,

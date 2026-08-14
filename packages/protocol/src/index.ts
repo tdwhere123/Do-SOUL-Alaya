@@ -34,6 +34,7 @@ export * from "./soul/open-semantic-factor-graph.js";
 export * from "./soul/verified-user-assertion-receipt.js";
 export * from "./soul/garden-source-turn-fallback-receipt.js";
 export * from "./soul/memory-entry.js";
+export * from "./soul/memory-object-key.js";
 export * from "./soul/global-memory-entry.js";
 export * from "./soul/synthesis-capsule.js";
 export * from "./soul/claim-form.js";
