@@ -130,6 +130,23 @@ describe("candidate selector observation contract", () => {
     expect(malformed.candidate_pool_complete).toBe(false);
   });
 
+  it("round-trips archived dumps that still carry kind facet demand atoms", () => {
+    const observation = {
+      ...LEGACY_SELECTOR_OBSERVATION,
+      demand: {
+        atoms: [{ kind: "facet", value: "occupation_work" }],
+        matches: [],
+        unmatched: [{ kind: "facet", value: "occupation_work" }]
+      }
+    };
+
+    expect(readCandidateSelectorObservation(observation)).toEqual(observation);
+    const question = buildQuestion({ selector_observation: observation });
+    expect(question.candidates[0]?.selector_observation).toEqual(observation);
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(question).candidates[0]
+      ?.selector_observation).toEqual(observation);
+  });
+
   it("round-trips a storage_error path observation instead of dropping the candidate", () => {
     const observation = {
       ...SELECTOR_OBSERVATION,

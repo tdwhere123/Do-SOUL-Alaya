@@ -312,7 +312,7 @@ export function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLa
 }
 
 export function objectKeyExactTokens(tokens: readonly string[]): readonly string[] {
-  // FTS5 trigram cannot MATCH below 3 chars; ASCII shorts already ride porter.
+  // FTS5 trigram cannot MATCH below 3 chars; porter is >=3 codepoints, so ASCII shorts ride content exact.
   return Object.freeze(tokens.filter((token) =>
     countQueryCodepoints(token) < 3 && tokenBearsCjk(token)
   ));
