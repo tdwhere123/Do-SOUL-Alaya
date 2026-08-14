@@ -22,7 +22,9 @@ describe("LongMemEval open semantic factor diagnostics", () => {
       operator_id: "open_semantic_factor_compatibility_trace_v1" as const,
       query_capture_digest: formation.capture_digest,
       observed_evidence_count: 0,
+      matchable_evidence_count: 0,
       evaluated_evidence_count: 0,
+      incomparable_seal: "none" as const,
       truncated: false,
       entries: [],
       trace_digest: digest("2")
@@ -98,7 +100,9 @@ describe("LongMemEval open semantic factor diagnostics", () => {
       operator_id: "open_semantic_factor_compatibility_trace_v1" as const,
       query_capture_digest: formation.capture_digest,
       observed_evidence_count: 0,
+      matchable_evidence_count: 0,
       evaluated_evidence_count: 0,
+      incomparable_seal: "none" as const,
       truncated: false,
       entries: [],
       trace_digest: digest("2")

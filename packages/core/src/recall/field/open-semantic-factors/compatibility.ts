@@ -12,7 +12,10 @@ import {
   enumerateOpenSemanticArgumentAlignments,
   type OpenSemanticFactorArgumentMapping
 } from "./argument-alignment.js";
-import { openSemanticFactorsOverlap } from "./factor-identity.js";
+import {
+  openSemanticFactorSetsOverlap,
+  openSemanticFactorsOverlap
+} from "./factor-identity.js";
 
 export type {
   OpenSemanticFactorAlignmentOperator,
@@ -104,6 +107,13 @@ function matchGraphs(
   readonly candidates: readonly Readonly<OpenSemanticPropositionMatch>[];
   readonly matches: readonly Readonly<OpenSemanticPropositionMatch>[];
 }> {
+  // Proposition search cannot produce matches without a shared factor token.
+  if (!openSemanticFactorSetsOverlap(evidence.factors, query.factors)) {
+    return Object.freeze({
+      candidates: Object.freeze([]),
+      matches: Object.freeze([])
+    });
+  }
   const evidenceFactors = indexFactors(evidence.factors);
   const queryFactors = indexFactors(query.factors);
   const matchCandidates = enumerateMatchCandidates({

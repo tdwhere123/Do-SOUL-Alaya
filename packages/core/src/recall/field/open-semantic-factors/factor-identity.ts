@@ -23,3 +23,20 @@ export function openSemanticFactorsOverlap(
   }
   return false;
 }
+
+export function openSemanticFactorSetsOverlap(
+  left: readonly Readonly<OpenSemanticFactor>[],
+  right: readonly Readonly<OpenSemanticFactor>[]
+): boolean {
+  if (left.length === 0 || right.length === 0) return false;
+  const rightTokens = new Set<string>();
+  for (const factor of right) {
+    for (const token of openSemanticFactorAlignTokens(factor)) rightTokens.add(token);
+  }
+  for (const factor of left) {
+    for (const token of openSemanticFactorAlignTokens(factor)) {
+      if (rightTokens.has(token)) return true;
+    }
+  }
+  return false;
+}

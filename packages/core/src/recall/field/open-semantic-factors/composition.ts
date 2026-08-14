@@ -375,9 +375,15 @@ function compositionStatus(
   if (query.status !== "formed") return "unavailable";
   if (solutionCount > 0) return "composed";
   const statuses = new Set(trace.entries.map(({ receipt }) => receipt.status));
-  if (statuses.has("rejected")) return "rejected";
-  if (statuses.has("unavailable")) return "unavailable";
-  if (statuses.has("ineligible")) return "ineligible";
+  if (trace.incomparable_seal === "rejected" || statuses.has("rejected")) {
+    return "rejected";
+  }
+  if (trace.incomparable_seal === "unavailable" || statuses.has("unavailable")) {
+    return "unavailable";
+  }
+  if (trace.incomparable_seal === "ineligible" || statuses.has("ineligible")) {
+    return "ineligible";
+  }
   return "no_match";
 }
 

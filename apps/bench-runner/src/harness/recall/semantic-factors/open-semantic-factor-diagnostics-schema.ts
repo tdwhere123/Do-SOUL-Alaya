@@ -63,7 +63,9 @@ export const OpenSemanticFactorCompatibilityTraceSchema = z.object({
   operator_id: z.literal("open_semantic_factor_compatibility_trace_v1"),
   query_capture_digest: DigestSchema,
   observed_evidence_count: CountSchema,
+  matchable_evidence_count: CountSchema,
   evaluated_evidence_count: CountSchema,
+  incomparable_seal: z.enum(["none", "ineligible", "unavailable", "rejected"]),
   truncated: z.boolean(),
   entries: z.array(z.object({
     evidence_id: IdSchema,
