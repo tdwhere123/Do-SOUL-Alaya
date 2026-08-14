@@ -64,6 +64,60 @@ describe("migration 120 memory object keys", () => {
       database.close();
     }
   });
+
+  it("indexes CJK key surfaces on the trigram table", () => {
+    const database = createDatabase();
+    try {
+      insertMemory(database, "memory-1", "I visited a museum.");
+      insertKey(database, {
+        ownerId: "memory-1",
+        keyId: "gist-museum",
+        keyType: "gist_remainder",
+        surface: "博物馆",
+        sourceRef: "evidence:capsule-1:gist:0:3"
+      });
+
+      expect(database.prepare(`
+        SELECT owner_id FROM memory_object_key_fts_trigram
+        WHERE memory_object_key_fts_trigram MATCH ?
+      `).all('content:"博物馆"')).toEqual([{ owner_id: "memory-1" }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rebuilds both FTS tables when a key surface is updated", () => {
+    const database = createDatabase();
+    try {
+      insertMemory(database, "memory-1", "I visited a museum.");
+      insertKey(database, {
+        ownerId: "memory-1",
+        keyId: "gist-museum",
+        keyType: "gist_remainder",
+        surface: "Natural History",
+        sourceRef: "evidence:capsule-1:gist:0:15"
+      });
+      database.prepare(`
+        UPDATE memory_object_keys SET surface = ?, normalized_surface = lower(?)
+        WHERE key_id = 'gist-museum'
+      `).run("Golden Retriever", "Golden Retriever");
+
+      expect(database.prepare(`
+        SELECT owner_id FROM memory_object_key_fts
+        WHERE memory_object_key_fts MATCH ?
+      `).all('content:"History"')).toEqual([]);
+      expect(database.prepare(`
+        SELECT owner_id FROM memory_object_key_fts
+        WHERE memory_object_key_fts MATCH ?
+      `).all('content:"Retriever"')).toEqual([{ owner_id: "memory-1" }]);
+      expect(database.prepare(`
+        SELECT owner_id FROM memory_object_key_fts_trigram
+        WHERE memory_object_key_fts_trigram MATCH ?
+      `).all('content:"Retriever"')).toEqual([{ owner_id: "memory-1" }]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function createDatabase(): BetterSqlite3.Database {
