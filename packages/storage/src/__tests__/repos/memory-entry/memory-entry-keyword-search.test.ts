@@ -27,6 +27,10 @@ describe("buildObjectIdFilterSql", () => {
       sql: "AND memory_content_fts_porter.object_id IN (?)",
       params: ["y"]
     });
+    expect(buildObjectIdFilterSql(["z"], "memory_object_key_fts.owner_id")).toEqual({
+      sql: "AND memory_object_key_fts.owner_id IN (?)",
+      params: ["z"]
+    });
   });
 
   it("does not expose arbitrary SQL identifier fragments", () => {
@@ -93,6 +97,15 @@ describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
     // trigram_fts fusion stream to read.
     expect(byId.get("obj-both")?.trigram_rank).toBeGreaterThan(0);
     expect(byId.get("obj-trigram-only")?.trigram_rank).toBeGreaterThan(0);
+  });
+
+  it("surfaces object_key_rank for objects admitted by Key FTS", () => {
+    const merged = mergeKeywordSearchRows([], [], 10, [], {
+      porter: [{ object_id: "obj-key", raw_rank: -4 }]
+    });
+    expect(merged).toEqual([
+      { object_id: "obj-key", normalized_rank: 1, object_key_rank: 1 }
+    ]);
   });
 });
 

@@ -8,6 +8,7 @@ import { buildMonotoneFieldRefinementLevels } from
 import {
   buildGroupedOrdinalScores,
   countQueryCodepoints,
+  mergeExactKeywordSearchRows,
   mergeKeywordSearchRows,
   normalizeKeywordSearchObjectIds,
   tokenBearsCjk,
@@ -26,6 +27,7 @@ import {
   searchTrigramKeywordRows,
   type MemoryEntrySearchWorkflowHost
 } from "../search-workflows.js";
+import { searchObjectKeyKeywordLanes } from "./object-key-fts.js";
 
 type KeywordFieldLane = MemoryEntryKeywordLaneReceipt["lane"];
 
@@ -55,17 +57,33 @@ export async function searchByKeywordField(
     : normalizeKeywordSearchObjectIds(scope.objectIds);
   const depths = normalizeRefinementDepths(limit, refinementDepths);
   const maxDepth = depths.at(-1) ?? limit;
-  const rows = this.activeConnection().transaction(() => Object.freeze({
-    exact: searchExactKeywordRows.call(
-      this, workspaceId, laneTokens.exact, maxDepth, objectIds, scope.tier
-    ),
-    porter: searchPorterKeywordRows.call(
-      this, workspaceId, laneTokens.porter, maxDepth, objectIds, scope.tier
-    ),
-    trigram: searchTrigramKeywordRows.call(
-      this, workspaceId, laneTokens.trigram, maxDepth, objectIds, scope.tier
-    )
-  }))();
+  const rows = this.activeConnection().transaction(() => {
+    const objectKeys = searchObjectKeyKeywordLanes.call(this, {
+      workspaceId,
+      porterTokens: laneTokens.porter,
+      trigramTokens: laneTokens.trigram,
+      exactTokens: laneTokens.exact,
+      limit: maxDepth,
+      candidateObjectIds: objectIds,
+      tier: scope.tier
+    });
+    return Object.freeze({
+      exact: mergeExactKeywordSearchRows(
+        searchExactKeywordRows.call(
+          this, workspaceId, laneTokens.exact, maxDepth, objectIds, scope.tier
+        ),
+        objectKeys.exact
+      ),
+      porter: searchPorterKeywordRows.call(
+        this, workspaceId, laneTokens.porter, maxDepth, objectIds, scope.tier
+      ),
+      trigram: searchTrigramKeywordRows.call(
+        this, workspaceId, laneTokens.trigram, maxDepth, objectIds, scope.tier
+      ),
+      keyPorter: objectKeys.porter,
+      keyTrigram: objectKeys.trigram
+    });
+  })();
   const base = buildKeywordFieldView(rows, laneTokens, limit);
   return fieldWithRefinements(base, buildMonotoneFieldRefinementLevels(
     base.matches,
@@ -111,6 +129,8 @@ type KeywordFieldRows = Readonly<{
   readonly exact: readonly ExactKeywordSearchRow[];
   readonly porter: readonly FtsKeywordSearchRow[];
   readonly trigram: readonly FtsKeywordSearchRow[];
+  readonly keyPorter: readonly FtsKeywordSearchRow[];
+  readonly keyTrigram: readonly FtsKeywordSearchRow[];
 }>;
 
 function buildKeywordFieldView(
@@ -121,7 +141,11 @@ function buildKeywordFieldView(
   return Object.freeze({
     matches: mergeKeywordSearchRows(
       rows.exact.slice(0, depth), rows.trigram.slice(0, depth), depth,
-      rows.porter.slice(0, depth)
+      rows.porter.slice(0, depth),
+      {
+        porter: rows.keyPorter.slice(0, depth),
+        trigram: rows.keyTrigram.slice(0, depth)
+      }
     ),
     lanes: Object.freeze([
       buildKeywordFieldLaneReceipt(

@@ -101,6 +101,13 @@ function relativeAliases(hit: Readonly<RelativeSurfaceHit>): readonly string[] {
   );
 }
 
+export function complementaryTemporalAliasSurfaces(text: string): readonly string[] {
+  return Object.freeze([
+    ...extractCalendarSurfaces(text).flatMap((hit) => calendarAliases(hit)),
+    ...extractRelativeSurfaces(text).flatMap((hit) => relativeAliases(hit))
+  ]);
+}
+
 function aliasDraft(
   input: Readonly<{ readonly workspace_id: string; readonly owner_id: string }>,
   surface: string,

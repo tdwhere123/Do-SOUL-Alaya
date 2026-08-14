@@ -166,6 +166,7 @@ function isSearchResult(value: Record<string, unknown>): value is
   return typeof value.object_id === "string" && value.object_id.trim().length > 0 &&
     unitInterval(value.normalized_rank) &&
     (value.trigram_rank === undefined || unitInterval(value.trigram_rank)) &&
+    (value.object_key_rank === undefined || unitInterval(value.object_key_rank)) &&
     (value.matched_fts_lanes === undefined || isCanonicalFtsLaneIds(value.matched_fts_lanes)) &&
     isProjectionIdentity(value.matched_projection);
 }

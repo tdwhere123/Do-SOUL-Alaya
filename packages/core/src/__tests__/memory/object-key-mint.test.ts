@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
 import { mintMemoryObjectKeys } from "../../memory/object-keys/mint.js";
+import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/temporal-aliases.js";
 
 const OWNER = "memory-1";
 const WORKSPACE = "workspace-1";
@@ -99,6 +100,14 @@ describe("mintMemoryObjectKeys", () => {
     expect(surfacesOf(keys, "gist_remainder")).not.toEqual(
       expect.arrayContaining(["Golden Retriever"])
     );
+  });
+
+  it("exposes query-side temporal alias surfaces without inventing a year", () => {
+    expect(complementaryTemporalAliasSurfaces("when is 2/8")).toEqual(
+      expect.arrayContaining(["February 8", "2月8日", "February"])
+    );
+    expect(complementaryTemporalAliasSurfaces("when is 2/8").some((surface) => /\d{4}/u.test(surface)))
+      .toBe(false);
   });
 });
 

@@ -70,6 +70,8 @@ export interface MemoryEntryKeywordSearchResult {
   readonly normalized_rank: number;
   // invariant: trigram_rank marks substring/CJK hits for recall's trigram_fts stream.
   readonly trigram_rank?: number;
+  // invariant: object_key_rank marks hits that Key FTS admitted; not a new scoring stream.
+  readonly object_key_rank?: number;
 }
 
 export interface MemoryEntryKeywordLaneReceipt {

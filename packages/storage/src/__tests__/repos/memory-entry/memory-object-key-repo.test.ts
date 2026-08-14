@@ -38,7 +38,9 @@ describe("SqliteMemoryObjectKeyRepo", () => {
       SELECT owner_id FROM memory_object_key_fts
       WHERE memory_object_key_fts MATCH ?
     `).all('content:"Retriever"')).toEqual([{ owner_id: memory.object_id }]);
-    expect(await repo.searchByKeyword(memory.workspace_id, "Retriever", 5)).toEqual([]);
+    const hits = await repo.searchByKeyword(memory.workspace_id, "Retriever", 5);
+    expect(hits.map((hit) => hit.object_id)).toEqual([memory.object_id]);
+    expect(hits[0]?.object_key_rank).toBeGreaterThan(0);
   });
 });
 

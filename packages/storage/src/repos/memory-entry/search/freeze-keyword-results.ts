@@ -8,7 +8,8 @@ export function freezeKeywordSearchResults(
       Object.freeze({
         object_id: row.object_id,
         normalized_rank: row.normalized_rank,
-        ...(row.trigram_rank !== undefined ? { trigram_rank: row.trigram_rank } : {})
+        ...(row.trigram_rank !== undefined ? { trigram_rank: row.trigram_rank } : {}),
+        ...(row.object_key_rank !== undefined ? { object_key_rank: row.object_key_rank } : {})
       })
     )
   );

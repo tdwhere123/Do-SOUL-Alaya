@@ -12,6 +12,7 @@ import type {
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
+import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/temporal-aliases.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
 export { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";
@@ -77,9 +78,10 @@ export interface SourceProximitySeedScoreDiagnostic {
 // variants). Returns null when there is nothing to expand so callers can skip
 // the extra FTS pass. see also: packages/core/src/recall/recall-query-probes.ts:expandLexicalTerms.
 export function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
-  const expanded = uniqueStrings(
-    queryProbes.expanded_terms.slice(0, 16).map((term) => term.trim()).filter((term) => term.length > 0)
-  );
+  const expanded = uniqueStrings([
+    ...queryProbes.expanded_terms.slice(0, 16),
+    ...complementaryTemporalAliasSurfaces(queryProbes.normalized_query ?? "")
+  ].map((term) => term.trim()).filter((term) => term.length > 0));
   return expanded.length === 0 ? null : expanded.join(" ");
 }
 

@@ -12,6 +12,7 @@ export interface KeywordSearchResult {
   readonly object_id: string;
   readonly normalized_rank: number;
   readonly trigram_rank?: number;
+  readonly object_key_rank?: number;
   /** Absent only on legacy or external search ports. */
   readonly matched_fts_lanes?: readonly FtsLaneId[];
   readonly matched_projection?: RecallEvidenceSearchProjectionIdentity;
