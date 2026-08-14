@@ -45,6 +45,7 @@ export * from "./memory/evidence-service.js";
 export * from "./memory/evidence-fact-frame-formation.js";
 export * from "./memory/object-keys/mint.js";
 export * from "./memory/object-keys/write-service.js";
+export * from "./memory/object-keys/retrofit.js";
 export * from "./semantic/open-semantic-factor-formation.js";
 export * from "./semantic/open-semantic-factor-extraction-port.js";
 export * from "./memory/fact-frame-formation/declarative-normalizer.js";

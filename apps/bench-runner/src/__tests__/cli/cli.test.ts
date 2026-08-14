@@ -86,6 +86,19 @@ describe("bench-runner CLI", () => {
     );
   });
 
+  it("documents and dispatches object-key retrofit", async () => {
+    expect(await runCli(["--help"])).toBe(0);
+    expect(stdoutBuf).toContain(
+      "retrofit-object-keys --snapshot <scratch.sqlite> [--output <json>]"
+    );
+
+    stdoutBuf = "";
+    expect(await runCli(["retrofit-object-keys"])).toBe(2);
+    expect(stderrBuf).toContain(
+      "retrofit-object-keys: --snapshot <db> required"
+    );
+  });
+
   it("documents and dispatches the selection order ledger", async () => {
     expect(await runCli(["--help"])).toBe(0);
     expect(stdoutBuf).toContain(

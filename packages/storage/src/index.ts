@@ -65,6 +65,7 @@ export {
   SqliteEvidenceCapsuleRepo,
   SqliteEvidenceRecallEmbeddingRepo,
   readObjectKeyEvidenceSources,
+  scanObjectKeyRetrofitSources,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleKeywordHit,
@@ -75,6 +76,8 @@ export {
   type EvidenceSearchProjectionIdentity,
   type RecallQualifiedEvidence,
   type StoredObjectKeyEvidenceSource,
+  type ObjectKeyRetrofitOwnerRow,
+  type ObjectKeyRetrofitScan,
   type VerifiedAssertionLocatorResolutionInput,
   type VerifiedAssertionLocatorResolver,
   type EvidenceSourceAnchor

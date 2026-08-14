@@ -9,6 +9,8 @@ import { runMaterializeAuditedExtractionTargetCommand } from
 import { runSelectExtractionTargetCommand } from "./target-selection/command.js";
 import { runFactFrameFormationAuditCommand } from
   "./fact-frame-formation-audit/command.js";
+import { runRetrofitObjectKeysCommand } from
+  "./object-key-retrofit/command.js";
 import { runQuerySemanticFactorCacheFillCommand } from
   "./query-semantic-factor-cache/command.js";
 import { runEmbeddingCacheOverlayBuildCommand } from
@@ -54,6 +56,7 @@ Usage:
   alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
   alaya-bench-runner materialize-audited-extraction-target --cache-audit-output <audit-dir> --extraction-cache-root <target-root> --extraction-target-selection <receipt.json> --materialization-receipt-out <receipt.json>
   alaya-bench-runner fact-frame-formation-audit --snapshot <db> [--output <json>]
+  alaya-bench-runner retrofit-object-keys --snapshot <scratch.sqlite> [--output <json>]
   alaya-bench-runner selection-order-ledger --selection-boundaries <ndjson.gz> --selection-boundaries-sha256 <sha256> --expected-question-count <n> --expected-question-id-digest <sha256> --output <ledger.ndjson.gz> [--captured-score-fidelity assert|recompute-live] [--gold-map <gold.json>]
   alaya-bench-runner capture-parity --snapshot <db> --output <json> [--query-semantic-factor-cache <json>] [--variant oracle|s|m] [--policy-shape stress|chat] [--data-dir-root <path>] [--history-root <path>]
   alaya-bench-runner query-semantic-factor-cache-fill --snapshot <db> --query-semantic-factor-cache <new-cache.json> [--concurrency N]
@@ -101,6 +104,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "fact-frame-formation-audit") {
     return runFactFrameFormationAuditCommand(rest);
+  }
+  if (command === "retrofit-object-keys") {
+    return runRetrofitObjectKeysCommand(rest);
   }
   if (command === "selection-order-ledger") {
     return runSelectionOrderLedgerCommand(rest);

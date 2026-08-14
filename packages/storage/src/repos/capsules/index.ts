@@ -12,6 +12,11 @@ export {
   readObjectKeyEvidenceSources,
   type StoredObjectKeyEvidenceSource
 } from "./object-key-source-reader.js";
+export {
+  scanObjectKeyRetrofitSources,
+  type ObjectKeyRetrofitOwnerRow,
+  type ObjectKeyRetrofitScan
+} from "./object-key-retrofit-scan.js";
 export type {
   VerifiedAssertionLocatorResolutionInput,
   VerifiedAssertionLocatorResolver
