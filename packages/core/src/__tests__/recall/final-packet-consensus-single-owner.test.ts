@@ -111,8 +111,7 @@ describe("final packet consensus selection ownership", () => {
 
     const observation = buildFinalPacketConsensusObservation(
       plan,
-      select(baseline).candidates,
-      false
+      select(baseline).candidates
     );
     expect(observation.planned_candidate_keys).toEqual(
       plan.proposedCandidates.map((candidate) => candidate.candidateKey)
@@ -163,7 +162,7 @@ describe("final packet consensus selection ownership", () => {
     expect(candidateKeys(plan)).toEqual(originalKeys);
     expect(keysOf(plan.consensusHead)).toEqual(originalKeys.slice(0, headWidth));
     expect(plan.decision.status).toBe("no_op");
-    expect(buildFinalPacketConsensusObservation(plan, actual, true).decision)
+    expect(buildFinalPacketConsensusObservation(plan, actual).decision)
       .toEqual(plan.decision);
   });
 
@@ -196,7 +195,7 @@ describe("final packet consensus selection ownership", () => {
       object_kind: sourceCandidate.objectKind,
       origin_plane: sourceCandidate.originPlane ?? "workspace_local"
     }));
-    expect(buildFinalPacketConsensusObservation(plan, actual, true))
+    expect(buildFinalPacketConsensusObservation(plan, actual))
       .toMatchObject({
         embedding_rank_basis: "source_semantic_rrf_then_packet_relative",
         source_semantic_intermediate_candidate_keys:

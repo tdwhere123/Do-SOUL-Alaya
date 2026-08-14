@@ -110,10 +110,13 @@ function resolveSourceSemanticRankBasis(params: Readonly<{
 
 export function buildFinalPacketConsensusObservation(
   plan: FinalPacketConsensusPlan,
-  actual: readonly Readonly<RecallCandidate>[],
-  replayAccepted: boolean
+  actual: readonly Readonly<RecallCandidate>[]
 ): RecallPacketPlanObservation {
-  const decision = plan.decision.status === "accepted" && !replayAccepted
+  const actualKeys = actual.map(buildRecallCandidateSelectionKey);
+  const plannedKeys = candidateKeys(plan.proposedCandidates);
+  const applied = plannedKeys.length === actualKeys.length &&
+    plannedKeys.every((key, index) => key === actualKeys[index]);
+  const decision = plan.decision.status === "accepted" && !applied
     ? { status: "rejected", reason: "coverage_order_retained" } as const
     : plan.decision;
   const observation: RecallPacketPlanObservation = deepFreeze({
@@ -151,55 +154,6 @@ export function buildFinalPacketConsensusObservation(
   });
   assertRecallPacketPlanObservation(observation);
   return observation;
-}
-
-export function buildFinalSelectorOrder(
-  plan: FinalPacketConsensusPlan,
-  sourceCandidates: readonly FineAssessmentCandidate[]
-): readonly FineAssessmentCandidate[] {
-  if (plan.decision.status !== "accepted") {
-    return Object.freeze([...sourceCandidates]);
-  }
-  const planned = plan.candidates.map((candidate) => candidate.sourceCandidate);
-  const plannedKeys = new Set(plan.candidates.map((candidate) => candidate.candidateKey));
-  return Object.freeze([
-    ...planned,
-    ...sourceCandidates.filter(
-      (candidate) => !plannedKeys.has(buildRecallCandidateDedupeKey(candidate))
-    )
-  ]);
-}
-
-export function packetMatchesPlannedMembership(
-  plan: FinalPacketConsensusPlan,
-  actual: readonly Readonly<RecallCandidate>[]
-): boolean {
-  return packetKeysMatchPlannedMembership(
-    plan,
-    actual.map(buildRecallCandidateSelectionKey)
-  );
-}
-
-export function fineAssessmentPacketMatchesPlannedMembership(
-  plan: FinalPacketConsensusPlan,
-  actual: readonly FineAssessmentCandidate[]
-): boolean {
-  return packetKeysMatchPlannedMembership(
-    plan,
-    actual.map(buildRecallCandidateDedupeKey)
-  );
-}
-
-function packetKeysMatchPlannedMembership(
-  plan: FinalPacketConsensusPlan,
-  receivedKeys: readonly string[]
-): boolean {
-  if (plan.candidates.length !== receivedKeys.length) return false;
-  const expected = new Set(plan.candidates.map((candidate) => candidate.candidateKey));
-  const received = new Set(receivedKeys);
-  return expected.size === plan.candidates.length &&
-    received.size === receivedKeys.length &&
-    [...expected].every((candidateKey) => received.has(candidateKey));
 }
 
 function toConsensusCandidate(

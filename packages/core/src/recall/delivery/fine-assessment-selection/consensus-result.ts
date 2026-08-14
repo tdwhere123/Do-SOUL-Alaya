@@ -4,7 +4,6 @@ import {
 } from "../selection-boundary/selection-boundary-capture.js";
 import {
   buildFinalPacketConsensusObservation,
-  packetMatchesPlannedMembership,
   resolveFinalPacketConsensusPlan
 } from "../final-order/final-packet-consensus.js";
 import { materializeFinalPacket } from "../final-order/final-packet-order.js";
@@ -34,8 +33,7 @@ export function buildSelectionResult(
   const observesBoundary = params.selectionBoundaryObserver !== undefined;
   const packetConsensus = buildFinalPacketConsensusObservation(
     consensus,
-    packet.candidates,
-    packetMatchesPlannedMembership(consensus, packet.candidates)
+    packet.candidates
   );
   const selectionResult = Object.freeze({
     candidates: packet.candidates,
