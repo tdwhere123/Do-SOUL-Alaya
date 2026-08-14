@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import {
   CAPTURED_SCORE_FIDELITY_ASSERT,
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
@@ -11,22 +12,26 @@ import {
   type CapturedScoreFidelityMode
 } from "@do-soul/alaya-core";
 import { publishBytesExclusiveDurable } from
-  "../extraction/fill/manifest/durable-exclusive-publication.js";
+  "../../extraction/fill/manifest/durable-exclusive-publication.js";
 import { measureGitState } from
-  "../provenance/contract/frozen-code-contract.js";
-import { sha256File } from "../snapshot/integrity.js";
+  "../../provenance/contract/frozen-code-contract.js";
+import { computeExecutedDistIdentityFresh } from
+  "../../provenance/executed-dist-identity.js";
 import {
   forEachSelectionBoundaryGzipRecord,
   type SelectionBoundaryArtifactRecord
-} from "./selection-boundary-artifact-reader.js";
+} from "../selection-boundary-artifact-reader.js";
 import {
   LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES,
   verifyLongMemEvalSelectionBoundaryArtifact
 } from
-  "./selection-boundary-spool.js";
+  "../selection-boundary-spool.js";
 import { withSelectionBoundaryRecordIdentity } from
-  "./selection-boundary-record-identity.js";
-import { loadSelectionReplayGoldMap } from "./selection-boundary-gold-map.js";
+  "../selection-boundary-record-identity.js";
+import {
+  loadSelectionReplayGoldMap,
+  type SelectionReplayGoldQuestion
+} from "./gold-map.js";
 import {
   accumulateRecomputeQuestion,
   buildRecomputeQuestionPayload,
@@ -35,7 +40,8 @@ import {
   type SelectionOrderLedgerRecomputeQuestion,
   type SelectionOrderLedgerRecomputeSummary,
   type StageMembership
-} from "./selection-order-ledger-recompute.js";
+} from "./recompute.js";
+import { snapshotLedgerSource } from "./source.js";
 
 const ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -52,6 +58,10 @@ export type SelectionOrderLedgerArtifactIdentity = Readonly<{
   readonly bytes: number;
   readonly source_sha256: string;
   readonly source_commit: string;
+  readonly source_worktree_state_sha256: string;
+  readonly executed_dist: ExecutedDistIdentity;
+  readonly question_id_digest: string;
+  readonly gold_map_sha256?: string;
   readonly question_count: number;
   readonly candidate_count: number;
   readonly coarse_unavailable_questions: number;
@@ -62,10 +72,19 @@ export type SelectionOrderLedgerArtifactIdentity = Readonly<{
 export type SelectionOrderLedgerMaterializeInput = Readonly<{
   readonly sourcePath: string;
   readonly expectedSourceSha256: string;
+  readonly expectedQuestionCount: number;
+  readonly expectedQuestionIdDigest: string;
   readonly outputPath: string;
   readonly checkoutRoot: string;
   readonly capturedScoreFidelity?: CapturedScoreFidelityMode;
   readonly goldMapPath?: string;
+  readonly computeExecutedDistIdentity?: () => Promise<unknown>;
+}>;
+
+type ExecutedDistIdentity = Readonly<{
+  readonly algorithm: "sha256-reachable-path-file-sha256-v1";
+  readonly sha256: string;
+  readonly file_count: number;
 }>;
 
 export async function materializeSelectionOrderLedgerArtifact(
@@ -73,31 +92,43 @@ export async function materializeSelectionOrderLedgerArtifact(
 ): Promise<SelectionOrderLedgerArtifactIdentity> {
   const capturedScoreFidelity = resolveLedgerFidelity(input);
   assertSha256(input.expectedSourceSha256);
-  const [sourceSha256, git] = await Promise.all([
-    sha256File(input.sourcePath),
-    measureGitState(input.checkoutRoot)
-  ]);
-  if (sourceSha256 !== input.expectedSourceSha256) {
-    throw new Error("selection order ledger source SHA-256 mismatch");
+  assertPopulationAuthority(input);
+  const source = await snapshotLedgerSource({
+    sourcePath: input.sourcePath,
+    expectedSha256: input.expectedSourceSha256,
+    outputPath: input.outputPath,
+    maxBytes: LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES
+  });
+  try {
+    const [verified, git, executedDist] = await Promise.all([
+      verifyLongMemEvalSelectionBoundaryArtifact(source.path),
+      measureGitState(input.checkoutRoot),
+      resolveExecutedDistIdentity(input.computeExecutedDistIdentity)
+    ]);
+    assertVerifiedPopulation(input, verified);
+    const code = Object.freeze({
+      commit: git.commitSha,
+      worktreeStateSha256: git.worktreeStateSha256,
+      executedDist
+    });
+    const collected = await collectLedgerRows(
+      { ...input, sourcePath: source.path }, source.sha256, code,
+      capturedScoreFidelity
+    );
+    assertCollectedPopulation(input, collected);
+    return await publishLedgerArtifact(
+      input.outputPath, source.sha256, code, capturedScoreFidelity, collected
+    );
+  } finally {
+    await source.dispose();
   }
-  await verifyLongMemEvalSelectionBoundaryArtifact(input.sourcePath);
-  const collected = await collectLedgerRows(
-    input,
-    sourceSha256,
-    git.commitSha,
-    capturedScoreFidelity
-  );
-  if (await sha256File(input.sourcePath) !== sourceSha256) {
-    throw new Error("selection order ledger source changed while reading");
-  }
-  return publishLedgerArtifact(
-    input.outputPath,
-    sourceSha256,
-    git.commitSha,
-    capturedScoreFidelity,
-    collected
-  );
 }
+
+type LedgerCodeIdentity = Readonly<{
+  readonly commit: string;
+  readonly worktreeStateSha256: string;
+  readonly executedDist: ExecutedDistIdentity;
+}>;
 
 export function resolveLedgerFidelity(
   input: Readonly<{
@@ -127,7 +158,7 @@ export function resolveLedgerFidelity(
 async function collectLedgerRows(
   input: SelectionOrderLedgerMaterializeInput,
   sourceSha256: string,
-  sourceCommit: string,
+  code: LedgerCodeIdentity,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ) {
   const goldByQuestion = capturedScoreFidelity ===
@@ -136,9 +167,9 @@ async function collectLedgerRows(
     : null;
   const collected = emptyCollectedRows(
     sourceSha256,
-    sourceCommit,
+    code,
     capturedScoreFidelity,
-    goldByQuestion !== null
+    goldByQuestion
   );
   await forEachSelectionBoundaryGzipRecord(
     input.sourcePath,
@@ -151,36 +182,44 @@ async function collectLedgerRows(
         record,
         recordIndex,
         capturedScoreFidelity,
-        goldByQuestion
+        goldByQuestion?.byQuestion ?? null
       );
     }
   );
+  assertGoldPopulation(collected);
   collected.rows.push(JSON.stringify(summaryRow(collected, capturedScoreFidelity)));
   return freezeCollectedRows(collected);
 }
 
 type CollectedLedgerRows = {
   rows: string[];
+  questionIds: string[];
   questionCount: number;
   candidateCount: number;
   recomputeAcc: ReturnType<typeof createRecomputeAccumulator> | null;
+  goldQuestionIds: Set<string> | null;
+  goldMapSha256: string | undefined;
 };
 
 function emptyCollectedRows(
   sourceSha256: string,
-  sourceCommit: string,
+  code: LedgerCodeIdentity,
   capturedScoreFidelity: CapturedScoreFidelityMode,
-  recompute: boolean
+  goldMap: Awaited<ReturnType<typeof loadSelectionReplayGoldMap>> | null
 ): CollectedLedgerRows {
   return {
     rows: [JSON.stringify(ledgerManifest(
       sourceSha256,
-      sourceCommit,
-      capturedScoreFidelity
+      code,
+      capturedScoreFidelity,
+      goldMap?.sha256
     ))],
+    questionIds: [],
     questionCount: 0,
     candidateCount: 0,
-    recomputeAcc: recompute ? createRecomputeAccumulator() : null
+    recomputeAcc: goldMap === null ? null : createRecomputeAccumulator(),
+    goldQuestionIds: goldMap === null ? null : new Set(goldMap.byQuestion.keys()),
+    goldMapSha256: goldMap?.sha256
   };
 }
 
@@ -189,7 +228,7 @@ function appendQuestionRow(
   record: SelectionBoundaryArtifactRecord,
   recordIndex: number,
   capturedScoreFidelity: CapturedScoreFidelityMode,
-  goldByQuestion: Awaited<ReturnType<typeof loadSelectionReplayGoldMap>> | null
+  goldByQuestion: ReadonlyMap<string, SelectionReplayGoldQuestion> | null
 ): void {
   const verified = verifyRecordLedger(
     record,
@@ -197,6 +236,7 @@ function appendQuestionRow(
     capturedScoreFidelity,
     goldByQuestion
   );
+  collected.questionIds.push(record.question_id);
   collected.questionCount += 1;
   collected.candidateCount += verified.published.ledger.candidate_count;
   if (
@@ -242,6 +282,8 @@ function summaryRow(
 function freezeCollectedRows(collected: CollectedLedgerRows) {
   return Object.freeze({
     rows: Object.freeze(collected.rows),
+    questionIdDigest: computeLongMemEvalQuestionIdDigest(collected.questionIds),
+    goldMapSha256: collected.goldMapSha256,
     questionCount: collected.questionCount,
     candidateCount: collected.candidateCount,
     recompute: collected.recomputeAcc === null
@@ -254,7 +296,7 @@ function verifyRecordLedger(
   record: SelectionBoundaryArtifactRecord,
   recordIndex: number,
   capturedScoreFidelity: CapturedScoreFidelityMode,
-  goldByQuestion: Awaited<ReturnType<typeof loadSelectionReplayGoldMap>> | null
+  goldByQuestion: ReadonlyMap<string, SelectionReplayGoldQuestion> | null
 ): VerifiedLedgerRow {
   return withSelectionBoundaryRecordIdentity(
     "selection order ledger record verification failed",
@@ -300,14 +342,14 @@ type VerifiedLedgerRow = Readonly<{
 async function publishLedgerArtifact(
   requestedOutputPath: string,
   sourceSha256: string,
-  sourceCommit: string,
+  code: LedgerCodeIdentity,
   capturedScoreFidelity: CapturedScoreFidelityMode,
   collected: Awaited<ReturnType<typeof collectLedgerRows>>
 ): Promise<SelectionOrderLedgerArtifactIdentity> {
   const bytes = gzipSync(`${collected.rows.join("\n")}\n`, { level: 9 });
   const outputPath = await canonicalOutputPath(requestedOutputPath);
   const ownerIdentity = createHash("sha256").update(sourceSha256)
-    .update("\0").update(sourceCommit).digest("hex");
+    .update("\0").update(code.commit).digest("hex");
   publishBytesExclusiveDurable({
     destination: outputPath,
     bytes,
@@ -319,7 +361,13 @@ async function publishLedgerArtifact(
     sha256: createHash("sha256").update(bytes).digest("hex"),
     bytes: bytes.byteLength,
     source_sha256: sourceSha256,
-    source_commit: sourceCommit,
+    source_commit: code.commit,
+    source_worktree_state_sha256: code.worktreeStateSha256,
+    executed_dist: code.executedDist,
+    question_id_digest: collected.questionIdDigest,
+    ...(collected.goldMapSha256 === undefined
+      ? {}
+      : { gold_map_sha256: collected.goldMapSha256 }),
     question_count: collected.questionCount,
     candidate_count: collected.candidateCount,
     coarse_unavailable_questions: 0,
@@ -332,8 +380,9 @@ async function publishLedgerArtifact(
 
 function ledgerManifest(
   sourceSha256: string,
-  sourceCommit: string,
-  capturedScoreFidelity: CapturedScoreFidelityMode
+  code: LedgerCodeIdentity,
+  capturedScoreFidelity: CapturedScoreFidelityMode,
+  goldMapSha256?: string
 ): Readonly<Record<string, unknown>> {
   const recompute = capturedScoreFidelity ===
     CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE;
@@ -341,9 +390,72 @@ function ledgerManifest(
     record_type: "manifest",
     schema_version: recompute ? 2 : 1,
     source_artifact_sha256: sourceSha256,
-    source_commit: sourceCommit,
+    source_commit: code.commit,
+    source_worktree_state_sha256: code.worktreeStateSha256,
+    executed_dist: code.executedDist,
     authoritative_only: true,
-    ...(recompute ? { captured_score_fidelity: capturedScoreFidelity } : {})
+    ...(recompute ? {
+      captured_score_fidelity: capturedScoreFidelity,
+      gold_map_sha256: goldMapSha256
+    } : {})
+  });
+}
+
+function assertGoldPopulation(collected: CollectedLedgerRows): void {
+  if (collected.goldQuestionIds === null) return;
+  const sourceIds = new Set(collected.questionIds);
+  if (sourceIds.size !== collected.goldQuestionIds.size ||
+      [...sourceIds].some((id) => !collected.goldQuestionIds?.has(id))) {
+    throw new Error("selection replay gold map question set mismatch");
+  }
+}
+
+function assertPopulationAuthority(input: SelectionOrderLedgerMaterializeInput): void {
+  if (!Number.isSafeInteger(input.expectedQuestionCount) ||
+      input.expectedQuestionCount <= 0) {
+    throw new Error("selection order ledger expected question count must be positive");
+  }
+  assertSha256(input.expectedQuestionIdDigest);
+}
+
+function assertVerifiedPopulation(
+  input: SelectionOrderLedgerMaterializeInput,
+  verified: { readonly questionCount: number; readonly questionIdDigest: string }
+): void {
+  if (verified.questionCount !== input.expectedQuestionCount ||
+      verified.questionIdDigest !== input.expectedQuestionIdDigest) {
+    throw new Error("selection order ledger source population identity mismatch");
+  }
+}
+
+function assertCollectedPopulation(
+  input: SelectionOrderLedgerMaterializeInput,
+  collected: { readonly questionCount: number; readonly questionIdDigest: string }
+): void {
+  if (collected.questionCount !== input.expectedQuestionCount ||
+      collected.questionIdDigest !== input.expectedQuestionIdDigest) {
+    throw new Error("selection order ledger collected population identity mismatch");
+  }
+}
+
+async function resolveExecutedDistIdentity(
+  compute: () => Promise<unknown> = computeExecutedDistIdentityFresh
+): Promise<ExecutedDistIdentity> {
+  const value = await compute();
+  if (typeof value !== "object" || value === null) {
+    throw new Error("selection order ledger executed dist identity is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (record.algorithm !== "sha256-reachable-path-file-sha256-v1" ||
+      typeof record.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(record.sha256) ||
+      !Number.isSafeInteger(record.file_count) || Number(record.file_count) <= 0) {
+    throw new Error("selection order ledger executed dist identity is invalid");
+  }
+  return Object.freeze({
+    algorithm: record.algorithm,
+    sha256: record.sha256,
+    file_count: Number(record.file_count)
   });
 }
 

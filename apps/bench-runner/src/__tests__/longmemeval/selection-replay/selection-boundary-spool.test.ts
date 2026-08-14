@@ -120,7 +120,7 @@ describe("LongMemEval selection-boundary spool", () => {
 
     await expect(
       verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
-    ).resolves.toEqual({ recordCount: 3 });
+    ).resolves.toMatchObject({ recordCount: 3, questionCount: 2 });
     expect(replayBoundary.mock.calls.map(([captured]) => captured)).toEqual([
       boundary("first"),
       boundary("second"),
@@ -152,7 +152,7 @@ describe("LongMemEval selection-boundary spool", () => {
     expect(boundaryV2.schema_version).toBe(2);
     await expect(
       realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
-    ).resolves.toEqual({ recordCount: 1 });
+    ).resolves.toMatchObject({ recordCount: 1, questionCount: 1 });
     expect(replayBoundary).not.toHaveBeenCalled();
   });
 
@@ -184,7 +184,7 @@ describe("LongMemEval selection-boundary spool", () => {
 
     await expect(
       realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
-    ).resolves.toEqual({ recordCount: 1 });
+    ).resolves.toMatchObject({ recordCount: 1, questionCount: 1 });
   });
 
   it("rejects truncated committed source identity before publishing", async () => {
@@ -250,6 +250,44 @@ describe("LongMemEval selection-boundary spool", () => {
     );
   });
 
+  it("rejects an empty artifact and a globally repeated question", async () => {
+    const outputRoot = await temporaryRoot();
+    const emptyPath = join(outputRoot, "selection-boundaries-empty.ndjson.gz");
+    await writeFile(emptyPath, gzipSync(""));
+    await expect(verifyLongMemEvalSelectionBoundaryArtifact(emptyPath))
+      .rejects.toThrow(/contains no records/u);
+
+    const repeatedPath = join(outputRoot, "selection-boundaries-repeated.ndjson.gz");
+    const repeated = [
+      record("question-1", 0, true, boundary("first")),
+      record("question-2", 0, true, boundary("second")),
+      record("question-1", 0, true, boundary("repeated"))
+    ];
+    await writeFile(
+      repeatedPath,
+      gzipSync(`${repeated.map((row) => JSON.stringify(row)).join("\n")}\n`)
+    );
+    await expect(verifyLongMemEvalSelectionBoundaryArtifact(repeatedPath))
+      .rejects.toThrow(/repeats question_id question-1/u);
+  });
+
+  it("caps decompressed artifact bytes before buffering a record", async () => {
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-expanded.ndjson.gz");
+    await writeFile(artifactPath, gzipSync("x".repeat(2_048)));
+
+    await expect(forEachSelectionBoundaryGzipRecord(
+      artifactPath,
+      1_024,
+      {
+        utf8Invalid: () => "invalid UTF-8",
+        jsonInvalid: () => "invalid JSON",
+        gzipExceeded: () => "gzip exceeded"
+      },
+      () => undefined
+    )).rejects.toThrow(/decompressed bytes/u);
+  });
+
   it("preserves a consumer failure when the pipeline aborts upstream", async () => {
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-consumer.ndjson.gz");
@@ -284,6 +322,21 @@ describe("LongMemEval selection-boundary spool", () => {
         "selection replay gzip exceeds the 1 byte size limit"
       );
     await expect(access(artifactPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not overwrite an existing artifact destination", async () => {
+    const spool = await enabledSpool();
+    const capture = spool.beginQuestion("question-existing-output");
+    capture.observer(boundary("existing-output"));
+    await capture.commit();
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "existing.ndjson.gz");
+    await writeFile(artifactPath, "operator-owned\n", { flag: "wx" });
+
+    await expect(spool.writeGzipArtifact(artifactPath)).rejects.toMatchObject({
+      code: "EEXIST"
+    });
+    await expect(readFile(artifactPath, "utf8")).resolves.toBe("operator-owned\n");
   });
 
   it("fails loud when a scored recall never reaches selection", async () => {

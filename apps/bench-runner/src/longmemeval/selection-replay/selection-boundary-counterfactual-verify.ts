@@ -34,7 +34,7 @@ import {
 import {
   loadSelectionReplayGoldMap,
   type SelectionReplayGoldQuestion
-} from "./selection-boundary-gold-map.js";
+} from "./order-ledger/gold-map.js";
 
 const COUNTERFACTUAL_ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -99,7 +99,7 @@ export async function evaluateSelectionCounterfactual(
       try {
         const evaluation = evaluateCounterfactualRecord(
           record,
-          goldByQuestion,
+          goldByQuestion.byQuestion,
           options.cfTokenCompanion,
           reconstruct
         );

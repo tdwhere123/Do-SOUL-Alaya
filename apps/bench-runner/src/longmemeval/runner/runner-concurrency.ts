@@ -21,7 +21,8 @@ import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "../diagnostics/spool.js";
-import { readOptionalTreatmentBoolean } from "../../harness/strict-treatment-config.js";
+import { refuseRetiredLocalCrossEncoderTreatment } from
+  "../../harness/strict-treatment-config.js";
 import { loadQuestionManifestSelection } from "../selection/question-manifest.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from
   "../../cli/merge/release-evidence-authority.js";
@@ -159,6 +160,7 @@ export async function runLongMemEvalConcurrent(
   opts: LongMemEvalRunOptions,
   deps: LongMemEvalConcurrencyDeps = {}
 ): Promise<LongMemEvalRunResult> {
+  refuseRetiredLocalCrossEncoderTreatment(process.env);
   validateLongMemEvalConcurrency(opts);
   const context = await prepareLongMemEvalConcurrentRun(opts, deps);
   let succeeded = false;
@@ -334,10 +336,6 @@ async function runLongMemEvalConcurrentWorker(
         ...buildLongMemEvalWorkerEnvOverrides({
           concurrency: context.concurrency,
           embeddingMode: context.opts.embeddingMode,
-          crossEncoderEnabled: readOptionalTreatmentBoolean(
-            process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-            "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-          ) === true,
           shardRoot: context.shardRoot,
           historyRoot: plan.historyRoot
         }),

@@ -1,11 +1,13 @@
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   assertCaptureParityWindow,
   compareCaptureParity,
   type CaptureParityReport,
   type CaptureParityView
 } from "@do-soul/alaya-core";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
@@ -27,6 +29,15 @@ import { captureRecallEvalQuestion } from
 import { LONGMEMEVAL_SELECTION_REPLAY_ENV } from
   "../selection-replay/selection-boundary-spool.js";
 import { extractCaptureParityViewFromEval } from "./extract.js";
+import { sha256File } from "../snapshot/integrity.js";
+import { measureGitState } from
+  "../provenance/contract/frozen-code-contract.js";
+import { computeExecutedDistIdentityFresh } from
+  "../provenance/executed-dist-identity.js";
+import {
+  assertCaptureParityArmAuthority,
+  type CaptureParityArmAuthority
+} from "./authority.js";
 
 export interface CaptureParityRunOptions {
   readonly snapshotDbPath: string;
@@ -38,10 +49,30 @@ export interface CaptureParityRunOptions {
   readonly querySemanticFactorCachePath?: string;
 }
 
+export type CaptureParityRunReport = Readonly<CaptureParityReport & {
+  authority: Readonly<{
+    snapshot_db_sha256: string;
+    code: Readonly<{
+      commit_sha: string;
+      worktree_state_sha256: string;
+      executed_dist: ExecutedDistIdentity;
+    }>;
+    arm: CaptureParityArmAuthority;
+  }>;
+}>;
+
+type ExecutedDistIdentity = Readonly<{
+  algorithm: "sha256-reachable-path-file-sha256-v1";
+  sha256: string;
+  file_count: number;
+}>;
+
 export async function runCaptureParity(
   options: CaptureParityRunOptions,
   ambientEnv: Readonly<Record<string, string | undefined>> = process.env
-): Promise<Readonly<CaptureParityReport>> {
+): Promise<CaptureParityRunReport> {
+  const snapshotDbSha256 = await sha256File(options.snapshotDbPath);
+  const code = await captureParityCodeIdentity();
   const captureOff = await collectArm(options, ambientEnv, false);
   const captureOn = await collectArm(options, ambientEnv, true);
   if (captureOff.sidecarQuestionCount !== captureOn.sidecarQuestionCount) {
@@ -49,11 +80,23 @@ export async function runCaptureParity(
       `capture parity sidecar_question_count differs: off=${captureOff.sidecarQuestionCount} on=${captureOn.sidecarQuestionCount}`
     );
   }
-  return compareCaptureParity(
+  assertCaptureParityArmAuthority(captureOff.authority, captureOn.authority);
+  if (await sha256File(options.snapshotDbPath) !== snapshotDbSha256) {
+    throw new Error("capture parity snapshot DB changed during execution");
+  }
+  const report = compareCaptureParity(
     captureOff.views,
     captureOn.views,
     captureOff.sidecarQuestionCount
   );
+  return Object.freeze({
+    ...report,
+    authority: Object.freeze({
+      snapshot_db_sha256: snapshotDbSha256,
+      code,
+      arm: captureOff.authority
+    })
+  });
 }
 
 async function collectArm(
@@ -63,6 +106,7 @@ async function collectArm(
 ): Promise<Readonly<{
   views: readonly CaptureParityView[];
   sidecarQuestionCount: number;
+  authority: CaptureParityArmAuthority;
 }>> {
   const arm = captureOn ? "capture-on" : "capture-off";
   const dataDirRoot = join(options.dataDirRoot, arm);
@@ -82,7 +126,48 @@ async function collectArm(
       `capture parity collected ${views.length} questions for window_length=${context.window.length}`
     );
   }
-  return { views, sidecarQuestionCount: context.sidecarQuestionCount };
+  return {
+    views,
+    sidecarQuestionCount: context.sidecarQuestionCount,
+    authority: armAuthority(context)
+  };
+}
+
+function armAuthority(context: RecallEvalRunContext): CaptureParityArmAuthority {
+  return Object.freeze({
+    dataset_sha256: context.datasetSha256,
+    question_id_digest: computeLongMemEvalQuestionIdDigest(
+      context.window.map((question) => question.questionId)
+    ),
+    runtime_attribution: context.runtimeAttribution
+  });
+}
+
+async function captureParityCodeIdentity(): Promise<
+  CaptureParityRunReport["authority"]["code"]
+> {
+  const checkoutRoot = resolve(
+    dirname(fileURLToPath(import.meta.url)), "../../../../.."
+  );
+  const [git, rawExecutedDist] = await Promise.all([
+    measureGitState(checkoutRoot),
+    computeExecutedDistIdentityFresh()
+  ]);
+  return Object.freeze({
+    commit_sha: git.commitSha,
+    worktree_state_sha256: git.worktreeStateSha256,
+    executed_dist: requireExecutedDistIdentity(rawExecutedDist)
+  });
+}
+
+function requireExecutedDistIdentity(value: unknown): ExecutedDistIdentity {
+  const row = value as Partial<ExecutedDistIdentity> | null;
+  if (row === null || row.algorithm !== "sha256-reachable-path-file-sha256-v1" ||
+      !/^[a-f0-9]{64}$/u.test(row.sha256 ?? "") ||
+      !Number.isSafeInteger(row.file_count) || (row.file_count ?? 0) <= 0) {
+    throw new Error("capture parity executed dist identity is invalid");
+  }
+  return row as ExecutedDistIdentity;
 }
 
 async function collectArmQuestions(

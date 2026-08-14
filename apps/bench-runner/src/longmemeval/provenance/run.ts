@@ -384,8 +384,6 @@ export function isLongMemEvalRunProvenanceSummaryGateEligible(
     hasCurrentRecallConfigIdentity(provenance.recall_config) &&
     hasRequiredEmbeddingArtifact(provenance.runtime) &&
     hasConsistentEmbeddingSupplementProvenance(provenance.runtime) &&
-    (provenance.runtime.answer_rerank?.enabled !== true ||
-      provenance.runtime.answer_rerank.model_artifact_sha256.length === 64) &&
     hasConsistentAnswerRerankProvenance(provenance.runtime);
 }
 
@@ -454,8 +452,7 @@ function hasConsistentAnswerRerankProvenance(
     runtime.paired_env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
     "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
   );
-  if (runtime.answer_rerank === undefined) return false;
-  return runtime.answer_rerank.enabled === (pairedEnabled ?? false);
+  return runtime.answer_rerank?.enabled === false && pairedEnabled === null;
 }
 
 async function readManifestIdentity(

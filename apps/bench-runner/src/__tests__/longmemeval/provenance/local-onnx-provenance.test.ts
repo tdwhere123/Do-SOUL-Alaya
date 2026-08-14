@@ -75,30 +75,20 @@ describe("local ONNX runtime provenance", () => {
     expect(second).not.toBe(first);
   });
 
-  it("fails loud when an enabled cross encoder has no readable artifact", async () => {
-    const root = await mkdtemp(join(tmpdir(), "lme-cross-onnx-missing-"));
-    roots.push(root);
-
+  it("refuses the retired cross-encoder treatment before inspecting artifacts", async () => {
     await expect(resolveLocalCrossEncoderRuntimeProvenance({
       ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: root,
+      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: "/missing",
       ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/missing"
-    })).rejects.toThrow(/missing or unreadable/u);
+    })).rejects.toThrow(/retired/u);
   });
 
-  it("records the effective cross-encoder model and artifact digest", async () => {
-    const { cacheRoot } = await createModel("fixture-v1");
-
+  it("records only the disabled identity for the retired treatment", async () => {
     await expect(resolveLocalCrossEncoderRuntimeProvenance({
-      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "1",
-      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: ` ${cacheRoot} `,
-      ALAYA_LOCAL_CROSS_ENCODER_MODEL: " Xenova/reranker "
-    })).resolves.toEqual({
-      enabled: true,
-      provider_kind: "local_onnx_cross_encoder",
-      effective_model_id: "Xenova/reranker",
-      model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
-    });
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false",
+      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: "/ignored",
+      ALAYA_LOCAL_CROSS_ENCODER_MODEL: "ignored"
+    })).resolves.toEqual({ enabled: false });
   });
 });
 

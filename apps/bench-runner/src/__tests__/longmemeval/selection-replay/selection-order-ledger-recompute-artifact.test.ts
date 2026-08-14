@@ -10,6 +10,7 @@ import {
   counterfactualDeliveredCandidateKeys,
   reconstructFineAssessmentComposition
 } from "@do-soul/alaya-core";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-types.js";
 import {
@@ -18,6 +19,11 @@ import {
   withDivergentCandidatePopulation
 } from
   "../../../../../../packages/core/src/__tests__/recall/selection-boundary-live-capture-fixture.js";
+import {
+  deltaTotal,
+  objectIdFromKey,
+  symmetricDifferenceSize
+} from "./order-ledger/assertions.js";
 
 const { measureGitState } = vi.hoisted(() => ({
   measureGitState: vi.fn(async () => ({
@@ -34,9 +40,31 @@ vi.mock(
 );
 
 import {
-  materializeSelectionOrderLedgerArtifact,
+  materializeSelectionOrderLedgerArtifact as materializeRawLedger,
   resolveLedgerFidelity
-} from "../../../longmemeval/selection-replay/selection-order-ledger-artifact.js";
+} from "../../../longmemeval/selection-replay/order-ledger/artifact.js";
+
+async function materializeSelectionOrderLedgerArtifact(
+  input: Omit<Parameters<typeof materializeRawLedger>[0],
+    "expectedQuestionCount" | "expectedQuestionIdDigest">
+) {
+  const records = gunzipSync(await readFile(input.sourcePath)).toString("utf8")
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as {
+      question_id: string; authoritative: boolean;
+    });
+  const ids = records.filter((row) => row.authoritative)
+    .map((row) => row.question_id);
+  return materializeRawLedger({
+    ...input,
+    expectedQuestionCount: ids.length,
+    expectedQuestionIdDigest: computeLongMemEvalQuestionIdDigest(ids),
+    computeExecutedDistIdentity: async () => ({
+      algorithm: "sha256-reachable-path-file-sha256-v1",
+      sha256: "c".repeat(64),
+      file_count: 1
+    })
+  });
+}
 
 const roots: string[] = [];
 
@@ -455,31 +483,6 @@ async function publishDivergentRecompute(
       }>;
     }
   };
-}
-
-function symmetricDifferenceSize(
-  captured: readonly string[],
-  live: readonly string[]
-): number {
-  const capturedSet = new Set(captured);
-  const liveSet = new Set(live);
-  let count = 0;
-  for (const key of capturedSet) if (!liveSet.has(key)) count += 1;
-  for (const key of liveSet) if (!capturedSet.has(key)) count += 1;
-  return count;
-}
-
-function deltaTotal(
-  deltas: Record<string, { gained: number; lost: number }>
-): number {
-  return Object.values(deltas).reduce(
-    (sum, delta) => sum + delta.gained + delta.lost,
-    0
-  );
-}
-
-function objectIdFromKey(candidateKey: string): string {
-  return candidateKey.split(":").at(-1)!;
 }
 
 async function temporaryRoot(): Promise<string> {

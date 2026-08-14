@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertFineAssessmentOrderLedgerAttribution } from
+import {
+  assertFineAssessmentOrderLedgerAttribution
+} from
   "@do-soul/alaya-core";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { fineAssess } from
   "../../../../../../packages/core/src/recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from
@@ -35,8 +38,30 @@ vi.mock(
   () => ({ measureGitState })
 );
 
-import { materializeSelectionOrderLedgerArtifact } from
-  "../../../longmemeval/selection-replay/selection-order-ledger-artifact.js";
+import { materializeSelectionOrderLedgerArtifact as materializeRawLedger } from
+  "../../../longmemeval/selection-replay/order-ledger/artifact.js";
+
+async function materializeSelectionOrderLedgerArtifact(
+  input: Omit<Parameters<typeof materializeRawLedger>[0],
+    "expectedQuestionCount" | "expectedQuestionIdDigest">
+) {
+  const records = gunzipSync(await readFile(input.sourcePath)).toString("utf8")
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as {
+      question_id: string; authoritative: boolean;
+    });
+  const ids = records.filter((row) => row.authoritative)
+    .map((row) => row.question_id);
+  return materializeRawLedger({
+    ...input,
+    expectedQuestionCount: ids.length,
+    expectedQuestionIdDigest: computeLongMemEvalQuestionIdDigest(ids),
+    computeExecutedDistIdentity: async () => ({
+      algorithm: "sha256-reachable-path-file-sha256-v1",
+      sha256: "c".repeat(64),
+      file_count: 1
+    })
+  });
+}
 
 const roots: string[] = [];
 
@@ -87,18 +112,25 @@ describe("selection order ledger artifact", () => {
       question_count: 1,
       coarse_unavailable_questions: 0
     });
-    await expect(materializeSelectionOrderLedgerArtifact({
+    const duplicatePublication = materializeSelectionOrderLedgerArtifact({
       sourcePath,
       expectedSourceSha256: sourceSha256,
       outputPath,
       checkoutRoot: root
-    })).rejects.toBeDefined();
+    }).then(() => null, (error: unknown) => error);
+    await expect(duplicatePublication).resolves.toBeDefined();
   });
 
   it("rejects a source digest mismatch before publication", async () => {
     const root = await temporaryRoot();
     const sourcePath = join(root, "selection-boundaries.ndjson.gz");
-    await writeFile(sourcePath, gzipSync("{}\n"), { flag: "wx" });
+    const source = gzipSync(`${JSON.stringify({
+      question_id: "question-1",
+      invocation_index: 0,
+      authoritative: true,
+      boundary: captureFineAssessmentSelectionBoundary("digest-mismatch")
+    })}\n`);
+    await writeFile(sourcePath, source, { flag: "wx" });
 
     await expect(materializeSelectionOrderLedgerArtifact({
       sourcePath,
@@ -106,6 +138,37 @@ describe("selection order ledger artifact", () => {
       outputPath: join(root, "ledger.ndjson.gz"),
       checkoutRoot: root
     })).rejects.toThrow(/source SHA-256 mismatch/u);
+  });
+
+  it("rejects a mismatched authoritative question population", async () => {
+    const root = await temporaryRoot();
+    const sourcePath = join(root, "population-source.ndjson.gz");
+    const outputPath = join(root, "population-ledger.ndjson.gz");
+    const source = gzipSync(`${JSON.stringify({
+      question_id: "population-question",
+      invocation_index: 0,
+      authoritative: true,
+      boundary: captureFineAssessmentSelectionBoundary("population-mismatch")
+    })}\n`);
+    await writeFile(sourcePath, source, { flag: "wx" });
+    const sourceSha256 = createHash("sha256").update(source).digest("hex");
+
+    await expect(materializeRawLedger({
+      sourcePath,
+      expectedSourceSha256: sourceSha256,
+      expectedQuestionCount: 2,
+      expectedQuestionIdDigest: computeLongMemEvalQuestionIdDigest([
+        "population-question", "missing-question"
+      ]),
+      outputPath,
+      checkoutRoot: root,
+      computeExecutedDistIdentity: async () => ({
+        algorithm: "sha256-reachable-path-file-sha256-v1",
+        sha256: "c".repeat(64),
+        file_count: 1
+      })
+    })).rejects.toThrow(/source population identity mismatch/u);
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects a legacy source without coarse identity before publication", async () => {

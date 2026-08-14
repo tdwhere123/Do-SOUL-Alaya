@@ -107,6 +107,8 @@ describe("bench-runner CLI", () => {
       "selection-order-ledger",
       "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
       "--selection-boundaries-sha256", "0".repeat(64),
+      "--expected-question-count", "1",
+      "--expected-question-id-digest", "1".repeat(64),
       "--output", "/tmp/ledger.ndjson.gz",
       "--captured-score-fidelity", "recompute_live"
     ])).toBe(2);
@@ -120,6 +122,8 @@ describe("bench-runner CLI", () => {
       "selection-order-ledger",
       "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
       "--selection-boundaries-sha256", "0".repeat(64),
+      "--expected-question-count", "1",
+      "--expected-question-id-digest", "1".repeat(64),
       "--output", "/tmp/ledger.ndjson.gz",
       "--gold-map", "/tmp/gold.json"
     ])).toBe(2);
@@ -133,6 +137,8 @@ describe("bench-runner CLI", () => {
       "selection-order-ledger",
       "--selection-boundaries", "/tmp/boundaries.ndjson.gz",
       "--selection-boundaries-sha256", "0".repeat(64),
+      "--expected-question-count", "1",
+      "--expected-question-id-digest", "1".repeat(64),
       "--output", "/tmp/ledger.ndjson.gz",
       "--captured-score-fidelity", "recompute-live"
     ])).toBe(2);

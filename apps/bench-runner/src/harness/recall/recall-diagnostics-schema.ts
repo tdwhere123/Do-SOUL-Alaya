@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
-import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
+import { refuseRetiredLocalCrossEncoderTreatment } from
+  "../strict-treatment-config.js";
 import {
   RecallAnswerShapePlanSchema,
   RecallAnswerSupportObservationSchema,
@@ -427,15 +428,8 @@ export function parseBenchRecallDiagnosticsForRun(
 ): BenchRecallDiagnostics {
   const diagnostics = BenchRecallDiagnosticsSchema.parse(value);
   assertBiEncoderRunActivation(diagnostics, env);
-  const crossEncoderEnabled = readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  );
-  if (crossEncoderEnabled === true) {
-    assertCrossEncoderTreatmentActivation(diagnostics);
-  } else if (crossEncoderEnabled === false) {
-    assertCrossEncoderControlInactive(diagnostics);
-  }
+  refuseRetiredLocalCrossEncoderTreatment(env);
+  assertCrossEncoderControlInactive(diagnostics);
   return diagnostics;
 }
 
@@ -448,45 +442,6 @@ function assertCrossEncoderControlInactive(
     diagnostics.answer_rerank_scored_count !== 0 ||
     diagnostics.answer_rerank_failure_class !== null
   ) {
-    throw new Error("cross-encoder control activation failed: reranking was observed");
-  }
-}
-
-function assertCrossEncoderTreatmentActivation(
-  diagnostics: BenchRecallDiagnostics
-): void {
-  if (diagnostics.answer_rerank_status === "not_applicable") {
-    assertRerankNotApplicable(diagnostics);
-    return;
-  }
-  if (diagnostics.answer_rerank_status !== "returned") {
-    throw new Error(
-      `cross-encoder treatment activation failed: status ${diagnostics.answer_rerank_status}`
-    );
-  }
-  if (
-    diagnostics.answer_rerank_expected_count <= 0 ||
-    diagnostics.answer_rerank_scored_count !== diagnostics.answer_rerank_expected_count ||
-    diagnostics.answer_rerank_failure_class !== null
-  ) {
-    throw new Error(
-      `cross-encoder treatment activation failed: expected ${diagnostics.answer_rerank_expected_count} scores but received ${diagnostics.answer_rerank_scored_count}`
-    );
-  }
-}
-
-function assertRerankNotApplicable(diagnostics: BenchRecallDiagnostics): void {
-  const normalizedQuery = diagnostics.query_probes.normalized_query;
-  const emptyQuery = normalizedQuery === null || normalizedQuery.trim().length === 0;
-  const emptyPool = diagnostics.candidate_pool_count === 0;
-  if (
-    (!emptyQuery && !emptyPool) ||
-    diagnostics.answer_rerank_expected_count !== 0 ||
-    diagnostics.answer_rerank_scored_count !== 0 ||
-    diagnostics.answer_rerank_failure_class !== null
-  ) {
-    throw new Error(
-      "cross-encoder treatment activation failed: not_applicable for a non-empty query and candidate pool"
-    );
+    throw new Error("retired cross-encoder reranking was observed");
   }
 }

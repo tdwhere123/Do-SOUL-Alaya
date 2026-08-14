@@ -3,6 +3,7 @@ import {
   LongMemEvalMatrixPromotionContractSchema,
   matrixCellForTreatment,
   parseLongMemEvalMatrixPromotionContract,
+  promotionCellForTreatment,
   productDefaultTreatment
 } from "../../../longmemeval/promotion/schema/contract.js";
 
@@ -36,6 +37,13 @@ describe("LongMemEval matrix promotion contract", () => {
 
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw))
       .toThrow(/A\/B treatment pair/u);
+  });
+
+  it("rejects retired answer-rerank cells at the promotion boundary", () => {
+    expect(() => promotionCellForTreatment({
+      embedding_supplement: false,
+      answer_rerank: true
+    })).toThrow(/outside the canonical A\/B pair/u);
   });
 
   it.each([

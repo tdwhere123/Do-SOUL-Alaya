@@ -116,7 +116,7 @@ describe("answer relevance candidate diagnostics", () => {
     }).success).toBe(false);
   });
 
-  it("fails the treatment run when a non-empty pool did not return every score", () => {
+  it("rejects the retired cross-encoder treatment before interpreting its diagnostics", () => {
     expect(() => parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
       answer_rerank_status: "failed",
@@ -124,67 +124,19 @@ describe("answer relevance candidate diagnostics", () => {
       answer_rerank_failure_class: "service_error",
       candidates: [baseCandidate]
     }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /cross-encoder treatment activation failed/u
-    );
-
-    expect(() => parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: 1,
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /expected 1 scores but received 0/u
+      /local cross-encoder reranking is retired/u
     );
   });
 
-  it("accepts complete scoring and only permits empty-pool inapplicability", () => {
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: 1,
-      answer_rerank_scored_count: 1,
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "1" }).answer_rerank_status).toBe(
-      "returned"
-    );
-
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      total_scanned: 0,
-      candidate_pool_count: 0,
-      pre_budget_count: 0,
-      delivered_count: 0,
-      answer_rerank_status: "not_applicable",
-      candidates: []
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" }).answer_rerank_status).toBe(
-      "not_applicable"
-    );
-
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      query_probes: { ...baseDiagnostics.query_probes, normalized_query: null },
-      answer_rerank_status: "not_applicable",
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" }).answer_rerank_status).toBe(
-      "not_applicable"
-    );
-
-    expect(() => parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "not_applicable",
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /non-empty query and candidate pool/u
-    );
-
+  it("rejects observed reranking in current run diagnostics", () => {
     expect(() => parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
       answer_rerank_status: "returned",
       answer_rerank_expected_count: 1,
       answer_rerank_scored_count: 1,
       candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false" })).toThrow(
-      /cross-encoder control activation failed/u
+    })).toThrow(
+      /retired cross-encoder reranking was observed/u
     );
   });
 

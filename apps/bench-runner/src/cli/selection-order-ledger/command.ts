@@ -5,7 +5,7 @@ import {
   type CapturedScoreFidelityMode
 } from "@do-soul/alaya-core";
 import { materializeSelectionOrderLedgerArtifact } from
-  "../../longmemeval/selection-replay/selection-order-ledger-artifact.js";
+  "../../longmemeval/selection-replay/order-ledger/artifact.js";
 
 export async function runSelectionOrderLedgerCommand(
   args: readonly string[]
@@ -17,6 +17,14 @@ export async function runSelectionOrderLedgerCommand(
       expectedSourceSha256: required(
         values,
         "--selection-boundaries-sha256"
+      ),
+      expectedQuestionCount: positiveInteger(
+        required(values, "--expected-question-count"),
+        "--expected-question-count"
+      ),
+      expectedQuestionIdDigest: required(
+        values,
+        "--expected-question-id-digest"
       ),
       outputPath: required(values, "--output"),
       checkoutRoot: process.cwd(),
@@ -50,6 +58,8 @@ function parseArgs(args: readonly string[]): ReadonlyMap<string, string> {
   const allowed = new Set([
     "--selection-boundaries",
     "--selection-boundaries-sha256",
+    "--expected-question-count",
+    "--expected-question-id-digest",
     "--output",
     "--captured-score-fidelity",
     "--gold-map"
@@ -58,6 +68,15 @@ function parseArgs(args: readonly string[]): ReadonlyMap<string, string> {
     throw new Error("unknown selection order ledger flag");
   }
   return values;
+}
+
+function positiveInteger(raw: string, flag: string): number {
+  if (!/^\d+$/u.test(raw)) throw new Error(`${flag} must be a positive integer`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return value;
 }
 
 function parseCapturedScoreFidelity(

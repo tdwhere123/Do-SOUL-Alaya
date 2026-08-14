@@ -162,7 +162,6 @@ function runProvenance(
       answer_rerank: { enabled: false },
       paired_env: {
         ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false",
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false",
         ALAYA_RECALL_ANSWERS_WITH: "1",
         ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
         ALAYA_CONFLICT_DETECTION_ENABLED: "1",

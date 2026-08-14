@@ -46,6 +46,10 @@ implements EvidenceFactFrameProposalNormalizer {
     const valueStart = predicate.relationIndex + 1;
     if (relation === undefined || valueStart >= tokens.length ||
         !isRelationToken(tokens, predicate.relationIndex)) return undefined;
+    if (valueStartsFiniteClause(tokens, valueStart) ||
+        valueContainsDelimitedClause(assertion, tokens, valueStart)) {
+      return undefined;
+    }
     const value = sliceFactFrameTokens(assertion, tokens, valueStart, tokens.length);
     if (value.length === 0 || value.length > MAX_SLOT_TEXT_LENGTH) return undefined;
     return EvidenceFactFrameFormationProposalSchema.parse({
@@ -63,6 +67,29 @@ implements EvidenceFactFrameProposalNormalizer {
       }
     });
   }
+}
+
+function valueStartsFiniteClause(
+  tokens: readonly FactFrameSourceToken[],
+  valueStart: number
+): boolean {
+  return AUXILIARIES.has(tokens[valueStart]?.normalized ?? "");
+}
+
+function valueContainsDelimitedClause(
+  source: string,
+  tokens: readonly FactFrameSourceToken[],
+  valueStart: number
+): boolean {
+  for (let index = valueStart + 1; index < tokens.length; index += 1) {
+    const subject = readSubject(source, tokens, index);
+    if (subject === null || readPredicate(tokens, subject.nextIndex) === null) continue;
+    const previous = tokens[index - 1];
+    if (previous !== undefined && /[,;:!?]/u.test(
+      source.slice(previous.end, tokens[index]!.start)
+    )) return true;
+  }
+  return false;
 }
 
 export const RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER:

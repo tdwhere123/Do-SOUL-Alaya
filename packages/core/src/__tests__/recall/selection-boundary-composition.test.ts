@@ -8,12 +8,8 @@ import {
   type CapturedScoreFidelityMode
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-composition.js";
-import {
-  ALWAYS_FAIL_CLOSED_ASSERTIONS,
-  CAPTURED_VS_LIVE_ASSERTIONS,
-  capturedOutcomeIsEnforced
-} from
-  "../../recall/delivery/selection-boundary/replay-identity-contract.js";
+import { CAPTURED_VS_LIVE_ASSERTIONS, capturedOutcomeIsEnforced } from
+  "../../recall/delivery/selection-boundary/validation/replay-identity-contract.js";
 import {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH
 } from
@@ -293,12 +289,6 @@ describe("fine-assessment selection composition reconstruction", () => {
     }
   });
 
-  it("refuses to free live packet-plan well-formedness", () => {
-    const packetPlan = ALWAYS_FAIL_CLOSED_ASSERTIONS.find((row) =>
-      row.site.includes("packet-plan-observation.ts")
-    );
-    expect(packetPlan?.class).toBe("input");
-  });
 });
 
 function captureLiveBoundary(): FineAssessmentSelectionBoundaryCase {

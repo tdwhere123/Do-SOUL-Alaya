@@ -152,9 +152,7 @@ describe("embedding treatment activation", () => {
 
   it.each([
     ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
-    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "false"]
+    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"]
   ] as const)("requires diagnostics for explicit %s=%s", (name, value) => {
     const env = { [name]: value };
     expect(requiresEmbeddingTreatmentDiagnostics(env)).toBe(true);
@@ -165,6 +163,15 @@ describe("embedding treatment activation", () => {
   it("does not require treatment diagnostics without an override", () => {
     expect(requiresEmbeddingTreatmentDiagnostics({})).toBe(false);
     expect(() => assertEmbeddingTreatmentDiagnosticsPresent(undefined, {})).not.toThrow();
+  });
+
+  it("rejects the retired local cross-encoder treatment", () => {
+    expect(() => requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
+    })).toThrow(/local cross-encoder reranking is retired/u);
+    expect(requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+    })).toBe(false);
   });
 
   it.each([

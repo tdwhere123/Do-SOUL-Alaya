@@ -1,4 +1,7 @@
-import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
+import {
+  readOptionalTreatmentBoolean,
+  refuseRetiredLocalCrossEncoderTreatment
+} from "../strict-treatment-config.js";
 
 interface EmbeddingTreatmentDiagnostics {
   readonly embedding_provider_status: string;
@@ -48,12 +51,10 @@ export function assertBiEncoderRunActivation(
 export function requiresEmbeddingTreatmentDiagnostics(
   env: Readonly<Record<string, string | undefined>>
 ): boolean {
+  refuseRetiredLocalCrossEncoderTreatment(env);
   return readOptionalTreatmentBoolean(
     env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT,
     "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
-  ) !== null || readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
   ) !== null;
 }
 

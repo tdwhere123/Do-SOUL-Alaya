@@ -235,7 +235,9 @@ function entryData(
         answer_rerank: cross,
         paired_env: {
           ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: String(treatment.embedding_supplement),
-          ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: String(treatment.answer_rerank),
+          ...(treatment.answer_rerank
+            ? { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" }
+            : {}),
           ...(treatment.embedding_supplement
             ? { ALAYA_LOCAL_EMBEDDING_MODEL: DEFAULT_LOCAL_ONNX_MODEL_ID }
             : {})

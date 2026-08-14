@@ -39,7 +39,7 @@ export function registerRunProvenanceRootCleanup(): string[] {
 
 export async function createRunProvenanceFixture(roots: string[]) {
   const paths = await createRunProvenancePaths(roots);
-  await writeLocalModelArtifacts(paths.modelCacheRoot, paths.crossEncoderCacheRoot);
+  await writeLocalModelArtifacts(paths.modelCacheRoot);
   const authority = await createQuestionAuthority(paths.manifestPath);
   writeFixtureExtractionManifest(paths.extractionCacheRoot);
   const provenance = await buildLongMemEvalRunProvenance({
@@ -54,7 +54,7 @@ export async function createRunProvenanceFixture(roots: string[]) {
     evaluatedCount: 1,
     commitSha7: "05d98df",
     embeddingProviderLabel: "local_onnx:Xenova/test",
-    env: createRunProvenanceEnvironment(paths.modelCacheRoot, paths.crossEncoderCacheRoot),
+    env: createRunProvenanceEnvironment(paths.modelCacheRoot),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
     datasetSha256: authority.manifest.dataset_sha256,
@@ -72,26 +72,16 @@ async function createRunProvenancePaths(roots: string[]) {
     root,
     manifestPath: join(root, "manifest.json"),
     extractionCacheRoot: join(root, "extraction-cache"),
-    modelCacheRoot: join(root, "models"),
-    crossEncoderCacheRoot: join(root, "cross-models")
+    modelCacheRoot: join(root, "models")
   };
 }
 
-async function writeLocalModelArtifacts(
-  modelCacheRoot: string,
-  crossEncoderCacheRoot: string
-): Promise<void> {
+async function writeLocalModelArtifacts(modelCacheRoot: string): Promise<void> {
   await mkdir(join(modelCacheRoot, "Xenova", "test"), { recursive: true });
-  await mkdir(join(crossEncoderCacheRoot, "Xenova", "reranker"), { recursive: true });
   await writeFile(join(modelCacheRoot, "Xenova", "test", "config.json"), "model-config", {
     encoding: "utf8",
     flag: "w"
   });
-  await writeFile(
-    join(crossEncoderCacheRoot, "Xenova", "reranker", "model.onnx"),
-    "cross-encoder-model",
-    "utf8"
-  );
 }
 
 async function createQuestionAuthority(manifestPath: string) {
@@ -169,11 +159,7 @@ export async function buildFixtureRunProvenanceSidecar(
     evaluatedCount: 1,
     commitSha7: "05d98df",
     embeddingProviderLabel: "local_onnx:Xenova/test",
-    env: createRunProvenanceEnvironment(
-      fixture.modelCacheRoot,
-      fixture.crossEncoderCacheRoot,
-      false
-    ),
+    env: createRunProvenanceEnvironment(fixture.modelCacheRoot, false),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
     datasetSha256: fixture.manifest.dataset_sha256,
@@ -184,7 +170,6 @@ export async function buildFixtureRunProvenanceSidecar(
 
 function createRunProvenanceEnvironment(
   modelCacheRoot: string,
-  crossEncoderCacheRoot: string,
   includeRedactionInputs = true
 ): NodeJS.ProcessEnv {
   return {
@@ -197,9 +182,6 @@ function createRunProvenanceEnvironment(
     OFFICIAL_API_GARDEN_MODEL: "cached-model",
     ALAYA_LOCAL_ONNX_THREADS: "2",
     ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
-    ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-    ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
-    ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
     ALAYA_EXP_ANSWERS_WITH_CAP: "3",
     ALAYA_RECALL_ANSWERS_WITH: "1",
     ALAYA_RECALL_FACET_TAGS: "1",

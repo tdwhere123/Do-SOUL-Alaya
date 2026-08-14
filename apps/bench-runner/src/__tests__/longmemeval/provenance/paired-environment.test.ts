@@ -5,6 +5,15 @@ import {
 } from "../../../longmemeval/provenance/paired-environment.js";
 
 describe("paired-environment bench provenance", () => {
+  it("omits retired local cross-encoder controls from current provenance", () => {
+    const paired = collectPairedEnvironment({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false",
+      ALAYA_LOCAL_CROSS_ENCODER_MODEL: "legacy-model"
+    });
+    expect(paired).not.toHaveProperty("ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
+    expect(paired).not.toHaveProperty("ALAYA_LOCAL_CROSS_ENCODER_MODEL");
+  });
+
   it("resolves credential state markers correctly without leaking secret values", () => {
     expect(resolveCredentialStateMarker(undefined)).toBe("unset");
     expect(resolveCredentialStateMarker("")).toBe("empty");

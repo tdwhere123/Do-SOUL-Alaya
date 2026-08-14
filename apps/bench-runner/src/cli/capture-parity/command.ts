@@ -1,6 +1,4 @@
 import process from "node:process";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { publishExclusiveOutput } from "../output/exclusive-output.js";
 import { runCaptureParity } from
@@ -8,12 +6,22 @@ import { runCaptureParity } from
 import type { LongMemEvalVariant } from
   "../../longmemeval/ingestion/dataset.js";
 import type { BenchPolicyShape } from "@do-soul/alaya-eval";
+import {
+  createOwnedTempRoot,
+  externalTempRoot,
+  finalizeOwnedTempRoot,
+  type OwnedTempRoot
+} from "../../longmemeval/lifecycle/owned-temp-root.js";
 
 export async function runCaptureParityCommand(
   args: readonly string[]
 ): Promise<number> {
+  let scratchRoot: OwnedTempRoot | undefined;
+  let exitCode = 2;
   try {
-    const options = await parseCaptureParityOptions(args);
+    const parsed = await parseCaptureParityOptions(args);
+    const { options } = parsed;
+    scratchRoot = parsed.scratchRoot;
     const report = await runCaptureParity(options);
     await publishExclusiveOutput(
       options.outputPath,
@@ -32,15 +40,32 @@ export async function runCaptureParityCommand(
       first_difference: report.first_difference,
       output: options.outputPath
     })}\n`);
-    return report.parity ? 0 : 1;
+    exitCode = report.parity ? 0 : 1;
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     process.stderr.write(`alaya-bench-runner capture-parity: ${message}\n`);
-    return 2;
+  } finally {
+    let cleanupError: unknown;
+    try {
+      if (scratchRoot !== undefined) {
+        await finalizeOwnedTempRoot(scratchRoot, true);
+      }
+    } catch (cause) {
+      cleanupError = cause;
+    }
+    if (cleanupError !== undefined) {
+      const message = cleanupError instanceof Error
+        ? cleanupError.message
+        : String(cleanupError);
+      process.stderr.write(`alaya-bench-runner capture-parity cleanup: ${message}\n`);
+      exitCode = 2;
+    }
   }
+  return exitCode;
 }
 
 async function parseCaptureParityOptions(args: readonly string[]): Promise<{
+  readonly options: {
   readonly snapshotDbPath: string;
   readonly outputPath: string;
   readonly variant: LongMemEvalVariant;
@@ -48,16 +73,21 @@ async function parseCaptureParityOptions(args: readonly string[]): Promise<{
   readonly dataDirRoot: string;
   readonly policyShape?: BenchPolicyShape;
   readonly querySemanticFactorCachePath?: string;
+  };
+  readonly scratchRoot: OwnedTempRoot;
 }> {
   const values = parseFlagPairs(args);
   const snapshotDbPath = required(values, "--snapshot");
   const outputPath = required(values, "--output");
   const variant = optionalVariant(values.get("--variant"));
   const policyShape = optionalPolicyShape(values.get("--policy-shape"));
-  const dataDirRoot = values.get("--data-dir-root") ??
-    await mkdtemp(join(tmpdir(), "alaya-capture-parity-"));
+  const suppliedDataRoot = values.get("--data-dir-root");
+  const scratchRoot = suppliedDataRoot === undefined
+    ? await createOwnedTempRoot("alaya-capture-parity-")
+    : externalTempRoot(suppliedDataRoot);
+  const dataDirRoot = scratchRoot.path;
   const historyRoot = values.get("--history-root") ?? join(dataDirRoot, "history");
-  return {
+  return { options: {
     snapshotDbPath,
     outputPath,
     variant,
@@ -67,7 +97,7 @@ async function parseCaptureParityOptions(args: readonly string[]): Promise<{
     ...(values.get("--query-semantic-factor-cache") === undefined
       ? {}
       : { querySemanticFactorCachePath: values.get("--query-semantic-factor-cache") })
-  };
+  }, scratchRoot };
 }
 
 function parseFlagPairs(args: readonly string[]): ReadonlyMap<string, string> {

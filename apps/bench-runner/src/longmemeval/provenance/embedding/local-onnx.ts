@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import { resolveBenchEmbeddingSchemaVersion } from "../../../harness/daemon/handle/daemon-handle-ops-support.js";
-import { readOptionalTreatmentBoolean } from "../../../harness/strict-treatment-config.js";
+import { refuseRetiredLocalCrossEncoderTreatment } from
+  "../../../harness/strict-treatment-config.js";
 
 const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 
@@ -92,31 +93,13 @@ async function collectArtifactFiles(root: string, current = root): Promise<strin
   return files;
 }
 
-export type LocalCrossEncoderRuntimeProvenance =
-  | Readonly<{ enabled: false }>
-  | Readonly<{
-      enabled: true;
-      provider_kind: "local_onnx_cross_encoder";
-      effective_model_id: string;
-      model_artifact_sha256: string;
-    }>;
+export type LocalCrossEncoderRuntimeProvenance = Readonly<{ enabled: false }>;
 
 export async function resolveLocalCrossEncoderRuntimeProvenance(
   env: Readonly<Record<string, string | undefined>>
 ): Promise<LocalCrossEncoderRuntimeProvenance> {
-  const enabled = readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true;
-  if (!enabled) return { enabled: false };
-  const cacheRoot = requireCrossEncoderEnv(env, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR");
-  const modelId = requireCrossEncoderEnv(env, "ALAYA_LOCAL_CROSS_ENCODER_MODEL");
-  return {
-    enabled: true,
-    provider_kind: "local_onnx_cross_encoder",
-    effective_model_id: modelId,
-    model_artifact_sha256: await resolveLocalArtifactTreeSha256(cacheRoot, modelId)
-  };
+  refuseRetiredLocalCrossEncoderTreatment(env);
+  return { enabled: false };
 }
 
 export async function resolveLocalArtifactTreeSha256(
@@ -158,15 +141,6 @@ export async function resolveLocalArtifactTreeSha256(
     for await (const chunk of createReadStream(file)) hash.update(chunk);
   }
   return hash.digest("hex");
-}
-
-function requireCrossEncoderEnv(
-  env: Readonly<Record<string, string | undefined>>,
-  name: "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR" | "ALAYA_LOCAL_CROSS_ENCODER_MODEL"
-): string {
-  const value = env[name]?.trim();
-  if (!value) throw new Error(`${name} is required when local cross-encoder reranking is enabled`);
-  return value;
 }
 
 function updateFrame(hash: ReturnType<typeof createHash>, value: Buffer): void {

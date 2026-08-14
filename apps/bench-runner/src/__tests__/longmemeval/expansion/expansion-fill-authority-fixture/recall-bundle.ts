@@ -98,8 +98,7 @@ export function recallBundle(
           embedding_supplement: { enabled: false },
           answer_rerank: { enabled: false },
           paired_env: {
-            ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false",
-            ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+            ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
           }
         },
         execution: {

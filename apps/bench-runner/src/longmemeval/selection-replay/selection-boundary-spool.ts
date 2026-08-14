@@ -3,7 +3,6 @@ import {
   appendFile,
   mkdir,
   mkdtemp,
-  rename,
   rm,
   writeFile
 } from "node:fs/promises";
@@ -13,6 +12,9 @@ import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
+import { linkFileExclusiveDurable } from
+  "../extraction/fill/manifest/durable-exclusive-publication.js";
 import {
   replayFineAssessmentSelectionBoundary,
   materializeFineAssessmentSelectionBoundary,
@@ -91,29 +93,53 @@ export async function createLongMemEvalSelectionBoundarySpool(input: {
 export async function verifyLongMemEvalSelectionBoundaryArtifact(
   artifactPath: string,
   maxArtifactBytes = LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES
-): Promise<{ readonly recordCount: number }> {
+): Promise<{
+  readonly recordCount: number;
+  readonly questionCount: number;
+  readonly questionIdDigest: string;
+}> {
   return verifySelectionBoundaryArtifact(artifactPath, maxArtifactBytes);
 }
 
 async function verifySelectionBoundaryArtifact(
   artifactPath: string,
   maxArtifactBytes: number
-): Promise<{ readonly recordCount: number }> {
+): Promise<{
+  readonly recordCount: number;
+  readonly questionCount: number;
+  readonly questionIdDigest: string;
+}> {
   let previous: SelectionBoundaryRecord | undefined;
+  const questionIds = new Set<string>();
   const { recordCount } = await forEachSelectionBoundaryGzipRecord(
     artifactPath,
     maxArtifactBytes,
     SELECTION_REPLAY_ARTIFACT_ERRORS,
     (record, recordIndex) => {
+      const beginsQuestion = previous === undefined ||
+        previous.question_id !== record.question_id;
+      if (beginsQuestion && questionIds.has(record.question_id)) {
+        throw new Error(
+          `selection replay repeats question_id ${record.question_id}`
+        );
+      }
       assertRecordSequence(record, previous);
+      if (beginsQuestion) questionIds.add(record.question_id);
       replayRecordWithIdentity(record, recordIndex);
       previous = record;
     }
   );
+  if (recordCount === 0) {
+    throw new Error("selection replay artifact contains no records");
+  }
   if (previous !== undefined && !previous.authoritative) {
     throw new Error("selection replay question has no authoritative invocation");
   }
-  return { recordCount };
+  return {
+    recordCount,
+    questionCount: questionIds.size,
+    questionIdDigest: computeLongMemEvalQuestionIdDigest([...questionIds])
+  };
 }
 
 /** The first replay mismatch must stay attributable to one source record. */
@@ -215,7 +241,8 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
         this.maxArtifactBytes
       );
       assertVerifiedRecordCount(expectedSource, verified.recordCount);
-      await rename(partialPath, artifactPath);
+      linkFileExclusiveDurable(partialPath, artifactPath);
+      await rm(partialPath);
       return { ...artifactMeter.identity(), recordCount: verified.recordCount };
     } catch (error) {
       await rm(partialPath, { force: true });

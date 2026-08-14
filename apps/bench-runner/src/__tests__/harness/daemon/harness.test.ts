@@ -381,7 +381,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   });
 
   it(
-    "preserves cross-encoder configuration and restores managed env on shutdown",
+    "refuses retired cross-encoder configuration before daemon startup",
     async () => {
       const keys = [
         "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
@@ -392,29 +392,14 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK = "true";
       process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR = "/tmp/cross-encoder-cache";
       process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
-      const configured = snapshotManagedEnv();
-
       try {
-        await withBenchDaemon(
+        await expect(withBenchDaemon(
           {
             workspaceId: "harness-cross-encoder-env-ws",
             runId: "harness-cross-encoder-env-run"
           },
-          async () => {
-            expect(process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK).toBe("true");
-            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR).toBe(
-              "/tmp/cross-encoder-cache"
-            );
-            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
-              "Xenova/ms-marco-MiniLM-L-6-v2"
-            );
-            process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "mutated-by-runtime";
-          }
-        );
-        expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
-          "Xenova/ms-marco-MiniLM-L-6-v2"
-        );
-        expect(snapshotManagedEnv()).toEqual(configured);
+          async () => undefined
+        )).rejects.toThrow(/cross-encoder reranking is retired/u);
       } finally {
         for (const key of keys) {
           const value = original[key];

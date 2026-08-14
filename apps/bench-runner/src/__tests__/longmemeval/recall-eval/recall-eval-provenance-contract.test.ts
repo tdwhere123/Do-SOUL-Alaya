@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLongMemEvalSelectionContractIdentity } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
-import { compareLongMemEvalQuestionTypes } from "../../../longmemeval/comparison/question-type-comparison.js";
 import {
   buildRecallEvalRunProvenance,
   isRecallEvalRunEvidenceEligible
@@ -20,9 +19,8 @@ import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/
 import {
   DATASET_SHA,
   dataset,
-  kpi,
   provenance
-} from "../qa/question-type-comparison-test-fixtures.js";
+} from "./recall-eval-provenance-contract-fixture.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 import {
   buildSnapshotExtractionAuthority,
@@ -133,10 +131,7 @@ function withFrozenCode(
   });
 }
 
-function runtimeAttribution(
-  biSha: string,
-  crossSha: string
-): RecallEvalRuntimeAttribution {
+function runtimeAttribution(biSha: string): RecallEvalRuntimeAttribution {
   return {
     status: "attributed",
     gate_eligible: true,
@@ -156,12 +151,7 @@ function runtimeAttribution(
       effective_schema_version: 1,
       d2q_input: "raw_content"
     },
-    answer_rerank: {
-      enabled: true,
-      provider_kind: "local_onnx_cross_encoder",
-      effective_model_id: "Xenova/reranker",
-      model_artifact_sha256: crossSha
-    },
+    answer_rerank: { enabled: false },
     recall_config: buildEffectiveRecallConfigIdentity({}, {
       maxResults: 10,
       conflictAwareness: true
@@ -198,40 +188,33 @@ function runtimeAttribution(
   };
 }
 
-function env(enabled: boolean, modelRoot: string): Readonly<Record<string, string>> {
+function env(modelRoot: string): Readonly<Record<string, string>> {
   return {
     ...archived.runtime.paired_env,
     ALAYA_LOCAL_ONNX_THREADS: "2",
-    ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
     ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelRoot,
     ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/test",
-    ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: modelRoot,
-    ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
-    ALAYA_RECALL_FACET_TAGS: "0",
-    ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: enabled ? "on" : "off"
+    ALAYA_RECALL_FACET_TAGS: "0"
   };
 }
 
-describe("recall-eval provenance producer/comparator contract", () => {
-  it("emits a strict paired archive whose sole A/B difference is the slice switch", async () => {
+describe("recall-eval provenance producer contract", () => {
+  it("emits a strict current archive and refuses unbound runtime evidence", async () => {
     const modelRoot = await mkdtemp(join(tmpdir(), "recall-eval-provenance-"));
     await mkdir(join(modelRoot, "Xenova", "test"), { recursive: true });
-    await mkdir(join(modelRoot, "Xenova", "reranker"), { recursive: true });
     await writeFile(join(modelRoot, "Xenova", "test", "model.onnx"), "bi", "utf8");
-    await writeFile(join(modelRoot, "Xenova", "reranker", "model.onnx"), "cross", "utf8");
     try {
       const biSha = await resolveLocalArtifactTreeSha256(modelRoot, "Xenova/test");
-      const crossSha = await resolveLocalArtifactTreeSha256(modelRoot, "Xenova/reranker");
-      const build = async (enabled: boolean): Promise<LongMemEvalRunProvenance> => {
+      const build = async (): Promise<LongMemEvalRunProvenance> => {
         const built = await buildRecallEvalRunProvenance({
           manifest: manifest(),
           extractionAuthority: extractionAuthority(),
-          runtimeAttribution: runtimeAttribution(biSha, crossSha),
+          runtimeAttribution: runtimeAttribution(biSha),
           evaluatedCount: dataset.length,
           offset: 0,
           limit: null,
           commitSha7: "05d98df",
-          env: env(enabled, modelRoot),
+          env: env(modelRoot),
           computeExecutedDistIdentity: async () => ({
             algorithm: "sha256-reachable-path-file-sha256-v1",
             sha256: "6".repeat(64),
@@ -240,25 +223,18 @@ describe("recall-eval provenance producer/comparator contract", () => {
         });
         return withFrozenCode(built);
       };
-      const [control, treatment] = await Promise.all([build(false), build(true)]);
-      const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
+      const control = await build();
 
       expect(LongMemEvalRunProvenanceSchema.parse(control)).toEqual(control);
       expect(control.code.executed_dist).toMatchObject({ sha256: "6".repeat(64), file_count: 3 });
-      expect(control.runtime.answer_rerank).toEqual({
-        enabled: true,
-        provider_kind: "local_onnx_cross_encoder",
-        effective_model_id: "Xenova/reranker",
-        model_artifact_sha256: crossSha
-      });
+      expect(control.runtime.answer_rerank).toEqual({ enabled: false });
       expect(control.runtime.query_semantic_factor_cache).toEqual(
-        runtimeAttribution(biSha, crossSha).query_semantic_factor_cache
+        runtimeAttribution(biSha).query_semantic_factor_cache
       );
       expect(control.seed_capabilities).toEqual({ facet_tags_enabled: true });
-      expect(treatment.seed_capabilities).toEqual({ facet_tags_enabled: true });
       expect(control).toMatchObject({ dataset_sha256: DATASET_SHA, selection });
       expect(isRecallEvalRunEvidenceEligible({
-        runtimeAttribution: runtimeAttribution(biSha, crossSha),
+        runtimeAttribution: runtimeAttribution(biSha),
         provenance: control,
         expectedQuestionIdDigest: selection.selected_id_digest,
         actualQuestionIdDigest: selection.selected_id_digest,
@@ -268,9 +244,9 @@ describe("recall-eval provenance producer/comparator contract", () => {
       })).toBe(true);
       expect(isRecallEvalRunEvidenceEligible({
         runtimeAttribution: {
-          ...runtimeAttribution(biSha, crossSha),
+          ...runtimeAttribution(biSha),
           query_semantic_factor_cache: {
-            ...runtimeAttribution(biSha, crossSha).query_semantic_factor_cache!,
+            ...runtimeAttribution(biSha).query_semantic_factor_cache!,
             cache_content_sha256: `sha256:${"a".repeat(64)}`
           }
         },
@@ -285,12 +261,12 @@ describe("recall-eval provenance producer/comparator contract", () => {
       const sliced = withFrozenCode(await buildRecallEvalRunProvenance({
         manifest: manifest(),
         extractionAuthority: extractionAuthority(),
-        runtimeAttribution: runtimeAttribution(biSha, crossSha),
+        runtimeAttribution: runtimeAttribution(biSha),
         evaluatedCount: dataset.length - 1,
         offset: 0,
         limit: dataset.length - 1,
         commitSha7: "05d98df",
-        env: env(false, modelRoot),
+        env: env(modelRoot),
         computeExecutedDistIdentity: async () => ({
           algorithm: "sha256-reachable-path-file-sha256-v1",
           sha256: "6".repeat(64),
@@ -299,7 +275,7 @@ describe("recall-eval provenance producer/comparator contract", () => {
       }));
       expect(sliced.selection).toBeUndefined();
       expect(isRecallEvalRunEvidenceEligible({
-        runtimeAttribution: runtimeAttribution(biSha, crossSha),
+        runtimeAttribution: runtimeAttribution(biSha),
         provenance: sliced,
         expectedQuestionIdDigest: selection.selected_id_digest,
         actualQuestionIdDigest: selection.selected_id_digest,
@@ -310,13 +286,13 @@ describe("recall-eval provenance producer/comparator contract", () => {
       await expect(buildRecallEvalRunProvenance({
         manifest: manifest(),
         extractionAuthority: extractionAuthority(),
-        runtimeAttribution: runtimeAttribution(biSha, crossSha),
+        runtimeAttribution: runtimeAttribution(biSha),
         evaluatedCount: dataset.length,
         offset: 0,
         limit: null,
         commitSha7: "05d98df",
         env: {
-          ...env(false, modelRoot),
+          ...env(modelRoot),
           ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "7".repeat(64),
           ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "3"
         },
@@ -329,17 +305,17 @@ describe("recall-eval provenance producer/comparator contract", () => {
       await expect(buildRecallEvalRunProvenance({
         manifest: manifest(),
         extractionAuthority: extractionAuthority(),
-        runtimeAttribution: runtimeAttribution(biSha, crossSha),
+        runtimeAttribution: runtimeAttribution(biSha),
         evaluatedCount: dataset.length,
         offset: 0,
         limit: null,
         commitSha7: "05d98df",
-        env: env(false, modelRoot),
+        env: env(modelRoot),
         computeExecutedDistIdentity: async () => null
       })).rejects.toThrow(/executed dist closure/u);
       expect(isRecallEvalRunEvidenceEligible({
         runtimeAttribution: {
-          ...runtimeAttribution(biSha, crossSha),
+          ...runtimeAttribution(biSha),
           status: "legacy_unattributed",
           gate_eligible: false
         },
@@ -350,14 +326,6 @@ describe("recall-eval provenance producer/comparator contract", () => {
         offset: 0,
         limit: null
       })).toBe(false);
-      expect(compareLongMemEvalQuestionTypes({
-        dataset,
-        datasetSha256: DATASET_SHA,
-        control: kpi(rows),
-        treatment: kpi(rows),
-        controlProvenance: control,
-        treatmentProvenance: treatment
-      })).toMatchObject({ evidence_grade: "paired_attributed", gate: { pass: false } });
     } finally {
       await rm(modelRoot, { recursive: true, force: true });
     }

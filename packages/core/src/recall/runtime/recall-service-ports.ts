@@ -7,13 +7,13 @@ import type {
   PathAnchorRef,
   PathRelation,
   ProjectMappingAnchor,
+  ScopeClass,
   SoulActiveConstraint,
   SoulRecallTokenizerHint,
   Slot,
   StorageTier as StorageTierType,
   SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingNeighborHit,
   EmbeddingRecallRequestScoreSnapshot,
@@ -26,9 +26,7 @@ import type {
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
 } from "../../embedding-recall/embedding-recall-service.js";
-import type {
-  ManifestationBiasSidecarEntry
-} from "../../manifestation/manifestation-resolver.js";
+import type { ManifestationBiasSidecarEntry } from "../../manifestation/manifestation-resolver.js";
 import type {
   GlobalMemoryRecallCachePort,
   GlobalMemoryRecallPort
@@ -483,8 +481,7 @@ export interface RecallServiceDependencies {
   // see also: shared/entity-extraction-port.ts, shared/entity-extraction-rules.ts RuleBasedEntityExtractor.
   readonly entityExtractionPort?: import("../../shared/entity-extraction-port.js").EntityExtractionPort;
   // Optional read-only structured query parser; absent means relation demand is unavailable.
-  readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js")
-    .QueryFactFrameExtractionPort;
+  readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js").QueryFactFrameExtractionPort;
   readonly openSemanticFactorExtractionPort?: import(
     "../../semantic/open-semantic-factor-extraction-port.js"
   ).OpenSemanticFactorExtractionPort;

@@ -43,7 +43,7 @@ import {
   CAPTURED_SCORE_FIDELITY_ASSERT,
   CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
   type CapturedScoreFidelityMode
-} from "./replay-identity-contract.js";
+} from "./validation/replay-identity-contract.js";
 
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
@@ -184,6 +184,15 @@ function assertCompositionInputs(
   deepHead: RecallDeepHeadAssessment,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ): void {
+  assertCompositionDeliveryInputs(input, delivery, capturedScoreFidelity);
+  assertCompositionDeepHeadInputs(input, deepHead, capturedScoreFidelity);
+}
+
+function assertCompositionDeliveryInputs(
+  input: FineAssessmentSelectionBoundaryInput,
+  delivery: ReturnType<typeof applyDeliverySelection>,
+  capturedScoreFidelity: CapturedScoreFidelityMode
+): void {
   assertCapturedVsLive(capturedScoreFidelity, "candidate_population", () => {
     assertCandidatePopulation(delivery.orderedCandidates, input.ordered_candidates);
   });
@@ -211,6 +220,13 @@ function assertCompositionInputs(
       "delivery_rank"
     );
   });
+}
+
+function assertCompositionDeepHeadInputs(
+  input: FineAssessmentSelectionBoundaryInput,
+  deepHead: RecallDeepHeadAssessment,
+  capturedScoreFidelity: CapturedScoreFidelityMode
+): void {
   assertCapturedVsLive(capturedScoreFidelity, "coverage_relevance", () => {
     assertNumberMapEquals(
       deepHead.scores,

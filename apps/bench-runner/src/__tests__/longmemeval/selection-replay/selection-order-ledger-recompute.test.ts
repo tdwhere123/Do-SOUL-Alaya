@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadSelectionReplayGoldMap } from
-  "../../../longmemeval/selection-replay/selection-boundary-gold-map.js";
+  "../../../longmemeval/selection-replay/order-ledger/gold-map.js";
 import {
   firstCapturedToLiveMembershipOwner,
   formulaOperatorIdFromTraces
-} from "../../../longmemeval/selection-replay/selection-order-ledger-recompute.js";
+} from "../../../longmemeval/selection-replay/order-ledger/recompute.js";
 
 const roots: string[] = [];
 
@@ -89,6 +89,30 @@ describe("selection replay gold map", () => {
     })}\n`);
     await expect(loadSelectionReplayGoldMap(nonStringPath)).rejects.toThrow(
       /gold_object_ids for q2 must be strings/u
+    );
+  });
+
+  it("rejects missing booleans and duplicate gold object ids", async () => {
+    const root = await mkdtemp(join(tmpdir(), "selection-replay-gold-map-"));
+    roots.push(root);
+    const missingBooleanPath = join(root, "missing-boolean.json");
+    await writeFile(missingBooleanPath, `${JSON.stringify({
+      questions: [{
+        question_id: "q1",
+        is_abstention: false,
+        gold_object_ids: ["gold-a"]
+      }]
+    })}\n`);
+    await expect(loadSelectionReplayGoldMap(missingBooleanPath)).rejects.toThrow(
+      /question row is invalid/u
+    );
+
+    const duplicateIdPath = join(root, "duplicate-id.json");
+    await writeFile(duplicateIdPath, `${JSON.stringify({
+      questions: [goldRow("q2", ["gold-a", "gold-a"])]
+    })}\n`);
+    await expect(loadSelectionReplayGoldMap(duplicateIdPath)).rejects.toThrow(
+      /gold_object_ids for q2 must be unique/u
     );
   });
 });

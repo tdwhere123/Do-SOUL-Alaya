@@ -28,59 +28,113 @@ export async function forEachSelectionBoundaryGzipRecord(
     recordIndex: number
   ) => void | Promise<void>
 ): Promise<{ readonly recordCount: number }> {
+  const decompressedLimit = Math.min(maxArtifactBytes * 8, 1024 * 1024 * 1024);
+  const recordLimit = Math.min(maxArtifactBytes, 16 * 1024 * 1024);
   let recordCount = 0;
   let callbackError: unknown;
+  let limitError: Error | undefined;
+  let recordLimitError: Error | undefined;
   try {
     await pipeline(
       createReadStream(artifactPath),
       createCompressedSizeLimit(maxArtifactBytes, errors.gzipExceeded),
       createGunzip(),
+      createByteLimit(
+        decompressedLimit,
+        `selection boundary artifact exceeds ${decompressedLimit} decompressed bytes`,
+        (error) => { limitError = error; }
+      ),
       async (source) => {
-        for await (const encoded of readLfDelimitedRecords(source)) {
-          if (encoded.byteLength === 0) continue;
-          const record = parseSelectionBoundaryRecord(
-            decodeSelectionBoundaryRecord(
-              encoded,
-              recordCount,
-              errors.utf8Invalid
-            ),
-            recordCount,
-            errors.jsonInvalid
-          );
-          try {
-            await onRecord(record, recordCount);
-          } catch (error) {
-            callbackError = error;
-            throw error;
-          }
-          recordCount += 1;
-        }
+        recordCount = await consumeSelectionBoundaryRecords({
+          source, recordLimit, errors, onRecord,
+          onRecordLimitError: (error) => { recordLimitError = error; },
+          onCallbackError: (error) => { callbackError = error; }
+        });
       }
     );
   } catch (error) {
     if (callbackError !== undefined) throw callbackError;
+    if (recordLimitError !== undefined) throw recordLimitError;
+    if (limitError !== undefined) throw limitError;
     throw error;
   }
   return { recordCount };
 }
 
+async function consumeSelectionBoundaryRecords(input: Readonly<{
+  source: AsyncIterable<Buffer | string>;
+  recordLimit: number;
+  errors: SelectionBoundaryArtifactErrors;
+  onRecord: (
+    record: SelectionBoundaryArtifactRecord,
+    recordIndex: number
+  ) => void | Promise<void>;
+  onRecordLimitError: (error: Error) => void;
+  onCallbackError: (error: unknown) => void;
+}>): Promise<number> {
+  let recordCount = 0;
+  for await (const encoded of readLfDelimitedRecords(
+    input.source, input.recordLimit, input.onRecordLimitError
+  )) {
+    if (encoded.byteLength === 0) continue;
+    const record = parseSelectionBoundaryRecord(
+      decodeSelectionBoundaryRecord(encoded, recordCount, input.errors.utf8Invalid),
+      recordCount,
+      input.errors.jsonInvalid
+    );
+    try {
+      await input.onRecord(record, recordCount);
+    } catch (error) {
+      input.onCallbackError(error);
+      throw error;
+    }
+    recordCount += 1;
+  }
+  return recordCount;
+}
+
 async function* readLfDelimitedRecords(
-  stream: AsyncIterable<Buffer | string>
+  stream: AsyncIterable<Buffer | string>,
+  maxRecordBytes: number,
+  onExceeded: (error: Error) => void
 ): AsyncGenerator<Buffer> {
   let pending: Buffer[] = [];
+  let pendingBytes = 0;
   for await (const chunk of stream) {
     const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     let start = 0;
     let newline = raw.indexOf(0x0a, start);
     while (newline >= 0) {
-      yield completeRecord(pending, raw.subarray(start, newline));
+      const tail = raw.subarray(start, newline);
+      assertRecordSize(pendingBytes + tail.byteLength, maxRecordBytes, onExceeded);
+      yield completeRecord(pending, tail);
       pending = [];
+      pendingBytes = 0;
       start = newline + 1;
       newline = raw.indexOf(0x0a, start);
     }
-    if (start < raw.byteLength) pending.push(raw.subarray(start));
+    if (start < raw.byteLength) {
+      const tail = raw.subarray(start);
+      pendingBytes += tail.byteLength;
+      assertRecordSize(pendingBytes, maxRecordBytes, onExceeded);
+      pending.push(tail);
+    }
   }
   if (pending.length > 0) yield Buffer.concat(pending);
+}
+
+function assertRecordSize(
+  bytes: number,
+  maxBytes: number,
+  onExceeded: (error: Error) => void
+): void {
+  if (bytes > maxBytes) {
+    const error = new Error(
+      `selection boundary record exceeds ${maxBytes} decompressed bytes`
+    );
+    onExceeded(error);
+    throw error;
+  }
 }
 
 function completeRecord(pending: readonly Buffer[], tail: Buffer): Buffer {
@@ -130,12 +184,22 @@ export function createCompressedSizeLimit(
   maxBytes: number,
   gzipExceeded: (maxBytes: number) => string
 ): Transform {
-  let compressedBytes = 0;
+  return createByteLimit(maxBytes, gzipExceeded(maxBytes));
+}
+
+function createByteLimit(
+  maxBytes: number,
+  message: string,
+  onExceeded: (error: Error) => void = () => undefined
+): Transform {
+  let bytes = 0;
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
-      compressedBytes += chunk.byteLength;
-      if (compressedBytes > maxBytes) {
-        callback(new Error(gzipExceeded(maxBytes)));
+      bytes += chunk.byteLength;
+      if (bytes > maxBytes) {
+        const error = new Error(message);
+        onExceeded(error);
+        callback(error);
         return;
       }
       callback(null, chunk);

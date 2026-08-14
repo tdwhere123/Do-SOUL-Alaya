@@ -62,6 +62,16 @@ export { retainBoundedAnswerHeads };
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
 type IsBehaviorEligible<T> = (candidate: T) => boolean;
+type DirectEvidencePromotionInput<T> = Readonly<{
+  candidates: readonly T[]; baseline: readonly T[];
+  queryProbes: Readonly<RecallQueryProbes>;
+  evidenceSemanticActivationsByCandidateKey: ReadonlyMap<
+    string, Readonly<RecallEvidenceSemanticActivationReceipt>
+  >;
+  publicRelevanceByCandidateKey: ReadonlyMap<string, number>; excludedCandidateKeys: ReadonlySet<string>;
+  selectDelivered: SelectDelivered<T>; isBehaviorEligible: IsBehaviorEligible<T>;
+  supportsSingleSemanticLeader: boolean; headLimit: number;
+}>;
 
 export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
@@ -83,9 +93,22 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
     const unchanged = unchangedSelection(candidates);
     return withOrderTransitions(unchanged, unchanged, unchanged);
   }
+  return selectDirectEvidencePromotions({
+    candidates, baseline, queryProbes, evidenceSemanticActivationsByCandidateKey,
+    publicRelevanceByCandidateKey, excludedCandidateKeys, selectDelivered,
+    isBehaviorEligible, supportsSingleSemanticLeader, headLimit
+  });
+}
+
+function selectDirectEvidencePromotions<T extends DirectEvidenceHeadCandidate>(
+  input: DirectEvidencePromotionInput<T>
+): DirectEvidenceHeadSelection<T> {
+  const { candidates, baseline, queryProbes, excludedCandidateKeys, headLimit,
+    publicRelevanceByCandidateKey, selectDelivered, isBehaviorEligible } = input;
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
   const semanticActivations = constrainSourceSemanticActivationsToAnswerShape(
-    supportsSingleSemanticLeader, evidenceSemanticActivationsByCandidateKey
+    input.supportsSingleSemanticLeader,
+    input.evidenceSemanticActivationsByCandidateKey
   );
   const semanticLeader = selectUniqueSourceSemanticLeader({
     candidates,

@@ -8,8 +8,7 @@ import { canonicalProductRecallProvenanceConfig } from
   "./product-policy-verifier.js";
 
 const TREATMENT_NEUTRAL_RECALL_ENV = Object.freeze({
-  ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false",
-  ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+  ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
 });
 
 export function assertPromotionSnapshotProducerPolicy(

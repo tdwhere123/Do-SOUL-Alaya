@@ -237,37 +237,13 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose("博物馆 I visited the Louvre yesterday.")).toBeUndefined();
   });
 
-  // Token-identical to admitted shapes. A POS tagger is the separator.
-  // Flipping any of these to unavailable is a residual close, not a drive-by.
-  describe("known residuals (currently form a wrong frame)", () => {
-    it("to-be + adjective + finite clause currently latches the embedded subject", () => {
-      expect(normalizer.propose(
-        "To be sure I arrived on time, I woke up early."
-      )?.fact_frame.slots).toEqual([
-        { role: "subject", text: "I" },
-        { role: "relation", text: "arrived" },
-        { role: "value", text: "on time, I woke up early" }
-      ]);
-    });
-
-    it("fused which currently latches a relativizer reading", () => {
-      expect(normalizer.propose(
-        "Speaking of which I bought last year, I still use it."
-      )?.fact_frame.slots).toEqual([
-        { role: "subject", text: "I" },
-        { role: "relation", text: "bought" },
-        { role: "value", text: "last year, I still use it" }
-      ]);
-    });
-
-    it("comma-less reduced relative currently latches the relative subject", () => {
-      expect(normalizer.propose(
-        "On the house I saw was listed"
-      )?.fact_frame.slots).toEqual([
-        { role: "subject", text: "I" },
-        { role: "relation", text: "saw" },
-        { role: "value", text: "was listed" }
-      ]);
+  describe("ambiguous adjunct clauses", () => {
+    it.each([
+      "To be sure I arrived on time, I woke up early.",
+      "Speaking of which I bought last year, I still use it.",
+      "On the house I saw was listed"
+    ])("fails closed instead of forming an embedded-clause frame: %s", (source) => {
+      expect(normalizer.propose(source)).toBeUndefined();
     });
   });
 

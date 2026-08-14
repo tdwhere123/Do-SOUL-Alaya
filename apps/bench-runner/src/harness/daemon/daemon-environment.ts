@@ -13,7 +13,8 @@ import type {
 import { emitBenchHarnessWarning } from "./runtime/daemon-warnings.js";
 import {
   readOptionalOnnxThreadCount,
-  readOptionalTreatmentBoolean
+  readOptionalTreatmentBoolean,
+  refuseRetiredLocalCrossEncoderTreatment
 } from "../strict-treatment-config.js";
 import { planBenchDaemonConfigDirectory } from "./daemon-config-directory.js";
 
@@ -164,20 +165,11 @@ function buildBenchDaemonEnvironment(input: {
   setEnvironmentValue(environment, "HOME", join(input.dataDir, "home"));
   setEnvironmentValue(environment, "ALAYA_REVIEWER_IDENTITY", input.reviewerCredentials.identity);
   setEnvironmentValue(environment, "ALAYA_REVIEWER_TOKEN", input.reviewerCredentials.token);
-  copyTreatmentValue(environment, input.ambientEnv, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
-  copyTreatmentValue(environment, input.ambientEnv, "ALAYA_LOCAL_CROSS_ENCODER_MODEL");
   copyTreatmentValue(environment, input.ambientEnv, "ALAYA_RECALL_D2Q");
   copyTreatmentValue(environment, input.ambientEnv, "ALAYA_LOCAL_ONNX_THREADS");
-  const crossEnabled = readOptionalTreatmentBoolean(
-    input.ambientEnv.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true;
-  setEnvironmentValue(
-    environment,
-    "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
-    crossEnabled ? resolveLocalModelCacheRoot(input.ambientEnv, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR")
-      : input.ambientEnv.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR
-  );
+  setEnvironmentValue(environment, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", undefined);
+  setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR", undefined);
+  setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_MODEL", undefined);
   setEnvironmentValue(
     environment,
     "ALAYA_RECALL_SOURCE_REF_ROBUST",
@@ -189,10 +181,7 @@ function buildBenchDaemonEnvironment(input: {
 function validateSavedTreatmentEnvironment(
   savedEnv: Partial<Record<string, string | undefined>>
 ): void {
-  readOptionalTreatmentBoolean(
-    savedEnv.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  );
+  refuseRetiredLocalCrossEncoderTreatment(savedEnv);
   readOptionalTreatmentBoolean(savedEnv.ALAYA_RECALL_D2Q, "ALAYA_RECALL_D2Q");
   readOptionalOnnxThreadCount(savedEnv.ALAYA_LOCAL_ONNX_THREADS);
 }
@@ -259,7 +248,7 @@ function copyTreatmentValue(
 
 function resolveLocalModelCacheRoot(
   env: Readonly<Record<string, string | undefined>>,
-  explicitKey: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR" | "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR"
+  explicitKey: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR"
 ): string {
   const explicit = env[explicitKey]?.trim();
   if (explicit) return resolve(explicit);

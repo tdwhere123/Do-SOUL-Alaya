@@ -6,16 +6,16 @@ import {
   type SelectionCompositionReconstruction
 } from "@do-soul/alaya-core";
 import type { SelectionBoundaryArtifactRecord } from
-  "./selection-boundary-artifact-reader.js";
+  "../selection-boundary-artifact-reader.js";
 import {
   anyGoldInHead,
   fullGoldInHead,
   goldObjectsInHead,
   sameMembership,
   sameOrder
-} from "./selection-boundary-counterfactual-metrics.js";
+} from "../selection-boundary-counterfactual-metrics.js";
 import type { SelectionReplayGoldQuestion } from
-  "./selection-boundary-gold-map.js";
+  "./gold-map.js";
 
 const PROTECTION_OWNERS: readonly FineAssessmentMembershipOwner[] = [
   "fusion",
