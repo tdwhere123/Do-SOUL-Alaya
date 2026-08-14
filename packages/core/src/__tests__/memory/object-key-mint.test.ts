@@ -138,6 +138,23 @@ describe("mintMemoryObjectKeys", () => {
       expect.arrayContaining(["4", "four"])
     );
   });
+
+  it("skips remainder surfaces that exceed the addressable Key bound", () => {
+    const oversized = `Uniqueblob${"x".repeat(600)}`;
+    const keys = mintMemoryObjectKeys({
+      workspace_id: WORKSPACE,
+      owner_id: OWNER,
+      memory_content: "I bought used books.",
+      evidence: [{
+        object_id: EVIDENCE,
+        gist: `She mentioned ${oversized} today.`,
+        fact_key_contents: [],
+        osf_graph: null
+      }]
+    });
+    expect(keys.every((key) => key.surface.length <= 512)).toBe(true);
+    expect(keys.some((key) => key.surface.includes("Uniqueblob"))).toBe(false);
+  });
 });
 
 function surfacesOf(

@@ -1,5 +1,5 @@
-import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
-import { formMemoryObjectKey } from "./form-key.js";
+import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/alaya-protocol";
+import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
 import { tokenizeWithSpans, type TokenSpan } from "./tokenize.js";
 import type { DraftMemoryObjectKey, MintableEvidence } from "./types.js";
@@ -17,7 +17,7 @@ export function mintGistRemainderKeys(input: Readonly<{
   readonly memory_content: string;
   readonly evidence: Readonly<MintableEvidence>;
   readonly occupied: ReadonlySet<string>;
-}>): readonly ReturnType<typeof formMemoryObjectKey>[] {
+}>): readonly Readonly<MemoryObjectKey>[] {
   const contentNormalized = normalizeMemoryObjectKeySurface(input.memory_content);
   const contentTokens = new Set(
     tokenizeWithSpans(input.memory_content).map((span) =>
@@ -27,7 +27,7 @@ export function mintGistRemainderKeys(input: Readonly<{
   const phrases = remainderPhrases(tokenizeWithSpans(input.evidence.gist), contentTokens);
   return Object.freeze(phrases.flatMap((phrase) => {
     if (occupies(phrase.surface, input.occupied, contentNormalized)) return [];
-    return [formMemoryObjectKey(gistDraft(input, phrase))];
+    return formedKey(gistDraft(input, phrase));
   }));
 }
 

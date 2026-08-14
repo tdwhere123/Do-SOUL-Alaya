@@ -1,6 +1,6 @@
-import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
+import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/alaya-protocol";
 import { aliasKeyDraft, aliasSourceTexts } from "./alias-source.js";
-import { formMemoryObjectKey } from "./form-key.js";
+import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
 import {
   extractCalendarSurfaces,
@@ -17,7 +17,7 @@ export function mintTemporalAliasKeys(input: Readonly<{
   readonly memory_content: string;
   readonly evidence: readonly Readonly<MintableEvidence>[];
   readonly occupied: ReadonlySet<string>;
-}>): readonly ReturnType<typeof formMemoryObjectKey>[] {
+}>): readonly Readonly<MemoryObjectKey>[] {
   const contentNormalized = normalizeMemoryObjectKeySurface(input.memory_content);
   return Object.freeze(aliasSourceTexts(input).flatMap((source) => [
     ...calendarAliasKeys(input, source, contentNormalized),
@@ -40,12 +40,12 @@ function calendarAliasKeys(
   }>,
   source: Readonly<{ readonly text: string; readonly sourceRef: string }>,
   contentNormalized: string
-): readonly ReturnType<typeof formMemoryObjectKey>[] {
+): readonly Readonly<MemoryObjectKey>[] {
   return extractCalendarSurfaces(source.text).flatMap((hit) =>
     calendarAliases(hit).flatMap((surface) =>
       occupies(surface, input.occupied, contentNormalized)
         ? []
-        : [formMemoryObjectKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))]
+        : formedKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))
     )
   );
 }
@@ -58,12 +58,12 @@ function relativeAliasKeys(
   }>,
   source: Readonly<{ readonly text: string; readonly sourceRef: string }>,
   contentNormalized: string
-): readonly ReturnType<typeof formMemoryObjectKey>[] {
+): readonly Readonly<MemoryObjectKey>[] {
   return extractRelativeSurfaces(source.text).flatMap((hit) =>
     relativeAliases(hit).flatMap((surface) =>
       occupies(surface, input.occupied, contentNormalized)
         ? []
-        : [formMemoryObjectKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))]
+        : formedKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))
     )
   );
 }

@@ -1,6 +1,6 @@
-import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
+import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/alaya-protocol";
 import { aliasKeyDraft, aliasSourceTexts } from "./alias-source.js";
-import { formMemoryObjectKey } from "./form-key.js";
+import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
 import { extractNumericSurfaces } from "./numeric-extract.js";
 import { numericAliasSurfaces } from "./numeric-words.js";
@@ -12,14 +12,14 @@ export function mintNumericAliasKeys(input: Readonly<{
   readonly memory_content: string;
   readonly evidence: readonly Readonly<MintableEvidence>[];
   readonly occupied: ReadonlySet<string>;
-}>): readonly ReturnType<typeof formMemoryObjectKey>[] {
+}>): readonly Readonly<MemoryObjectKey>[] {
   const contentNormalized = normalizeMemoryObjectKeySurface(input.memory_content);
   return Object.freeze(aliasSourceTexts(input).flatMap((source) =>
     extractNumericSurfaces(source.text).flatMap((hit) =>
       numericAliasSurfaces(hit.value, hit.surface).flatMap((surface) =>
         occupies(surface, input.occupied, contentNormalized)
           ? []
-          : [formMemoryObjectKey(aliasKeyDraft(input, "numeric_alias", surface, source.sourceRef, hit.surface))]
+          : formedKey(aliasKeyDraft(input, "numeric_alias", surface, source.sourceRef, hit.surface))
       )
     )
   ));
