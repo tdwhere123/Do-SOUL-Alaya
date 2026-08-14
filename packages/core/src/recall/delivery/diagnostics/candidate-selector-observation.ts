@@ -55,7 +55,6 @@ function buildDemandObservation(
 ): RecallCandidateSelectorObservation["demand"] {
   const probes = context.supplementaryData.queryProbes;
   const atoms = compileRecallQueryDemand(probes, {
-    soughtFacets: context.supplementaryData.querySoughtFacets,
     sourceExactLexicalTerms:
       context.supplementaryData.queryFactFrameExtraction === undefined
         ? []
@@ -121,7 +120,7 @@ function matchDemandAtom(
           .some((value) => value.toLocaleLowerCase() === atom.value)
         ? "key" : null;
     case "facet":
-      return matchFacetKey(atom.value, candidate) ? "key" : null;
+      return null;
   }
 }
 
@@ -168,18 +167,6 @@ function eventOverlapsQueryWindow(
   const end = Date.parse(candidate.entry.event_time_end ?? "") || start;
   return window !== undefined && Number.isFinite(start) &&
     Math.min(start, end) <= window.endMs && Math.max(start, end) >= window.startMs;
-}
-
-function matchFacetKey(facet: string, candidate: FineAssessmentCandidate): boolean {
-  const fields = [
-    ...(candidate.entry.domain_tags ?? []),
-    ...(candidate.entry.canonical_entities ?? []),
-    candidate.entry.preference_subject,
-    candidate.entry.preference_predicate,
-    candidate.entry.preference_object,
-    candidate.entry.preference_category
-  ];
-  return fields.some((value) => value?.toLocaleLowerCase().includes(facet));
 }
 
 function demandAtomKey(atom: Readonly<RecallSelectorDemandAtom>): string {

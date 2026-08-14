@@ -216,7 +216,6 @@ describe("slice-key read-time derivation", () => {
 
     expect(keys.map(({ dimension, normalized_value }) => [dimension, normalized_value]))
       .toEqual([
-        ["semantic", "location_place"],
         ["time", "day:2026-03-19"],
         ["time", "month:2026-03"]
       ]);
@@ -245,9 +244,6 @@ describe("slice-key read-time derivation", () => {
     expect(keys.map(({ dimension, normalized_value }) => [dimension, normalized_value]))
       .toEqual([
         ["entity", "ada lovelace"],
-        ["semantic", "food_dining"],
-        ["semantic", "location_place"],
-        ["space", "paris"],
         ["time", "day:2026-03-19"],
         ["time", "month:2026-03"]
       ]);
@@ -258,7 +254,7 @@ describe("slice-key read-time derivation", () => {
     ).toBe(true);
   });
 
-  it("does not infer space from an unvalued location facet", () => {
+  it("does not mint slice keys from unsupplied facet_tags", () => {
     const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({ facet_tags: [{ facet: "location_place", value: "  " }] }),
@@ -266,7 +262,7 @@ describe("slice-key read-time derivation", () => {
     });
 
     expect(keys.some((item) => item.dimension === "space")).toBe(false);
-    expect(keys.some((item) => item.normalized_value === "location_place")).toBe(true);
+    expect(keys.some((item) => item.normalized_value === "location_place")).toBe(false);
   });
 
   it("fails closed for workspace mismatch and invalid or excessive intervals", () => {
@@ -402,7 +398,7 @@ describe("slice-key read-time derivation", () => {
       asOfMs: 1_773_964_800_000
     });
 
-    expect(original.some((item) => item.normalized_value === "food_dining")).toBe(true);
+    expect(original.some((item) => item.normalized_value === "ada")).toBe(true);
     expect(replaced.some((item) => item.normalized_value === "food_dining")).toBe(false);
     expect(replaced.some((item) => item.normalized_value === "ada")).toBe(false);
     expect(cleared).toEqual([]);
@@ -491,17 +487,14 @@ describe("slice-key read-time derivation", () => {
     const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
-        facet_tags: [
-          { facet: "ä" },
-          { facet: "z" }
-        ]
+        canonical_entities: ["ä", "z"]
       }),
       asOfMs: 1_773_964_800_000
     });
 
     expect(
       keys
-        .filter((item) => item.dimension === "semantic")
+        .filter((item) => item.dimension === "entity")
         .map((item) => item.normalized_value)
     ).toEqual(["z", "ä"]);
   });

@@ -144,9 +144,7 @@ function materializeAttributedFacilityObjective<
     throw new Error("attributed facility selection requires canonical query probes");
   }
   const demand = materializeAttributedQueryFacilityDemand({
-    query_demand: compileRecallQueryDemand(queryProbes, {
-      soughtFacets: supplementaryData.querySoughtFacets,
-    }),
+    query_demand: compileRecallQueryDemand(queryProbes),
     weights: config.demand_weights,
     semantic_factors:
       supplementaryData.queryFactFrameExtraction === undefined

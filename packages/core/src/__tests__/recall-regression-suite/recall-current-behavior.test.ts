@@ -175,7 +175,7 @@ it("promotes answerable source-window neighbors without lifting source-only neig
     expect(result.candidates.map((item) => item.object_id)).toContain(answerableNeighbor.object_id);
     expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
     expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
-    expect(result.diagnostics?.query_sought_facets).toContain("location_place");
+    expect(result.diagnostics?.query_sought_facets).toEqual([]);
     const answerDiagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === answerableNeighbor.object_id
     );

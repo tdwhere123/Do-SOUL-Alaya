@@ -97,6 +97,11 @@ describe("compileRecallQueryDemand", () => {
     expect(Object.isFrozen(demand.atoms)).toBe(true);
   });
 
+  it("does not mint closed-vocab facet demand atoms", () => {
+    expect(compile("Where does she work and live?").atoms.every((atom) => atom.kind !== "facet"))
+      .toBe(true);
+  });
+
   it("admits source-exact structured terms through the same canonical demand owner", () => {
     const probes = compileRecallQueryProbes("How many playlists do I have on Spotify?");
     const baseline = compileRecallQueryDemand(probes);

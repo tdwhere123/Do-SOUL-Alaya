@@ -1,6 +1,5 @@
 import type { MemoryEntry, PathAnchorRef } from "@do-soul/alaya-protocol";
 
-import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { parseQueryTimeWindow } from "../scoring/temporal-fusion-scoring.js";
 import {
@@ -159,7 +158,6 @@ export function deriveQuerySliceKeysV2(
   input: QuerySliceKeyDerivationInputV2
 ): readonly SelectedSliceKeyV2[] {
   const inputs = [
-    ...deriveQuerySemanticInputs(input),
     ...deriveQueryEntityInputs(input),
     ...deriveQueryTimeInputs(input)
   ];
@@ -186,7 +184,6 @@ export function deriveMemorySliceKeysV2(
     return Object.freeze([]);
   }
   const inputs = [
-    ...deriveMemoryFacetInputs(input),
     ...deriveMemoryEntityInputs(input),
     ...deriveMemoryTimeInputs(input)
   ];
@@ -215,17 +212,6 @@ export function derivePathAnchorSliceKeysV2(
   return Object.freeze([]);
 }
 
-function deriveQuerySemanticInputs(
-  input: QuerySliceKeyDerivationInputV2
-): readonly SelectedSliceKeyInputV2[] {
-  return deriveQuerySoughtFacets(input.queryProbes).map((facet) =>
-    sliceInput(input, "semantic", facet, {
-      kind: "query_probe",
-      source_ref: `query:facet:${facet}`
-    })
-  );
-}
-
 function deriveQueryTimeInputs(
   input: QuerySliceKeyDerivationInputV2
 ): readonly SelectedSliceKeyInputV2[] {
@@ -238,23 +224,6 @@ function deriveQueryTimeInputs(
     kind: "query_probe",
     source_ref: "query:event-time-window"
   }));
-}
-
-function deriveMemoryFacetInputs(
-  input: MemorySliceKeyDerivationInputV2
-): readonly SelectedSliceKeyInputV2[] {
-  return (input.entry.facet_tags ?? []).flatMap((tag) => {
-    const facet = tag.facet.trim();
-    const semantic = memoryInput(input, "semantic", facet, "facet_tag", `facet:${facet}`);
-    const place = tag.value?.trim() ?? "";
-    if (facet.toLowerCase() !== "location_place" || place.length === 0) {
-      return [semantic];
-    }
-    return [
-      semantic,
-      memoryInput(input, "space", place, "location_facet", `facet:${facet}:value:${place}`)
-    ];
-  });
 }
 
 function deriveMemoryEntityInputs(

@@ -21,7 +21,6 @@ import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
 import { parseQueryTimeWindow } from "../scoring/temporal-fusion-scoring.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
-import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
 import {
   collectEvidenceAndGovernanceSupplement,
   type EvidenceAndGovernanceSupplement
@@ -113,12 +112,11 @@ export async function collectSupplementaryData(
         error: toErrorMessage(error)
       })
     });
-  const querySoughtFacets = deriveQuerySoughtFacets(params.queryProbes);
+  // Closed-vocab FACET_VOCABULARY has no memory-side Key partner.
+  const querySoughtFacets = Object.freeze([] as const);
   const queryFieldAttribution = collectQueryFieldAttribution({
     queryText: params.queryText,
-    queryDemand: compileRecallQueryDemand(params.queryProbes, {
-      soughtFacets: querySoughtFacets
-    }),
+    queryDemand: compileRecallQueryDemand(params.queryProbes),
     entityCapture: queryEntityExtraction,
     factFramePort: params.dependencies.queryFactFrameExtractionPort,
     onFailure: (error) => params.warn("query field attribution failed", {

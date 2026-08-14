@@ -28,7 +28,6 @@ export interface RecallQueryDemand {
 }
 
 export interface CompileRecallQueryDemandOptions {
-  readonly soughtFacets?: readonly string[];
   readonly sourceExactLexicalTerms?: readonly string[];
 }
 
@@ -42,7 +41,7 @@ export function compileRecallQueryDemand(
     ...probes.date_terms.map((term) => demandAtom("temporal", normalize(term), "core")),
     ...lexicalDemandAtoms(probes),
     ...sourceExactLexicalDemandAtoms(options.sourceExactLexicalTerms ?? []),
-    ...structuralDemandAtoms(probes, options.soughtFacets ?? [])
+    ...structuralDemandAtoms(probes)
   ];
   return freezeDemand(atoms);
 }
@@ -82,8 +81,7 @@ function sourceExactLexicalDemandAtoms(
 }
 
 function structuralDemandAtoms(
-  probes: Readonly<RecallQueryProbes>,
-  soughtFacets: readonly string[]
+  probes: Readonly<RecallQueryProbes>
 ): readonly RecallQueryDemandAtom[] {
   return [
     ...probes.phrases.map((value) =>
@@ -92,8 +90,7 @@ function structuralDemandAtoms(
     ...probes.evidence_refs.map((value) => demandAtom("evidence_ref", normalize(value), "core")),
     ...probes.dimensions.map((value) => demandAtom("dimension", normalize(value), "supporting")),
     ...probes.scope_classes.map((value) => demandAtom("scope_class", normalize(value), "supporting")),
-    ...probes.domain_tags.map((value) => demandAtom("domain_tag", normalize(value), "supporting")),
-    ...soughtFacets.map((value) => demandAtom("facet", normalize(value), "supporting"))
+    ...probes.domain_tags.map((value) => demandAtom("domain_tag", normalize(value), "supporting"))
   ];
 }
 
