@@ -1,4 +1,4 @@
-import { isCjkSegmentationCandidate, segmentCjkRun } from "../../shared/cjk-segmentation.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from "../../../shared/cjk-segmentation.js";
 
 export interface TokenSpan {
   readonly token: string;

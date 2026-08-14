@@ -12,8 +12,8 @@ import type {
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
-import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/numeric-aliases.js";
-import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/temporal-aliases.js";
+import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/mint/numeric-aliases.js";
+import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/mint/temporal-aliases.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
 export { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";

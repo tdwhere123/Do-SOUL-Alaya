@@ -4,7 +4,7 @@ import { mintGistRemainderKeys } from "./gist-remainder.js";
 import { mintOsfSurfaceKeys } from "./osf-surfaces.js";
 import { mintNumericAliasKeys } from "./numeric-aliases.js";
 import { mintTemporalAliasKeys } from "./temporal-aliases.js";
-import type { MintMemoryObjectKeysInput } from "./types.js";
+import type { MintMemoryObjectKeysInput } from "../types.js";
 
 export function mintMemoryObjectKeys(
   input: Readonly<MintMemoryObjectKeysInput>

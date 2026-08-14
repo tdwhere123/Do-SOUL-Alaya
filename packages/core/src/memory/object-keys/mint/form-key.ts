@@ -4,7 +4,7 @@ import {
   normalizeMemoryObjectKeySurface,
   type MemoryObjectKey
 } from "@do-soul/alaya-protocol";
-import type { DraftMemoryObjectKey } from "./types.js";
+import type { DraftMemoryObjectKey } from "../types.js";
 
 export function formMemoryObjectKey(draft: Readonly<DraftMemoryObjectKey>): Readonly<MemoryObjectKey> | null {
   const normalized = normalizeMemoryObjectKeySurface(draft.surface);

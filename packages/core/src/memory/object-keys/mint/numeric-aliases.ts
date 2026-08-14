@@ -2,9 +2,9 @@ import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/
 import { aliasKeyDraft, aliasSourceTexts } from "./alias-source.js";
 import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
-import { extractNumericSurfaces } from "./numeric-extract.js";
-import { numericAliasSurfaces } from "./numeric-words.js";
-import type { MintableEvidence } from "./types.js";
+import { extractNumericSurfaces } from "../normalize/numeric-extract.js";
+import { numericAliasSurfaces } from "../normalize/numeric-words.js";
+import type { MintableEvidence } from "../types.js";
 
 export function mintNumericAliasKeys(input: Readonly<{
   readonly workspace_id: string;

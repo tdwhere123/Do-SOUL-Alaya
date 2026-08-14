@@ -13,7 +13,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { MemoryService } from "../../memory/memory-service.js";
-import { retrofitMemoryObjectKeys } from "../../memory/object-keys/retrofit.js";
+import { retrofitMemoryObjectKeys } from "../../memory/object-keys/retrofit/retrofit.js";
 import {
   REAL_SQLITE_TEST_RUN_ID,
   REAL_SQLITE_TEST_WORKSPACE_ID,

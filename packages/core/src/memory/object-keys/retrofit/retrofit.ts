@@ -1,6 +1,6 @@
 import type { MemoryObjectKey } from "@do-soul/alaya-protocol";
-import { mintMemoryObjectKeys } from "./mint.js";
-import type { MintableEvidence } from "./types.js";
+import { mintMemoryObjectKeys } from "../mint/mint.js";
+import type { MintableEvidence } from "../types.js";
 
 export interface ObjectKeyRetrofitOwner {
   readonly object_id: string;

@@ -1,5 +1,5 @@
 import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
-import { tokenizeWithSpans } from "./tokenize.js";
+import { tokenizeWithSpans } from "../normalize/tokenize.js";
 
 export function occupancySet(
   memoryContent: string,

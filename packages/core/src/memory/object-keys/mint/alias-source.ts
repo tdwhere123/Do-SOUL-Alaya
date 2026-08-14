@@ -1,4 +1,4 @@
-import type { DraftMemoryObjectKey, MintableEvidence } from "./types.js";
+import type { DraftMemoryObjectKey, MintableEvidence } from "../types.js";
 
 export function aliasSourceTexts(input: Readonly<{
   readonly owner_id: string;

@@ -1,7 +1,7 @@
 import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/alaya-protocol";
 import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
-import type { DraftMemoryObjectKey, MintableEvidence } from "./types.js";
+import type { DraftMemoryObjectKey, MintableEvidence } from "../types.js";
 
 export function mintOsfSurfaceKeys(input: Readonly<{
   readonly workspace_id: string;

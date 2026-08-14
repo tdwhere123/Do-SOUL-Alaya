@@ -1,8 +1,8 @@
 import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/alaya-protocol";
 import { formedKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
-import { tokenizeWithSpans, type TokenSpan } from "./tokenize.js";
-import type { DraftMemoryObjectKey, MintableEvidence } from "./types.js";
+import { tokenizeWithSpans, type TokenSpan } from "../normalize/tokenize.js";
+import type { DraftMemoryObjectKey, MintableEvidence } from "../types.js";
 
 const DISCOURSE_STOP = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "her", "his",

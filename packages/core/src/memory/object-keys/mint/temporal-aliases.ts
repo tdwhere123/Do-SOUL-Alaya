@@ -7,9 +7,9 @@ import {
   extractRelativeSurfaces,
   type CalendarSurfaceHit,
   type RelativeSurfaceHit
-} from "./temporal-extract.js";
-import { titleCaseMonth } from "./month-names.js";
-import type { MintableEvidence } from "./types.js";
+} from "../normalize/temporal-extract.js";
+import { titleCaseMonth } from "../normalize/month-names.js";
+import type { MintableEvidence } from "../types.js";
 
 export function mintTemporalAliasKeys(input: Readonly<{
   readonly workspace_id: string;
