@@ -40,7 +40,7 @@ describe("recall field capture persistence", () => {
     const stopCertificate = {
       schema_version: 1 as const,
       operator_id: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-      activation_mode: "shadow" as const,
+      activation_mode: "live" as const,
       field_seal_digest: `sha256:${"b".repeat(64)}`,
       refinement_receipt_digests: [refinementReceipt.receipt_digest],
       objective: {

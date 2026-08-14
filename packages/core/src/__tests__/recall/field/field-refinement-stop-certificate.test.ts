@@ -24,6 +24,8 @@ describe("field refinement stop certificate", () => {
 
     expect(receipt.status).toBe("certified");
     expect(receipt.reason).toBe("exchange_dominated");
+    expect(receipt.activation_mode).toBe("live");
+    expect(receipt.candidate_membership_changed).toBe(false);
     expect(receipt.maximum_exchange_improvement_upper_bound).toBe(0);
     expect(receipt.exchange_bounds).toHaveLength(5);
     expect(receipt.exchange_bounds.every((bound) =>

@@ -259,7 +259,7 @@ describe("request-scoped retrieval field bundle", () => {
     expect(searchByKeywordField.mock.calls[0]?.[4]).toEqual([2]);
     expect(receipt).toMatchObject({
       schema_version: 1,
-      activation_mode: "shadow",
+      activation_mode: "live",
       requested_depths: [1, 2],
       stop_reason: "all_channels_closed",
       candidate_membership_changed: false

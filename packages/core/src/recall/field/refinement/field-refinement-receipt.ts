@@ -41,7 +41,7 @@ export type RecallFieldLaneRefinementReceipt = Readonly<{
 export type RecallRetrievalFieldRefinementReceipt = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID;
-  readonly activation_mode: "shadow";
+  readonly activation_mode: "live";
   readonly ordering_operator_id: typeof RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID;
   readonly score_calibration_operator_id:
     typeof RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID;
@@ -75,7 +75,7 @@ export function createRecallRetrievalFieldRefinementReceipt(params: Readonly<{
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID,
-    activation_mode: "shadow" as const,
+    activation_mode: "live" as const,
     ordering_operator_id: RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID,
     score_calibration_operator_id: RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID,
     request_digest: params.request_digest,
@@ -96,7 +96,7 @@ export function verifyRecallRetrievalFieldRefinementReceipt(
 ): void {
   if (receipt.schema_version !== 1 ||
       receipt.operator_id !== RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID ||
-      receipt.activation_mode !== "shadow" ||
+      receipt.activation_mode !== "live" ||
       receipt.ordering_operator_id !== RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID ||
       receipt.score_calibration_operator_id !==
         RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID ||

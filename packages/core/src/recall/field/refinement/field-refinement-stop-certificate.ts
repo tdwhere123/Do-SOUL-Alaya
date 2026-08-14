@@ -41,7 +41,7 @@ export type RecallFieldExchangeBound = Readonly<{
 export type RecallFieldRefinementStopCertificate = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID;
-  readonly activation_mode: "shadow";
+  readonly activation_mode: "live";
   readonly field_seal_digest: RecallFieldDigest;
   readonly refinement_receipt_digests: readonly RecallFieldDigest[];
   readonly objective: CoverageSelectionObjectiveReceipt;
@@ -116,7 +116,7 @@ export function verifyRecallFieldRefinementStopCertificate(
 ): void {
   if (receipt.schema_version !== 1 ||
       receipt.operator_id !== RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID ||
-      receipt.activation_mode !== "shadow" ||
+      receipt.activation_mode !== "live" ||
       receipt.candidate_membership_changed !== false ||
       receipt.receipt_digest !== digestRecallFieldIdentity(receiptBody(receipt))) {
     throw new Error("field refinement stop certificate fidelity mismatch");
@@ -149,7 +149,7 @@ function baseContext<T extends CoverageSelectableCandidate>(
   return Object.freeze({
     schema_version: 1,
     operator_id: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-    activation_mode: "shadow",
+    activation_mode: "live",
     field_seal_digest: params.fieldSeal.seal_digest,
     refinement_receipt_digests: Object.freeze(params.refinementReceipts
       .map(({ receipt_digest }) => receipt_digest).sort()),

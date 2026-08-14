@@ -58,7 +58,7 @@ const RecallFieldLaneRefinementReceiptSchema = z.object({
 export const RecallRetrievalFieldRefinementReceiptSchema = z.object({
   schema_version: z.literal(1),
   operator_id: z.literal(RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID),
-  activation_mode: z.literal("shadow"),
+  activation_mode: z.literal("live"),
   ordering_operator_id: z.literal(RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID),
   score_calibration_operator_id:
     z.literal(RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID),
@@ -101,7 +101,7 @@ const RecallFieldExchangeBoundSchema = z.object({
 export const RecallFieldRefinementStopCertificateSchema = z.object({
   schema_version: z.literal(1),
   operator_id: z.literal(RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID),
-  activation_mode: z.literal("shadow"),
+  activation_mode: z.literal("live"),
   field_seal_digest: RecallFieldDigestSchema,
   refinement_receipt_digests: z.array(RecallFieldDigestSchema).readonly(),
   objective: RecallCoverageSelectionObjectiveReceiptSchema,
