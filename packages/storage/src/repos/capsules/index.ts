@@ -8,6 +8,10 @@ export {
   type RecallQualifiedEvidence,
   type EvidenceSourceAnchor
 } from "./evidence-capsule-repo.js";
+export {
+  readObjectKeyEvidenceSources,
+  type StoredObjectKeyEvidenceSource
+} from "./object-key-source-reader.js";
 export type {
   VerifiedAssertionLocatorResolutionInput,
   VerifiedAssertionLocatorResolver

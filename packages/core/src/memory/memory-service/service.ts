@@ -35,6 +35,7 @@ export class MemoryService {
       dynamicsService: dependencies.dynamicsService,
       greenService: dependencies.greenService,
       enrichPendingWriter: dependencies.enrichPendingWriter,
+      objectKeyWriter: dependencies.objectKeyWriter,
       generateObjectId,
       now
     });

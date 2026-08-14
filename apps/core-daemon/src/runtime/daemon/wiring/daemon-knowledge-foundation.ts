@@ -10,9 +10,14 @@ import {
   MemoryService,
   PathRelationProposalService,
   RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
-  SynthesisService
+  SynthesisService,
+  createMemoryObjectKeyWriter
 } from "@do-soul/alaya-core";
-import { SqliteHealthIssueGroupRepo } from "@do-soul/alaya-storage";
+import {
+  SqliteHealthIssueGroupRepo,
+  SqliteMemoryObjectKeyRepo,
+  readObjectKeyEvidenceSources
+} from "@do-soul/alaya-storage";
 import { TopologyService } from "@do-soul/alaya-soul";
 import { createGraphHealthService } from "../../../services/status/graph-health-service.js";
 import { createSecurityStatusBootstrapServices } from "../../../security/status-bootstrap.js";
@@ -164,6 +169,7 @@ function createMemoryService(
   dynamicsService: DynamicsService,
   greenService: GreenService
 ) {
+  const objectKeyRepo = new SqliteMemoryObjectKeyRepo(input.database);
   return new MemoryService({
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService,
@@ -174,7 +180,13 @@ function createMemoryService(
     synthesisCapsuleLookup: {
       findById: (objectId: string) => input.synthesisCapsuleRepo.findById(objectId)
     },
-    enrichPendingWriter: { enqueue: input.enqueueEnrichPending }
+    enrichPendingWriter: { enqueue: input.enqueueEnrichPending },
+    objectKeyWriter: createMemoryObjectKeyWriter({
+      readEvidenceSources: (workspaceId, evidenceIds) =>
+        readObjectKeyEvidenceSources(input.database, workspaceId, evidenceIds),
+      replaceOwnerKeys: (workspaceId, ownerId, keys) =>
+        objectKeyRepo.replaceOwnerKeys(workspaceId, ownerId, keys)
+    })
   });
 }
 
