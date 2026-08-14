@@ -25,7 +25,13 @@ const EXACT_KEY_SCAN_BATCH_SIZE = 200;
 
 interface ObjectKeySurfaceRow {
   readonly owner_id: string;
+  readonly key_id: string;
   readonly surface: string;
+}
+
+interface ExactKeyScanCursor {
+  readonly ownerId: string;
+  readonly keyId: string;
 }
 
 export function searchObjectKeyKeywordLanes(
@@ -111,10 +117,10 @@ function searchExactObjectKeyRows(
   if (tokens.length === 0) return [];
   const tokenMatchers = tokens.map((token) => createShortKeywordMatcher(token));
   const counts = new Map<string, number>();
-  let lastOwnerId: string | null = null;
+  let cursor: ExactKeyScanCursor | null = null;
   while (true) {
     const batch: readonly ObjectKeySurfaceRow[] = readExactObjectKeyBatch.call(
-      this, workspaceId, candidateObjectIds, lastOwnerId, tier
+      this, workspaceId, candidateObjectIds, cursor, tier
     );
     if (batch.length === 0) break;
     for (const row of batch) {
@@ -127,7 +133,8 @@ function searchExactObjectKeyRows(
       }
     }
     if (batch.length < EXACT_KEY_SCAN_BATCH_SIZE) break;
-    lastOwnerId = batch.at(-1)?.owner_id ?? null;
+    const last = batch.at(-1);
+    cursor = last === undefined ? null : { ownerId: last.owner_id, keyId: last.key_id };
   }
   return Object.freeze(
     [...counts.entries()]
@@ -141,14 +148,17 @@ function readExactObjectKeyBatch(
   this: ObjectKeySearchHost,
   workspaceId: string,
   candidateObjectIds: readonly string[] | undefined,
-  lastOwnerId: string | null,
+  cursor: ExactKeyScanCursor | null,
   tier?: StorageTier
 ): readonly ObjectKeySurfaceRow[] {
   const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, "k.owner_id");
-  const keysetPredicate = lastOwnerId === null ? "" : "AND k.owner_id > ?";
+  // Owner-only keyset skips the remaining keys of the last owner in a full batch.
+  const keysetPredicate = cursor === null
+    ? ""
+    : "AND (k.owner_id > ? OR (k.owner_id = ? AND k.key_id > ?))";
   const tierPredicate = tier === undefined ? "" : "AND memory_entries.storage_tier = ?";
   return this.activeConnection().prepare(`
-    SELECT k.owner_id, k.surface
+    SELECT k.owner_id, k.key_id, k.surface
     FROM memory_object_keys k
     JOIN memory_entries ON memory_entries.object_id = k.owner_id
     WHERE k.workspace_id = ?
@@ -163,7 +173,7 @@ function readExactObjectKeyBatch(
     workspaceId,
     ...objectIdFilter.params,
     ...(tier === undefined ? [] : [tier]),
-    ...(lastOwnerId === null ? [] : [lastOwnerId]),
+    ...(cursor === null ? [] : [cursor.ownerId, cursor.ownerId, cursor.keyId]),
     EXACT_KEY_SCAN_BATCH_SIZE
   ) as readonly ObjectKeySurfaceRow[];
 }
