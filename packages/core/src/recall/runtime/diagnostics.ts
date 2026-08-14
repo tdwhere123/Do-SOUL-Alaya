@@ -136,6 +136,9 @@ export function buildRecallDiagnostics(
       ? {}
       : { answer_shape_plan: params.answerShapePlan }),
     query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
+    ...(params.candidates[0]?.facet_overlap_status === undefined
+      ? {}
+      : { facet_overlap_status: params.candidates[0].facet_overlap_status }),
     total_scanned: params.totalScanned,
     candidate_pool_count: params.candidatePoolCount,
     pre_budget_count: params.preBudgetCount,
@@ -299,6 +302,7 @@ function freezeFusionBreakdown(
       object_kind: candidate.object_kind,
       origin_plane: candidate.origin_plane,
       facet_overlap: candidate.facet_overlap,
+      facet_overlap_status: candidate.facet_overlap_status ?? "inactive:query_empty",
       per_stream_rank: candidate.per_stream_rank,
       fused_rank: candidate.fused_rank,
       fused_score: candidate.fused_score,

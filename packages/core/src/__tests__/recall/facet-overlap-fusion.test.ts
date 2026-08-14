@@ -211,5 +211,45 @@ describe("facet_overlap fusion stream", () => {
     const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
     const fusion = buildFusion(supplementaryData({ querySoughtFacets: [] }));
     expect(fusion.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap ?? 0).toBe(0);
+    expect(fusion.get(goldKey)?.facet_overlap_status).toBe("inactive:query_empty");
+    expect(fusion.get(goldKey)?.per_stream_rank.facet_overlap).toBeNull();
+  });
+
+  it("seals missing write-side facet tags as supply_unavailable, not a live zero stream", () => {
+    const gold = createMemoryEntry({
+      object_id: GOLD_ID,
+      content: "Operator memory with no persisted facet tags.",
+      facet_tags: null
+    });
+    const distractor = createMemoryEntry({
+      object_id: DISTRACTOR_ID,
+      content: "Distractor memory with no persisted facet tags."
+    });
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        { entry: gold, effectiveScore: 0.4, effectiveFactors: { activation: 0, relevance: 0 } },
+        { entry: distractor, effectiveScore: 0.6, effectiveFactors: { activation: 0, relevance: 0 } }
+      ],
+      policy: POLICY,
+      supplementaryData: supplementaryData({
+        querySoughtFacets: ["occupation_work", "location_place"]
+      }),
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+    const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
+    const distractorKey = `workspace_local:memory_entry:${DISTRACTOR_ID}`;
+    expect(fusion.get(goldKey)?.facet_overlap_status).toBe("inactive:supply_unavailable");
+    expect(fusion.get(distractorKey)?.facet_overlap_status).toBe("inactive:supply_unavailable");
+    expect(fusion.get(goldKey)?.per_stream_rank.facet_overlap).toBeNull();
+    expect(fusion.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap).toBe(0);
+  });
+
+  it("marks facet_overlap active when the packet carries persisted tags", () => {
+    const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
+    const fusion = buildFusion(supplementaryData({
+      querySoughtFacets: ["occupation_work", "location_place"]
+    }));
+    expect(fusion.get(goldKey)?.facet_overlap_status).toBe("active");
+    expect(fusion.get(goldKey)?.per_stream_rank.facet_overlap).not.toBeNull();
   });
 });

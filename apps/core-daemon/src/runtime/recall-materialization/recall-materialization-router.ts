@@ -114,15 +114,17 @@ function readMaterializationRouterOptions() {
     fullTurnEvidenceExcerpt:
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",
-    // Defaults OFF so a merge never flips durable write behavior pre-bench.
+    // Write-side lift is a distinct flag from read-side ALAYA_RECALL_PROJECTIONS.
     projectionRoutingEnabled: readProjectionRoutingEnabled(),
     deriveFacetTags: readFacetTagsEnabled(),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
 }
 
-function readProjectionRoutingEnabled(): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_PROJECTIONS ?? "");
+export function readProjectionRoutingEnabled(
+  env: NodeJS.Dict<string> = process.env
+): boolean {
+  return /^(?:1|true|on|yes)$/iu.test(env.ALAYA_RECALL_PROJECTION_ROUTING ?? "");
 }
 
 function readFacetTagsEnabled(): boolean {

@@ -478,6 +478,11 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     ...LongMemEvalFieldDiagnosticSchemaShape,
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
+    facet_overlap_status: z.enum([
+      "active",
+      "inactive:query_empty",
+      "inactive:supply_unavailable"
+    ]).optional(),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),
     candidate_key_collisions: z
       .array(

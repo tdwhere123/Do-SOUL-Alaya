@@ -19,6 +19,7 @@ import {
 import {
   activeFusionStreams,
   facetOverlapCountFor,
+  resolveFacetOverlapSupplyStatus,
   RECALL_FUSION_DEFAULT_WEIGHTS
 } from "./fusion-delivery-streams.js";
 import type {
@@ -289,10 +290,14 @@ function buildFusedRankByCandidateKey(
 function finalizeRecallFusionDetails(
   prelim: readonly PreliminaryFusionCandidate[],
   fusedRankByCandidateKey: ReadonlyMap<string, number>,
-  _supplementaryData: RecallSupplementaryData
+  supplementaryData: RecallSupplementaryData
 ): ReadonlyMap<string, RecallFusionBreakdown> {
   const fuelCoverage = buildFloodFuelCoverageSummary(
     prelim.map((candidate) => candidate.floodPotential).filter((row) => row !== undefined)
+  );
+  const facetOverlapStatus = resolveFacetOverlapSupplyStatus(
+    prelim.map((candidate) => candidate.entry),
+    supplementaryData.querySoughtFacets
   );
   return Object.freeze(
     new Map(
@@ -304,6 +309,7 @@ function finalizeRecallFusionDetails(
           object_kind: candidate.objectKind,
           origin_plane: candidate.originPlane,
           facet_overlap: candidate.facetOverlapCount,
+          facet_overlap_status: facetOverlapStatus,
           per_stream_rank: candidate.perStreamRank,
           fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
           fused_score: candidate.fusedScore,
@@ -346,6 +352,7 @@ export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<Reca
     object_kind: "memory_entry",
     origin_plane: "workspace_local",
     facet_overlap: 0,
+    facet_overlap_status: "inactive:query_empty",
     per_stream_rank: Object.freeze(buildEmptyFusionStreamRanks()) as RecallFusionStreamRanks,
     fused_rank: Number.MAX_SAFE_INTEGER,
     fused_score: 0,

@@ -1,5 +1,8 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { RecallFusionStream } from "../runtime/recall-service-types.js";
+import type {
+  FacetOverlapSupplyStatus,
+  RecallFusionStream
+} from "../runtime/recall-service-types.js";
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "lexical_fts", "trigram_fts", "synthesis_fts", "evidence_fts",
@@ -38,4 +41,15 @@ export function facetOverlapCountFor(
     }
   }
   return matched.size;
+}
+
+export function resolveFacetOverlapSupplyStatus(
+  entries: readonly Readonly<Pick<MemoryEntry, "facet_tags">>[],
+  querySoughtFacets: readonly string[] | undefined
+): FacetOverlapSupplyStatus {
+  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
+    return "inactive:query_empty";
+  }
+  const hasSupply = entries.some((entry) => (entry.facet_tags?.length ?? 0) > 0);
+  return hasSupply ? "active" : "inactive:supply_unavailable";
 }
