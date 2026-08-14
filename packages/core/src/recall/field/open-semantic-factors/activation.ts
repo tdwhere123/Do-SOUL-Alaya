@@ -15,7 +15,7 @@ export const OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID =
 export type OpenSemanticFactorActivationObservation = Readonly<{
   readonly evidence_id: string;
   readonly state: "observed";
-  readonly activation: 1;
+  readonly activation: number;
   readonly solution_count: number;
   readonly proposition_match_count: number;
 }>;
@@ -43,7 +43,7 @@ export function materializeOpenSemanticFactorActivation(params: Readonly<{
     trace: params.trace,
     query_capture: params.query_capture
   });
-  const entries = buildActivationEntries(composition);
+  const entries = buildActivationEntries(composition, params.trace);
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID,
@@ -62,8 +62,15 @@ export function materializeOpenSemanticFactorActivation(params: Readonly<{
 }
 
 function buildActivationEntries(
-  composition: Readonly<OpenSemanticFactorCompositionReceipt>
+  composition: Readonly<OpenSemanticFactorCompositionReceipt>,
+  trace: Readonly<OpenSemanticFactorCompatibilityTrace>
 ): readonly Readonly<OpenSemanticFactorActivationObservation>[] {
+  const fractionByEvidenceId = new Map(
+    trace.entries.flatMap((entry) => {
+      const fraction = compatibilityFraction(entry.receipt);
+      return fraction > 0 ? [[entry.evidence_id, fraction] as const] : [];
+    })
+  );
   const supportByEvidenceId = new Map<string, {
     solutionCount: number;
     propositionMatches: Set<string>;
@@ -86,13 +93,24 @@ function buildActivationEntries(
   }
   return Object.freeze([...supportByEvidenceId]
     .sort(([left], [right]) => compareText(left, right))
-    .map(([evidenceId, support]) => Object.freeze({
-      evidence_id: evidenceId,
-      state: "observed" as const,
-      activation: 1 as const,
-      solution_count: support.solutionCount,
-      proposition_match_count: support.propositionMatches.size
-    })));
+    .flatMap(([evidenceId, support]) => {
+      const activation = fractionByEvidenceId.get(evidenceId);
+      if (activation === undefined) return [];
+      return [Object.freeze({
+        evidence_id: evidenceId,
+        state: "observed" as const,
+        activation,
+        solution_count: support.solutionCount,
+        proposition_match_count: support.propositionMatches.size
+      })];
+    }));
+}
+
+function compatibilityFraction(
+  receipt: Readonly<OpenSemanticFactorCompatibilityTrace["entries"][number]["receipt"]>
+): number {
+  if (receipt.query_proposition_count <= 0) return 0;
+  return receipt.matched_query_proposition_count / receipt.query_proposition_count;
 }
 
 function compareText(left: string, right: string): number {

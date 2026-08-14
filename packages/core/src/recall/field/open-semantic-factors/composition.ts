@@ -216,6 +216,11 @@ function searchSolutions(params: Readonly<{
       selected: [...params.selected, candidate]
     });
   }
+  // Unmatched query propositions must not block remaining consistent bindings.
+  searchSolutions({
+    ...params,
+    queryIndex: params.queryIndex + 1
+  });
 }
 
 function recordSolution(params: Readonly<{

@@ -134,7 +134,7 @@ export const OpenSemanticFactorActivationReceiptSchema = z.object({
   entries: z.array(z.object({
     evidence_id: IdSchema,
     state: z.literal("observed"),
-    activation: z.literal(1),
+    activation: z.number().gt(0).max(1),
     solution_count: CountSchema,
     proposition_match_count: CountSchema
   }).strict().readonly()).readonly(),

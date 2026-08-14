@@ -21,7 +21,11 @@ export function assertOpenSemanticCandidateActivations(
 function isValidReceipt(value: unknown): boolean {
   if (!isRecord(value) || value.schema_version !== 1 ||
       value.operator_id !== "open_semantic_factor_candidate_activation_v1" ||
-      value.state !== "observed" || value.score !== 1 ||
+      value.state !== "observed" ||
+      typeof value.score !== "number" ||
+      !Number.isFinite(value.score) ||
+      value.score <= 0 ||
+      value.score > 1 ||
       !Array.isArray(value.evidence_ids) ||
       typeof value.solution_count !== "number" ||
       !Number.isSafeInteger(value.solution_count) || value.solution_count <= 0 ||

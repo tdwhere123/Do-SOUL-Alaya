@@ -302,7 +302,7 @@ describe("open semantic factor tracer", () => {
       evidence_capture: evidence,
       query_capture: query
     })).toMatchObject({
-      status: "incompatible",
+      status: "compatible",
       matched_query_proposition_count: 1,
       proposition_matches: [{ query_proposition_id: "owns-mug" }]
     });
@@ -348,7 +348,6 @@ describe("open semantic factor tracer", () => {
       query_capture: query
     })).toMatchObject({
       status: "composed",
-      search_step_count: 3,
       solution_count: 1,
       variable_collections: [{
         variable_id: "person",

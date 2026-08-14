@@ -3,6 +3,7 @@ import type {
   OpenSemanticFactor,
   OpenSemanticProposition
 } from "@do-soul/alaya-protocol";
+import { openSemanticFactorsOverlap } from "./factor-identity.js";
 
 export const OPEN_SEMANTIC_ARGUMENT_ALIGNMENT_LIMIT = 256;
 
@@ -88,6 +89,17 @@ function searchArgumentAlignments(params: Readonly<{
       mappings: [...params.mappings, mapped.mapping]
     });
   }
+  if (queryArgument.reference_kind === "variable" &&
+      !params.evidence.arguments.some((argument) =>
+        argument.binding_identity === queryArgument.binding_identity &&
+        argument.reference_kind === "factor" &&
+        !params.usedEvidencePositions.has(argument.position))) {
+    // Skip only answer slots with no evidence counterpart; do not drop mapped constraints.
+    searchArgumentAlignments({
+      ...params,
+      queryIndex: params.queryIndex + 1
+    });
+  }
 }
 
 function mapArgument(
@@ -113,7 +125,8 @@ function mapArgument(
     });
   }
   const queryFactor = queryFactors.get(queryArgument.reference_id);
-  if (queryFactor?.semantic_identity !== evidenceFactor.semantic_identity) return null;
+  if (queryFactor === undefined ||
+      !openSemanticFactorsOverlap(queryFactor, evidenceFactor)) return null;
   return Object.freeze({
     mapping: freezeArgumentMapping(
       queryArgument, evidenceArgument, evidenceFactor, "exact_semantic_identity_v1"

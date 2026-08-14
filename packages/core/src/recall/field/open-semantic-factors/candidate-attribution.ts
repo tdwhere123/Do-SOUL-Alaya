@@ -14,7 +14,7 @@ export type OpenSemanticFactorCandidateActivation = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID;
   readonly state: "observed";
-  readonly score: 1;
+  readonly score: number;
   readonly evidence_ids: readonly string[];
   readonly solution_count: number;
   readonly proposition_match_count: number;
@@ -43,7 +43,7 @@ export function attributeOpenSemanticFactorActivations(params: Readonly<{
       schema_version: 1 as const,
       operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
       state: "observed" as const,
-      score: 1 as const,
+      score: Math.max(...entries.map((entry) => entry.activation)),
       evidence_ids: Object.freeze(evidenceIds),
       solution_count: Math.max(...entries.map((entry) => entry.solution_count)),
       proposition_match_count: Math.max(

@@ -12,6 +12,7 @@ import {
   enumerateOpenSemanticArgumentAlignments,
   type OpenSemanticFactorArgumentMapping
 } from "./argument-alignment.js";
+import { openSemanticFactorsOverlap } from "./factor-identity.js";
 
 export type {
   OpenSemanticFactorAlignmentOperator,
@@ -71,8 +72,8 @@ export function materializeOpenSemanticFactorCompatibility(params: Readonly<{
   const matchedQueryPropositions = new Set(
     matches.map((match) => match.query_proposition_id)
   );
-  const compatible = query.graph.propositions.every((proposition) =>
-    matchedQueryPropositions.has(proposition.proposition_id));
+  // All-must-match treated partial overlap as absent fuel.
+  const compatible = matchedQueryPropositions.size > 0;
   return freezeReceipt(
     compatible ? "compatible" : "incompatible",
     evidence,
@@ -206,7 +207,7 @@ function matchPropositions(params: Readonly<{
   const evidencePredicate = params.evidenceFactors.get(params.evidence.predicate_factor_id);
   const queryPredicate = params.queryFactors.get(params.query.predicate_factor_id);
   if (evidencePredicate === undefined || queryPredicate === undefined ||
-      evidencePredicate.semantic_identity !== queryPredicate.semantic_identity) return [];
+      !openSemanticFactorsOverlap(evidencePredicate, queryPredicate)) return [];
   return enumerateOpenSemanticArgumentAlignments(params).map((alignment) => Object.freeze({
     match: Object.freeze({
       query_proposition_id: params.query.proposition_id,
