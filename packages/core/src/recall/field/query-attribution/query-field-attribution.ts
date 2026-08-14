@@ -327,6 +327,8 @@ function compareText(left: string, right: string): number {
 const FIELD_ROLES: ReadonlySet<string> = new Set(["entity", "relation"]);
 const QUERY_DEMAND_KINDS: ReadonlySet<string> = new Set([
   "ordering", "temporal", "lexical_term", "phrase", "object_id",
-  "evidence_ref", "dimension", "scope_class", "domain_tag", "facet"
+  "evidence_ref", "dimension", "scope_class", "domain_tag",
+  // Historical dump atoms may still carry kind "facet"; emitters no longer mint it.
+  "facet"
 ]);
 const QUERY_DEMAND_PRIORITIES: ReadonlySet<string> = new Set(["core", "supporting"]);

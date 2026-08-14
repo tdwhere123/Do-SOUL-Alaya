@@ -98,8 +98,9 @@ describe("compileRecallQueryDemand", () => {
   });
 
   it("does not mint closed-vocab facet demand atoms", () => {
-    expect(compile("Where does she work and live?").atoms.every((atom) => atom.kind !== "facet"))
-      .toBe(true);
+    expect(compile("Where does she work and live?").atoms.every((atom) =>
+      !atom.id.startsWith("facet:")
+    )).toBe(true);
   });
 
   it("admits source-exact structured terms through the same canonical demand owner", () => {

@@ -10,8 +10,7 @@ export type RecallQueryDemandKind =
   | "evidence_ref"
   | "dimension"
   | "scope_class"
-  | "domain_tag"
-  | "facet";
+  | "domain_tag";
 
 export type RecallQueryDemandPriority = "core" | "supporting";
 

@@ -119,7 +119,8 @@ function matchDemandAtom(
       return (candidate.entry.domain_tags ?? [])
           .some((value) => value.toLocaleLowerCase() === atom.value)
         ? "key" : null;
-    case "facet":
+    default:
+      // Archive dumps may still carry historical facet demand atoms.
       return null;
   }
 }
