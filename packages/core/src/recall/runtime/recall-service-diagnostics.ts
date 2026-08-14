@@ -70,6 +70,9 @@ export interface RecallEmbeddingWorkspaceScanDiagnostics {
   readonly workspace_scan_truncated?: boolean;
   readonly workspace_scan_cap?: number;
   readonly workspace_scanned_count?: number;
+  readonly injection_truncated?: boolean;
+  readonly injection_eligible_count?: number;
+  readonly injection_admitted_count?: number;
   readonly provider_kind?: string;
   readonly model_id?: string;
   readonly schema_version?: number;

@@ -40,6 +40,8 @@ export function buildObjectEmbeddingFieldCaptures(params: Readonly<{
   readonly exactLookupFailed: boolean;
   readonly poolScores: Readonly<Record<string, number>>;
   readonly workspaceHits: readonly Readonly<EmbeddingNeighborHit>[];
+  readonly seedNeighborCount: number;
+  readonly seedNeighborLimit: number;
 }>): readonly RecallFiniteFieldChannelCapture[] {
   const sourceSnapshotDigest = buildSourceSnapshotDigest(params);
   return Object.freeze([
@@ -74,6 +76,9 @@ function buildWorkspaceChannel(
     return emptyChannel(channelId, "unavailable", null);
   }
   if (params.scan.truncated) return emptyChannel(channelId, "truncated", 1);
+  if (params.seedNeighborCount > params.seedNeighborLimit) {
+    return emptyChannel(channelId, "truncated", 1);
+  }
   return completeChannel(channelId, params.workspaceHits);
 }
 
@@ -154,7 +159,9 @@ function buildSourceSnapshotDigest(
       truncated: params.scan.truncated,
       attempted: params.scan.attempted,
       failed: params.scan.failed,
-      records: params.scan.records.map(recordIdentity)
+      records: params.scan.records.map(recordIdentity),
+      seed_neighbor_count: params.seedNeighborCount,
+      seed_neighbor_limit: params.seedNeighborLimit
     },
     exact_lookup_failed: params.exactLookupFailed
   });

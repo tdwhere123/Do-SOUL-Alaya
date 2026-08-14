@@ -57,6 +57,7 @@ interface ScoredLedger {
   readonly poolScores: Readonly<Record<string, number>>;
   readonly neighbors: readonly Readonly<EmbeddingNeighborHit>[];
   readonly workspaceFieldHits: readonly Readonly<EmbeddingNeighborHit>[];
+  readonly seedNeighborCount: number;
   readonly scoringLatencyMs: number;
 }
 
@@ -245,6 +246,7 @@ export class RequestScoreSnapshotBuilder {
         workspaceFieldHits,
         workspaceFieldHits.length
       ),
+      seedNeighborCount: neighbors.length,
       scoringLatencyMs: elapsedMs(this.deps.nowEpochMs(), startedAtEpochMs)
     });
   }
@@ -272,7 +274,9 @@ export class RequestScoreSnapshotBuilder {
         scan,
         exactLookupFailed,
         poolScores: scored.poolScores,
-        workspaceHits: scored.workspaceFieldHits
+        workspaceHits: scored.workspaceFieldHits,
+        seedNeighborCount: scored.seedNeighborCount,
+        seedNeighborLimit: params.maxNeighbors
       }),
       degradedReason: resolveDegradationReason(
         scan,
@@ -305,7 +309,9 @@ export class RequestScoreSnapshotBuilder {
         scan,
         exactLookupFailed,
         poolScores: Object.freeze({}),
-        workspaceHits: Object.freeze([])
+        workspaceHits: Object.freeze([]),
+        seedNeighborCount: 0,
+        seedNeighborLimit: params.maxNeighbors
       }),
       degradedReason: resolveDegradationReason(scan, null, exactLookupFailed, reportNoStoredVectors)
     });
@@ -330,6 +336,7 @@ function emptyScoredLedger(): ScoredLedger {
     poolScores: Object.freeze({}),
     neighbors: Object.freeze([]),
     workspaceFieldHits: Object.freeze([]),
+    seedNeighborCount: 0,
     scoringLatencyMs: 0
   });
 }
@@ -392,6 +399,16 @@ function resolveQuerySnapshot(
   snapshot: PreparedEmbeddingQuerySnapshot
 ): QueryResolution {
   if (snapshot.status === "ready") {
+    if (snapshot.embedding === null || !isFiniteNonzeroVector(snapshot.embedding)) {
+      return Object.freeze({
+        handle,
+        embedding: null,
+        status: "provider_failed",
+        degradationReason: "query_embedding_unusable",
+        inferenceCalls: handle.cacheHit ? 0 : 1,
+        cacheHit: handle.cacheHit
+      });
+    }
     return Object.freeze({
       handle,
       embedding: snapshot.embedding,
