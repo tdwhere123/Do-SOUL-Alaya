@@ -45,6 +45,7 @@ beforeAll(() => {
   if (!existsSync(SNAPSHOT)) {
     throw new Error(`readonly snapshot missing: ${SNAPSHOT}`);
   }
+  // SIGKILL skips afterAll; unique alaya-path-bind-* prefix makes leftover /tmp copies findable.
   snapshotScratch = mkdtempSync(path.join(tmpdir(), "alaya-path-bind-"));
   snapshotCopy = path.join(snapshotScratch, "snapshot.sqlite");
   copyFileSync(SNAPSHOT, snapshotCopy);
@@ -83,6 +84,7 @@ describe("typed path transfer bind seam", () => {
 
     const flood = computeIntegratedFloodScore({
       entry: memory(TARGET_ID),
+      // Fixture status probe: A_path is injected, not observed from this snapshot.
       axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
       supplementaryData: supplementary({
         pathInflowByTarget: derivations.pathInflowByTarget,
@@ -111,10 +113,12 @@ describe("typed path transfer bind seam", () => {
         path_id: PATH_ID,
         relation_kind: "answers_with",
         seed_object_id: SOURCE_ID,
-        target_object_id: TARGET_ID
+        target_object_id: TARGET_ID,
+        decision: "transferred",
+        edge_conductance: expect.closeTo(0.75)
       })
     ]));
-    expect(transfer.value).toBeGreaterThan(0);
+    expect(transfer.value).toBeCloseTo(0.75);
 
     const flood = computeIntegratedFloodScore({
       entry: memory(TARGET_ID),
@@ -125,7 +129,7 @@ describe("typed path transfer bind seam", () => {
       })
     });
     expect(flood.diagnostics.path_status).toBe("active");
-    expect(flood.diagnostics.A_path).toBe(transfer.value);
+    expect(flood.diagnostics.A_path).toBeCloseTo(0.75);
   }, 60_000);
 
   it("seals a forced legacy bind as index_unavailable instead of pass-through identity", async () => {
@@ -143,6 +147,7 @@ describe("typed path transfer bind seam", () => {
     });
     const flood = computeIntegratedFloodScore({
       entry: candidates[1]!,
+      // Fixture status probe: A_path is injected, not observed from this snapshot.
       axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
       supplementaryData: supplementary({
         pathInflowByTarget: derivations.pathInflowByTarget,
@@ -176,6 +181,7 @@ describe("refresh-required path index", () => {
     });
     const flood = computeIntegratedFloodScore({
       entry: candidates[1]!,
+      // Fixture status probe: A_path is injected, not observed from this snapshot.
       axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
       supplementaryData: supplementary({
         pathInflowByTarget: derivations.pathInflowByTarget,

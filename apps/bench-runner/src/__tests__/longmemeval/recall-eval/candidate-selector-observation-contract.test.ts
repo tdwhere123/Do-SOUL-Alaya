@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildQuestionDiagnostic } from
   "../../../longmemeval/diagnostics.js";
+import { readCandidateSelectorObservation } from
+  "../../../longmemeval/diagnostics/artifacts/candidate-selector-observation-reader.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
   "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 
@@ -126,6 +128,19 @@ describe("candidate selector observation contract", () => {
     });
     expect(malformed.candidates).toEqual([]);
     expect(malformed.candidate_pool_complete).toBe(false);
+  });
+
+  it("round-trips a storage_error path observation instead of dropping the candidate", () => {
+    const observation = {
+      ...SELECTOR_OBSERVATION,
+      path: { status: "storage_error" as const, receipts: [] }
+    };
+    const question = buildQuestion({ selector_observation: observation });
+
+    expect(readCandidateSelectorObservation(observation)).toEqual(observation);
+    expect(question.candidates[0]?.selector_observation).toEqual(observation);
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(question).candidates[0]
+      ?.selector_observation).toEqual(observation);
   });
 });
 

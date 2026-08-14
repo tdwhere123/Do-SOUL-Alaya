@@ -8,6 +8,7 @@ export class LegacyPathIndexUnboundError extends Error {
 }
 
 export function isLegacyPathIndexUnboundError(error: unknown): boolean {
+  // Worker serialization keeps `name` only; wrapping in StorageError degrades to storage_error (fail-safe).
   return error instanceof Error && error.name === "LegacyPathIndexUnboundError";
 }
 

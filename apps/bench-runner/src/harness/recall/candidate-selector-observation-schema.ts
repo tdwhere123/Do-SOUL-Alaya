@@ -62,6 +62,16 @@ const RecallSelectorPathReceiptSchema = z
   .strict()
   .readonly();
 
+// Unavailable is the unbound-index seal; storage_error is a real DB fault — do not collapse them.
+const RecallSelectorPathStatusSchema = z.enum([
+  "not_observed",
+  "unavailable",
+  "storage_error",
+  "none",
+  "partial",
+  "complete"
+]);
+
 const RecallCandidateSelectorObservationV1Schema = z
   .object({
     schema_version: z.literal(1),
@@ -118,7 +128,7 @@ const RecallCandidateSelectorObservationV1Schema = z
       marginal_gain: z.number().min(0).max(1).nullable()
     }).strict().readonly(),
     path: z.object({
-      status: z.enum(["not_observed", "unavailable", "none", "partial", "complete"]),
+      status: RecallSelectorPathStatusSchema,
       receipts: z.array(RecallSelectorPathReceiptSchema).readonly()
     }).strict().readonly()
   })
@@ -182,7 +192,7 @@ const RecallCandidateSelectorObservationV2Schema = z
       marginal_gain: z.number().min(0).max(1).nullable()
     }).strict().readonly(),
     path: z.object({
-      status: z.enum(["not_observed", "unavailable", "none", "partial", "complete"]),
+      status: RecallSelectorPathStatusSchema,
       receipts: z.array(RecallSelectorPathReceiptSchema).readonly()
     }).strict().readonly()
   })
