@@ -203,6 +203,33 @@ describe("resolveMcpDegradationReason", () => {
     ).toBe("provider_failed");
   });
 
+  it("maps query_embedding_unusable to MCP provider_failed instead of null", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "requested",
+            embedding_provider_status: "query_embedding_unusable",
+            provider_degradation_reason: "query_embedding_unusable"
+          }
+        },
+        false
+      )
+    ).toBe("provider_failed");
+
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "requested",
+            embedding_provider_status: "query_embedding_unusable"
+          }
+        },
+        false
+      )
+    ).toBe("provider_failed");
+  });
+
   it("does not invent degradation when embedding was intentionally disabled", () => {
     expect(
       resolveMcpDegradationReason(

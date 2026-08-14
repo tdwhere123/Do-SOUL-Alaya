@@ -292,6 +292,9 @@ function normalizeProviderState(value: string): BenchEmbeddingProviderState {
   if (normalized === "provider_not_requested" || normalized === "not_requested") {
     return "provider_not_requested";
   }
+  if (normalized === "query_embedding_unusable") {
+    return "query_embedding_unusable";
+  }
   return "unknown";
 }
 
@@ -301,6 +304,7 @@ function sanitizeProviderDegradationReason(value: string | null): string | null 
   if (
     normalized === "query_embedding_failed" ||
     normalized === "query_embedding_pending" ||
+    normalized === "query_embedding_unusable" ||
     normalized === "provider_unavailable" ||
     normalized === "local_vector_lookup_failed"
   ) {

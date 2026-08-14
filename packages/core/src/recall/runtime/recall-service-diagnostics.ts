@@ -1,21 +1,27 @@
-import type {
-  MemoryEntry,
-  RecallCandidate,
-  RecallScoreFactors,
-  RecallOriginPlane} from "@do-soul/alaya-protocol";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
-import type { RecallCandidateSelectorObservation } from
-  "./diagnostics/candidate-selector-observation.js";
 import type { RecallFiniteFieldChannelCapture } from
   "../field/finite-field-capture.js";
 import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
-import type { RecallAnswerRerankDiagnostics, RecallAnswerRerankFailureClass,
-  RecallAnswerRerankStatus, RecallEvidenceEmbeddingFailureClass,
-  RecallEvidenceEmbeddingStatus } from "./diagnostics/stage-status.js";
+import type {
+  RecallAnswerRerankFailureClass,
+  RecallAnswerRerankStatus,
+  RecallEvidenceEmbeddingFailureClass,
+  RecallEvidenceEmbeddingStatus
+} from "./diagnostics/stage-status.js";
+import type {
+  FineAssessmentPrunedCandidateDiagnostic,
+  RecallCandidateDiagnostic,
+  RecallFusionBreakdown
+} from "./diagnostics/fusion-candidate-diagnostics.js";
+import type {
+  RecallDegradationReason,
+  RecallEmbeddingProviderStatus
+} from "./diagnostics/vocabulary.js";
+
 export type {
   RecallAnswerRerankDiagnostics,
   RecallAnswerRerankFailureClass,
@@ -23,340 +29,36 @@ export type {
   RecallEvidenceEmbeddingFailureClass,
   RecallEvidenceEmbeddingStatus
 } from "./diagnostics/stage-status.js";
-
-export type RecallAdmissionPlane =
-  | "activation"
-  | "protected_winner"
-  | "object_probe"
-  | "evidence_anchor"
-  | "facet_concept"
-  | "domain_tag_cluster"
-  | "session_surface_cohort"
-  | "temporal_window"
-  | "source_proximity"
-  | "graph_expansion"
-  | "path_expansion"
-  | "lexical"
-  // High-precision anchor FTS lane: admitted only on a required anchor token. see also: recall-query-plan.ts, coarse-filter-semantic.ts.
-  | "lexical_anchor"
-  | "synthesis_child"
-  // Embedding-workspace-scan injections with no lexical/structural anchor; separate plane name keeps seed selection honest.
-  | "semantic_supplement"
-  // see also: collectEntityDerivedSeeds — entity FTS hits that seed graph_expansion and admit on their own plane.
-  | "entity_seed";
-
-export type RecallCandidateDropReason =
-  | "duplicate"
-  | "dimension_limit"
-  | "max_entries"
-  | "max_total_tokens";
-
-export type RecallEmbeddingProviderStatus =
-  | "provider_returned"
-  | "provider_pending"
-  | "provider_failed"
-  | "provider_not_requested"
-  | "query_embedding_unusable";
-
-export type RecallDegradationReason =
-  | "evidence_fts_failed"
-  | "evidence_candidate_embedding_failed"
-  | "synthesis_fts_failed"
-  | "embedding_coarse_injection_failed"
-  | "graph_expansion_failed"
-  | "path_expansion_failed"
-  | "packet_plan_trace_capture_failed";
-
-export interface RecallEmbeddingWorkspaceScanDiagnostics {
-  readonly workspace_scan_truncated?: boolean;
-  readonly workspace_scan_cap?: number;
-  readonly workspace_scanned_count?: number;
-  readonly injection_truncated?: boolean;
-  readonly injection_eligible_count?: number;
-  readonly injection_admitted_count?: number;
-  readonly provider_kind?: string;
-  readonly model_id?: string;
-  readonly schema_version?: number;
-}
-
-export type RecallFusionStream =
-  | "lexical_fts"
-  | "trigram_fts"
-  | "synthesis_fts"
-  | "evidence_fts"
-  | "evidence_structural_agreement"
-  | "source_proximity"
-  | "source_evidence_agreement"
-  | "subject_alignment"
-  | "structural"
-  | "existing_score"
-  | "embedding_similarity"
-  | "graph_expansion"
-  | "entity_seed"
-  | "path_expansion"
-  | "temporal_recency"
-  | "workspace_activation";
-
-export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
-export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;
-
-export type RecallConformantAxis = "object" | "path" | "evidence" | "temporal" | "control";
-
-export type FloodAxisInactiveReason =
-  | "active"
-  | "inactive:no_fuel"
-  | "inactive:no_slice"
-  | "inactive:no_slice_match"
-  | "inactive:no_path"
-  | "inactive:no_evidence"
-  | "inactive:pass_through"
-  | "inactive:not_applicable"
-  | "inactive:index_unavailable"
-  | "inactive:storage_error";
-
-export const RECALL_FLOOD_EDGE_REASONS = [
-  "transferred",
-  "capped",
-  "self_loop",
-  "missing_edge_provenance",
-  "missing_or_zero_input",
-  "non_positive_conductance",
-  "no_slice_match"
-] as const;
-
-export interface RecallFloodEdgeTraceV1 {
-  readonly schema_version: 1;
-  readonly path_id: string;
-  readonly relation_kind: string;
-  readonly seed_object_id: string;
-  readonly target_object_id: string;
-  readonly input_potential: number;
-  readonly edge_conductance: number;
-  readonly slice_compatibility:
-    | "not_evaluated"
-    | "no_query_key"
-    | "missing_source_key"
-    | "missing_target_key"
-    | "missing_source_and_target_key"
-    | "no_slice_match"
-    | "slice_match";
-  readonly raw_transfer: number;
-  readonly capped_transfer: number;
-  readonly decision: "transferred" | "rejected";
-  readonly reason: typeof RECALL_FLOOD_EDGE_REASONS[number];
-}
-
-export interface RecallFloodH1TransitionCounts {
-  readonly evaluated_edge_count: number;
-  readonly seed_overlap_edge_count: number;
-  readonly transferred_edge_count: number;
-  readonly rejected_edge_count: number;
-  readonly reason_counts: Readonly<
-    Record<RecallFloodEdgeTraceV1["reason"], number>
-  >;
-}
-
-export interface IntegratedFloodCandidateDiagnostics {
-  readonly R_obj: number;
-  readonly Slice: number;
-  readonly A_path: number;
-  readonly B_evidence: number;
-  readonly E_direct: number;
-  readonly omega: number;
-  readonly Flood: number;
-  readonly lambda: number;
-  readonly beta: number;
-  readonly final_score: number;
-  readonly slice_status: FloodAxisInactiveReason;
-  readonly path_status: FloodAxisInactiveReason;
-  readonly evidence_status: FloodAxisInactiveReason;
-  readonly e_direct_status: FloodAxisInactiveReason;
-  readonly fuel_verified: boolean;
-  readonly edge_traces?: readonly Readonly<RecallFloodEdgeTraceV1>[];
-  readonly edge_trace_truncated_count?: number;
-  readonly score_mode?: "rrf_seeded_h1_max_product";
-  readonly h1_max_product?: Readonly<{
-    readonly schema_version: 1;
-    readonly seed_basis: "rrf_family_base";
-    readonly direct_potential: number;
-    readonly strongest_transfer: number;
-    readonly winner: "direct" | "edge";
-    readonly winning_edge_trace: Readonly<RecallFloodEdgeTraceV1> | null;
-    readonly frontier_admitted: boolean;
-    readonly transition_counts: Readonly<RecallFloodH1TransitionCounts>;
-  }>;
-  readonly h1_overlay?: Readonly<{
-    readonly schema_version: 1;
-    readonly baseline_score: number;
-    readonly edge_score: number;
-    readonly final_score: number;
-    readonly delta: number;
-    readonly applied: boolean;
-    readonly winner: "baseline" | "edge";
-    readonly winning_edge_trace: Readonly<RecallFloodEdgeTraceV1> | null;
-  }>;
-}
-
-export interface FloodFuelCoverageSummary {
-  readonly candidates_total: number;
-  readonly cold_start_count: number;
-  readonly fuel_verified_count: number;
-  readonly slice_active_count: number;
-  readonly path_active_count: number;
-  readonly evidence_active_count: number;
-  readonly h1_candidate_count?: number;
-  readonly h1_transferable_count?: number;
-  readonly h1_edge_winner_count?: number;
-  readonly h1_direct_winner_count?: number;
-  readonly h1_overlay_applied_count?: number;
-  readonly h1_evaluated_edge_count?: number;
-  readonly h1_seed_overlap_edge_count?: number;
-  readonly h1_transferred_edge_count?: number;
-  readonly h1_rejected_edge_count?: number;
-  readonly h1_newly_admitted_frontier_target_count?: number;
-  readonly h1_reason_counts?: Readonly<
-    Record<RecallFloodEdgeTraceV1["reason"], number>
-  >;
-}
-
-export interface RecallFusionBreakdown {
-  readonly candidate_key: string;
-  readonly object_id: string;
-  readonly object_kind: RecallCandidate["object_kind"];
-  readonly origin_plane: RecallOriginPlane;
-  readonly per_stream_rank: RecallFusionStreamRanks;
-  readonly fused_rank: number;
-  readonly fused_score: number;
-  readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
-  readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
-  readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
-  readonly flood_potential?: Readonly<IntegratedFloodCandidateDiagnostics>;
-  readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
-}
-
-export type RecallAdmissionDiagnosticPass = "final_selector";
-
-export interface RecallAdmissionAttemptDiagnostic {
-  readonly pass: RecallAdmissionDiagnosticPass;
-  readonly selection_order: number;
-  readonly admitted: boolean;
-  readonly dropped_reason: RecallCandidateDropReason | null;
-}
-
-export interface RecallCandidateDiagnostic {
-  readonly candidate_key: string;
-  readonly object_id: string;
-  readonly object_kind: RecallCandidate["object_kind"];
-  readonly created_at: string;
-  // Object's memory dimension (typed facet) — for facet-separation diagnostics. Provenance only.
-  readonly dimension: string;
-  readonly origin_plane: RecallOriginPlane;
-  readonly admission_planes: readonly RecallAdmissionPlane[];
-  readonly plane_first_admitted: RecallAdmissionPlane;
-  readonly plane_winning_admission: RecallAdmissionPlane;
-  readonly pre_budget_rank: number;
-  readonly selection_order: number;
-  readonly admission_attempts: readonly Readonly<RecallAdmissionAttemptDiagnostic>[];
-  readonly evidence_projection_matches: readonly Readonly<
-    import("./recall-service-results.js").RecallEvidenceProjectionMatchReceipt
-  >[];
-  readonly fused_rank: number;
-  readonly fused_score: number;
-  readonly per_stream_rank: RecallFusionStreamRanks;
-  readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
-  readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
-  readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
-  readonly flood_potential?: Readonly<IntegratedFloodCandidateDiagnostics>;
-  readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
-  readonly final_rank: number | null;
-  /** MemTrace alias of final_rank after delivery selection. */
-  readonly post_rank?: number | null;
-  /** MemTrace alias of within_budget. */
-  readonly in_final_packet?: boolean;
-  /** MemTrace alias of dropped_reason. */
-  readonly eviction_reason?: RecallCandidateDropReason | null;
-  readonly dropped_reason: RecallCandidateDropReason | null;
-  readonly within_budget: boolean;
-  readonly relevance_score: number;
-  readonly answer_relevance_score?: number;
-  readonly answer_relevance_rank?: number;
-  readonly additive_score: number;
-  readonly lexical_rank: number | null;
-  readonly structural_score: number;
-  readonly score_factors: Readonly<RecallScoreFactors>;
-  readonly source_channels: readonly string[];
-  readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
-  readonly answer_features?: Readonly<RecallCandidateAnswerFeatures>;
-  readonly deep_head_trace?: Readonly<
-    import("../rerank/deep-head.js").RecallDeepHeadTrace
-  >;
-  readonly coverage_marginal_gain?: number;
-  // Capture-only upstream state; delivery never reads this field.
-  readonly selector_observation?: Readonly<RecallCandidateSelectorObservation>;
-  readonly path_suppression_score: number;
-  // Live delivery-stage ranks (1-based). Provenance only — never feeds ranking.
-  readonly rank_after_fusion?: number;
-  readonly rank_after_feature_rerank?: number;
-  readonly rank_after_coverage_selector?: number;
-  readonly coverage_selector_action?: "noop" | "kept" | "promoted" | "displaced";
-  // Retired stages: producers omit these. Optional only for old diagnostic dumps.
-  readonly rank_after_lexical_priority?: number;
-  readonly rank_after_synthesis_reserve?: number;
-  readonly rank_after_structural_reserve?: number;
-  readonly rank_after_session_coverage?: number;
-  readonly session_coverage_action?: "noop" | "kept" | "promoted" | "displaced";
-  readonly reserved_by?: "none" | "synthesis" | "structural";
-  readonly session_key?: string;
-  readonly source_cohort_key?: string | null;
-}
-
-export interface FineAssessmentPrunedCandidateDiagnostic {
-  readonly candidate_key: string;
-  readonly origin_plane: RecallOriginPlane;
-  readonly object_kind: RecallCandidate["object_kind"];
-  readonly object_id: string;
-  readonly coarse_index: number;
-  readonly drop_reason: "fine_assessment_cap";
-}
-
-export interface RecallCandidateAnswerFeatures {
-  readonly content: MemoryEntry["content"];
-  readonly evidence_gist: string | null;
-  readonly evidence_gist_truncated: boolean;
-  readonly domain_tags: MemoryEntry["domain_tags"];
-  readonly evidence_refs: MemoryEntry["evidence_refs"];
-  readonly facet_tags: NonNullable<MemoryEntry["facet_tags"]>;
-  readonly canonical_entities: NonNullable<MemoryEntry["canonical_entities"]>;
-  readonly projection_schema_version: Exclude<MemoryEntry["projection_schema_version"], undefined>;
-  readonly event_time_start: Exclude<MemoryEntry["event_time_start"], undefined>;
-  readonly event_time_end: Exclude<MemoryEntry["event_time_end"], undefined>;
-  readonly valid_from: Exclude<MemoryEntry["valid_from"], undefined>;
-  readonly valid_to: Exclude<MemoryEntry["valid_to"], undefined>;
-  readonly time_precision: Exclude<MemoryEntry["time_precision"], undefined>;
-  readonly time_source: Exclude<MemoryEntry["time_source"], undefined>;
-  readonly preference_subject: Exclude<MemoryEntry["preference_subject"], undefined>;
-  readonly preference_predicate: Exclude<MemoryEntry["preference_predicate"], undefined>;
-  readonly preference_object: Exclude<MemoryEntry["preference_object"], undefined>;
-  readonly preference_category: Exclude<MemoryEntry["preference_category"], undefined>;
-  readonly preference_polarity: Exclude<MemoryEntry["preference_polarity"], undefined>;
-  readonly answer_support?: Readonly<
-    import("../query/recall-candidate-answer-support.js").RecallCandidateAnswerSupport
-  >;
-  readonly answer_support_observations?: readonly Readonly<
-    import("../query/recall-answer-support-observation.js").RecallAnswerSupportObservation
-  >[];
-}
-
-export interface RecallPathExpansionSourceDiagnostic {
-  readonly path_id: string;
-  readonly seed_id: string;
-  readonly seed_kind: "memory" | "time_concern";
-  readonly target_object_id: string;
-  readonly source_channel: "path_expansion" | "time_concern";
-  // The relation (constitution.relation_kind) and firing facet_key that carried the candidate. Provenance only — attributes gold delivery to a relation/facet, not a flat stream label.
-  readonly relation_kind: string;
-  readonly facet_key: string | null;
-}
+export type {
+  RecallAdmissionPlane,
+  RecallCandidateDropReason,
+  RecallDegradationReason,
+  RecallEmbeddingProviderStatus,
+  RecallEmbeddingWorkspaceScanDiagnostics
+} from "./diagnostics/vocabulary.js";
+export {
+  RECALL_FLOOD_EDGE_REASONS
+} from "./diagnostics/flood-diagnostics.js";
+export type {
+  FloodAxisInactiveReason,
+  FloodFuelCoverageSummary,
+  IntegratedFloodCandidateDiagnostics,
+  RecallFloodEdgeTraceV1,
+  RecallFloodH1TransitionCounts
+} from "./diagnostics/flood-diagnostics.js";
+export type {
+  FineAssessmentPrunedCandidateDiagnostic,
+  RecallAdmissionAttemptDiagnostic,
+  RecallAdmissionDiagnosticPass,
+  RecallCandidateAnswerFeatures,
+  RecallCandidateDiagnostic,
+  RecallConformantAxis,
+  RecallFusionBreakdown,
+  RecallFusionStream,
+  RecallFusionStreamContributions,
+  RecallFusionStreamRanks,
+  RecallPathExpansionSourceDiagnostic
+} from "./diagnostics/fusion-candidate-diagnostics.js";
 
 // invariant: per-recall token economy is measure-only — never feeds ranking, gates eligibility, or enters the protocol payload; lives only in the in-memory RecallDiagnostics sub-object.
 // see also: diagnostics.ts buildRecallDiagnostics/computeRecallTokenEconomy, bench-runner recall-diagnostics-schema.ts, longmemeval/diagnostics.ts.

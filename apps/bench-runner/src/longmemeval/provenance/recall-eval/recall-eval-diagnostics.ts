@@ -120,7 +120,9 @@ export const RecallEvalDiagnosticsEvidenceV2Schema = z.object({
     provider_states: z.object({
       total: z.number().int().nonnegative(), provider_returned: z.number().int().nonnegative(),
       provider_pending: z.number().int().nonnegative(), provider_failed: z.number().int().nonnegative(),
-      provider_not_requested: z.number().int().nonnegative(), unknown: z.number().int().nonnegative()
+      provider_not_requested: z.number().int().nonnegative(),
+      query_embedding_unusable: z.number().int().nonnegative().default(0),
+      unknown: z.number().int().nonnegative()
     }).strict(),
     answer_rerank_status_counts: z.object({
       returned: z.number().int().nonnegative(), not_applicable: z.number().int().nonnegative(),

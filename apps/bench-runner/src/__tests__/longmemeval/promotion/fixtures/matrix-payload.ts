@@ -93,6 +93,7 @@ export function productPayloadFixture(
       provider_pending_rate: 0,
       provider_failed_rate: 0,
       provider_not_requested_rate: 0,
+      query_embedding_unusable_rate: 0,
       r_at_5_with_embedding_returned: 0.95,
       recall_token_economy: recallTokenEconomy(100),
       quality_metrics: {

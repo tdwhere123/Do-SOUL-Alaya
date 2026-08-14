@@ -107,7 +107,10 @@ function mapEmbeddingDegradationReason(
   if (mappedProviderReason !== null) {
     return mappedProviderReason;
   }
-  if (diagnostics.embedding_provider_status === "provider_failed") {
+  if (
+    diagnostics.embedding_provider_status === "provider_failed" ||
+    diagnostics.embedding_provider_status === "query_embedding_unusable"
+  ) {
     return "provider_failed";
   }
   if (diagnostics.embedding_provider_status === "provider_pending") {

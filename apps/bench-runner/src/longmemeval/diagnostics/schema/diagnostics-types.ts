@@ -172,11 +172,13 @@ export interface ProviderStateSummary {
   readonly provider_pending: number;
   readonly provider_failed: number;
   readonly provider_not_requested: number;
+  readonly query_embedding_unusable: number;
   readonly unknown: number;
   readonly provider_returned_rate: number;
   readonly provider_pending_rate: number;
   readonly provider_failed_rate: number;
   readonly provider_not_requested_rate: number;
+  readonly query_embedding_unusable_rate: number;
   readonly unknown_rate: number;
 }
 

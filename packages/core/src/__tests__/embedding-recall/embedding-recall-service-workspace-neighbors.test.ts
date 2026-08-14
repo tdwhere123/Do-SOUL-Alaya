@@ -7,6 +7,7 @@ import {
 } from "../../embedding-recall/embedding-recall-service.js";
 import { WorkspaceNeighborScanner } from "../../embedding-recall/workspace-neighbor-scanner.js";
 import type { QueryEmbeddingEngine } from "../../embedding-recall/query-embedding-engine.js";
+import { createPreparedEmbeddingQueryHandle } from "../../embedding-recall/helpers.js";
 import {
   createEmbeddingRecord,
   createProvider
@@ -399,5 +400,39 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
         error: "query engine exploded"
       })
     );
+  });
+
+  it("names a ready unusable query vector instead of stretching provider_returned", async () => {
+    const scanner = new WorkspaceNeighborScanner({
+      provider: createProvider({}),
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [
+          createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+        ])
+      },
+      queryEngine: {
+        prepareQueryEmbedding: () => createPreparedEmbeddingQueryHandle(
+          "query-unusable",
+          Object.freeze({ status: "ready", embedding: new Float32Array([0, 0]) }),
+          { cacheHit: true }
+        )
+      } as QueryEmbeddingEngine,
+      queryTimeoutMs: 1000,
+      warn: vi.fn()
+    });
+
+    const result = await scanner.collectWorkspaceNeighborsWithMetadata({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+
+    expect(result.query_embedding_status).toBe("query_embedding_unusable");
+    expect(result.query_embedding_degradation_reason).toBe("query_embedding_unusable");
+    expect(result.hits).toEqual([]);
+    expect(result.embedding_inference_calls).toBe(0);
   });
 });

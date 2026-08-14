@@ -251,6 +251,7 @@ function embeddingKpiFields(
     provider_pending_rate: providerSummary.provider_pending_rate,
     provider_failed_rate: providerSummary.provider_failed_rate,
     provider_not_requested_rate: providerSummary.provider_not_requested_rate,
+    query_embedding_unusable_rate: providerSummary.query_embedding_unusable_rate,
     ...(embeddingVectorCache === null ? {} : { embedding_vector_cache_ready_rate: embeddingVectorCache.ready_rate }),
     ...(queryEmbeddingCache === null ? {} : { query_embedding_cache_ready_rate: queryEmbeddingCache.ready_rate })
   };

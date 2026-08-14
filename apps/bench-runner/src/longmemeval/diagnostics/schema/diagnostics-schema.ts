@@ -39,6 +39,7 @@ export const BenchEmbeddingProviderStateSchema = z.enum([
   "provider_pending",
   "provider_failed",
   "provider_not_requested",
+  "query_embedding_unusable",
   "unknown"
 ]);
 

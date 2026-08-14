@@ -23,11 +23,13 @@ const PROVIDER_SUMMARY_KEYS = [
   "provider_pending",
   "provider_failed",
   "provider_not_requested",
+  "query_embedding_unusable",
   "unknown",
   "provider_returned_rate",
   "provider_pending_rate",
   "provider_failed_rate",
   "provider_not_requested_rate",
+  "query_embedding_unusable_rate",
   "unknown_rate"
 ] as const satisfies readonly (keyof ProviderStateSummary)[];
 
@@ -164,7 +166,9 @@ function assertProviderBinding(
       (kpi.provider_failed_rate !== undefined &&
        kpi.provider_failed_rate !== expected.provider_failed_rate) ||
       (kpi.provider_not_requested_rate !== undefined &&
-       kpi.provider_not_requested_rate !== expected.provider_not_requested_rate)) {
+       kpi.provider_not_requested_rate !== expected.provider_not_requested_rate) ||
+      (kpi.query_embedding_unusable_rate !== undefined &&
+       kpi.query_embedding_unusable_rate !== expected.query_embedding_unusable_rate)) {
     throw new Error("full diagnostics provider rates differ from verified KPI");
   }
 }
@@ -175,7 +179,16 @@ function sameProviderSummary(
 ): boolean {
   if (actual === null || typeof actual !== "object") return false;
   const record = actual as Record<string, unknown>;
-  return PROVIDER_SUMMARY_KEYS.every((key) => record[key] === expected[key]);
+  return PROVIDER_SUMMARY_KEYS.every((key) => {
+    const actualValue = record[key];
+    if (
+      actualValue === undefined &&
+      (key === "query_embedding_unusable" || key === "query_embedding_unusable_rate")
+    ) {
+      return expected[key] === 0;
+    }
+    return actualValue === expected[key];
+  });
 }
 
 function hitAt5Ratio(rows: readonly { readonly hit_at_5: boolean }[]): number {

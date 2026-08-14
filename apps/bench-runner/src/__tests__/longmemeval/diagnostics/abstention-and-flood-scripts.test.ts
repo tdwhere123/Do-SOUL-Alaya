@@ -31,11 +31,13 @@ async function writeDiagnosticsFixture(input: {
           provider_pending: 0,
           provider_failed: 0,
           provider_not_requested: 0,
+          query_embedding_unusable: 0,
           unknown: 0,
           provider_returned_rate: 1,
           provider_pending_rate: 0,
           provider_failed_rate: 0,
           provider_not_requested_rate: 0,
+          query_embedding_unusable_rate: 0,
           unknown_rate: 0
         },
         questions: [

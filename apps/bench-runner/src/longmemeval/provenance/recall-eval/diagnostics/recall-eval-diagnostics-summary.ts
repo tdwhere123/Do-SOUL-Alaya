@@ -14,7 +14,7 @@ export class RecallEvalDiagnosticsSummaryAccumulator {
   readonly #latency = { measured_question_count: 0, total_ms: 0, max_ms: 0 };
   readonly #providers: Record<ProviderState, number> = {
     provider_returned: 0, provider_pending: 0, provider_failed: 0,
-    provider_not_requested: 0, unknown: 0
+    provider_not_requested: 0, query_embedding_unusable: 0, unknown: 0
   };
   readonly #cross: Record<CrossStatus | "unavailable", number> = {
     returned: 0, not_applicable: 0, not_requested: 0,

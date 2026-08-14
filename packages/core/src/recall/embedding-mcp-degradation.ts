@@ -12,11 +12,13 @@ export const EMBEDDING_PROVIDER_DIAGNOSTIC_TO_MCP_REASON = Object.freeze({
   query_embedding_pending: "provider_unavailable",
   provider_failed: "provider_failed",
   query_embedding_failed: "provider_failed",
+  query_embedding_unusable: "provider_failed",
   local_vector_lookup_failed: "provider_failed"
 } as const satisfies Record<string, SoulMemorySearchDegradationReason>);
 
 const KNOWN_INTERNAL_DIAGNOSTICS = new Set([
   "query_embedding_failed",
+  "query_embedding_unusable",
   "provider_unavailable",
   "local_vector_lookup_failed",
   "query_embedding_pending",

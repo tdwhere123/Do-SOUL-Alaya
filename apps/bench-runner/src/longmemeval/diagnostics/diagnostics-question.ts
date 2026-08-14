@@ -203,12 +203,14 @@ export function summarizeProviderStates(
   let providerPending = 0;
   let providerFailed = 0;
   let providerNotRequested = 0;
+  let queryEmbeddingUnusable = 0;
   let unknown = 0;
   for (const row of diagnostics) {
     if (row.provider_state === "provider_returned") providerReturned++;
     else if (row.provider_state === "provider_pending") providerPending++;
     else if (row.provider_state === "provider_failed") providerFailed++;
     else if (row.provider_state === "provider_not_requested") providerNotRequested++;
+    else if (row.provider_state === "query_embedding_unusable") queryEmbeddingUnusable++;
     else unknown++;
   }
   const total = diagnostics.length;
@@ -218,11 +220,13 @@ export function summarizeProviderStates(
     provider_pending: providerPending,
     provider_failed: providerFailed,
     provider_not_requested: providerNotRequested,
+    query_embedding_unusable: queryEmbeddingUnusable,
     unknown,
     provider_returned_rate: ratio(providerReturned, total),
     provider_pending_rate: ratio(providerPending, total),
     provider_failed_rate: ratio(providerFailed, total),
     provider_not_requested_rate: ratio(providerNotRequested, total),
+    query_embedding_unusable_rate: ratio(queryEmbeddingUnusable, total),
     unknown_rate: ratio(unknown, total)
   };
 }

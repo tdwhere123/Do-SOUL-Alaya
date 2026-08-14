@@ -1,5 +1,11 @@
 import { resolveEmbeddingWorkspaceScanCap } from "./constants.js";
-import { clamp01, cosineSimilarity, emptyWorkspaceNeighborResult, toErrorMessage } from "./helpers.js";
+import {
+  clamp01,
+  cosineSimilarity,
+  emptyWorkspaceNeighborResult,
+  isFiniteNonzeroVector,
+  toErrorMessage
+} from "./helpers.js";
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import { selectTopNeighborHits } from "./scoring/neighbor-top-k.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
@@ -229,6 +235,14 @@ function resolveWorkspaceNeighborQuerySnapshot(
 ): WorkspaceQueryEmbeddingResolution {
   const { queryEmbeddingCacheHit } = options;
   if (snapshot.status === "ready") {
+    if (snapshot.embedding === null || !isFiniteNonzeroVector(snapshot.embedding)) {
+      return failedWorkspaceNeighborQuery(
+        { queryEmbeddingCacheHit },
+        "query_embedding_unusable",
+        "query_embedding_unusable",
+        "query_embedding_unusable"
+      );
+    }
     return {
       queryEmbedding: snapshot.embedding,
       queryEmbeddingCacheHit,

@@ -243,6 +243,7 @@ function buildEmbeddingKpis(
     provider_pending_rate: provider.provider_pending_rate,
     provider_failed_rate: provider.provider_failed_rate,
     provider_not_requested_rate: provider.provider_not_requested_rate,
+    query_embedding_unusable_rate: provider.query_embedding_unusable_rate,
     ...(returnedRAt5 === undefined ? {} : { r_at_5_with_embedding_returned: returnedRAt5 }),
     ...(vectors === null ? {} : { embedding_vector_cache_ready_rate: vectors.ready_rate }),
     ...(queries === null ? {} : { query_embedding_cache_ready_rate: queries.ready_rate })

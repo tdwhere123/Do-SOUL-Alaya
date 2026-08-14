@@ -70,7 +70,7 @@ interface StreamState {
   };
   readonly provider: Record<
     "provider_returned" | "provider_pending" | "provider_failed" |
-    "provider_not_requested" | "unknown",
+    "provider_not_requested" | "query_embedding_unusable" | "unknown",
     number
   >;
   readonly treatment: DiagnosticsTreatmentState;
@@ -158,6 +158,7 @@ function createStreamState(): StreamState {
       provider_pending: 0,
       provider_failed: 0,
       provider_not_requested: 0,
+      query_embedding_unusable: 0,
       unknown: 0
     },
     treatment: createDiagnosticsTreatmentState(),
@@ -451,6 +452,9 @@ function assertKpiReaggregation(
     provider_pending_rate: ratio(state.provider.provider_pending, providerTotal),
     provider_failed_rate: ratio(state.provider.provider_failed, providerTotal),
     provider_not_requested_rate: ratio(state.provider.provider_not_requested, providerTotal),
+    query_embedding_unusable_rate: payload.kpi.query_embedding_unusable_rate === undefined
+      ? undefined
+      : ratio(state.provider.query_embedding_unusable, providerTotal),
     r_at_5_with_embedding_returned: state.provider.provider_returned === 0
       ? undefined
       : ratio(state.providerReturnedHitsAt5, state.provider.provider_returned),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NO_STORED_VECTORS_DEGRADATION_REASON } from "../../../embedding-recall/constants.js";
+import { mapEmbeddingProviderDiagnosticToMcpReason } from "../../../recall/embedding-mcp-degradation.js";
 import { normalizeEmbeddingProviderDegradationReason } from "../../../recall/runtime/diagnostics.js";
 
 describe("normalizeEmbeddingProviderDegradationReason", () => {
@@ -18,6 +19,15 @@ describe("normalizeEmbeddingProviderDegradationReason", () => {
     );
     expect(normalizeEmbeddingProviderDegradationReason("query_embedding_pending")).toBe(
       "query_embedding_pending"
+    );
+    expect(normalizeEmbeddingProviderDegradationReason("query_embedding_unusable")).toBe(
+      "query_embedding_unusable"
+    );
+  });
+
+  it("maps query_embedding_unusable to MCP provider_failed without growing the public enum", () => {
+    expect(mapEmbeddingProviderDiagnosticToMcpReason("query_embedding_unusable")).toBe(
+      "provider_failed"
     );
   });
 

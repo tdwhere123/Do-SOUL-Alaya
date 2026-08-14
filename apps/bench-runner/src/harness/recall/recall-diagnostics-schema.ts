@@ -353,7 +353,8 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_returned",
       "provider_pending",
       "provider_failed",
-      "provider_not_requested"
+      "provider_not_requested",
+      "query_embedding_unusable"
     ]),
     embedding_supplement_status: z.enum([
       "disabled",
