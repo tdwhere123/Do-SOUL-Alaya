@@ -106,6 +106,7 @@ export type FloodAxisInactiveReason =
   | "inactive:no_path"
   | "inactive:no_evidence"
   | "inactive:pass_through"
+  | "inactive:not_applicable"
   | "inactive:index_unavailable"
   | "inactive:storage_error"
   | "inactive:beta_disabled";

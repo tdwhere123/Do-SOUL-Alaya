@@ -138,6 +138,7 @@ async function prepareRecallRequest(
     context.dependencies.slotRepo.findByWorkspace(params.workspaceId),
     loadActiveConstraints({
       activeConstraintsPort: context.dependencies.activeConstraintsPort,
+      warn: context.warn,
       workspaceId: params.workspaceId,
       cap: params.activeConstraintsCap ?? null,
       asOf: params.referenceTime

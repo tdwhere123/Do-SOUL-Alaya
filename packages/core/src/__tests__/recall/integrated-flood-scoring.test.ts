@@ -191,6 +191,22 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.score).toBeCloseTo(0.4, 12);
   });
 
+  it("does not count ineligible capsules as path-graph pass-through", () => {
+    const entry = createMemoryEntry({ object_id: "99999999-9999-4999-8999-999999999999" });
+    const result = computeIntegratedFloodScore({
+      entry,
+      memorySupplementEligible: false,
+      axisInputs: { R_obj: 0.4, A_path: 0, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowAvailability: "unavailable"
+      })
+    });
+    expect(result.diagnostics.path_status).toBe("inactive:not_applicable");
+    expect(result.diagnostics.A_path).toBe(1);
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.4, 12);
+  });
+
   it("diagnostic names match the integrated flood contract", () => {
     const entry = createMemoryEntry({
       object_id: "33333333-3333-4333-8333-333333333333",

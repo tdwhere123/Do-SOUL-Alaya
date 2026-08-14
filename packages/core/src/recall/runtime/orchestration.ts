@@ -88,6 +88,7 @@ export function resolvePolicy(params: Readonly<{
 
 export async function loadActiveConstraints(params: Readonly<{
   readonly activeConstraintsPort?: RecallServiceDependencies["activeConstraintsPort"];
+  readonly warn: RecallServiceWarnPort;
   readonly workspaceId: string;
   readonly cap: number | null;
   readonly asOf?: string;
@@ -109,8 +110,14 @@ export async function loadActiveConstraints(params: Readonly<{
       asOf: params.asOf
     });
   } catch (error) {
-    // A missing named as-of generation is an absent index, not a constraint-store fault.
+    // An unbound or missing as-of index is an absent constraint projection, not a store fault.
     if (classifyPathIndexReadFailure(error) === "index_unbound") {
+      params.warn("active constraints lookup skipped", {
+        workspace_id: params.workspaceId,
+        operation: "active_constraints",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
       return Object.freeze({
         constraints: Object.freeze([]),
         total_count: 0

@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteRelationAssertionRepo } from "../../../repos/path/relation-assertion-repo.js";
-import {
-  SqliteTemporalPathProjectionReader,
-  TemporalProjectionGenerationMissingError
-} from "../../../repos/path/temporal-path-projection-reader.js";
+import { SqliteTemporalPathProjectionReader } from "../../../repos/path/temporal-path-projection-reader.js";
 
 const BUILD_AS_OF = "2026-08-13T18:57:26.000Z";
 const QUESTION_AS_OF = "2023-05-30T23:40:00.000Z";
@@ -23,9 +20,13 @@ describe("temporal path projection reader as-of lookup", () => {
     const reader = openReaderWithBuildTimeGeneration();
 
     await expect(reader.findByWorkspace("workspace-1", { asOf: QUESTION_AS_OF }))
-      .rejects.toBeInstanceOf(TemporalProjectionGenerationMissingError);
-    await expect(reader.findByWorkspace("workspace-1", { asOf: QUESTION_AS_OF }))
-      .rejects.toThrow(/No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z/);
+      .rejects.toMatchObject({
+        name: "TemporalProjectionGenerationMissingError",
+        code: "NOT_FOUND",
+        message: expect.stringMatching(
+          /No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z/
+        )
+      });
   });
 
   it("still serves the verified build-time generation when as-of matches", async () => {

@@ -68,8 +68,13 @@ function resolveSliceAxis(): ResolvedFloodFuelAxis {
 function resolvePathAxis(
   rawPath: number,
   hasInflow: boolean,
-  availability: RecallPathInflowAvailability | undefined
+  availability: RecallPathInflowAvailability | undefined,
+  eligible: boolean
 ): ResolvedFloodFuelAxis {
+  if (!eligible) {
+    // Capsules are outside the path-transfer population.
+    return { value: 1, status: "inactive:not_applicable", countsAsFuel: false };
+  }
   if (availability === "unavailable") {
     return { value: 0, status: "inactive:index_unavailable", countsAsFuel: false };
   }
@@ -160,9 +165,9 @@ function resolveIntegratedFloodScore(
   const slice = resolveSliceAxis();
   const path = resolvePathAxis(
     params.axisInputs.A_path,
-    memorySupplementEligible &&
-      hasPathInflow(params.entry.object_id, params.supplementaryData),
-    memorySupplementEligible ? params.supplementaryData.pathInflowAvailability : undefined
+    hasPathInflow(params.entry.object_id, params.supplementaryData),
+    params.supplementaryData.pathInflowAvailability,
+    memorySupplementEligible
   );
   const evidence = resolveEvidenceAxis(
     params.axisInputs.B_evidence,
