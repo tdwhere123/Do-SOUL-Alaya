@@ -231,7 +231,6 @@ function isReplayCandidateComplete(
   const legacyComplete = candidate.per_stream_rank !== null &&
     candidate.fused_rank_contribution_per_stream !== null &&
     candidate.score_factors.activation !== undefined &&
-    candidate.score_factors.facet_overlap !== undefined &&
     candidate.score_factors.created_at !== undefined;
   if (!legacyComplete || answerShapePlan === null) return legacyComplete;
   return hasCompleteAnswerTrace(candidate, answerShapePlan) &&

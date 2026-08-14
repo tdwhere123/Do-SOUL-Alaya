@@ -91,8 +91,7 @@ export type RecallFusionStream =
   | "entity_seed"
   | "path_expansion"
   | "temporal_recency"
-  | "workspace_activation"
-  | "facet_overlap";
+  | "workspace_activation";
 
 export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
 export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;
@@ -110,12 +109,6 @@ export type FloodAxisInactiveReason =
   | "inactive:index_unavailable"
   | "inactive:storage_error"
   | "inactive:beta_disabled";
-
-export type FacetOverlapSupplyStatus =
-  | "active"
-  | "inactive:query_empty"
-  | "inactive:supply_unavailable";
-
 
 export const RECALL_FLOOD_EDGE_REASONS = [
   "transferred",
@@ -227,8 +220,6 @@ export interface RecallFusionBreakdown {
   readonly object_id: string;
   readonly object_kind: RecallCandidate["object_kind"];
   readonly origin_plane: RecallOriginPlane;
-  readonly facet_overlap: number;
-  readonly facet_overlap_status: FacetOverlapSupplyStatus;
   readonly per_stream_rank: RecallFusionStreamRanks;
   readonly fused_rank: number;
   readonly fused_score: number;
@@ -253,8 +244,6 @@ export interface RecallCandidateDiagnostic {
   readonly object_id: string;
   readonly object_kind: RecallCandidate["object_kind"];
   readonly created_at: string;
-  readonly facet_overlap: number;
-  readonly facet_overlap_status?: FacetOverlapSupplyStatus;
   // Object's memory dimension (typed facet) — for facet-separation diagnostics. Provenance only.
   readonly dimension: string;
   readonly origin_plane: RecallOriginPlane;
@@ -436,7 +425,6 @@ export interface RecallDiagnostics {
     import("../query/recall-answer-shape-plan.js").RecallAnswerShapePlan
   >;
   readonly query_sought_facets: readonly string[];
-  readonly facet_overlap_status?: FacetOverlapSupplyStatus;
   readonly retrieval_field_captures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly retrieval_field_refinement_receipts?: readonly Readonly<
     import("../field/refinement/field-refinement-receipt.js")

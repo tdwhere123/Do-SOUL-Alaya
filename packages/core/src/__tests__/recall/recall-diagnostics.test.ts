@@ -69,7 +69,6 @@ describe("recall diagnostics", () => {
       dimension: "fact",
       origin_plane: "workspace_local",
       created_at: "2026-07-07T00:00:00.000Z",
-      facet_overlap: 0,
       admission_planes: ["activation"] as RecallCandidateDiagnostic["admission_planes"],
       plane_first_admitted: "activation" as RecallCandidateDiagnostic["plane_first_admitted"],
       plane_winning_admission: "activation" as RecallCandidateDiagnostic["plane_winning_admission"],

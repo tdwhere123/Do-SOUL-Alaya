@@ -218,10 +218,8 @@ function assertRecallEnvironment(
   );
   const embedding = env.ALAYA_RECALL_EVAL_EMBEDDING?.trim().toLowerCase();
   const cross = env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK?.trim().toLowerCase();
-  const facets = env.ALAYA_RECALL_FACET_TAGS?.trim().toLowerCase();
   if (embedding !== (cell === "B" ? "env" : "disabled") || (cross !== undefined &&
       !["0", "false", "off", "no"].includes(cross)) ||
-      ["1", "true", "on", "yes"].includes(facets ?? "") ||
       readRecallEvalMaxResults(env.ALAYA_RECALL_EVAL_MAX_RESULTS) !== 10) {
     throw new Error("500Q recall environment differs from promoted A/B defaults");
   }

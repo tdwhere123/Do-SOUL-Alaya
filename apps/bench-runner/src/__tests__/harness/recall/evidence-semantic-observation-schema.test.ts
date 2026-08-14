@@ -23,8 +23,7 @@ const FUSION_STREAMS = [
   "entity_seed",
   "path_expansion",
   "temporal_recency",
-  "workspace_activation",
-  "facet_overlap"
+  "workspace_activation"
 ] as const;
 
 describe("evidence-semantic observation diagnostics contract", () => {

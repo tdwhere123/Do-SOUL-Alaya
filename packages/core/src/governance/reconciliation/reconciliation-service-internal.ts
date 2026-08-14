@@ -29,7 +29,6 @@ export interface ReconciliationInput {
   readonly incomingDimension: MemoryEntry["dimension"];
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
-  readonly incomingFacetTags?: MemoryEntry["facet_tags"];
 }
 
 export type ReconciliationMemoryProjectionFields = Pick<

@@ -389,8 +389,6 @@ export interface ReconciliationPort {
       readonly incomingDimension: MemoryMaterializationInput["dimension"];
       readonly incomingDomainTags: readonly string[];
       readonly incomingProjectionFields?: ReconciliationProjectionFields;
-      // content-derived; refreshes the survivor's facet_tags on an in-place UPDATE.
-      readonly incomingFacetTags?: MemoryMaterializationInput["facet_tags"];
     },
     applyVerdict: (
       verdict: ReconciliationDecisionView
@@ -453,8 +451,4 @@ export interface MaterializationRouterDeps {
   // Use the full source turn as the gist basis. A digest-bound assertion keeps
   // its atomic grounded excerpt; source-turn fallbacks remain searchable whole.
   readonly fullTurnEvidenceExcerpt?: boolean;
-  // When true, lift a projection-bearing signal_only signal to memory_entry_only; default-off keeps the curated deferral.
-  readonly projectionRoutingEnabled?: boolean;
-  // flag-on: derive facet_tags from content for the facet_overlap stream; off → no facet_tags.
-  readonly deriveFacetTags?: boolean;
 }

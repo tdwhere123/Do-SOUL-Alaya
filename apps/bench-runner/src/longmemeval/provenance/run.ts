@@ -221,7 +221,6 @@ export async function buildLongMemEvalRunProvenance(input: {
     runtime: await buildRuntimeIdentity(input),
     execution: buildExecutionIdentity(input),
     recall_config: buildRunRecallConfig(input),
-    seed_capabilities: buildSeedCapabilities(input.env),
     question_manifest: questionManifest
   });
 }
@@ -265,12 +264,6 @@ function buildRunRecallConfig(
       maxResults: 10,
       conflictAwareness: (input.opts.policyShape ?? "stress") !== "chat"
     })
-  };
-}
-
-function buildSeedCapabilities(env: Readonly<Record<string, string | undefined>>) {
-  return {
-    facet_tags_enabled: /^(?:1|true|on|yes)$/iu.test(env.ALAYA_RECALL_FACET_TAGS ?? "")
   };
 }
 

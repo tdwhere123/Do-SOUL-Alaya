@@ -84,7 +84,6 @@ function runtimeIdentity() {
       ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
       OFFICIAL_API_GARDEN_MODEL: "cached-model",
       ALAYA_RECALL_ANSWERS_WITH: "1",
-      ALAYA_RECALL_FACET_TAGS: "1",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "1",
       ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
       ALAYA_CONFLICT_DETECTION_ENABLED: "1",
@@ -139,7 +138,6 @@ export function provenance(
       conf_slice_compatibility: confSliceCompatibility,
       ...stableRecallConfig()
     },
-    seed_capabilities: { facet_tags_enabled: true },
     question_manifest: null
   };
 }

@@ -110,8 +110,6 @@ function buildIdentityDiagnosticFields(
     object_id: candidate.entry.object_id,
     object_kind: candidate.objectKind ?? "memory_entry",
     created_at: candidate.entry.created_at,
-    facet_overlap: candidate.fusion.facet_overlap,
-    facet_overlap_status: candidate.fusion.facet_overlap_status,
     dimension: candidate.entry.dimension,
     origin_plane: candidate.originPlane ?? "workspace_local"
   };

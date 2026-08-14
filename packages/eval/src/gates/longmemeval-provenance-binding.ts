@@ -400,7 +400,6 @@ function assertProductBRun(
       provenance.recall_config.max_results !== 10 ||
       provenance.recall_config.conflict_awareness !== true ||
       provenance.recall_config.conf_slice_compatibility !== false ||
-      provenance.seed_capabilities?.facet_tags_enabled !== false ||
       provenance.question_manifest !== null) {
     throw new Error("500Q run provenance differs from product-B runtime defaults");
   }

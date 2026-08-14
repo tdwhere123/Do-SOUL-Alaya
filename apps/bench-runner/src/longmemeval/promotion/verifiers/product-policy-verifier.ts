@@ -48,8 +48,7 @@ export function assertProductDefaultRunProvenancePolicy(
   context: string
 ): void {
   const expected = canonicalProductRecallProvenanceConfig();
-  if (!isDeepStrictEqual(provenance.recall_config, expected) ||
-      provenance.seed_capabilities?.facet_tags_enabled !== false) {
+  if (!isDeepStrictEqual(provenance.recall_config, expected)) {
     throw new Error(`${context} provenance policy differs`);
   }
   assertProductDefaultBiEncoderRuntime(provenance.runtime, `${context} embedding`);

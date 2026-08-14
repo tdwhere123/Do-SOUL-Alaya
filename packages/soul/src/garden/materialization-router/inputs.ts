@@ -7,7 +7,6 @@ import {
   type EvidenceHealthState as EvidenceHealthStateValue,
   type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
-import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
   readGardenVerifiedUserAssertionReceipt
 } from "../grounding/signal-source-grounding.js";
@@ -136,14 +135,6 @@ function normalizePayloadString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized;
-}
-
-// True when raw_payload carries a non-empty preference_profile / temporal_projection; gates the projection-routing lift.
-export function signalCarriesProjectionPayload(signal: CandidateMemorySignal): boolean {
-  return (
-    Object.keys(readMemoryPreferenceProfilePayload(signal.raw_payload)).length > 0 ||
-    Object.keys(readMemoryTemporalProjectionPayload(signal.raw_payload)).length > 0
-  );
 }
 
 export function hasMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): boolean {
@@ -296,8 +287,7 @@ function buildSignalPhysicalAnchor(
 export function buildMemoryInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[],
-  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"],
-  deriveFacetTags = false
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
   const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
   const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
@@ -321,7 +311,6 @@ export function buildMemoryInput(
     storage_tier: StorageTier.HOT,
     ...temporalProjection,
     ...preferenceProfile,
-    ...buildFacetTagsProjection(content, deriveFacetTags),
     ...buildCanonicalEntitiesProjection(signal),
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
@@ -362,19 +351,6 @@ function normalizeCanonicalEntities(values: readonly string[]): readonly string[
     }
   }
   return output;
-}
-
-// Off → no facet_tags key (byte-identical to flat write); on → deterministic
-// content-derived tags aligned to the read-side query facets via the same vocabulary.
-export function buildFacetTagsProjection(
-  content: string,
-  deriveFacetTags: boolean
-): Partial<Pick<MemoryMaterializationInput, "facet_tags">> {
-  if (!deriveFacetTags) {
-    return {};
-  }
-  const facets = deriveFacetsFromText(content);
-  return facets.length === 0 ? {} : { facet_tags: facets.map((facet) => ({ facet })) };
 }
 
 // invariant: the enrich_pending no-drop intent carried into a memory-creating

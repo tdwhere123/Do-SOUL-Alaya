@@ -43,7 +43,6 @@ export type PreliminaryFusionCandidate = Readonly<{
   readonly perStreamRank: RecallFusionStreamRanks;
   readonly contributions: RecallFusionStreamContributions;
   readonly fusedScore: number;
-  readonly facetOverlapCount: number;
   // invariant: conformant axis fields are diagnostics; fusedScore owns ordering.
   readonly axisRank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly axisRa?: Readonly<Record<RecallConformantAxis, number>>;

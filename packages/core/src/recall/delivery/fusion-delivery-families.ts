@@ -40,7 +40,6 @@ export const RECALL_FUSION_FAMILY_STREAMS: Readonly<
   temporal_facet: Object.freeze([
     "temporal_recency",
     "workspace_activation",
-    "facet_overlap",
     "subject_alignment"
   ] as const satisfies readonly RecallFusionStream[])
 });

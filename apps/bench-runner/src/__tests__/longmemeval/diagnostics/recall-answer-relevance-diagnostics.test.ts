@@ -21,8 +21,7 @@ const fusionStreams = [
   "entity_seed",
   "path_expansion",
   "temporal_recency",
-  "workspace_activation",
-  "facet_overlap"
+  "workspace_activation"
 ] as const;
 
 const baseCandidate = {

@@ -149,8 +149,6 @@ function scoreWorkspaceLocalFusionStream(
       return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
-    case "facet_overlap":
-      return scoreFacetOverlap(candidate.entry, supplementaryData.querySoughtFacets);
   }
 }
 
@@ -164,23 +162,6 @@ function resolveSemanticFusionActivation(
     supplementaryData,
     candidateKey
   ).score ?? 0;
-}
-
-function scoreFacetOverlap(
-  entry: Readonly<MemoryEntry>,
-  querySoughtFacets: readonly string[] | undefined
-): number {
-  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return 0;
-  }
-  const sought = new Set(querySoughtFacets);
-  const matched = new Set<string>();
-  for (const tag of entry.facet_tags ?? []) {
-    if (sought.has(tag.facet)) {
-      matched.add(tag.facet);
-    }
-  }
-  return clamp01(matched.size);
 }
 
 function scoreEvidenceStructuralAgreement(

@@ -68,14 +68,7 @@ describe("verified LongMemEval A/B promotion", () => {
           recall_config: { conf_slice_compatibility: false, ...custom }
         }
       };
-    }],
-    ["facet-tag seed capability", (data: VerifiedRecallEvalPromotionEntryData) => ({
-      ...data,
-      provenance: {
-        ...data.provenance,
-        seed_capabilities: { facet_tags_enabled: true }
-      }
-    })]
+    }]
   ] as const)("rejects a unified custom %s across both cells", (_label, mutate) => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((cell) =>

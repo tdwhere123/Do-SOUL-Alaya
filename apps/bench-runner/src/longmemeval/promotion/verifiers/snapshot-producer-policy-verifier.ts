@@ -30,9 +30,6 @@ export function assertPromotionSnapshotProducerPolicy(
   )) {
     throw new Error("snapshot producer recall config differs from the neutral contract");
   }
-  if (provenance.seed_capabilities?.facet_tags_enabled !== false) {
-    throw new Error("snapshot producer seed capabilities differ from the neutral contract");
-  }
 }
 
 function assertTreatmentNeutralRuntime(

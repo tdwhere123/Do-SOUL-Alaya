@@ -1,8 +1,7 @@
 import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
 
-// invariant: this keyword table mirrors packages/soul/src/shared/facet-keywords.ts.
-// Both sides emit FACET_VOCABULARY ids so write-side entry facets and read-side
-// query facets can overlap deterministically without a core<->soul dependency.
+// Query-side FACET_VOCABULARY ids for slice keys and demand atoms. Memory
+// facet_tags are no longer written; this table does not feed a scoring stream.
 type FacetKeywordPattern = Readonly<{ readonly facet: string; readonly ascii: RegExp; readonly cjk: RegExp }>;
 
 const FACET_KEYWORD_PATTERNS: readonly FacetKeywordPattern[] = [

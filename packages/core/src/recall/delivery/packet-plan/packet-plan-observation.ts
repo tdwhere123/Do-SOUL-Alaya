@@ -6,7 +6,6 @@ export const DIRECT_QUERY_EVIDENCE_STREAMS = Object.freeze([
   "synthesis_fts",
   "evidence_fts",
   "entity_seed",
-  "facet_overlap",
   "temporal_recency"
 ] as const);
 

@@ -13,7 +13,6 @@ import {
   buildDistilledFact,
   buildEnrichmentIntent,
   buildEvidenceInput,
-  buildFacetTagsProjection,
   buildMemoryInput
 } from "./inputs.js";
 import {
@@ -172,7 +171,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     let memory: MemoryMaterializationCreatedObject;
     try {
       memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
       );
     } catch (error) {
       try {
@@ -257,10 +256,6 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   ) {
     const incomingContent = buildDistilledFact(signal);
     const incomingMemory = buildMemoryInput(signal, [], this.enrichmentIntent(signal));
-    const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
-      incomingContent,
-      this.dependencies.deriveFacetTags === true
-    );
     return await port.runWithDecision(
       {
         workspaceId: signal.workspace_id,
@@ -269,8 +264,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         incomingContent,
         incomingDimension: incomingMemory.dimension,
         incomingDomainTags: signal.domain_tags,
-        incomingProjectionFields: readReconciliationProjectionFields(incomingMemory),
-        ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
+        incomingProjectionFields: readReconciliationProjectionFields(incomingMemory)
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state, context)
     );
@@ -291,7 +285,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     }
     await this.preflightSignalRefFallback(signal);
     state.appendedMemory = await this.dependencies.memoryService.create(
-      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
+      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
     );
     state.createdObjects.push({
       object_kind: state.appendedMemory.object_kind,

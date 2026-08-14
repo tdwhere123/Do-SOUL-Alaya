@@ -11,8 +11,7 @@ const DIRECT_QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.free
   "trigram_fts",
   "synthesis_fts",
   "evidence_fts",
-  "entity_seed",
-  "facet_overlap"
+  "entity_seed"
 ]);
 
 const NON_EMBEDDING_QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.freeze([

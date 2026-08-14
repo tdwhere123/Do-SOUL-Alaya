@@ -193,8 +193,7 @@ function env(modelRoot: string): Readonly<Record<string, string>> {
     ...archived.runtime.paired_env,
     ALAYA_LOCAL_ONNX_THREADS: "2",
     ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelRoot,
-    ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/test",
-    ALAYA_RECALL_FACET_TAGS: "0"
+    ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/test"
   };
 }
 
@@ -231,7 +230,7 @@ describe("recall-eval provenance producer contract", () => {
       expect(control.runtime.query_semantic_factor_cache).toEqual(
         runtimeAttribution(biSha).query_semantic_factor_cache
       );
-      expect(control.seed_capabilities).toEqual({ facet_tags_enabled: true });
+      expect(control.seed_capabilities).toBeUndefined();
       expect(control).toMatchObject({ dataset_sha256: DATASET_SHA, selection });
       expect(isRecallEvalRunEvidenceEligible({
         runtimeAttribution: runtimeAttribution(biSha),

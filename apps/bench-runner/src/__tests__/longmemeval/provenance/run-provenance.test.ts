@@ -28,7 +28,7 @@ describe("LongMemEval run provenance", () => {
     });
     expect(provenance.recall_config.conf_slice_compatibility).toBe(false);
     expect(provenance.recall_config.schema_version).toBe(2);
-    expect(provenance.seed_capabilities).toEqual({ facet_tags_enabled: true });
+    expect(provenance.seed_capabilities).toBeUndefined();
     expect(provenance.code).toEqual({
       commit_sha7: "05d98df",
       gate_sha256: null,
@@ -95,7 +95,6 @@ describe("LongMemEval run provenance", () => {
         ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
         ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset",
         ALAYA_RECALL_ANSWERS_WITH: "1",
-        ALAYA_RECALL_FACET_TAGS: "1",
         ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
         OFFICIAL_API_GARDEN_MODEL: "cached-model"
       }

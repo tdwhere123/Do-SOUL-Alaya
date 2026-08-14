@@ -127,13 +127,6 @@ describe("shard extraction authority references", () => {
 
     expect(verifyShardRunProvenance(input).hydrated.extraction_cache)
       .toHaveProperty("content_closure_index");
-    expect(() => verifyShardRunProvenance({
-      ...input,
-      provenanceContents: JSON.stringify({
-        ...fixture.compact,
-        seed_capabilities: { facet_tags_enabled: true }
-      })
-    })).toThrow(/product-default/u);
   });
 });
 

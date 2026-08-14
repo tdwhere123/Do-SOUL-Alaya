@@ -9,7 +9,6 @@ import {
 } from "../coarse-filter/coarse-candidates.js";
 import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
 import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   scoreEvidenceAnchorMatch,
@@ -27,33 +26,10 @@ export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly dynamicRecallCohortRadius: number;
 }>): void {
   addQueryEvidenceCandidates(params);
-  addFacetConceptCandidates(params);
   const seedContext = collectExpansionSeedContext(params);
   addEvidenceAnchorCandidates(params, seedContext.structuralSeeds);
   addDomainTagClusterCandidates(params, seedContext.structuralSeeds);
   addSessionSurfaceCohortCandidates(params, seedContext);
-}
-
-function addFacetConceptCandidates(params: Readonly<{
-  readonly tierMemories: readonly Readonly<MemoryEntry>[];
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
-  readonly dynamicRecallPlaneCap: number;
-}>): void {
-  const sought = new Set(deriveQuerySoughtFacets(params.queryProbes));
-  if (sought.size === 0) return;
-  const matches = params.tierMemories
-    .map((entry) => ({ entry, overlap: countFacetOverlap(entry, sought) }))
-    .filter(({ overlap }) => overlap > 0)
-    .sort((left, right) => right.overlap - left.overlap || compareMemoryEntries(left.entry, right.entry))
-    .slice(0, params.dynamicRecallPlaneCap);
-  for (const { entry } of matches) {
-    params.addCandidate(entry, "facet_concept", undefined, "facet_concept");
-  }
-}
-
-function countFacetOverlap(entry: Readonly<MemoryEntry>, sought: ReadonlySet<string>): number {
-  return new Set((entry.facet_tags ?? []).map(({ facet }) => facet).filter((facet) => sought.has(facet))).size;
 }
 
 function addQueryEvidenceCandidates(params: Readonly<{

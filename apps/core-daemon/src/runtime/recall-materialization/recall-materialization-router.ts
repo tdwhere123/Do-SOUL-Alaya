@@ -57,8 +57,6 @@ function createMaterializationRouter(
     handoffGapHandler: input.handoffGapHandler,
     retainUnroutedHighConfidenceFacts: routerOptions.retainUnroutedHighConfidenceFacts,
     fullTurnEvidenceExcerpt: routerOptions.fullTurnEvidenceExcerpt,
-    projectionRoutingEnabled: routerOptions.projectionRoutingEnabled,
-    deriveFacetTags: routerOptions.deriveFacetTags,
     ...(routerOptions.materializationConfidenceFloor === undefined
       ? {}
       : { materializationConfidenceFloor: routerOptions.materializationConfidenceFloor })
@@ -114,21 +112,8 @@ function readMaterializationRouterOptions() {
     fullTurnEvidenceExcerpt:
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",
-    // Write-side lift is a distinct flag from read-side ALAYA_RECALL_PROJECTIONS.
-    projectionRoutingEnabled: readProjectionRoutingEnabled(),
-    deriveFacetTags: readFacetTagsEnabled(),
     materializationConfidenceFloor: readMaterializationConfidenceFloor()
   };
-}
-
-export function readProjectionRoutingEnabled(
-  env: NodeJS.Dict<string> = process.env
-): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(env.ALAYA_RECALL_PROJECTION_ROUTING ?? "");
-}
-
-function readFacetTagsEnabled(): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_FACET_TAGS ?? "");
 }
 
 function readMaterializationConfidenceFloor(): number | undefined {

@@ -66,7 +66,7 @@ const RecallFusionStreamRankSchema = z
     path_expansion: z.number().int().positive().nullable(),
     temporal_recency: z.number().int().positive().nullable(),
     workspace_activation: z.number().int().positive().nullable(),
-    facet_overlap: z.number().int().positive().nullable()
+    facet_overlap: z.number().int().positive().nullable().optional()
   })
   .strict()
   .readonly();
@@ -89,7 +89,7 @@ const RecallFusionStreamContributionSchema = z
     path_expansion: z.number().min(0),
     temporal_recency: z.number().min(0),
     workspace_activation: z.number().min(0),
-    facet_overlap: z.number().min(0)
+    facet_overlap: z.number().min(0).optional()
   })
   .strict()
   .readonly();
@@ -194,11 +194,6 @@ const RecallCandidateDiagnosticSchema = z
     object_kind: RecallDiagnosticObjectKindSchema,
     created_at: z.string().min(1).optional(),
     facet_overlap: z.number().int().nonnegative().optional(),
-    facet_overlap_status: z.enum([
-      "active",
-      "inactive:query_empty",
-      "inactive:supply_unavailable"
-    ]).optional(),
     dimension: z.string().min(1).optional(),
     origin_plane: RecallOriginPlaneSchema,
     admission_planes: z.array(z.string().min(1)).readonly(),
@@ -349,11 +344,6 @@ export const BenchRecallDiagnosticsSchema = z
       OpenSemanticFactorActivationReceiptSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
-    facet_overlap_status: z.enum([
-      "active",
-      "inactive:query_empty",
-      "inactive:supply_unavailable"
-    ]).optional(),
     total_scanned: z.number().int().nonnegative(),
     candidate_pool_count: z.number().int().nonnegative(),
     pre_budget_count: z.number().int().nonnegative(),
@@ -400,12 +390,7 @@ export const BenchRecallDiagnosticsSchema = z
             object_id: z.string().min(1),
             object_kind: RecallDiagnosticObjectKindSchema,
             origin_plane: RecallOriginPlaneSchema,
-            facet_overlap: z.number().int().nonnegative(),
-            facet_overlap_status: z.enum([
-              "active",
-              "inactive:query_empty",
-              "inactive:supply_unavailable"
-            ]).optional(),
+            facet_overlap: z.number().int().nonnegative().optional(),
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),
             fused_score: z.number().min(0),

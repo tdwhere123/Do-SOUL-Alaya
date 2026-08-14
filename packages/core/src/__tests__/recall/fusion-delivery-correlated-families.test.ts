@@ -234,7 +234,7 @@ describe("fusion family decorrelation", () => {
       embedding_similarity: { [CANDIDATE_KEY]: 1 },
       path_expansion: { [CANDIDATE_KEY]: 1 },
       graph_expansion: { [CANDIDATE_KEY]: 1 },
-      facet_overlap: { [CANDIDATE_KEY]: 1 }
+      subject_alignment: { [CANDIDATE_KEY]: 1 }
     })[0]!;
 
     const familyHits = countFamiliesWithHits([{ per_stream_rank: value.perStreamRank }]);

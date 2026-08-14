@@ -226,7 +226,7 @@ export interface RecallSupplementaryData {
   // memoryGovernanceCeiling / clampManifestationByGovernance,
   // recall-candidate-builder.ts buildRecallCandidate.
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
-  // Facets the query intends; the facet_overlap fusion stream scores candidates by how many they carry.
+  // Facets the query intends; used for slice keys and demand atoms, not a scoring stream.
   readonly querySoughtFacets?: readonly string[];
 }
 
