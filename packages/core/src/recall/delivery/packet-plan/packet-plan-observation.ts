@@ -27,6 +27,7 @@ export type RecallPacketPlanDecision =
       readonly status: "rejected";
       readonly reason:
         | "admission_infeasible"
+        | "coverage_order_retained"
         | "cardinality_mismatch"
         | "protected_candidate_constraint";
     }>;
@@ -213,11 +214,12 @@ function assertMembershipAuthorizations(
   if (observation.tail_policy === "head_tail_exchange") return;
   const authorizations = observation.membership_authorizations;
   if (authorizations.length === 0 &&
-      ["strict_tail_consensus", "admission_infeasible"].includes(
+      ["strict_tail_consensus", "admission_infeasible", "coverage_order_retained"].includes(
         observation.decision.reason
       )) return;
   const deliverable = observation.decision.status === "accepted" ||
-    observation.decision.reason === "admission_infeasible";
+    observation.decision.reason === "admission_infeasible" ||
+    observation.decision.reason === "coverage_order_retained";
   if (!deliverable) {
     if (authorizations.length > 0) {
       throw validationError("Rejected packet proposal carries membership authorization");
@@ -361,7 +363,7 @@ function assertTailPolicy(observation: RecallPacketPlanObservation): void {
   const requiresTailPolicy = reason === "nested_membership_consensus";
   const headTailExchange = observation.tail_policy === "head_tail_exchange";
   const permitsTailPolicy = requiresTailPolicy || headTailExchange ||
-    reason === "admission_infeasible";
+    reason === "admission_infeasible" || reason === "coverage_order_retained";
   if ((requiresTailPolicy && observation.tail_policy === undefined) ||
       (!permitsTailPolicy && observation.tail_policy !== undefined)) {
     throw validationError("Packet membership tail policy is inconsistent");
@@ -438,7 +440,7 @@ function assertDecisionReason(
     throw validationError("Changed consensus decision is inconsistent");
   }
   if (
-    ["nested_membership_consensus", "admission_infeasible"].includes(reason) &&
+    ["nested_membership_consensus", "admission_infeasible", "coverage_order_retained"].includes(reason) &&
     !changed
   ) {
     throw validationError("Changed membership decision is inconsistent");
@@ -469,7 +471,7 @@ function assertProtectionDecision(
   }
   if (
     ["strict_tail_consensus", "nested_membership_consensus",
-      "admission_infeasible"].includes(observation.decision.reason) &&
+      "admission_infeasible", "coverage_order_retained"].includes(observation.decision.reason) &&
     !protectionsSatisfied
   ) {
     throw validationError("Accepted consensus violates a protected candidate");

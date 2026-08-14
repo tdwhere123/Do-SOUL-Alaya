@@ -95,10 +95,6 @@ describe("one ordering sequence", () => {
       "fusion",
       "deep_head",
       "coverage",
-      "direct_evidence_promotion",
-      "semantic_memory_refinement",
-      "behavior_authority_promotion",
-      "verified_temporal_head",
       "consensus",
       "final_budget"
     ]);
@@ -243,7 +239,7 @@ describe("one ordering sequence", () => {
 
     expect(row?.first_membership_changing_owner).toBe("fusion");
     expect(row?.membership_changing_owners).toEqual([
-      "fusion", "deep_head", "coverage", "direct_evidence_promotion"
+      "fusion", "deep_head", "coverage", "consensus"
     ]);
   });
 

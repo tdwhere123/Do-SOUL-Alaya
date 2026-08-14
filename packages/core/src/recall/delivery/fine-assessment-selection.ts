@@ -1,12 +1,7 @@
 import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
-import {
-  selectBoundedDirectEvidenceHead
-} from "./admission/direct-evidence-answer-head.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
 import {
-  buildFinalSelectorOrder,
-  fineAssessmentPacketMatchesPlannedMembership,
   resolveFinalPacketConsensusPlan
 } from "./final-order/final-packet-consensus.js";
 import {
@@ -30,7 +25,6 @@ import { captureFineAssessmentPreProjection } from
 import {
   advanceFineAssessmentOrderState,
   birthFineAssessmentOrderState,
-  carryFineAssessmentOrderState,
   stampFineAssessmentFinalRanks
 } from "./fine-assessment-selection/order-sequence.js";
 import type { FineAssessmentOrderState } from
@@ -47,8 +41,6 @@ import type { RecallAdmissionDiagnosticPass } from
   "../runtime/recall-service-diagnostics.js";
 import { createRecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
-import { retainVerifiedTemporalAnswerHead } from
-  "./admission/answer-head/verified-temporal-answer-head.js";
 
 export type {
   FineAssessmentAdmissionReceipt,
@@ -65,11 +57,9 @@ export function selectFineAssessmentCandidates(
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
   const coverage = prepareCanonicalCoverage(selectionParams, context);
-  const promoted = applyCanonicalAdmissionPromoters(coverage.order, context);
   const selection = resolveAdmissionAwareFinalSelection(
-    promoted.order,
-    context,
-    promoted.protections
+    coverage.order,
+    context
   );
   return finalizeCanonicalSelection(
     selectionParams,
@@ -101,54 +91,6 @@ function prepareCanonicalCoverage(
     collectMembershipKeys(coverageSelection.candidates, context)
   );
   return Object.freeze({ selection: coverageSelection, order: coverageOrder });
-}
-
-function applyCanonicalAdmissionPromoters(
-  coverageOrder: FineAssessmentOrderState,
-  context: FineAssessmentSelectionContext
-) {
-  const excludedCandidateKeys = new Set<string>();
-  const evidenceHead = selectBoundedDirectEvidenceHead(
-    coverageOrder.candidates, context.supplementaryData.queryProbes,
-    context.supplementaryData.evidenceSemanticActivationsByCandidateKey,
-    context.finalRelevanceByCandidateKey,
-    context.config.budgets.max_entries, excludedCandidateKeys,
-    (candidates) => collectAdmittedCandidates(candidates, context),
-    (candidate) => context.answerSupportByCandidateKey.get(
-      candidate.fusion.candidate_key)?.authority?.behavior_eligible === true,
-    context.supportsSingleSemanticLeader
-  );
-  const evidenceOrder = evidenceHead.orderTransitions.reduce(
-    (order, transition) => carryFineAssessmentOrderState(
-      order,
-      transition.candidates,
-      transition.owner,
-      collectMembershipKeys(transition.candidates, context)
-    ),
-    coverageOrder
-  );
-  const temporalHead = retainVerifiedTemporalAnswerHead({
-    selection: {
-      ...evidenceHead,
-      candidates: evidenceOrder.candidates
-    },
-    queryProbes: context.supplementaryData.queryProbes,
-    contextsByMemoryId:
-      context.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {},
-    maxEntries: context.config.budgets.max_entries,
-    selectDelivered: (candidates) => collectAdmittedCandidates(candidates, context),
-    keyOf: buildRecallCandidateDedupeKey
-  });
-  const promotedOrder = carryFineAssessmentOrderState(
-    evidenceOrder,
-    temporalHead.candidates,
-    "verified_temporal_head",
-    collectMembershipKeys(temporalHead.candidates, context)
-  );
-  return Object.freeze({
-    order: promotedOrder,
-    protections: temporalHead.protections
-  });
 }
 
 function finalizeCanonicalSelection(
@@ -217,43 +159,23 @@ function buildRefinementStopCertificate(
 
 function resolveAdmissionAwareFinalSelection(
   order: FineAssessmentOrderState,
-  context: FineAssessmentSelectionContext,
-  protectedCandidates: Parameters<typeof resolveFinalPacketConsensusPlan>[0]["protectedCandidates"]
+  context: FineAssessmentSelectionContext
 ) {
   const consensus = resolveFinalPacketConsensusPlan({
     baseline: collectAdmittedCandidates(order.candidates, context),
     sourceCandidates: order.birthCandidates,
-    protectedCandidates,
+    protectedCandidates: [],
     supportsSingleSemanticLeader: context.supportsSingleSemanticLeader,
     evidenceSemanticActivationsByCandidateKey:
       context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });
-  const proposedOrder = buildFinalSelectorOrder(consensus, order.candidates);
-  if (consensus.decision.status !== "accepted") {
-    return Object.freeze({
-      consensus,
-      order: advanceFineAssessmentOrderState(
-        order,
-        proposedOrder,
-        "consensus",
-        collectMembershipKeys(proposedOrder, context)
-      )
-    });
-  }
-  const feasiblePacket = collectAdmittedCandidates(proposedOrder, context);
-  const finalCandidates = fineAssessmentPacketMatchesPlannedMembership(
-    consensus,
-    feasiblePacket
-  )
-    ? proposedOrder
-    : order.candidates;
   return Object.freeze({
     consensus,
     order: advanceFineAssessmentOrderState(
       order,
-      finalCandidates,
+      order.candidates,
       "consensus",
-      collectMembershipKeys(finalCandidates, context)
+      collectMembershipKeys(order.candidates, context)
     )
   });
 }

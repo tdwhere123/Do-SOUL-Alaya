@@ -108,8 +108,8 @@ describe("selection boundary pre-projection decision receipts", () => {
     const preProjection = requirePreProjection(boundary);
 
     expect(boundary.expected.packet_consensus.decision).toEqual({
-      status: "accepted",
-      reason: "strict_tail_consensus"
+      status: "rejected",
+      reason: "coverage_order_retained"
     });
     expect(preProjection.introduced_candidate_keys).toEqual([]);
     const retained = preProjection.projection_actions.filter((action) =>

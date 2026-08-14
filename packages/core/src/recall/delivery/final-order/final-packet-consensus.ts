@@ -114,7 +114,7 @@ export function buildFinalPacketConsensusObservation(
   replayAccepted: boolean
 ): RecallPacketPlanObservation {
   const decision = plan.decision.status === "accepted" && !replayAccepted
-    ? { status: "rejected", reason: "admission_infeasible" } as const
+    ? { status: "rejected", reason: "coverage_order_retained" } as const
     : plan.decision;
   const observation: RecallPacketPlanObservation = deepFreeze({
     baseline_candidate_keys: candidateKeys(plan.baseline),

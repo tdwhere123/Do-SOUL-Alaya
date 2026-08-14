@@ -52,17 +52,18 @@ describe("final packet consensus selection ownership", () => {
       .toEqual(candidateKeys(control));
   });
 
-  it("admits the consensus order through one authoritative selector pass", () => {
-    const result = select(consensusCandidates());
+  it("observes consensus without replacing coverage membership", () => {
+    const result = select(consensusCandidates(), { capturePacketPlanTrace: true });
 
-    expect(result.candidates.map((candidate) => candidate.object_id))
-      .toContain("challenger");
+    expect(packetIds(result)).not.toContain("challenger");
+    expect(result.packetPlanObservation?.decision).toEqual({
+      status: "rejected",
+      reason: "coverage_order_retained"
+    });
     expect(result.diagnostics.every((candidate) =>
       candidate.admission_attempts.length === 1 &&
       candidate.admission_attempts[0]?.pass === "final_selector"
     )).toBe(true);
-    expect(result.diagnostics.find((candidate) => candidate.object_id === "challenger"))
-      .toMatchObject({ final_rank: expect.any(Number), dropped_reason: null });
   });
 
   it("falls back before final projection when the consensus packet is infeasible", () => {
@@ -75,7 +76,7 @@ describe("final packet consensus selection ownership", () => {
     expect(packetIds(result)).toEqual(baselineIds());
     expect(result.packetPlanObservation?.decision).toEqual({
       status: "rejected",
-      reason: "admission_infeasible"
+      reason: "coverage_order_retained"
     });
     expect(result.diagnostics.every((candidate) =>
       candidate.admission_attempts.length === 1 &&

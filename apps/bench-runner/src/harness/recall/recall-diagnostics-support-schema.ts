@@ -26,6 +26,7 @@ const RecallPacketPlanDecisionSchema = z.discriminatedUnion("status", [
     status: z.literal("rejected"),
     reason: z.enum([
       "admission_infeasible",
+      "coverage_order_retained",
       "cardinality_mismatch",
       "protected_candidate_constraint"
     ])
@@ -204,11 +205,12 @@ function validateMembershipAuthorizations(
   if (trace.tail_policy === "head_tail_exchange") return;
   const receipts = trace.membership_authorizations;
   if (receipts.length === 0 &&
-      ["strict_tail_consensus", "admission_infeasible"].includes(
+      ["strict_tail_consensus", "admission_infeasible", "coverage_order_retained"].includes(
         trace.decision.reason
       )) return;
   const deliverable = trace.decision.status === "accepted" ||
-    trace.decision.reason === "admission_infeasible";
+    trace.decision.reason === "admission_infeasible" ||
+    trace.decision.reason === "coverage_order_retained";
   if (!deliverable) {
     if (receipts.length > 0) {
       addPacketPlanIssue(
@@ -324,7 +326,7 @@ function validateTailPolicy(
   const requiresTailPolicy = reason === "nested_membership_consensus";
   const headTailExchange = trace.tail_policy === "head_tail_exchange";
   const permitsTailPolicy = requiresTailPolicy || headTailExchange ||
-    reason === "admission_infeasible";
+    reason === "admission_infeasible" || reason === "coverage_order_retained";
   if ((requiresTailPolicy && trace.tail_policy === undefined) ||
       (!permitsTailPolicy && trace.tail_policy !== undefined)) {
     addPacketPlanIssue(context, ["tail_policy"], "Membership tail policy is inconsistent");
@@ -408,7 +410,7 @@ function validatePacketPlanDecisionReason(
     addPacketPlanIssue(context, ["decision"], "Changed consensus is inconsistent");
   }
   if (
-    ["nested_membership_consensus", "admission_infeasible"].includes(reason) &&
+    ["nested_membership_consensus", "admission_infeasible", "coverage_order_retained"].includes(reason) &&
     !changed
   ) {
     addPacketPlanIssue(context, ["decision"], "Changed membership is inconsistent");
@@ -440,7 +442,7 @@ function validateProtectionDecision(
   }
   if (
     ["strict_tail_consensus", "nested_membership_consensus",
-      "admission_infeasible"].includes(
+      "admission_infeasible", "coverage_order_retained"].includes(
       trace.decision.reason
     ) &&
     !protectionsSatisfied
