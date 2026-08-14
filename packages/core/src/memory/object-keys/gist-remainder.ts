@@ -39,7 +39,11 @@ function remainderPhrases(
   let current: TokenSpan[] = [];
   for (const span of spans) {
     const normalized = normalizeMemoryObjectKeySurface(span.token);
-    if (contentTokens.has(normalized) || DISCOURSE_STOP.has(normalized)) {
+    if (
+      contentTokens.has(normalized) ||
+      DISCOURSE_STOP.has(normalized) ||
+      isNonLexicalToken(span.token)
+    ) {
       pushPhrase(phrases, current);
       current = [];
       continue;
@@ -70,9 +74,15 @@ function joinSeparator(current: readonly TokenSpan[]): string {
 }
 
 function isDiscriminatingPhrase(spans: readonly TokenSpan[], surface: string): boolean {
+  if (!spans.some((span) => !isNonLexicalToken(span.token))) return false;
   if (spans.length >= 2) return surface.trim().length > 0;
   const token = spans[0]?.token ?? "";
   return token.length >= 4 || /[\p{Script=Han}]/u.test(token);
+}
+
+function isNonLexicalToken(token: string): boolean {
+  // Digit/punctuation groups are timestamp fragments, not addressable lexical surfaces.
+  return !/[\p{L}]/u.test(token);
 }
 
 function gistDraft(

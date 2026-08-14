@@ -155,6 +155,44 @@ describe("mintMemoryObjectKeys", () => {
     expect(keys.every((key) => key.surface.length <= 512)).toBe(true);
     expect(keys.some((key) => key.surface.includes("Uniqueblob"))).toBe(false);
   });
+
+  it("drops timestamp-like gist remainder spans that carry no lexical letters", () => {
+    const keys = mintMemoryObjectKeys({
+      workspace_id: WORKSPACE,
+      owner_id: OWNER,
+      memory_content: "She watched the episode last night.",
+      evidence: [{
+        object_id: EVIDENCE,
+        gist: "She watched the episode 04 01 733 last night.",
+        fact_key_contents: [],
+        osf_graph: null
+      }]
+    });
+
+    expect(surfacesOf(keys, "gist_remainder")).not.toEqual(
+      expect.arrayContaining(["04 01 733"])
+    );
+    expect(surfacesOf(keys, "gist_remainder").some((surface) => /^\d+(?:\s+\d+)+$/u.test(surface)))
+      .toBe(false);
+  });
+
+  it("still mints a two-character CJK gist remainder", () => {
+    const keys = mintMemoryObjectKeys({
+      workspace_id: WORKSPACE,
+      owner_id: OWNER,
+      memory_content: "We visited the museum.",
+      evidence: [{
+        object_id: EVIDENCE,
+        gist: "We visited the museum in 2月.",
+        fact_key_contents: [],
+        osf_graph: null
+      }]
+    });
+
+    expect(surfacesOf(keys, "gist_remainder")).toEqual(
+      expect.arrayContaining(["2月"])
+    );
+  });
 });
 
 function surfacesOf(
