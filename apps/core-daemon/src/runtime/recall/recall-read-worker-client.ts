@@ -72,7 +72,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly workers: (Worker | null)[];
   private readonly databaseFilename: string;
   private readonly requestTimeoutMs: number;
-  private readonly temporalProjectionSelected: boolean;
+  private readonly temporalProjectionSelected: boolean | undefined;
   private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
   private readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   private readonly workerUrl: URL;
@@ -193,8 +193,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   }) {
     this.databaseFilename = input.databaseFilename;
     this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
-    this.temporalProjectionSelected = input.temporalProjectionSelected === true;
-    if (this.temporalProjectionSelected && input.prepareTemporalProjection === undefined) {
+    this.temporalProjectionSelected = input.temporalProjectionSelected;
+    if (this.temporalProjectionSelected === true && input.prepareTemporalProjection === undefined) {
       throw new Error("selected temporal recall worker requires parent projection preparation");
     }
     this.prepareTemporalProjection = input.prepareTemporalProjection;
@@ -218,7 +218,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
       workerData: {
         databaseFilename: this.databaseFilename,
-        temporalProjectionSelected: this.temporalProjectionSelected
+        ...(this.temporalProjectionSelected === undefined
+          ? {}
+          : { temporalProjectionSelected: this.temporalProjectionSelected })
       }
     });
     worker.on("message", (message: unknown) => {

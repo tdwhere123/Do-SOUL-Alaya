@@ -8,6 +8,7 @@ import type {
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics,
   RecallFloodEdgeTraceV1,
+  RecallPathInflowAvailability,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import {
@@ -64,7 +65,14 @@ function resolveSliceAxis(): ResolvedFloodFuelAxis {
   return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
 }
 
-function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodFuelAxis {
+function resolvePathAxis(
+  rawPath: number,
+  hasInflow: boolean,
+  availability: RecallPathInflowAvailability | undefined
+): ResolvedFloodFuelAxis {
+  if (availability === "unavailable") {
+    return { value: 0, status: "inactive:index_unavailable", countsAsFuel: false };
+  }
   if (!hasInflow) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
@@ -150,7 +158,8 @@ function resolveIntegratedFloodScore(
   const path = resolvePathAxis(
     params.axisInputs.A_path,
     memorySupplementEligible &&
-      hasPathInflow(params.entry.object_id, params.supplementaryData)
+      hasPathInflow(params.entry.object_id, params.supplementaryData),
+    memorySupplementEligible ? params.supplementaryData.pathInflowAvailability : undefined
   );
   const evidence = resolveEvidenceAxis(
     params.axisInputs.B_evidence,

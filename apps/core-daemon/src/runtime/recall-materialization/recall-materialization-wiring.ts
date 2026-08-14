@@ -10,15 +10,24 @@ import {
   type ManifestationResolverEventLogWriterPort,
   type PathActivationCandidateProducerPathReaderPort
 } from "@do-soul/alaya-core";
-import { SqliteTemporalPathProjectionReader } from "@do-soul/alaya-storage";
+import {
+  isLegacyPathIndexUnbound,
+  isTemporalProjectionSelected,
+  SqliteTemporalPathProjectionReader
+} from "@do-soul/alaya-storage";
 import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { SqliteHandoffGapAdapter } from "../../handoff/gap-adapter.js";
 import { createRecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 import {
+  createPreparedTemporalRecallPathReadPorts,
   createRecallPathReadPorts,
   createRecallTemporalProjectionEnsurer
 } from "../recall/recall-path-readers.js";
+import {
+  resolveRecallPathReadBind,
+  wrapLegacyPathReaderForIndexHealth
+} from "../recall/recall-path-read-bind.js";
 import {
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
@@ -37,11 +46,15 @@ import type { CreateRecallMaterializationWiringInput } from "./recall-materializ
 
 export async function createRecallMaterializationWiring(input: CreateRecallMaterializationWiringInput) {
   const globalMemoryRuntime = createGlobalMemoryRuntime(input);
-  const directPathReadPorts = createDirectRecallPathReadPorts(input);
+  const bindTemporalPathReads = resolveRecallPathReadBind({
+    database: input.database,
+    temporalProjectionSelected: input.temporalProjectionSelected
+  }) === "temporal";
+  const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads);
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
-    temporalProjectionSelected: input.temporalProjectionSelected === true,
-    ...(input.temporalProjectionSelected === true
+    temporalProjectionSelected: bindTemporalPathReads,
+    ...(bindTemporalPathReads
       ? { prepareTemporalProjection: directPathReadPorts.ensureTemporalProjection }
       : {}),
     warn: input.warn
@@ -288,8 +301,11 @@ function createRecallPathRuntime(
   };
 }
 
-function createDirectRecallPathReadPorts(input: CreateRecallMaterializationWiringInput) {
-  if (input.temporalProjectionSelected === true) {
+function createDirectRecallPathReadPorts(
+  input: CreateRecallMaterializationWiringInput,
+  bindTemporalPathReads: boolean
+) {
+  if (isTemporalProjectionSelected(input.database)) {
     const relationAssertionService = new RelationAssertionService({
       repo: input.relationAssertionRepo,
       eventPublisher: input.eventPublisher,
@@ -303,7 +319,17 @@ function createDirectRecallPathReadPorts(input: CreateRecallMaterializationWirin
       ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
     });
   }
-  return createRecallPathReadPorts({ legacyPathReader: input.pathRelationRepo });
+  if (bindTemporalPathReads) {
+    return createPreparedTemporalRecallPathReadPorts(
+      new SqliteTemporalPathProjectionReader(input.relationAssertionRepo)
+    );
+  }
+  return createRecallPathReadPorts({
+    legacyPathReader: wrapLegacyPathReaderForIndexHealth(
+      input.pathRelationRepo,
+      () => isLegacyPathIndexUnbound(input.database) ? "index_unavailable" : "ready"
+    )
+  });
 }
 
 function createManifestationRuntime(

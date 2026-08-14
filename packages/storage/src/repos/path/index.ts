@@ -24,8 +24,11 @@ export {
   type RelationAssertionProjectionGeneration,
   type RelationAssertionRepo
 } from "./relation-assertion-repo.js";
-export { assertRelationProjectionCurrent } from
-  "./relation-assertion/projection-reader.js";
+export {
+  assertRelationProjectionCurrent,
+  isLegacyPathIndexUnbound,
+  isRelationProjectionReadable
+} from "./relation-assertion/projection-reader.js";
 export {
   digestRelationFormationEventSource,
   type RelationFormationEventSource

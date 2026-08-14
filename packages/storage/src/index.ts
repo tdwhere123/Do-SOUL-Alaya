@@ -172,6 +172,8 @@ export {
 export {
   assertRelationProjectionCurrent,
   digestRelationFormationEventSource,
+  isLegacyPathIndexUnbound,
+  isRelationProjectionReadable,
   SqliteRelationAssertionRepo,
   type RelationAssertionProjectionGeneration,
   type RelationAssertionRepo,

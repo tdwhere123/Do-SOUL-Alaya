@@ -161,6 +161,21 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.score).toBeCloseTo(0.25, 12);
   });
 
+  it("does not treat an unavailable path index as pass-through identity", () => {
+    const entry = createMemoryEntry({ object_id: "77777777-7777-4777-8777-777777777777" });
+    const result = computeIntegratedFloodScore({
+      entry,
+      axisInputs: { R_obj: 0.4, A_path: 0, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowAvailability: "unavailable"
+      })
+    });
+    expect(result.diagnostics.path_status).toBe("inactive:index_unavailable");
+    expect(result.diagnostics.A_path).not.toBe(1);
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.4, 12);
+  });
+
   it("diagnostic names match the integrated flood contract", () => {
     const entry = createMemoryEntry({
       object_id: "33333333-3333-4333-8333-333333333333",

@@ -23,6 +23,25 @@ export function assertRelationProjectionCurrent(db: StorageDatabase): void {
   }
 }
 
+export function isRelationProjectionReadable(db: StorageDatabase): boolean {
+  try {
+    const row = db.connection.prepare(`
+      SELECT projection_refresh_required
+      FROM temporal_schema_state
+      WHERE state_id = 1 AND status = 'ready'
+      LIMIT 1
+    `).get() as Readonly<{ readonly projection_refresh_required: number }> | undefined;
+    return row !== undefined && row.projection_refresh_required === 0;
+  } catch (error) {
+    if (isMissingTableError(error)) return false;
+    throw wrapRelationAssertionStorageError("inspect relation projection readability", error);
+  }
+}
+
+export function isLegacyPathIndexUnbound(db: StorageDatabase): boolean {
+  return isRelationProjectionPopulated(db) && isPathRelationsTableEmpty(db);
+}
+
 export function readActiveProjectionGeneration(
   db: StorageDatabase
 ): string | null {
@@ -126,4 +145,32 @@ function parseProjectionRow(row: ProjectionRow): Readonly<PathRelation> {
   return PathRelationSchema.parse(
     parseRelationAssertionJson(row.projection_json, "relation path projection")
   );
+}
+
+function isRelationProjectionPopulated(db: StorageDatabase): boolean {
+  if (!isRelationProjectionReadable(db)) return false;
+  try {
+    const row = db.connection.prepare(`
+      SELECT projection_count
+      FROM temporal_schema_state
+      WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
+    `).get() as Readonly<{ readonly projection_count: number }> | undefined;
+    return row !== undefined && row.projection_count > 0;
+  } catch (error) {
+    if (isMissingTableError(error)) return false;
+    throw wrapRelationAssertionStorageError("inspect relation projection population", error);
+  }
+}
+
+function isPathRelationsTableEmpty(db: StorageDatabase): boolean {
+  try {
+    return db.connection.prepare("SELECT 1 FROM path_relations LIMIT 1").get() === undefined;
+  } catch (error) {
+    if (isMissingTableError(error)) return true;
+    throw wrapRelationAssertionStorageError("inspect legacy path_relations vacancy", error);
+  }
+}
+
+function isMissingTableError(error: unknown): boolean {
+  return error instanceof Error && /no such table/iu.test(error.message);
 }

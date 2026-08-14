@@ -1,4 +1,3 @@
-import { isTemporalProjectionSelected } from "@do-soul/alaya-storage";
 import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
 import {
@@ -9,6 +8,7 @@ import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime
 import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
 import { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { CreateRecallMaterializationWiringInput } from "../recall-materialization/recall-materialization-wiring-types.js";
+import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 import type { RelationProjectionAdmissionMode } from "../recall-materialization/relation-projection/mode.js";
 
@@ -54,7 +54,9 @@ function buildRecallRuntimeInput(input: RecallCoreStartupInput) {
   const { bootstrap, foundation, repositories } = input;
   return {
     database: bootstrap.database,
-    temporalProjectionSelected: isTemporalProjectionSelected(bootstrap.database),
+    temporalProjectionSelected: resolveRecallPathReadBind({
+      database: bootstrap.database
+    }) === "temporal",
     relationProjectionAdmissionMode: input.relationProjectionAdmissionMode,
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,

@@ -33,6 +33,7 @@ import {
   type RecallPathProjectionReadOptions,
   type RecallPathReadPorts
 } from "../recall/recall-path-readers.js";
+import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 export function createRecallUtilizationRuntime(input: CreateRecallMaterializationWiringInput) {
@@ -275,7 +276,10 @@ function createRecallGraphSupportPort(
   input: CreateRecallMaterializationWiringInput,
   directPathReadPorts: RecallPathReadPorts
 ) {
-  if (input.temporalProjectionSelected !== true) {
+  if (resolveRecallPathReadBind({
+    database: input.database,
+    temporalProjectionSelected: input.temporalProjectionSelected
+  }) !== "temporal") {
     return input.graphExploreService;
   }
   const temporalReader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);

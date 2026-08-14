@@ -10,10 +10,7 @@ import {
   SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
-  SqlitePathRelationRepo,
-  SqliteRelationAssertionRepo,
-  SqliteSynthesisCapsuleRepo,
-  SqliteTemporalPathProjectionReader
+  SqliteSynthesisCapsuleRepo
 } from "@do-soul/alaya-storage";
 import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import type {
@@ -21,9 +18,10 @@ import type {
   RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
 import {
-  createPreparedTemporalRecallPathReadPorts,
-  createRecallPathReadPorts,
-  type RecallPathProjectionReadOptions
+  createBoundRecallPathReadPorts
+} from "./recall-path-read-bind.js";
+import type {
+  RecallPathProjectionReadOptions
 } from "./recall-path-readers.js";
 import { runWorkerActiveConstraints } from "../recall-read-worker/active-constraints.js";
 import {
@@ -57,7 +55,6 @@ if (parentPort === null) {
 }
 
 const databaseFilename = readDatabaseFilename(workerData);
-const temporalProjectionSelected = readTemporalProjectionSelected(workerData);
 const database = initDatabase({ filename: databaseFilename });
 database.connection.pragma("query_only = ON");
 const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
@@ -67,13 +64,10 @@ const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(
 );
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const claimFormRepo = new SqliteClaimFormRepo(database);
-const recallPathReadPorts = temporalProjectionSelected
-  ? createPreparedTemporalRecallPathReadPorts(
-      new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(database))
-    )
-  : createRecallPathReadPorts({
-      legacyPathReader: new SqlitePathRelationRepo(database)
-    });
+const recallPathReadPorts = createBoundRecallPathReadPorts({
+  database,
+  temporalProjectionSelected: readTemporalProjectionSelected(workerData)
+});
 const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
 
@@ -426,11 +420,11 @@ function readDatabaseFilename(value: unknown): string {
   return readString(payload.databaseFilename, "databaseFilename");
 }
 
-function readTemporalProjectionSelected(value: unknown): boolean {
+function readTemporalProjectionSelected(value: unknown): boolean | undefined {
   const payload = asPayload(value);
   const selected = payload.temporalProjectionSelected;
   if (selected === undefined) {
-    return false;
+    return undefined;
   }
   if (typeof selected !== "boolean") {
     throw new Error("worker payload temporalProjectionSelected must be a boolean");
