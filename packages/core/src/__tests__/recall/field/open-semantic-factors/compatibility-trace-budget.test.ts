@@ -4,9 +4,12 @@ import { materializeOpenSemanticFactorFormation } from
   "../../../../semantic/open-semantic-factor-formation.js";
 import { materializeOpenSemanticFactorCompatibility } from
   "../../../../recall/field/open-semantic-factors/compatibility.js";
+import { digestRecallFieldIdentity } from
+  "../../../../recall/field/field-identity.js";
 import {
   materializeOpenSemanticFactorCompatibilityTrace,
-  verifyOpenSemanticFactorCompatibilityTrace
+  verifyOpenSemanticFactorCompatibilityTrace,
+  type OpenSemanticFactorCompatibilityTrace
 } from "../../../../recall/field/open-semantic-factors/compatibility-trace.js";
 import { materializeOpenSemanticFactorComposition } from
   "../../../../recall/field/open-semantic-factors/composition.js";
@@ -98,7 +101,72 @@ describe("open semantic compatibility evaluation budget", () => {
       query_capture: query
     }).status).toBe("unavailable");
   });
+
+  it("seals formed evidence against an unformed query from the query capture status", () => {
+    const evidence = matchingEvidence();
+    expect(evidence.status).toBe("formed");
+    const queries = [
+      materializeOpenSemanticFactorFormation({
+        source_kind: "query",
+        source_text: "Which books have I bought?"
+      }),
+      materializeOpenSemanticFactorFormation({
+        source_kind: "query",
+        source_text: null
+      }),
+      materializeOpenSemanticFactorFormation({
+        source_kind: "query",
+        source_text: "Which books have I bought?",
+        proposal: { not: "a formation proposal" }
+      })
+    ];
+
+    for (const query of queries) {
+      expect(["ineligible", "unavailable", "rejected"]).toContain(query.status);
+      const trace = materializeOpenSemanticFactorCompatibilityTrace({
+        query_capture: query,
+        evidence_formations: { "e-formed": evidence }
+      });
+      expect(trace).toMatchObject({
+        observed_evidence_count: 1,
+        matchable_evidence_count: 0,
+        evaluated_evidence_count: 0,
+        truncated: false,
+        incomparable_seal: query.status
+      });
+      expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
+    }
+
+    const remainder = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: queries[0]!,
+      evidence_formations: { "e-formed": evidence }
+    });
+    expect(() => verifyOpenSemanticFactorCompatibilityTrace(
+      retargetSeal(remainder, "none")
+    )).toThrow("open semantic factor compatibility trace contract mismatch");
+
+    const complete = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: queryGraph(),
+      evidence_formations: { "e-formed": evidence }
+    });
+    expect(complete.observed_evidence_count).toBe(complete.matchable_evidence_count);
+    expect(() => verifyOpenSemanticFactorCompatibilityTrace(
+      retargetSeal(complete, "unavailable")
+    )).toThrow("open semantic factor compatibility trace contract mismatch");
+  });
 });
+
+function retargetSeal(
+  trace: OpenSemanticFactorCompatibilityTrace,
+  incomparable_seal: OpenSemanticFactorCompatibilityTrace["incomparable_seal"]
+): OpenSemanticFactorCompatibilityTrace {
+  const { trace_digest: _digest, ...body } = trace;
+  const nextBody = Object.freeze({ ...body, incomparable_seal });
+  return Object.freeze({
+    ...nextBody,
+    trace_digest: digestRecallFieldIdentity(nextBody)
+  });
+}
 
 function compatibleEvidenceIds(
   query: ReturnType<typeof queryGraph>,
