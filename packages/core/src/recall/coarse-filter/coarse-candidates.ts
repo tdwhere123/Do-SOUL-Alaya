@@ -12,6 +12,7 @@ import type {
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
+import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/numeric-aliases.js";
 import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/temporal-aliases.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
@@ -80,7 +81,8 @@ export interface SourceProximitySeedScoreDiagnostic {
 export function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
   const expanded = uniqueStrings([
     ...queryProbes.expanded_terms.slice(0, 16),
-    ...complementaryTemporalAliasSurfaces(queryProbes.normalized_query ?? "")
+    ...complementaryTemporalAliasSurfaces(queryProbes.normalized_query ?? ""),
+    ...complementaryNumericAliasSurfaces(queryProbes.normalized_query ?? "")
   ].map((term) => term.trim()).filter((term) => term.length > 0));
   return expanded.length === 0 ? null : expanded.join(" ");
 }

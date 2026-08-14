@@ -2,6 +2,7 @@ import { normalizeMemoryObjectKeySurface, type MemoryObjectKey } from "@do-soul/
 import { occupancySet } from "./occupancy.js";
 import { mintGistRemainderKeys } from "./gist-remainder.js";
 import { mintOsfSurfaceKeys } from "./osf-surfaces.js";
+import { mintNumericAliasKeys } from "./numeric-aliases.js";
 import { mintTemporalAliasKeys } from "./temporal-aliases.js";
 import type { MintMemoryObjectKeysInput } from "./types.js";
 
@@ -16,6 +17,7 @@ export function mintMemoryObjectKeys(
     acceptKeys(minted, occupied, mintGistRemainderKeys({ ...input, evidence, occupied }));
   }
   acceptKeys(minted, occupied, mintTemporalAliasKeys({ ...input, occupied }));
+  acceptKeys(minted, occupied, mintNumericAliasKeys({ ...input, occupied }));
   return Object.freeze(minted);
 }
 

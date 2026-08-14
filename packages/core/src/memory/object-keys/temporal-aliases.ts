@@ -1,14 +1,15 @@
 import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
+import { aliasKeyDraft, aliasSourceTexts } from "./alias-source.js";
 import { formMemoryObjectKey } from "./form-key.js";
 import { occupies } from "./occupancy.js";
-import { titleCaseMonth } from "./month-names.js";
 import {
   extractCalendarSurfaces,
   extractRelativeSurfaces,
   type CalendarSurfaceHit,
   type RelativeSurfaceHit
 } from "./temporal-extract.js";
-import type { DraftMemoryObjectKey, MintableEvidence } from "./types.js";
+import { titleCaseMonth } from "./month-names.js";
+import type { MintableEvidence } from "./types.js";
 
 export function mintTemporalAliasKeys(input: Readonly<{
   readonly workspace_id: string;
@@ -18,27 +19,16 @@ export function mintTemporalAliasKeys(input: Readonly<{
   readonly occupied: ReadonlySet<string>;
 }>): readonly ReturnType<typeof formMemoryObjectKey>[] {
   const contentNormalized = normalizeMemoryObjectKeySurface(input.memory_content);
-  const sources = sourceTexts(input);
-  return Object.freeze(sources.flatMap((source) => [
+  return Object.freeze(aliasSourceTexts(input).flatMap((source) => [
     ...calendarAliasKeys(input, source, contentNormalized),
     ...relativeAliasKeys(input, source, contentNormalized)
   ]));
 }
 
-function sourceTexts(input: Readonly<{
-  readonly owner_id: string;
-  readonly memory_content: string;
-  readonly evidence: readonly Readonly<MintableEvidence>[];
-}>): readonly Readonly<{ readonly text: string; readonly sourceRef: string }>[] {
+export function complementaryTemporalAliasSurfaces(text: string): readonly string[] {
   return Object.freeze([
-    {
-      text: input.memory_content,
-      sourceRef: `memory:${input.owner_id}:content`
-    },
-    ...input.evidence.map((item) => ({
-      text: item.gist,
-      sourceRef: `evidence:${item.object_id}:gist`
-    }))
+    ...extractCalendarSurfaces(text).flatMap((hit) => calendarAliases(hit)),
+    ...extractRelativeSurfaces(text).flatMap((hit) => relativeAliases(hit))
   ]);
 }
 
@@ -55,7 +45,7 @@ function calendarAliasKeys(
     calendarAliases(hit).flatMap((surface) =>
       occupies(surface, input.occupied, contentNormalized)
         ? []
-        : [formMemoryObjectKey(aliasDraft(input, surface, source.sourceRef, hit.surface))]
+        : [formMemoryObjectKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))]
     )
   );
 }
@@ -73,7 +63,7 @@ function relativeAliasKeys(
     relativeAliases(hit).flatMap((surface) =>
       occupies(surface, input.occupied, contentNormalized)
         ? []
-        : [formMemoryObjectKey(aliasDraft(input, surface, source.sourceRef, hit.surface))]
+        : [formMemoryObjectKey(aliasKeyDraft(input, "temporal_alias", surface, source.sourceRef, hit.surface))]
     )
   );
 }
@@ -99,30 +89,6 @@ function relativeAliases(hit: Readonly<RelativeSurfaceHit>): readonly string[] {
   return [`${hit.count} ${englishUnit} ago`, `${hit.count}${cjkUnit}前`].filter((surface) =>
     normalizeMemoryObjectKeySurface(surface) !== normalizeMemoryObjectKeySurface(hit.surface)
   );
-}
-
-export function complementaryTemporalAliasSurfaces(text: string): readonly string[] {
-  return Object.freeze([
-    ...extractCalendarSurfaces(text).flatMap((hit) => calendarAliases(hit)),
-    ...extractRelativeSurfaces(text).flatMap((hit) => relativeAliases(hit))
-  ]);
-}
-
-function aliasDraft(
-  input: Readonly<{ readonly workspace_id: string; readonly owner_id: string }>,
-  surface: string,
-  sourceRef: string,
-  original: string
-): DraftMemoryObjectKey {
-  return {
-    workspace_id: input.workspace_id,
-    owner_id: input.owner_id,
-    key_type: "temporal_alias",
-    surface,
-    language: /[\p{Script=Han}]/u.test(surface) ? "zh" : "en",
-    source_kind: "stored_text",
-    source_ref: `${sourceRef}:surface:${original}`
-  };
 }
 
 function pad(value: number): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
 import { mintMemoryObjectKeys } from "../../memory/object-keys/mint.js";
+import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/numeric-aliases.js";
 import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/temporal-aliases.js";
 
 const OWNER = "memory-1";
@@ -108,6 +109,34 @@ describe("mintMemoryObjectKeys", () => {
     );
     expect(complementaryTemporalAliasSurfaces("when is 2/8").some((surface) => /\d{4}/u.test(surface)))
       .toBe(false);
+  });
+
+  it("aliases stored number surfaces without inventing a new magnitude", () => {
+    const keys = mintMemoryObjectKeys({
+      workspace_id: WORKSPACE,
+      owner_id: OWNER,
+      memory_content: "I bought used books.",
+      evidence: [{
+        object_id: EVIDENCE,
+        gist: "I bought 3 used books.",
+        fact_key_contents: [],
+        osf_graph: null
+      }]
+    });
+
+    const aliases = surfacesOf(keys, "numeric_alias");
+    expect(aliases).toEqual(expect.arrayContaining(["three", "三"]));
+    expect(aliases).not.toEqual(expect.arrayContaining(["3"]));
+    expect(aliases.some((surface) => /\b(?:4|four|四)\b/u.test(surface))).toBe(false);
+  });
+
+  it("exposes query-side numeric alias surfaces without inventing a magnitude", () => {
+    expect(complementaryNumericAliasSurfaces("bought 3 books")).toEqual(
+      expect.arrayContaining(["three", "三"])
+    );
+    expect(complementaryNumericAliasSurfaces("bought 3 books")).not.toEqual(
+      expect.arrayContaining(["4", "four"])
+    );
   });
 });
 
