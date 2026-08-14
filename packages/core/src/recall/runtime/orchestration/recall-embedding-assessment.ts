@@ -41,6 +41,8 @@ import {
   type RecallFiniteFieldChannelCapture
 } from "../../field/finite-field-capture.js";
 import type { RecallFiniteFieldSeal } from "../../field/finite-field-seal.js";
+import { buildSessionPointerFieldCaptures } from
+  "../../field/session-pointer-field-capture.js";
 import type { RecallRetrievalFieldRefinementReceipt } from
   "../../field/refinement/field-refinement-receipt.js";
 
@@ -121,7 +123,11 @@ export async function collectLegacyEmbeddingAssessmentData(
     ...prepared.retrievalFieldBundle.captures(),
     ...(evidenceScoring.fieldChannelCapture === undefined
       ? []
-      : [evidenceScoring.fieldChannelCapture])
+      : [evidenceScoring.fieldChannelCapture]),
+    ...buildSessionPointerFieldCaptures({
+      queryProbes: prepared.queryProbes,
+      candidates: coarse.coarseFilter.candidates
+    })
   ]);
   return Object.freeze({
     preparedEmbeddingQuery,
@@ -194,7 +200,9 @@ export async function collectSnapshotEmbeddingAssessmentData(
     evidenceScoring,
     retrievalFieldCaptures: prepared.retrievalFieldBundle.captures(),
     retrievalFieldRefinementReceipts:
-      prepared.retrievalFieldBundle.refinementReceipts()
+      prepared.retrievalFieldBundle.refinementReceipts(),
+    queryProbes: prepared.queryProbes,
+    coarseCandidates: coarse.coarseFilter.candidates
   });
 }
 
@@ -206,13 +214,19 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
   readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly retrievalFieldRefinementReceipts:
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
+  readonly queryProbes: PreparedRecallRequest["queryProbes"];
+  readonly coarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
 }>): EmbeddingAssessmentData {
   const fieldCaptures = materializeRecallRetrievalFieldCaptures([
     ...params.retrievalFieldCaptures,
     ...(params.snapshot.fieldChannelCaptures ?? []),
     ...(params.evidenceScoring.fieldChannelCapture === undefined
       ? []
-      : [params.evidenceScoring.fieldChannelCapture])
+      : [params.evidenceScoring.fieldChannelCapture]),
+    ...buildSessionPointerFieldCaptures({
+      queryProbes: params.queryProbes,
+      candidates: params.coarseCandidates
+    })
   ]);
   return Object.freeze({
     preparedEmbeddingQuery: Object.freeze({

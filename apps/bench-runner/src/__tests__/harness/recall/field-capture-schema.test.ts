@@ -4,7 +4,8 @@ import {
   captureRecallQueryFactFrames,
   createRecallRetrievalFieldRefinementReceipt,
   materializeRecallRetrievalFieldCaptures,
-  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID
+  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
+  RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1
 } from "@do-soul/alaya-core";
 import { LongMemEvalQuestionDiagnosticSchema } from
   "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
@@ -79,7 +80,9 @@ describe("recall field capture persistence", () => {
     });
 
     const parsed = LongMemEvalQuestionDiagnosticSchema.parse(diagnostic);
-    expect(parsed.retrieval_field_captures).toHaveLength(16);
+    expect(parsed.retrieval_field_captures).toHaveLength(
+      RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1.length
+    );
     expect(parsed.retrieval_field_captures?.every(({ channel }) =>
       channel.status === "unavailable")).toBe(true);
     expect(parsed.retrieval_field_refinement_receipts?.[0]?.receipt_digest)

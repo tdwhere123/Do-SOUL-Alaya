@@ -27,7 +27,9 @@ export const RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1 = Object.freeze([
   "evidence_fts_trigram",
   "object_embedding_pool",
   "object_embedding_workspace",
-  "evidence_semantic"
+  "evidence_semantic",
+  "session_event_index",
+  "explicit_pointer"
 ] as const);
 
 export type RecallRetrievalFieldChannelId =

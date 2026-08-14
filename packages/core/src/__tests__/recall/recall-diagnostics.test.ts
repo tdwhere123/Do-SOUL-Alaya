@@ -11,7 +11,8 @@ import {
   captureRecallQueryEntities
 } from "../../recall/field/query-entity-attribution-producer.js";
 import {
-  materializeRecallRetrievalFieldCaptures
+  materializeRecallRetrievalFieldCaptures,
+  RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1
 } from "../../recall/field/finite-field-capture.js";
 
 const emptyQueryProbes = Object.freeze({
@@ -199,7 +200,9 @@ describe("recall diagnostics", () => {
     });
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
     expect(diagnostics.query_entity_extraction?.status).toBe("ineligible");
-    expect(diagnostics.retrieval_field_captures).toHaveLength(16);
+    expect(diagnostics.retrieval_field_captures).toHaveLength(
+      RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1.length
+    );
     expect(diagnostics.evidence_embedding_selection_receipt).toMatchObject({
       operator_id: "ordered_candidate_prefix_v1",
       input_memory_count: 1,
