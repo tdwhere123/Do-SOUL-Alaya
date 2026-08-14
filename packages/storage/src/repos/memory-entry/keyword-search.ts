@@ -296,6 +296,28 @@ export function tokenBearsCjk(token: string): boolean {
   return CJK_TOKEN_PATTERN.test(token);
 }
 
+export interface KeywordLaneTokens {
+  readonly exact: readonly string[];
+  readonly trigram: readonly string[];
+  readonly porter: readonly string[];
+}
+
+export function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
+  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+  return {
+    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
+    trigram,
+    porter: trigram.filter((token) => !tokenBearsCjk(token))
+  };
+}
+
+export function objectKeyExactTokens(tokens: readonly string[]): readonly string[] {
+  // FTS5 trigram cannot MATCH below 3 chars; ASCII shorts already ride porter.
+  return Object.freeze(tokens.filter((token) =>
+    countQueryCodepoints(token) < 3 && tokenBearsCjk(token)
+  ));
+}
+
 export function createShortKeywordMatcher(token: string): (content: string) => boolean {
   if (shouldMatchShortWordByTokenBoundary(token)) {
     const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRegex(token)}($|[^\\p{L}\\p{N}_])`, "iu");

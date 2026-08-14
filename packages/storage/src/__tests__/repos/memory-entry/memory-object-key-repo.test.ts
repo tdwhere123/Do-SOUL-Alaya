@@ -83,6 +83,51 @@ describe("SqliteMemoryObjectKeyRepo", () => {
       [FAT_OWNER_ID, STRADDLE_TAIL_ID].sort()
     );
   });
+
+  it("still finds a two-character CJK key through the exact lane", async () => {
+    const { database, repo } = await createRepo();
+    const objectKeys = new SqliteMemoryObjectKeyRepo(database);
+    const ownerId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await repo.create(createMemoryEntry({
+      object_id: ownerId,
+      content: "Museum visit notes without a calendar fragment."
+    }));
+    objectKeys.replaceOwnerKeys("workspace-1", ownerId, [
+      objectKey({
+        owner_id: ownerId,
+        key_id: "gist-cjk-month",
+        key_type: "gist_remainder",
+        surface: CJK_SURFACE,
+        language: "zh",
+        source_ref: "evidence:capsule-1:gist:cjk:0"
+      })
+    ]);
+
+    const hits = await repo.searchByKeyword("workspace-1", CJK_SURFACE, 5);
+    expect(hits.map((hit) => hit.object_id)).toEqual([ownerId]);
+  });
+
+  it("does not scan object keys for short ASCII tokens that porter already covers", async () => {
+    const { database, repo } = await createRepo();
+    const objectKeys = new SqliteMemoryObjectKeyRepo(database);
+    const ownerId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    await repo.create(createMemoryEntry({
+      object_id: ownerId,
+      content: "Museum visit notes without a particle match."
+    }));
+    objectKeys.replaceOwnerKeys("workspace-1", ownerId, [
+      objectKey({
+        owner_id: ownerId,
+        key_id: "gist-ascii-to",
+        key_type: "gist_remainder",
+        surface: "to",
+        source_ref: "evidence:capsule-1:gist:0:2"
+      })
+    ]);
+
+    const hits = await repo.searchByKeyword("workspace-1", "to", 5);
+    expect(hits.map((hit) => hit.object_id)).not.toContain(ownerId);
+  });
 });
 
 function objectKey(

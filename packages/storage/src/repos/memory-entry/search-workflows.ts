@@ -7,11 +7,10 @@ import {
 } from "../shared/fts-lane-routing.js";
 import {
   buildObjectIdFilterSql,
-  countQueryCodepoints,
   mergeKeywordSearchRows,
   mergeExactKeywordSearchRows,
   normalizeKeywordSearchObjectIds,
-  tokenBearsCjk,
+  partitionKeywordLaneTokens,
   tokenizeFtsQuery,
   type FtsKeywordSearchRow,
   type ObjectIdFilterColumn
@@ -31,12 +30,6 @@ export interface MemoryEntrySearchWorkflowHost {
   activeConnection(): StorageDatabase["connection"];
   readonly searchByKeywordStatement: SqliteAllStatement;
   readonly searchByKeywordPorterStatement: SqliteAllStatement;
-}
-
-interface KeywordLaneTokens {
-  readonly exact: readonly string[];
-  readonly trigram: readonly string[];
-  readonly porter: readonly string[];
 }
 
 export async function searchByKeyword(
@@ -256,15 +249,6 @@ function searchKeywordRows(
       { porter: objectKeys.porter, trigram: objectKeys.trigram }
     )
   );
-}
-
-export function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
-  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-  return {
-    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
-    trigram,
-    porter: trigram.filter((token) => !tokenBearsCjk(token))
-  };
 }
 
 function searchTrigramKeywordRowsWithinObjectIds(

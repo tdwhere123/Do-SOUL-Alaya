@@ -4,6 +4,7 @@ import { buildWorkspaceScopedFtsMatch } from "../../shared/fts-lane-routing.js";
 import {
   buildObjectIdFilterSql,
   createShortKeywordMatcher,
+  objectKeyExactTokens,
   type ExactKeywordSearchRow,
   type FtsKeywordSearchRow,
   type ObjectIdFilterColumn
@@ -114,8 +115,9 @@ function searchExactObjectKeyRows(
   candidateObjectIds?: readonly string[],
   tier?: StorageTier
 ): readonly ExactKeywordSearchRow[] {
-  if (tokens.length === 0) return [];
-  const tokenMatchers = tokens.map((token) => createShortKeywordMatcher(token));
+  const exactTokens = objectKeyExactTokens(tokens);
+  if (exactTokens.length === 0) return [];
+  const tokenMatchers = exactTokens.map((token) => createShortKeywordMatcher(token));
   const counts = new Map<string, number>();
   let cursor: ExactKeyScanCursor | null = null;
   while (true) {

@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildObjectIdFilterSql,
   mergeKeywordSearchRows,
+  objectKeyExactTokens,
   tokenizeFtsQuery,
   type ExactKeywordSearchRow,
   type FtsKeywordSearchRow
@@ -106,6 +107,13 @@ describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
     expect(merged).toEqual([
       { object_id: "obj-key", normalized_rank: 1, object_key_rank: 1 }
     ]);
+  });
+});
+
+describe("objectKeyExactTokens", () => {
+  it("keeps trigram-infeasible CJK tokens and drops short ASCII", () => {
+    expect(objectKeyExactTokens(["I", "a", "to", "8", "3", "2月"])).toEqual(["2月"]);
+    expect(objectKeyExactTokens(["museum", "Retriever"])).toEqual([]);
   });
 });
 

@@ -7,14 +7,14 @@ import { buildMonotoneFieldRefinementLevels } from
   "../../shared/monotone-field-refinement.js";
 import {
   buildGroupedOrdinalScores,
-  countQueryCodepoints,
   mergeExactKeywordSearchRows,
   mergeKeywordSearchRows,
   normalizeKeywordSearchObjectIds,
-  tokenBearsCjk,
+  partitionKeywordLaneTokens,
   tokenizeFtsQuery,
   type ExactKeywordSearchRow,
-  type FtsKeywordSearchRow
+  type FtsKeywordSearchRow,
+  type KeywordLaneTokens
 } from "../keyword-search.js";
 import type {
   MemoryEntryKeywordFieldResult,
@@ -30,12 +30,6 @@ import {
 import { searchObjectKeyKeywordLanes } from "./object-key-fts.js";
 
 type KeywordFieldLane = MemoryEntryKeywordLaneReceipt["lane"];
-
-interface KeywordLaneTokens {
-  readonly exact: readonly string[];
-  readonly trigram: readonly string[];
-  readonly porter: readonly string[];
-}
 
 const MEMORY_FTS_TRIGRAM = "memory_content_fts";
 const MEMORY_FTS_PORTER = "memory_content_fts_porter";
@@ -204,15 +198,6 @@ function normalizeRefinementDepths(
     throw new RangeError("field refinement depths must be increasing above the base depth");
   }
   return Object.freeze(normalized);
-}
-
-function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
-  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-  return {
-    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
-    trigram,
-    porter: trigram.filter((token) => !tokenBearsCjk(token))
-  };
 }
 
 function buildKeywordFieldLaneReceipt<T extends ExactKeywordSearchRow | FtsKeywordSearchRow>(
