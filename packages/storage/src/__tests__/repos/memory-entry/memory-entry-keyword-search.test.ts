@@ -108,6 +108,28 @@ describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
       { object_id: "obj-key", normalized_rank: 1, object_key_rank: 1 }
     ]);
   });
+
+  it("collapses content porter and multiple key hits into one object vote", () => {
+    const merged = mergeKeywordSearchRows(
+      [],
+      [{ object_id: "obj-1", raw_rank: -1 }],
+      10,
+      [{ object_id: "obj-1", raw_rank: -2 }],
+      {
+        porter: [
+          { object_id: "obj-1", raw_rank: -5 },
+          { object_id: "obj-1", raw_rank: -3 }
+        ],
+        trigram: [
+          { object_id: "obj-1", raw_rank: -9 },
+          { object_id: "obj-1", raw_rank: -7 }
+        ]
+      }
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.object_id).toBe("obj-1");
+    expect(merged[0]?.normalized_rank).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("objectKeyExactTokens", () => {
