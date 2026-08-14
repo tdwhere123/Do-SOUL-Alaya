@@ -12,7 +12,7 @@ import type { RecallSupplementaryData } from "../../recall/runtime/recall-servic
 import { resetCoreConfigForTests } from "../../config/install-core-config.js";
 
 const CONF_ENV = [
-  "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP",
+  "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_FLOOD_CAP",
   "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE"
 ] as const;
 

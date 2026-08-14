@@ -14,6 +14,13 @@ describe("paired-environment bench provenance", () => {
     expect(paired).not.toHaveProperty("ALAYA_LOCAL_CROSS_ENCODER_MODEL");
   });
 
+  it("omits the retired evidence-beta ranking control from current provenance", () => {
+    const paired = collectPairedEnvironment({
+      ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44"
+    });
+    expect(paired).not.toHaveProperty("ALAYA_RECALL_CONF_EVIDENCE_BETA");
+  });
+
   it("resolves credential state markers correctly without leaking secret values", () => {
     expect(resolveCredentialStateMarker(undefined)).toBe("unset");
     expect(resolveCredentialStateMarker("")).toBe("empty");

@@ -34,7 +34,7 @@ const NOW = "2026-03-20T10:20:30.000Z";
 
 const CONFORMANT_ENV = [
   "ALAYA_RECALL_CONF_W_PATH",
-  "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
+  "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
   "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
   "ALAYA_RECALL_PATH_FLOW",
   "ALAYA_RECALL_TEMPORAL_WINDOW"
@@ -464,7 +464,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("integrated flood score matches R_obj + lambda * omega * Flood with beta disabled", async () => {
+  it("integrated flood score adds the evidence residual on top of flood", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const spec: CandidateSpec = { id: objectId(2), lexical: 1, evidenceSupports: [0.5, 0.5] };
     const candidate = (await runFusion(GENERIC_QUERY, [seed, spec], {
@@ -473,11 +473,14 @@ describe("conformant compositional combine (real SQLite)", () => {
     const axes = candidate.per_axis_contribution!;
     const flood = candidate.flood_potential!;
     expect(flood.R_obj).toBeCloseTo(axes.object, 12);
-    expect(flood.beta).toBe(0);
-    expect(flood.e_direct_status).toBe("inactive:beta_disabled");
+    expect(flood.beta).toBe(1);
+    expect(flood.e_direct_status).toBe("active");
     expect(flood.fuel_verified).toBe(true);
+    const lGate = 1 - flood.R_obj;
     const expected =
-      flood.R_obj + flood.lambda * flood.omega * flood.Flood * (1 - flood.R_obj);
+      flood.R_obj +
+      flood.E_direct * lGate +
+      flood.lambda * flood.omega * flood.Flood * lGate;
     expect(candidate.fused_score).toBeCloseTo(expected, 9);
     expect(flood.final_score).toBeCloseTo(expected, 9);
   });

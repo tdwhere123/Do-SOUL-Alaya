@@ -25,8 +25,6 @@ function readRecallFloodEnv(recall: RecallConfig, name: string): RecallEnvLookup
       return matched(stringify(recall.confRhoEvidence));
     case "ALAYA_RECALL_CONF_W_PATH":
       return matched(stringify(recall.confWPath));
-    case "ALAYA_RECALL_CONF_EVIDENCE_BETA":
-      return matched(stringify(recall.confEvidenceBeta));
     case "ALAYA_RECALL_CONF_FLOOD_CAP":
       return matched(stringify(recall.confFloodCap));
     case "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL":

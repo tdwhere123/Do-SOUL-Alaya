@@ -11,10 +11,7 @@ import type {
   RecallPathInflowAvailability,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
-import {
-  resolveConformantEvidenceBeta,
-  resolveConformantPathWeight
-} from "./conformant-fusion-scoring.js";
+import { resolveConformantPathWeight } from "./conformant-fusion-scoring.js";
 import { resolveSliceAxis } from "./flood-slice-axis.js";
 
 export type {
@@ -151,11 +148,14 @@ interface ResolvedIntegratedFloodScore {
   readonly lGate: number;
 }
 
+// Identity residual scale: an env beta was a forever-off multiplier.
+const EVIDENCE_RESIDUAL_SCALE = 1;
+
 function resolveIntegratedFloodScore(
   params: IntegratedFloodScoreParams
 ): ResolvedIntegratedFloodScore {
   const lambda = resolveConformantPathWeight();
-  const beta = resolveConformantEvidenceBeta();
+  const beta = EVIDENCE_RESIDUAL_SCALE;
   const memorySupplementEligible = params.memorySupplementEligible ?? true;
   const slice = resolveSliceAxis(params.entry, params.supplementaryData);
   const path = resolvePathAxis(
@@ -179,7 +179,7 @@ function resolveIntegratedFloodScore(
   );
   const eDirect = clamp01(params.axisInputs.B_evidence);
   const eDirectStatus: FloodAxisInactiveReason =
-    beta <= 0 ? "inactive:beta_disabled" : eDirect > 0 ? "active" : "inactive:no_evidence";
+    eDirect > 0 ? "active" : "inactive:no_evidence";
   const base = clamp01(params.axisInputs.R_obj);
   const lGate = structuralLikelihoodGate(base);
   return {
@@ -189,11 +189,14 @@ function resolveIntegratedFloodScore(
 }
 
 function computeFinalFloodScore(resolved: ResolvedIntegratedFloodScore): number {
-  // invariant: flood activation cannot demote the pass-through base.
-  return clamp01(resolved.fuelVerified
-    ? (resolved.base + resolved.lambda * resolved.omega * resolved.flood * resolved.lGate) *
-      (1 + resolved.beta * resolved.eDirect)
-    : resolved.base);
+  // invariant: flood and evidence residuals cannot demote the pass-through base.
+  const evidenceResidual = resolved.eDirect > 0
+    ? resolved.beta * resolved.eDirect * resolved.lGate
+    : 0;
+  const floodBonus = resolved.fuelVerified
+    ? resolved.lambda * resolved.omega * resolved.flood * resolved.lGate
+    : 0;
+  return clamp01(resolved.base + evidenceResidual + floodBonus);
 }
 
 function buildIntegratedFloodDiagnostics(

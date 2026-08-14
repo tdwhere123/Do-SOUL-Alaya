@@ -13,7 +13,6 @@ function createStubCoreConfig(): CoreConfig {
       confRhoPath: undefined,
       confRhoEvidence: undefined,
       confWPath: undefined,
-      confEvidenceBeta: undefined,
       confFloodCap: undefined,
       confFloodCapTotal: undefined,
       pathEmbModulation: undefined,

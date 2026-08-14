@@ -10,9 +10,8 @@ import {
 const RECALL_ENV_FIXTURE = Object.freeze({
   ALAYA_RECALL_CONF_RHO_PATH: "0.11",
   ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
-  ALAYA_RECALL_CONF_W_PATH: "0.33",
-  ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44",
-  ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
+      ALAYA_RECALL_CONF_W_PATH: "0.33",
+      ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
   ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
   ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
   ALAYA_RECALL_PROJECTIONS: "off",
@@ -25,6 +24,7 @@ const EXPECTED_RECALL_ENV = Object.freeze({
 });
 
 const RETIRED_RECALL_ENV_NAMES = Object.freeze([
+  "ALAYA_RECALL_CONF_EVIDENCE_BETA",
   "ALAYA_RECALL_EMBED_POOL_RESCORE",
   "ALAYA_RECALL_QUERY_HYDE_JSON",
   "ALAYA_RECALL_COMPOSE",
@@ -138,6 +138,7 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
 
   it("does not expose retired ranking-authority flags", () => {
     const config = parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44",
       ALAYA_RECALL_FACET_SLICE: "on",
       ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true",
@@ -145,6 +146,7 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
       ALAYA_RECALL_SESSION_ROUTE: "on",
       ALAYA_RECALL_LEXICAL_DECORR: "on"
     });
+    expect(config).not.toHaveProperty("confEvidenceBeta");
     expect(config).not.toHaveProperty("facetSlice");
     expect(config).not.toHaveProperty("confSliceCompatibility");
     expect(config).not.toHaveProperty("confH1MaxProduct");

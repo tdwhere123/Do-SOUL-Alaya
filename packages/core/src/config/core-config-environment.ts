@@ -5,7 +5,6 @@ export const CORE_CONFIG_ENV_KEYS = Object.freeze({
     confRhoPath: "ALAYA_RECALL_CONF_RHO_PATH",
     confRhoEvidence: "ALAYA_RECALL_CONF_RHO_EVIDENCE",
     confWPath: "ALAYA_RECALL_CONF_W_PATH",
-    confEvidenceBeta: "ALAYA_RECALL_CONF_EVIDENCE_BETA",
     confFloodCap: "ALAYA_RECALL_CONF_FLOOD_CAP",
     confFloodCapTotal: "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
     pathEmbModulation: "ALAYA_RECALL_PATH_EMB_MODULATION",

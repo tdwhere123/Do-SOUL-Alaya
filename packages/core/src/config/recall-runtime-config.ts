@@ -4,7 +4,6 @@ export interface RecallRuntimeConfig {
   readonly confRhoPath: number | undefined;
   readonly confRhoEvidence: number | undefined;
   readonly confWPath: number | undefined;
-  readonly confEvidenceBeta: number | undefined;
   readonly confFloodCap: number | undefined;
   readonly confFloodCapTotal: number | undefined;
   readonly pathEmbModulation: string | undefined;
@@ -46,7 +45,6 @@ export function parseRecallRuntimeConfigFromEnv(
     confRhoPath: readOptionalNumber(env[keys.confRhoPath]),
     confRhoEvidence: readOptionalNumber(env[keys.confRhoEvidence]),
     confWPath: readOptionalNumber(env[keys.confWPath]),
-    confEvidenceBeta: readOptionalNumber(env[keys.confEvidenceBeta]),
     confFloodCap: readOptionalNumber(env[keys.confFloodCap]),
     confFloodCapTotal: readOptionalNumber(env[keys.confFloodCapTotal]),
     pathEmbModulation: env[keys.pathEmbModulation],

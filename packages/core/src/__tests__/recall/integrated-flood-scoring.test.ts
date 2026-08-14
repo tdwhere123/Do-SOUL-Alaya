@@ -11,8 +11,7 @@ import { createSelectedSliceKeyV2 } from "../../recall/flood/slice-key-contract.
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const CONF_ENV = [
-  "ALAYA_RECALL_CONF_W_PATH",
-  "ALAYA_RECALL_CONF_EVIDENCE_BETA"
+  "ALAYA_RECALL_CONF_W_PATH"
 ] as const;
 
 afterEach(() => {
@@ -153,7 +152,10 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.slice_status).toBe("inactive:no_slice_match");
     expect(result.diagnostics.Slice).toBe(0);
     expect(result.diagnostics.fuel_verified).toBe(false);
-    expect(result.score).toBeCloseTo(0.2, 12);
+    expect(result.score).toBeCloseTo(
+      0.2 + 0.7 * structuralLikelihoodGate(0.2),
+      12
+    );
   });
 
   it("path fuel changes only eligible candidates with verified path and evidence inflow", () => {
@@ -181,12 +183,14 @@ describe("computeIntegratedFloodScore", () => {
     expect(coldResult.diagnostics.fuel_verified).toBe(false);
     expect(coldResult.score).toBeCloseTo(0.5, 12);
     expect(warmResult.diagnostics.fuel_verified).toBe(true);
+    const lGate = structuralLikelihoodGate(0.1);
     expect(warmResult.score).toBeCloseTo(
       0.1 +
+        0.6 * lGate +
         resolveConformantPathWeight() *
           warmResult.diagnostics.omega *
           warmResult.diagnostics.Flood *
-          structuralLikelihoodGate(0.1),
+          lGate,
       9
     );
     expect(warmResult.score).toBeGreaterThan(0.1);
@@ -207,6 +211,7 @@ describe("computeIntegratedFloodScore", () => {
 
     expect(result.diagnostics.path_status).toBe("active");
     expect(result.diagnostics.evidence_status).toBe("inactive:pass_through");
+    expect(result.diagnostics.e_direct_status).toBe("inactive:no_evidence");
     expect(result.diagnostics.fuel_verified).toBe(false);
     expect(result.score).toBeCloseTo(0.3, 12);
   });
@@ -228,7 +233,10 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("active");
     expect(result.diagnostics.path_status).toBe("inactive:pass_through");
     expect(result.diagnostics.fuel_verified).toBe(false);
-    expect(result.score).toBeCloseTo(0.25, 12);
+    expect(result.score).toBeCloseTo(
+      0.25 + 0.8 * structuralLikelihoodGate(0.25),
+      12
+    );
   });
 
   it("does not treat an unavailable path index as pass-through identity", () => {
@@ -277,6 +285,29 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.score).toBeCloseTo(0.4, 12);
   });
 
+  it("adds evidence as an additive residual even when flood fuel is closed", () => {
+    const entry = createMemoryEntry({
+      object_id: "33333333-3333-4333-8333-333333333333",
+      evidence_refs: ["ev-a"]
+    });
+    const result = computeIntegratedFloodScore({
+      entry,
+      axisInputs: { R_obj: 0.25, A_path: 0, B_evidence: 0.8 },
+      supplementaryData: supplementary({
+        evidenceSupportVectorsByMemoryId: {
+          [entry.object_id]: [{ source_kind: "evidence_ref", source_id: "ev-a", support: 0.8 }]
+        }
+      })
+    });
+    const lGate = structuralLikelihoodGate(0.25);
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.diagnostics.e_direct_status).toBe("active");
+    expect(result.diagnostics.E_direct).toBeCloseTo(0.8, 12);
+    expect(result.diagnostics.beta).toBe(1);
+    expect(result.score).toBeCloseTo(0.25 + 0.8 * lGate, 12);
+    expect(result.score).toBeGreaterThan(0.25);
+  });
+
   it("diagnostic names match the integrated flood contract", () => {
     const entry = createMemoryEntry({
       object_id: "33333333-3333-4333-8333-333333333333",
@@ -301,9 +332,9 @@ describe("computeIntegratedFloodScore", () => {
         omega: expect.any(Number),
         Flood: expect.any(Number),
         lambda: resolveConformantPathWeight(),
-        beta: 0,
+        beta: 1,
         final_score: expect.any(Number),
-        e_direct_status: "inactive:beta_disabled"
+        e_direct_status: "active"
       })
     );
   });
@@ -333,10 +364,13 @@ describe("computeIntegratedFloodScore", () => {
     const { omega, Flood, lambda, beta } = result.diagnostics;
     expect(result.diagnostics.fuel_verified).toBe(true);
     expect(omega).toBeLessThan(1);
-    expect(beta).toBe(0);
+    expect(beta).toBe(1);
     expect(result.score).toBeGreaterThanOrEqual(rObj);
     const lGate = structuralLikelihoodGate(rObj);
-    expect(result.score).toBeCloseTo(rObj + lambda * omega * Flood * lGate, 12);
+    expect(result.score).toBeCloseTo(
+      rObj + 0.8 * lGate + lambda * omega * Flood * lGate,
+      12
+    );
   });
 
   it("applies L-gate: high R_obj shrinks flood bonus toward zero", () => {
@@ -371,15 +405,12 @@ describe("computeIntegratedFloodScore", () => {
     const highBonus = high.score - 0.9;
     expect(lowBonus).toBeGreaterThan(highBonus);
     expect(structuralLikelihoodGate(0.9)).toBeCloseTo(0.1, 12);
-    expect(highBonus).toBeCloseTo(
-      resolveConformantPathWeight() * high.diagnostics.Flood * 0.1,
-      12
-    );
+    expect(high.score).toBe(1);
+    expect(highBonus).toBeCloseTo(0.1, 12);
   });
 
   it("clamps an active non-default flood score and diagnostics to one", () => {
     process.env.ALAYA_RECALL_CONF_W_PATH = "2";
-    process.env.ALAYA_RECALL_CONF_EVIDENCE_BETA = "3";
     const seed = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
     const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-safe"] });
@@ -407,13 +438,12 @@ describe("computeIntegratedFloodScore", () => {
 
   it("fails non-finite path fuel closed without changing the base score", () => {
     process.env.ALAYA_RECALL_CONF_W_PATH = "2";
-    process.env.ALAYA_RECALL_CONF_EVIDENCE_BETA = "3";
     const seed = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
     const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-safe"] });
     const result = computeIntegratedFloodScore({
       entry: target,
-      axisInputs: { R_obj: 0.2, A_path: Number.POSITIVE_INFINITY, B_evidence: 2 },
+      axisInputs: { R_obj: 0.2, A_path: Number.POSITIVE_INFINITY, B_evidence: 0 },
       supplementaryData: supplementary({
         pathInflowByTarget: { [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }] },
         evidenceSupportVectorsByMemoryId: {
@@ -439,12 +469,12 @@ describe("computeIntegratedFloodScore", () => {
         omega: 1,
         Flood: 0.5,
         lambda: 0.6,
-        beta: 0,
+        beta: 1,
         final_score: 1.3,
         slice_status: "active",
         path_status: "active",
         evidence_status: "active",
-        e_direct_status: "inactive:beta_disabled",
+        e_direct_status: "inactive:no_evidence",
         fuel_verified: true
       },
       {
@@ -456,12 +486,12 @@ describe("computeIntegratedFloodScore", () => {
         omega: 1,
         Flood: 0,
         lambda: 0.6,
-        beta: 0,
+        beta: 1,
         final_score: 0.5,
         slice_status: "inactive:pass_through",
         path_status: "inactive:pass_through",
         evidence_status: "inactive:pass_through",
-        e_direct_status: "inactive:beta_disabled",
+        e_direct_status: "inactive:no_evidence",
         fuel_verified: false
       }
     ]);

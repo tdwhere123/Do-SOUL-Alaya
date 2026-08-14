@@ -62,10 +62,6 @@ export function resolveConformantPathWeight(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_W_PATH", 0.6);
 }
 
-export function resolveConformantEvidenceBeta(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0);
-}
-
 export function resolveConformantFloodCapPerSource(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_FLOOD_CAP", 1);
 }
