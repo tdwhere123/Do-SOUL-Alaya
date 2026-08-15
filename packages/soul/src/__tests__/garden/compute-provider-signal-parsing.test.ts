@@ -252,33 +252,33 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     } satisfies Partial<GardenProviderError>);
   });
 
-  it("admits candidate core when the optional semantic graph is unavailable", async () => {
+  it("keeps historical graphless parsing readable but rejects it from the current provider", async () => {
+    const graphlessRaw = JSON.stringify({
+      signals: [{
+        signal_kind: "potential_claim",
+        object_kind: "fact",
+        confidence: 0.8,
+        matched_text: "The build is green.",
+        source_locator: {
+          contract_version: 2,
+          kind: "assertion_catalog",
+          assertion_id: 1
+        }
+      }]
+    });
+    const [historicalDraft] = parseOfficialApiSignals(graphlessRaw);
+    expect(historicalDraft?.semantic_factor_graph_projection).toEqual({
+      status: "unavailable",
+      reason: "semantic_factor_graph_missing"
+    });
+
     const graphless = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
-        signals: [{
-          signal_kind: "potential_claim",
-          object_kind: "fact",
-          confidence: 0.8,
-          matched_text: "The build is green.",
-          source_locator: {
-            contract_version: 2,
-            kind: "assertion_catalog",
-            assertion_id: 1
-          }
-        }]
-      }))
+      extractor: createExtractor(graphlessRaw)
     });
-    const [graphlessSignal] = await graphless.compile(
+    await expect(graphless.compile(
       "The build is green.", createContext("The build is green.")
-    );
-    expect(graphlessSignal?.raw_payload).toMatchObject({
-      semantic_factor_graph_projection: {
-        status: "unavailable",
-        reason: "semantic_factor_graph_missing"
-      }
-    });
-    expect(graphlessSignal?.raw_payload).not.toHaveProperty("semantic_factor_graph");
+    )).rejects.toMatchObject({ kind: "invalid_response" });
 
     const graphful = new OfficialApiGardenProvider({
       apiKey: "sk-test",
@@ -323,7 +323,14 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     expect(signals).toHaveLength(1);
     expect(signals[0]).toMatchObject({
       signal_kind: "potential_semantic_observation",
-      object_kind: "open_semantic_observation"
+      object_kind: "open_semantic_observation",
+      raw_payload: {
+        object_kind_projection: {
+          status: "rejected",
+          reason: "object_kind_not_allowed",
+          proposed_object_kind: "physical_item"
+        }
+      }
     });
   });
 
@@ -362,6 +369,32 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     })] }));
 
     expect(drafts).toHaveLength(1);
+  });
+
+  it("projects allowed object kinds and rejects unknown routing metadata", () => {
+    const drafts = parseOfficialApiSignals(JSON.stringify({ signals: [
+      openSignal({ object_kind: "preference", confidence: 0.8, matched_text: "I prefer tea." }),
+      openSignal({ object_kind: "decision", confidence: 0.8, matched_text: "I chose tea." }),
+      openSignal({ object_kind: "user_preference", confidence: 0.8, matched_text: "Call me Ash." })
+    ] }));
+
+    expect(drafts[0]).toMatchObject({
+      signal_kind: "potential_preference",
+      object_kind: "preference"
+    });
+    expect(drafts[1]).toMatchObject({
+      signal_kind: "potential_claim",
+      object_kind: "decision"
+    });
+    expect(drafts[2]).toMatchObject({
+      signal_kind: "potential_semantic_observation",
+      object_kind: "open_semantic_observation",
+      object_kind_projection: {
+        status: "rejected",
+        reason: "object_kind_not_allowed",
+        proposed_object_kind: "user_preference"
+      }
+    });
   });
 
   it("normalizes canonical decimal confidence strings and rejects other text", () => {

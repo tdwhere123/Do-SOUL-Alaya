@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
+import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
+
+export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 1;
 
 const ENVELOPE_PROMPT_PARTS = Object.freeze([
   "You extract candidate durable memory signals from one bounded source assertion batch.",
+  `The response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}.`,
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
-  'Each non-empty signal must include "signal_kind", "object_kind", "confidence", "matched_text", "source_locator", and "semantic_factor_graph".',
-  'A signal without semantic_factor_graph is invalid. signal_kind and object_kind are routing metadata only; they are not semantic roles or an ontology.'
+  "Do not output analysis or reasoning. Emit the JSON object immediately and keep it compact.",
+  "Do not repeat source text outside matched_text or semantic_factor_graph surfaces.",
+  'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", and "semantic_factor_graph".',
+  'A signal without semantic_factor_graph is invalid. object_kind is bounded routing metadata only; it is not a semantic role or an ontology.'
 ]);
 
 const HISTORICAL_ENVELOPE_PROMPT_PARTS = Object.freeze([
@@ -17,8 +23,19 @@ const CURRENT_CONFIDENCE_PROMPT_PARTS = Object.freeze([
   '"confidence" must be a JSON number from 0 through 1, never a string label such as "high", "medium", or "low".'
 ]);
 
+const DURABLE_PROJECTION_PROMPT_PARTS = Object.freeze([
+  `"object_kind" must be exactly one of: ${OFFICIAL_API_OBJECT_KINDS.join(", ")}. Use "open_semantic_observation" only when no more specific allowed kind is justified by the assertion.`,
+  'Use "preference" for a durable like, dislike, or choice tendency; "decision" for a committed choice; "constraint" or "factual_policy" for a standing must, must-not, or rule; and "episode", "activity", or "outcome" for source-supported events and results.',
+  'Include "canonical_entities" with at most 3 lowercase names or stable source phrases that occur in matched_text. Do not infer an alias, identity, or pronoun resolution that is absent from that assertion.',
+  'When the assertion explicitly states event time or validity, include "temporal_projection" with "projection_schema_version":1, "time_precision", "time_source":"explicit", and only the applicable ISO fields.',
+  'Use "event_time_start" and "event_time_end" for when an event occurred. Use "valid_from" and optional "valid_to" only for an explicitly effective or ongoing interval; omit "valid_to" for an open interval. Never copy event time into valid time.',
+  'For relative dates, omit absolute temporal_projection values; the runtime resolves them from the trusted source observation.',
+  'For a durable preference, include "preference_profile" with "projection_schema_version":1 and the exact keys "preference_subject", "preference_predicate", "preference_object", optional "preference_category", and "preference_polarity".',
+  '"preference_polarity" must be exactly "positive", "negative", or "neutral".'
+]);
+
 const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
-  'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
+  'Do not include "signal_kind"; the runtime derives it deterministically from the bounded object_kind.',
   'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
   "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
   "The server-derived source_assertions catalog contains only User assertions the runtime can ground without unresolved references; no other conversation content is available or authoritative.",
@@ -103,6 +120,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...ENVELOPE_PROMPT_PARTS,
   ...CURRENT_CONFIDENCE_PROMPT_PARTS,
   ...GROUNDED_SIGNAL_PROMPT_PARTS,
+  ...DURABLE_PROJECTION_PROMPT_PARTS,
   ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
   ...FINAL_PROMPT_PARTS
 ]);

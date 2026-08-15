@@ -2,14 +2,15 @@ import { z } from "zod";
 import {
   AssociativeFactFrameSchema,
   OpenSemanticFactorGraphProposalSchema,
-  SignalKind,
   type AssociativeFactFrame,
   type CandidateMemorySignal,
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import {
+  inspectOfficialApiTemporalProjection,
   parseOfficialApiTemporalProjection,
+  type OfficialApiTemporalProjectionAudit,
   type OfficialApiTemporalProjectionDraft
 } from "./temporal/observed-projection.js";
 import {
@@ -21,12 +22,17 @@ import {
   type OfficialApiSemanticFactorGraphProjectionAudit
 } from "./official-api/semantic-factor-projection.js";
 import { salvageRawSignalElements } from "./official-api/raw-signal-envelope.js";
+import {
+  projectOfficialApiObjectKind,
+  type OfficialApiObjectKindProjection
+} from "./official-api/object-kind-contract.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
-export const OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND = "open_semantic_observation";
+export {
+  OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
+} from "./official-api/object-kind-contract.js";
 // Raw cache identity and parser projection identity evolve independently.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v8";
-const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v10";
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
 const CANONICAL_CONFIDENCE_PATTERN = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u;
@@ -189,6 +195,7 @@ export interface OfficialApiPreferenceProfileDraft {
 export interface OfficialApiSignalDraft {
   readonly signal_kind: CandidateMemorySignal["signal_kind"];
   readonly object_kind: string;
+  readonly object_kind_projection?: OfficialApiObjectKindProjection;
   readonly confidence: number;
   readonly matched_text: string;
   readonly evidence_refs: readonly string[];
@@ -198,6 +205,7 @@ export interface OfficialApiSignalDraft {
   readonly reason?: string;
   readonly source_locator?: OfficialApiSourceLocator;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
+  readonly temporal_projection_audit?: OfficialApiTemporalProjectionAudit;
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
   readonly fact_frame?: AssociativeFactFrame;
   readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
@@ -205,7 +213,13 @@ export interface OfficialApiSignalDraft {
     OfficialApiSemanticFactorGraphProjectionAudit;
 }
 
-type OfficialApiSignalEntryRejection = "signal_entry_invalid";
+export interface OfficialApiSignalParseOptions {
+  readonly requireSemanticFactorGraph?: boolean;
+}
+
+type OfficialApiSignalEntryRejection =
+  | "signal_entry_invalid"
+  | "semantic_factor_graph_required";
 type OfficialApiSignalEntryInspection = Readonly<
   | {
       readonly draft: OfficialApiSignalDraft;
@@ -221,7 +235,10 @@ type OfficialApiSignalEntryInspection = Readonly<
 // through this exact production parse instead of a divergent bench-only
 // copy.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+export function parseOfficialApiSignals(
+  content: string,
+  options: OfficialApiSignalParseOptions = {}
+): readonly OfficialApiSignalDraft[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -235,7 +252,7 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
     // element. This is the array-level analogue of the per-entry drop policy
     // applied below after a successful parse — a sibling's corruption is not
     // allowed to abort the turn's good signals.
-    return salvageOfficialApiSignals(content);
+    return salvageOfficialApiSignals(content, options);
   }
   // invariant: a malformed *envelope* (response is not an object, or has no
   // signals array) is a genuine total failure of the extraction call, so it
@@ -251,7 +268,7 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   const drafts: OfficialApiSignalDraft[] = [];
   const rejections: OfficialApiSignalEntryRejection[] = [];
   for (const candidate of envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT)) {
-    const inspected = inspectOfficialApiSignalEntry(candidate);
+    const inspected = inspectOfficialApiSignalEntry(candidate, options);
     if (inspected.draft === null) rejections.push(inspected.rejection);
     else drafts.push(inspected.draft);
   }
@@ -270,7 +287,10 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
 // (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
 // degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
 // see also: salvageRawSignalElements (string-aware balanced-brace walk).
-function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+function salvageOfficialApiSignals(
+  content: string,
+  options: OfficialApiSignalParseOptions
+): readonly OfficialApiSignalDraft[] {
   const drafts: OfficialApiSignalDraft[] = [];
   for (const element of salvageRawSignalElements(content)) {
     if (drafts.length >= OFFICIAL_API_SIGNAL_LIMIT) {
@@ -287,7 +307,7 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
     if (!UnknownRecordSchema.safeParse(candidate).success) {
       continue;
     }
-    const draft = parseOfficialApiSignalEntry(candidate);
+    const draft = parseOfficialApiSignalEntry(candidate, options);
     if (draft !== null) {
       drafts.push(draft);
     }
@@ -303,13 +323,15 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
 // signal_kind, missing object_kind / matched_text / confidence, or a
 // non-object element), so one bad fact is dropped while the rest survive.
 export function parseOfficialApiSignalEntry(
-  candidate: unknown
+  candidate: unknown,
+  options: OfficialApiSignalParseOptions = {}
 ): OfficialApiSignalDraft | null {
-  return inspectOfficialApiSignalEntry(candidate).draft;
+  return inspectOfficialApiSignalEntry(candidate, options).draft;
 }
 
 function inspectOfficialApiSignalEntry(
-  candidate: unknown
+  candidate: unknown,
+  options: OfficialApiSignalParseOptions
 ): OfficialApiSignalEntryInspection {
   if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
     return { draft: null, rejection: "signal_entry_invalid" };
@@ -317,29 +339,39 @@ function inspectOfficialApiSignalEntry(
   const semanticProjection = inspectOfficialApiSemanticFactorGraphProjection(
     (candidate as Record<string, unknown>).semantic_factor_graph
   );
+  if (options.requireSemanticFactorGraph === true && semanticProjection.graph === undefined) {
+    return { draft: null, rejection: "semantic_factor_graph_required" };
+  }
+  const temporalProjection = inspectOfficialApiTemporalProjection(
+    (candidate as Record<string, unknown>).temporal_projection
+  );
   const parsed = OpenOfficialApiSignalEntrySchema.safeParse({
     ...(candidate as Record<string, unknown>),
+    temporal_projection: temporalProjection.projection,
     semantic_factor_graph: semanticProjection.graph
   });
   if (!parsed.success) {
     return { draft: null, rejection: "signal_entry_invalid" };
   }
+  const objectKindProjection = projectOfficialApiObjectKind(parsed.data.object_kind ?? undefined);
   return {
     draft: buildOfficialApiSignalDraft(Object.freeze({
       ...parsed.data,
-      signal_kind: SignalKind.POTENTIAL_SEMANTIC_OBSERVATION,
-      object_kind: OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
-    }), semanticProjection.audit),
+      signal_kind: objectKindProjection.signalKind,
+      object_kind: objectKindProjection.objectKind
+    }), semanticProjection.audit, temporalProjection.audit, objectKindProjection.audit),
     rejection: null
   };
 }
 
 function buildOfficialApiSignalDraft(
   record: z.infer<typeof OpenOfficialApiSignalEntrySchema> & {
-    readonly signal_kind: typeof SignalKind.POTENTIAL_SEMANTIC_OBSERVATION;
-    readonly object_kind: typeof OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND;
+    readonly signal_kind: CandidateMemorySignal["signal_kind"];
+    readonly object_kind: string;
   },
-  semanticFactorGraphProjection?: OfficialApiSemanticFactorGraphProjectionAudit
+  semanticFactorGraphProjection: OfficialApiSemanticFactorGraphProjectionAudit | undefined,
+  temporalProjectionAudit: OfficialApiTemporalProjectionAudit,
+  objectKindProjection: OfficialApiObjectKindProjection | undefined
 ): OfficialApiSignalDraft {
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
   // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
@@ -348,7 +380,10 @@ function buildOfficialApiSignalDraft(
   const clampedReason = record.reason === null ? null : record.reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
   return Object.freeze({
     signal_kind: record.signal_kind,
-    object_kind: record.object_kind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
+    object_kind: record.object_kind,
+    ...(objectKindProjection === undefined ? {} : {
+      object_kind_projection: objectKindProjection
+    }),
     confidence: record.confidence,
     matched_text: clampedMatchedText,
     evidence_refs: record.evidence_refs,
@@ -358,6 +393,7 @@ function buildOfficialApiSignalDraft(
     ...(clampedReason === null ? {} : { reason: clampedReason }),
     ...(record.source_locator === undefined ? {} : { source_locator: record.source_locator }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
+    temporal_projection_audit: temporalProjectionAudit,
     ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile }),
     ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame }),
     ...(record.semantic_factor_graph === undefined

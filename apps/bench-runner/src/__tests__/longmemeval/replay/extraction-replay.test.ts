@@ -116,6 +116,34 @@ describe("extraction cache replay occurrence accounting", () => {
 });
 
 describe("extraction cache replay rejection", () => {
+  it("rejects graphless raw entries under the current signal contract", () => {
+    const root = cacheRoot();
+    const key = "d".repeat(64);
+    writeShard(root, key, JSON.stringify({ signals: [{
+      object_kind: "fact",
+      confidence: 0.8,
+      matched_text: "source fact"
+    }] }));
+
+    const result = replayExtractionOccurrences({
+      cacheRoot: root,
+      model,
+      requestProfile,
+      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+      requireSemanticFactorGraph: true
+    });
+
+    expect(result.occurrences[0]?.entries[0]).toMatchObject({
+      disposition: "invalid",
+      stage: "parse",
+      reason: "semantic_factor_graph_required",
+      semanticFactorGraphProjection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      }
+    });
+  });
+
   it("commits graph projection failure for a later rejected candidate", () => {
     const root = cacheRoot();
     const key = "e".repeat(64);

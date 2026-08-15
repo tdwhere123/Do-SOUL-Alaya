@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  createTimeConcernWindowDigest,
+  type PathRelation
+} from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteRelationAssertionRepo } from "../../../repos/path/relation-assertion-repo.js";
 import { SqliteTemporalPathProjectionReader } from "../../../repos/path/temporal-path-projection-reader.js";
@@ -34,6 +38,33 @@ describe("temporal path projection reader as-of lookup", () => {
 
     await expect(reader.findByWorkspace("workspace-1", { asOf: BUILD_AS_OF }))
       .resolves.toEqual([]);
+  });
+
+  it("matches canonical time concern intervals by overlap", async () => {
+    const path = {
+      anchors: {
+        source_anchor: { kind: "object", object_id: "memory-1" },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "memory-1",
+          window_digest: createTimeConcernWindowDigest(
+            "2026-03-19T00:00:00.000Z",
+            "2026-03-19T23:59:59.999Z"
+          )
+        }
+      }
+    } as PathRelation;
+    const reader = new SqliteTemporalPathProjectionReader({
+      findActiveProjectionByWorkspace: async () => [path],
+      findProjectionByWorkspaceAtAsOf: async () => [path]
+    });
+
+    await expect(reader.findByTimeConcernWindowDigests("workspace-1", [
+      createTimeConcernWindowDigest(
+        "2026-03-01T00:00:00.000Z",
+        "2026-03-31T23:59:59.999Z"
+      )
+    ])).resolves.toEqual([path]);
   });
 });
 

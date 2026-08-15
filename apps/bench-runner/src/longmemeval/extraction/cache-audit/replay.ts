@@ -96,6 +96,7 @@ export function replayExtractionOccurrences(input: {
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly occurrences: readonly ExtractionOccurrence[];
   readonly audit?: ExtractionReplayAuditor;
+  readonly requireSemanticFactorGraph?: boolean;
   /** A refill audit may defer absent shards while still rejecting malformed ones. */
   readonly allowMissingShards?: boolean;
 }): ExtractionReplayResult {
@@ -145,6 +146,7 @@ function replayOccurrence(input: {
   readonly occurrence: ExtractionOccurrence;
   readonly cached: Map<string, CachedExtractionInspection>;
   readonly audit: ExtractionReplayAuditor;
+  readonly requireSemanticFactorGraph?: boolean;
   readonly allowMissingShards?: boolean;
 }): ExtractionReplayOccurrence {
   const shards = inspectOccurrenceShards(input);
@@ -181,6 +183,7 @@ function auditOccurrenceShards(
       created_at: input.occurrence.sourceObservedAt,
       source_observed_at: input.occurrence.sourceObservedAt,
       require_source_observed_at: true,
+      require_semantic_factor_graph: input.requireSemanticFactorGraph === true,
       signal_id_for: (index) => replayScopedId(
         "signal", `${input.occurrence.id}:${batchIndex}:${index}`
       )

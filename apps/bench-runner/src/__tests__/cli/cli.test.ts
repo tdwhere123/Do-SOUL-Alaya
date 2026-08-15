@@ -50,6 +50,7 @@ describe("bench-runner CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(stdoutBuf).toContain("extraction-fill");
+    expect(stdoutBuf).toContain("recover-extraction-attempt-ledger");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
     expect(stdoutBuf).toContain("--experiment");
     expect(stdoutBuf).toContain("--legacy-manifest-sha256 <sha>");
@@ -58,6 +59,13 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--direct-deepseek-500-operator <operator>");
     expect(stdoutBuf).toContain("--direct-newapi-deepseek-500-operator <operator>");
     expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
+  });
+
+  it("dispatches interrupted extraction ledger recovery", async () => {
+    expect(await runCli(["recover-extraction-attempt-ledger"])).toBe(2);
+    expect(stderrBuf).toContain(
+      "recover-extraction-attempt-ledger: --extraction-cache-root <path> required"
+    );
   });
 
   it("documents the extraction cache audit", async () => {

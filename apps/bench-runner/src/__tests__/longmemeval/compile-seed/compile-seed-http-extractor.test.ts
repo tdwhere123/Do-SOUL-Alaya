@@ -42,7 +42,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
   }
 
-  it("adds disabled thinking only for the explicit non-thinking profile", async () => {
+  it("sends the compatible reasoning controls for the explicit non-thinking profile", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
     );
@@ -55,6 +55,8 @@ describe("createGardenHttpExtractor retry policy", () => {
     await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.reasoning_effort).toBe("none");
+    expect(body.enable_thinking).toBe(false);
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
@@ -77,7 +79,7 @@ describe("createGardenHttpExtractor retry policy", () => {
       .toBe("provider-model-alias");
   });
 
-  it("leaves thinking absent for the provider-default profile", async () => {
+  it("leaves reasoning controls absent for the provider-default profile", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
     );
@@ -89,6 +91,8 @@ describe("createGardenHttpExtractor retry policy", () => {
     await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("enable_thinking");
     expect(body).not.toHaveProperty("thinking");
   });
 
@@ -427,45 +431,39 @@ describe("createGardenHttpExtractor retry policy", () => {
   // tick the test would time out.
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
   it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
-    // Fetch that resolves only when the abort signal fires. timeoutMs=20ms
-    // ensures the per-attempt timer triggers fast; the goal is to prove the
-    // abort path WIRES through to the fetch signal and exits the await.
-    // First attempt times out, then second attempt times out — exhausts the
-    // 1-timeout-retry budget and surfaces failure_timeout.
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
-      (_input, init) =>
-        new Promise<Response>((_, reject) => {
-          const signal = (init as RequestInit | undefined)?.signal as
-            | AbortSignal
-            | undefined;
-          signal?.addEventListener("abort", () => {
-            reject(new Error("The user aborted a request."));
-          });
-        })
-    );
-    const sleep = vi.fn(async () => undefined);
-    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
-      fetch: fetchMock,
-      sleep,
-      random: () => 0
-    });
-    let thrown: unknown = null;
+    vi.useFakeTimers();
     try {
-      await extractor.extract({
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal as
+              | AbortSignal
+              | undefined;
+            signal?.addEventListener("abort", () => {
+              reject(new Error("The user aborted a request."));
+            });
+          })
+      );
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
         systemPrompt: "s",
         userPrompt: "t",
-        timeoutMs: 20
+        timeoutMs: 60_000
       });
-    } catch (error) {
-      thrown = error;
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      await rejection;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(thrown).toBeInstanceOf(Error);
-    const benchRetry = (thrown as {
-      benchRetry?: { retryCount: number; retryClassification: string };
-    }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_timeout");
-    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES).
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // invariant: root-cause regression. The previous test's fetch rejects when
@@ -479,34 +477,32 @@ describe("createGardenHttpExtractor retry policy", () => {
   // failure_timeout within budget.
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
   it("settles a never-resolving fetch that ignores its abort signal via the timeout backstop", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      // Never settles and never reads the signal — the stalled-socket shape.
-      .mockImplementation(() => new Promise<Response>(() => {}));
-    const sleep = vi.fn(async () => undefined);
-    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
-      fetch: fetchMock,
-      sleep,
-      random: () => 0
-    });
-    let thrown: unknown = null;
+    vi.useFakeTimers();
     try {
-      await extractor.extract({
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        // Never settles and never reads the signal — the stalled-socket shape.
+        .mockImplementation(() => new Promise<Response>(() => {}));
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
         systemPrompt: "s",
         userPrompt: "t",
-        timeoutMs: 20
+        timeoutMs: 60_000
       });
-    } catch (error) {
-      thrown = error;
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      await rejection;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(thrown).toBeInstanceOf(Error);
-    const benchRetry = (thrown as {
-      benchRetry?: { retryCount: number; retryClassification: string };
-    }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_timeout");
-    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES);
-    // each attempt is forced to settle by the backstop rather than hanging.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // invariant: an operator abort (input.abortSignal) must settle the attempt

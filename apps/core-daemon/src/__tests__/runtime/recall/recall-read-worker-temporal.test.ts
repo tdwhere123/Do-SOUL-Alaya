@@ -14,9 +14,11 @@ import {
   SqlitePathRelationRepo,
   SqliteRelationAssertionRepo,
   SqliteRunRepo,
+  SqliteSoftAssociationPathRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
+import { createBoundRecallPathReadPorts } from "../../../runtime/recall/recall-path-read-bind.js";
 import { createRecallTemporalProjectionEnsurer } from "../../../runtime/recall/recall-path-readers.js";
 import {
   closeDaemonSqliteWriteQueue,
@@ -90,7 +92,7 @@ describe("selected temporal recall read worker", () => {
     }
   });
 
-  it("uses only the selected temporal projection for worker path reads", async () => {
+  it("keeps governed soft associations consistent across direct and worker path reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-test-"));
     const databasePath = join(directory, "alaya.db");
     const database = await openDaemonDatabase(databasePath);
@@ -111,6 +113,14 @@ describe("selected temporal recall read worker", () => {
       await memoryRepo.create(createMemoryEntry(sourceMemoryId, "Temporal source memory"));
       await memoryRepo.create(createMemoryEntry(targetMemoryId, "Temporal target memory"));
       pathRelationRepo.create(createLegacyPathRelation());
+      const softAssociation = createSoftAssociationPathRelation();
+      new SqliteSoftAssociationPathRepo(database).create(softAssociation);
+      await expect(createBoundRecallPathReadPorts({
+        database,
+        pathReadBind: "temporal"
+      }).pathExpansionPort.findByAnchors(workspaceId, [
+        { kind: "object", object_id: sourceMemoryId }
+      ])).resolves.toEqual([softAssociation]);
       database.close();
 
       const legacyClient = createRecallReadWorkerClient({
@@ -123,7 +133,10 @@ describe("selected temporal recall read worker", () => {
       try {
         await expect(legacyClient.pathExpansionPort.findByAnchors(workspaceId, [
           { kind: "object", object_id: sourceMemoryId }
-        ])).resolves.toMatchObject([{ path_id: "legacy-path-temporal" }]);
+        ])).resolves.toMatchObject([
+          { path_id: "legacy-path-temporal" },
+          { path_id: softAssociation.path_id }
+        ]);
       } finally {
         await legacyClient.close();
       }
@@ -145,7 +158,7 @@ describe("selected temporal recall read worker", () => {
       try {
         await expect(selectedClient.pathExpansionPort.findByAnchors(workspaceId, [
           { kind: "object", object_id: sourceMemoryId }
-        ])).resolves.toEqual([]);
+        ])).resolves.toEqual([softAssociation]);
       } finally {
         await selectedClient.close();
       }
@@ -406,5 +419,20 @@ function createLegacyPathRelation(): PathRelation {
     },
     created_at: "2026-07-17T00:00:00.000Z",
     updated_at: "2026-07-17T00:00:00.000Z"
+  };
+}
+
+function createSoftAssociationPathRelation(): PathRelation {
+  return {
+    ...createLegacyPathRelation(),
+    path_id: "soft-association-worker",
+    constitution: {
+      relation_kind: "co_recalled",
+      why_this_relation_exists: ["earned co-recall"]
+    },
+    legitimacy: {
+      evidence_basis: ["recalls_edge_co_usage"],
+      governance_class: "attention_only"
+    }
   };
 }

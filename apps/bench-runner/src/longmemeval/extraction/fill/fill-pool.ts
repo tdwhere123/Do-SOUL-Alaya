@@ -7,24 +7,19 @@ import type {
   BenchTerminalRetryClassification,
   CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
-import {
-  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS,
-  EXTRACTION_REQUEST_TIMEOUT_MS
-} from "../../compile-seed/compile-seed-http.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { createAdaptiveConcurrencyController } from "../adaptive-concurrency.js";
 import type { AdaptiveConcurrencyReleaseOutcome } from "../adaptive-concurrency.js";
-import { EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD } from
-  "../authority/receipt-limits.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import { readFillRetryTelemetry } from "./fill-stats.js";
+import {
+  EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
+  resolveExtractionFillProviderTimeBudget
+} from "./policy/provider-time-budget.js";
+
+export { EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS };
 
 type FillTaskRetryClassification = BenchTerminalRetryClassification | "unknown";
-
-const EXTRACTION_FILL_PROVIDER_WALL_CLOCK_GRACE_MS = 30_000;
-export const EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS =
-  EXTRACTION_REQUEST_TIMEOUT_MS * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD +
-  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS + EXTRACTION_FILL_PROVIDER_WALL_CLOCK_GRACE_MS;
 
 export class ExtractionFillTaskError extends Error {
   readonly exitCode = 1;
@@ -156,10 +151,11 @@ async function extractTurn(
   transport: ExtractionPoolInput["transport"]
 ): Promise<number> {
   let rateLimitRetries = 0;
+  const timeBudget = resolveExtractionFillProviderTimeBudget(transport?.maxOutputTokens);
   const provider = new OfficialApiGardenProvider({
     apiKey: "extraction-fill-injected",
-    requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
-    wallClockBudgetMs: EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
+    requestTimeoutMs: timeBudget.requestTimeoutMs,
+    wallClockBudgetMs: timeBudget.providerWallClockBudgetMs,
     diagnosticDir: null,
     extractor: {
       extract: async (request) => {

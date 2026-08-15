@@ -8,6 +8,7 @@ import type {
   EventLogRepo,
   PathRelationRepo
 } from "@do-soul/alaya-storage";
+import { mergePathRelationsByIdentity } from "../../runtime/recall/path-relation-identity-merge.js";
 
 export type GraphHealthStatus = "healthy" | "degraded";
 export type GraphHealthWarning = "path_relations_empty";
@@ -24,6 +25,10 @@ export interface GraphHealthSnapshot {
 
 export interface GraphHealthService {
   getStatus(workspaceId: string): Promise<GraphHealthSnapshot>;
+}
+
+interface SoftAssociationPathHealthRepo {
+  findActiveByWorkspace(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 // invariant: every PATH_RELATION_* event that mutates path lifecycle/topology
@@ -52,12 +57,14 @@ const SPARSE_GRAPH_HINT =
 // path_relations_by_kind groups active relations by constitution.relation_kind.
 export function createGraphHealthService(deps: {
   readonly pathRelationRepo: Pick<PathRelationRepo, "findByWorkspace">;
+  readonly softAssociationPathRepo: SoftAssociationPathHealthRepo;
   readonly eventLogRepo: Pick<EventLogRepo, "queryByWorkspaceAndType">;
 }): GraphHealthService {
   return Object.freeze({
     getStatus: async (workspaceId: string): Promise<GraphHealthSnapshot> => {
-      const [pathRelations, pathEventBatches] = await Promise.all([
+      const [pathRelations, softAssociationPaths, pathEventBatches] = await Promise.all([
         deps.pathRelationRepo.findByWorkspace(workspaceId),
+        deps.softAssociationPathRepo.findActiveByWorkspace(workspaceId),
         Promise.all(
           PATH_RELATION_EVENT_TYPES.map(
             async (eventType) => await deps.eventLogRepo.queryByWorkspaceAndType(workspaceId, eventType)
@@ -65,7 +72,10 @@ export function createGraphHealthService(deps: {
         )
       ]);
 
-      const activePathRelations = pathRelations.filter(isActivePathRelation);
+      const activePathRelations = mergePathRelationsByIdentity(
+        pathRelations.filter(isActivePathRelation),
+        softAssociationPaths.filter(isActivePathRelation)
+      );
       const byKind: Record<string, number> = {};
       for (const relation of activePathRelations) {
         const kind = relation.constitution.relation_kind;

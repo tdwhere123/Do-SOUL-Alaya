@@ -27,8 +27,8 @@ import {
   type OfficialApiSignalDraft
 } from "./official-api-signal-parser.js";
 import {
-  normalizeSourceObservedAt,
-  selectObservedTemporalProjection
+  inspectObservedTemporalProjection,
+  normalizeSourceObservedAt
 } from "./temporal/observed-projection.js";
 import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
 import {
@@ -73,6 +73,7 @@ export {
   type OfficialApiSignalFormationAuditResult
 } from "./official-api/formation-audit.js";
 export {
+  OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
@@ -282,11 +283,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     );
     const groundedDraft = grounding.draft;
     const confidence = clampConfidence(groundedDraft.confidence);
-    const temporalProjection = grounding.status === "grounded"
-      ? selectObservedTemporalProjection(
+    const temporalSelection = grounding.status === "grounded"
+      ? inspectObservedTemporalProjection(
           groundedDraft.matched_text,
           groundedDraft.temporal_projection,
-          context.source_observed_at
+          context.source_observed_at,
+          groundedDraft.temporal_projection_audit
         )
       : undefined;
     try {
@@ -299,11 +301,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         turnMessages: context.turn_messages,
         groundingSourceText,
         confidence,
-        temporalProjection,
+        temporalProjection: temporalSelection?.projection,
+        temporalProjectionAudit: temporalSelection?.audit,
         distilledFact: groundedDraft.distilled_fact,
         providerKind: this.provider_kind,
         signalId: this.generateSignalId(),
         createdAt,
+        sourceObservedAt: normalizeSourceObservedAt(context.source_observed_at) ?? createdAt,
         sourceGrounding: grounding.audit
       }));
     } catch (error) {
@@ -406,7 +410,7 @@ function parseBoundedBatchSignals(
   rawJson: string,
   request: OfficialApiExtractionRequest
 ): readonly OfficialApiSignalDraft[] {
-  const drafts = parseOfficialApiSignals(rawJson);
+  const drafts = parseOfficialApiSignals(rawJson, { requireSemanticFactorGraph: true });
   const allowedIds = new Set(request.source_assertions.map(({ assertion_id }) => assertion_id));
   if (drafts.some(({ source_locator }) =>
     source_locator !== undefined && !allowedIds.has(source_locator.assertion_id)

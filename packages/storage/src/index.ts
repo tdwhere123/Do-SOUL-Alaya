@@ -177,6 +177,10 @@ export {
   type PathRelationRepo
 } from "./repos/path/index.js";
 export {
+  SqliteSoftAssociationPathRepo,
+  type SoftAssociationPathReadOptions
+} from "./repos/path/index.js";
+export {
   assertRelationProjectionCurrent,
   digestRelationFormationEventSource,
   isLegacyPathIndexUnbound,

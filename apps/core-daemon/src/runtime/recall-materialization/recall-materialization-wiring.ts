@@ -317,19 +317,22 @@ function createDirectRecallPathReadPorts(
       temporalPathProjectionReader: new SqliteTemporalPathProjectionReader(
         input.relationAssertionRepo
       ),
+      softAssociationPathReader: input.softAssociationPathRepo,
       ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
     });
   }
   if (bindTemporalPathReads) {
     return createPreparedTemporalRecallPathReadPorts(
-      new SqliteTemporalPathProjectionReader(input.relationAssertionRepo)
+      new SqliteTemporalPathProjectionReader(input.relationAssertionRepo),
+      input.softAssociationPathRepo
     );
   }
   return createRecallPathReadPorts({
     legacyPathReader: wrapLegacyPathReaderForIndexHealth(
       input.pathRelationRepo,
       () => isLegacyPathIndexUnbound(input.database) ? "index_unavailable" : "ready"
-    )
+    ),
+    softAssociationPathReader: input.softAssociationPathRepo
   });
 }
 

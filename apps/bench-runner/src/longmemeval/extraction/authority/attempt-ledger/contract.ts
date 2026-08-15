@@ -87,7 +87,8 @@ export function readAttemptLedgerRecordEnvelope(path: string): {
 
 export function persistAttemptLedgerRecord(
   path: string,
-  record: ExtractionAttemptLedgerRecord
+  record: ExtractionAttemptLedgerRecord,
+  temporaryDirectory: string = dirname(dirname(path))
 ): void {
   assertStoredAttemptLedgerRecord(record);
   const directory = dirname(path);
@@ -96,7 +97,7 @@ export function persistAttemptLedgerRecord(
     destination: path,
     bytes: serializeLedger(record),
     ownerIdentity: record.lineage_digest,
-    temporaryDirectory: dirname(directory)
+    temporaryDirectory
   });
 }
 

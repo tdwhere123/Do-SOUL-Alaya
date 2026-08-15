@@ -12,7 +12,6 @@ import {
 import {
   findActiveConstraints,
   SqliteRecallRoutingKeyProjectionRepo,
-  SqliteTemporalPathProjectionReader,
   type EvidenceSearchMatch
 } from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
@@ -29,11 +28,10 @@ import {
 import { createRecallUtilizationService } from "../../services/status/recall-utilization-service.js";
 import { createGlobalMemoryRecallCachePort } from "../daemon/lifecycle/daemon-runtime-support.js";
 import {
-  createTemporalGraphExplorePathReader,
   type RecallPathProjectionReadOptions,
   type RecallPathReadPorts
 } from "../recall/recall-path-readers.js";
-import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
+import { createRecallGraphExplorePathReader } from "../recall/recall-graph-path-reader.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 export function createRecallUtilizationRuntime(input: CreateRecallMaterializationWiringInput) {
@@ -273,23 +271,12 @@ function createRecallService(input: {
 }
 
 function createRecallGraphSupportPort(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<CreateRecallMaterializationWiringInput, "eventLogRepo">,
   directPathReadPorts: RecallPathReadPorts
 ) {
-  if (resolveRecallPathReadBind({
-    database: input.database,
-    pathReadBind: input.pathReadBind
-  }) !== "temporal") {
-    return input.graphExploreService;
-  }
-  const temporalReader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
   const createGraphService = (options: RecallPathProjectionReadOptions = {}) =>
     new GraphExploreService({
-      pathRepo: createTemporalGraphExplorePathReader(
-        temporalReader,
-        directPathReadPorts.ensureTemporalProjection,
-        options
-      ),
+      pathRepo: createRecallGraphExplorePathReader(directPathReadPorts, options),
       eventLogRepo: input.eventLogRepo
     });
   return {
@@ -315,6 +302,10 @@ function createRecallGraphSupportPort(
     ) => await createGraphService(options).countInboundRecallMetricsByMemoryId(memoryIds, workspaceId)
   };
 }
+
+export const recallMaterializationRecallRuntimeTestInternals = Object.freeze({
+  createRecallGraphSupportPort
+});
 
 function withEmbeddingWarmupHoldAnnotation(
   service: RecallService,

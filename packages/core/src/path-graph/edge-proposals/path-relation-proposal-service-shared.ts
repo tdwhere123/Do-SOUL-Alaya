@@ -134,7 +134,8 @@ export interface PathRelationProposalRepoPort {
   create(relation: PathRelation): Readonly<PathRelation>;
   findByAnchorMemoryId?(
     memoryId: string,
-    workspaceId: string
+    workspaceId: string,
+    relationKind: string
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 

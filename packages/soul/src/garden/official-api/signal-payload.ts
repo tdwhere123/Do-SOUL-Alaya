@@ -14,6 +14,7 @@ import {
 import { buildSchemaGroundedRawPayload } from "../schema-grounding.js";
 import { buildOfficialApiVerifiedUserAssertionSource } from "../grounding/source-locator.js";
 import type { OfficialApiSourceGroundingAudit } from "./source-grounding.js";
+import { projectOfficialApiTimeConcern } from "./time-concern-projection.js";
 
 export function buildOfficialCandidateSignal(input: {
   readonly draft: OfficialApiSignalDraft;
@@ -25,10 +26,12 @@ export function buildOfficialCandidateSignal(input: {
   readonly groundingSourceText: string;
   readonly confidence: number;
   readonly temporalProjection: OfficialApiSignalDraft["temporal_projection"];
+  readonly temporalProjectionAudit?: OfficialApiSignalDraft["temporal_projection_audit"];
   readonly distilledFact: string | undefined;
   readonly providerKind: GardenProviderKind;
   readonly signalId: string;
   readonly createdAt: string;
+  readonly sourceObservedAt: string;
   readonly sourceGrounding: OfficialApiSourceGroundingAudit;
 }): Record<string, unknown> {
   const { draft } = input;
@@ -65,11 +68,26 @@ function buildOfficialRawPayload(
     input.groundingSourceText
   );
   const sourceLocator = verifiedSource?.source_locator ?? draft.source_locator;
+  const timeConcern = projectOfficialApiTimeConcern({
+    sourceAssertion: input.sourceGrounding.status === "grounded"
+      ? input.sourceGrounding.source_assertion
+      : input.groundingSourceText,
+    sourceObservedAt: input.sourceObservedAt,
+    temporalProjection: input.temporalProjection
+  });
   return {
     matched_text: draft.matched_text,
     ...(sourceLocator === undefined ? {} : { source_locator: sourceLocator }),
+    ...(draft.object_kind_projection === undefined ? {} : {
+      object_kind_projection: draft.object_kind_projection
+    }),
     ...(input.distilledFact === undefined ? {} : { distilled_fact: input.distilledFact }),
     ...(input.temporalProjection === undefined ? {} : { temporal_projection: input.temporalProjection }),
+    ...(input.temporalProjectionAudit === undefined ? {} : {
+      temporal_projection_audit: input.temporalProjectionAudit
+    }),
+    ...(timeConcern.payload === undefined ? {} : { time_concern: timeConcern.payload }),
+    time_concern_projection_audit: timeConcern.audit,
     ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
     ...(draft.fact_frame === undefined ? {} : { fact_frame: draft.fact_frame }),
     ...(draft.semantic_factor_graph === undefined

@@ -27,6 +27,10 @@ describe("official API preference profile grounding", () => {
       }
     }).compile(SOURCE, CONTEXT);
 
+    expect(signal).toMatchObject({
+      signal_kind: "potential_preference",
+      object_kind: "preference"
+    });
     expect(signal?.raw_payload.preference_profile).toEqual({
       projection_schema_version: 1,
       preference_subject: "operator",

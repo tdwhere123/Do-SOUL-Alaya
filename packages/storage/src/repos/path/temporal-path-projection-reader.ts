@@ -1,5 +1,6 @@
 import {
   serializePathAnchorRef,
+  timeConcernWindowDigestsMatch,
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
@@ -58,12 +59,12 @@ export class SqliteTemporalPathProjectionReader {
     windowDigests: readonly string[],
     options: TemporalProjectionReadOptions = {}
   ): Promise<readonly Readonly<PathRelation>[]> {
-    const requested = new Set(windowDigests);
-    if (requested.size === 0) return Object.freeze([]);
+    if (windowDigests.length === 0) return Object.freeze([]);
     const paths = await this.readProjection(workspaceId, options.asOf);
     return Object.freeze(paths.filter((path) =>
       [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-        anchor.kind === "time_concern" && requested.has(anchor.window_digest)
+        anchor.kind === "time_concern" && windowDigests.some((digest) =>
+          timeConcernWindowDigestsMatch(anchor.window_digest, digest))
       )
     ));
   }

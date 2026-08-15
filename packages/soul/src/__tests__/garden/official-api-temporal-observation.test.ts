@@ -57,6 +57,85 @@ describe("official Garden temporal observation contract", () => {
     }));
 
     expect(draft?.temporal_projection).toBeUndefined();
+    expect(draft?.temporal_projection_audit).toEqual({
+      status: "rejected",
+      reason: "temporal_projection_invalid"
+    });
+  });
+
+  it("accepts an open valid-time nomination before source verification", () => {
+    const [draft] = parseOfficialApiSignals(temporalEnvelope({
+      projection_schema_version: 1,
+      valid_from: "2024-03-01",
+      time_precision: "month",
+      time_source: "explicit"
+    }, "I have worked at Acme since March 2024."));
+
+    expect(draft?.temporal_projection).toMatchObject({
+      valid_from: "2024-03-01T00:00:00.000Z",
+      time_precision: "month",
+      time_source: "explicit"
+    });
+  });
+
+  it("persists source-verified open valid time and its formation receipt", async () => {
+    const source = "I have worked at Acme since March 2024.";
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
+        projection_schema_version: 1,
+        valid_from: "2024-03-01",
+        time_precision: "month",
+        time_source: "explicit"
+      }, source)),
+      generateSignalId: () => "signal-valid-time"
+    });
+
+    const [signal] = await provider.compile(source, createContext());
+
+    expect(signal?.raw_payload.temporal_projection).toEqual({
+      projection_schema_version: 1,
+      valid_from: "2024-03-01T00:00:00.000Z",
+      time_precision: "month",
+      time_source: "explicit"
+    });
+    expect(signal?.raw_payload.temporal_projection_audit).toEqual({
+      status: "formed",
+      reason: "valid_time_source_verified"
+    });
+  });
+
+  it("rejects an ungrounded valid-time role without manufacturing validity", async () => {
+    const source = "I traveled from March 2024 to April 2024.";
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
+        projection_schema_version: 1,
+        valid_from: "2024-03-01",
+        time_precision: "month",
+        time_source: "explicit"
+      }, source)),
+      generateSignalId: () => "signal-invalid-valid-time"
+    });
+
+    const [signal] = await provider.compile(source, createContext());
+
+    expect(signal?.raw_payload.temporal_projection).toMatchObject({
+      event_time_start: "2024-03-01T00:00:00.000Z",
+      event_time_end: "2024-04-30T23:59:59.999Z",
+      time_precision: "range",
+      time_source: "explicit"
+    });
+    expect(signal?.raw_payload.temporal_projection).not.toHaveProperty("valid_from");
+    expect(signal?.raw_payload.temporal_projection_audit).toEqual({
+      status: "rejected",
+      reason: "valid_time_role_not_source_grounded"
+    });
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      proposed_temporal_projection: {
+        valid_from: "2024-03-01T00:00:00.000Z"
+      }
+    });
   });
 
   it("derives relative time from source observation after raw extraction", async () => {

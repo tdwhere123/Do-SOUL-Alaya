@@ -202,6 +202,7 @@ function analyzeExtractionCache(input: {
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile,
     occurrences,
+    requireSemanticFactorGraph: true,
     allowMissingShards: true
   });
   const decision = decideExtractionCacheCompatibility({

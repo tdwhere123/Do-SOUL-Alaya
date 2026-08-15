@@ -161,6 +161,7 @@ async function createDaemonFoundationWiring(
     eventLogRepo: repositories.eventLogRepo,
     workspaceEngineConfigRepo: repositories.workspaceEngineConfigRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    softAssociationPathRepo: repositories.softAssociationPathRepo,
     bootstrappingRecordRepo: repositories.bootstrappingRecordRepo,
     configRepo: repositories.configRepo,
     trustStateRepo: repositories.trustStateRepo,

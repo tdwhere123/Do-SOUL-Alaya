@@ -140,6 +140,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       return {};
     }),
     createSignalEmissionWriter: vi.fn(() => ({})),
+    createMemoryObjectKeyWriter: vi.fn(() => ({
+      materializeForMemory: vi.fn()
+    })),
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
       recall: vi.fn(async () => []),
       // anchor: index.ts createAlayaDaemonRuntime subscribes the recall port

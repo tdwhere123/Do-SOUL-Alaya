@@ -16,7 +16,6 @@ import {
   directionEligiblePathExpansionTargets,
   firstTimeConcernSeedId,
   isPathExcludedFromRecall,
-  normalizeTimeConcernWindowDigest,
   pathAnchorFacetKey,
   pathMatchesTimeConcernWindowDigest,
   pathRelationMemoryIds,
@@ -24,6 +23,7 @@ import {
   scorePathRelationSuppression,
   uniqueStrings
 } from "./path-relations.js";
+import { resolveTimeConcernQueryDigests } from "./time-concern-query-digests.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
@@ -107,7 +107,10 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   if (findByTimeConcernWindowDigests === undefined || params.queryProbes.date_terms.length === 0) {
     return 0;
   }
-  const windowDigests = collectTimeConcernWindowDigests(params.queryProbes);
+  const windowDigests = resolveTimeConcernQueryDigests(
+    params.queryProbes.date_terms,
+    params.pathProjectionAsOf
+  );
   if (windowDigests.length === 0) {
     return 0;
   }
@@ -258,16 +261,6 @@ function buildMemoryPathExpansionSource(
     relation_kind: path.constitution.relation_kind,
     facet_key: pathAnchorFacetKey(path)
   });
-}
-
-function collectTimeConcernWindowDigests(
-  queryProbes: Readonly<RecallQueryProbes>
-): readonly string[] {
-  return uniqueStrings(
-    queryProbes.date_terms
-      .map((term) => normalizeTimeConcernWindowDigest(term))
-      .filter((term) => term.length > 0)
-  );
 }
 
 async function loadTimeConcernPathExpansionPaths(

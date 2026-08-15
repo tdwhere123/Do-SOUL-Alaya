@@ -61,6 +61,7 @@ export type DaemonServiceFoundationInput = {
   | "eventLogRepo"
   | "workspaceEngineConfigRepo"
   | "pathRelationRepo"
+  | "softAssociationPathRepo"
   | "bootstrappingRecordRepo"
   | "configRepo"
   | "trustStateRepo"

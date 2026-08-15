@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
 import {
   GardenProviderError,
   GardenProviderKind,
@@ -67,8 +68,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("evidence_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("source_memory_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Preserve relative-date meaning");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("temporal_projection");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("preference_profile");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("temporal_projection");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("preference_profile");
   });
 
   it("carries official synthesis evidence and source refs into first-class signal fields", async () => {
@@ -165,6 +166,17 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         event_time_end: "2026-03-19T23:59:59.999Z",
         time_precision: "day",
         time_source: "explicit"
+      },
+      time_concern: {
+        matched_text: "2026-03-19",
+        window_digest: createTimeConcernWindowDigest(
+          "2026-03-19T00:00:00.000Z",
+          "2026-03-19T23:59:59.999Z"
+        )
+      },
+      time_concern_projection_audit: {
+        status: "formed",
+        reason: "source_temporal_term_verified"
       }
     });
     expect(
@@ -361,7 +373,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       expect(warn).toHaveBeenCalledWith(
         "garden/compute-provider: dropped one official-API signal",
         expect.objectContaining({
-          runId: "run-1", signalKind: "potential_semantic_observation"
+          runId: "run-1", signalKind: "potential_claim"
         })
       );
     } finally {
@@ -432,7 +444,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       );
       expect(signals).toHaveLength(4);
       expect(signals.map((s) => s.object_kind)).toEqual(
-        Array.from({ length: 4 }, () => "open_semantic_observation")
+        ["open_semantic_observation", "decision", "fact", "open_semantic_observation"]
       );
     } finally {
       warn.mockRestore();

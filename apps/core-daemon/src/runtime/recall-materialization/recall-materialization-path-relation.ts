@@ -53,6 +53,7 @@ type PathRelationRuntimeInput = Pick<
   | "memoryEntryRepo"
   | "pathFailureHealthInboxPort"
   | "pathRelationRepo"
+  | "softAssociationPathRepo"
   | "proposalRepo"
   | "relationProjectionAdmissionMode"
   | "relationAssertionRepo"
@@ -226,15 +227,20 @@ function createPathRelationProposalService(
     | "memoryEntryRepo"
     | "pathFailureHealthInboxPort"
     | "pathRelationRepo"
+    | "softAssociationPathRepo"
     | "warn"
   >,
   runtimeConfig: ReturnType<typeof readPathRelationRuntimeConfig>
 ) {
   return new PathRelationProposalService({
     repo: {
-      create: (relation) => input.pathRelationRepo.create(relation),
-      findByAnchorMemoryId: async (memoryId, workspaceId) =>
-        await input.pathRelationRepo.findByBackingObjectId(workspaceId, memoryId)
+      create: (relation) => relation.constitution.relation_kind === "co_recalled"
+        ? input.softAssociationPathRepo.create(relation)
+        : input.pathRelationRepo.create(relation),
+      findByAnchorMemoryId: async (memoryId, workspaceId, relationKind) =>
+        relationKind === "co_recalled"
+          ? await input.softAssociationPathRepo.findByBackingObjectId(workspaceId, memoryId)
+          : await input.pathRelationRepo.findByBackingObjectId(workspaceId, memoryId)
     },
     counterStore: input.coUsageCounterRepo,
     memoryExistence: {

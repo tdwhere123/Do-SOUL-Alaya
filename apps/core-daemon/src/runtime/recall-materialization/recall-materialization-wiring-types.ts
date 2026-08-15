@@ -28,6 +28,7 @@ import type {
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
   SqliteRelationAssertionRepo,
+  SqliteSoftAssociationPathRepo,
   SqliteProposalRepo,
   SqliteReconciliationLeaseRepo,
   SqliteSignalRepo,
@@ -54,6 +55,7 @@ export type CreateRecallMaterializationWiringInput = {
   readonly healthJournalService: HealthJournalService;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly softAssociationPathRepo: SqliteSoftAssociationPathRepo;
   readonly relationAssertionRepo: SqliteRelationAssertionRepo;
   readonly manifestationBudgetConfigProvider: ManifestationBudgetConfigProviderPort;
   readonly projectMappingService: ProjectMappingService;

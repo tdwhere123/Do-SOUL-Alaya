@@ -39,6 +39,8 @@ import { decideExtractionCacheCompatibility } from
   "../../../../longmemeval/extraction/cache-audit/compatibility.js";
 import { buildExtractionCacheAuditReceipt } from
   "../../../../longmemeval/extraction/cache-audit/receipt.js";
+import { verifyCommittedAuditedExtractionCacheSuccessor } from
+  "../../../../longmemeval/extraction/cache-audit/target-materializer.js";
 import { computeExtractionKeySetSha256 } from
   "../../../../longmemeval/extraction/content-closure.js";
 import { runExtractionFill } from
@@ -168,6 +170,8 @@ function setEnvironment(options: CatalogRefillSuccessorOptions): void {
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:E0_TEST_GARDEN_KEY");
   vi.stubEnv("E0_TEST_GARDEN_KEY", "test-key");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_PROVIDER_URL", undefined);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", undefined);
   if (options.alternateTransport !== undefined) {
     if (options.alternateTransport.providerUrl !== undefined) {
       vi.stubEnv(
@@ -380,14 +384,27 @@ async function issueMaterializedSuccessorSelection(roots: ReturnType<typeof crea
     "--data-dir", roots.dataDir, "--pinned-meta-root", roots.pinnedMetaRoot
   ]);
   if (code !== 0) {
+    const detail = await diagnoseSuccessorSelectionFailure(roots);
     throw new Error(
-      "materialized successor transport or supplemental verification failed before refill"
+      `materialized successor transport or supplemental verification failed before refill: ${detail}`
     );
   }
   roots.selectionPath = join(roots.root, "successor-target-selection.json");
   return JSON.parse(readFileSync(roots.selectionPath, "utf8")) as {
     readonly receipt_digest: string;
   };
+}
+
+async function diagnoseSuccessorSelectionFailure(
+  roots: ReturnType<typeof createRoots>
+): Promise<string> {
+  try {
+    verifyCommittedAuditedExtractionCacheSuccessor({ targetRoot: roots.targetRoot });
+    await inspect(roots, roots.targetRoot);
+    return "immediate successor verification and authority inspection both passed";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function commandArgs(fixture: Pick<CatalogRefillSuccessorFixture,

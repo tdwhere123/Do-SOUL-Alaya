@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
+  OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
   resolveOfficialApiSystemPrompt
 } from "../../garden/compute-provider.js";
@@ -55,14 +56,29 @@ describe("official API system prompt", () => {
     );
   });
 
-  it("defines one open semantic proposal instead of fixed world categories", () => {
+  it("keeps open semantic factors while freezing bounded durable projections", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"semantic_factor_graph"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"binding_identity":OPEN_NAME');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit character spans");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("not a fixed role list");
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"canonical_entities"');
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"preference_profile"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      `response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}`
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      '"object_kind" must be exactly one of: preference, decision, constraint'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      'Do not include "signal_kind"; the runtime derives it deterministically'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"canonical_entities"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"temporal_projection"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"valid_from"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Never copy event time into valid time");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_profile"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_subject"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_polarity"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"evidence_polarity"');
   });
 
   it("defines confidence as a bounded JSON number rather than a label", () => {
@@ -71,6 +87,15 @@ describe("official API system prompt", () => {
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       'never a string label such as "high", "medium", or "low"'
+    );
+  });
+
+  it("requires direct compact output without analysis", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "Do not output analysis or reasoning. Emit the JSON object immediately"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "Do not repeat source text outside matched_text or semantic_factor_graph surfaces."
     );
   });
 

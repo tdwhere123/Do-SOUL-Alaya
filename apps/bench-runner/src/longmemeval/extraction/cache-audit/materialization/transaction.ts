@@ -120,8 +120,10 @@ function commitMaterializationTransaction(input: {
       input.binding.max_shard_bytes
     );
   }
+  const observedCommittedAt = requireTimestamp(input.input.now());
   const commit = buildMaterializationCommit({
-    journal: input.journal, committedAt: requireTimestamp(input.input.now()),
+    journal: input.journal,
+    committedAt: timestampNotBefore(observedCommittedAt, input.journal.created_at),
     targetManifestSha256: input.manifestSha256
   });
   writeExclusiveMaterializationRecord(
@@ -134,6 +136,10 @@ function commitMaterializationTransaction(input: {
   triggerMaterializationTestSigkillAfter("journal-unlinked");
   assertExactTargetTree(input.targetRoot, input.binding.shards, "committed");
   return commit;
+}
+
+function timestampNotBefore(observed: string, lowerBound: string): string {
+  return Date.parse(observed) < Date.parse(lowerBound) ? lowerBound : observed;
 }
 
 function materializationBinding(input: Parameters<typeof runMaterializationTransaction>[0],

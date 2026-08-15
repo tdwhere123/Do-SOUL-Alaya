@@ -34,6 +34,19 @@ describe("createGardenHttpExtractor — output-token retries", () => {
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
   });
 
+  it("uses the authorized ceiling for a retry-disabled probe", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({
+      choices: [{ message: { content: '{"signals":[]}' }, finish_reason: "stop" }]
+    }));
+
+    await createExtractor(fetchMock).extract({
+      ...extractionInput(),
+      retryMode: "disabled"
+    });
+
+    expect(requestTokenCaps(fetchMock)).toEqual([4096]);
+  });
+
   it.each([
     [429, "rate limit"],
     [503, "server failure"]

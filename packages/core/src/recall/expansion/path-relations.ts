@@ -1,5 +1,7 @@
 import {
   isPathRecallEligible,
+  normalizeTimeConcernWindowDigest as normalizeProtocolTimeConcernWindowDigest,
+  timeConcernWindowDigestsMatch,
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
@@ -228,13 +230,13 @@ export function pathMatchesTimeConcernWindowDigest(
   path: Readonly<PathRelation>,
   windowDigests: readonly string[]
 ): boolean {
-  const queryDigests = new Set(windowDigests);
   return [
     path.anchors.source_anchor,
     path.anchors.target_anchor
   ].some((anchor) =>
     anchor.kind === "time_concern" &&
-    queryDigests.has(normalizeTimeConcernWindowDigest(anchor.window_digest))
+    windowDigests.some((digest) =>
+      timeConcernWindowDigestsMatch(anchor.window_digest, digest))
   );
 }
 
@@ -242,13 +244,13 @@ export function firstTimeConcernSeedId(
   path: Readonly<PathRelation>,
   windowDigests: readonly string[]
 ): string {
-  const queryDigests = new Set(windowDigests);
   const anchor = [
     path.anchors.source_anchor,
     path.anchors.target_anchor
   ].find((candidate) =>
     candidate.kind === "time_concern" &&
-    queryDigests.has(normalizeTimeConcernWindowDigest(candidate.window_digest))
+    windowDigests.some((digest) =>
+      timeConcernWindowDigestsMatch(candidate.window_digest, digest))
   );
   return anchor?.kind === "time_concern"
     ? `time_concern:${normalizeTimeConcernWindowDigest(anchor.window_digest)}`
@@ -256,7 +258,7 @@ export function firstTimeConcernSeedId(
 }
 
 export function normalizeTimeConcernWindowDigest(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, "_");
+  return normalizeProtocolTimeConcernWindowDigest(value);
 }
 
 export function anchorMemoryId(anchor: PathAnchorRef): string | undefined {

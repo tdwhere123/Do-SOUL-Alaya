@@ -1,11 +1,11 @@
 import {
-  getPathAnchorBackingObjectId,
   isPathActiveForRecall,
-  serializePathAnchorRef,
+  timeConcernWindowDigestsMatch,
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { normalizeRecallTimeConcernWindowDigest } from "../garden-wiring/garden-compute-support.js";
+import { mergePathRelationsByIdentity } from "./path-relation-identity-merge.js";
 
 export type RecallPathProjectionReadOptions = Readonly<{
   readonly asOf?: string;
@@ -107,22 +107,15 @@ export interface TemporalRecallPathProjectionReader {
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
-export interface TemporalGraphExplorePathReader {
+export interface SoftAssociationRecallPathReader {
   findByAnchors(
     workspaceId: string,
-    anchorRefs: readonly PathAnchorRef[]
+    anchorRefs: readonly PathAnchorRef[],
+    options?: RecallPathProjectionReadOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
-  findByTargetAnchor(
+  findActiveByWorkspace(
     workspaceId: string,
-    anchorRef: PathAnchorRef
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findByBackingObjectId(
-    workspaceId: string,
-    objectId: string
-  ): Promise<readonly Readonly<PathRelation>[]>;
-  findByBackingObjectIds(
-    workspaceId: string,
-    objectIds: readonly string[]
+    options?: RecallPathProjectionReadOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
@@ -156,12 +149,14 @@ export interface RecallPathReadPorts {
 type SelectedPathReader = Readonly<{
   readonly kind: "selected";
   readonly reader: TemporalRecallPathProjectionReader;
+  readonly softAssociationReader?: SoftAssociationRecallPathReader;
   readonly ensureTemporalProjection: RecallTemporalProjectionEnsurer;
 }>;
 
 type LegacyPathReader = Readonly<{
   readonly kind: "legacy";
   readonly reader: LegacyRecallPathReader;
+  readonly softAssociationReader?: SoftAssociationRecallPathReader;
 }>;
 
 type PathReaderMode = SelectedPathReader | LegacyPathReader;
@@ -174,6 +169,7 @@ const projectionAlreadyPrepared: RecallTemporalProjectionEnsurer = async () => u
 export function createRecallPathReadPorts(input: {
   readonly temporalProjectionSelected?: boolean;
   readonly legacyPathReader?: LegacyRecallPathReader;
+  readonly softAssociationPathReader?: SoftAssociationRecallPathReader;
   readonly temporalPathProjectionReader?: TemporalRecallPathProjectionReader;
   readonly ensureTemporalProjection?: RecallTemporalProjectionEnsurer;
 }): RecallPathReadPorts {
@@ -190,7 +186,14 @@ function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPath
     options: RecallPathProjectionReadOptions = {}
   ) => {
     await mode.ensureTemporalProjection(options);
-    return await mode.reader.findByAnchors(workspaceId, anchorRefs, options);
+    const temporal = await mode.reader.findByAnchors(workspaceId, anchorRefs, options);
+    if (mode.softAssociationReader === undefined) return temporal;
+    const associative = await mode.softAssociationReader.findByAnchors(
+      workspaceId,
+      anchorRefs,
+      options
+    );
+    return mergePathRelationsByIdentity(temporal, eligibleAssociativePaths(associative, options));
   };
   const findByTimeConcernWindowDigests: FindByTimeConcernWindowDigests = async (
     workspaceId: string,
@@ -209,7 +212,13 @@ function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPath
   const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId, options = {}) => {
     await mode.ensureTemporalProjection(options);
     const paths = await mode.reader.findByWorkspace(workspaceId, options);
-    return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+    const temporal = paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+    if (mode.softAssociationReader === undefined) return temporal;
+    const associative = await mode.softAssociationReader.findActiveByWorkspace(
+      workspaceId,
+      options
+    );
+    return mergePathRelationsByIdentity(temporal, eligibleAssociativePaths(associative, options));
   };
   return buildRecallPathReadPorts({
     findByAnchors,
@@ -220,25 +229,41 @@ function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPath
 }
 
 function createLegacyRecallPathReadPorts(mode: LegacyPathReader): RecallPathReadPorts {
-  const findByAnchors: FindByAnchors = async (workspaceId, anchorRefs) =>
-    await mode.reader.findByAnchors(workspaceId, anchorRefs);
+  const findByAnchors: FindByAnchors = async (workspaceId, anchorRefs, options = {}) => {
+    const legacy = (await mode.reader.findByAnchors(workspaceId, anchorRefs))
+      .filter((path) => isPathActiveForRecall(path.lifecycle.status));
+    if (mode.softAssociationReader === undefined) return legacy;
+    const associative = await mode.softAssociationReader.findByAnchors(
+      workspaceId,
+      anchorRefs,
+      options
+    );
+    return mergePathRelationsByIdentity(legacy, eligibleAssociativePaths(associative, options));
+  };
   const findByTimeConcernWindowDigests: FindByTimeConcernWindowDigests = async (
     workspaceId,
     windowDigests
   ) => {
     const normalizedWindowDigests = windowDigests.map(normalizeRecallTimeConcernWindowDigest);
-    const normalized = new Set(normalizedWindowDigests);
     const paths = await mode.reader.findByWorkspaceAll(workspaceId);
     return paths.filter((path) =>
       isPathActiveForRecall(path.lifecycle.status) &&
       [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
         anchor.kind === "time_concern" &&
-        normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
+        normalizedWindowDigests.some((digest) =>
+          timeConcernWindowDigestsMatch(anchor.window_digest, digest))
       )
     );
   };
-  const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId) =>
-    await mode.reader.findActiveAll(workspaceId);
+  const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId, options = {}) => {
+    const legacy = await mode.reader.findActiveAll(workspaceId);
+    if (mode.softAssociationReader === undefined) return legacy;
+    const associative = await mode.softAssociationReader.findActiveByWorkspace(
+      workspaceId,
+      options
+    );
+    return mergePathRelationsByIdentity(legacy, eligibleAssociativePaths(associative, options));
+  };
   return buildRecallPathReadPorts({
     findByAnchors,
     findByTimeConcernWindowDigests,
@@ -277,52 +302,23 @@ function buildRecallPathReadPorts(input: Readonly<{
 }
 
 export function createPreparedTemporalRecallPathReadPorts(
-  temporalPathProjectionReader: TemporalRecallPathProjectionReader
+  temporalPathProjectionReader: TemporalRecallPathProjectionReader,
+  softAssociationPathReader?: SoftAssociationRecallPathReader
 ): RecallPathReadPorts {
   // The daemon parent prepares the projection before dispatch, so a worker
   // connection stays query-only while reusing the canonical read transforms.
   return createSelectedRecallPathReadPorts({
     kind: "selected",
     reader: temporalPathProjectionReader,
+    softAssociationReader: softAssociationPathReader,
     ensureTemporalProjection: projectionAlreadyPrepared
-  });
-}
-
-export function createTemporalGraphExplorePathReader(
-  reader: TemporalRecallPathProjectionReader,
-  ensureTemporalProjection: RecallTemporalProjectionEnsurer,
-  options: RecallPathProjectionReadOptions = {}
-): TemporalGraphExplorePathReader {
-  return Object.freeze({
-    findByAnchors: async (
-      workspaceId: string,
-      anchorRefs: readonly PathAnchorRef[]
-    ) => {
-      await ensureTemporalProjection(options);
-      return await reader.findByAnchors(workspaceId, anchorRefs, options);
-    },
-    findByTargetAnchor: async (workspaceId: string, anchorRef: PathAnchorRef) => {
-      await ensureTemporalProjection(options);
-      const anchorKey = serializePathAnchorRef(anchorRef);
-      const paths = await reader.findByAnchors(workspaceId, [anchorRef], options);
-      return paths.filter((path) =>
-        serializePathAnchorRef(path.anchors.target_anchor) === anchorKey
-      );
-    },
-    findByBackingObjectId: async (workspaceId: string, objectId: string) => {
-      await ensureTemporalProjection(options);
-      return await findTemporalPathsByBackingObjectIds(reader, workspaceId, new Set([objectId]), options);
-    },
-    findByBackingObjectIds: async (workspaceId: string, objectIds: readonly string[]) => {
-      await ensureTemporalProjection(options);
-      return await findTemporalPathsByBackingObjectIds(reader, workspaceId, new Set(objectIds), options);
-    }
   });
 }
 
 function selectPathReader(input: {
   readonly temporalProjectionSelected?: boolean;
   readonly legacyPathReader?: LegacyRecallPathReader;
+  readonly softAssociationPathReader?: SoftAssociationRecallPathReader;
   readonly temporalPathProjectionReader?: TemporalRecallPathProjectionReader;
   readonly ensureTemporalProjection?: RecallTemporalProjectionEnsurer;
 }): PathReaderMode {
@@ -336,13 +332,37 @@ function selectPathReader(input: {
     return Object.freeze({
       kind: "selected",
       reader: input.temporalPathProjectionReader,
+      softAssociationReader: input.softAssociationPathReader,
       ensureTemporalProjection: input.ensureTemporalProjection
     });
   }
   if (input.legacyPathReader === undefined) {
     throw new Error("legacy recall requires a legacy path reader");
   }
-  return Object.freeze({ kind: "legacy", reader: input.legacyPathReader });
+  return Object.freeze({
+    kind: "legacy",
+    reader: input.legacyPathReader,
+    softAssociationReader: input.softAssociationPathReader
+  });
+}
+
+function eligibleAssociativePaths(
+  paths: readonly Readonly<PathRelation>[],
+  options: RecallPathProjectionReadOptions
+): readonly Readonly<PathRelation>[] {
+  const asOfMs = options.asOf === undefined ? Number.POSITIVE_INFINITY : Date.parse(options.asOf);
+  return paths.filter((path) =>
+    path.constitution.relation_kind === "co_recalled" &&
+    path.anchors.source_anchor.kind === "object" &&
+    path.anchors.target_anchor.kind === "object" &&
+    path.effect_vector.recall_bias > 0 &&
+    isPathActiveForRecall(path.lifecycle.status) &&
+    path.legitimacy.governance_class === "attention_only" &&
+    path.legitimacy.evidence_basis.length === 1 &&
+    path.legitimacy.evidence_basis[0] === "recalls_edge_co_usage" &&
+    Date.parse(path.created_at) <= asOfMs &&
+    Date.parse(path.updated_at) <= asOfMs
+  );
 }
 
 async function findPathPlasticityStrengths(input: {
@@ -404,20 +424,4 @@ function getDirectionEligibleObjectAnchorMemoryIds(
     memoryIds.add(targetAnchor.object_id);
   }
   return [...memoryIds];
-}
-
-async function findTemporalPathsByBackingObjectIds(
-  reader: TemporalRecallPathProjectionReader,
-  workspaceId: string,
-  objectIds: ReadonlySet<string>,
-  options: RecallPathProjectionReadOptions
-): Promise<readonly Readonly<PathRelation>[]> {
-  if (objectIds.size === 0) {
-    return Object.freeze([]);
-  }
-  const paths = await reader.findByWorkspace(workspaceId, options);
-  return paths.filter((path) =>
-    objectIds.has(getPathAnchorBackingObjectId(path.anchors.source_anchor)) ||
-    objectIds.has(getPathAnchorBackingObjectId(path.anchors.target_anchor))
-  );
 }

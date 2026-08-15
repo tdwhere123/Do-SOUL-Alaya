@@ -81,6 +81,7 @@ export * from "./soul/extension-descriptors.js";
 export * from "./soul/extension-descriptor-parsers.js";
 export * from "./soul/canonical-alias.js";
 export * from "./soul/path-anchor-identity.js";
+export * from "./soul/time-concern-window-digest.js";
 export * from "./soul/path-anchor-normalization.js";
 export * from "./soul/compute-routing.js";
 export * from "./soul/consolidation-types.js";

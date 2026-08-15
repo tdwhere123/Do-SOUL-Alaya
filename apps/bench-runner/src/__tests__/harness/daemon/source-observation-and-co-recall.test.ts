@@ -91,9 +91,10 @@ interface CoRecalledPathRow {
 }
 
 // invariant: read the recalls-tier co_recalled paths the bench co-recall hub
-// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
-// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
-// the durable row, not from a re-import of the predicate.
+// mints into the governed soft-association projection. recall_bias +
+// lifecycle_status are what isPathRecallEligible gates on (active lifecycle
+// AND recall_bias > 0), so the test asserts eligibility from the durable row,
+// not from a re-import of the predicate.
 // see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
 function readCoRecalledPathRelations(
   db: BenchDatabase,
@@ -106,7 +107,7 @@ function readCoRecalledPathRelations(
               json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
               json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
               json_extract(legitimacy_json, '$.governance_class')       AS governance_class
-         FROM path_relations
+         FROM soft_association_path_relations
         WHERE workspace_id = ?
           AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
     )

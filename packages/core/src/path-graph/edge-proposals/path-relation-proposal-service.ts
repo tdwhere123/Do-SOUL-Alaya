@@ -326,7 +326,11 @@ export class PathRelationProposalService {
   private async materialize(params: MaterializePathRelationInput): Promise<PathMintOutcome> {
     const sourceId = getPathAnchorBackingObjectId(params.sourceAnchor);
     if (this.deps.repo.findByAnchorMemoryId !== undefined) {
-      const existing = await this.deps.repo.findByAnchorMemoryId(sourceId, params.workspaceId);
+      const existing = await this.deps.repo.findByAnchorMemoryId(
+        sourceId,
+        params.workspaceId,
+        params.relationKind
+      );
       const alreadyLinked = existing.some((relation) =>
         pathRelationMatchesIdentity(relation, {
           sourceAnchor: params.sourceAnchor,

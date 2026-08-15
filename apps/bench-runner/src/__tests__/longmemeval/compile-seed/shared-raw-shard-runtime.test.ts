@@ -203,6 +203,27 @@ function signal(assertionId: number, matchedText: string) {
       contract_version: 2,
       kind: "assertion_catalog",
       assertion_id: assertionId
+    },
+    semantic_factor_graph: {
+      schema_version: 1,
+      source_kind: "evidence",
+      factors: [{
+        factor_id: "f0",
+        surface: matchedText,
+        semantic_identity: matchedText.toLowerCase()
+      }],
+      variables: [],
+      result_variable_ids: [],
+      propositions: [{
+        proposition_id: "p0",
+        predicate_factor_id: "f0",
+        arguments: [{
+          position: 0,
+          binding_identity: `assertion-${assertionId}`,
+          reference_kind: "factor",
+          reference_id: "f0"
+        }]
+      }]
     }
   };
 }

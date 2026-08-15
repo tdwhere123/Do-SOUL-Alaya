@@ -73,6 +73,7 @@ function buildRecallPersistenceInput(input: RecallCoreStartupInput) {
   return {
     memoryEntryRepo: repositories.memoryEntryRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    softAssociationPathRepo: repositories.softAssociationPathRepo,
     relationAssertionRepo: repositories.relationAssertionRepo,
     claimFormRepo: repositories.claimFormRepo,
     coUsageCounterRepo: repositories.coUsageCounterRepo,

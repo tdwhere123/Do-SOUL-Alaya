@@ -233,6 +233,7 @@ function createKnowledgeGraphRuntime(input: DaemonServiceFoundationInput) {
     }),
     graphHealthService: createGraphHealthService({
       pathRelationRepo: input.pathRelationRepo,
+      softAssociationPathRepo: input.softAssociationPathRepo,
       eventLogRepo: input.eventLogRepo
     }),
     graphContractService: new GraphContractService({

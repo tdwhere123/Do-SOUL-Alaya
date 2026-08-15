@@ -32,6 +32,8 @@ afterEach(() => {
 
 describe("catalog-refill successor target-only rejection", () => {
   it("accepts preserved pristine ledger and resume history", async () => {
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_PROVIDER_URL", "https://ambient.invalid/v1");
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", "ambient-transport-model");
     fixture = await createCatalogRefillSuccessorFixture();
     addPristineHistory(fixture);
 

@@ -113,7 +113,7 @@ async function extractGardenHttpSignals(
   input: GardenHttpExtractInput
 ): Promise<GardenHttpExtractResult> {
   const apiKey = requireGardenApiKey(config);
-  let useOutputTokenCeiling = false;
+  let useOutputTokenCeiling = input.retryMode === "disabled";
   let responseSchemaRetryInstruction: string | null = null;
   const retry = await runGardenHttpRetryLoop({
     maxRetries: input.retryMode === "disabled" ? 0 : BENCH_HTTP_MAX_RETRIES,

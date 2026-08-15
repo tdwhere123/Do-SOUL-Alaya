@@ -5,6 +5,7 @@ import {
   isTemporalProjectionSelected,
   SqlitePathRelationRepo,
   SqliteRelationAssertionRepo,
+  SqliteSoftAssociationPathRepo,
   SqliteTemporalPathProjectionReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -35,14 +36,16 @@ export function createBoundRecallPathReadPorts(input: {
 }): RecallPathReadPorts {
   if (resolveRecallPathReadBind(input) === "temporal") {
     return createPreparedTemporalRecallPathReadPorts(
-      new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(input.database))
+      new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(input.database)),
+      new SqliteSoftAssociationPathRepo(input.database)
     );
   }
   return createRecallPathReadPorts({
     legacyPathReader: wrapLegacyPathReaderForIndexHealth(
       new SqlitePathRelationRepo(input.database),
       () => isLegacyPathIndexUnbound(input.database) ? "index_unavailable" : "ready"
-    )
+    ),
+    softAssociationPathReader: new SqliteSoftAssociationPathRepo(input.database)
   });
 }
 

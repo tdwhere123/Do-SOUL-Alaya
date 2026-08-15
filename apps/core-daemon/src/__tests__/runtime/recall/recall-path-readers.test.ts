@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { SignalEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
+import {
+  SignalEventType,
+  createTimeConcernWindowDigest,
+  type EventLogEntry,
+  type PathRelation
+} from "@do-soul/alaya-protocol";
 import { EventPublisher, RelationAssertionService, stableStringify } from "@do-soul/alaya-core";
 import {
   initDatabase,
@@ -14,7 +19,6 @@ import {
 } from "@do-soul/alaya-storage";
 import {
   createRecallTemporalProjectionEnsurer,
-  createTemporalGraphExplorePathReader,
   createRecallPathReadPorts
 } from "../../../runtime/recall/recall-path-readers.js";
 
@@ -65,17 +69,30 @@ describe("createRecallPathReadPorts", () => {
   });
 
   it("uses an explicit legacy reader on the lower helper when no temporal reader is supplied", async () => {
+    const association = createSoftAssociationPath("path-legacy-soft", "memory-c");
+    const dormantDuplicate = {
+      ...association,
+      path_id: "path-legacy-dormant",
+      lifecycle: { ...association.lifecycle, status: "dormant" as const }
+    };
     const legacy = {
-      findByAnchors: vi.fn(async () => [path]),
+      findByAnchors: vi.fn(async () => [path, dormantDuplicate]),
       findByWorkspaceAll: vi.fn(async () => [path]),
       findActiveAll: vi.fn(async () => [path])
     };
+    const softAssociation = {
+      findByAnchors: vi.fn(async () => [association]),
+      findActiveByWorkspace: vi.fn(async () => [association])
+    };
 
-    const ports = createRecallPathReadPorts({ legacyPathReader: legacy });
+    const ports = createRecallPathReadPorts({
+      legacyPathReader: legacy,
+      softAssociationPathReader: softAssociation
+    });
 
     await expect(ports.pathExpansionPort.findByAnchors(workspaceId, [
       { kind: "object", object_id: "memory-a" }
-    ])).resolves.toEqual([path]);
+    ])).resolves.toEqual([path, association]);
     await expect(ports.pathExpansionPort.findByTimeConcernWindowDigests(
       workspaceId,
       ["next week"]
@@ -85,7 +102,38 @@ describe("createRecallPathReadPorts", () => {
     expect(legacy.findByWorkspaceAll).toHaveBeenCalledWith(workspaceId);
   });
 
-  it("uses only temporal projections for selected expansion, time concerns, and plasticity", async () => {
+  it("matches canonical interval overlap through the legacy reader", async () => {
+    const dayPath = createPathRelation({
+      anchors: {
+        source_anchor: { kind: "object", object_id: "memory-a" },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "memory-a",
+          window_digest: createTimeConcernWindowDigest(
+            "2026-03-19T00:00:00.000Z",
+            "2026-03-19T23:59:59.999Z"
+          )
+        }
+      }
+    });
+    const ports = createRecallPathReadPorts({
+      legacyPathReader: {
+        findByAnchors: vi.fn(async () => []),
+        findByWorkspaceAll: vi.fn(async () => [dayPath]),
+        findActiveAll: vi.fn(async () => [dayPath])
+      }
+    });
+
+    await expect(ports.pathExpansionPort.findByTimeConcernWindowDigests(
+      workspaceId,
+      [createTimeConcernWindowDigest(
+        "2026-03-01T00:00:00.000Z",
+        "2026-03-31T23:59:59.999Z"
+      )]
+    )).resolves.toEqual([dayPath]);
+  });
+
+  it("keeps legacy truth out while overlaying bounded co-recall associations", async () => {
     const legacy = {
       findByAnchors: vi.fn(async () => {
         throw new Error("legacy reader must not be called after selection");
@@ -97,15 +145,36 @@ describe("createRecallPathReadPorts", () => {
         throw new Error("legacy reader must not be called after selection");
       })
     };
+    const coRecalled = createSoftAssociationPath("path-co-recalled-overlay", "memory-c");
+    const temporalDuplicate = createSoftAssociationPath("path-temporal-duplicate", "memory-d");
+    const softDuplicate = createSoftAssociationPath("path-soft-duplicate", "memory-d");
     const temporal = {
-      findByAnchors: vi.fn(async () => [path]),
+      findByAnchors: vi.fn(async () => [path, temporalDuplicate]),
       findByTimeConcernWindowDigests: vi.fn(async () => [path]),
-      findByWorkspace: vi.fn(async () => [path])
+      findByWorkspace: vi.fn(async () => [path, temporalDuplicate])
+    };
+    const futureCoRecalled = {
+      ...coRecalled,
+      path_id: "path-future-co-recalled",
+      created_at: "2026-07-18T00:00:00.000Z"
+    };
+    const ignoredLegacyTruth = createPathRelation({ path_id: "path-legacy-truth" });
+    const softAssociation = {
+      findByAnchors: vi.fn(async () => [
+        coRecalled, softDuplicate, futureCoRecalled, ignoredLegacyTruth
+      ]),
+      findActiveByWorkspace: vi.fn(async () => [
+        coRecalled,
+        softDuplicate,
+        futureCoRecalled,
+        ignoredLegacyTruth
+      ])
     };
     const ensureTemporalProjection = vi.fn(async () => undefined);
     const ports = createRecallPathReadPorts({
       temporalProjectionSelected: true,
       legacyPathReader: legacy,
+      softAssociationPathReader: softAssociation,
       temporalPathProjectionReader: temporal,
       ensureTemporalProjection
     });
@@ -115,7 +184,7 @@ describe("createRecallPathReadPorts", () => {
       workspaceId,
       [{ kind: "object", object_id: "memory-a" }],
       options
-    )).resolves.toEqual([path]);
+    )).resolves.toEqual([path, temporalDuplicate, coRecalled]);
     await expect(ports.pathExpansionPort.findByTimeConcernWindowDigests(
       workspaceId,
       ["next week"],
@@ -126,7 +195,9 @@ describe("createRecallPathReadPorts", () => {
       ["memory-a"],
       options
     )).resolves.toEqual(new Map([["memory-a", 0.8]]));
-    await expect(ports.findActiveByWorkspace(workspaceId, options)).resolves.toEqual([path]);
+    await expect(ports.findActiveByWorkspace(workspaceId, options)).resolves.toEqual([
+      path, temporalDuplicate, coRecalled
+    ]);
 
     expect(temporal.findByAnchors).toHaveBeenLastCalledWith(
       workspaceId,
@@ -143,6 +214,8 @@ describe("createRecallPathReadPorts", () => {
     expect(ensureTemporalProjection).toHaveBeenLastCalledWith(options);
     expect(legacy.findByAnchors).not.toHaveBeenCalled();
     expect(legacy.findByWorkspaceAll).not.toHaveBeenCalled();
+    expect(softAssociation.findByAnchors).toHaveBeenCalledTimes(2);
+    expect(softAssociation.findActiveByWorkspace).toHaveBeenCalledOnce();
   });
 
   it("fails closed when selected mode has no temporal projection reader", () => {
@@ -160,45 +233,6 @@ describe("createRecallPathReadPorts", () => {
         findByWorkspace: async () => []
       }
     })).toThrow("selected temporal projection requires an assertion projection ensurer");
-  });
-
-  it("derives graph lookups from the temporal projection without a legacy reader", async () => {
-    const sourceOnlyPath = createPathRelation({
-      path_id: "path-source-only",
-      anchors: {
-        source_anchor: path.anchors.target_anchor,
-        target_anchor: { kind: "object", object_id: "memory-c" }
-      }
-    });
-    const temporal = {
-      findByAnchors: vi.fn(async () => [path, sourceOnlyPath]),
-      findByTimeConcernWindowDigests: vi.fn(async () => [path]),
-      findByWorkspace: vi.fn(async () => [path])
-    };
-    const options = { asOf: "2026-07-16T00:00:00.000Z" };
-    const ensureTemporalProjection = vi.fn(async () => undefined);
-    const graphReader = createTemporalGraphExplorePathReader(
-      temporal,
-      ensureTemporalProjection,
-      options
-    );
-
-    await expect(graphReader.findByTargetAnchor(workspaceId, {
-      kind: "time_concern",
-      source_object_id: "memory-a",
-      window_digest: "next_week"
-    })).resolves.toEqual([path]);
-    await expect(graphReader.findByBackingObjectIds!(workspaceId, ["memory-a"])).resolves.toEqual([path]);
-    await expect(graphReader.findByBackingObjectId(workspaceId, "memory-b")).resolves.toEqual([]);
-
-    expect(temporal.findByAnchors).toHaveBeenCalledWith(
-      workspaceId,
-      [path.anchors.target_anchor],
-      options
-    );
-    expect(temporal.findByWorkspace).toHaveBeenCalledTimes(2);
-    expect(temporal.findByWorkspace).toHaveBeenLastCalledWith(workspaceId, options);
-    expect(ensureTemporalProjection).toHaveBeenCalledTimes(3);
   });
 
   it("rebuilds current and exact historical selected projections in the direct fallback", async () => {
@@ -434,5 +468,25 @@ function createPathRelation(overrides: Partial<PathRelation> = {}): PathRelation
     },
     created_at: "2026-07-17T00:00:00.000Z",
     updated_at: "2026-07-17T00:00:00.000Z"
+  };
+}
+
+function createSoftAssociationPath(pathId: string, targetObjectId: string): PathRelation {
+  return {
+    ...createPathRelation({
+      path_id: pathId,
+      anchors: {
+        source_anchor: { kind: "object", object_id: "memory-a" },
+        target_anchor: { kind: "object", object_id: targetObjectId }
+      },
+      constitution: {
+        relation_kind: "co_recalled",
+        why_this_relation_exists: ["earned co-recall"]
+      }
+    }),
+    legitimacy: {
+      evidence_basis: ["recalls_edge_co_usage"],
+      governance_class: "attention_only"
+    }
   };
 }

@@ -1,134 +1,13 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
 
-import { tmpdir } from "node:os";
-
-import { join } from "node:path";
-
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import {
-  initDatabase,
-  SqliteGardenTaskRepo,
-  SqliteSignalRepo,
-  type GardenTaskEventPublisherPort
-} from "@do-soul/alaya-storage";
-
-import {
-  GardenRole,
-  GardenTaskKind,
-  SignalSource,
-  isPathRecallEligible,
-  mapRelationKindToGraphEdgeType,
-  type GardenClaimTaskResponse
-} from "@do-soul/alaya-protocol";
-
-import {
-  BENCH_DAEMON_MANAGED_ENV_KEYS,
-  type BenchDaemonHandle,
-  type BenchSignalSeedInput
-} from "../../../harness/daemon.js";
+import type { BenchDaemonHandle } from "../../../harness/daemon.js";
 
 import { withBenchDaemon } from "./bench-daemon.test-support.js";
-
-import {
-  closeBenchDaemonResources,
-  optimizeBenchDb,
-  resolveBenchReviewerCredentials
-} from "../../../harness/daemon/daemon-support.js";
-
-import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../../../harness/embedding/co-recall-warmup.js";
 
 import {
   BenchRecallDiagnosticsSchema,
   type BenchRecallDiagnostics
 } from "../../../harness/recall/recall-diagnostics-schema.js";
-
-import {
-  createCompileSeedRunner,
-  type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
-
-const handles: BenchDaemonHandle[] = [];
-
-const tmpRoots: string[] = [];
-
-type BenchDatabase = ReturnType<typeof initDatabase>;
-
-interface DerivesFromPathRow {
-  readonly relation_kind: string;
-  readonly source_object_id: string;
-  readonly target_object_id: string;
-  readonly recall_bias: number;
-}
-
-// invariant: signal-ref edges fold into governed path_relations rows.
-// These helpers read the path-candidate side (derives_from for
-// source_memory_refs) and confirm the old edge_proposals sink stays empty.
-function readDerivesFromPathRelation(
-  db: BenchDatabase,
-  sourceObjectId: string,
-  targetObjectId: string
-): DerivesFromPathRow | undefined {
-  return db.connection
-    .prepare(
-      `SELECT json_extract(constitution_json, '$.relation_kind')        AS relation_kind,
-              json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
-              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
-              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias
-         FROM path_relations
-        WHERE json_extract(anchors_json, '$.source_anchor.object_id') = ?
-          AND json_extract(anchors_json, '$.target_anchor.object_id') = ?
-          AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
-    )
-    .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
-}
-
-interface CoRecalledPathRow {
-  readonly source_object_id: string;
-  readonly target_object_id: string;
-  readonly recall_bias: number;
-  readonly lifecycle_status: string;
-  readonly governance_class: string;
-}
-
-// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
-// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
-// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
-// the durable row, not from a re-import of the predicate.
-// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
-function readCoRecalledPathRelations(
-  db: BenchDatabase,
-  workspaceId: string
-): readonly CoRecalledPathRow[] {
-  return db.connection
-    .prepare(
-      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
-              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
-              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
-              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
-              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
-         FROM path_relations
-        WHERE workspace_id = ?
-          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
-    )
-    .all(workspaceId) as readonly CoRecalledPathRow[];
-}
-
-function edgeProposalCount(
-  db: BenchDatabase,
-  sourceMemoryId: string,
-  targetMemoryId: string
-): number {
-  const row = db.connection
-    .prepare(
-      `SELECT COUNT(*) AS n
-         FROM edge_proposals
-        WHERE source_memory_id = ?
-          AND target_memory_id = ?`
-    )
-    .get(sourceMemoryId, targetMemoryId) as { readonly n: number };
-  return row.n;
-}
 
 // invariant: re-parse the recall handle's `diagnostics: unknown` field through
 // the SAME BenchRecallDiagnosticsSchema the harness already applied internally,
@@ -147,19 +26,6 @@ function findCandidateDiagnostic(
   const parsed = BenchRecallDiagnosticsSchema.parse(diagnostics);
   return parsed.candidates.find((candidate) => candidate.object_id === objectId);
 }
-
-function snapshotManagedEnv(): Record<string, string | undefined> {
-  return Object.fromEntries(BENCH_DAEMON_MANAGED_ENV_KEYS.map((key) => [key, process.env[key]]));
-}
-
-afterEach(async () => {
-  for (const h of handles.splice(0)) {
-    await h.shutdown().catch(() => undefined);
-  }
-  for (const root of tmpRoots.splice(0)) {
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
   it(
@@ -282,6 +148,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
               "path_expansion"
             );
             expect(negativeSiblingDiag.per_stream_rank.path_expansion).toBeNull();
+            expect(negativeSiblingDiag.per_stream_rank.graph_expansion).toBeNull();
           }
         }
       );

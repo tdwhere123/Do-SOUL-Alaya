@@ -91,7 +91,10 @@ export function createMaterializerFixture(options: MaterializerFixtureOptions = 
 
 export function materialize(
   fixture: ReturnType<typeof createMaterializerFixture>,
-  options: { readonly maxShardBytes?: number } = {}
+  options: {
+    readonly maxShardBytes?: number;
+    readonly now?: () => string;
+  } = {}
 ) {
   return materializeAuditedExtractionCacheTarget({
     sourceRoot: fixture.sourceRoot,
@@ -100,8 +103,10 @@ export function materialize(
     inventory: fixture.inventory,
     targetSelection: fixture.targetSelection,
     auditedSourceManifestRaw: fixture.sourceManifestRaw,
-    now: () => "2026-08-12T00:00:00.000Z",
-    ...options
+    now: options.now ?? (() => "2026-08-12T00:00:00.000Z"),
+    ...(options.maxShardBytes === undefined
+      ? {}
+      : { maxShardBytes: options.maxShardBytes })
   });
 }
 

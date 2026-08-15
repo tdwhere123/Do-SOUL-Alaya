@@ -48,6 +48,23 @@ describe("extraction cache compatibility", () => {
     expect(result.projection.reasons).toContain("formation_semantics_mismatch");
   });
 
+  it("rebuilds raw observations when the frozen signal-contract prompt changes", () => {
+    const source = identity();
+    const result = decideExtractionCacheCompatibility({
+      sourceRoot: "/cache/canonical",
+      source,
+      final: {
+        ...source,
+        raw: { ...source.raw, systemPromptSha256: "9".repeat(64) }
+      },
+      replay: completeReplay()
+    });
+
+    expect(result.raw.action).toBe("rebuild");
+    expect(result.raw.reasons).toContain("system_prompt_mismatch");
+    expect(result.projection.reasons).toContain("raw_cache_rebuild");
+  });
+
   it("blocks projection reuse without invalidating closed raw observations", () => {
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",

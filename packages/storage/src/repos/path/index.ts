@@ -39,6 +39,10 @@ export {
   type TemporalProjectionReadOptions
 } from "./temporal-path-projection-reader.js";
 export {
+  SqliteSoftAssociationPathRepo,
+  type SoftAssociationPathReadOptions
+} from "./soft-association/index.js";
+export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo

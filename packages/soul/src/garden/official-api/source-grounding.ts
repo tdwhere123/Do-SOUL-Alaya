@@ -22,6 +22,7 @@ interface OfficialApiSourceGroundingProposal {
   readonly proposed_distilled_fact?: string;
   readonly proposed_canonical_entities?: readonly string[];
   readonly proposed_preference_profile?: OfficialApiPreferenceProfileDraft;
+  readonly proposed_temporal_projection?: OfficialApiSignalDraft["temporal_projection"];
   readonly proposed_fact_frame?: OfficialApiSignalDraft["fact_frame"];
   readonly proposed_semantic_factor_graph?: OfficialApiSignalDraft["semantic_factor_graph"];
   readonly reasons: readonly string[];
@@ -145,6 +146,9 @@ function buildGroundedAudit(
     ...(draft.distilled_fact === undefined ? {} : { proposed_distilled_fact: draft.distilled_fact }),
     ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
     ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
+    ...(draft.temporal_projection === undefined ? {} : {
+      proposed_temporal_projection: draft.temporal_projection
+    }),
     ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
     ...(draft.semantic_factor_graph === undefined
       ? {}
@@ -194,6 +198,9 @@ function rejectedGrounding(
       ...(draft.distilled_fact === undefined ? {} : { proposed_distilled_fact: draft.distilled_fact }),
       ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
       ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
+      ...(draft.temporal_projection === undefined ? {} : {
+        proposed_temporal_projection: draft.temporal_projection
+      }),
       ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
       ...(draft.semantic_factor_graph === undefined
         ? {}

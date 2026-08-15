@@ -29,7 +29,11 @@ export function buildGardenHttpRequestInit(
         [input.outputTokenField ?? "max_tokens"]: input.maxOutputTokens
       }),
       ...(config.requestProfile === "deepseek-v4-nonthinking-v1"
-        ? { thinking: { type: "disabled" } }
+        ? {
+          reasoning_effort: "none",
+          enable_thinking: false,
+          thinking: { type: "disabled" }
+        }
         : {}),
       messages: [
         { role: "system", content: input.systemPrompt },

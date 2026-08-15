@@ -7,6 +7,8 @@ import { assertExtractionTargetSelectionRootBinding } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
 import { inspectExtractionCacheInventory } from
   "../../../longmemeval/extraction/cache-audit/inventory.js";
+import { verifyCommittedAuditedExtractionCacheSuccessor } from
+  "../../../longmemeval/extraction/cache-audit/target-materializer.js";
 import {
   cleanupMaterializerFixtures,
   createMaterializerFixture,
@@ -58,6 +60,23 @@ describe("audited extraction cache target materializer", () => {
       kind: "longmemeval-extraction-cache-materialization",
       materialized_key_count: 3,
       target_selection_receipt_digest: fixture.targetSelection.receipt_digest
+    });
+  });
+
+  it("keeps commit time valid when the wall clock moves backward", () => {
+    const fixture = createMaterializerFixture();
+    const timestamps = [
+      "2026-08-12T00:00:00.300Z",
+      "2026-08-12T00:00:00.100Z"
+    ];
+
+    materialize(fixture, { now: () => timestamps.shift()! });
+
+    expect(verifyCommittedAuditedExtractionCacheSuccessor({
+      targetRoot: fixture.targetRoot
+    })).toMatchObject({
+      created_at: "2026-08-12T00:00:00.300Z",
+      committed_at: "2026-08-12T00:00:00.300Z"
     });
   });
 });

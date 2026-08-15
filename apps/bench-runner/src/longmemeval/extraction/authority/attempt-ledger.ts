@@ -186,6 +186,7 @@ export function discardPristineForkedExtractionAttemptLedger(input: {
 
 export function openExtractionAttemptLedger(input: {
   readonly cacheRoot: string;
+  readonly publicationTemporaryDirectory?: string;
   readonly lineageDigest: string;
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
   readonly startingMissing: number;
@@ -203,12 +204,16 @@ export function openExtractionAttemptLedger(input: {
   const existed = boundedArtifactEntryExists(path);
   let current = existed ? readAttemptLedgerRecord(path) : expected;
   assertBoundRecord(current, expected);
-  current = reconcilePending(input.cacheRoot, current, path);
+  current = reconcilePending(
+    input.cacheRoot, current, path, true, input.publicationTemporaryDirectory
+  );
   assertSuccessfulShards(input.cacheRoot, current);
-  if (!existed) persistAttemptLedgerRecord(path, current);
+  if (!existed) {
+    persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
+  }
   const update = (next: ExtractionAttemptLedgerRecord): void => {
     current = next;
-    persistAttemptLedgerRecord(path, current);
+    persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
   };
   return {
     reserveAttempt: (cacheKey) => update(reserveTransportAttempt(current, cacheKey)),
@@ -271,7 +276,8 @@ function reconcilePending(
   cacheRoot: string,
   current: ExtractionAttemptLedgerRecord,
   path: string,
-  persist = true
+  persist = true,
+  publicationTemporaryDirectory?: string
 ): ExtractionAttemptLedgerRecord {
   const recovered = current.pending_keys.flatMap((cacheKey) => {
     const shard = readValidLedgerShard(cacheRoot, cacheKey, current.cache_identity);
@@ -284,7 +290,7 @@ function reconcilePending(
     successful_shards: sortedSuccessfulShards([...current.successful_shards, ...recovered]),
     pending_keys: current.pending_keys.filter((key) => !recoveredKeys.has(key))
   };
-  if (persist) persistAttemptLedgerRecord(path, next);
+  if (persist) persistAttemptLedgerRecord(path, next, publicationTemporaryDirectory);
   return next;
 }
 
