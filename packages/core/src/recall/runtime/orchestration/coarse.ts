@@ -30,6 +30,10 @@ import type { RecallQueryEntityExtractionCapture } from
 export type CoarseFilterResult = Readonly<{
   readonly total_scanned: number;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly retrievalFieldTruncation: Readonly<{
+    readonly session_event_index: boolean;
+    readonly explicit_pointer: boolean;
+  }>;
   readonly ftsRanks: Readonly<Record<string, number>>;
   readonly trigramFtsRanks: Readonly<Record<string, number>>;
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;

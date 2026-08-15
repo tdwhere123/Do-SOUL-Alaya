@@ -217,8 +217,9 @@ function freezeSupplementaryData(
   const openSemanticFactorCompatibilityTrace =
     materializeOpenSemanticFactorCompatibilityTrace({
       query_capture: querySemanticFactorFormation,
-      evidence_formations:
-        evidenceAndGovernance.semanticFactorFormationsByEvidenceId
+      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+      unavailable_evidence_ids:
+        evidenceAndGovernance.semanticFactorFormationUnavailableEvidenceIds
     });
   const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
     trace: openSemanticFactorCompatibilityTrace,

@@ -60,6 +60,38 @@ describe("recall evidence contexts for associative fact keys", () => {
         }
       }
     ]);
+    expect(contexts.semanticFactorFormationUnavailableEvidenceIds)
+      .toEqual(["evidence-1"]);
+  });
+
+  it("names a qualified evidence capsule whose semantic formation is absent", async () => {
+    const entry = createMemoryEntry({
+      content: ASSERTION,
+      evidence_refs: ["evidence-without-formation"]
+    });
+    const evidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-without-formation"
+    });
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => [evidence]),
+          findRecallQualifiedByIds: vi.fn(async () => [{
+            capsule: evidence,
+            verified_user_projection: false
+          }])
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      candidates: [entry],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {}
+    });
+
+    expect(contexts.semanticFactorFormationUnavailableEvidenceIds)
+      .toEqual(["evidence-without-formation"]);
   });
 
   it("isolates an invalid receipt owner without clearing valid sibling fact keys", async () => {
@@ -141,6 +173,84 @@ describe("recall evidence contexts for associative fact keys", () => {
     );
   });
 
+  it("names semantic formation ids isolated after a qualified lookup integrity failure", async () => {
+    const left = createMemoryEntry({
+      object_id: "memory-left-semantic",
+      evidence_refs: ["evidence-left-semantic"]
+    });
+    const right = createMemoryEntry({
+      object_id: "memory-right-semantic",
+      evidence_refs: ["evidence-right-semantic"]
+    });
+    const leftEvidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-left-semantic"
+    });
+    const rightEvidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-right-semantic"
+    });
+    const integrityError = new Error("semantic formation receipt mismatch");
+    integrityError.name = "EvidenceProjectionIntegrityError";
+
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => [leftEvidence, rightEvidence]),
+          findRecallQualifiedByIds: vi.fn(async () => {
+            throw integrityError;
+          })
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      candidates: [left, right],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {}
+    });
+
+    expect(contexts.semanticFactorFormationUnavailableEvidenceIds).toEqual([
+      "evidence-left-semantic",
+      "evidence-right-semantic"
+    ]);
+  });
+
+  it("names all semantic formation ids when evidence context loading fails upstream", async () => {
+    const entry = createMemoryEntry({
+      evidence_refs: ["evidence-upstream-failure"]
+    });
+    const evidence = createVerifiedAssertionEvidence({
+      objectId: "evidence-upstream-failure"
+    });
+    const warn = vi.fn();
+
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => {
+            throw new Error("evidence store unavailable");
+          }),
+          findRecallQualifiedByIds: vi.fn(async () => [{
+            capsule: evidence,
+            verified_user_projection: false
+          }])
+        }
+      },
+      warn,
+      workspaceId: "workspace-1",
+      candidates: [entry],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {}
+    });
+
+    expect(contexts.semanticFactorFormationUnavailableEvidenceIds)
+      .toEqual(["evidence-upstream-failure"]);
+    expect(warn).toHaveBeenCalledWith(
+      "evidence context lookup for coverage and answer authority failed",
+      expect.objectContaining({ error: "evidence store unavailable" })
+    );
+  });
+
   it("stops recursive isolation when a child lookup throws a non-integrity error", async () => {
     const leftEntry = createMemoryEntry({
       object_id: "memory-left",
@@ -200,7 +310,11 @@ describe("recall evidence contexts for associative fact keys", () => {
       evidenceGistsByMemoryId: {},
       evidenceSemanticDocumentsByMemoryId: {},
       verifiedUserAssertionContextsByMemoryId: {},
-      semanticFactorFormationsByEvidenceId: {}
+      semanticFactorFormationsByEvidenceId: {},
+      semanticFactorFormationUnavailableEvidenceIds: [
+        "evidence-left",
+        "evidence-right"
+      ]
     });
     expect(findFactKeys.mock.calls.map((call) => call[1])).toEqual([
       ["evidence-left", "evidence-right"],

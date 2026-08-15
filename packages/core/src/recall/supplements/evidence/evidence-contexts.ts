@@ -40,10 +40,16 @@ export interface RecallEvidenceContexts {
     string,
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
+  readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[];
 }
 
 interface EvidenceRecord {
   readonly evidence: Readonly<EvidenceCapsule>;
+}
+
+interface SemanticFactorFormationLookup {
+  readonly qualified: readonly Readonly<RecallQualifiedEvidence>[];
+  readonly unavailableEvidenceIds: readonly string[];
 }
 
 export async function collectRecallEvidenceContexts(params: Readonly<{
@@ -54,8 +60,6 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
 }>): Promise<Readonly<RecallEvidenceContexts>> {
-  const evidenceSearchPort = params.dependencies.evidenceSearchPort;
-  if (evidenceSearchPort?.findByIds === undefined) return emptyEvidenceContexts();
   const gistCandidates = collectRelevantCandidates(
     params.candidates,
     params.coarseEvidenceFtsRanks
@@ -71,6 +75,10 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
     ...collectAuthorityEvidenceIds(authorityCandidates)
   ]);
   if (evidenceIds.length === 0) return emptyEvidenceContexts();
+  const evidenceSearchPort = params.dependencies.evidenceSearchPort;
+  if (evidenceSearchPort?.findByIds === undefined) {
+    return emptyEvidenceContexts(evidenceIds);
+  }
   try {
     const [capsules, factKeys, semanticFormations] = await Promise.all([
       evidenceSearchPort.findByIds(params.workspaceId, evidenceIds),
@@ -84,7 +92,8 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       params.coarseEvidenceFtsRanksPerRef,
       capsules,
       factKeys,
-      semanticFormations
+      semanticFormations.qualified,
+      semanticFormations.unavailableEvidenceIds
     );
   } catch (error) {
     params.warn("evidence context lookup for coverage and answer authority failed", {
@@ -93,26 +102,41 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
-    return emptyEvidenceContexts();
+    return emptyEvidenceContexts(evidenceIds);
   }
 }
 
 async function loadQualifiedSemanticFormations(
   params: Parameters<typeof collectRecallEvidenceContexts>[0],
   evidenceIds: readonly string[]
-): Promise<readonly RecallQualifiedEvidence[]> {
+): Promise<SemanticFactorFormationLookup> {
   const find = params.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
-  if (find === undefined) return Object.freeze([]);
-  return await loadQualifiedEvidenceWithIsolation({
+  if (find === undefined) {
+    return Object.freeze({
+      qualified: Object.freeze([]),
+      unavailableEvidenceIds: Object.freeze([...evidenceIds])
+    });
+  }
+  const unavailableEvidenceIds = new Set<string>();
+  const qualified = await loadQualifiedEvidenceWithIsolation({
     params,
     evidenceIds,
     message: "semantic factor evidence context lookup failed",
     operation: "qualified_semantic_factor_lookup",
+    onUnavailableEvidenceIds: (ids) => ids.forEach((id) => unavailableEvidenceIds.add(id)),
     load: async (ids) => await find.call(
       params.dependencies.evidenceSearchPort,
       params.workspaceId,
       ids.map((objectId) => Object.freeze({ object_id: objectId }))
     )
+  });
+  const returnedIds = new Set(qualified.map((item) => item.capsule.object_id));
+  for (const evidenceId of evidenceIds) {
+    if (!returnedIds.has(evidenceId)) unavailableEvidenceIds.add(evidenceId);
+  }
+  return Object.freeze({
+    qualified,
+    unavailableEvidenceIds: Object.freeze([...unavailableEvidenceIds].sort(compareText))
   });
 }
 
@@ -141,6 +165,7 @@ async function loadQualifiedEvidenceWithIsolation(input: Readonly<{
   readonly evidenceIds: readonly string[];
   readonly message: string;
   readonly operation: string;
+  readonly onUnavailableEvidenceIds?: (ids: readonly string[]) => void;
   readonly load: (ids: readonly string[]) => Promise<readonly RecallQualifiedEvidence[]>;
 }>): Promise<readonly RecallQualifiedEvidence[]> {
   try {
@@ -168,19 +193,26 @@ async function loadQualifiedEvidenceWithIsolation(input: Readonly<{
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
+    input.onUnavailableEvidenceIds?.(input.evidenceIds);
     return Object.freeze([]);
   }
 }
 
-function emptyEvidenceContexts(): Readonly<RecallEvidenceContexts> {
+function emptyEvidenceContexts(
+  unavailableEvidenceIds: readonly string[] = []
+): Readonly<RecallEvidenceContexts> {
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze({}),
     evidenceSemanticDocumentsByMemoryId: Object.freeze({}),
     verifiedUserAssertionContextsByMemoryId: Object.freeze({}),
-    semanticFactorFormationsByEvidenceId: Object.freeze({})
+    semanticFactorFormationsByEvidenceId: Object.freeze({}),
+    ...(unavailableEvidenceIds.length === 0
+      ? {}
+      : {
+          semanticFactorFormationUnavailableEvidenceIds: Object.freeze([...new Set(unavailableEvidenceIds)].sort(compareText))
+        })
   });
 }
-
 function collectRelevantCandidates(
   candidates: readonly Readonly<MemoryEntry>[],
   coarseEvidenceFtsRanks: Readonly<Record<string, number>>
@@ -227,7 +259,8 @@ function buildMemoryEvidenceContexts(
   ranksByRef: Readonly<Record<string, number>>,
   capsules: readonly Readonly<EvidenceCapsule>[],
   qualifiedFactKeys: readonly Readonly<RecallQualifiedEvidence>[],
-  qualifiedSemanticFormations: readonly Readonly<RecallQualifiedEvidence>[]
+  qualifiedSemanticFormations: readonly Readonly<RecallQualifiedEvidence>[],
+  semanticUnavailableEvidenceIds: readonly string[]
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
   const qualifiedAssertionEvidenceIds = collectQualifiedAssertionEvidenceIds(
@@ -268,7 +301,11 @@ function buildMemoryEvidenceContexts(
     evidenceSemanticDocumentsByMemoryId: Object.freeze(semanticDocuments),
     verifiedUserAssertionContextsByMemoryId: Object.freeze(contexts),
     semanticFactorFormationsByEvidenceId:
-      buildSemanticFactorFormationsByEvidenceId(qualifiedSemanticFormations)
+      buildSemanticFactorFormationsByEvidenceId(qualifiedSemanticFormations),
+    ...buildUnavailableSemanticFactorEvidenceIds(
+      qualifiedSemanticFormations,
+      semanticUnavailableEvidenceIds
+    )
   });
 }
 
@@ -282,6 +319,27 @@ function buildSemanticFactorFormationsByEvidenceId(
     formations[item.capsule.object_id] = item.semantic_factor_formation;
   }
   return Object.freeze(formations);
+}
+
+function buildUnavailableSemanticFactorEvidenceIds(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[],
+  explicitIds: readonly string[]
+): Readonly<{ readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[] }> {
+  const ids = [...new Set([
+    ...explicitIds,
+    ...qualified
+      .filter((item) => item.matched_projection === undefined &&
+        item.semantic_factor_formation === undefined)
+      .map((item) => item.capsule.object_id)
+  ])]
+    .sort(compareText);
+  return ids.length === 0
+    ? {}
+    : { semanticFactorFormationUnavailableEvidenceIds: Object.freeze(ids) };
+}
+
+function compareText(left: string, right: string): number {
+  return left === right ? 0 : left < right ? -1 : 1;
 }
 
 function buildFactKeysByEvidenceId(

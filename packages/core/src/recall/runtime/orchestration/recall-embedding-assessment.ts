@@ -126,7 +126,8 @@ export async function collectLegacyEmbeddingAssessmentData(
       : [evidenceScoring.fieldChannelCapture]),
     ...buildSessionPointerFieldCaptures({
       queryProbes: prepared.queryProbes,
-      candidates: coarse.coarseFilter.candidates
+      candidates: coarse.coarseFilter.candidates,
+      truncatedChannels: coarse.coarseFilter.retrievalFieldTruncation
     })
   ]);
   return Object.freeze({
@@ -202,7 +203,8 @@ export async function collectSnapshotEmbeddingAssessmentData(
     retrievalFieldRefinementReceipts:
       prepared.retrievalFieldBundle.refinementReceipts(),
     queryProbes: prepared.queryProbes,
-    coarseCandidates: coarse.coarseFilter.candidates
+    coarseCandidates: coarse.coarseFilter.candidates,
+    coarseFieldTruncation: coarse.coarseFilter.retrievalFieldTruncation
   });
 }
 
@@ -216,6 +218,10 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
   readonly queryProbes: PreparedRecallRequest["queryProbes"];
   readonly coarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly coarseFieldTruncation: Readonly<{
+    readonly session_event_index: boolean;
+    readonly explicit_pointer: boolean;
+  }>;
 }>): EmbeddingAssessmentData {
   const fieldCaptures = materializeRecallRetrievalFieldCaptures([
     ...params.retrievalFieldCaptures,
@@ -225,7 +231,8 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
       : [params.evidenceScoring.fieldChannelCapture]),
     ...buildSessionPointerFieldCaptures({
       queryProbes: params.queryProbes,
-      candidates: params.coarseCandidates
+      candidates: params.coarseCandidates,
+      truncatedChannels: params.coarseFieldTruncation
     })
   ]);
   return Object.freeze({

@@ -18,6 +18,10 @@ import { RECALL_TOTAL_CANDIDATE_CAP } from "../../shared/recall-policy.js";
 export interface CoarseFilterRunResult {
   readonly total_scanned: number;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly retrievalFieldTruncation: Readonly<{
+    readonly session_event_index: boolean;
+    readonly explicit_pointer: boolean;
+  }>;
   readonly ftsRanks: Readonly<Record<string, number>>;
   readonly trigramFtsRanks: Readonly<Record<string, number>>;
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
@@ -63,6 +67,10 @@ export interface BuildCoarseFilterResultParams {
   readonly entitySeedScores: ReadonlyMap<string, number>;
   readonly pathExpansionScores: ReadonlyMap<string, number>;
   readonly pathSuppressionScores: ReadonlyMap<string, number>;
+  readonly retrievalFieldTruncation: Readonly<{
+    readonly session_event_index: boolean;
+    readonly explicit_pointer: boolean;
+  }>;
 }
 
 export function buildCoarseFilterResult(
@@ -71,6 +79,7 @@ export function buildCoarseFilterResult(
   return Object.freeze({
     total_scanned: params.totalScanned,
     candidates: buildSupplementedCandidates(params),
+    retrievalFieldTruncation: params.retrievalFieldTruncation,
     ftsRanks: Object.freeze(Object.fromEntries(params.ftsRanks.entries())),
     trigramFtsRanks: Object.freeze(Object.fromEntries(params.trigramFtsRanks.entries())),
     synthesisFtsRanks: Object.freeze({}),

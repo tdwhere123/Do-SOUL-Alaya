@@ -43,6 +43,7 @@ import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallRetrievalFieldBundle } from
   "../field/retrieval/retrieval-field-bundle.js";
+import { RECALL_TOTAL_CANDIDATE_CAP } from "../../shared/recall-policy.js";
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
@@ -71,6 +72,10 @@ export interface CoarseFilterState {
   readonly entitySeedScores: Map<string, number>;
   readonly pathExpansionScores: Map<string, number>;
   readonly pathSuppressionScores: Map<string, number>;
+  readonly retrievalFieldTruncation: {
+    session_event_index: boolean;
+    explicit_pointer: boolean;
+  };
   readonly addCandidate: AddCoarseCandidate;
 }
 
@@ -101,8 +106,13 @@ export function createCoarseFilterState(params: Readonly<{
     pathExpansionScores: new Map<string, number>(),
     pathSuppressionScores: new Map<string, number>()
   };
+  const retrievalFieldTruncation = {
+    session_event_index: false,
+    explicit_pointer: false
+  };
   return Object.freeze({
     ...state,
+    retrievalFieldTruncation,
     addCandidate: createCoarseCandidateAdder({
       ...state,
       winnerMemoryIds: params.winnerMemoryIds,
@@ -124,7 +134,12 @@ export function admitInitialCoarseCandidates(params: Readonly<{
   for (const entry of params.rankedMatches) {
     params.state.addCandidate(entry, "activation", 0, "activation");
   }
-  addObjectProbeCandidates(params.tierMemories, params.queryProbes, params.state.addCandidate);
+  addObjectProbeCandidates(
+    params.tierMemories,
+    params.queryProbes,
+    params.state.addCandidate,
+    () => { params.state.retrievalFieldTruncation.explicit_pointer = true; }
+  );
 }
 
 export async function admitDynamicCoarseCandidates(params: Readonly<{
@@ -204,14 +219,21 @@ export function buildCoarseFilterRunResult(params: Readonly<{
     graphExpansionCandidateSources: params.dynamic.graphExpansionCandidateSources,
     entitySeedScores: params.state.entitySeedScores,
     pathExpansionScores: params.state.pathExpansionScores,
-    pathSuppressionScores: params.state.pathSuppressionScores
+    pathSuppressionScores: params.state.pathSuppressionScores,
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: params.state.retrievalFieldTruncation.session_event_index ||
+        params.state.drafts.size > RECALL_TOTAL_CANDIDATE_CAP,
+      explicit_pointer: params.state.retrievalFieldTruncation.explicit_pointer ||
+        params.state.drafts.size > RECALL_TOTAL_CANDIDATE_CAP
+    })
   });
 }
 
 function addObjectProbeCandidates(
   tierMemories: readonly Readonly<MemoryEntry>[],
   queryProbes: Readonly<RecallQueryProbes>,
-  addCandidate: AddCoarseCandidate
+  addCandidate: AddCoarseCandidate,
+  onTruncated: () => void
 ): void {
   const scoredCandidates = tierMemories
     .map((entry) => Object.freeze({ entry, score: scoreObjectProbeMatch(entry, queryProbes) }))
@@ -224,6 +246,7 @@ function addObjectProbeCandidates(
         ? compareMemoryEntries(left.entry, right.entry)
       : right.score - left.score
   );
+  if (scoredCandidates.length > DYNAMIC_RECALL_PLANE_CAP) onTruncated();
   for (const candidate of objectProbeCandidates) {
     addCandidate(candidate.entry, "object_probe", candidate.score, "object_probe");
   }
@@ -255,7 +278,10 @@ async function admitSemanticAndContentCandidates(
     queryProbes: params.queryProbes,
     addCandidate: params.state.addCandidate,
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
-    dynamicRecallCohortRadius: DYNAMIC_RECALL_COHORT_RADIUS
+    dynamicRecallCohortRadius: DYNAMIC_RECALL_COHORT_RADIUS,
+    onSessionSurfaceCohortTruncated: () => {
+      params.state.retrievalFieldTruncation.session_event_index = true;
+    }
   });
 }
 

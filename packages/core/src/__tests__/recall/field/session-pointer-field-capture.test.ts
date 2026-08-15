@@ -103,6 +103,35 @@ describe("session and pointer field captures", () => {
       .toEqual(["workspace_local:memory_entry:memory-session"]);
   });
 
+  it("keeps a bounded source plane truncated when its admitted prefix is retained", () => {
+    const [session, pointer] = buildSessionPointerFieldCaptures({
+      queryProbes: {
+        ...emptyProbes,
+        surface_ids: ["surface-shared"],
+        object_ids: ["memory-pointer"]
+      },
+      candidates: [
+        candidate("memory-session", ["session_surface_cohort"]),
+        candidate("memory-pointer", ["object_probe"])
+      ],
+      truncatedChannels: {
+        session_event_index: true,
+        explicit_pointer: true
+      }
+    });
+
+    expect(session?.channel).toMatchObject({
+      status: "truncated",
+      depth: 1,
+      unseen_upper_bound: 1
+    });
+    expect(pointer?.channel).toMatchObject({
+      status: "truncated",
+      depth: 1,
+      unseen_upper_bound: 1
+    });
+  });
+
   it("keeps producer receipts in the catalog instead of filling them as unavailable", () => {
     const captures = materializeRecallRetrievalFieldCaptures(
       buildSessionPointerFieldCaptures({

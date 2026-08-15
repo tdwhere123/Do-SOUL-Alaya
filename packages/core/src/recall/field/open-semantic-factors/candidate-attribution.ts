@@ -66,7 +66,7 @@ function candidateEvidenceIds(candidate: Readonly<CoarseRecallCandidate>): reado
     return [candidate.entry.object_id];
   }
   if (!isWorkspaceMemoryCandidate(candidate)) return [];
-  return candidate.entry.evidence_refs;
+  return [...new Set(candidate.entry.evidence_refs)];
 }
 
 function compareText(left: string, right: string): number {

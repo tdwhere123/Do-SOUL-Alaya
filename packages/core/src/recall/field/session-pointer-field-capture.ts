@@ -12,6 +12,10 @@ import { digestRecallFieldIdentity } from "./field-identity.js";
 export function buildSessionPointerFieldCaptures(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly truncatedChannels?: Readonly<Partial<Record<
+    "session_event_index" | "explicit_pointer",
+    boolean
+  >>>;
 }>): readonly RecallFiniteFieldChannelCapture[] {
   return Object.freeze([
     captureChannel({
@@ -19,14 +23,16 @@ export function buildSessionPointerFieldCaptures(params: Readonly<{
       eligible: hasSessionProbes(params.queryProbes),
       candidates: params.candidates,
       plane: "session_surface_cohort",
-      queryProbes: params.queryProbes
+      queryProbes: params.queryProbes,
+      truncated: params.truncatedChannels?.session_event_index === true
     }),
     captureChannel({
       channelId: "explicit_pointer",
       eligible: hasPointerProbes(params.queryProbes),
       candidates: params.candidates,
       plane: "object_probe",
-      queryProbes: params.queryProbes
+      queryProbes: params.queryProbes,
+      truncated: params.truncatedChannels?.explicit_pointer === true
     })
   ]);
 }
@@ -40,6 +46,7 @@ function captureChannel(params: Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly plane: "session_surface_cohort" | "object_probe";
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly truncated: boolean;
 }>): RecallFiniteFieldChannelCapture {
   const admitted = params.eligible
     ? params.candidates.filter((candidate) =>
@@ -50,31 +57,35 @@ function captureChannel(params: Readonly<{
       producer: "session_pointer_field_capture_v1",
       channel_id: params.channelId,
       eligible: params.eligible,
+      truncated: params.truncated,
       probe: probeIdentity(params.queryProbes),
       admitted: admitted.map((candidate) => candidate.entry.object_id).sort()
     }),
     channel: params.eligible
-      ? completeChannel(params.channelId, admitted)
+      ? completeChannel(params.channelId, admitted, params.truncated)
       : emptyChannel(params.channelId, "ineligible")
   });
 }
 
 function completeChannel(
   channelId: Extract<RecallRetrievalFieldChannelId, "session_event_index" | "explicit_pointer">,
-  candidates: readonly Readonly<CoarseRecallCandidate>[]
+  candidates: readonly Readonly<CoarseRecallCandidate>[],
+  truncated: boolean
 ) {
   const observations = Object.freeze(candidates.map((candidate, index) => Object.freeze({
     observation_id: `${channelId}:${candidate.entry.object_id}`,
     candidate_key: buildRecallCandidateDedupeKey(candidate),
+    // The channel rank is the admitted-pool projection order. It is not a
+    // claim about an unexposed source-index rank.
     rank: index + 1
   })));
   return Object.freeze({
     channel_id: channelId,
     // Complete names the admitted-pool plane projection, not a session/pointer index scan.
-    status: "complete" as const,
+    status: truncated ? "truncated" as const : "complete" as const,
     depth: observations.length,
     observations,
-    unseen_upper_bound: 0
+    unseen_upper_bound: truncated ? 1 : 0
   });
 }
 

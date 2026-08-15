@@ -28,6 +28,7 @@ export type OpenSemanticFactorCompatibilityTrace = Readonly<{
   readonly observed_evidence_count: number;
   readonly matchable_evidence_count: number;
   readonly evaluated_evidence_count: number;
+  readonly unavailable_evidence_ids: readonly string[];
   readonly incomparable_seal: OpenSemanticFactorIncomparableSeal;
   readonly truncated: boolean;
   readonly entries: readonly Readonly<OpenSemanticFactorCompatibilityTraceEntry>[];
@@ -47,10 +48,16 @@ export function materializeOpenSemanticFactorCompatibilityTrace(params: Readonly
     string,
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
+  readonly unavailable_evidence_ids?: readonly string[];
 }>): OpenSemanticFactorCompatibilityTrace {
   const observed = Object.entries(params.evidence_formations)
     .filter(([evidenceId]) => evidenceId.trim().length > 0)
     .sort(([left], [right]) => left.localeCompare(right));
+  const observedIds = new Set(observed.map(([evidenceId]) => evidenceId));
+  const unavailableEvidenceIds = Object.freeze([...new Set(
+    (params.unavailable_evidence_ids ?? [])
+      .filter((evidenceId) => evidenceId.trim().length > 0 && !observedIds.has(evidenceId))
+  )].sort(compareText));
   const matchable = observed.filter(([, capture]) =>
     captureIsMatchable(capture, params.query_capture));
   const entries = Object.freeze(matchable.map(([evidenceId, evidenceCapture]) =>
@@ -65,13 +72,15 @@ export function materializeOpenSemanticFactorCompatibilityTrace(params: Readonly
     schema_version: 1 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_COMPATIBILITY_TRACE_OPERATOR_ID,
     query_capture_digest: params.query_capture.capture_digest,
-    observed_evidence_count: observed.length,
+    observed_evidence_count: observed.length + unavailableEvidenceIds.length,
     matchable_evidence_count: matchable.length,
     evaluated_evidence_count: entries.length,
+    unavailable_evidence_ids: unavailableEvidenceIds,
     incomparable_seal: dominantIncomparableSeal(
       observed,
       matchable.length,
-      params.query_capture
+      params.query_capture,
+      unavailableEvidenceIds.length > 0
     ),
     // Remainder rows are incomparable, so they cannot change the match set.
     truncated: matchable.length > entries.length,
@@ -88,6 +97,11 @@ export function verifyOpenSemanticFactorCompatibilityTrace(
 ): OpenSemanticFactorCompatibilityTrace {
   const { trace_digest: _digest, ...body } = trace;
   const evidenceIds = new Set<string>();
+  const unavailableIdsValid = trace.unavailable_evidence_ids.every((evidenceId, index) =>
+    evidenceId.trim().length > 0 &&
+    (index === 0 || trace.unavailable_evidence_ids[index - 1]! < evidenceId) &&
+    !trace.entries.some((entry) => entry.evidence_id === evidenceId)
+  );
   const entriesValid = trace.entries.every((entry) => {
     const { receipt_digest: _receiptDigest, ...receiptBody } = entry.receipt;
     const unique = !evidenceIds.has(entry.evidence_id);
@@ -101,9 +115,13 @@ export function verifyOpenSemanticFactorCompatibilityTrace(
       trace.evaluated_evidence_count !== trace.entries.length ||
       trace.matchable_evidence_count < trace.evaluated_evidence_count ||
       trace.observed_evidence_count < trace.matchable_evidence_count ||
+      trace.unavailable_evidence_ids.length >
+        trace.observed_evidence_count - trace.matchable_evidence_count ||
+      !unavailableIdsValid ||
       !INCOMPARABLE_SEALS.includes(trace.incomparable_seal) ||
       (trace.incomparable_seal === "none") !==
-        (trace.observed_evidence_count === trace.matchable_evidence_count) ||
+        (trace.observed_evidence_count === trace.matchable_evidence_count &&
+          trace.unavailable_evidence_ids.length === 0) ||
       trace.truncated !== (
         trace.matchable_evidence_count > trace.evaluated_evidence_count
       ) || !entriesValid ||
@@ -124,11 +142,13 @@ function captureIsMatchable(
 function dominantIncomparableSeal(
   observed: readonly (readonly [string, Readonly<OpenSemanticFactorFormationCapture>])[],
   matchableCount: number,
-  query: Readonly<OpenSemanticFactorFormationCapture>
+  query: Readonly<OpenSemanticFactorFormationCapture>,
+  hasUnavailableEvidence: boolean
 ): OpenSemanticFactorIncomparableSeal {
-  if (matchableCount === observed.length) return "none";
+  if (matchableCount === observed.length && !hasUnavailableEvidence) return "none";
   // Evidence-only seals miss query-unformed remainders.
   let seal = sealFromCapture(query);
+  if (hasUnavailableEvidence && seal === "none") seal = "unavailable";
   if (seal === "rejected") return "rejected";
   for (const [, capture] of observed) {
     const next = sealFromCapture(capture);
@@ -149,4 +169,8 @@ function sealFromCapture(
     return capture.status;
   }
   return "none";
+}
+
+function compareText(left: string, right: string): number {
+  return left === right ? 0 : left < right ? -1 : 1;
 }

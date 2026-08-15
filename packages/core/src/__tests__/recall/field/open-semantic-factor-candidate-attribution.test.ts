@@ -42,6 +42,25 @@ describe("open semantic factor candidate attribution", () => {
     ]);
   });
 
+  it("deduplicates repeated stored evidence references before sealing a receipt", () => {
+    const activations = attributeOpenSemanticFactorActivations({
+      candidates: [candidate(createMemoryEntry({
+        object_id: "memory-duplicate-refs",
+        evidence_refs: ["evidence-b", "evidence-a", "evidence-b"]
+      }))],
+      activation: composedActivation(false)
+    });
+    const data = {
+      openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
+    } as SerializedRecallSupplementaryData;
+
+    expect([...activations.values()][0]?.evidence_ids).toEqual([
+      "evidence-a",
+      "evidence-b"
+    ]);
+    expect(() => assertOpenSemanticCandidateActivations(data)).not.toThrow();
+  });
+
   it("does not promote partial or non-composed searches", () => {
     const candidates = [candidate(createMemoryEntry({
       object_id: "memory-1",

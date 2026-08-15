@@ -257,6 +257,12 @@ export function mergeCoarseFilters(
   return Object.freeze({
     total_scanned: current.total_scanned + next.total_scanned,
     candidates: Object.freeze([...current.candidates, ...nextCandidates]),
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: current.retrievalFieldTruncation.session_event_index ||
+        next.retrievalFieldTruncation.session_event_index,
+      explicit_pointer: current.retrievalFieldTruncation.explicit_pointer ||
+        next.retrievalFieldTruncation.explicit_pointer
+    }),
     ftsRanks: mergeReadonlyRecords(current.ftsRanks, next.ftsRanks),
     trigramFtsRanks: mergeReadonlyRecords(current.trigramFtsRanks, next.trigramFtsRanks),
     synthesisFtsRanks: mergeReadonlyRecords(current.synthesisFtsRanks, next.synthesisFtsRanks),

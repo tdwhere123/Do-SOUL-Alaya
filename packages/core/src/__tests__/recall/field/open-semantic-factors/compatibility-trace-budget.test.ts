@@ -102,6 +102,44 @@ describe("open semantic compatibility evaluation budget", () => {
     }).status).toBe("unavailable");
   });
 
+  it("names qualified evidence whose semantic formation is unavailable", () => {
+    const query = unboundQueryGraph();
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: {},
+      unavailable_evidence_ids: ["evidence-missing"]
+    });
+
+    expect(trace).toMatchObject({
+      observed_evidence_count: 1,
+      matchable_evidence_count: 0,
+      evaluated_evidence_count: 0,
+      unavailable_evidence_ids: ["evidence-missing"],
+      incomparable_seal: "unavailable",
+      truncated: false
+    });
+    expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
+    expect(materializeOpenSemanticFactorComposition({
+      trace,
+      query_capture: query
+    }).status).toBe("unavailable");
+  });
+
+  it("preserves a rejected query seal when evidence is unavailable", () => {
+    const query = Object.freeze({
+      ...unboundQueryGraph(),
+      status: "rejected" as const
+    });
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: {},
+      unavailable_evidence_ids: ["evidence-missing"]
+    });
+
+    expect(trace.incomparable_seal).toBe("rejected");
+    expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
+  });
+
   it("seals formed evidence against an unformed query from the query capture status", () => {
     const evidence = matchingEvidence();
     expect(evidence.status).toBe("formed");

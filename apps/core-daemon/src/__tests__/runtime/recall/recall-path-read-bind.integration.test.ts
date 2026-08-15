@@ -244,6 +244,20 @@ describe("refresh-required path index", () => {
     expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
     expect(flood.diagnostics.A_path).not.toBe(1);
   });
+
+  it("fails closed when a ready state points at a missing active generation", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    openDatabases.push(database);
+    database.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET active_projection_generation = 'missing-generation'
+      WHERE state_id = 1
+    `).run();
+
+    expect(() => resolveRecallPathReadBind({ database })).toThrow(
+      "active generation is missing or inconsistent"
+    );
+  });
 });
 
 async function collectLocatorDerivations(database: StorageDatabase) {

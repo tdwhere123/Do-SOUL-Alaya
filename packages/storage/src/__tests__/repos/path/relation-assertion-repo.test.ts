@@ -137,13 +137,36 @@ describe("SqliteRelationAssertionRepo", () => {
     insertProjection(database.connection, "temporal-a-current", "assertion-current", currentPath);
     database.connection.prepare(`
       UPDATE temporal_schema_state
-      SET history_digest = ?
+      SET assertion_schema_generation = 'relation_assertion_v2',
+          assertion_event_contract_generation = 'relation_assertion_event_v2',
+          projection_schema_generation = 'relation_path_projection_v1',
+          active_projection_generation = 'temporal-a-current',
+          active_as_of = ?,
+          projection_policy_id = 'relation-path-projection-v1',
+          projection_policy_sha256 = 'fixture-policy',
+          history_digest = ?,
+          projection_count = 1,
+          projection_digest = 'temporal-a-current-digest'
       WHERE state_id = 1
-    `).run(currentHistoryDigest);
+    `).run(asOf, currentHistoryDigest);
 
     await expect(repo.findProjectionByWorkspaceAtAsOf("workspace-1", asOf))
       .resolves.toEqual([currentPath]);
   });
+
+  it("fails a current read when the active generation tuple is broken", async () => {
+    const { database } = createRepo();
+    const repo = new SqliteRelationAssertionRepo(database);
+    database.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET active_projection_generation = 'missing-generation'
+      WHERE state_id = 1
+    `).run();
+
+    await expect(repo.findActiveProjectionByWorkspace("workspace-1"))
+      .rejects.toThrow("active generation is missing or inconsistent");
+  });
+
   it("retains current-history as-of caches while pruning unreadable histories", async () => {
     const { database } = createRepo();
     const repo = new SqliteRelationAssertionRepo(database);

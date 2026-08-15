@@ -24,6 +24,7 @@ export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
   readonly dynamicRecallCohortRadius: number;
+  readonly onSessionSurfaceCohortTruncated?: () => void;
 }>): void {
   addQueryEvidenceCandidates(params);
   const seedContext = collectExpansionSeedContext(params);
@@ -142,6 +143,7 @@ function addSessionSurfaceCohortCandidates(
     readonly addCandidate: CoarseCandidateAdder;
     readonly dynamicRecallPlaneCap: number;
     readonly dynamicRecallCohortRadius: number;
+    readonly onSessionSurfaceCohortTruncated?: () => void;
   }>,
   seedContext: Readonly<{
     readonly seeds: readonly Readonly<MemoryEntry>[];
@@ -159,20 +161,24 @@ function addExactSessionSurfaceCohortCandidates(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
+  readonly onSessionSurfaceCohortTruncated?: () => void;
 }>): void {
   const querySurfaceIds = new Set(params.queryProbes.surface_ids);
   const queryRunIds = new Set(params.queryProbes.run_ids);
-  const exactCohortMatches = params.tierMemories
+  const allExactCohortMatches = params.tierMemories
     .filter((entry) =>
       (entry.surface_id !== null && querySurfaceIds.has(entry.surface_id)) ||
       (entry.run_id !== null && queryRunIds.has(entry.run_id))
     )
-    .sort(compareMemoryEntries)
-    .slice(0, params.dynamicRecallPlaneCap);
+    .sort(compareMemoryEntries);
+  if (allExactCohortMatches.length > params.dynamicRecallPlaneCap) {
+    params.onSessionSurfaceCohortTruncated?.();
+  }
+  const exactCohortMatches = allExactCohortMatches.slice(0, params.dynamicRecallPlaneCap);
   const exactCohortRatio =
     params.tierMemories.length === 0
       ? 0
-      : exactCohortMatches.length / params.tierMemories.length;
+      : allExactCohortMatches.length / params.tierMemories.length;
   if (exactCohortRatio <= 0.5) {
     for (const entry of exactCohortMatches) {
       params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");
