@@ -66,6 +66,26 @@ export function createRecallFiniteFieldChannelCapture(params: Readonly<{
   });
 }
 
+export type RecallFiniteFieldPostingSeed = Readonly<{
+  readonly channel_id: RecallRetrievalFieldChannelId;
+  readonly candidate_key: string;
+  readonly rank: number;
+}>;
+
+export function recallFiniteFieldCapturePostingSeeds(
+  capture: RecallFiniteFieldChannelCapture
+): readonly RecallFiniteFieldPostingSeed[] {
+  verifyRecallFiniteFieldChannelCapture(capture);
+  if (capture.channel.status === "unavailable" || capture.channel.status === "ineligible") {
+    return Object.freeze([]);
+  }
+  return Object.freeze(capture.channel.observations.map((observation) => Object.freeze({
+    channel_id: capture.channel.channel_id,
+    candidate_key: observation.candidate_key,
+    rank: observation.rank
+  })));
+}
+
 export function verifyRecallFiniteFieldChannelCapture(
   capture: RecallFiniteFieldChannelCapture
 ): void {

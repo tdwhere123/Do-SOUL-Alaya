@@ -75,6 +75,17 @@ export function verifyRecallFiniteFieldSeal(seal: RecallFiniteFieldSeal): void {
   }
 }
 
+export function assertRecallFiniteFieldDoesNotClaimExhaustion(
+  seal: RecallFiniteFieldSeal,
+  unopenedFrontierUpperBounds: readonly number[]
+): void {
+  verifyRecallFiniteFieldSeal(seal);
+  const claimedClosed = seal.channels.every((channel) => channel.status !== "truncated");
+  if (claimedClosed && unopenedFrontierUpperBounds.some((bound) => bound > 0)) {
+    throw new Error("finite field cannot claim exhaustion while a bundle frontier remains");
+  }
+}
+
 export function assertRecallFiniteFieldRefinement(
   previous: RecallFiniteFieldSeal,
   next: RecallFiniteFieldSeal

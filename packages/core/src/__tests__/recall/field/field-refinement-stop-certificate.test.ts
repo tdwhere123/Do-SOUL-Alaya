@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { materializeConfiguredCoverageSelection } from
   "../../../recall/field/facility/selection-objective.js";
+import { createHash } from "node:crypto";
+import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
+
 import {
   createRecallFieldRefinementStopCertificate,
   verifyRecallFieldRefinementStopCertificate
 } from "../../../recall/field/refinement/field-refinement-stop-certificate.js";
+import { createFieldStopCertificateEnvelope } from
+  "../../../recall/field/refinement/field-refinement-stop-envelope.js";
 import { createRecallRetrievalFieldRefinementReceipt } from
   "../../../recall/field/refinement/field-refinement-receipt.js";
 import { createRecallFiniteFieldSeal } from
@@ -55,6 +60,45 @@ describe("field refinement stop certificate", () => {
     expect(receipt.status).toBe("uncertified");
     expect(receipt.reason).toBe("objective_bound_unavailable");
     expect(receipt.exchange_bounds).toEqual([]);
+  });
+
+  it("lifts the live exchange-bound owner into an incomplete envelope when a higher bundle remains", () => {
+    const sha256: FieldContractSha256 = (preimage) =>
+      createHash("sha256").update(preimage, "utf8").digest("hex");
+    const core = createRecallFieldRefinementStopCertificate(createFixture([1, 1, 1, 1, 1]));
+    const generationId = `sha256:${"a".repeat(64)}`;
+    const closed = createFieldStopCertificateEnvelope({
+      workspace_id: "workspace-1",
+      generation_id: generationId,
+      condition_digest: `sha256:${"b".repeat(64)}`,
+      recorded_at: "2026-08-16T00:00:00.000Z",
+      sha256,
+      selected_candidate_keys: core.selected_candidate_keys,
+      coreCertificate: core
+    });
+    const incomplete = createFieldStopCertificateEnvelope({
+      workspace_id: "workspace-1",
+      generation_id: generationId,
+      condition_digest: `sha256:${"b".repeat(64)}`,
+      recorded_at: "2026-08-16T00:00:00.000Z",
+      sha256,
+      selected_candidate_keys: core.selected_candidate_keys,
+      coreCertificate: core,
+      bundleFrontiers: [{
+        unseen_gain_upper_bound: 0.9,
+        incumbent_loss: 0.1,
+        opened: false
+      }]
+    });
+
+    expect(core.status).toBe("certified");
+    expect(closed.status).toBe("certified");
+    expect(closed.frontier).toBe("closed");
+    expect(closed.operator_id).toBe(core.operator_id);
+    expect(incomplete.status).toBe("uncertified");
+    expect(incomplete.frontier).toBe("incomplete");
+    expect(incomplete.reason).toBe("exchange_not_dominated");
+    expect(incomplete.operator_id).toBe("recall_field_selector_exchange_bound_v1");
   });
 });
 
