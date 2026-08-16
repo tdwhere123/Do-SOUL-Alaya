@@ -174,8 +174,17 @@ export function buildCompositionSelectionParams(
       captureAnswerFeatures: input.capture_answer_features
     }),
     capturePacketPlanTrace: true,
-    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey
+    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey,
+    generation_id: requireCapturedPin(input.generation_id, "generation_id"),
+    condition_digest: requireCapturedPin(input.condition_digest, "condition_digest")
   };
+}
+
+function requireCapturedPin(value: string | undefined, label: string): string {
+  if (value === undefined || value.length === 0 || value === "unspecified") {
+    throw new Error(`Select_Gamma requires a pinned ${label}`);
+  }
+  return value;
 }
 
 function assertCompositionInputs(

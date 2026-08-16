@@ -1,6 +1,9 @@
-import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { vi } from "vitest";
 
+import { captureQueryCondition } from "../../recall/query/condition/query-condition-capture.js";
+import { createInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import type { FineAssessmentSelectionBoundaryCase } from
@@ -37,7 +40,7 @@ export function captureFineAssessmentSelectionBoundary(
 ): FineAssessmentSelectionBoundaryCase {
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   fineAssess({
-    ...FIELD_PINS,
+    ...liveFieldPins(),
     ...buildLiveCaptureBase(taskSurfaceRef, supplementaryOverrides, options),
     selectionBoundaryObserver: (pending) => {
       boundary = materializeFineAssessmentSelectionBoundary(pending);
@@ -107,7 +110,6 @@ export function withCapturedOrderAlignedExpected(
   const params = restoreSelectionParams(boundary.input);
   let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const replayed = selectFineAssessmentCandidates({
-    ...FIELD_PINS,
     ...params,
     capturePacketPlanTrace: true,
     ...(boundary.expected.pre_projection === undefined ? {} : {
@@ -131,6 +133,36 @@ export function withCapturedOrderAlignedExpected(
       boundary.expected.coverage_objective !== undefined
     )
   };
+}
+
+const LIVE_CAPTURE_AS_OF = "2026-07-29T00:00:00.000Z";
+
+export function liveFieldPins(): Readonly<{
+  readonly generation_id: string;
+  readonly condition_digest: string;
+}> {
+  const pin = createInMemoryFieldQuerySession(fieldContractSha256)
+    .pinActiveGeneration("workspace-1", LIVE_CAPTURE_AS_OF);
+  const receipt = captureQueryCondition({
+    principal: "workspace-1",
+    workspace_id: "workspace-1",
+    authorized_scopes: ["workspace-1"],
+    explicit_bridges: [],
+    workspace_project: "workspace-1",
+    query_task_factors: ["live-capture"],
+    governance_state: "open",
+    activation_budget: 8,
+    token_budget: 400,
+    effective_as_of: LIVE_CAPTURE_AS_OF
+  }, {
+    sha256: fieldContractSha256,
+    now: () => LIVE_CAPTURE_AS_OF,
+    pin
+  });
+  return Object.freeze({
+    generation_id: receipt.generation_id,
+    condition_digest: receipt.identity
+  });
 }
 
 function buildLiveCaptureBase(

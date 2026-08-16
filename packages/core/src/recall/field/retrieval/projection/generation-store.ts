@@ -22,6 +22,42 @@ import {
 
 export type ProjectionCrashPoint = "before_pointer_swap" | "after_pointer_swap";
 
+export interface ProjectionGenerationLifecycleStore {
+  snapshot(input: FieldProjectionGeneration): FieldProjectionGeneration;
+  verify(input: FieldProjectionGeneration): FieldProjectionGeneration;
+  activatePointer(pointer: ProjectionGenerationPointer): ProjectionGenerationPointer;
+  putArtifacts(
+    workspaceId: string,
+    artifacts: ProjectionGenerationArtifacts
+  ): ProjectionGenerationArtifacts;
+  readArtifacts(
+    workspaceId: string,
+    generationId: string
+  ): ProjectionGenerationArtifacts | null;
+}
+
+export function createPortBackedGenerationStore(
+  port: ProjectionGenerationPort
+): ProjectionGenerationLifecycleStore {
+  const artifacts = new Map<string, ProjectionGenerationArtifacts>();
+  return {
+    snapshot: (input) => port.snapshot(input),
+    verify: (input) => port.verify(input),
+    activatePointer: (input) => port.activatePointer(input),
+    putArtifacts(workspaceId, next) {
+      const key = generationKey(workspaceId, next.generation_id);
+      if (artifacts.has(key)) {
+        throw new Error("projection generation artifacts are immutable");
+      }
+      artifacts.set(key, next);
+      return next;
+    },
+    readArtifacts(workspaceId, generationId) {
+      return artifacts.get(generationKey(workspaceId, generationId)) ?? null;
+    }
+  };
+}
+
 export class ProjectionPointerCrash extends Error {
   public constructor(public readonly point: ProjectionCrashPoint) {
     super(`projection pointer crash at ${point}`);

@@ -170,7 +170,20 @@ vi.mock("@do-soul/alaya-storage", async () => {
   return buildToolRuntimeWiringStorageMocks({ actual, hoisted });
 });
 
-vi.mock("@do-soul/alaya-core", () => buildToolRuntimeWiringCoreMocks({ hoisted }));
+vi.mock("@do-soul/alaya-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@do-soul/alaya-core")>();
+  return {
+    ...actual,
+    ...buildToolRuntimeWiringCoreMocks({ hoisted }),
+    fieldContractSha256: actual.fieldContractSha256,
+    activateEmptyGeneration: actual.activateEmptyGeneration,
+    createPortBackedGenerationStore: actual.createPortBackedGenerationStore,
+    createInMemoryFieldQuerySession: actual.createInMemoryFieldQuerySession,
+    createInMemoryFieldStores: actual.createInMemoryFieldStores,
+    createProjectionGenerationReceipt: actual.createProjectionGenerationReceipt,
+    SEALED_EMPTY_FRONTIER: actual.SEALED_EMPTY_FRONTIER
+  };
+});
 
 vi.mock("@do-soul/alaya-engine-gateway", () => ({
   APIConversationEngine: hoisted.apiConversationEngineCtor,

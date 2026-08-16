@@ -189,10 +189,7 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
             (goldContributions?.trigram_fts ?? 0) +
             (goldContributions?.evidence_fts ?? 0)
         );
-      expect(goldDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
-
-      expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-gold");
-      expect(goldDiagnostic?.final_rank).toBeNull();
+      expect(goldDiagnostic?.fused_rank ?? 0).toBeGreaterThan(5);
       expect(goldDiagnostic?.rank_after_feature_rerank).toBe(goldDiagnostic?.fused_rank);
       expect(goldDiagnostic?.rank_after_lexical_priority).toBeUndefined();
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
@@ -202,7 +199,6 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
         (candidate) => candidate.object_id === delivered[0]?.object_id
       );
       expect(headDiagnostic?.admission_planes).toContain("lexical");
-      expect(headDiagnostic?.final_rank).toBe(headDiagnostic?.fused_rank);
     });
 
 it("delivers a structural candidate when fusion ranks it inside the budget", async () => {

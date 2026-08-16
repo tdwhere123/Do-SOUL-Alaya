@@ -1,6 +1,6 @@
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
-import { parseOptionalRow } from "../shared/parse-row.js";
+import { parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import {
   assertSubjectNotErased,
   verifyPersistedSourceRecord,
@@ -18,9 +18,23 @@ import type {
   FieldSourceSpanRow
 } from "./ports.js";
 
+const RECORD_SELECT = `
+  SELECT record_id, workspace_id, source_id, source_version, content_digest,
+         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
+         operator_id, source_body
+  FROM source_records
+`;
+
+const SPAN_SELECT = `
+  SELECT span_id, record_id, start_offset, end_offset, purpose, producer_version,
+         workspace_id, recorded_at
+  FROM source_spans
+`;
+
 export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly insertStatement;
   private readonly selectStatement;
+  private readonly listStatement;
 
   public constructor(
     private readonly database: StorageDatabase,
@@ -34,12 +48,12 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
-    this.selectStatement = database.connection.prepare(`
-      SELECT record_id, workspace_id, source_id, source_version, content_digest,
-             evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-             operator_id, source_body
-      FROM source_records WHERE workspace_id = ? AND record_id = ? LIMIT 1
-    `);
+    this.selectStatement = database.connection.prepare(
+      `${RECORD_SELECT} WHERE workspace_id = ? AND record_id = ? LIMIT 1`
+    );
+    this.listStatement = database.connection.prepare(
+      `${RECORD_SELECT} WHERE workspace_id = ? ORDER BY record_id`
+    );
   }
 
   public insert(row: FieldSourceRecordRow): FieldSourceRecordRow {
@@ -75,11 +89,16 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       "source record"
     );
   }
+
+  public listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[] {
+    return parseRows(this.listStatement.all(workspaceId), fieldSourceRecordParser, "source record");
+  }
 }
 
 export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
   private readonly insertStatement;
   private readonly selectStatement;
+  private readonly listStatement;
 
   public constructor(
     database: StorageDatabase,
@@ -92,11 +111,12 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, span_id) DO NOTHING
     `);
-    this.selectStatement = database.connection.prepare(`
-      SELECT span_id, record_id, start_offset, end_offset, purpose, producer_version,
-             workspace_id, recorded_at
-      FROM source_spans WHERE workspace_id = ? AND span_id = ? LIMIT 1
-    `);
+    this.selectStatement = database.connection.prepare(
+      `${SPAN_SELECT} WHERE workspace_id = ? AND span_id = ? LIMIT 1`
+    );
+    this.listStatement = database.connection.prepare(
+      `${SPAN_SELECT} WHERE workspace_id = ? ORDER BY span_id`
+    );
   }
 
   public insert(row: FieldSourceSpanRow): FieldSourceSpanRow {
@@ -124,6 +144,10 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
       fieldSourceSpanParser,
       "source span"
     );
+  }
+
+  public listByWorkspace(workspaceId: string): readonly FieldSourceSpanRow[] {
+    return parseRows(this.listStatement.all(workspaceId), fieldSourceSpanParser, "source span");
   }
 }
 

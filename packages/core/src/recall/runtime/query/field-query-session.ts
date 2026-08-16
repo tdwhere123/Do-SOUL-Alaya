@@ -8,8 +8,10 @@ import {
   buildProjectionGeneration,
   verifyProjectionGeneration
 } from "../../field/retrieval/projection/generation-lifecycle.js";
-import { InMemoryProjectionGenerationStore } from
-  "../../field/retrieval/projection/generation-store.js";
+import {
+  InMemoryProjectionGenerationStore,
+  type ProjectionGenerationLifecycleStore
+} from "../../field/retrieval/projection/generation-store.js";
 
 export const SEALED_EMPTY_FRONTIER = "sealed:empty";
 
@@ -34,8 +36,8 @@ export function createInMemoryFieldQuerySession(
   };
 }
 
-function activateEmptyGeneration(
-  store: InMemoryProjectionGenerationStore,
+export function activateEmptyGeneration(
+  store: ProjectionGenerationLifecycleStore,
   sha256: FieldContractSha256,
   workspaceId: string,
   recordedAt: string

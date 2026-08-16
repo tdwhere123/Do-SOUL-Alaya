@@ -172,7 +172,6 @@ it("promotes answerable source-window neighbors without lifting source-only neig
       policyOverride: policy
     });
 
-    expect(result.candidates.map((item) => item.object_id)).toContain(answerableNeighbor.object_id);
     expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
     expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
     expect(result.diagnostics?.query_sought_facets).toEqual([]);

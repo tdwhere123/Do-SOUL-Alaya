@@ -183,7 +183,7 @@ async function prepareRecallRequest(
     retrievalFieldBundle,
     answerShapePlan,
     referenceTime,
-    temporalProjectionAsOf: params.referenceTime,
+    temporalProjectionAsOf: referenceTime,
     activeConstraints,
     winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots),
     queryCondition

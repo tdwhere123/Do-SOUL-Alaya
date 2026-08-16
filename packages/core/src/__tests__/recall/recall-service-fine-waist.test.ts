@@ -57,7 +57,8 @@ describe("RecallService complete fine-assessment field", () => {
       expect(graphIds).toHaveLength(6);
       expect(spies.getStrengthByMemoryId).toHaveBeenCalledWith(
         "workspace-1",
-        graphIds
+        graphIds,
+        { asOf: "2026-03-23T00:00:00.000Z" }
       );
       expect(result.diagnostics?.token_economy).toMatchObject({
         coarse_pool_size: 6,
@@ -98,7 +99,9 @@ describe("RecallService complete fine-assessment field", () => {
       objectIds: [fixture.first.object_id, fixture.late.object_id]
     }));
     expect(fixture.spies.readGraphMetrics).toHaveBeenCalledWith(
-      [fixture.first.object_id, fixture.late.object_id], "workspace-1"
+      [fixture.first.object_id, fixture.late.object_id],
+      "workspace-1",
+      { asOf: "2026-03-23T00:00:00.000Z" }
     );
     expect(result.diagnostics?.token_economy).toMatchObject({
       coarse_pool_size: 2,

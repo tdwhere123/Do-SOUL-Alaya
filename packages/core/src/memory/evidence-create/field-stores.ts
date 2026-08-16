@@ -1,9 +1,10 @@
-import type {
-  AddressableSourceSpan,
-  DerivationJobReceipt,
-  FactorDescriptor,
-  FactorIncidence,
-  SourceRecordIdentity
+import {
+  sameFactorDescriptorFields,
+  type AddressableSourceSpan,
+  type DerivationJobReceipt,
+  type FactorDescriptor,
+  type FactorIncidence,
+  type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 
@@ -153,9 +154,7 @@ function sameSpan(existing: AddressableSourceSpan, incoming: AddressableSourceSp
 
 function sameFactor(existing: FactorDescriptor, incoming: FactorDescriptor): boolean {
   return existing.identity === incoming.identity &&
-    existing.family === incoming.family &&
-    existing.operator_id === incoming.operator_id &&
-    existing.canonical_payload === incoming.canonical_payload;
+    sameFactorDescriptorFields(existing, incoming);
 }
 
 function sameIncidence(existing: FactorIncidence, incoming: FactorIncidence): boolean {

@@ -106,7 +106,8 @@ it("admits FTS hits for extracted entities on the entity_seed plane and fans int
 
       expect(findByAnchors).toHaveBeenCalledWith(
         "workspace-1",
-        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }])
+        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }]),
+        { asOf: "2026-03-23T00:00:00.000Z" }
       );
     });
 

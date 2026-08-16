@@ -213,12 +213,16 @@ loopback remains the supported default.
 
 ## Runtime Write Model
 
-State-changing runtime writes follow:
+EventPublisher-owned runtime transitions stay EventLog-first:
 
 ```text
 EventLog append -> DB update -> audit row -> in-process notification
                                               (RuntimeNotifier listeners)
 ```
+
+Field formation, projection-generation, and causal-usage writes use
+the verified persist-then-audit order: persist the receipt, then append
+EventLog from a separate audit helper. Audit still precedes broadcast.
 
 Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.

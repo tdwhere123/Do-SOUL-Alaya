@@ -131,6 +131,19 @@ describe("field contract repos", () => {
       weight: 0.2
     })).toThrow(/check failed|CHECK constraint failed|weight/u);
   });
+
+  it("lists workspace rows through parsers and refuses a null-payload factor wildcard", () => {
+    const { records, factors } = createRepos();
+    const record = records.insert(hashedRecord("workspace-1", "listed body"));
+    const live = factors.insertDescriptor(hashedFactor("workspace-1", "atlas"));
+    expect(records.listByWorkspace("workspace-1").map((row) => row.record_id))
+      .toEqual([record.record_id]);
+    expect(factors.listDescriptors("workspace-1")).toEqual([live]);
+    expect(() => factors.insertDescriptor({
+      ...live,
+      canonical_payload: null
+    })).toThrow(/factor|payload|VALIDATION/u);
+  });
 });
 
 function createRepos() {

@@ -33,3 +33,12 @@ export {
   SqliteFieldCausalUsageRepo,
   SqliteFieldProofEffectRepo
 } from "./usage-effect-repo.js";
+export {
+  factorFromRow,
+  generationFromRow,
+  generationToRow,
+  incidenceFromRow,
+  jobFromRow,
+  sourceRecordFromRow,
+  sourceSpanFromRow
+} from "./field-receipts.js";

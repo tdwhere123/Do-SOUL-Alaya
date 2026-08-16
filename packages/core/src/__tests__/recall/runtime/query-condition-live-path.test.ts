@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
 import {
   captureEffectiveAsOf,
@@ -20,6 +20,7 @@ import {
 } from "../query/query-condition-test-fixtures.js";
 import {
   createDependencies,
+  createMemoryEntry,
   createTaskSurface
 } from "../recall-service-test-fixtures.js";
 
@@ -48,6 +49,29 @@ describe("live query condition capture", () => {
     expect(view?.query_cache_key).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(view?.generation_id).not.toBe(`sha256:${"a".repeat(64)}`);
     expect(view?.condition_digest).not.toBe(`sha256:${"b".repeat(64)}`);
+  });
+
+  it("passes captured as-of into path reads when the caller omits referenceTime", async () => {
+    const findByAnchors = vi.fn(async () => []);
+    const { dependencies } = createDependencies([
+      createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
+    ]);
+    const service = new RecallService({
+      ...dependencies,
+      now: frozenClock(),
+      fieldQuerySession: createInMemoryFieldQuerySession(fieldContractSha256),
+      sha256: fieldContractSha256,
+      pathExpansionPort: { findByAnchors }
+    });
+
+    await service.recall({
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      taskSurface: createTaskSurface()
+    });
+
+    expect(findByAnchors).toHaveBeenCalled();
+    expect(findByAnchors.mock.calls[0]?.[2]).toEqual({ asOf: CLOCK_AS_OF });
   });
 
   it("replays an explicit as-of without consulting the clock", () => {

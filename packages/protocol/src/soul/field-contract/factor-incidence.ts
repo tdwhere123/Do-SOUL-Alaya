@@ -61,6 +61,23 @@ export type FactorDescriptor = z.infer<typeof FactorDescriptorSchema>;
 export type FactorIncidence = z.infer<typeof FactorIncidenceSchema>;
 export type DerivationJobReceipt = z.infer<typeof DerivationJobReceiptSchema>;
 
+export function sameFactorDescriptorFields(
+  existing: Readonly<{
+    readonly family: string;
+    readonly operator_id: string;
+    readonly canonical_payload: string | null;
+  }>,
+  incoming: Readonly<{
+    readonly family: string;
+    readonly operator_id: string;
+    readonly canonical_payload: string | null;
+  }>
+): boolean {
+  return existing.family === incoming.family &&
+    existing.operator_id === incoming.operator_id &&
+    existing.canonical_payload === incoming.canonical_payload;
+}
+
 export function verifyFactorDescriptor(
   receipt: FactorDescriptor,
   sha256: FieldContractSha256,

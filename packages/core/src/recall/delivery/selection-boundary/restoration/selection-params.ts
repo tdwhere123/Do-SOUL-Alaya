@@ -29,8 +29,8 @@ export function restoreSelectionParams(
     tokenEstimator: createCapturedTokenEstimator(
       input.token_estimates_by_content
     ),
-    generation_id: input.generation_id ?? `sha256:${"c".repeat(64)}`,
-    condition_digest: input.condition_digest ?? `sha256:${"d".repeat(64)}`,
+    generation_id: requireRestoredPin(input.generation_id, "generation_id"),
+    condition_digest: requireRestoredPin(input.condition_digest, "condition_digest"),
     rankByCandidateKey: new Map(input.rank_by_candidate_key),
     ...(input.final_relevance_by_candidate_key === undefined ? {} : {
       finalRelevanceByCandidateKey: new Map(
@@ -62,6 +62,13 @@ export function restoreSelectionParams(
       )
     })
   };
+}
+
+function requireRestoredPin(value: string | undefined, label: string): string {
+  if (value === undefined || value.length === 0 || value === "unspecified") {
+    throw new Error(`Select_Gamma requires a pinned ${label}`);
+  }
+  return value;
 }
 
 export function restoreSupplementaryData(

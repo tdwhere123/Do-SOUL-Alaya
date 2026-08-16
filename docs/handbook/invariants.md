@@ -26,8 +26,10 @@ These rules always win over lower-level docs and task-card convenience.
 
 ## Event And State
 
-7. EventLog is first for state-changing writes: append EventLog, update
-   DB, then notify (per §10 below — there is no SSE).
+7. EventPublisher-owned runtime transitions stay EventLog-first: append
+   EventLog, update DB, then notify (per §10 below — there is no SSE).
+   Field formation, projection-generation, and causal-usage writes persist
+   the receipt first, then append EventLog as a separate audit step.
 8. Only `packages/core` and `apps/core-daemon` may author
    EventLog-producing runtime transitions or mutate run truth.
    `packages/storage` may provide mechanical persistence helpers behind

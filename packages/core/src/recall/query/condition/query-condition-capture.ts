@@ -23,12 +23,19 @@ export type QueryConditionCaptureDeps = Readonly<{
   readonly pin: Readonly<Pick<ProjectionPin, "workspace_id" | "generation_id">>;
 }>;
 
+const DATED_OFFSET = /(?:z|[+-]\d{2}:\d{2})$/iu;
+
 export function captureEffectiveAsOf(
   explicit: string | undefined,
   now: () => string
 ): string {
   const value = explicit === undefined ? now() : explicit;
-  return IsoDatetimeStringSchema.parse(value);
+  const parsed = IsoDatetimeStringSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (!DATED_OFFSET.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error("recall reference time must be a valid date-time with a timezone offset");
+  }
+  return IsoDatetimeStringSchema.parse(new Date(value).toISOString());
 }
 
 export function materializeQueryCondition(

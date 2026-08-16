@@ -226,7 +226,8 @@ it("admits a weak entity into graph_expansion when a co-admitting plane carries 
       expect(neighborDiag?.admission_planes).toContain("path_expansion");
       expect(findByAnchors).toHaveBeenCalledWith(
         "workspace-1",
-        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }])
+        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }]),
+        { asOf: "2026-03-23T00:00:00.000Z" }
       );
     });
 

@@ -36,6 +36,13 @@ describe("query condition capture", () => {
     expect(clock.calls()).toBe(1);
   });
 
+  it("canonicalizes a dated offset to UTC Z without consulting the clock", () => {
+    const clock = countingClock("2026-08-16T23:59:59.000Z");
+    expect(captureEffectiveAsOf("2026-08-15T20:00:00+08:00", clock.now))
+      .toBe("2026-08-15T12:00:00.000Z");
+    expect(clock.calls()).toBe(0);
+  });
+
   it("keeps an explicit as-of and does not consult the clock", () => {
     const clock = countingClock("2026-08-16T23:59:59.000Z");
     const receipt = captureQueryCondition(

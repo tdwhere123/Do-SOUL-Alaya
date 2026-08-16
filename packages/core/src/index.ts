@@ -45,12 +45,17 @@ export {
   type FieldFormationStores
 } from "./memory/evidence-create/field-stores.js";
 export {
+  activateEmptyGeneration,
   createInMemoryFieldQuerySession,
   SEALED_EMPTY_FRONTIER,
   type RecallFieldQuerySession
 } from "./recall/runtime/query/field-query-session.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
+export {
+  createPortBackedGenerationStore,
+  type ProjectionGenerationLifecycleStore
+} from "./recall/field/retrieval/projection/generation-store.js";
 export type { RecallServiceFieldDeps } from "./recall/recall-service.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";

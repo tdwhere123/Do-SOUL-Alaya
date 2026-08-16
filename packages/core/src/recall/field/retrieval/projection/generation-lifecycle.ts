@@ -22,7 +22,10 @@ import {
   type ProjectionGenerationArtifacts
 } from "./generation-artifacts.js";
 import { createProjectionGenerationReceipt } from "./generation-identity.js";
-import type { InMemoryProjectionGenerationStore } from "./generation-store.js";
+import type {
+  InMemoryProjectionGenerationStore,
+  ProjectionGenerationLifecycleStore
+} from "./generation-store.js";
 import {
   assertSingleGeneration,
   materializeRetrievalL1Postings,
@@ -42,7 +45,7 @@ export type BuiltProjectionGeneration = Readonly<{
 }>;
 
 export type ProjectionBuildRequest = Readonly<{
-  readonly store: InMemoryProjectionGenerationStore;
+  readonly store: ProjectionGenerationLifecycleStore;
   readonly sha256: FieldContractSha256;
   readonly workspace_id: string;
   readonly input_event_frontier: string;
@@ -67,7 +70,8 @@ export function buildProjectionGeneration(
   return persistBuilt(request, generation, request.sliceKeys);
 }
 
-export function catchUpProjectionGeneration(params: ProjectionBuildRequest & Readonly<{
+export function catchUpProjectionGeneration(params: Omit<ProjectionBuildRequest, "store"> & Readonly<{
+  readonly store: InMemoryProjectionGenerationStore;
   readonly source_generation_id: string;
   readonly events: readonly ProjectionCatchUpEvent[];
 }>): BuiltProjectionGeneration {
@@ -89,7 +93,7 @@ export function catchUpProjectionGeneration(params: ProjectionBuildRequest & Rea
 }
 
 export function verifyProjectionGeneration(
-  store: InMemoryProjectionGenerationStore,
+  store: ProjectionGenerationLifecycleStore,
   generation: FieldProjectionGeneration,
   _sha256: FieldContractSha256
 ): BuiltProjectionGeneration {
@@ -104,7 +108,7 @@ export function verifyProjectionGeneration(
 }
 
 export function activateProjectionGeneration(
-  store: InMemoryProjectionGenerationStore,
+  store: ProjectionGenerationLifecycleStore,
   pointer: ProjectionGenerationPointer
 ): ProjectionGenerationPointer {
   return store.activatePointer(pointer);
@@ -180,7 +184,7 @@ function applyCatchUpErases(
 }
 
 function requireArtifacts(
-  store: InMemoryProjectionGenerationStore,
+  store: ProjectionGenerationLifecycleStore,
   workspaceId: string,
   generationId: string
 ): ProjectionGenerationArtifacts {

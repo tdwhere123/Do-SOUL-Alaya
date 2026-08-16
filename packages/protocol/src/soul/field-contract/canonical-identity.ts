@@ -40,6 +40,24 @@ export type FieldReceiptReplayRule = z.infer<typeof FieldReceiptReplayRuleSchema
 export type FieldReceiptFailureDisposition = z.infer<typeof FieldReceiptFailureDispositionSchema>;
 export type FieldReceiptGovernanceEffect = z.infer<typeof FieldReceiptGovernanceEffectSchema>;
 export type FieldReceiptDeletionBehavior = z.infer<typeof FieldReceiptDeletionBehaviorSchema>;
+export type FieldReceiptContractFields = z.infer<typeof FieldReceiptContractFieldsSchema>;
+
+export function fieldReceiptContractFields(input: Readonly<{
+  readonly identity: string;
+  readonly producer: string;
+  readonly consumer: string;
+  readonly deletion_behavior?: FieldReceiptDeletionBehavior;
+}>): FieldReceiptContractFields {
+  return {
+    producer: input.producer,
+    consumer: input.consumer,
+    identity: input.identity,
+    replay_rule: "idempotent_same_identity",
+    failure_disposition: "fail_closed",
+    governance_effect: "none",
+    deletion_behavior: input.deletion_behavior ?? "retain_identity"
+  };
+}
 
 export function formatFieldContractDigest(hex: string): string {
   if (!FIELD_CONTRACT_HEX_PATTERN.test(hex)) {

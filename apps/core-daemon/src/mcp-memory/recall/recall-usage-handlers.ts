@@ -437,7 +437,10 @@ async function maybeEmitCoUsage(
     deliveryId: request.delivery_id,
     usedObjectIds,
     occurredAt: params.now(),
-    scope: workspaceId
+    scope: workspaceId,
+    ...(params.deps.asyncSideEffectAudit === undefined ? {} : {
+      eventLog: params.deps.asyncSideEffectAudit.eventLogRepo
+    })
   });
 }
 

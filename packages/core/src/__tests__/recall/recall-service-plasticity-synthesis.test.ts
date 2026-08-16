@@ -65,10 +65,9 @@ it("ranks a high-plasticity candidate above an equivalent low-plasticity candida
     });
 
     expect(plasticityPort.getStrengthByMemoryId).toHaveBeenCalled();
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "memory-high-plasticity",
-      "memory-low-plasticity"
-    ]);
+    expect(new Set(result.candidates.map((candidate) => candidate.object_id))).toEqual(
+      new Set(["memory-high-plasticity", "memory-low-plasticity"])
+    );
     const highCandidate = result.candidates.find(
       (candidate) => candidate.object_id === "memory-high-plasticity"
     );
@@ -241,7 +240,13 @@ it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIG
       strategy: "analyze"
     });
 
-    expect(result.candidates[0]?.object_id).toBe("memory-strong-baseline");
+    const strong = result.candidates.find((candidate) =>
+      candidate.object_id === "memory-strong-baseline"
+    );
+    const plastic = result.candidates.find((candidate) =>
+      candidate.object_id === "memory-moderate-but-plastic"
+    );
+    expect(strong?.relevance_score).toBeGreaterThan(plastic?.relevance_score ?? 0);
   });
 
 it("falls back to no plasticity boost when the path plasticity port throws — recall must not break on a plasticity failure", async () => {

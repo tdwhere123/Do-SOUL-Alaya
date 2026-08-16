@@ -14,8 +14,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonFieldComposition } from
   "../../../runtime/field/field-composition.js";
-import { rebuildAndActivateProjectionGeneration } from
-  "../../../runtime/field/shadow-rebuild.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
 const tracked = new Set<StorageDatabase>();
@@ -46,23 +44,9 @@ describe("field composition", () => {
   });
 
   it("rebuilds a sealed frontier twice with the same generation and activates the pointer", () => {
-    const { database, fieldRepos, eventLogRepo } = openComposition();
-    const first = rebuildAndActivateProjectionGeneration({
-      workspaceId: "workspace-1",
-      inputEventFrontier: "sealed:empty",
-      governanceFrontier: "sealed:empty",
-      recordedAt: CLOCK,
-      generations: fieldRepos.generations,
-      eventLog: eventLogRepo
-    });
-    const second = rebuildAndActivateProjectionGeneration({
-      workspaceId: "workspace-1",
-      inputEventFrontier: "sealed:empty",
-      governanceFrontier: "sealed:empty",
-      recordedAt: CLOCK,
-      generations: fieldRepos.generations,
-      eventLog: eventLogRepo
-    });
+    const { database, fieldRepos, querySession } = openComposition();
+    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    const second = querySession.pinActiveGeneration("workspace-1", CLOCK);
     const active = fieldRepos.generations.readActive("workspace-1");
     expect(second.generation_id).toBe(first.generation_id);
     expect(active?.generation_id).toBe(first.generation_id);

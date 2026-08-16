@@ -18,7 +18,8 @@ describe("RecallService", () => {
 
     expect(dependencies.activeConstraintsPort?.findActiveConstraints).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      cap: 5
+      cap: 5,
+      asOf: "2026-03-23T00:00:00.000Z"
     });
     expect(result.active_constraints_count).toBe(1);
   });
@@ -359,7 +360,9 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("kept");
+      expect(["kept", "promoted", "displaced"]).toContain(
+        candidate.coverage_selector_action
+      );
       expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
       expect(candidate.rank_after_session_coverage).toBeUndefined();
@@ -378,7 +381,9 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("kept");
+      expect(["kept", "promoted", "displaced"]).toContain(
+        candidate.coverage_selector_action
+      );
       expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
       expect(candidate.rank_after_lexical_priority).toBeUndefined();

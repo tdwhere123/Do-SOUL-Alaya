@@ -58,11 +58,12 @@ export function verifyPersistedFactor(
   row: FieldFactorDescriptorRow,
   sha256: FieldContractSha256
 ): void {
-  const payload = row.canonical_payload;
-  if (payload === null) return;
+  if (row.canonical_payload === null) {
+    throw new StorageError("VALIDATION_FAILED", "factor payload is required");
+  }
   assertHashed("factor", row.factor_id, () => hashFactorId({
     family: row.family,
-    canonical_payload: payload,
+    canonical_payload: row.canonical_payload,
     operator_id: row.operator_id
   }, sha256));
 }

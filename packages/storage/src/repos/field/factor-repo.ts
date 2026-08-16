@@ -1,7 +1,11 @@
-import type { DerivationJobStatus, FieldContractSha256 } from "@do-soul/alaya-protocol";
+import {
+  sameFactorDescriptorFields,
+  type DerivationJobStatus,
+  type FieldContractSha256
+} from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
-import { parseOptionalRow } from "../shared/parse-row.js";
+import { parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import {
   assertSubjectNotErased,
   canonicalizeEvidenceIdsJson,
@@ -24,11 +28,23 @@ import type {
   FieldFactorRepo
 } from "./ports.js";
 
+const DESCRIPTOR_SELECT = `
+  SELECT factor_id, workspace_id, family, canonical_payload, operator_id, recorded_at
+  FROM factor_descriptors
+`;
+
+const INCIDENCE_SELECT = `
+  SELECT incidence_id, span_id, factor_id, scope, operator_id, workspace_id, recorded_at
+  FROM factor_incidences
+`;
+
 export class SqliteFieldFactorRepo implements FieldFactorRepo {
   private readonly insertDescriptorStatement;
   private readonly selectDescriptorStatement;
+  private readonly listDescriptorStatement;
   private readonly insertIncidenceStatement;
   private readonly selectIncidenceStatement;
+  private readonly listIncidenceStatement;
 
   public constructor(
     private readonly database: StorageDatabase,
@@ -40,20 +56,24 @@ export class SqliteFieldFactorRepo implements FieldFactorRepo {
       ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, factor_id) DO NOTHING
     `);
-    this.selectDescriptorStatement = database.connection.prepare(`
-      SELECT factor_id, workspace_id, family, canonical_payload, operator_id, recorded_at
-      FROM factor_descriptors WHERE workspace_id = ? AND factor_id = ? LIMIT 1
-    `);
+    this.selectDescriptorStatement = database.connection.prepare(
+      `${DESCRIPTOR_SELECT} WHERE workspace_id = ? AND factor_id = ? LIMIT 1`
+    );
+    this.listDescriptorStatement = database.connection.prepare(
+      `${DESCRIPTOR_SELECT} WHERE workspace_id = ? ORDER BY factor_id`
+    );
     this.insertIncidenceStatement = database.connection.prepare(`
       INSERT INTO factor_incidences (
         incidence_id, span_id, factor_id, scope, operator_id, workspace_id, recorded_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, incidence_id) DO NOTHING
     `);
-    this.selectIncidenceStatement = database.connection.prepare(`
-      SELECT incidence_id, span_id, factor_id, scope, operator_id, workspace_id, recorded_at
-      FROM factor_incidences WHERE workspace_id = ? AND incidence_id = ? LIMIT 1
-    `);
+    this.selectIncidenceStatement = database.connection.prepare(
+      `${INCIDENCE_SELECT} WHERE workspace_id = ? AND incidence_id = ? LIMIT 1`
+    );
+    this.listIncidenceStatement = database.connection.prepare(
+      `${INCIDENCE_SELECT} WHERE workspace_id = ? ORDER BY incidence_id`
+    );
   }
 
   public insertDescriptor(row: FieldFactorDescriptorRow): FieldFactorDescriptorRow {
@@ -99,6 +119,22 @@ export class SqliteFieldFactorRepo implements FieldFactorRepo {
   public findIncidence(workspaceId: string, incidenceId: string): FieldFactorIncidenceRow | null {
     return parseOptionalRow(
       this.selectIncidenceStatement.get(workspaceId, incidenceId),
+      fieldFactorIncidenceParser,
+      "factor incidence"
+    );
+  }
+
+  public listDescriptors(workspaceId: string): readonly FieldFactorDescriptorRow[] {
+    return parseRows(
+      this.listDescriptorStatement.all(workspaceId),
+      fieldFactorDescriptorParser,
+      "factor descriptor"
+    );
+  }
+
+  public listIncidences(workspaceId: string): readonly FieldFactorIncidenceRow[] {
+    return parseRows(
+      this.listIncidenceStatement.all(workspaceId),
       fieldFactorIncidenceParser,
       "factor incidence"
     );
@@ -184,8 +220,5 @@ function sameDescriptor(
   existing: FieldFactorDescriptorRow,
   incoming: FieldFactorDescriptorRow
 ): boolean {
-  return existing.family === incoming.family &&
-    existing.operator_id === incoming.operator_id &&
-    (existing.canonical_payload === incoming.canonical_payload ||
-      existing.canonical_payload === null);
+  return sameFactorDescriptorFields(existing, incoming);
 }

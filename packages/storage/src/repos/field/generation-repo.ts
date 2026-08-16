@@ -1,10 +1,12 @@
 import type {
   FieldContractSha256,
+  ProjectionGenerationPort,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { parseOptionalRow } from "../shared/parse-row.js";
+import { generationFromRow, generationToRow } from "./field-receipts.js";
 import { verifyPersistedGeneration } from "./identity.js";
 import {
   fieldProjectionGenerationParser,
@@ -165,6 +167,17 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
       fieldProjectionGenerationParser,
       "projection generation"
     );
+  }
+
+  public asGenerationPort(): ProjectionGenerationPort {
+    return {
+      snapshot: (input) => generationFromRow(this.insert(generationToRow(input))),
+      verify: (input) => generationFromRow(
+        this.persistStatus(input.workspace_id, input.generation_id, "verified")
+      ),
+      activatePointer: (input) => this.activatePointer(input),
+      pin: (input) => this.pin(input)
+    };
   }
 
   public readByGenerationIds(

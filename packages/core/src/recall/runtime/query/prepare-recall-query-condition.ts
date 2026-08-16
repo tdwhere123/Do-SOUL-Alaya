@@ -29,22 +29,9 @@ export function resolvePreparedAsOf(
   explicit: string | undefined,
   now: () => string
 ): string {
-  if (explicit === undefined) return captureEffectiveAsOf(undefined, now);
-  if (!/(?:z|[+-]\d{2}:\d{2})$/iu.test(explicit)) {
-    throw new Error("recall reference time must include a timezone offset");
-  }
-  if (!Number.isFinite(Date.parse(explicit))) {
-    throw new Error("recall reference time must be a valid date-time");
-  }
+  if (explicit === undefined) return now();
+  captureEffectiveAsOf(explicit, now);
   return explicit;
-}
-
-export function toConditionAsOf(value: string): string {
-  try {
-    return captureEffectiveAsOf(value, () => value);
-  } catch {
-    return new Date(value).toISOString();
-  }
 }
 
 export function capturePreparedRequestCondition(input: Readonly<{
@@ -63,13 +50,13 @@ export function capturePreparedRequestCondition(input: Readonly<{
   readonly principal?: string;
 }>): PreparedQueryConditionCapture {
   const referenceTime = resolvePreparedAsOf(input.explicitAsOf, input.now);
-  const conditionAsOf = toConditionAsOf(referenceTime);
+  const effectiveAsOf = captureEffectiveAsOf(referenceTime, input.now);
   return {
     referenceTime,
     receipt: prepareRecallQueryCondition({
       ...input,
-      explicitAsOf: conditionAsOf,
-      pin: input.session.pinActiveGeneration(input.workspaceId, conditionAsOf)
+      explicitAsOf: effectiveAsOf,
+      pin: input.session.pinActiveGeneration(input.workspaceId, effectiveAsOf)
     })
   };
 }
@@ -77,7 +64,7 @@ export function capturePreparedRequestCondition(input: Readonly<{
 export function prepareRecallQueryCondition(
   input: PrepareRecallQueryConditionInput
 ): QueryConditionReceipt {
-  const effectiveAsOf = toConditionAsOf(resolvePreparedAsOf(input.explicitAsOf, input.now));
+  const effectiveAsOf = captureEffectiveAsOf(input.explicitAsOf, input.now);
   return captureQueryCondition({
     principal: input.principal ?? input.workspaceId,
     workspace_id: input.workspaceId,

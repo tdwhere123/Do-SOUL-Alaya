@@ -27,13 +27,11 @@ export function createDaemonFieldComposition(input: Readonly<{
   return Object.freeze({
     fieldRepos,
     stores: createSqliteFieldFormationStores({
-      database: input.database,
       repos: fieldRepos
     }),
     usagePort: createSqliteCausalUsagePort({
       repo: fieldRepos.usage,
-      sha256,
-      eventLog: input.eventLogRepo
+      sha256
     }),
     querySession: createSqliteFieldQuerySession({
       generations: fieldRepos.generations,

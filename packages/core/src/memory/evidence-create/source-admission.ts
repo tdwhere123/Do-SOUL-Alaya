@@ -1,6 +1,7 @@
 import {
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   SourceRecordIdentitySchema,
+  fieldReceiptContractFields,
   hashAddressableSourceSpanId,
   hashContentDigest,
   hashSourceRecordId,
@@ -98,15 +99,11 @@ function persistSpan(
 }
 
 function receiptFields(identity: string) {
-  return {
-    producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-    consumer: RECORD_CONSUMER,
+  return fieldReceiptContractFields({
     identity,
-    replay_rule: "idempotent_same_identity" as const,
-    failure_disposition: "fail_closed" as const,
-    governance_effect: "none" as const,
-    deletion_behavior: "retain_identity" as const
-  };
+    producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    consumer: RECORD_CONSUMER
+  });
 }
 
 export function resolveSourceLineageId(input: Readonly<{

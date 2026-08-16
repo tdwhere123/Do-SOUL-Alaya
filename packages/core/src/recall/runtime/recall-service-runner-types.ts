@@ -107,9 +107,7 @@ export interface PreparedRecallRequest {
   readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly answerShapePlan: Readonly<RecallAnswerShapePlan>;
   readonly referenceTime: string;
-  // Only an explicit caller value selects a historical projection. The normal
-  // current-recall clock must keep using the active runtime projection.
-  readonly temporalProjectionAsOf?: string;
+  readonly temporalProjectionAsOf: string;
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly queryCondition: QueryConditionReceipt;

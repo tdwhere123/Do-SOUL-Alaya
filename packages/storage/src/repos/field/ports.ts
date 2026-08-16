@@ -4,6 +4,7 @@ import type {
   EffectDecision,
   FactorFamily,
   ProjectionEraseSubjectKind,
+  ProjectionGenerationPort,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
 
@@ -124,11 +125,13 @@ export type FieldProofEffectRow = Readonly<{
 export interface FieldSourceRecordRepo {
   insert(row: FieldSourceRecordRow): FieldSourceRecordRow;
   findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null;
+  listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[];
 }
 
 export interface FieldSourceSpanRepo {
   insert(row: FieldSourceSpanRow): FieldSourceSpanRow;
   findById(workspaceId: string, spanId: string): FieldSourceSpanRow | null;
+  listByWorkspace(workspaceId: string): readonly FieldSourceSpanRow[];
 }
 
 export interface FieldFactorRepo {
@@ -136,6 +139,8 @@ export interface FieldFactorRepo {
   insertIncidence(row: FieldFactorIncidenceRow): FieldFactorIncidenceRow;
   findDescriptor(workspaceId: string, factorId: string): FieldFactorDescriptorRow | null;
   findIncidence(workspaceId: string, incidenceId: string): FieldFactorIncidenceRow | null;
+  listDescriptors(workspaceId: string): readonly FieldFactorDescriptorRow[];
+  listIncidences(workspaceId: string): readonly FieldFactorIncidenceRow[];
 }
 
 export interface FieldDerivationJobRepo {
@@ -164,6 +169,7 @@ export interface FieldProjectionGenerationRepo {
     workspaceId: string,
     generationIds: readonly string[]
   ): readonly FieldProjectionGenerationRow[];
+  asGenerationPort(): ProjectionGenerationPort;
 }
 
 export interface FieldEraseBarrierRepo {
