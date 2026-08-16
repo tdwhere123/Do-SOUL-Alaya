@@ -53,8 +53,18 @@ export interface QueryConditionPort {
   captureCondition(input: QueryCondition): QueryConditionReceipt;
 }
 
+export type AttributedActivationReceipt = Readonly<{
+  readonly workspace_id: string;
+  readonly generation_id: string;
+  readonly condition_digest: string;
+  readonly seed_ids: readonly string[];
+  readonly opened_candidate_keys: readonly string[];
+  readonly stop_disposition: "certified" | "uncertified";
+  readonly frontier: "closed" | "incomplete";
+}>;
+
 export interface AttributedActivationPort {
-  attribute(input: QueryConditionReceipt): QueryConditionReceipt;
+  attribute(input: QueryConditionReceipt): AttributedActivationReceipt;
 }
 
 export interface StopCertificatePort {
@@ -69,8 +79,20 @@ export interface CausalUsagePort {
   recordUsage(input: CausalUsageReceipt): CausalUsageReceipt;
 }
 
+export type SelectGammaRequest = Readonly<{
+  readonly workspace_id: string;
+  readonly generation_id: string;
+  readonly condition_digest: string;
+  readonly eligible_candidate_keys: readonly string[];
+  readonly token_budget: number;
+}>;
+
+export type SelectGammaResult = Readonly<{
+  readonly selected_candidate_keys: readonly string[];
+}>;
+
 export interface SelectGammaPort {
-  select(input: FieldStopCertificateReceipt): FieldStopCertificateReceipt;
+  select(input: SelectGammaRequest): SelectGammaResult;
 }
 
 export interface EraseBarrierPort {

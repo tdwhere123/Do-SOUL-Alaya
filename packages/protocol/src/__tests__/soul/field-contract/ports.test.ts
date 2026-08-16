@@ -60,7 +60,15 @@ describe("field-contract ports", () => {
       })
     };
     const activation: AttributedActivationPort = {
-      attribute: (input) => input
+      attribute: (input) => ({
+        workspace_id: input.condition.workspace_id,
+        generation_id: input.generation_id,
+        condition_digest: input.identity,
+        seed_ids: Object.freeze([]),
+        opened_candidate_keys: Object.freeze([]),
+        stop_disposition: "uncertified",
+        frontier: "incomplete"
+      })
     };
     const stop: StopCertificatePort = {
       certify: (input) => input
@@ -90,7 +98,9 @@ describe("field-contract ports", () => {
       recordUsage: (input) => input
     };
     const select: SelectGammaPort = {
-      select: (input) => input
+      select: (input) => ({
+        selected_candidate_keys: input.eligible_candidate_keys
+      })
     };
     const erase: EraseBarrierPort = {
       erase: (input) => input

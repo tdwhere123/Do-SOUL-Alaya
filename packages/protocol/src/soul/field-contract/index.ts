@@ -126,6 +126,7 @@ export {
 } from "./stop-certificate.js";
 export type {
   AttributedActivationPort,
+  AttributedActivationReceipt,
   CausalUsagePort,
   EraseBarrierPort,
   FactorIncidencePort,
@@ -133,6 +134,8 @@ export type {
   ProofEffectPort,
   QueryConditionPort,
   SelectGammaPort,
+  SelectGammaRequest,
+  SelectGammaResult,
   SourceAdmissionPort,
   SourceAdmissionRequest,
   SourceAdmissionResult,
