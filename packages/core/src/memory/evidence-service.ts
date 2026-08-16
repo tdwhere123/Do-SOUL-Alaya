@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  EvidenceCapsuleSchema,
   EvidenceHealthStateSchema,
   MemoryGovernanceEventType,
-  SoulEvidenceCreatedPayloadSchema,
   SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
@@ -13,15 +11,27 @@ import {
   type EvidenceSearchProjection,
   type EvidenceHealthState,
   type EventLogEntry,
+  type FactorIncidencePort,
+  type FieldContractSha256,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationProposal,
+  type SourceAdmissionPort,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
+import type { OpenSemanticFactorExtractionPort } from
+  "../semantic/open-semantic-factor-extraction-port.js";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
+import { createEvidenceCapsule } from "./evidence-create/create-evidence.js";
+import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js";
+import { fieldSha256 } from "./evidence-create/field-hash.js";
+import {
+  createInMemoryFieldStores,
+  type FieldFormationStores
+} from "./evidence-create/field-stores.js";
+import { createSourceAdmissionPort } from "./evidence-create/source-admission.js";
 import type { EvidenceFactFrameProposalNormalizer } from
   "./fact-frame-formation/declarative-normalizer.js";
-import { planEvidenceFormation } from "./evidence-create/formation-plan.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -114,15 +124,34 @@ export interface EvidenceServiceDependencies {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
+  readonly sha256?: FieldContractSha256;
+  readonly sourceAdmission?: SourceAdmissionPort;
+  readonly factorIncidence?: FactorIncidencePort;
+  readonly fieldStores?: FieldFormationStores;
+  readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
 }
 
 export class EvidenceService {
   private readonly generateObjectId: () => string;
   private readonly now: () => string;
+  private readonly sha256: FieldContractSha256;
+  private readonly fieldStores: FieldFormationStores;
+  private readonly sourceAdmission: SourceAdmissionPort;
+  private readonly factorIncidence: FactorIncidencePort;
 
   public constructor(private readonly dependencies: EvidenceServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.sha256 = dependencies.sha256 ?? fieldSha256;
+    this.fieldStores = dependencies.fieldStores ?? createInMemoryFieldStores();
+    this.sourceAdmission = dependencies.sourceAdmission ?? createSourceAdmissionPort({
+      sha256: this.sha256,
+      stores: this.fieldStores
+    });
+    this.factorIncidence = dependencies.factorIncidence ?? createFactorIncidencePort({
+      sha256: this.sha256,
+      stores: this.fieldStores
+    });
   }
 
   public async create(
@@ -131,47 +160,24 @@ export class EvidenceService {
     factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
     semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
   ): Promise<Readonly<EvidenceCapsule>> {
-    const timestamp = this.now();
-    const evidence = parseEvidenceCapsule({
-      ...input,
-      object_id: this.generateObjectId(),
-      object_kind: "evidence_capsule",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: timestamp,
-      updated_at: timestamp
-    });
-    const formation = planEvidenceFormation({
-      evidence,
+    return await createEvidenceCapsule({
+      capsuleInput: input,
       searchProjections,
       factFrameProposal,
       semanticFactorProposal,
-      factFrameProposalNormalizer: this.dependencies.factFrameProposalNormalizer
+      evidenceCapsuleRepo: this.dependencies.evidenceCapsuleRepo,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
+      factFrameProposalNormalizer: this.dependencies.factFrameProposalNormalizer,
+      warn: this.dependencies.warn,
+      generateObjectId: this.generateObjectId,
+      now: this.now,
+      sha256: this.sha256,
+      sourceAdmission: this.sourceAdmission,
+      factorIncidence: this.factorIncidence,
+      fieldStores: this.fieldStores,
+      semanticExtractor: this.dependencies.semanticExtractor
     });
-
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
-      entity_type: "evidence_capsule",
-      entity_id: evidence.object_id,
-      workspace_id: evidence.workspace_id,
-      run_id: evidence.run_id,
-      caused_by: evidence.created_by,
-      payload_json: SoulEvidenceCreatedPayloadSchema.parse({
-        object_id: evidence.object_id,
-        object_kind: evidence.object_kind,
-        workspace_id: evidence.workspace_id,
-        run_id: evidence.run_id
-      })
-    });
-
-    const created = await this.dependencies.evidenceCapsuleRepo.create(
-      evidence,
-      formation.searchProjections,
-      formation.factFrameCapture,
-      formation.semanticFormation
-    );
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return created;
   }
 
   public async deleteCreatedEvidence(objectId: string): Promise<void> {
@@ -384,14 +390,6 @@ export class EvidenceService {
       return findByHealthPage.call(this.dependencies.evidenceCapsuleRepo, health, page);
     }
     return this.dependencies.evidenceCapsuleRepo.findByHealth(health);
-  }
-}
-
-function parseEvidenceCapsule(value: EvidenceCapsule): EvidenceCapsule {
-  try {
-    return EvidenceCapsuleSchema.parse(value);
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid evidence capsule payload", { cause: error });
   }
 }
 

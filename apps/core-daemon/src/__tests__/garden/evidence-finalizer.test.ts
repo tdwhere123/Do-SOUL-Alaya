@@ -49,4 +49,53 @@ describe("post-turn evidence finalizer", () => {
       content: observation
     }]);
   });
+
+  it("keeps empty-semantic candidate evidence without a complete-form fallback", async () => {
+    const receiveSignal = vi.fn(async (signal: CandidateMemorySignal) => ({
+      signal,
+      materialization: {
+        created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }]
+      }
+    }));
+    const hasCreatedEvidence = vi.fn(async () => true);
+
+    await expect(finalizePostTurnEvidence({
+      taskId: "task-1",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      createdAt: CREATED_AT,
+      turnContent: "Assistant: I use Atlas.",
+      turnMessages: [{ message_id: "a1", role: "assistant", content: "I use Atlas." }],
+      sourceObservation: {
+        observed_at: CREATED_AT,
+        authority: "trusted_host_event",
+        source_event_id: "event-1"
+      },
+      candidates: [{
+        signal_id: "candidate-1",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        surface_id: null,
+        source: "user_action",
+        signal_kind: "new_fact",
+        object_kind: "memory_entry",
+        signal_state: "emitted",
+        scope_hint: "project",
+        domain_tags: [],
+        confidence: 0.9,
+        evidence_refs: [],
+        source_memory_refs: [],
+        supersedes_refs: [],
+        exception_to_refs: [],
+        contradicts_refs: [],
+        incompatible_with_refs: [],
+        created_at: CREATED_AT,
+        raw_payload: { gist: "I use Atlas." }
+      } as CandidateMemorySignal],
+      signalReceiver: { receiveSignal, hasCreatedEvidence }
+    })).resolves.toEqual(["candidate-1"]);
+
+    expect(receiveSignal).toHaveBeenCalledTimes(1);
+    expect(receiveSignal.mock.calls[0]?.[0]?.signal_id).toBe("candidate-1");
+  });
 });

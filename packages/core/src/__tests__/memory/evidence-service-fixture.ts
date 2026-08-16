@@ -1,8 +1,12 @@
 import { EvidenceHealthState, type EvidenceCapsule, type EventLogEntry } from
   "@do-soul/alaya-protocol";
-import { vi } from "vitest";
-import { EvidenceService, type EvidenceCapsuleInput } from
-  "../../memory/evidence-service.js";
+import { vi, type Mock } from "vitest";
+import {
+  EvidenceService,
+  type EvidenceCapsuleInput,
+  type EvidenceServiceDependencies,
+  type EvidenceServiceEvidenceCapsuleRepoPort
+} from "../../memory/evidence-service.js";
 
 export function createEvidenceInput(
   overrides: Partial<EvidenceCapsuleInput> = {}
@@ -38,12 +42,18 @@ export function createEvidenceInput(
 }
 
 export function createCreationHarness(
-  dependencies: Pick<
-    ConstructorParameters<typeof EvidenceService>[0],
-    "factFrameProposalNormalizer"
-  > = {}
+  dependencies: Partial<EvidenceServiceDependencies> & {
+    readonly deleteById?: Mock<(objectId: string) => Promise<void>>;
+  } = {}
 ) {
-  const create = vi.fn(async (capsule: EvidenceCapsule) => capsule);
+  const store = new Map<string, EvidenceCapsule>();
+  const create = vi.fn<EvidenceServiceEvidenceCapsuleRepoPort["create"]>(
+    async (capsule) => {
+      const frozen = Object.freeze({ ...capsule });
+      store.set(capsule.object_id, frozen);
+      return frozen;
+    }
+  );
   const append = vi.fn(async (
     event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
   ) => ({
@@ -52,15 +62,16 @@ export function createCreationHarness(
     created_at: "2026-03-20T01:00:00.000Z",
     revision: 0
   }));
+  const { deleteById, generateObjectId, ...serviceDependencies } = dependencies;
   const service = new EvidenceService({
     now: () => "2026-03-20T01:00:00.000Z",
-    generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    generateObjectId: generateObjectId ?? (() => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"),
     eventLogRepo: { append },
-    ...dependencies,
+    ...serviceDependencies,
     evidenceCapsuleRepo: {
       create,
-      deleteById: vi.fn(),
-      findById: vi.fn(async () => null),
+      deleteById: deleteById ?? vi.fn(),
+      findById: vi.fn(async (objectId: string) => store.get(objectId) ?? null),
       findByRunId: vi.fn(async () => []),
       findByWorkspaceId: vi.fn(async () => []),
       findByHealth: vi.fn(async () => []),
