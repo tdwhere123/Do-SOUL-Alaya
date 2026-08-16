@@ -110,6 +110,24 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+export function computeDissipativeEdgeStep(input: Readonly<{
+  readonly inputPotential: number;
+  readonly conductance: number;
+  readonly hopCost?: number;
+}>): number {
+  if (!Number.isFinite(input.inputPotential) || input.inputPotential < 0) {
+    throw new Error("activation must be finite and non-negative");
+  }
+  if (!Number.isFinite(input.conductance)) {
+    throw new Error("conductance must be finite");
+  }
+  const hopCost = input.hopCost ?? 0;
+  if (!Number.isFinite(hopCost) || hopCost < 0) {
+    throw new Error("hop_cost must be finite and non-negative");
+  }
+  return Math.max(0, input.inputPotential * input.conductance - hopCost);
+}
+
 export function computeFloodEdgeTransfer(
   input: FloodEdgeTransferInput
 ): Readonly<FloodEdgeTransferResult> {

@@ -56,9 +56,16 @@ export function planEvidenceFormation(input: Readonly<{
   readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
   readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
 }> & EvidenceFieldFormationPorts): EvidenceFormationPlan {
-  const views = planFormationViews(input);
-  tryPlanFieldFormation(input, views);
-  return views;
+  return planFormationViews(input);
+}
+
+export function admitEvidenceFieldFormation(
+  input: Readonly<{
+    readonly evidence: Readonly<EvidenceCapsule>;
+    readonly views: EvidenceFormationPlan;
+  }> & EvidenceFieldFormationPorts
+): void {
+  tryPlanFieldFormation(input, input.views);
 }
 
 function planFormationViews(input: Readonly<{
@@ -197,7 +204,7 @@ function sourceRequestFromEvidence(
     }),
     source_version: "1",
     content_bytes: content,
-    evidence_object_id: null,
+    evidence_object_id: evidence.object_id,
     recorded_at: evidence.created_at,
     event_time: evidence.event_anchor?.occurred_at ?? null,
     valid_from: null,

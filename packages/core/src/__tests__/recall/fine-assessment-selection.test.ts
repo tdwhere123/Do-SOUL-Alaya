@@ -426,13 +426,16 @@ describe("selectFineAssessmentCandidates", () => {
       ])
     });
 
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["shared", "next"]);
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "next",
+      "shared"
+    ]);
     expect(result.diagnostics.map((candidate) => ({
       candidateKey: candidate.candidate_key,
       droppedReason: candidate.dropped_reason
     }))).toEqual([
-      { candidateKey: local.fusion.candidate_key, droppedReason: null },
       { candidateKey: next.fusion.candidate_key, droppedReason: null },
+      { candidateKey: local.fusion.candidate_key, droppedReason: null },
       { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" }
     ]);
   });

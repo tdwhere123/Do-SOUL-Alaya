@@ -156,23 +156,6 @@ export function buildFinalPacketConsensusObservation(
   return observation;
 }
 
-export function buildFinalSelectorOrder(
-  plan: FinalPacketConsensusPlan,
-  sourceCandidates: readonly FineAssessmentCandidate[]
-): readonly FineAssessmentCandidate[] {
-  if (plan.decision.status !== "accepted") {
-    return Object.freeze([...sourceCandidates]);
-  }
-  const planned = plan.candidates.map((candidate) => candidate.sourceCandidate);
-  const plannedKeys = new Set(plan.candidates.map((candidate) => candidate.candidateKey));
-  return Object.freeze([
-    ...planned,
-    ...sourceCandidates.filter(
-      (candidate) => !plannedKeys.has(buildRecallCandidateDedupeKey(candidate))
-    )
-  ]);
-}
-
 export function fineAssessmentPacketMatchesPlannedMembership(
   plan: FinalPacketConsensusPlan,
   actual: readonly FineAssessmentCandidate[]

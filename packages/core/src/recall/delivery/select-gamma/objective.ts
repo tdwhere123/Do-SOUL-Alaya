@@ -1,17 +1,7 @@
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
-import type {
-  CoverageSelectableCandidate,
-  CoverageSelectionObjective
-} from "../coverage-selection.js";
 import type {
   SelectGammaCoverState,
-  SelectGammaFeatureWeights,
-  SelectGammaFormulaCandidate
+  SelectGammaFeatureWeights
 } from "./types.js";
-
-export type SelectGammaCoverageState = Readonly<{
-  readonly covered: SelectGammaCoverState;
-}>;
 
 export function selectGammaMarginalGain(
   candidate: Readonly<{
@@ -44,38 +34,6 @@ export function acceptSelectGammaCoverage(
   }
 }
 
-export function createSelectGammaCoverageObjective<
-  T extends CoverageSelectableCandidate
->(config: Readonly<{
-  readonly feature_weights: SelectGammaFeatureWeights;
-  readonly coverByKey?: ReadonlyMap<string, SelectGammaFormulaCandidate>;
-}>): CoverageSelectionObjective<T, SelectGammaCoverageState> {
-  const weights = config.feature_weights;
-  const coverByKey = config.coverByKey ?? new Map();
-  return Object.freeze({
-    operator_id: SELECT_GAMMA_OPERATOR_ID,
-    mathematical_class: "monotone_submodular",
-    createState: () => ({ covered: new Map() }),
-    cloneState: (state) => ({ covered: new Map(state.covered) }),
-    marginalGain: ({ candidate, state }) => {
-      const formula = coverByKey.get(candidate.fusion.candidate_key);
-      if (formula === undefined) {
-        throw new Error("Select_Gamma objective is missing candidate cover");
-      }
-      return selectGammaMarginalGain(formula, state.covered, weights);
-    },
-    accept: ({ candidate, state }) => {
-      const formula = coverByKey.get(candidate.fusion.candidate_key);
-      if (formula === undefined) {
-        throw new Error("Select_Gamma objective is missing candidate cover");
-      }
-      acceptSelectGammaCoverage(formula, state.covered);
-    },
-    compareCandidatesOnEqualGain: (left, right) =>
-      compareText(left.fusion.candidate_key, right.fusion.candidate_key)
-  });
-}
-
 function unitCover(value: number | undefined): number {
   const amount = value ?? 0;
   if (!Number.isFinite(amount) || amount < 0) {
@@ -89,8 +47,4 @@ function nonNegative(value: number): number {
     throw new Error("Select_Gamma feature weight must be finite and non-negative");
   }
   return value;
-}
-
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
-import { fieldSha256 } from "../../memory/evidence-create/field-hash.js";
+import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "../../memory/evidence-create/source-admission.js";
 import { createCreationHarness, createEvidenceInput } from "./evidence-service-fixture.js";
@@ -34,6 +34,7 @@ describe("EvidenceService source formation", () => {
     expect(created.excerpt).toBe("Raw source with no complete form.");
     expect(create).toHaveBeenCalled();
     expect(deleteById).not.toHaveBeenCalled();
+    expect(stores.listRecords("workspace-1")).toHaveLength(0);
     expect(await service.findById(created.object_id)).not.toBeNull();
   });
 
@@ -63,6 +64,7 @@ describe("EvidenceService source formation", () => {
     });
     expect(extractor.extract).not.toHaveBeenCalled();
     expect(stores.listRecords("workspace-1")).toHaveLength(1);
+    expect(stores.listRecords("workspace-1")[0]?.evidence_object_id).toBe(created.object_id);
     expect(stores.listRecords("workspace-1")[0]?.valid_from).toBeNull();
     expect(stores.listSpans("workspace-1").length).toBeGreaterThan(1);
     expect(stores.listIncidences("workspace-1").some((row) => {

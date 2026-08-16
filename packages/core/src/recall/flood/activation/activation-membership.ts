@@ -1,4 +1,4 @@
-import type { QueryCondition } from "@do-soul/alaya-protocol";
+import { compareCodeUnits, type QueryCondition } from "@do-soul/alaya-protocol";
 import type { ActivationNode } from "./activation-graph.js";
 
 export function freezeSeeds(
@@ -36,5 +36,5 @@ function isInitialSeed(
 }
 
 function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
+  return compareCodeUnits(left, right);
 }

@@ -200,13 +200,7 @@ describe("mcp memory tool handler", () => {
     expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("feeds co-usage path reinforcement only when the report has a resolvable delivery", async () => {
-    // SECURITY: co-usage reinforcement (onCoUsage) requires a server-side
-    // delivery witness. A report whose delivery cannot be resolved skips the
-    // delivered_object_ids subset gate, so feeding its used ids into onCoUsage
-    // would let a caller pump path support/strength between arbitrary memories.
-    // A legitimate report (delivery resolves, used ids subset the delivery)
-    // still reinforces. see also: mcp-memory/tool-handler.ts reportContextUsage.
+  it("records causal used receipts without the independent co-usage counter", async () => {
     const onCoUsage = vi.fn(async () => undefined);
     const onCoRecall = vi.fn(async () => undefined);
     const baseDeps = createDeps();
@@ -231,8 +225,7 @@ describe("mcp memory tool handler", () => {
       context
     });
     expect(legitimate.ok).toBe(true);
-    expect(onCoUsage).toHaveBeenCalledTimes(1);
-    expect(onCoUsage).toHaveBeenCalledWith(["mem1", "mem2"], context.workspaceId);
+    expect(onCoUsage).not.toHaveBeenCalled();
 
     onCoUsage.mockClear();
     deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);

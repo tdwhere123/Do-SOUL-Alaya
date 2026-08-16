@@ -1,6 +1,7 @@
 import {
   FieldGenerationEventType,
   ProjectionEraseBarrierSchema,
+  sameEraseBarrier,
   SoulFieldEraseBarrierPayloadSchema,
   type EventLogEntry,
   type ProjectionEraseBarrier
@@ -27,7 +28,6 @@ export interface GovernanceEventLogPort {
 export interface EventLogSafeEraseBarrierDependencies {
   readonly barriers: EraseBarrierStore;
   readonly subjects: EraseSubjectStore;
-  readonly eventLog: GovernanceEventLogPort;
 }
 
 export class EventLogSafeEraseBarrier {
@@ -38,9 +38,7 @@ export class EventLogSafeEraseBarrier {
     const existing = this.existingCompatibleBarrier(barrier);
     if (existing !== null) return existing;
     this.dependencies.subjects.clearPlaintext(barrier.workspace_id, barrier.subject_id);
-    const stored = this.dependencies.barriers.put(barrier);
-    this.dependencies.eventLog.append(buildEraseEventInput(stored));
-    return stored;
+    return this.dependencies.barriers.put(barrier);
   }
 
   public restorePlaintext(
@@ -123,7 +121,9 @@ export class InMemoryGovernanceEventLog implements GovernanceEventLogPort {
   }
 }
 
-function buildEraseEventInput(barrier: ProjectionEraseBarrier): EventPublisherInput {
+export function buildEraseBarrierEventInput(
+  barrier: ProjectionEraseBarrier
+): EventPublisherInput {
   return {
     event_type: FieldGenerationEventType.SOUL_FIELD_ERASE_BARRIER,
     entity_type: "projection_erase_barrier",
@@ -140,15 +140,6 @@ function buildEraseEventInput(barrier: ProjectionEraseBarrier): EventPublisherIn
       erased_at: barrier.erased_at
     })
   };
-}
-
-function sameEraseBarrier(
-  existing: ProjectionEraseBarrier,
-  incoming: ProjectionEraseBarrier
-): boolean {
-  return existing.generation_id === incoming.generation_id
-    && existing.subject_kind === incoming.subject_kind
-    && existing.subject_id === incoming.subject_id;
 }
 
 function barrierKey(workspaceId: string, barrierId: string): string {

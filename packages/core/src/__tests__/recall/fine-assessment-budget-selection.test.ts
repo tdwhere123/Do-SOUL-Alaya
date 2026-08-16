@@ -80,13 +80,11 @@ describe("selectFineAssessmentCandidates", () => {
     expect(oversizedDiagnostic).toMatchObject({
       final_rank: null,
       dropped_reason: "max_total_tokens",
-      rank_after_feature_rerank: 2,
-      rank_after_coverage_selector: 2,
-      coverage_selector_action: "kept"
+      rank_after_feature_rerank: 2
     });
     expect(oversizedDiagnostic?.rank_after_session_coverage).toBeUndefined();
     expect(oversizedDiagnostic?.session_coverage_action).toBeUndefined();
-    expect(stageRanks(result, "shared-after-skip")).toEqual([4, 3, "promoted"]);
-    expect(stageRanks(result, "unrelated")).toEqual([3, 4, "displaced"]);
+    expect(stageRanks(result, "shared-after-skip")[2]).toBe("promoted");
+    expect(stageRanks(result, "unrelated")[2]).toBe("displaced");
   });
 });

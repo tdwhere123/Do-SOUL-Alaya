@@ -39,6 +39,7 @@ export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export * from "./runs/engine-binding-service.js";
 export * from "./shared/errors.js";
+export { fieldContractSha256 } from "./shared/field-hash.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";
 export * from "./memory/evidence-service.js";

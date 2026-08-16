@@ -1,18 +1,13 @@
-import { createHash } from "node:crypto";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   CAUSAL_USAGE_OPERATOR_ID,
   CausalUsageReceiptSchema,
   hashCausalUsageId,
   type CausalUsageKind,
-  type CausalUsageReceipt,
-  type FieldContractSha256
+  type CausalUsageReceipt
 } from "@do-soul/alaya-protocol";
 
-export function daemonFieldSha256(preimage: string): string {
-  return createHash("sha256").update(preimage, "utf8").digest("hex");
-}
-
-export const usageIdentitySha256: FieldContractSha256 = daemonFieldSha256;
+export const usageIdentitySha256 = fieldContractSha256;
 
 export function hashUsageIdentity(input: Readonly<{
   readonly causal_key: string;

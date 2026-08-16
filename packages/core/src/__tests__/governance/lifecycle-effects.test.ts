@@ -27,7 +27,7 @@ describe("GovernedEffectLifecycle", () => {
     const barriers = new InMemoryEraseBarrierStore();
     const eventLog = new InMemoryGovernanceEventLog(() => AS_OF);
     subjects.seed("workspace-1", "claim-1", "plaintext claim body");
-    const erase = new EventLogSafeEraseBarrier({ subjects, barriers, eventLog });
+    const erase = new EventLogSafeEraseBarrier({ subjects, barriers });
     const lifecycle = new GovernedEffectLifecycle({
       proof: new ProofCarryingEffectOwner({
         now: () => AS_OF,
@@ -59,6 +59,18 @@ describe("GovernedEffectLifecycle", () => {
     expect(eventLog.entries.some((entry) =>
       entry.event_type === FieldGenerationEventType.SOUL_FIELD_EFFECT_DECIDED
     )).toBe(true);
+    const eraseAudit = eventLog.entries.find((entry) =>
+      entry.event_type === FieldGenerationEventType.SOUL_FIELD_ERASE_BARRIER
+    );
+    expect(eraseAudit).toMatchObject({
+      entity_type: "projection_erase_barrier",
+      payload_json: {
+        workspace_id: "workspace-1",
+        barrier_id: "barrier-claim-1",
+        subject_id: "claim-1"
+      }
+    });
+    expect(JSON.stringify(eraseAudit?.payload_json)).not.toMatch(/plaintext claim/u);
   });
 });
 

@@ -10,6 +10,7 @@ import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { readNow, type NowProvider } from "../../shared/time.js";
 import {
   EventLogSafeEraseBarrier,
+  buildEraseBarrierEventInput,
   type GovernanceEventLogPort
 } from "./erase-barrier.js";
 import { GovernedEffectAction } from "./proof-effect-policy.js";
@@ -74,7 +75,10 @@ export class GovernedEffectLifecycle {
   private applyAllowed(request: EffectRequest): void {
     const current = this.readHistory(request.target);
     if (request.action === GovernedEffectAction.ERASE) {
-      this.dependencies.erase.erase(this.dependencies.buildEraseBarrier(request));
+      const stored = this.dependencies.erase.erase(
+        this.dependencies.buildEraseBarrier(request)
+      );
+      this.dependencies.eventLog.append(buildEraseBarrierEventInput(stored));
       this.history.set(request.target, { ...current, erased: true });
       return;
     }

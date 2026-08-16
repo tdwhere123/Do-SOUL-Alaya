@@ -1,8 +1,9 @@
-import type { QueryCondition } from "@do-soul/alaya-protocol";
+import { compareCodeUnits, type QueryCondition } from "@do-soul/alaya-protocol";
 import { applySoftConditionFactors } from
   "../../query/condition/hard-soft-masks.js";
+import { computeDissipativeEdgeStep } from "../edge-transfer.js";
 import {
-  computeDissipativeMessage,
+  assertDissipativeLambda,
   scaleOutgoingTransfers
 } from "../../scoring/activation/dissipative-transfer.js";
 import type {
@@ -79,10 +80,10 @@ function transferableMessage(
     node: target,
     condition: input.condition
   });
-  return computeDissipativeMessage({
-    lambda: adjusted.lambda,
-    activation: input.available,
-    hop_cost: adjusted.hop_cost
+  return computeDissipativeEdgeStep({
+    inputPotential: input.available,
+    conductance: assertDissipativeLambda(adjusted.lambda),
+    hopCost: adjusted.hop_cost
   });
 }
 
@@ -112,5 +113,5 @@ function compareEdges(left: ActivationEdge, right: ActivationEdge): number {
 }
 
 function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
+  return compareCodeUnits(left, right);
 }

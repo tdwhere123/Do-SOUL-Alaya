@@ -26,6 +26,7 @@ export type SelectGammaFeatureWeights = Readonly<Record<string, number>>;
 export type SelectGammaBinding = Readonly<{
   readonly candidates: readonly SelectGammaFormulaCandidate[];
   readonly feature_weights?: SelectGammaFeatureWeights;
+  readonly max_selected?: number;
 }>;
 
 export type SelectGammaCoverState = Map<string, number>;

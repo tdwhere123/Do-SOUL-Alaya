@@ -9,7 +9,7 @@ import {
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import { emitDeterministicIncidences } from "../../memory/evidence-create/factor-emit.js";
-import { fieldSha256 } from "../../memory/evidence-create/field-hash.js";
+import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import {
   createFactorIncidencePort,

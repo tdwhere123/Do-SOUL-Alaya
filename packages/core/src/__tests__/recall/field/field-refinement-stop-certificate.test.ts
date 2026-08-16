@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { materializeConfiguredCoverageSelection } from
   "../../../recall/field/facility/selection-objective.js";
-import { createHash } from "node:crypto";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 import {
   createRecallFieldRefinementStopCertificate,
@@ -63,8 +63,7 @@ describe("field refinement stop certificate", () => {
   });
 
   it("lifts the live exchange-bound owner into an incomplete envelope when a higher bundle remains", () => {
-    const sha256: FieldContractSha256 = (preimage) =>
-      createHash("sha256").update(preimage, "utf8").digest("hex");
+    const sha256: FieldContractSha256 = fieldContractSha256;
     const core = createRecallFieldRefinementStopCertificate(createFixture([1, 1, 1, 1, 1]));
     const generationId = `sha256:${"a".repeat(64)}`;
     const closed = createFieldStopCertificateEnvelope({

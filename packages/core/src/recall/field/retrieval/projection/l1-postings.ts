@@ -1,4 +1,5 @@
 import {
+  compareCodeUnits,
   hashLabeledIdentity,
   type FieldContractSha256,
   type ProjectionEraseSubjectKind
@@ -116,5 +117,5 @@ function matchesEraseSubject(
 }
 
 function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  return compareCodeUnits(left, right);
 }

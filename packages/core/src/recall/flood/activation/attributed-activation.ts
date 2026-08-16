@@ -107,6 +107,7 @@ function snapshotGraph(graph: ActivationGraph): ActivationGraph {
 function hardMaskFrom(receipt: QueryConditionReceipt): HardMaskInput {
   return {
     workspace_id: receipt.condition.workspace_id,
+    principal: receipt.condition.principal,
     authorized_scopes: receipt.condition.authorized_scopes,
     explicit_bridges: receipt.condition.explicit_bridges,
     generation_id: receipt.generation_id,

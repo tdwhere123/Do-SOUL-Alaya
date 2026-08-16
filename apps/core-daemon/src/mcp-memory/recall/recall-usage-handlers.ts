@@ -1,5 +1,4 @@
 import {
-  reportAsyncSideEffectFailure,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort
 } from "@do-soul/alaya-core";
@@ -438,32 +437,6 @@ async function maybeEmitCoUsage(
     occurredAt: params.now(),
     scope: workspaceId
   });
-  if (params.deps.pathRelationProposalService === undefined || usedObjectIds.length < 2) {
-    return;
-  }
-  try {
-    await params.deps.pathRelationProposalService.onCoUsage(
-      usedObjectIds,
-      workspaceId
-    );
-  } catch (err) {
-    await reportAsyncSideEffectFailure(
-      {
-        source: "mcp-memory.report_context_usage",
-        operation: "path_relation_co_usage",
-        subjectType: "context_delivery",
-        subjectId: request.delivery_id,
-        workspaceId,
-        runId: linkedDelivery.run_id ?? context.runId ?? null,
-        warningCode: "ALAYA_PATH_RELATION_CO_USAGE_FAILED",
-        warningMessage: "[RecallUsage] path relation co-usage side effect failed",
-        eventLogRepo: params.deps.asyncSideEffectAudit?.eventLogRepo,
-        runtimeNotifier: params.deps.asyncSideEffectAudit?.runtimeNotifier,
-        now: params.now
-      },
-      err
-    );
-  }
 }
 
 export function createGardenTaskPayloadFingerprint(

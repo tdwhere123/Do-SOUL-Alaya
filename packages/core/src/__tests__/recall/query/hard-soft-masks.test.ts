@@ -11,6 +11,7 @@ import {
 
 const MASK = {
   workspace_id: "workspace-1",
+  principal: "agent",
   authorized_scopes: ["workspace-1", "project-a"],
   explicit_bridges: ["bridge-adopt"],
   generation_id: GENERATION_ID,
@@ -18,6 +19,16 @@ const MASK = {
 } as const;
 
 describe("query condition hard and soft masks", () => {
+  it("denies the same graph under a foreign principal", () => {
+    expect(evaluateHardMask(node("owned"), MASK)).toBe("allow");
+    expect(evaluateHardMask(node("owned"), {
+      ...MASK,
+      principal: "foreign-agent"
+    })).toBe("deny");
+    expect(evaluateHardMask(node("owned", { principal: "foreign-agent" }), MASK))
+      .toBe("deny");
+  });
+
   it("denies a cross-scope node without an explicit bridge", () => {
     expect(evaluateHardMask(node("foreign", { scope: "other-scope" }), MASK)).toBe("deny");
   });

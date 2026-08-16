@@ -297,7 +297,7 @@ export function assertFieldIdentity(actual: string, expected: string, label: str
   }
 }
 
-function compareCodeUnits(left: string, right: string): number {
+export function compareCodeUnits(left: string, right: string): number {
   if (left === right) return 0;
   return left < right ? -1 : 1;
 }

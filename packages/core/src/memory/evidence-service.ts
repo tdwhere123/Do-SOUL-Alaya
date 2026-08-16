@@ -24,7 +24,7 @@ import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 import { createEvidenceCapsule } from "./evidence-create/create-evidence.js";
 import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js";
-import { fieldSha256 } from "./evidence-create/field-hash.js";
+import { fieldContractSha256 } from "../shared/field-hash.js";
 import {
   createInMemoryFieldStores,
   type FieldFormationStores
@@ -142,7 +142,7 @@ export class EvidenceService {
   public constructor(private readonly dependencies: EvidenceServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.sha256 = dependencies.sha256 ?? fieldSha256;
+    this.sha256 = dependencies.sha256 ?? fieldContractSha256;
     this.fieldStores = dependencies.fieldStores ?? createInMemoryFieldStores();
     this.sourceAdmission = dependencies.sourceAdmission ?? createSourceAdmissionPort({
       sha256: this.sha256,

@@ -10,7 +10,7 @@ import {
   type ProofEffectLookup,
   type ProofRecord
 } from "../../governance/effects/proof-effect-policy.js";
-import { defaultFieldSha256 } from "../../governance/effects/field-hash.js";
+import { fieldContractSha256 as defaultFieldSha256 } from "../../shared/field-hash.js";
 
 const AS_OF = "2026-08-16T00:00:00.000Z";
 const EARLIER = "2026-08-15T00:00:00.000Z";

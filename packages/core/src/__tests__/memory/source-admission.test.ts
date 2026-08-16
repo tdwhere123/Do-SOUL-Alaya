@@ -6,7 +6,7 @@ import {
   hashSourceRecordId,
   type SourceAdmissionRequest
 } from "@do-soul/alaya-protocol";
-import { fieldSha256 } from "../../memory/evidence-create/field-hash.js";
+import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "../../memory/evidence-create/source-admission.js";
 

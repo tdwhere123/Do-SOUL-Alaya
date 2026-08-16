@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import type {
   FieldContractSha256,
   ProjectionPin,
   QueryCondition
 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import type { QueryConditionDraft } from
   "../../../recall/query/condition/query-condition-capture.js";
 import type {
@@ -18,7 +18,7 @@ export const GENERATION_ID = `sha256:${"a".repeat(64)}`;
 export const OTHER_GENERATION_ID = `sha256:${"b".repeat(64)}`;
 
 export function testSha256(): FieldContractSha256 {
-  return (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex");
+  return fieldContractSha256;
 }
 
 export function frozenClock(asOf = CLOCK_AS_OF): () => string {
@@ -82,6 +82,7 @@ export function node(
   return {
     candidate_key: candidateKey,
     workspace_id: "workspace-1",
+    principal: "agent",
     scope: "workspace-1",
     generation_id: GENERATION_ID,
     valid_from: "2026-01-01T00:00:00.000Z",

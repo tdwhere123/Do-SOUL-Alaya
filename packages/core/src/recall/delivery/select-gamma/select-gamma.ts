@@ -23,7 +23,8 @@ export function createSelectGammaPort(
       selected_candidate_keys: selectFormulaCandidates(
         request,
         candidates,
-        weights
+        weights,
+        binding.max_selected
       )
     })
   });
@@ -32,7 +33,8 @@ export function createSelectGammaPort(
 function selectFormulaCandidates(
   request: SelectGammaRequest,
   candidates: ReadonlyMap<string, SelectGammaFormulaCandidate>,
-  weights: SelectGammaFeatureWeights
+  weights: SelectGammaFeatureWeights,
+  maxSelected?: number
 ): readonly string[] {
   assertTokenBudget(request.token_budget);
   const remaining = request.eligible_candidate_keys.map((key) => {
@@ -42,18 +44,20 @@ function selectFormulaCandidates(
     }
     return candidate;
   });
-  return greedySelect(remaining, request.token_budget, weights);
+  return greedySelect(remaining, request.token_budget, weights, maxSelected);
 }
 
 function greedySelect(
   remaining: SelectGammaFormulaCandidate[],
   tokenBudget: number,
-  weights: SelectGammaFeatureWeights
+  weights: SelectGammaFeatureWeights,
+  maxSelected?: number
 ): readonly string[] {
   const selected: string[] = [];
   const covered = new Map<string, number>();
   let usedTokens = 0;
   while (remaining.length > 0) {
+    if (maxSelected !== undefined && selected.length >= maxSelected) break;
     const picked = pickNext(
       remaining,
       covered,

@@ -1,5 +1,6 @@
 import {
   classifyFieldValidTime,
+  compareCodeUnits,
   type FieldValidTimeClass
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
@@ -94,13 +95,13 @@ function parseOptionalTime(value: string | null, fieldName: string): string | nu
 function compareCompetingStates(left: CompetingState, right: CompetingState): number {
   return compareOptionalIso(left.valid_from, right.valid_from)
     || compareOptionalIso(left.event_time, right.event_time)
-    || left.recorded_at.localeCompare(right.recorded_at)
-    || left.id.localeCompare(right.id);
+    || compareCodeUnits(left.recorded_at, right.recorded_at)
+    || compareCodeUnits(left.id, right.id);
 }
 
 function compareOptionalIso(left: string | null, right: string | null): number {
   if (left === right) return 0;
   if (left === null) return 1;
   if (right === null) return -1;
-  return left.localeCompare(right);
+  return compareCodeUnits(left, right);
 }

@@ -9,7 +9,7 @@ import {
   type ProofEffectPort
 } from "@do-soul/alaya-protocol";
 import { readNow, type NowProvider } from "../../shared/time.js";
-import { defaultFieldSha256 } from "./field-hash.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { isHardActive, type DualTimeFields } from "./dual-time.js";
 
 export const GovernedEffectAction = {
@@ -95,7 +95,7 @@ export class ProofCarryingEffectOwner implements ProofEffectPort {
   public constructor(dependencies: ProofCarryingEffectOwnerDependencies) {
     this.lookup = dependencies.lookup;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.sha256 = dependencies.sha256 ?? defaultFieldSha256;
+    this.sha256 = dependencies.sha256 ?? fieldContractSha256;
   }
 
   public decide(input: EffectRequest): EffectDecisionReceipt {

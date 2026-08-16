@@ -2,6 +2,7 @@ import {
   PROJECTION_GENERATION_OPERATOR_ID,
   ProjectionEraseBarrierSchema,
   hashLabeledIdentity,
+  sameEraseBarrier,
   type FieldContractSha256,
   type ProjectionEraseBarrier,
   type ProjectionEraseSubjectKind
@@ -47,7 +48,5 @@ export function sameProjectionEraseBarrier(
   existing: ProjectionEraseBarrier,
   incoming: ProjectionEraseBarrier
 ): boolean {
-  return existing.generation_id === incoming.generation_id &&
-    existing.subject_kind === incoming.subject_kind &&
-    existing.subject_id === incoming.subject_id;
+  return sameEraseBarrier(existing, incoming);
 }

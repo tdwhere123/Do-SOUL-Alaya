@@ -4,14 +4,13 @@ import {
   hashLabeledIdentity,
   type FieldContractSha256,
   type FieldStopCertificateReceipt,
-  type FieldStopExchangeBound,
-  type FieldStopReason
+  type FieldStopExchangeBound
 } from "@do-soul/alaya-protocol";
 
-import type { RecallFieldRefinementStopCertificate } from
-  "./field-refinement-stop-certificate.js";
-
-const SCORE_EPSILON = 1e-12;
+import {
+  decideRecallFieldStop,
+  type RecallFieldRefinementStopCertificate
+} from "./field-refinement-stop-certificate.js";
 
 export type BundleFrontierBound = Readonly<{
   readonly unseen_gain_upper_bound: number;
@@ -49,7 +48,13 @@ export function createFieldStopCertificateEnvelope(params: Readonly<{
   const bundleBounds = evaluateBundleFrontierBounds(params.bundleFrontiers ?? []);
   const coreBounds = params.coreCertificate?.exchange_bounds ?? [];
   const bounds = Object.freeze([...coreBounds, ...bundleBounds]);
-  const decision = decideStop(params, bounds);
+  const decision = decideRecallFieldStop({
+    bounds,
+    ...(params.coreCertificate === undefined
+      ? {}
+      : { coreReason: params.coreCertificate.reason }),
+    activationBudgetRemaining: params.activationBudgetRemaining
+  });
   return FieldStopCertificateReceiptSchema.parse({
     schema_version: 1,
     producer: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
@@ -74,49 +79,9 @@ export function createFieldStopCertificateEnvelope(params: Readonly<{
   });
 }
 
-function decideStop(
-  params: Parameters<typeof createFieldStopCertificateEnvelope>[0],
-  bounds: readonly FieldStopExchangeBound[]
-): Readonly<{
-  readonly status: "certified" | "uncertified";
-  readonly frontier: "closed" | "incomplete";
-  readonly reason: FieldStopReason;
-  readonly improvement: number | null;
-}> {
-  const improvement = bounds.length === 0
-    ? null
-    : Math.max(...bounds.map((bound) => bound.improvement_upper_bound));
-  const openGain = bounds.some((bound) => bound.improvement_upper_bound > SCORE_EPSILON);
-  const reason = resolveReason(params, openGain, improvement);
-  const certified = reason === "all_channels_closed" || reason === "exchange_dominated";
-  return Object.freeze({
-    status: certified ? "certified" : "uncertified",
-    frontier: certified ? "closed" : "incomplete",
-    reason,
-    improvement
-  });
-}
-
-function resolveReason(
-  params: Parameters<typeof createFieldStopCertificateEnvelope>[0],
-  openGain: boolean,
-  improvement: number | null
-): FieldStopReason {
-  if (!openGain) {
-    if (params.coreCertificate !== undefined &&
-        params.coreCertificate.reason !== "all_channels_closed" &&
-        params.coreCertificate.reason !== "exchange_dominated") {
-      return params.coreCertificate.reason;
-    }
-    return improvement === null ? "all_channels_closed" : "exchange_dominated";
-  }
-  if (params.activationBudgetRemaining === 0) return "activation_budget_exhausted";
-  return "exchange_not_dominated";
-}
-
 function hashStopIdentity(
   params: Parameters<typeof createFieldStopCertificateEnvelope>[0],
-  decision: ReturnType<typeof decideStop>
+  decision: ReturnType<typeof decideRecallFieldStop>
 ): string {
   return hashLabeledIdentity("stop_certificate", [
     params.workspace_id,

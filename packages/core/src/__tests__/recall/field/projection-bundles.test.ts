@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   FieldStopCertificateReceiptSchema,
   type FieldContractSha256
 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 import { createRecallFiniteFieldChannelCapture } from
   "../../../recall/field/finite-field-capture.js";
@@ -28,8 +28,7 @@ import { materializeSliceKeyL1Postings } from
   "../../../recall/flood/slice-key-l1-postings.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
-const sha256: FieldContractSha256 = (preimage) =>
-  createHash("sha256").update(preimage, "utf8").digest("hex");
+const sha256: FieldContractSha256 = fieldContractSha256;
 const GENERATION = `sha256:${"a".repeat(64)}`;
 const CONDITION = `sha256:${"b".repeat(64)}`;
 

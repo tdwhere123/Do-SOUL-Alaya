@@ -1,4 +1,5 @@
 import {
+  compareCodeUnits,
   hashBundleId,
   hashLabeledIdentity,
   PROJECTION_GENERATION_OPERATOR_ID,
@@ -87,6 +88,9 @@ export function applyEraseToL2Bundles(
 ): readonly ProjectionL2Bundle[] {
   return Object.freeze(bundles.map((bundle) => Object.freeze({
     ...bundle,
+    member_refs: Object.freeze(bundle.member_refs.filter((member) =>
+      subjectKind === "generation" ? false : member !== subjectId
+    )),
     factor_summary: Object.freeze(bundle.factor_summary.map((factor) =>
       subjectKind === "generation" || factor.value === subjectId
         ? Object.freeze({ ...factor, value: "" })
@@ -259,5 +263,5 @@ function uniqueSorted(values: readonly string[]): readonly string[] {
 }
 
 function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  return compareCodeUnits(left, right);
 }

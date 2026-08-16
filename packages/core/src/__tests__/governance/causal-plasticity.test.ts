@@ -5,7 +5,7 @@ import {
   hashCausalUsageId,
   type CausalUsageReceipt
 } from "@do-soul/alaya-protocol";
-import { defaultFieldSha256 } from "../../governance/effects/field-hash.js";
+import { fieldContractSha256 as defaultFieldSha256 } from "../../shared/field-hash.js";
 import {
   projectSoftUsage,
   usageWeightFor

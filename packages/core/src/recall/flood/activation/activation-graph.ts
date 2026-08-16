@@ -3,6 +3,7 @@ import type { SliceCompatibilityV2 } from "../slice-key-selector.js";
 export type ActivationNode = Readonly<{
   readonly candidate_key: string;
   readonly workspace_id: string;
+  readonly principal: string;
   readonly scope: string;
   readonly generation_id: string;
   readonly valid_from: string | null;

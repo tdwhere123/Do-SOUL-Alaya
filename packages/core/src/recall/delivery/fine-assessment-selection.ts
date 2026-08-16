@@ -1,4 +1,4 @@
-import type { SelectGammaRequest, SelectGammaResult } from "@do-soul/alaya-protocol";
+import type { SelectGammaResult } from "@do-soul/alaya-protocol";
 import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
@@ -12,7 +12,7 @@ import {
 } from "./fine-assessment-selection/admission.js";
 import {
   bindFineAssessmentSelectGammaPort,
-  eligibleFineAssessmentKeys
+  buildSelectGammaRequest
 } from "./select-gamma/bind-fine-assessment.js";
 import {
   buildSelectionResult,
@@ -34,6 +34,7 @@ import type { FineAssessmentOrderState } from
   "./fine-assessment-selection/order-sequence.js";
 import type {
   FineAssessmentAccumulator,
+  FineAssessmentAdmission,
   FineAssessmentAdmissionReceipt,
   FineAssessmentCandidate,
   FineAssessmentSelectionContext,
@@ -65,15 +66,21 @@ export function selectFineAssessmentCandidates(
     context,
     coverage.order.candidates
   );
+  const selectedOrder = orderBySelectGammaKeys(
+    coverage.order.candidates,
+    selectGamma.selected_candidate_keys
+  );
   const selection = resolveAdmissionAwareFinalSelection(
     coverage.order,
-    context
+    context,
+    selectedOrder
   );
   const result = finalizeCanonicalSelection(
     selectionParams,
     context,
     coverage.selection,
     selection,
+    selectedOrder,
     boundaryCapture
   );
   assertSelectGammaDeliveryOrder(
@@ -112,12 +119,18 @@ function finalizeCanonicalSelection(
   context: FineAssessmentSelectionContext,
   coverageSelection: ReturnType<typeof prepareCoverageSelection>,
   selection: ReturnType<typeof resolveAdmissionAwareFinalSelection>,
+  selected: readonly FineAssessmentCandidate[],
   boundaryCapture: ReturnType<typeof createSelectionBoundary>
 ): FineAssessmentSelectionResult {
-  const finalAccumulator = reduceFineAssessmentCandidates(
+  const finalAccumulator = appendUnselectedDiagnostics(
+    reduceFineAssessmentCandidates(
+      selected,
+      context,
+      boundaryCapture !== undefined
+    ),
+    selected,
     selection.order.candidates,
-    context,
-    boundaryCapture !== undefined
+    context
   );
   const preProjection = boundaryCapture === undefined
     ? undefined
@@ -173,10 +186,11 @@ function buildRefinementStopCertificate(
 
 function resolveAdmissionAwareFinalSelection(
   order: FineAssessmentOrderState,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  selected: readonly FineAssessmentCandidate[]
 ) {
   const consensus = resolveFinalPacketConsensusPlan({
-    baseline: collectAdmittedCandidates(order.candidates, context),
+    baseline: selected,
     sourceCandidates: order.birthCandidates,
     protectedCandidates: [],
     supportsSingleSemanticLeader: context.supportsSingleSemanticLeader,
@@ -199,24 +213,36 @@ function selectBoundGamma(
   context: FineAssessmentSelectionContext,
   orderedCandidates: readonly FineAssessmentCandidate[]
 ): SelectGammaResult {
-  return bindFineAssessmentSelectGammaPort({
+  const greedy = bindFineAssessmentSelectGammaPort({
     ...params,
     orderedCandidates
   }, context).select(buildSelectGammaRequest(params, context, orderedCandidates));
+  const admitted = collectAdmittedCandidates(
+    orderBySelectGammaKeys(orderedCandidates, greedy.selected_candidate_keys),
+    context
+  );
+  return Object.freeze({
+    selected_candidate_keys: Object.freeze(admitted.map((candidate) =>
+      candidate.fusion.candidate_key
+    ))
+  });
 }
 
-function buildSelectGammaRequest(
-  params: FineAssessmentSelectionParams,
-  context: FineAssessmentSelectionContext,
-  orderedCandidates: readonly FineAssessmentCandidate[]
-): SelectGammaRequest {
-  return Object.freeze({
-    workspace_id: params.orderedCandidates[0]?.entry.workspace_id ?? "unspecified",
-    generation_id: "unspecified",
-    condition_digest: "unspecified",
-    eligible_candidate_keys: eligibleFineAssessmentKeys(orderedCandidates),
-    token_budget: context.config.budgets.max_total_tokens
-  });
+function orderBySelectGammaKeys(
+  candidates: readonly FineAssessmentCandidate[],
+  selectedKeys: readonly string[]
+): readonly FineAssessmentCandidate[] {
+  const byKey = new Map(candidates.map((candidate) => [
+    candidate.fusion.candidate_key,
+    candidate
+  ]));
+  return Object.freeze(selectedKeys.map((key) => {
+    const candidate = byKey.get(key);
+    if (candidate === undefined) {
+      throw new Error("Select_Gamma selected an unknown candidate key");
+    }
+    return candidate;
+  }));
 }
 
 function assertSelectGammaDeliveryOrder(
@@ -240,6 +266,52 @@ function assertSelectGammaDeliveryOrder(
       deliveredIds.some((objectId, index) => objectId !== selectedIds[index])) {
     throw new Error("Select_Gamma admission order must be the delivery order");
   }
+}
+
+function appendUnselectedDiagnostics(
+  accumulator: FineAssessmentAccumulator,
+  selected: readonly FineAssessmentCandidate[],
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): FineAssessmentAccumulator {
+  const selectedKeys = new Set(selected.map((candidate) =>
+    candidate.fusion.candidate_key
+  ));
+  let selectionOrder = selected.length;
+  for (const candidate of candidates) {
+    if (selectedKeys.has(candidate.fusion.candidate_key)) continue;
+    selectionOrder += 1;
+    const objectKey = buildRecallLogicalObjectKey(candidate);
+    const admission = resolveAdmission(
+      accumulator.admission,
+      candidate,
+      objectKey,
+      context
+    );
+    recordAdmissionReceipt(accumulator, admission.receipt);
+    appendAdmissionExclusion(
+      accumulator,
+      candidate,
+      buildRecallCandidateDedupeKey(candidate),
+      selectionOrder,
+      leftoverDropReason(admission.droppedReason, candidate, context),
+      context,
+      "final_selector"
+    );
+  }
+  return accumulator;
+}
+
+function leftoverDropReason(
+  droppedReason: FineAssessmentAdmission["droppedReason"],
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): Exclude<FineAssessmentAdmissionReceipt["kind"], "retained"> {
+  if (estimateCandidateTokens(candidate, context) >
+      context.config.budgets.max_total_tokens) {
+    return "max_total_tokens";
+  }
+  return droppedReason ?? "max_total_tokens";
 }
 
 function collectMembershipKeys(

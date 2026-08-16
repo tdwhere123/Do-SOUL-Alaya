@@ -551,7 +551,7 @@ describe("coverage-aware delivery", () => {
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
       "shared",
-      "deliverable-shared"
+      "novel"
     ]);
     expect(result.diagnostics.find(
       (candidate) => candidate.candidate_key === duplicate.fusion.candidate_key

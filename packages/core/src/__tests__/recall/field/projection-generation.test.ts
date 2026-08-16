@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { type FieldContractSha256 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 import {
   createSelectedSliceKeyV2,
@@ -25,8 +25,7 @@ import { createProjectionBundleCache } from
   "../../../recall/field/retrieval/projection/bundle-cache.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
-const sha256: FieldContractSha256 = (preimage) =>
-  createHash("sha256").update(preimage, "utf8").digest("hex");
+const sha256: FieldContractSha256 = fieldContractSha256;
 
 describe("immutable projection generations", () => {
   it("snapshots a shadow generation and refuses a second generation table or active insert", () => {
@@ -198,13 +197,32 @@ describe("immutable projection generations", () => {
     }, sha256));
     cache.invalidateSubject("memory-1");
 
-    expect(store.readArtifacts("workspace-1", first.generation.generation_id)
-      ?.postings.find((posting) => posting.subject_id === "memory-1")).toMatchObject({
-      erased: true,
-      normalized_value: ""
-    });
-    expect(store.readArtifacts("workspace-1", next.generation.generation_id)
-      ?.postings.find((posting) => posting.subject_id === "memory-1")?.erased).toBe(true);
+    const firstArtifacts = store.readArtifacts(
+      "workspace-1",
+      first.generation.generation_id
+    );
+    const nextArtifacts = store.readArtifacts(
+      "workspace-1",
+      next.generation.generation_id
+    );
+    expect(firstArtifacts?.postings.find((posting) => posting.subject_id === "memory-1"))
+      .toMatchObject({
+        erased: true,
+        normalized_value: ""
+      });
+    expect(nextArtifacts?.postings.find((posting) => posting.subject_id === "memory-1")
+      ?.erased).toBe(true);
+    expect(JSON.stringify(firstArtifacts?.slice_keys ?? [])).not.toMatch(/Ada Lovelace/u);
+    expect(nextArtifacts?.slice_keys.some((key) => key.owner_id === "memory-1")).toBe(false);
+    expect(JSON.stringify(nextArtifacts?.slice_keys.filter((key) =>
+      key.owner_id === "memory-1"
+    ) ?? [])).not.toMatch(/Ada Lovelace/u);
+    expect(firstArtifacts?.bundles.some((bundle) =>
+      bundle.member_refs.includes("memory-1")
+    )).toBe(false);
+    expect(nextArtifacts?.bundles.some((bundle) =>
+      bundle.member_refs.includes("memory-1")
+    )).toBe(false);
     expect(() => cache.get({
       bundle_id: bundle.bundle_id,
       condition_digest: digest("condition-1"),

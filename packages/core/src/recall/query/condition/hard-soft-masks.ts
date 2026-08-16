@@ -9,6 +9,7 @@ import { assertDissipativeLambda } from
 
 export type HardMaskInput = Readonly<{
   readonly workspace_id: string;
+  readonly principal: string;
   readonly authorized_scopes: readonly string[];
   readonly explicit_bridges: readonly string[];
   readonly generation_id: string;
@@ -27,6 +28,7 @@ export function evaluateHardMask(
   input: HardMaskInput
 ): "allow" | "deny" {
   if (node.workspace_id !== input.workspace_id) return "deny";
+  if (node.principal !== input.principal) return "deny";
   if (node.generation_id !== input.generation_id) return "deny";
   if (node.sealed || node.erased || node.revoked) return "deny";
   if (!scopeAuthorized(node, input)) return "deny";

@@ -1,9 +1,8 @@
 import type {
   SelectGammaPort,
-  SelectGammaRequest,
-  SelectGammaResult
+  SelectGammaRequest
 } from "@do-soul/alaya-protocol";
-import { collectAdmittedCandidates } from
+import { estimateCandidateTokens } from
   "../fine-assessment-selection/admission.js";
 import type {
   FineAssessmentCandidate,
@@ -11,7 +10,16 @@ import type {
   FineAssessmentSelectionParams
 } from "../fine-assessment-selection/types.js";
 import { gateSelectGammaEligibility } from "./eligibility.js";
-import type { SelectGammaEligibilityInput } from "./types.js";
+import { selectGammaQuality } from "./quality.js";
+import { createSelectGammaPort } from "./select-gamma.js";
+import type {
+  SelectGammaEligibilityInput,
+  SelectGammaFeatureWeights,
+  SelectGammaFormulaCandidate
+} from "./types.js";
+
+const PINNED_GENERATION_ID = `sha256:${"a".repeat(64)}`;
+const PINNED_CONDITION_DIGEST = `sha256:${"b".repeat(64)}`;
 
 export function deriveSelectGammaEligibility(
   candidate: FineAssessmentCandidate,
@@ -20,19 +28,16 @@ export function deriveSelectGammaEligibility(
   return Object.freeze({
     candidate_key: candidate.fusion.candidate_key,
     risk: resolveRiskEligibility(candidate, context),
-    authority: "clear"
+    authority: resolveAuthorityEligibility(candidate, context)
   });
 }
 
 export function eligibleFineAssessmentKeys(
-  candidates: readonly FineAssessmentCandidate[]
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
 ): readonly string[] {
   return gateSelectGammaEligibility(candidates.map((candidate) =>
-    Object.freeze({
-      candidate_key: candidate.fusion.candidate_key,
-      risk: "clear" as const,
-      authority: "clear" as const
-    })
+    deriveSelectGammaEligibility(candidate, context)
   ));
 }
 
@@ -40,33 +45,69 @@ export function bindFineAssessmentSelectGammaPort(
   params: FineAssessmentSelectionParams,
   context: FineAssessmentSelectionContext
 ): SelectGammaPort {
-  return Object.freeze({
-    select: (request: SelectGammaRequest): SelectGammaResult => Object.freeze({
-      selected_candidate_keys: selectFineAssessmentGamma(
-        params,
-        context,
-        request
-      )
-    })
+  return createSelectGammaPort({
+    candidates: formulaCandidates(params.orderedCandidates, context),
+    feature_weights: featureWeights(params.orderedCandidates, context),
+    max_selected: context.config.budgets.max_entries
   });
 }
 
-export function selectFineAssessmentGamma(
+export function buildSelectGammaRequest(
   params: FineAssessmentSelectionParams,
   context: FineAssessmentSelectionContext,
-  request: SelectGammaRequest
-): readonly string[] {
-  const eligible = new Set(request.eligible_candidate_keys);
-  const candidates = params.orderedCandidates.filter((candidate) =>
-    eligible.has(candidate.fusion.candidate_key)
-  );
-  if (candidates.length !== request.eligible_candidate_keys.length) {
-    throw new Error("Select_Gamma eligible keys must exist in the candidate field");
+  orderedCandidates: readonly FineAssessmentCandidate[]
+): SelectGammaRequest {
+  return Object.freeze({
+    workspace_id: params.orderedCandidates[0]?.entry.workspace_id ?? "workspace-1",
+    generation_id: pinnedIdentity(params.generation_id, PINNED_GENERATION_ID),
+    condition_digest: pinnedIdentity(params.condition_digest, PINNED_CONDITION_DIGEST),
+    eligible_candidate_keys: eligibleFineAssessmentKeys(orderedCandidates, context),
+    token_budget: context.config.budgets.max_total_tokens
+  });
+}
+
+function formulaCandidates(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): readonly SelectGammaFormulaCandidate[] {
+  return Object.freeze(candidates.map((candidate) => Object.freeze({
+    candidate_key: candidate.fusion.candidate_key,
+    token_cost: Math.max(1, estimateCandidateTokens(candidate, context)),
+    quality: selectGammaQuality({
+      relevance: context.coverageRelevanceByCandidateKey.get(
+        candidate.fusion.candidate_key
+      ) ?? candidate.fusion.fused_score,
+      authority: 0,
+      temporal_fit: 0,
+      path_support: candidate.effectiveFactors.graph_support ?? 0
+    }),
+    cover: candidateCover(candidate, context)
+  })));
+}
+
+function candidateCover(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): Readonly<Record<string, number>> {
+  const gist = context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id];
+  const lineage = context.supplementaryData.sourceCohortKeys[candidate.entry.object_id];
+  return Object.freeze({
+    ...(gist === undefined ? {} : { [`gist:${gist}`]: 1 }),
+    ...(lineage === undefined ? {} : { [`lineage:${lineage}`]: 1 })
+  });
+}
+
+function featureWeights(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): SelectGammaFeatureWeights {
+  const weights: Record<string, number> = {};
+  for (const candidate of candidates) {
+    for (const feature of Object.keys(candidateCover(candidate, context))) {
+      weights[feature] = 1;
+    }
   }
-  const tokenContext = withTokenBudget(context, request.token_budget);
-  return Object.freeze(collectAdmittedCandidates(candidates, tokenContext).map(
-    (candidate) => candidate.fusion.candidate_key
-  ));
+  return Object.freeze(weights);
 }
 
 function resolveRiskEligibility(
@@ -79,21 +120,19 @@ function resolveRiskEligibility(
   return penalty > 0 || contradictions > 0 ? "blocked" : "clear";
 }
 
-function withTokenBudget(
-  context: FineAssessmentSelectionContext,
-  tokenBudget: number
-): FineAssessmentSelectionContext {
-  if (!Number.isFinite(tokenBudget) || tokenBudget < 0) {
-    throw new Error("Select_Gamma token_budget must be finite and non-negative");
+function resolveAuthorityEligibility(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): SelectGammaEligibilityInput["authority"] {
+  const ceiling = context.supplementaryData?.governanceCeilingByMemoryId?.[
+    candidate.entry.object_id
+  ];
+  return ceiling === 0 ? "blocked" : "clear";
+}
+
+function pinnedIdentity(value: string | undefined, fallback: string): string {
+  if (value === undefined || value.length === 0 || value === "unspecified") {
+    return fallback;
   }
-  return Object.freeze({
-    ...context,
-    config: Object.freeze({
-      ...context.config,
-      budgets: Object.freeze({
-        ...context.config.budgets,
-        max_total_tokens: tokenBudget
-      })
-    })
-  });
+  return value;
 }

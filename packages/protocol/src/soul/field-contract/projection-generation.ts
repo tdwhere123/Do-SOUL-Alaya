@@ -73,6 +73,15 @@ export type ProjectionGenerationPointer = z.infer<typeof ProjectionGenerationPoi
 export type ProjectionPin = z.infer<typeof ProjectionPinSchema>;
 export type ProjectionEraseBarrier = z.infer<typeof ProjectionEraseBarrierSchema>;
 
+export function sameEraseBarrier(
+  existing: Pick<ProjectionEraseBarrier, "generation_id" | "subject_kind" | "subject_id">,
+  incoming: Pick<ProjectionEraseBarrier, "generation_id" | "subject_kind" | "subject_id">
+): boolean {
+  return existing.generation_id === incoming.generation_id &&
+    existing.subject_kind === incoming.subject_kind &&
+    existing.subject_id === incoming.subject_id;
+}
+
 export function verifyFieldProjectionGeneration(
   receipt: FieldProjectionGeneration,
   sha256: FieldContractSha256

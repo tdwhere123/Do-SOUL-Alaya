@@ -54,7 +54,19 @@ export function eraseProjectionArtifacts(
     generation_id: artifacts.generation_id,
     postings: applyEraseToL1Postings(artifacts.postings, subjectId, subjectKind),
     bundles: applyEraseToL2Bundles(artifacts.bundles, subjectId, subjectKind),
-    slice_keys: artifacts.slice_keys,
+    slice_keys: eraseSliceKeySurfaces(artifacts.slice_keys, subjectId, subjectKind),
     policy: artifacts.policy
   });
+}
+
+function eraseSliceKeySurfaces(
+  keys: readonly SelectedSliceKeyV2[],
+  subjectId: string,
+  subjectKind: ProjectionEraseSubjectKind
+): readonly SelectedSliceKeyV2[] {
+  return Object.freeze(keys.flatMap((key) => {
+    if (subjectKind === "generation" || key.owner_id === subjectId) return [];
+    if (key.normalized_value !== subjectId) return [key];
+    return [Object.freeze({ ...key, normalized_value: "" })];
+  }));
 }

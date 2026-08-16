@@ -222,7 +222,7 @@ describe("recall usage evidence proof", () => {
       context.workspaceId
     );
     expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(2);
-    expect(onCoUsage).toHaveBeenCalledWith(["mem1", "mem2"], context.workspaceId);
+    expect(onCoUsage).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { SelectGammaPort } from "@do-soul/alaya-protocol";
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import {
-  createSelectGammaCoverageObjective,
   selectGammaMarginalGain
 } from "../../../recall/delivery/select-gamma/objective.js";
+
 import { gateSelectGammaEligibility } from
   "../../../recall/delivery/select-gamma/eligibility.js";
 import { selectGammaQuality } from
   "../../../recall/delivery/select-gamma/quality.js";
 import { createSelectGammaPort } from
   "../../../recall/delivery/select-gamma/select-gamma.js";
-import { deriveSelectGammaEligibility } from
-  "../../../recall/delivery/select-gamma/bind-fine-assessment.js";
+import {
+  buildSelectGammaRequest,
+  deriveSelectGammaEligibility
+} from "../../../recall/delivery/select-gamma/bind-fine-assessment.js";
+import { createSelectionContext } from
+  "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
 import {
   selectFineAssessmentCandidates
 } from "../../../recall/delivery/fine-assessment-selection.js";
@@ -65,8 +68,28 @@ describe("Select_Gamma", () => {
     expect(firstGain).toBeGreaterThan(0);
     expect(repeatGain).toBeGreaterThanOrEqual(0);
     expect(repeatGain).toBeLessThan(firstGain);
-    expect(createSelectGammaCoverageObjective({ feature_weights: weights }).operator_id)
-      .toBe(SELECT_GAMMA_OPERATOR_ID);
+  });
+
+  it("binds pinned generation and condition receipts on the live request", () => {
+    const candidate = createCandidate("pinned");
+    const params = {
+      orderedCandidates: [candidate],
+      generation_id: `sha256:${"c".repeat(64)}`,
+      condition_digest: `sha256:${"d".repeat(64)}`,
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: new Map()
+    };
+    const request = buildSelectGammaRequest(
+      params,
+      createSelectionContext(params),
+      [candidate]
+    );
+    expect(request.generation_id).toBe(`sha256:${"c".repeat(64)}`);
+    expect(request.condition_digest).toBe(`sha256:${"d".repeat(64)}`);
+    expect(request.generation_id).not.toBe("unspecified");
+    expect(request.condition_digest).not.toBe("unspecified");
   });
 
   it("selects by gain per token with deterministic ties and no 5-cap", () => {

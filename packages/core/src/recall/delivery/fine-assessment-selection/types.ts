@@ -103,6 +103,8 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
   /** Null means a prior boundary did not capture the pre-delivery packet order. */
   readonly packetCandidates?: readonly FineAssessmentCandidate[] | null;
+  readonly generation_id?: string;
+  readonly condition_digest?: string;
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;

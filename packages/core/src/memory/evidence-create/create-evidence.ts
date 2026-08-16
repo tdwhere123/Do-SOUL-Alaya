@@ -16,7 +16,11 @@ import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import type { EvidenceFactFrameProposalNormalizer } from
   "../fact-frame-formation/declarative-normalizer.js";
-import { planEvidenceFormation, type EvidenceFormationPlan } from "./formation-plan.js";
+import {
+  admitEvidenceFieldFormation,
+  planEvidenceFormation,
+  type EvidenceFormationPlan
+} from "./formation-plan.js";
 import type { FieldFormationStores } from "./field-stores.js";
 
 export async function createEvidenceCapsule(input: Readonly<{
@@ -62,6 +66,7 @@ export async function createEvidenceCapsule(input: Readonly<{
     formation.factFrameCapture,
     formation.semanticFormation
   );
+  admitOptionalFieldFormation(input, created, formation);
   await input.runtimeNotifier.notifyEntry(event);
   return created;
 }
@@ -98,10 +103,6 @@ function planOptionalFormation(
     readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
     readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-    readonly sha256?: FieldContractSha256;
-    readonly sourceAdmission?: SourceAdmissionPort;
-    readonly factorIncidence?: FactorIncidencePort;
-    readonly fieldStores?: FieldFormationStores;
     readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
   }>,
   evidence: EvidenceCapsule
@@ -113,12 +114,7 @@ function planOptionalFormation(
       searchProjections: input.searchProjections,
       factFrameProposal: input.factFrameProposal,
       semanticFactorProposal: input.semanticFactorProposal,
-      factFrameProposalNormalizer: input.factFrameProposalNormalizer,
-      sha256: input.sha256,
-      sourceAdmission: input.sourceAdmission,
-      factorIncidence: input.factorIncidence,
-      fieldStores: input.fieldStores,
-      semanticExtractor: input.semanticExtractor
+      factFrameProposalNormalizer: input.factFrameProposalNormalizer
     });
   } catch (error) {
     if (error instanceof CoreError && error.code === "VALIDATION") throw error;
@@ -131,6 +127,36 @@ function planOptionalFormation(
       searchProjections: input.searchProjections.filter(
         (projection) => projection.projection_kind !== "fact_key"
       )
+    });
+  }
+}
+
+function admitOptionalFieldFormation(
+  input: Readonly<{
+    readonly sha256?: FieldContractSha256;
+    readonly sourceAdmission?: SourceAdmissionPort;
+    readonly factorIncidence?: FactorIncidencePort;
+    readonly fieldStores?: FieldFormationStores;
+    readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
+    readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  }>,
+  evidence: EvidenceCapsule,
+  views: EvidenceFormationPlan
+): void {
+  try {
+    admitEvidenceFieldFormation({
+      evidence,
+      views,
+      sha256: input.sha256,
+      sourceAdmission: input.sourceAdmission,
+      factorIncidence: input.factorIncidence,
+      fieldStores: input.fieldStores,
+      semanticExtractor: input.semanticExtractor
+    });
+  } catch (error) {
+    input.warn?.("optional evidence formation failed", {
+      evidence_object_id: evidence.object_id,
+      error: error instanceof Error ? error.message : String(error)
     });
   }
 }
