@@ -84,22 +84,28 @@ export function assertProjectionBundleLevelDag(
 export function applyEraseToL2Bundles(
   bundles: readonly ProjectionL2Bundle[],
   subjectId: string,
-  subjectKind: ProjectionEraseSubjectKind
+  subjectKind: ProjectionEraseSubjectKind,
+  surfaces: readonly string[] = []
 ): readonly ProjectionL2Bundle[] {
-  return Object.freeze(bundles.map((bundle) => Object.freeze({
-    ...bundle,
-    member_refs: Object.freeze(bundle.member_refs.filter((member) =>
+  const wiped = new Set([subjectId, ...surfaces].filter((value) => value.length > 0));
+  return Object.freeze(bundles.flatMap((bundle) => {
+    const memberRefs = Object.freeze(bundle.member_refs.filter((member) =>
       subjectKind === "generation" ? false : member !== subjectId
-    )),
-    factor_summary: Object.freeze(bundle.factor_summary.map((factor) =>
-      subjectKind === "generation" || factor.value === subjectId
-        ? Object.freeze({ ...factor, value: "" })
-        : factor
-    )),
-    support_lineages: Object.freeze(bundle.support_lineages.filter((lineage) =>
-      subjectKind === "generation" ? false : lineage !== subjectId
-    ))
-  })));
+    ));
+    if (memberRefs.length === 0) return [];
+    return [Object.freeze({
+      ...bundle,
+      member_refs: memberRefs,
+      factor_summary: Object.freeze(bundle.factor_summary.map((factor) =>
+        subjectKind === "generation" || wiped.has(factor.value)
+          ? Object.freeze({ ...factor, value: "" })
+          : factor
+      )),
+      support_lineages: Object.freeze(bundle.support_lineages.filter((lineage) =>
+        subjectKind === "generation" ? false : lineage !== subjectId
+      ))
+    })];
+  }));
 }
 
 function materializeLevelOneBundles(

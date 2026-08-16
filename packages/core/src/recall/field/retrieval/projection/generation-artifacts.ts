@@ -50,13 +50,31 @@ export function eraseProjectionArtifacts(
   subjectId: string,
   subjectKind: ProjectionEraseSubjectKind
 ): ProjectionGenerationArtifacts {
+  const surfaces = erasedSurfaces(artifacts, subjectId, subjectKind);
   return createProjectionGenerationArtifacts({
     generation_id: artifacts.generation_id,
     postings: applyEraseToL1Postings(artifacts.postings, subjectId, subjectKind),
-    bundles: applyEraseToL2Bundles(artifacts.bundles, subjectId, subjectKind),
+    bundles: applyEraseToL2Bundles(
+      artifacts.bundles, subjectId, subjectKind, surfaces
+    ),
     slice_keys: eraseSliceKeySurfaces(artifacts.slice_keys, subjectId, subjectKind),
     policy: artifacts.policy
   });
+}
+
+function erasedSurfaces(
+  artifacts: ProjectionGenerationArtifacts,
+  subjectId: string,
+  subjectKind: ProjectionEraseSubjectKind
+): readonly string[] {
+  if (subjectKind === "generation") return Object.freeze([]);
+  const fromPostings = artifacts.postings
+    .filter((posting) => posting.subject_id === subjectId)
+    .map((posting) => posting.normalized_value);
+  const fromKeys = artifacts.slice_keys
+    .filter((key) => key.owner_id === subjectId)
+    .map((key) => key.normalized_value);
+  return Object.freeze([...new Set([...fromPostings, ...fromKeys])]);
 }
 
 function eraseSliceKeySurfaces(

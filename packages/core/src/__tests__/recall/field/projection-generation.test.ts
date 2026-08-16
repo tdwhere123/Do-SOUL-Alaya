@@ -223,6 +223,8 @@ describe("immutable projection generations", () => {
     expect(nextArtifacts?.bundles.some((bundle) =>
       bundle.member_refs.includes("memory-1")
     )).toBe(false);
+    expect(JSON.stringify(firstArtifacts?.bundles ?? [])).not.toMatch(/ada lovelace/iu);
+    expect(JSON.stringify(nextArtifacts?.bundles ?? [])).not.toMatch(/ada lovelace/iu);
     expect(() => cache.get({
       bundle_id: bundle.bundle_id,
       condition_digest: digest("condition-1"),
