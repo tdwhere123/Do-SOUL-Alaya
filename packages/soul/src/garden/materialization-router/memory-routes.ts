@@ -174,18 +174,9 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
       );
     } catch (error) {
-      try {
-        await this.dependencies.evidenceService.deleteCreatedEvidence(evidence.object_id);
-      } catch (compensationError) {
-        throw new MaterializationPartialFailureError(
-          readErrorMessage(compensationError, "Evidence compensation failed after memory materialization failed"),
-          createdObjects,
-          { cause: compensationError }
-        );
-      }
       throw new MaterializationPartialFailureError(
         readErrorMessage(error, "Memory materialization failed after evidence creation"),
-        [],
+        createdObjects,
         { cause: error }
       );
     }

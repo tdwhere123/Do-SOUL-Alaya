@@ -78,6 +78,8 @@ export type FineAssessmentProjectionAction = Readonly<{
 export type FineAssessmentSelectionBoundaryInput = Readonly<{
   readonly ordered_candidates: readonly FineAssessmentCandidate[];
   readonly packet_candidate_keys?: readonly string[];
+  readonly generation_id?: string;
+  readonly condition_digest?: string;
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementary_data: SerializedRecallSupplementaryData;
   readonly token_estimates_by_content: SelectionBoundaryNumberMap;

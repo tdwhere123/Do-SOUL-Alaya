@@ -1,6 +1,7 @@
-import type {
-  SelectGammaPort,
-  SelectGammaRequest
+import {
+  ManifestationState,
+  type SelectGammaPort,
+  type SelectGammaRequest
 } from "@do-soul/alaya-protocol";
 import { estimateCandidateTokens } from
   "../fine-assessment-selection/admission.js";
@@ -17,9 +18,6 @@ import type {
   SelectGammaFeatureWeights,
   SelectGammaFormulaCandidate
 } from "./types.js";
-
-const PINNED_GENERATION_ID = `sha256:${"a".repeat(64)}`;
-const PINNED_CONDITION_DIGEST = `sha256:${"b".repeat(64)}`;
 
 export function deriveSelectGammaEligibility(
   candidate: FineAssessmentCandidate,
@@ -59,8 +57,8 @@ export function buildSelectGammaRequest(
 ): SelectGammaRequest {
   return Object.freeze({
     workspace_id: params.orderedCandidates[0]?.entry.workspace_id ?? "workspace-1",
-    generation_id: pinnedIdentity(params.generation_id, PINNED_GENERATION_ID),
-    condition_digest: pinnedIdentity(params.condition_digest, PINNED_CONDITION_DIGEST),
+    generation_id: requirePinnedIdentity(params.generation_id, "generation_id"),
+    condition_digest: requirePinnedIdentity(params.condition_digest, "condition_digest"),
     eligible_candidate_keys: eligibleFineAssessmentKeys(orderedCandidates, context),
     token_budget: context.config.budgets.max_total_tokens
   });
@@ -111,13 +109,12 @@ function featureWeights(
 }
 
 function resolveRiskEligibility(
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
+  _candidate: FineAssessmentCandidate,
+  _context: FineAssessmentSelectionContext
 ): SelectGammaEligibilityInput["risk"] {
-  if (!context.config.conflict_awareness) return "clear";
-  const penalty = candidate.effectiveFactors.conflict_penalty ?? 0;
-  const contradictions = candidate.entry.contradiction_count ?? 0;
-  return penalty > 0 || contradictions > 0 ? "blocked" : "clear";
+  // Scoring already applies conflict/contradiction penalties. Eligibility
+  // only removes candidates that are not allowed to compete.
+  return "clear";
 }
 
 function resolveAuthorityEligibility(
@@ -127,12 +124,12 @@ function resolveAuthorityEligibility(
   const ceiling = context.supplementaryData?.governanceCeilingByMemoryId?.[
     candidate.entry.object_id
   ];
-  return ceiling === 0 ? "blocked" : "clear";
+  return ceiling === ManifestationState.HIDDEN ? "blocked" : "clear";
 }
 
-function pinnedIdentity(value: string | undefined, fallback: string): string {
+function requirePinnedIdentity(value: string | undefined, label: string): string {
   if (value === undefined || value.length === 0 || value === "unspecified") {
-    return fallback;
+    throw new Error(`Select_Gamma requires a pinned ${label}`);
   }
   return value;
 }

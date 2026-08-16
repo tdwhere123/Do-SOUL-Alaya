@@ -70,6 +70,7 @@ export interface DaemonMcpMemoryToolHandlerInput {
   // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
+  readonly causalUsagePort?: McpMemoryToolHandlerDependencies["causalUsagePort"];
 }
 
 function buildSoulResolveHandler(
@@ -188,7 +189,8 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
       ? {}
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
     soulResolveHandler,
-    proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding)
+    proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding),
+    ...(input.causalUsagePort === undefined ? {} : { causalUsagePort: input.causalUsagePort })
   });
 }
 

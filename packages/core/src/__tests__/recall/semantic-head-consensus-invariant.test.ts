@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from
   "../../recall/delivery/fine-assessment-selection.js";
@@ -74,6 +75,7 @@ function runSelection(
   candidates: Parameters<typeof selectFineAssessmentCandidates>[0]["orderedCandidates"]
 ) {
   return selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: candidates,
     config: {
       ...createConfig(),

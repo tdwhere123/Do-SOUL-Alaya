@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -89,6 +90,7 @@ describe("final recall relevance ownership", () => {
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
     const basePolicy = buildPolicy();
     const assessed = fineAssess({
+    ...FIELD_PINS,
       candidates: [primary, redundant, novel].map(createCoarseCandidate),
       policy: {
         ...basePolicy,
@@ -150,6 +152,7 @@ describe("final recall relevance ownership", () => {
       [COVERAGE_NOVEL_ID]: 0.8
     };
     const assessed = fineAssess({
+    ...FIELD_PINS,
       candidates: memories.map((memory) => ({
         ...createCoarseCandidate(memory),
         structuralScore: evidenceScores[memory.object_id] ?? 0
@@ -205,6 +208,7 @@ describe("final recall relevance ownership", () => {
       }
     };
     const assess = (captureAnswerFeatures: boolean) => fineAssess({
+    ...FIELD_PINS,
       candidates: memories.map(createCoarseCandidate),
       policy: buildPolicy(),
       winnerMemoryIds: new Set(),
@@ -233,6 +237,7 @@ describe("final recall relevance ownership", () => {
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.5, [{ facet: "location_place" }]);
     const basePolicy = buildPolicy();
     const assessed = fineAssess({
+    ...FIELD_PINS,
       candidates: [primary, redundant, novel].map(createCoarseCandidate),
       policy: {
         ...basePolicy,
@@ -302,6 +307,7 @@ function buildRelevanceFixture(
     { facet: "occupation_work" }
   ]);
   const assessed = fineAssess({
+    ...FIELD_PINS,
     candidates: [createCoarseCandidate(activationWinner), createCoarseCandidate(fusionWinner)],
     policy: buildPolicy(), winnerMemoryIds: new Set(),
     supplementaryData: createSupplementaryData(answerRelevanceScoresByCandidateKey), tokenEstimator: { estimate: () => 4 },
@@ -327,6 +333,7 @@ function buildCoverageReorderedCeAssessment(): ReturnType<typeof fineAssess> {
   ]);
   const basePolicy = buildPolicy();
   return fineAssess({
+    ...FIELD_PINS,
     candidates: memories.map(createCoarseCandidate),
     policy: { ...basePolicy, fine_assessment: { ...basePolicy.fine_assessment,
       budgets: { max_entries: 10, max_total_tokens: 200, per_dimension_limits: null } } },

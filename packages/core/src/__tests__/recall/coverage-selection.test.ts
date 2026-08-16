@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -447,6 +448,7 @@ describe("coverage-aware delivery", () => {
       createCandidate(`mem-${index + 1}`, 1 - index * 0.05)
     );
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -477,6 +479,7 @@ describe("coverage-aware delivery", () => {
     const novel = createCandidate("novel", 0.6);
     const candidates = [rejected, deliverableShared, novel];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -527,6 +530,7 @@ describe("coverage-aware delivery", () => {
     const novel = withDimension(createCandidate("novel", 0.35), MemoryDimension.PREFERENCE);
     const candidates = [anchor, duplicate, dimensionRejected, deliverableShared, novel];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -578,6 +582,7 @@ describe("coverage-aware delivery", () => {
     const novel = createCandidate("novel", 0.4);
     const candidates = [conflict, protectedWinner, embeddingHead, novel];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -616,6 +621,7 @@ describe("coverage-aware delivery", () => {
       createCandidate(`same-gist-${index + 1}`, 1 - index * 0.01)
     );
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -696,6 +702,7 @@ describe("coverage-aware delivery", () => {
     const highFusedDupB = createCandidate("dup-b", 0.98);
     const lowFusedNovel = createCandidate("novel", 0.4);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [highFusedDupA, highFusedDupB, lowFusedNovel],
       config: {
         conflict_awareness: false,
@@ -758,6 +765,7 @@ describe("coverage-aware delivery", () => {
     const headA = createCandidate("head-a", 0.4);
     const candidates = [publicA, publicB, headA];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         conflict_awareness: false,
@@ -804,6 +812,7 @@ describe("coverage-aware delivery", () => {
     const estimate = vi.fn(() => 6);
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [local, global, next],
       config: {
         conflict_awareness: false,

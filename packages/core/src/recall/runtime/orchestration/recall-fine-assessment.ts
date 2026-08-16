@@ -144,7 +144,9 @@ function buildFineAssessParams(
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     answerShapePlan: prepared.answerShapePlan,
-    selectionBoundaryObserver: params.selectionBoundaryObserver
+    selectionBoundaryObserver: params.selectionBoundaryObserver,
+    generation_id: prepared.queryCondition.generation_id,
+    condition_digest: prepared.queryCondition.identity
   };
 }
 

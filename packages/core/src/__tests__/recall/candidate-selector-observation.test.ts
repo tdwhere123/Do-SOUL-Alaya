@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from
   "../../recall/delivery/fine-assessment-selection.js";
@@ -41,6 +42,7 @@ describe("candidate selector observation", () => {
       }
     };
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [memory, capsule],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -135,6 +137,7 @@ describe("candidate selector observation", () => {
       evidence_refs: ["memory-1"]
     });
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [memory],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -179,6 +182,7 @@ describe("candidate selector observation", () => {
       evidence_refs: ["rent-evidence"]
     });
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [applicable, distractor],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -219,6 +223,7 @@ describe("candidate selector observation", () => {
       evidence_refs: ["down-dog-evidence"]
     });
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [memory],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -337,6 +342,7 @@ function selectObservation(
 
 ) {
   const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: [memory],
     config: createConfig(),
     supplementaryData: createSupplementaryData({

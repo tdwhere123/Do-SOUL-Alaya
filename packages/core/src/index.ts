@@ -40,6 +40,18 @@ export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export * from "./runs/engine-binding-service.js";
 export * from "./shared/errors.js";
 export { fieldContractSha256 } from "./shared/field-hash.js";
+export {
+  createInMemoryFieldStores,
+  type FieldFormationStores
+} from "./memory/evidence-create/field-stores.js";
+export {
+  createInMemoryFieldQuerySession,
+  SEALED_EMPTY_FRONTIER,
+  type RecallFieldQuerySession
+} from "./recall/runtime/query/field-query-session.js";
+export { createProjectionGenerationReceipt } from
+  "./recall/field/retrieval/projection/generation-identity.js";
+export type { RecallServiceFieldDeps } from "./recall/recall-service.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";
 export * from "./memory/evidence-service.js";

@@ -1,4 +1,11 @@
-import type { RecallPolicy, SoulRecallHostContext, TaskObjectSurface } from "@do-soul/alaya-protocol";
+import type {
+  FieldContractSha256,
+  QueryConditionReceipt,
+  RecallPolicy,
+  SoulRecallHostContext,
+  TaskObjectSurface
+} from "@do-soul/alaya-protocol";
+import type { RecallFieldQuerySession } from "./query/field-query-session.js";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
 import type {
   EvidenceCandidateScoringResult
@@ -51,19 +58,8 @@ export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
     params.selectionBoundaryObserver !== undefined;
 }
 
-export function resolveRecallReferenceTime(
-  explicit: string | undefined,
-  now: () => string
-): string {
-  if (explicit === undefined) return now();
-  if (!/(?:z|[+-]\d{2}:\d{2})$/iu.test(explicit)) {
-    throw new Error("recall reference time must include a timezone offset");
-  }
-  if (!Number.isFinite(Date.parse(explicit))) {
-    throw new Error("recall reference time must be a valid date-time");
-  }
-  return explicit;
-}
+export { resolvePreparedAsOf as resolveRecallReferenceTime } from
+  "./query/prepare-recall-query-condition.js";
 
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
@@ -93,6 +89,8 @@ export interface RecallExecutionContext {
   readonly now: () => string;
   readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
   readonly degradationReasons?: Set<RecallDegradationReason>;
+  readonly fieldQuerySession?: RecallFieldQuerySession;
+  readonly sha256?: FieldContractSha256;
 }
 
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
@@ -114,6 +112,7 @@ export interface PreparedRecallRequest {
   readonly temporalProjectionAsOf?: string;
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
+  readonly queryCondition: QueryConditionReceipt;
 }
 
 type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];

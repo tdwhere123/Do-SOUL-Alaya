@@ -63,7 +63,7 @@ describe("EvidenceService", () => {
     };
     const created = await service.create(createEvidenceInput(), [projection]);
 
-    expect(order).toEqual(["event_log", "repo_create", "notify"]);
+    expect(order).toEqual(["event_log", "repo_create", "event_log", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
     expect(create).toHaveBeenCalledWith(
       expect.any(Object),
@@ -71,6 +71,10 @@ describe("EvidenceService", () => {
       expect.objectContaining({ status: "unavailable" }),
       expect.objectContaining({ status: "unavailable", graph: null })
     );
+    expect(appendedEvents[1]).toMatchObject({
+      event_type: "soul.field.source_record.admitted",
+      entity_type: "source_record"
+    });
     expect(appendedEvents[0]).toMatchObject({
       event_type: "soul.evidence.created",
       entity_type: "evidence_capsule",

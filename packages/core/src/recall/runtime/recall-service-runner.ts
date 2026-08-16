@@ -61,8 +61,11 @@ import {
   measureAsync,
   measureSync
 } from "./orchestration/recall-phase-latency.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { createInMemoryFieldQuerySession } from "./query/field-query-session.js";
+import { capturePreparedRequestCondition } from
+  "./query/prepare-recall-query-condition.js";
 import {
-  resolveRecallReferenceTime,
   type FineAssessmentResult,
   type FineAssessmentPreparation,
   type PreparedEmbeddingQuery,
@@ -116,7 +119,19 @@ async function prepareRecallRequest(
     params.querySemanticFactorFormationCapture
   );
   const answerShapePlan = resolvePreparedAnswerShapePlan(queryProbes);
-  const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
+  const capturedCondition = capturePreparedRequestCondition({
+    workspaceId: params.workspaceId,
+    explicitAsOf: params.referenceTime,
+    queryText,
+    tokenBudget: policy.fine_assessment.budgets.max_total_tokens,
+    activationBudget: policy.fine_assessment.budgets.max_entries,
+    sha256: context.sha256 ?? fieldContractSha256,
+    now: context.now,
+    session: context.fieldQuerySession ??
+      createInMemoryFieldQuerySession(context.sha256 ?? fieldContractSha256)
+  });
+  const queryCondition = capturedCondition.receipt;
+  const referenceTime = capturedCondition.referenceTime;
   const retrievalFieldBundle = createRecallRetrievalFieldBundle({
     workspaceId: params.workspaceId,
     queryText,
@@ -146,7 +161,7 @@ async function prepareRecallRequest(
       warn: context.warn,
       workspaceId: params.workspaceId,
       cap: params.activeConstraintsCap ?? null,
-      asOf: params.referenceTime
+      asOf: referenceTime
     }),
     captureRecallQueryEntities({
       query_text: queryText,
@@ -170,7 +185,8 @@ async function prepareRecallRequest(
     referenceTime,
     temporalProjectionAsOf: params.referenceTime,
     activeConstraints,
-    winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots)
+    winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots),
+    queryCondition
   });
 }
 

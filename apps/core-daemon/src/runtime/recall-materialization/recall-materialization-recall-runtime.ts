@@ -265,7 +265,10 @@ function createRecallService(input: {
       ? {}
       : { openSemanticFactorExtractionPort: input.input.openSemanticFactorExtractionPort }),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
-    warn: input.input.warn
+    warn: input.input.warn,
+    ...(input.input.fieldQuerySession === undefined
+      ? {}
+      : { fieldQuerySession: input.input.fieldQuerySession })
   });
   return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
 }

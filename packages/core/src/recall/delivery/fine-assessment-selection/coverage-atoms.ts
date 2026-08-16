@@ -1,4 +1,5 @@
 import {
+  ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID,
   mergeFtsLaneIds,
   type AssociativeFactSlotRole,
   type FtsLaneId
@@ -24,8 +25,7 @@ import {
   type ScoredObservationRow
 } from "../../scoring/observation-table.js";
 
-export const COVERAGE_ATOM_OPERATOR_ID =
-  "attributed_coverage_atoms_v1";
+export const COVERAGE_ATOM_OPERATOR_ID = ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID;
 
 export type CoverageDemandRole = AssociativeFactSlotRole | "complete";
 export type CoverageObservationChannel = "evidence_fts" | "evidence_semantic";

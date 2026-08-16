@@ -113,7 +113,7 @@ operate a compatibility mixture.
 Do not implement recall from flood / SliceKey / fused-score prose.
 The intended algorithm is the UGAF read path; the live runtime is a
 degenerate projection of that path (typed \(G_L\) transfer is not
-connected; family-max RRF plus stacked reorders are). Owner:
+connected; family-max RRF plus one Select_Gamma walk). Owner:
 
 [`recall.md`](recall.md)
 

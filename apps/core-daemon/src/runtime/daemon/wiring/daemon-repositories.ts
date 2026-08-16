@@ -45,6 +45,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
+import { createDaemonFieldComposition } from "../../field/field-composition.js";
 import {
   createOptionalGlobalMemoryRecallCacheRepo,
   createOptionalGlobalMemoryRepo
@@ -60,12 +61,17 @@ export function createDaemonRepositories(input: {
   const memoryRepos = createDaemonMemoryRepos(input);
   const surfaceRepos = createDaemonSurfaceRepos(input.database);
   const runtimeRepos = createDaemonRuntimeRepos(input.database);
+  const fieldComposition = createDaemonFieldComposition({
+    database: input.database,
+    eventLogRepo: coreRepos.eventLogRepo
+  });
 
   return Object.freeze({
     ...coreRepos,
     ...memoryRepos,
     ...surfaceRepos,
-    ...runtimeRepos
+    ...runtimeRepos,
+    fieldComposition
   });
 }
 

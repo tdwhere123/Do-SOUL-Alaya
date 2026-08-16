@@ -81,7 +81,8 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     proposalRepo: input.proposalRepo,
     runtimeNotifier: input.runtimeNotifier,
     resolutionService: input.resolutionService,
-    claimSourceReader: createClaimSourceReader(input)
+    claimSourceReader: createClaimSourceReader(input),
+    causalUsagePort: input.fieldComposition.usagePort
   };
 }
 

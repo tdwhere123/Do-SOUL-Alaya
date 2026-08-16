@@ -85,6 +85,7 @@ export type DaemonServiceFoundationInput = {
   | "surfaceIdentityRepo"
   | "surfaceAnchorRepo"
   | "projectMappingAnchorRepo"
+  | "fieldComposition"
 >;
 
 export async function createDaemonServiceFoundation(input: DaemonServiceFoundationInput) {

@@ -51,7 +51,6 @@ import {
   validateUsageStateConsistency
 } from "./recall-usage-support.js";
 import {
-  InMemoryCausalUsageRecorder,
   recordCausalUsedReceipts
 } from "../usage/causal-usage-recorder.js";
 
@@ -333,7 +332,10 @@ export function createReportContextUsageHandler(params: Readonly<{
   readonly warn: WarnPort;
 }>) {
   const { deps } = params;
-  const causalUsagePort = deps.causalUsagePort ?? new InMemoryCausalUsageRecorder();
+  if (deps.causalUsagePort === undefined) {
+    throw new Error("causal usage port must be constructed at the composition root");
+  }
+  const causalUsagePort = deps.causalUsagePort;
 
   return async function reportContextUsage(
     request: SoulReportContextUsageRequest,

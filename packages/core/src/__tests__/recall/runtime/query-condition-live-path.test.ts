@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+import { RecallService } from "../../../recall/recall-service.js";
+import {
+  captureEffectiveAsOf,
+  captureQueryCondition
+} from "../../../recall/query/condition/query-condition-capture.js";
+import { queryConditionParityView } from
+  "../../../recall/runtime/query-condition-parity.js";
+import {
+  createInMemoryFieldQuerySession
+} from "../../../recall/runtime/query/field-query-session.js";
+import { prepareRecallQueryCondition } from
+  "../../../recall/runtime/query/prepare-recall-query-condition.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import {
+  CLOCK_AS_OF,
+  countingClock,
+  EXPLICIT_AS_OF,
+  frozenClock
+} from "../query/query-condition-test-fixtures.js";
+import {
+  createDependencies,
+  createTaskSurface
+} from "../recall-service-test-fixtures.js";
+
+describe("live query condition capture", () => {
+  it("captures default as-of once and pins a real generation", async () => {
+    const clock = countingClock(CLOCK_AS_OF);
+    const { dependencies } = createDependencies([]);
+    const session = createInMemoryFieldQuerySession(fieldContractSha256);
+    const service = new RecallService({
+      ...dependencies,
+      now: clock.now,
+      fieldQuerySession: session,
+      sha256: fieldContractSha256
+    });
+
+    const result = await service.recall({
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      taskSurface: createTaskSurface()
+    });
+    const view = result.diagnostics?.query_condition;
+
+    expect(view?.effective_as_of).toBe(CLOCK_AS_OF);
+    expect(view?.generation_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(view?.condition_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(view?.query_cache_key).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(view?.generation_id).not.toBe(`sha256:${"a".repeat(64)}`);
+    expect(view?.condition_digest).not.toBe(`sha256:${"b".repeat(64)}`);
+  });
+
+  it("replays an explicit as-of without consulting the clock", () => {
+    const clock = countingClock("2026-08-16T23:59:59.000Z");
+    const session = createInMemoryFieldQuerySession(fieldContractSha256);
+    const pin = session.pinActiveGeneration("workspace-1", EXPLICIT_AS_OF);
+    const receipt = prepareRecallQueryCondition({
+      workspaceId: "workspace-1",
+      explicitAsOf: EXPLICIT_AS_OF,
+      queryText: "Ada",
+      tokenBudget: 400,
+      activationBudget: 8,
+      sha256: fieldContractSha256,
+      now: clock.now,
+      pin
+    });
+
+    expect(receipt.condition.effective_as_of).toBe(EXPLICIT_AS_OF);
+    expect(clock.calls()).toBe(0);
+    expect(captureEffectiveAsOf(EXPLICIT_AS_OF, clock.now)).toBe(EXPLICIT_AS_OF);
+    expect(queryConditionParityView(receipt).generation_id).toBe(pin.generation_id);
+  });
+
+  it("keeps direct and worker receipts on the same captured condition", () => {
+    const session = createInMemoryFieldQuerySession(fieldContractSha256);
+    const pin = session.pinActiveGeneration("workspace-1", CLOCK_AS_OF);
+    const deps = { sha256: fieldContractSha256, now: frozenClock(), pin };
+    const draft = {
+      principal: "workspace-1",
+      workspace_id: "workspace-1",
+      authorized_scopes: ["workspace-1"],
+      explicit_bridges: [] as const,
+      workspace_project: "workspace-1",
+      query_task_factors: ["Implement recall"],
+      governance_state: "open",
+      activation_budget: 8,
+      token_budget: 400
+    };
+    const direct = captureQueryCondition(draft, deps);
+    const worker = captureQueryCondition(draft, deps);
+    expect(queryConditionParityView(direct)).toEqual(queryConditionParityView(worker));
+  });
+});

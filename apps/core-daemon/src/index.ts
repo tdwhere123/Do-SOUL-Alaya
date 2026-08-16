@@ -184,7 +184,8 @@ async function createDaemonFoundationWiring(
     crossCuttingPermissionRepo: repositories.crossCuttingPermissionRepo,
     surfaceIdentityRepo: repositories.surfaceIdentityRepo,
     surfaceAnchorRepo: repositories.surfaceAnchorRepo,
-    projectMappingAnchorRepo: repositories.projectMappingAnchorRepo
+    projectMappingAnchorRepo: repositories.projectMappingAnchorRepo,
+    fieldComposition: repositories.fieldComposition
   });
 }
 
@@ -314,7 +315,8 @@ function buildFinalizeSurfaceRuntimeInput(
     signalService: runtimeWiring.recallWiring.signalService,
     graphExploreService: foundation.graphExploreService,
     edgeProposalService: foundation.edgeProposalService,
-    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort
+    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort,
+    fieldComposition: repositories.fieldComposition
   };
 }
 

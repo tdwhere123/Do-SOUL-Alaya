@@ -50,19 +50,19 @@ coverage. That is the failure mode UGAF §1.1 already named.
 
 ## Live system (degenerate projection)
 
-Verified read order at `10da1318` (order-only after the coarse union
-until `max_entries`):
+Verified live read order after Wave 2 composition (order-only after the
+coarse union until the token/`max_entries` cut):
 
 ```text
+prepare: capture effective_as_of once, pin one projection generation
 coarse union (lexical/FTS, trigram, graph/path/entity, global,
              synthesis, embedding inject)
   → observation table
   → family-max RRF inside a family, sum across families = fused_score
   → flood as bounded refinement on that base
   → deep-head probabilistic OR (lightweight_deep_head_prob_or_v1)
-  → coverage marginal-gain reorder
-  → admission promoters
-  → consensus reorder
+  → Select_Gamma (greedy ΔGamma / token; eligibility first)
+  → token / dimension / entry constraints during admission
   → max_entries  (only destructive cut)
 ```
 
@@ -81,14 +81,16 @@ coarse union (lexical/FTS, trigram, graph/path/entity, global,
 | Open-semantic channel | Query-factor cache + compatibility | Query side formed 100/100 on the B dump. Candidate side 0 `compatible`. Composition/activation `unavailable` 100/100. |
 | Embedding as a seed of \(\Omega\) | `semantic_supplement` + deep-head / fusion overlay | Live as a scorer (`provider_returned` 100/100 on that dump). Almost unused as a discoverer (9/19431 first-admits). Invariant §18 still holds: embedding never decides durable truth. |
 | Write-side Keys / facets | Daemon materialization + `memory_object_keys` | Complementary Keys (gist remainder, OSF surfaces, temporal/numeric aliases) mint at memory write and join keyword discovery. Closed-vocab facet-tag write, `facet_overlap`, and query-side `FACET_VOCABULARY` slice keys / demand atoms are deleted (no memory-side partner). Protocol `facet_tags` / `FACET_VOCABULARY` remain schema-only. Read-side `ALAYA_RECALL_PROJECTIONS` remains scoring floors, default ON. |
-| \(\operatorname{Select}_\Gamma\) | Coverage greedy + consensus + leftover promoters | Coverage is load-bearing on the B dump. Consensus still reorders after the set. Promoter **producers** are retired. |
+| \(\operatorname{Select}_\Gamma\) | `createSelectGammaPort` greedy \(\Delta\Gamma / \mathrm{token}\) | Admission order is the delivery order. Consensus remains a packet-plan observation and does not reorder. Live requests bind a real pinned `generation_id` and `condition_digest`. |
 | One destructive cut | `max_entries` | Holds. Do not add another. |
 | Deep-head composition | `lightweight_deep_head_prob_or_v1` | Live operator id (`packages/core/src/recall/rerank/deep-head-assessment-builder.ts:18`). Score is `probOr(resolvedEvidence, embedding?, fusionBaseline?)` (`:147-156`). |
 
-Net: activation transfer is not connected. The live system is a
-family-max RRF lexical ranker plus stacked reorders. That is the
-failure mode UGAF §1.1 warned against, not "three of four flood axes
-are off."
+Net: activation transfer is not connected. The live selector is one
+Select_Gamma walk on a family-max RRF candidate field. Query entry
+captures one `effective_as_of` and pins one generation; usage is
+causal-receipt only and is constructed at the daemon composition
+root. Optional formation failure does not delete the root evidence
+capsule.
 
 ## Env names that will mislead you
 

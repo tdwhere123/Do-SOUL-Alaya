@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
 import { RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS } from "../../recall/delivery/fine-assessment-answer-features.js";
@@ -53,6 +54,7 @@ describe("selectFineAssessmentCandidates", () => {
     });
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [candidate],
       config: createConfig(),
       supplementaryData,
@@ -107,6 +109,7 @@ describe("selectFineAssessmentCandidates", () => {
     }, "synthesis_capsule");
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [synthesis],
       config: createConfig(),
       supplementaryData: createSupplementaryData(),
@@ -148,6 +151,7 @@ describe("selectFineAssessmentCandidates", () => {
       "Where did I buy my new bookshelf from?"
     );
     const select = (evidenceGist: string) => selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [candidate],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -210,6 +214,7 @@ describe("selectFineAssessmentCandidates", () => {
     );
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [memory, evidence],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -246,6 +251,7 @@ describe("selectFineAssessmentCandidates", () => {
     });
 
     const stale = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [memory],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -283,6 +289,7 @@ describe("selectFineAssessmentCandidates", () => {
       });
       if (verified === null) throw new Error("test fixture must project");
       const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
         orderedCandidates: [candidate],
         config: createConfig(),
         supplementaryData: createSupplementaryData({
@@ -323,6 +330,7 @@ describe("selectFineAssessmentCandidates", () => {
       }
     };
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [local, synthesis, global],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -366,6 +374,7 @@ describe("selectFineAssessmentCandidates", () => {
     };
     const ordinary = createCandidate("ordinary-memory");
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [child, ordinary],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -385,6 +394,7 @@ describe("selectFineAssessmentCandidates", () => {
 
   it("omits answer features unless deep diagnostic capture is explicit", () => {
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [createCandidate("memory-1")],
       config: createConfig(),
       supplementaryData: createSupplementaryData(),
@@ -412,6 +422,7 @@ describe("selectFineAssessmentCandidates", () => {
     const next = createCandidate("next");
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [local, global, next],
       config: {
         ...createConfig(),
@@ -445,6 +456,7 @@ describe("selectFineAssessmentCandidates", () => {
     const redundant = createRankedCandidate("redundant", 2, 0.9);
     const diverse = createRankedCandidate("diverse", 3, 0.8);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [primary, redundant, diverse],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -491,6 +503,7 @@ describe("selectFineAssessmentCandidates", () => {
       candidates.map((candidate) => [candidate.fusion.candidate_key, trace])
     );
     const select = (captureAnswerFeatures: boolean) => selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: createConfig(),
       supplementaryData: createSupplementaryData({

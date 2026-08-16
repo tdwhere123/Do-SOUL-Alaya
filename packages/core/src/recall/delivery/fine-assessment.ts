@@ -57,6 +57,8 @@ export interface FineAssessParams {
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
+  readonly generation_id?: string;
+  readonly condition_digest?: string;
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -134,6 +136,8 @@ export function deliverFineAssessment(
   const selected = selectFineAssessmentCandidates({
     orderedCandidates: delivery.orderedCandidates,
     packetCandidates: preparation.candidates,
+    generation_id: params.generation_id,
+    condition_digest: params.condition_digest,
     config: params.policy.fine_assessment,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,

@@ -190,6 +190,12 @@ function serializeOptionalSelectionInputs(
       deep_head_trace_by_candidate_key: stableEntries(
         params.deepHeadTraceByCandidateKey
       )
+    }),
+    ...(params.generation_id === undefined ? {} : {
+      generation_id: params.generation_id
+    }),
+    ...(params.condition_digest === undefined ? {} : {
+      condition_digest: params.condition_digest
     })
   };
 }

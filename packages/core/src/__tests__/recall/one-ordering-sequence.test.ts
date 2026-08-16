@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,7 @@ describe("one ordering sequence", () => {
     ]);
     const keys = candidateKeys(candidates);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       packetCandidates: Object.freeze([first, second, third]),
       config: createConfig(),
@@ -111,6 +113,7 @@ describe("one ordering sequence", () => {
     const novel = createRankedCandidate("novel", 3, 0.4);
     const candidates = Object.freeze([dupA, dupB, novel]);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),
@@ -149,6 +152,7 @@ describe("one ordering sequence", () => {
     const first = createRankedCandidate("rank-first", 1, 0.9);
     const second = createRankedCandidate("rank-second", 2, 0.8);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [first, second],
       config: createConfig(),
       supplementaryData: createSupplementaryData(),
@@ -174,6 +178,7 @@ describe("one ordering sequence", () => {
     const second = createRankedCandidate("membership-second", 2, 0.8);
     const third = createRankedCandidate("membership-third", 3, 0.7);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [first, second, third],
       packetCandidates: [first, second, third],
       config: createConfig(),
@@ -217,6 +222,7 @@ describe("one ordering sequence", () => {
     const first = createRankedCandidate("multi-owner-first", 1, 0.9);
     const second = createRankedCandidate("multi-owner-second", 2, 0.8);
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [first, second],
       packetCandidates: [first, second],
       config: createConfig(),
@@ -249,6 +255,7 @@ describe("one ordering sequence", () => {
     const headA = createRankedCandidate("head-a", 1, 0.4);
     const candidates = Object.freeze([publicA, publicB, headA]);
     const params = {
+      ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),
@@ -326,6 +333,7 @@ describe("one ordering sequence", () => {
     const delivery = Object.freeze([second, first]);
     let captured: FineAssessmentSelectionBoundaryCase | undefined;
     selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: delivery,
       packetCandidates: packet,
       config: createConfig(),

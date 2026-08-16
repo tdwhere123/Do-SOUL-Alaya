@@ -125,7 +125,20 @@ These rules always win over lower-level docs and task-card convenience.
     `used` receipt is a soft read-side signal: repeated used receipts
     decay for path-strength reinforcement, `trust_mode = automatic`
     carries reduced weight, and durable truth still requires the
-    proposal/governance path.
+    proposal/governance path. The live used-report producer records a
+    `CausalUsageReceipt` only. That port is constructed at the daemon
+    composition root; delivery, inspection, and top-k membership have
+    weight 0.
+20a. **Source write persist-first.** A valid evidence create persists
+    the root capsule, then optionally admits source spans and F0-F2
+    incidences. Optional formation failure does not delete or
+    invalidate that capsule. Soul materialization does not compensate
+    a later memory-create failure by deleting the evidence.
+20b. **One query as-of and one pinned generation.** `prepareRecallRequest`
+    captures `effective_as_of` once and pins exactly one projection
+    generation. Select_Gamma is the admission-order selector; later
+    consensus does not reorder the delivered set. Missing generation
+    or condition pins fail closed.
 
 ### Temporal Relation Contract
 

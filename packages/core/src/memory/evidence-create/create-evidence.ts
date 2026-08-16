@@ -22,6 +22,7 @@ import {
   type EvidenceFormationPlan
 } from "./formation-plan.js";
 import type { FieldFormationStores } from "./field-stores.js";
+import { appendSourceRecordAdmitted } from "./source-admission-audit.js";
 
 export async function createEvidenceCapsule(input: Readonly<{
   readonly capsuleInput: Omit<
@@ -66,7 +67,7 @@ export async function createEvidenceCapsule(input: Readonly<{
     formation.factFrameCapture,
     formation.semanticFormation
   );
-  admitOptionalFieldFormation(input, created, formation);
+  await admitOptionalFieldFormation(input, created, formation);
   await input.runtimeNotifier.notifyEntry(event);
   return created;
 }
@@ -131,7 +132,7 @@ function planOptionalFormation(
   }
 }
 
-function admitOptionalFieldFormation(
+async function admitOptionalFieldFormation(
   input: Readonly<{
     readonly sha256?: FieldContractSha256;
     readonly sourceAdmission?: SourceAdmissionPort;
@@ -139,12 +140,16 @@ function admitOptionalFieldFormation(
     readonly fieldStores?: FieldFormationStores;
     readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+    readonly eventLogRepo: {
+      append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
+        EventLogEntry | Promise<EventLogEntry>;
+    };
   }>,
   evidence: EvidenceCapsule,
   views: EvidenceFormationPlan
-): void {
+): Promise<void> {
   try {
-    admitEvidenceFieldFormation({
+    const admitted = admitEvidenceFieldFormation({
       evidence,
       views,
       sha256: input.sha256,
@@ -153,6 +158,9 @@ function admitOptionalFieldFormation(
       fieldStores: input.fieldStores,
       semanticExtractor: input.semanticExtractor
     });
+    if (admitted !== null) {
+      await appendSourceRecordAdmitted(input.eventLogRepo, admitted);
+    }
   } catch (error) {
     input.warn?.("optional evidence formation failed", {
       evidence_object_id: evidence.object_id,

@@ -10,7 +10,8 @@ import {
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationProposal,
   type SourceAdmissionPort,
-  type SourceAdmissionRequest
+  type SourceAdmissionRequest,
+  type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
 import { materializeOpenSemanticFactorFormation } from
   "../../semantic/open-semantic-factor-formation.js";
@@ -64,8 +65,8 @@ export function admitEvidenceFieldFormation(
     readonly evidence: Readonly<EvidenceCapsule>;
     readonly views: EvidenceFormationPlan;
   }> & EvidenceFieldFormationPorts
-): void {
-  tryPlanFieldFormation(input, input.views);
+): SourceRecordIdentity | null {
+  return tryPlanFieldFormation(input, input.views);
 }
 
 function planFormationViews(input: Readonly<{
@@ -110,7 +111,7 @@ function tryPlanFieldFormation(
     readonly evidence: Readonly<EvidenceCapsule>;
   }> & EvidenceFieldFormationPorts,
   views: EvidenceFormationPlan
-): void {
+): SourceRecordIdentity | null {
   const sha256 = input.sha256;
   const sourceAdmission = input.sourceAdmission;
   const factorIncidence = input.factorIncidence;
@@ -121,10 +122,10 @@ function tryPlanFieldFormation(
     factorIncidence === undefined ||
     fieldStores === undefined
   ) {
-    return;
+    return null;
   }
   try {
-    applyFieldFormation({
+    return applyFieldFormation({
       evidence: input.evidence,
       views,
       sha256,
@@ -134,7 +135,7 @@ function tryPlanFieldFormation(
       semanticExtractor: input.semanticExtractor
     });
   } catch {
-    return;
+    return null;
   }
 }
 
@@ -146,7 +147,7 @@ function applyFieldFormation(input: Readonly<{
   readonly factorIncidence: FactorIncidencePort;
   readonly fieldStores: FieldFormationStores;
   readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
-}>): void {
+}>): SourceRecordIdentity {
   const request = sourceRequestFromEvidence(input.evidence, input.views);
   const admitted = input.sourceAdmission.admit(request);
   const emitted = emitDeterministicIncidences({
@@ -168,6 +169,7 @@ function applyFieldFormation(input: Readonly<{
   persistDescriptors(input.fieldStores, emitted.factors);
   persistIncidences(input.factorIncidence, emitted.incidences);
   tryNominateF3(input);
+  return admitted.record;
 }
 
 function tryNominateF3(input: Readonly<{

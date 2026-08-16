@@ -58,10 +58,11 @@ export function verifyPersistedFactor(
   row: FieldFactorDescriptorRow,
   sha256: FieldContractSha256
 ): void {
-  if (row.canonical_payload === null) return;
+  const payload = row.canonical_payload;
+  if (payload === null) return;
   assertHashed("factor", row.factor_id, () => hashFactorId({
     family: row.family,
-    canonical_payload: row.canonical_payload,
+    canonical_payload: payload,
     operator_id: row.operator_id
   }, sha256));
 }

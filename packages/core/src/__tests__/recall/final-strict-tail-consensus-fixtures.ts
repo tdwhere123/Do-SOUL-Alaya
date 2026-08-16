@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { createHash } from "node:crypto";
 import {
   selectFineAssessmentCandidates,
@@ -44,6 +45,7 @@ export function select(
 ): SelectionResult {
   const config = createConfig();
   return selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: candidates,
     config: {
       ...config,

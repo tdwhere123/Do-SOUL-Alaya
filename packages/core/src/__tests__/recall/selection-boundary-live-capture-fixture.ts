@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { vi } from "vitest";
 
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
@@ -36,6 +37,7 @@ export function captureFineAssessmentSelectionBoundary(
 ): FineAssessmentSelectionBoundaryCase {
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   fineAssess({
+    ...FIELD_PINS,
     ...buildLiveCaptureBase(taskSurfaceRef, supplementaryOverrides, options),
     selectionBoundaryObserver: (pending) => {
       boundary = materializeFineAssessmentSelectionBoundary(pending);
@@ -105,6 +107,7 @@ export function withCapturedOrderAlignedExpected(
   const params = restoreSelectionParams(boundary.input);
   let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const replayed = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     ...params,
     capturePacketPlanTrace: true,
     ...(boundary.expected.pre_projection === undefined ? {} : {

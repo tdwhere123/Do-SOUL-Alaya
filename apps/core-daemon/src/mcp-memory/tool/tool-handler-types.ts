@@ -217,6 +217,7 @@ export interface McpMemoryToolHandlerDependencies {
   // Single canonical declaration lives next to MaterializationRouter — re-using
   // the same port keeps the daemon-side wiring and the materializer in lockstep.
   readonly graphEdgePort?: GraphEdgeCreationPort;
+  readonly causalUsagePort?: import("@do-soul/alaya-protocol").CausalUsagePort;
   readonly sessionOverrideService: {
     apply(params: {
       readonly runId: string;

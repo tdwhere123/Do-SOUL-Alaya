@@ -138,6 +138,9 @@ export interface RecallDiagnostics {
   >[];
   readonly field_refinement_stop_certificate?:
     Readonly<RecallFieldRefinementStopCertificate>;
+  readonly query_condition?: Readonly<
+    import("./query-condition-parity.js").QueryConditionParityView
+  >;
   readonly query_entity_extraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly query_fact_frame_extraction?: Readonly<
     import("../field/query-attribution/query-fact-frame-attribution-producer.js")

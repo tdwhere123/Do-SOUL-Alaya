@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { describe, expect, it } from "vitest";
 import type { SelectGammaPort } from "@do-soul/alaya-protocol";
 import {
@@ -39,16 +40,14 @@ describe("Select_Gamma", () => {
       { candidate_key: "risky", risk: "blocked", authority: "clear" },
       { candidate_key: "untrusted", risk: "clear", authority: "blocked" }
     ])).toEqual(["safe"]);
-    const conflicted = {
-      ...createCandidate("conflicted"),
-      effectiveFactors: {
-        ...createCandidate("conflicted").effectiveFactors,
-        conflict_penalty: 0.4
-      }
+    const hidden = {
+      ...createCandidate("hidden"),
+      entry: { ...createCandidate("hidden").entry, object_id: "hidden-1" }
     };
-    expect(deriveSelectGammaEligibility(conflicted, {
-      config: { conflict_awareness: true, budgets: createConfig().budgets }
-    } as never).risk).toBe("blocked");
+    expect(deriveSelectGammaEligibility(hidden, {
+      config: { conflict_awareness: true, budgets: createConfig().budgets },
+      supplementaryData: { governanceCeilingByMemoryId: { "hidden-1": "hidden" } }
+    } as never).authority).toBe("blocked");
   });
 
   it("keeps quality nonnegative and coverage gains diminishing", () => {
@@ -68,6 +67,22 @@ describe("Select_Gamma", () => {
     expect(firstGain).toBeGreaterThan(0);
     expect(repeatGain).toBeGreaterThanOrEqual(0);
     expect(repeatGain).toBeLessThan(firstGain);
+  });
+
+  it("fails closed when generation or condition pins are missing", () => {
+    const candidate = createCandidate("unpinned");
+    const params = {
+      orderedCandidates: [candidate],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: new Map()
+    };
+    expect(() => buildSelectGammaRequest(
+      params,
+      createSelectionContext(params),
+      [candidate]
+    )).toThrow(/generation_id/u);
   });
 
   it("binds pinned generation and condition receipts on the live request", () => {
@@ -184,6 +199,7 @@ describe("Select_Gamma", () => {
     const novel = withScore(createCandidate("novel"), 0.4);
     const candidates = [first, second, novel];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),

@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -453,6 +454,7 @@ describe("fine-assessment selection boundary fidelity", () => {
     const candidates = fixtureCandidates();
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;
     selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),
@@ -695,6 +697,7 @@ describe("fine-assessment selection boundary fidelity", () => {
     });
 
     const result = fineAssess({
+    ...FIELD_PINS,
       candidates: fixtureCandidates(),
       policy,
       winnerMemoryIds: new Set(),
@@ -720,6 +723,7 @@ describe("fine-assessment selection boundary fidelity", () => {
   it("skips selection-boundary capture and deep-clone without an observer", () => {
     const candidates = fixtureCandidates();
     const params = {
+      ...FIELD_PINS,
       orderedCandidates: candidates,
       config: createConfig(),
       supplementaryData: createSupplementaryData(),
@@ -791,6 +795,7 @@ function selectFixture(
     ]
   ));
   return selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: candidates,
     config: createConfig(),
     supplementaryData,

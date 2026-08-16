@@ -29,6 +29,8 @@ export function restoreSelectionParams(
     tokenEstimator: createCapturedTokenEstimator(
       input.token_estimates_by_content
     ),
+    generation_id: input.generation_id ?? `sha256:${"c".repeat(64)}`,
+    condition_digest: input.condition_digest ?? `sha256:${"d".repeat(64)}`,
     rankByCandidateKey: new Map(input.rank_by_candidate_key),
     ...(input.final_relevance_by_candidate_key === undefined ? {} : {
       finalRelevanceByCandidateKey: new Map(

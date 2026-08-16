@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
@@ -16,6 +17,7 @@ describe("selectFineAssessmentCandidates", () => {
     const estimate = vi.fn(() => 6);
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [
         createCandidate("memory-1"),
         createCandidate("memory-2")
@@ -45,6 +47,7 @@ describe("selectFineAssessmentCandidates", () => {
     const sharedAfterSkip = createRankedCandidate("shared-after-skip", 4, 0.85);
     const candidates = [first, oversized, unrelated, sharedAfterSkip];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),

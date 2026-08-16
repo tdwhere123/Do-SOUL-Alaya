@@ -21,7 +21,7 @@ const CLOCK = "2026-08-16T00:00:00.000Z";
 const BODY = "I use Atlas for research.";
 
 describe("factor incidence", () => {
-  it("emits F0-F2 incidences using Wave 0 identities", () => {
+  it("emits F0-F2 incidences using canonical identities", () => {
     const stores = createInMemoryFieldStores();
     const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
     const incidence = createFactorIncidencePort({ sha256: fieldSha256, stores });

@@ -1,18 +1,29 @@
 import { randomUUID } from "node:crypto";
 import {
   DYNAMICS_CONSTANTS,
+  type FieldContractSha256,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
+import { fieldContractSha256 } from "../shared/field-hash.js";
 import { assertActivationWeightsSumToOne } from "./runtime/recall-service-helpers.js";
 import type {
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./runtime/recall-service-types.js";
+import {
+  createInMemoryFieldQuerySession,
+  type RecallFieldQuerySession
+} from "./runtime/query/field-query-session.js";
 import { buildDefaultPolicy } from "./runtime/orchestration.js";
 import { executeRecall, type RecallExecutionParams } from "./runtime/recall-service-runner.js";
 import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
+
+export type RecallServiceFieldDeps = Readonly<{
+  readonly fieldQuerySession?: RecallFieldQuerySession;
+  readonly sha256?: FieldContractSha256;
+}>;
 
 export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
@@ -55,12 +66,19 @@ export class RecallService {
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
   private readonly warn: RecallServiceWarnPort;
+  private readonly fieldQuerySession: RecallFieldQuerySession;
+  private readonly sha256: FieldContractSha256;
 
-  public constructor(private readonly dependencies: RecallServiceDependencies) {
+  public constructor(
+    private readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps
+  ) {
     assertActivationWeightsSumToOne(DYNAMICS_CONSTANTS.activation_weights_phase4b);
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
+    this.sha256 = dependencies.sha256 ?? fieldContractSha256;
+    this.fieldQuerySession = dependencies.fieldQuerySession ??
+      createInMemoryFieldQuerySession(this.sha256);
   }
 
   public async recall(params: RecallExecutionParams): Promise<RecallResult> {
@@ -73,7 +91,9 @@ export class RecallService {
         this.now
       ),
       now: this.now,
-      buildDefaultPolicy: (strategy, taskSurfaceRef) => this.buildDefaultPolicy(strategy, taskSurfaceRef)
+      buildDefaultPolicy: (strategy, taskSurfaceRef) => this.buildDefaultPolicy(strategy, taskSurfaceRef),
+      fieldQuerySession: this.fieldQuerySession,
+      sha256: this.sha256
     }, params);
   }
 

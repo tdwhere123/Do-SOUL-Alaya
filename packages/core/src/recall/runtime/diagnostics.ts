@@ -19,6 +19,7 @@ import type {
 } from "./recall-service-types.js";
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
+import type { QueryConditionParityView } from "./query-condition-parity.js";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import type { RecallFiniteFieldChannelCapture } from
@@ -59,6 +60,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
   readonly fieldRefinementStopCertificate?:
     Readonly<RecallFieldRefinementStopCertificate>;
+  readonly queryCondition?: QueryConditionParityView;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
@@ -132,6 +134,9 @@ export function buildRecallDiagnostics(
         field_refinement_stop_certificate:
           params.fieldRefinementStopCertificate
       }),
+    ...(params.queryCondition === undefined
+      ? {}
+      : { query_condition: params.queryCondition }),
     ...(params.answerShapePlan === undefined
       ? {}
       : { answer_shape_plan: params.answerShapePlan }),

@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -383,6 +384,7 @@ function capturedBoundaryV2(
 ): FineAssessmentSelectionBoundaryCase {
   let captured: FineAssessmentSelectionBoundaryCase | undefined;
   selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: candidates,
     config: createConfig(),
     supplementaryData: createSupplementaryData(),

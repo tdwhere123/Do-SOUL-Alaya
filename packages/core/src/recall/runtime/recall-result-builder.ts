@@ -1,4 +1,5 @@
 import { buildRecallDiagnostics, computeRecallTokenEconomy } from "./diagnostics.js";
+import { queryConditionParityView } from "./query-condition-parity.js";
 import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
 import type { CoarseStageResult } from "./recall-service-runner-coarse.js";
 import type {
@@ -50,6 +51,7 @@ export function buildRecallResult(
         assessment.supplementaryData.retrievalFieldRefinementReceipts,
       fieldRefinementStopCertificate:
         assessment.finalAssessment.fieldRefinementStopCertificate,
+      queryCondition: queryConditionParityView(prepared.queryCondition),
       querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
       answerShapePlan: prepared.answerShapePlan,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,

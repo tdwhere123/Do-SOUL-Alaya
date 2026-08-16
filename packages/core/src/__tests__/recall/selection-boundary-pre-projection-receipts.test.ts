@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 
@@ -160,6 +161,7 @@ function captureBoundary(
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   const config = createConfig();
   selectFineAssessmentCandidates({
+    ...FIELD_PINS,
     orderedCandidates: fixture.candidates,
     config: {
       ...config,

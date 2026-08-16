@@ -152,10 +152,10 @@ function sameSpan(existing: AddressableSourceSpan, incoming: AddressableSourceSp
 }
 
 function sameFactor(existing: FactorDescriptor, incoming: FactorDescriptor): boolean {
-  return existing.family === incoming.family &&
+  return existing.identity === incoming.identity &&
+    existing.family === incoming.family &&
     existing.operator_id === incoming.operator_id &&
-    (existing.canonical_payload === incoming.canonical_payload ||
-      existing.canonical_payload === null);
+    existing.canonical_payload === incoming.canonical_payload;
 }
 
 function sameIncidence(existing: FactorIncidence, incoming: FactorIncidence): boolean {
