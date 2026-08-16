@@ -123,6 +123,9 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT).toContain(
       "does not lower the durability threshold"
     );
+    expect(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT).toContain(
+      "bare topic, search phrase, title, or information request"
+    );
     expect(repairSha256).not.toBe(sha256(OFFICIAL_API_SYSTEM_PROMPT));
     expect(resolveOfficialApiSystemPrompt(repairSha256))
       .toBe(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { link, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { throwLifecycleErrors } from "../lifecycle/errors.js";
+
+const STAGING_SESSION_NAME = `${process.pid}-${randomUUID()}`;
 
 export interface StagedDiagnosticsArtifact {
   readonly stagedPath: string;
@@ -62,34 +64,43 @@ async function cleanFailedPublication(
   return errors;
 }
 
-const MAX_STALE_STAGING_FILES = 8;
-const MAX_STALE_STAGING_BYTES = 512 * 1024 * 1024;
-
 export async function prepareDiagnosticsArtifactStagingPath(
   artifactRoot: string,
   label: string
 ): Promise<string> {
   const stagingRoot = path.join(artifactRoot, ".staging");
-  await mkdir(stagingRoot, { recursive: true });
-  await pruneStagingFiles(stagingRoot);
-  return path.join(stagingRoot, `${safeLabel(label)}-${randomUUID()}.tmp`);
+  const sessionRoot = path.join(stagingRoot, STAGING_SESSION_NAME);
+  await mkdir(sessionRoot, { recursive: true });
+  await pruneAbandonedStagingSessions(stagingRoot);
+  return path.join(sessionRoot, `${safeLabel(label)}-${randomUUID()}.tmp`);
 }
 
-async function pruneStagingFiles(stagingRoot: string): Promise<void> {
-  const names = await readdir(stagingRoot);
-  const files = await Promise.all(names.map(async (name) => {
-    const info = await stat(path.join(stagingRoot, name));
-    return { name, modified: info.mtimeMs, bytes: info.size };
-  }));
-  files.sort((left, right) => right.modified - left.modified);
-  let retainedBytes = 0;
-  const stale = files.filter((file, index) => {
-    retainedBytes += file.bytes;
-    return index >= MAX_STALE_STAGING_FILES || retainedBytes > MAX_STALE_STAGING_BYTES;
+async function pruneAbandonedStagingSessions(stagingRoot: string): Promise<void> {
+  const entries = await readdir(stagingRoot, { withFileTypes: true });
+  const abandoned = entries.filter((entry) => {
+    if (!entry.isDirectory() || entry.name === STAGING_SESSION_NAME) return false;
+    const ownerPid = stagingSessionOwnerPid(entry.name);
+    return ownerPid !== null && !isProcessAlive(ownerPid);
   });
-  await Promise.all(stale.map(({ name }) =>
-    rm(path.join(stagingRoot, name), { force: true })
+  await Promise.all(abandoned.map((entry) =>
+    rm(path.join(stagingRoot, entry.name), { recursive: true, force: true })
   ));
+}
+
+function stagingSessionOwnerPid(name: string): number | null {
+  const separator = name.indexOf("-");
+  if (separator < 1 || !/^[0-9]+$/u.test(name.slice(0, separator))) return null;
+  const pid = Number(name.slice(0, separator));
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 function safeLabel(label: string): string {

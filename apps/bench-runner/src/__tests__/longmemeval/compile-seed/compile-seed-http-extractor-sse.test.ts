@@ -31,8 +31,8 @@ import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache
 // stream; a non-stream request can return an empty
 // `data: [DONE]\n\n` body. The extractor sends `stream:true` and parses the
 // SSE body; a compliant provider's plain JSON body must still work
-// (back-compat). The body read stays under the same wall-clock backstop as the
-// fetch so a mid-stream stalled socket settles as a timeout, not a hang.
+// (back-compat). Response headers and body chunks refresh the inactivity
+// backstop so an active stream stays alive while a stalled socket still settles.
 describe("createGardenHttpExtractor — SSE streaming body parse", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
@@ -268,6 +268,38 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
       userPrompt: "t"
     });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("uses the latest cumulative message.content frame", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"message":{"content":"{\\"signals\\":"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const result = await createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock
+    }).extract({ systemPrompt: "s", userPrompt: "t" });
+
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("rejects a stream that mixes delta and full-message content", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    await expect(extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      retryMode: "disabled"
+    })).rejects.toThrow(/mixes delta and message content/iu);
   });
 
   it("still extracts a compliant plain-JSON body (application/json back-compat)", async () => {

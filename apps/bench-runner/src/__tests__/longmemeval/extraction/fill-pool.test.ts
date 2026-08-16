@@ -17,6 +17,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
+import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
 
 it("retains the originating task failure for terminal fill diagnostics", () => {
   const cause = new Error("semantic graph validation failed");
@@ -164,10 +165,7 @@ it("backs a four-worker fill below its authority maximum after a 429", async () 
   const logs: string[] = [];
   await runExtractionPool({
     extractor: {
-      extract: vi.fn(async () => ({
-        rawJson: '{"signals":[]}',
-        taskRateLimitRetries: calls++ === 0 ? 1 : 0
-      }))
+      extract: vi.fn(async () => retryResult(calls++ === 0 ? 1 : 0))
     },
     turns: Array.from({ length: 4 }, (_, index) => ({
       turnContent: `I saved durable detail ${index}.`,
@@ -184,13 +182,19 @@ it("backs a four-worker fill below its authority maximum after a 429", async () 
   );
 });
 
-it("reports a redacted reason without treating schema rejection as provider pressure", async () => {
+it.each([
+  ["semantic_factor_graph_missing", "semantic_factor_graph_missing"],
+  ["semantic_factor_graph_required", "semantic_factor_graph_required"]
+])("reports redacted %s without treating schema rejection as provider pressure", async (
+  rejection,
+  expectedReason
+) => {
   const logs: string[] = [];
   const stats = newFillStats();
   const failure = Object.assign(
     new Error(
       "signals array contained no valid open semantic factor entries " +
-        "(rejections=semantic_factor_graph_missing:2)"
+        `(rejections=${rejection}:2)`
     ), {
     benchRetry: {
       retryCount: 4,
@@ -223,12 +227,12 @@ it("reports a redacted reason without treating schema rejection as provider pres
   expect(logs).toContain(
       "[extraction-fill] leaving provider failure for a later fill: " +
       "retry_classification=failure_max_retries " +
-      "failure_reason=semantic_factor_graph_missing processed_turns=1/1"
+      `failure_reason=${expectedReason} processed_turns=1/1`
   );
   expect(logs.some((message) => message.includes("provider-pressure backoff"))).toBe(false);
 });
 
-it("reports a first-pass 429 through a strict-empty cache recheck to adaptive concurrency", async () => {
+it("reports a first-pass 429 through a strict-empty cache recheck", async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-empty-recheck-"));
   const stats = newFillStats();
   try {
@@ -240,49 +244,19 @@ it("reports a first-pass 429 through a strict-empty cache recheck to adaptive co
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
+      extract: vi.fn<BenchSignalExtractor["extract"]>()
         .mockResolvedValueOnce({
           rawJson: '{"signals":[]}',
-          extractorMeta: {
-            recoveryKind: "none",
-            retryCount: 1,
-            retryClassification: "success_after_retry",
-            rateLimitRetries: 1
-          }
+          extractorMeta: retryResult(1).extractorMeta
         })
         .mockResolvedValueOnce({
           rawJson: '{"signals":[]}',
-          extractorMeta: {
-            recoveryKind: "none",
-            retryCount: 0,
-            retryClassification: "success_first_try",
-            rateLimitRetries: 0
-          }
+          extractorMeta: retryResult(0).extractorMeta
         })
     };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model",
-        modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      stats
-    });
-
     await runExtractionPool({
-      extractor,
-      turns: [{
-        turnContent: "User: I completed the review today.",
-        turnMessages: [{
-          message_id: "q1-m0",
-          role: "user",
-          content: "I completed the review today."
-        }]
-      }],
+      extractor: cachingExtractor(cacheRoot, delegate, stats),
+      turns: groundedTurns(),
       concurrency: 1,
       requestedTurns: 1,
       stats,
@@ -320,18 +294,57 @@ it("reports a first-pass 429 when the strict-empty recheck fails", async () => {
       }
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
+      extract: vi.fn<BenchSignalExtractor["extract"]>()
         .mockResolvedValueOnce({
           rawJson: '{"signals":[]}',
+          extractorMeta: retryResult(1).extractorMeta
+        })
+        .mockRejectedValueOnce(terminalFailure)
+    };
+    await runExtractionPool({
+      extractor: cachingExtractor(cacheRoot, delegate, stats),
+      turns: groundedTurns(),
+      concurrency: 1,
+      requestedTurns: 1,
+      stats,
+      log: () => undefined,
+      tolerateProviderTaskFailures: true
+    });
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(stats).toMatchObject({
+      rateLimitRetries: 1,
+      adaptiveConcurrencyBackoffs: 1,
+      adaptiveConcurrencyBackoffMs: 250
+    });
+  } finally {
+    await rm(cacheRoot, { recursive: true, force: true });
+  }
+});
+
+it("reports a recovered 429 from the accepted response to adaptive concurrency", async () => {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-recovered-rate-limit-"));
+  const stats = newFillStats();
+  try {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+      requestProfile: "provider-default-v1",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi
+        .fn<BenchSignalExtractor["extract"]>()
+        .mockImplementationOnce(async (input) => ({
+          rawJson: buildGroundedSignalResponse(input.userPrompt),
           extractorMeta: {
             recoveryKind: "none",
             retryCount: 1,
             retryClassification: "success_after_retry",
             rateLimitRetries: 1
           }
-        })
-        .mockRejectedValueOnce(terminalFailure)
+        }))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -358,11 +371,10 @@ it("reports a first-pass 429 when the strict-empty recheck fails", async () => {
       concurrency: 1,
       requestedTurns: 1,
       stats,
-      log: () => undefined,
-      tolerateProviderTaskFailures: true
+      log: () => undefined
     });
 
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
     expect(stats).toMatchObject({
       rateLimitRetries: 1,
       adaptiveConcurrencyBackoffs: 1,
@@ -453,8 +465,7 @@ it("backs the 100Q extraction pool below its initial concurrency after a 429", a
   }
 });
 
-it("gives one shard enough wall-clock budget for all five authorized attempts", async () => {
-  expect(EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS).toBe(333_000);
+it("honors the derived provider wall-clock budget", async () => {
   vi.useFakeTimers();
   try {
     const extractor: BenchSignalExtractor = {
@@ -525,6 +536,35 @@ function retryResult(rateLimitRetries: number) {
       rateLimitRetries
     }
   };
+}
+
+function cachingExtractor(
+  cacheRoot: string,
+  delegate: BenchSignalExtractor,
+  stats: ReturnType<typeof newFillStats>
+): BenchSignalExtractor {
+  return createCachingSignalExtractor({
+    delegate,
+    config: {
+      model: "test-model",
+      modelFamily: "test-model",
+      providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+      requestProfile: "provider-default-v1"
+    },
+    cacheRoot,
+    stats
+  });
+}
+
+function groundedTurns() {
+  return [{
+    turnContent: "User: I completed the review today.",
+    turnMessages: [{
+      message_id: "q1-m0",
+      role: "user" as const,
+      content: "I completed the review today."
+    }]
+  }];
 }
 
 async function flushMicrotasks(): Promise<void> {

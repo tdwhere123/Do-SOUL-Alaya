@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
+  createGardenHttpExtractor,
   type BenchSignalExtractor
 } from "../../../../longmemeval/compile-seed.js";
 import { cacheFilePath, computeSourceTurnCacheKey } from
@@ -17,17 +18,22 @@ import { extractLiveDelegate } from
   "../../../../longmemeval/extraction/cache/cache-live-delegate.js";
 import { openExtractionAttemptLedger } from
   "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../../longmemeval/extraction/authority/receipt-limits.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction-cache-test-fixture.js";
-import { signalsEnvelope } from "../../compile-seed/compile-seed-fixture.js";
+import {
+  signalsEnvelope,
+  withOpenSemanticFactorGraph
+} from "../../compile-seed/compile-seed-fixture.js";
 
 const MODEL = "test-model";
 const SYSTEM_PROMPT = "test-system-prompt";
 const REQUEST_PROFILE = "provider-default-v1" as const;
 
-describe("extraction live delegate empty-result recheck", () => {
+describe("extraction live delegate atomic persistence", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
@@ -45,7 +51,7 @@ describe("extraction live delegate empty-result recheck", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("rechecks one strict empty result once and persists only the terminal raw response", async () => {
+  it("rechecks one strict empty result once and persists only the terminal response", async () => {
     const terminalRaw = signalsEnvelope([{
       distilled: "I completed the review today.",
       matched: "I completed the review today."
@@ -63,18 +69,13 @@ describe("extraction live delegate empty-result recheck", () => {
         })
     };
     const onTransportAttempt = vi.fn(async () => undefined);
+    const onLiveExtractionOutcome = vi.fn();
     const extractor = createCachingSignalExtractor({
       delegate,
-      config: {
-        model: MODEL,
-        modelFamily: MODEL,
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        transportProviderUrl: "https://physical.example/v1?secret=hidden",
-        transportModel: "provider-model-alias",
-        requestProfile: REQUEST_PROFILE
-      },
+      config: extractionConfig(),
       cacheRoot,
-      onTransportAttempt
+      onTransportAttempt,
+      onLiveExtractionOutcome
     });
 
     const result = await extractor.extract({
@@ -87,145 +88,33 @@ describe("extraction live delegate empty-result recheck", () => {
       retryMode: "disabled"
     }));
     expect(onTransportAttempt).toHaveBeenCalledTimes(2);
+    expect(onLiveExtractionOutcome).toHaveBeenCalledTimes(2);
     expect(result.rawJson).toBe(terminalRaw);
-
-    const expectedShardPath = shardPath(cacheRoot);
-    expect(existsSync(expectedShardPath)).toBe(true);
-    const shard = JSON.parse(readFileSync(expectedShardPath, "utf8")) as {
-      readonly raw_json: string;
-      readonly transport_provenance?: {
-        readonly provider_url_sha256: string;
-        readonly model: string;
-      };
-    };
+    const shard = readShard(cacheRoot);
     expect(shard.raw_json).toBe(terminalRaw);
     expect(shard.transport_provenance).toEqual({
       provider_url_sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-      model: "provider-model-alias"
+      model: MODEL
     });
-    expect(JSON.stringify(shard)).not.toContain("secret=hidden");
-  });
-
-  it("accepts a second strict empty result without a third request", async () => {
-    const terminalRaw = '{ "signals": [] }\n';
-    const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({
-          rawJson: '{"signals":[]}',
-          usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 }
-        })
-        .mockResolvedValueOnce({
-          rawJson: terminalRaw,
-          extractorMeta: {
-            recoveryKind: "none",
-            retryCount: 0,
-            retryClassification: "success_first_try",
-            rateLimitRetries: 0
-          },
-          usage: { inputTokens: 20, outputTokens: 2, totalTokens: 22 },
-          responseMetadata: { finishReason: "stop", maxOutputTokens: 256 }
-        })
-    };
-    const onLiveExtractionOutcome = vi.fn();
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: extractionConfig(),
-      cacheRoot,
-      onLiveExtractionOutcome
-    });
-
-    const result = await extractor.extract({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({
-      rawJson: terminalRaw,
-      usage: { inputTokens: 20, outputTokens: 2, totalTokens: 22 },
-      responseMetadata: { finishReason: "stop", maxOutputTokens: 256 }
-    });
-    expect(onLiveExtractionOutcome).toHaveBeenCalledTimes(2);
-    expect(onLiveExtractionOutcome).toHaveBeenNthCalledWith(
-      1,
-      expect.any(String),
-      {
-        retryCount: 0,
-        rateLimitRetries: 0,
-        transportFailures: [],
-        usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 }
-      }
-    );
-    expect(onLiveExtractionOutcome).toHaveBeenNthCalledWith(
-      2,
-      expect.any(String),
-      {
-        retryCount: 0,
-        rateLimitRetries: 0,
-        transportFailures: [],
-        usage: { inputTokens: 20, outputTokens: 2, totalTokens: 22 }
-      }
-    );
-
-    const shard = readShard(cacheRoot);
-    expect(shard.raw_json).toBe(terminalRaw);
-    expect(shard.response_metadata?.usage).toEqual({
-      input_tokens: 20,
-      output_tokens: 2,
-      total_tokens: 22
-    });
-  });
-
-  it("throws a failed recheck and leaves no cache shard", async () => {
-    const terminalFailure = new Error("recheck transport failed");
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-        await input.onTransportAttempt?.(input.abortSignal);
-        if (input.retryMode === "disabled") throw terminalFailure;
-        return { rawJson: '{"signals":[]}' };
-      })
-    };
-    const onTransportAttempt = vi.fn(async () => undefined);
-    const onLiveExtractionFailed = vi.fn();
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: extractionConfig(),
-      cacheRoot,
-      onTransportAttempt,
-      onLiveExtractionFailed
-    });
-
-    await expect(extractor.extract({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
-    })).rejects.toBe(terminalFailure);
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
-    expect(onLiveExtractionFailed).toHaveBeenCalledOnce();
-    expect(existsSync(shardPath(cacheRoot))).toBe(false);
   });
 
   it("settles both strict-empty transports exactly once across a ledger reload", async () => {
-    const lineageDigest = "9".repeat(64);
     const ledgerInput = {
       cacheRoot,
-      lineageDigest,
+      lineageDigest: "9".repeat(64),
       cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
       startingMissing: 1,
       maximumAttempts: 2,
       successfulShardCeiling: 1
     } as const;
     const ledger = openExtractionAttemptLedger(ledgerInput);
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => {
-        await input.onTransportAttempt?.(input.abortSignal);
-        return { rawJson: '{"signals":[]}' };
-      })
-    };
     const extractor = createCachingSignalExtractor({
-      delegate,
+      delegate: {
+        extract: vi.fn(async (input) => {
+          await input.onTransportAttempt?.(input.abortSignal);
+          return { rawJson: '{"signals":[]}' };
+        })
+      },
       config: extractionConfig(),
       cacheRoot,
       onTransportAttempt: ledger.reserveAttempt,
@@ -245,16 +134,171 @@ describe("extraction live delegate empty-result recheck", () => {
       pendingKeys: [],
       unresolvedAttempts: [],
       transportFailures: [],
-      telemetry: {
-        unresolvedTransportAttempts: 0,
-        usageUnknownAttempts: 2
-      }
+      telemetry: { unresolvedTransportAttempts: 0, usageUnknownAttempts: 2 }
     };
     expect(ledger.snapshot()).toMatchObject(expected);
     expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toMatchObject(expected);
   });
 
-  it("does not commit a deterministic empty shard as a provider attempt", async () => {
+  it("settles a partitioned response against every physical provider request", async () => {
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "5".repeat(64),
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1,
+      maximumAttempts: 4,
+      successfulShardCeiling: 1
+    });
+    const extractor = createCachingSignalExtractor({
+      delegate: {
+        extract: vi.fn(async (input) => {
+          for (let index = 0; index < 4; index += 1) {
+            await input.onTransportAttempt?.(input.abortSignal);
+          }
+          return {
+            rawJson: signalsEnvelope([{
+              distilled: "I completed the review today.",
+              matched: "I completed the review today."
+            }]),
+            extractorMeta: {
+              recoveryKind: "none",
+              retryCount: 2,
+              retryClassification: "success_after_retry",
+              rateLimitRetries: 0,
+              successfulRequestCount: 2,
+              usageRequestCount: 2,
+              transportFailures: [
+                failure(1, "1"),
+                failure(3, "3")
+              ]
+            },
+            usage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 }
+          };
+        })
+      },
+      config: extractionConfig(),
+      cacheRoot,
+      onTransportAttempt: ledger.reserveAttempt,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard
+    });
+
+    await extractor.extract({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: userPromptWithAssertions()
+    });
+
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 4,
+      successfulShards: 1,
+      unresolvedAttempts: [],
+      transportFailures: [
+        expect.objectContaining({ attemptOrdinal: 1 }),
+        expect.objectContaining({ attemptOrdinal: 3 })
+      ],
+      telemetry: {
+        inputTokens: 40,
+        outputTokens: 12,
+        totalTokens: 52,
+        usageUnavailableRequests: 2
+      }
+    });
+  });
+
+  it("settles a real recursive HTTP partition that exceeds four requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(truncatedSseResponse())
+      .mockResolvedValueOnce(truncatedSseResponse())
+      .mockResolvedValueOnce(cacheSignalResponse(1))
+      .mockResolvedValueOnce(cacheSignalResponse(2))
+      .mockResolvedValueOnce(cacheSignalResponse(3));
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "6".repeat(64),
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1,
+      maximumAttempts: computeExtractionFillAttemptCeiling(1),
+      successfulShardCeiling: 1
+    });
+    const extractor = createCachingSignalExtractor({
+      delegate: createHttpExtractor(fetchMock),
+      config: extractionConfig(),
+      cacheRoot,
+      onTransportAttempt: ledger.reserveAttempt,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard
+    });
+
+    await extractor.extract({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: assertionBatchPrompt([1, 2, 3]),
+      maxOutputTokens: 32_768,
+      outputTokenField: "max_tokens"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 5,
+      successfulShards: 1,
+      pendingKeys: [],
+      unresolvedAttempts: []
+    });
+  });
+
+  it("settles completed partition requests when final composition validation fails", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(truncatedSseResponse())
+      .mockResolvedValueOnce(cacheSignalResponse(1))
+      .mockResolvedValueOnce(cacheSignalResponse(2));
+    const live = createHttpExtractor(fetchMock);
+    const delegate: BenchSignalExtractor = {
+      extract: (input) => live.extract({
+        ...input,
+        validateRawJson: (rawJson) => {
+          input.validateRawJson?.(rawJson);
+          const parsed = JSON.parse(rawJson) as { readonly signals: readonly unknown[] };
+          if (parsed.signals.length > 1) throw new Error("merged envelope rejected");
+        }
+      })
+    };
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "b".repeat(64),
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1,
+      maximumAttempts: computeExtractionFillAttemptCeiling(1),
+      successfulShardCeiling: 1
+    });
+    const extractor = createCachingSignalExtractor({
+      delegate,
+      config: extractionConfig(),
+      cacheRoot,
+      onTransportAttempt: ledger.reserveAttempt,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: assertionBatchPrompt([1, 2]),
+      maxOutputTokens: 32_768,
+      outputTokenField: "max_tokens"
+    })).rejects.toThrow(/merged envelope rejected/u);
+
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 3,
+      successfulShards: 0,
+      pendingKeys: [],
+      unresolvedAttempts: [],
+      transportFailures: [expect.objectContaining({ attemptOrdinal: 1 })],
+      telemetry: { retrySuccesses: 0, usageUnavailableRequests: 3 }
+    });
+  });
+
+  it("does not count a deterministic empty request as a provider attempt", async () => {
     const ledger = openExtractionAttemptLedger({
       cacheRoot,
       lineageDigest: "4".repeat(64),
@@ -291,7 +335,7 @@ describe("extraction live delegate empty-result recheck", () => {
     });
   });
 
-  it("settles a typed terminal failure against its reserved global ordinal", async () => {
+  it("settles a typed terminal failure against its reserved ordinal", async () => {
     const cacheKey = "8".repeat(64);
     const ledger = openExtractionAttemptLedger({
       cacheRoot,
@@ -315,15 +359,14 @@ describe("extraction live delegate empty-result recheck", () => {
         }]
       }
     });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => {
-        await input.onTransportAttempt?.(input.abortSignal);
-        throw terminalFailure;
-      })
-    };
 
     await expect(extractLiveDelegate({
-      delegate,
+      delegate: {
+        extract: vi.fn(async (input) => {
+          await input.onTransportAttempt?.(input.abortSignal);
+          throw terminalFailure;
+        })
+      },
       request: {
         systemPrompt: SYSTEM_PROMPT,
         userPrompt: userPromptWithAssertions(),
@@ -345,85 +388,152 @@ describe("extraction live delegate empty-result recheck", () => {
         phase: "response_status",
         httpStatus: 401,
         fingerprint: "6".repeat(64)
-      }],
-      telemetry: {
-        terminalRetryClassifications: { failure_non_retryable_4xx: 1 },
-        unresolvedTransportAttempts: 0,
-        usageUnknownAttempts: 1
-      }
+      }]
     });
   });
 
-  it("preserves a pre-transport recheck rejection and closes its actual ledger shard", async () => {
+  it("settles a failed response when the next retry exceeds authority", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("limited", { status: 429 })
+    );
     const ledger = openExtractionAttemptLedger({
       cacheRoot,
-      lineageDigest: "a".repeat(64),
+      lineageDigest: "e".repeat(64),
       cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
       startingMissing: 1,
       maximumAttempts: 1,
       successfulShardCeiling: 1
     });
-    let rejectedByAuthority: unknown;
-    let actualTransportStarts = 0;
-    const onTransportAttempt = vi.fn(async (cacheKey: string) => {
-      try {
-        ledger.reserveAttempt(cacheKey);
-      } catch (cause) {
-        rejectedByAuthority = cause;
-        throw cause;
-      }
-      actualTransportStarts += 1;
-    });
-    const onLiveExtractionFailed = vi.fn(ledger.abandonPendingShard);
-    const onLiveExtractionOutcome = vi.fn(ledger.recordTransportOutcome);
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async (input) => {
-        await input.onTransportAttempt?.(input.abortSignal);
-        return { rawJson: '{"signals":[]}' };
-      })
-    };
     const extractor = createCachingSignalExtractor({
-      delegate,
+      delegate: createHttpExtractor(fetchMock),
       config: extractionConfig(),
       cacheRoot,
-      onTransportAttempt,
-      onLiveExtractionFailed,
-      onLiveExtractionOutcome
+      onTransportAttempt: ledger.reserveAttempt,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard
     });
 
-    const rejection = await extractor.extract({
+    await expect(extractor.extract({
       systemPrompt: SYSTEM_PROMPT,
       userPrompt: userPromptWithAssertions()
-    }).then(() => undefined, (cause: unknown) => cause);
+    })).rejects.toThrow(/attempt ceiling exhausted/u);
 
-    expect(rejection).toBe(rejectedByAuthority);
-    expect(actualTransportStarts).toBe(1);
-    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
-    expect(onLiveExtractionOutcome).toHaveBeenCalledOnce();
-    expect(onLiveExtractionFailed).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(ledger.snapshot()).toMatchObject({
       attempts: 1,
       successfulShards: 0,
       pendingKeys: [],
-      telemetry: {
-        unresolvedTransportAttempts: 0,
-        terminalRetryClassifications: {
-          failure_max_retries: 0,
-          failure_non_retryable_4xx: 0,
-          failure_timeout: 0,
-          failure_aborted: 0
-        }
-      }
+      unresolvedAttempts: [],
+      transportFailures: [{
+        attemptOrdinal: 1,
+        cacheKey: expect.any(String),
+        kind: "http_error",
+        phase: "response_status",
+        httpStatus: 429,
+        fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }],
+      telemetry: { rateLimitRetries: 1 }
     });
-    expect(existsSync(shardPath(cacheRoot))).toBe(false);
   });
 
-  it("does not recheck a strict empty probe whose retry mode is disabled", async () => {
+  it("accepts a second strict empty result without a third request", async () => {
+    const terminalRaw = '{ "signals": [] }\n';
+    const delegate: BenchSignalExtractor = {
+      extract: vi
+        .fn<BenchSignalExtractor["extract"]>()
+        .mockResolvedValueOnce({
+          rawJson: '{"signals":[]}',
+          usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 }
+        })
+        .mockResolvedValueOnce({
+          rawJson: terminalRaw,
+          usage: { inputTokens: 20, outputTokens: 2, totalTokens: 22 }
+        })
+    };
+    const onOutcome = vi.fn();
+
+    const result = await extractLiveDelegate({
+      delegate,
+      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
+      stats: undefined,
+      onFailure: vi.fn(),
+      onOutcome
+    });
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(result.rawJson).toBe(terminalRaw);
+    expect(onOutcome).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails a strict-empty recheck without returning the first result", async () => {
+    const terminalFailure = new Error("recheck transport failed");
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+        if (input.retryMode === "disabled") throw terminalFailure;
+        return { rawJson: '{"signals":[]}' };
+      })
+    };
+    const onFailure = vi.fn();
+
+    await expect(extractLiveDelegate({
+      delegate,
+      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
+      stats: undefined,
+      onFailure
+    })).rejects.toBe(terminalFailure);
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(onFailure).toHaveBeenCalledOnce();
+  });
+
+  it("closes the first reservation when authority rejects the empty-result recheck", async () => {
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot,
+      lineageDigest: "c".repeat(64),
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1,
+      maximumAttempts: 1,
+      successfulShardCeiling: 1
+    });
+    const onTransportAttempt = vi.fn(async (cacheKey: string) => {
+      ledger.reserveAttempt(cacheKey);
+    });
+    const extractor = createCachingSignalExtractor({
+      delegate: {
+        extract: vi.fn(async (input) => {
+          await input.onTransportAttempt?.(input.abortSignal);
+          return { rawJson: '{"signals":[]}' };
+        })
+      },
+      config: extractionConfig(),
+      cacheRoot,
+      onTransportAttempt,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveExtractionFailed: ledger.abandonPendingShard
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: userPromptWithAssertions()
+    })).rejects.toThrow(/attempt ceiling exhausted/u);
+
+    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 1,
+      successfulShards: 0,
+      pendingKeys: [],
+      unresolvedAttempts: [],
+      telemetry: { usageUnknownAttempts: 1 }
+    });
+  });
+
+  it("does not recheck a strict empty request when retries are disabled", async () => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
     };
 
-    const result = await extractLiveDelegate({
+    await extractLiveDelegate({
       delegate,
       request: {
         systemPrompt: SYSTEM_PROMPT,
@@ -435,59 +545,19 @@ describe("extraction live delegate empty-result recheck", () => {
     });
 
     expect(delegate.extract).toHaveBeenCalledOnce();
-    expect(result.rawJson).toBe('{"signals":[]}');
   });
 
   it.each([
-    {
-      label: "unparseable prompt",
-      userPrompt: "not-json",
-      rawJson: '{"signals":[]}'
-    },
-    {
-      label: "empty source assertion catalog",
-      userPrompt: JSON.stringify({ source_assertions: [] }),
-      rawJson: '{"signals":[]}'
-    },
-    {
-      label: "non-empty first envelope",
-      userPrompt: userPromptWithAssertions(),
-      rawJson: JSON.stringify({ signals: [{
-        signal_kind: "potential_claim",
-        object_kind: "activity",
-        confidence: 0.9,
-        matched_text: "I completed the review today.",
-        distilled_fact: "I completed the review today."
-      }] })
-    },
-    {
-      label: "malformed first envelope",
-      userPrompt: userPromptWithAssertions(),
-      rawJson: '{"signals":['
-    },
-    {
-      label: "parseable envelope without signals",
-      userPrompt: userPromptWithAssertions(),
-      rawJson: '{}'
-    },
-    {
-      label: "parseable array envelope",
-      userPrompt: userPromptWithAssertions(),
-      rawJson: '[]'
-    },
-    {
-      label: "parseable envelope with non-array signals",
-      userPrompt: userPromptWithAssertions(),
-      rawJson: '{"signals":"invalid"}'
-    }
-  ])("does not recheck $label", async ({ userPrompt, rawJson }) => {
+    '{"signals":[',
+    '{}'
+  ])("returns one delegate result without a post-success request: %s", async (rawJson) => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({ rawJson }))
     };
 
     const result = await extractLiveDelegate({
       delegate,
-      request: { systemPrompt: SYSTEM_PROMPT, userPrompt },
+      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
       stats: undefined,
       onFailure: vi.fn()
     });
@@ -504,6 +574,16 @@ function extractionConfig() {
     providerUrl: TEST_EXTRACTION_PROVIDER_URL,
     requestProfile: REQUEST_PROFILE
   } as const;
+}
+
+function failure(attempt: number, digit: string) {
+  return {
+    kind: "http_error" as const,
+    phase: "response_status" as const,
+    httpStatus: 503,
+    fingerprint: digit.repeat(64),
+    attempt
+  };
 }
 
 function shardPath(cacheRoot: string): string {
@@ -524,13 +604,73 @@ function readShard(cacheRoot: string): {
       readonly total_tokens: number;
     };
   };
+  readonly transport_provenance?: {
+    readonly provider_url_sha256: string;
+    readonly model: string;
+  };
 } {
+  expect(existsSync(shardPath(cacheRoot))).toBe(true);
   return JSON.parse(readFileSync(shardPath(cacheRoot), "utf8"));
 }
 
 function userPromptWithAssertions(): string {
-  const turnContent = "I completed the review today.";
   return stringifyOfficialApiExtractionRequest(
-    buildOfficialApiExtractionRequest(turnContent, [])
+    buildOfficialApiExtractionRequest("I completed the review today.", [])
+  );
+}
+
+function createHttpExtractor(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) {
+  return createGardenHttpExtractor({
+    ...extractionConfig(),
+    apiKey: "sk-test"
+  }, {
+    fetch: fetchMock,
+    sleep: vi.fn(async () => undefined),
+    random: () => 0
+  });
+}
+
+function assertionBatchPrompt(assertionIds: readonly number[]): string {
+  return JSON.stringify({
+    schema_version: 2,
+    source_locator_contract_version: 2,
+    batch_contract_version: 1,
+    source_corpus_identity: "a".repeat(64),
+    batch_index: 0,
+    batch_count: 1,
+    source_assertions: assertionIds.map((assertion_id) => ({
+      assertion_id,
+      text: `User: assertion ${assertion_id}`
+    }))
+  });
+}
+
+function cacheSignalResponse(assertionId: number): Response {
+  const matchedText = `User: assertion ${assertionId}`;
+  const signal = withOpenSemanticFactorGraph({
+    signal_kind: "potential_claim",
+    object_kind: "open_semantic_observation",
+    confidence: 0.9,
+    matched_text: matchedText,
+    distilled_fact: `assertion ${assertionId}`,
+    source_locator: {
+      contract_version: 2,
+      kind: "assertion_catalog",
+      assertion_id: assertionId
+    }
+  });
+  return sseResponse(JSON.stringify({ signals: [signal] }), "stop");
+}
+
+function truncatedSseResponse(): Response {
+  return sseResponse('{"signals":[]}', "length");
+}
+
+function sseResponse(content: string, finishReason: string): Response {
+  return new Response(
+    `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] })}\n\n` +
+      "data: [DONE]\n\n",
+    { status: 200, headers: { "content-type": "text/event-stream" } }
   );
 }

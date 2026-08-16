@@ -1,3 +1,6 @@
+import { releaseGardenHttpReader } from
+  "./stream/garden-http-reader-release.js";
+
 const MAX_ERROR_BODY_BYTES = 16 * 1024;
 
 /**
@@ -6,7 +9,8 @@ const MAX_ERROR_BODY_BYTES = 16 * 1024;
  */
 export async function readBoundedGardenHttpErrorBody(
   response: Response,
-  attemptSettlement: Promise<never>
+  attemptSettlement: Promise<never>,
+  onProgress: () => void = () => undefined
 ): Promise<string | undefined> {
   const reader = response.body?.getReader();
   if (reader === undefined) return undefined;
@@ -22,6 +26,7 @@ export async function readBoundedGardenHttpErrorBody(
         body += decoder.decode();
         return body;
       }
+      onProgress();
       const remaining = MAX_ERROR_BODY_BYTES - bytesRead;
       const boundedChunk = result.value.subarray(0, remaining);
       bytesRead += boundedChunk.byteLength;
@@ -36,19 +41,6 @@ export async function readBoundedGardenHttpErrorBody(
   } catch {
     return undefined;
   } finally {
-    releaseBoundedReader(reader, completed);
+    releaseGardenHttpReader(reader, completed);
   }
-}
-
-function releaseBoundedReader(
-  reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>,
-  completed: boolean
-): void {
-  if (completed) {
-    reader.releaseLock();
-    return;
-  }
-  void reader.cancel()
-    .then(() => reader.releaseLock())
-    .catch(() => undefined);
 }

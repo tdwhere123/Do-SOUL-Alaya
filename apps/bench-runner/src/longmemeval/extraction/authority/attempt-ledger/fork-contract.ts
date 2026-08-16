@@ -8,7 +8,7 @@ export function assertMonotonicExtractionAttemptLedgerFork(input: {
   const { predecessor, successor } = input;
   if (successor.lineageDigest !== input.successorLineageDigest ||
       successor.startingMissing !== predecessor.startingMissing ||
-      successor.maximumAttempts !== predecessor.maximumAttempts ||
+      successor.maximumAttempts < predecessor.maximumAttempts ||
       successor.successfulShardCeiling !== predecessor.successfulShardCeiling ||
       successor.attempts < predecessor.attempts ||
       successor.pendingKeys.length !== 0 || successor.unresolvedAttempts.length !== 0 ||

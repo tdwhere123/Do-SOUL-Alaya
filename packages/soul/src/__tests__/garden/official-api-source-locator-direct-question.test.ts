@@ -3,6 +3,29 @@ import { buildOfficialApiSourceAssertions } from "../../garden/grounding/source-
 
 describe("official API source locator direct-question boundary", () => {
   it.each([
+    "Trunk based Development",
+    "Bach unaccompanied cello sheet music adapted for violin",
+    "Continue writing please"
+  ])("does not publish a bare topic or search phrase: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+  });
+
+  it.each([
+    "Alice moved to Berlin.",
+    "Alice moved to Berlin",
+    "Alice called Bob",
+    "Dad gave me pearl earrings.",
+    "Max is a Golden Retriever.",
+    "The headlining act I saw gave me useful advice",
+    "Financial accounting describes the financial condition of the business",
+    "Consistent sizing takes the guesswork out of shopping",
+    "While watching horror movies, I often get anxious",
+    "Rocky's doing alright"
+  ])("keeps a named-subject declaration: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([source]);
+  });
+
+  it.each([
     "Do you have recommendations for a collar brand or type that suits a Golden Retriever?",
     "By the way, do you know whether Max is a Golden Retriever?",
     "I am getting Max a collar, do you know whether Max is a Golden Retriever?",

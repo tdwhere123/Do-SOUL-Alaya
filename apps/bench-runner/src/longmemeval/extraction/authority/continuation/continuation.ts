@@ -27,6 +27,12 @@ import { assertPreservedValidClosureUnchanged } from
   "../repair/preserved-valid-closure.js";
 import type { ExtractionTargetSelectionReceipt } from
   "../target-selection/receipt.js";
+import {
+  assertCatalogPredecessorState,
+  assertContinuationInventory,
+  assertInheritedContinuationPredecessorState
+} from "./predecessor-state.js";
+import { computeExtractionFillAttemptCeiling } from "../receipt-limits.js";
 
 export function createSameRootExtractionContinuation(input: {
   readonly cacheRoot: string;
@@ -34,6 +40,7 @@ export function createSameRootExtractionContinuation(input: {
   readonly predecessorLedger: ExtractionAttemptLedgerSnapshot;
   readonly targetSelection: ExtractionTargetSelectionReceipt;
   readonly inspection: ExtractionAuthorityInspection;
+  readonly predecessorBaseInspection?: ExtractionAuthorityInspection;
 }): SameRootExtractionContinuation {
   assertPredecessorEvidence(input.predecessor, input.predecessorLedger);
   const mode = resolveContinuationMode(
@@ -42,11 +49,31 @@ export function createSameRootExtractionContinuation(input: {
   assertIdentityContinuity(
     input.predecessor.observation, input.inspection.observation, mode
   );
-  assertInitialPreservedState(input.inspection, input.predecessorLedger);
+  assertInitialPreservedState(
+    input.inspection, input.predecessorLedger, input.predecessor,
+    input.predecessorBaseInspection
+  );
   assertManifestMatchesInspection(input.cacheRoot, input.inspection);
+  const continuation = buildSameRootContinuation(input, mode);
+  assertSameRootExtractionContinuation(continuation);
+  if (continuation.successor_maximum_attempts! <= input.predecessorLedger.attempts ||
+      continuation.predecessor.remaining_successful_shards !==
+        input.inspection.observation.inventory.missingTurns) {
+    throw new Error("predecessor extraction authority has no exact continuation budget");
+  }
+  return Object.freeze(continuation);
+}
+
+function buildSameRootContinuation(
+  input: Parameters<typeof createSameRootExtractionContinuation>[0],
+  mode: ReturnType<typeof resolveContinuationMode>
+): SameRootExtractionContinuation {
   const predecessor = input.predecessorLedger;
-  const continuation = {
-    schema_version: 4 as const,
+  const successorMaximumAttempts = computeExtractionFillAttemptCeiling(
+    predecessor.startingMissing
+  );
+  return {
+    schema_version: 7 as const,
     kind: "same-root-settled-predecessor" as const,
     mode,
     successor_revision: input.inspection.observation.revision,
@@ -54,6 +81,7 @@ export function createSameRootExtractionContinuation(input: {
       input.inspection.observation.extraction.manifestSha256,
       "same-root continuation requires an in-progress manifest"
     ),
+    successor_maximum_attempts: successorMaximumAttempts,
     predecessor_transport_authority:
       captureExtractionTransportAuthority(input.predecessor),
     predecessor: {
@@ -67,17 +95,13 @@ export function createSameRootExtractionContinuation(input: {
       successful_shards: predecessor.successfulShards,
       successful_shard_ceiling: predecessor.successfulShardCeiling,
       remaining_successful_shards:
-        predecessor.successfulShardCeiling - predecessor.successfulShards
+        predecessor.successfulShardCeiling - predecessor.successfulShards,
+      initial_preserved_shards:
+        input.inspection.preservedValidClosure.shard_count - predecessor.successfulShards,
+      successful_keys: Object.freeze([...predecessor.successfulKeys])
     },
     preserved_valid_closure: Object.freeze({ ...input.inspection.preservedValidClosure })
   };
-  assertSameRootExtractionContinuation(continuation);
-  if (continuation.predecessor.remaining_attempts < 1 ||
-      continuation.predecessor.remaining_successful_shards !==
-        input.inspection.observation.inventory.missingTurns) {
-    throw new Error("predecessor extraction authority has no exact continuation budget");
-  }
-  return Object.freeze(continuation);
 }
 
 export function assertSameRootExtractionContinuationRuntime(input: {
@@ -96,6 +120,7 @@ export function assertSameRootExtractionContinuationRuntime(input: {
   assertExtractionAuthorityRenewal(input.receipt, input.predecessor);
   assertPredecessorEvidence(input.predecessor, input.predecessorLedger);
   assertBoundPredecessorLedger(continuation, input.predecessorLedger);
+  assertSuccessorAttemptCeiling(continuation, input.receipt, input.successorLedger);
   const mode = sameRootContinuationMode(continuation);
   assertIdentityContinuity(
     input.predecessor.observation, input.receipt.observation, mode
@@ -106,7 +131,12 @@ export function assertSameRootExtractionContinuationRuntime(input: {
     successor: input.successorLedger,
     successorLineageDigest: input.receipt.lineage_digest
   });
-  assertCurrentInventory(input.inspection, input.successorLedger);
+  assertContinuationInventory({
+    inspection: input.inspection,
+    continuation,
+    predecessor: input.predecessorLedger,
+    successor: input.successorLedger
+  });
   assertPreservedValidClosureUnchanged(
     continuation.preserved_valid_closure,
     input.inspection.preservedValidClosure
@@ -118,6 +148,20 @@ export function assertSameRootExtractionContinuationRuntime(input: {
   assertManifestMatchesInspection(
     input.cacheRoot, input.inspection, expectedManifestSha256
   );
+}
+
+function assertSuccessorAttemptCeiling(
+  continuation: SameRootExtractionContinuation,
+  receipt: ExtractionAuthorityReceipt,
+  successorLedger: ExtractionAttemptLedgerSnapshot
+): void {
+  const expected = continuation.schema_version === 7
+    ? continuation.successor_maximum_attempts!
+    : receipt.limits.maximum_attempts;
+  if (receipt.limits.maximum_attempts !== expected ||
+      successorLedger.maximumAttempts !== expected) {
+    throw new Error("same-root continuation successor attempt ceiling drifted");
+  }
 }
 
 export function continuationNewSuccessfulKeys(
@@ -259,8 +303,28 @@ function assertSelectionBinding(
 
 function assertInitialPreservedState(
   inspection: ExtractionAuthorityInspection,
-  predecessor: ExtractionAttemptLedgerSnapshot
+  predecessor: ExtractionAttemptLedgerSnapshot,
+  receipt: ExtractionAuthorityReceipt,
+  predecessorBaseInspection: ExtractionAuthorityInspection | undefined
 ): void {
+  if (receipt.catalog_refill !== undefined) {
+    assertCatalogPredecessorState({
+      inspection,
+      baseInspection: predecessorBaseInspection,
+      predecessor,
+      scope: receipt.catalog_refill
+    });
+    return;
+  }
+  if (receipt.continuation !== undefined) {
+    assertInheritedContinuationPredecessorState({
+      inspection,
+      baseInspection: predecessorBaseInspection,
+      predecessor,
+      receipt
+    });
+    return;
+  }
   const inventory = inspection.observation.inventory;
   const closure = inspection.preservedValidClosure;
   if (inventory.invalidTurns !== 0 || inventory.orphanTurns !== 0 ||
@@ -271,18 +335,6 @@ function assertInitialPreservedState(
       inspection.observation.extraction.rawContentClosureSha256 !==
         closure.content_closure_sha256) {
     throw new Error("current extraction cache is not the exact predecessor successful closure");
-  }
-}
-
-function assertCurrentInventory(
-  inspection: ExtractionAuthorityInspection,
-  successor: ExtractionAttemptLedgerSnapshot
-): void {
-  const inventory = inspection.observation.inventory;
-  if (inventory.invalidTurns !== 0 || inventory.orphanTurns !== 0 ||
-      inventory.validTurns !== successor.successfulShards ||
-      inventory.missingTurns !== successor.startingMissing - successor.successfulShards) {
-    throw new Error("same-root continuation inventory escaped its forked ledger");
   }
 }
 

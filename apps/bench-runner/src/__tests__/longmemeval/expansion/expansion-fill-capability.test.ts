@@ -29,6 +29,8 @@ import {
 } from "./expansion-fill-authority-fixture/manifest.js";
 import { assertCompleteLongMemEvalExpansionCache } from
   "../../../longmemeval/promotion/expansion/authority/expansion-cache-authority.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 
 describe("500Q expansion fill authority", () => {
   beforeEach(resetExpansionFillAuthorityFixture);
@@ -56,7 +58,7 @@ describe("500Q expansion fill authority", () => {
         spend: {
           ...currentApproval.spend,
           starting_missing: 400,
-          maximum_attempts: 2_000,
+          maximum_attempts: computeExtractionFillAttemptCeiling(400),
           successful_shard_ceiling: 400
         }
       }

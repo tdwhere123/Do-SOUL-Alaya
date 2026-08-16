@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
+  OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
   parseOfficialApiSignals
 } from "@do-soul/alaya-soul";
@@ -42,7 +44,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
   }
 
-  it("sends the compatible reasoning controls for the explicit non-thinking profile", async () => {
+  it("preserves the compatibility profile wire contract", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
     );
@@ -219,6 +221,64 @@ describe("createGardenHttpExtractor retry policy", () => {
     );
   });
 
+  it("tells a graphless retry to emit a valid graph or an explicit empty envelope", async () => {
+    const invalidResponse = JSON.stringify({
+      signals: [{ object_kind: "episode", padding: "x".repeat(32_768) }]
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: invalidResponse } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    await extractor.extract({
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: JSON.stringify({
+        source_assertions: [{ assertion_id: 1, text: "User: durable assertion" }]
+      }),
+      validateRawJson: (rawJson) => {
+        if (rawJson.includes('"object_kind"')) {
+          throw new Error(
+            "signals array contained no valid open semantic factor entries " +
+              "(rejections=semantic_factor_graph_required:1)"
+          );
+        }
+      }
+    });
+
+    const retryRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    const initialRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(initialRequest.messages.at(-1)?.content).not.toContain(
+      '"previous_invalid_response"'
+    );
+    expect(initialRequest.messages[0]?.content)
+      .toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(retryRequest.messages[0]?.content).toContain(
+      'Only two response forms are valid'
+    );
+    expect(retryRequest.messages[0]?.content)
+      .toContain(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
+    expect(retryRequest.messages.at(-1)?.content).toContain(
+      'Only two response forms are valid'
+    );
+    expect(retryRequest.messages.at(-1)?.content).not.toContain(
+      '"previous_invalid_response"'
+    );
+    expect(retryRequest.messages.at(-1)?.content.length).toBeLessThan(2_000);
+  });
+
   it("uses caller-owned schema correction for a non-signal response contract", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -251,7 +311,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     );
   });
 
-  it("caps repeated response-schema failures at one retry", async () => {
+  it("caps repeated response-schema failures at two correction retries", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => makeJsonResponse({
       choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
     }));
@@ -270,12 +330,45 @@ describe("createGardenHttpExtractor retry policy", () => {
       }
     })).rejects.toMatchObject({
       benchRetry: {
-        retryCount: 1,
+        retryCount: 2,
         retryClassification: "failure_max_retries"
       }
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves schema correction retries after a transient transport failure", async () => {
+    const invalid = () => makeJsonResponse({
+      choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+    });
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(invalid())
+      .mockResolvedValueOnce(invalid())
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    let schemaFailures = 0;
+    const result = await createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    }).extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: () => {
+        schemaFailures += 1;
+        if (schemaFailures <= 2) throw new Error("semantic factor graph is invalid");
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.extractorMeta).toMatchObject({
+      retryCount: 3,
+      retryClassification: "success_after_retry",
+      rateLimitRetries: 1
+    });
   });
 
   it("lets the canonical validator salvage content before default envelope parsing", async () => {

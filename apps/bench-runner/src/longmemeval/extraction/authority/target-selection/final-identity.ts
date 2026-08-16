@@ -39,8 +39,8 @@ export function assertContinuationFinalIdentity(
   observation: ExtractionAuthorityObservation
 ): void {
   const current = extractionTargetFinalIdentity(observation);
-  if (predecessor.revision === current.revision || !sameLogicalIdentity(predecessor, current)) {
-    throw new Error("same-root continuation target identity is not a revision-only successor");
+  if (!sameLogicalIdentity(predecessor, current)) {
+    throw new Error("same-root continuation target logical identity drifted");
   }
 }
 

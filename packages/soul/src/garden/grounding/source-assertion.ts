@@ -384,6 +384,41 @@ function hasCompleteClause(assertion: string, coordinated: boolean): boolean {
   return !coordinated && hasCompleteChineseClause(value);
 }
 
+const EXPLICIT_FINITE_VERBS = new Set([
+  "allows", "appears", "arrived", "became", "began", "bought", "brought", "built",
+  "called", "came", "caught", "centres", "chose", "contains", "described", "describes",
+  "did", "does", "ended", "faded", "feels", "found", "gave", "gets", "gives", "goes",
+  "had", "has", "helped", "helps", "includes", "involves", "is", "joined", "keeps",
+  "knew", "left", "lives", "looked", "looks", "lost", "made", "makes", "managed",
+  "means", "met", "moved", "needs", "offers", "paid", "played", "prefers", "profited",
+  "provides", "ran", "received", "requires", "runs", "said", "saw", "says", "seems",
+  "sent", "shows", "sounds", "spent", "started", "starts", "stayed", "surpassed",
+  "takes", "told", "took", "tries", "uses", "visited", "wants", "went", "won", "worked",
+  "works", "wrote"
+]);
+
+export function isAmbiguousBareStandaloneAssertion(assertion: string): boolean {
+  const value = stripSourceRoleLabel(assertion);
+  if (/[.!?。！？]\s*$/u.test(value) || /^(?:i|we|you)\b/iu.test(value)) return false;
+  const namedSubject = /^\p{Lu}[\p{L}\p{N}'’-]*\s+(.*)$/u.exec(value);
+  const predicate = namedSubject?.[1];
+  if (predicate === undefined || hasExplicitFinitePredicate(value, predicate)) return false;
+  const match = /^\p{L}+(?:ed|ing)\b\s+(\p{L}[\p{L}\p{N}'’-]*)/iu.exec(predicate);
+  if (match === null) return false;
+  const complement = match[1]!;
+  return !/^(?:a|an|the|this|that|these|those|my|our|your|his|her|its|their|me|us|you|him|her|it|them|to|from|in|on|at|with|for|about|into|onto|over|under|by|as)$/iu.test(complement) &&
+    !/^\p{L}+ly$/iu.test(complement);
+}
+
+function hasExplicitFinitePredicate(assertion: string, predicate: string): boolean {
+  if (/^\p{Lu}[\p{L}\p{N}’'-]*[’']s\s+\p{L}+ing\b/u.test(assertion)) return true;
+  if (/[,;]\s*(?:i|we|you|he|she|it|they)\b/iu.test(predicate)) return true;
+  if (/\b(?:am|are|was|were|have|do|can|could|may|might|must|shall|should|will|would)\b/iu.test(predicate) ||
+      /\b\p{L}+[’'](?:m|re|ve|d|ll)\b/iu.test(predicate)) return true;
+  return [...predicate.matchAll(/\b(\p{L}+)\b/gu)]
+    .some((match) => EXPLICIT_FINITE_VERBS.has(match[1]!.toLocaleLowerCase("en-US")));
+}
+
 function hasCompleteChineseClause(value: string): boolean {
   if (!/^\p{Script=Han}/u.test(value)) return false;
   const contentLength = value.match(/[\p{L}\p{N}]/gu)?.length ?? 0;

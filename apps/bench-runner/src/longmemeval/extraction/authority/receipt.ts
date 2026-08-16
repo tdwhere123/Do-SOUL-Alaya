@@ -6,8 +6,6 @@ import {
   type DirectExtractionSpendAuthorization
 } from "./direct-deepseek-500.js";
 import {
-  expectedExtractionAuthorityLimits,
-  EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS,
   resolveExtractionAuthorityReceiptLimits,
   resolveExtractionAuthorityReceiptPrice,
   type ExtractionAuthorityPriceEstimate,
@@ -47,8 +45,15 @@ import {
   writeExtractionAuthorityReceiptArtifactExclusive
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
-const LEGACY_RECEIPT_VERSION = 2, PREVIOUS_RECEIPT_VERSION = 3;
-const CURRENT_RECEIPT_VERSION = 4;
+import {
+  CURRENT_RECEIPT_VERSION,
+  LEGACY_RECEIPT_VERSION,
+  PARTITIONLESS_RECEIPT_VERSION,
+  PREVIOUS_RECEIPT_VERSION,
+  hasExpectedExtractionAuthorityReceiptLimits,
+  isExtractionAuthorityReceiptLimits,
+  isExtractionAuthorityReceiptPrice
+} from "./receipt/shape.js";
 export interface ExtractionAuthorityObservation {
   readonly revision: string;
   readonly commandDigest: string;
@@ -85,7 +90,8 @@ export interface ExtractionAuthorityObservation {
 }
 export interface ExtractionAuthorityReceipt {
   readonly schema_version: typeof LEGACY_RECEIPT_VERSION |
-    typeof PREVIOUS_RECEIPT_VERSION | typeof CURRENT_RECEIPT_VERSION;
+    typeof PREVIOUS_RECEIPT_VERSION | typeof PARTITIONLESS_RECEIPT_VERSION |
+    typeof CURRENT_RECEIPT_VERSION;
   readonly kind: "longmemeval-extraction-authority";
   readonly action: "probe" | "fill";
   readonly generated_at: string;
@@ -247,12 +253,13 @@ export function assertExtractionAuthorityReceipt(
       observation.extraction.rawContentClosureSha256) {
     throw new Error("extraction authority receipt raw cache closure drifted after inspection");
   }
-  const limits = expectedExtractionAuthorityLimits(
-    receipt.action,
-    receipt.limits.starting_missing
-  );
-  if (receipt.limits.maximum_attempts !== limits.maximumAttempts ||
-      receipt.limits.successful_shard_ceiling !== limits.successfulShardCeiling) {
+  if (!hasExpectedExtractionAuthorityReceiptLimits({
+    schemaVersion: receipt.schema_version,
+    action: receipt.action,
+    startingMissing: receipt.limits.starting_missing,
+    maximumAttempts: receipt.limits.maximum_attempts,
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling
+  })) {
     throw new Error("extraction authority receipt has reset or widened its cumulative limits");
   }
   if (receipt.action === "probe" && receipt.probe_key === undefined) {
@@ -335,6 +342,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
   const receipt = value as Partial<ExtractionAuthorityReceipt>;
   if ((receipt.schema_version !== LEGACY_RECEIPT_VERSION &&
        receipt.schema_version !== PREVIOUS_RECEIPT_VERSION &&
+       receipt.schema_version !== PARTITIONLESS_RECEIPT_VERSION &&
        receipt.schema_version !== CURRENT_RECEIPT_VERSION) ||
       receipt.kind !== "longmemeval-extraction-authority" ||
       (receipt.action !== "probe" && receipt.action !== "fill") ||
@@ -344,7 +352,8 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       !isDigest(receipt.receipt_digest) ||
       !isObservation(receipt.observation) ||
       !isInspection(receipt.inspection) ||
-      !isReceiptLimits(receipt.limits) || !isReceiptPrice(receipt.price) ||
+      !isExtractionAuthorityReceiptLimits(receipt.limits) ||
+      !isExtractionAuthorityReceiptPrice(receipt.price) ||
       (receipt.target_selection_digest !== undefined && !isDigest(receipt.target_selection_digest)) ||
       (receipt.direct_spend !== undefined &&
         !isDirectExtractionSpendAuthorization(receipt.direct_spend)) ||
@@ -416,25 +425,6 @@ function isInspection(value: unknown): value is ExtractionAuthorityInspection {
   }
   return value.disk.status === "unavailable" ||
     (value.disk.status === "available" && isNonNegativeSafeInteger(value.disk.freeBytes));
-}
-
-function isReceiptLimits(value: unknown): boolean {
-  if (!isObject(value)) return false;
-  return isNonNegativeSafeInteger(value.starting_missing) &&
-    isNonNegativeSafeInteger(value.maximum_attempts) &&
-    isNonNegativeSafeInteger(value.successful_shard_ceiling) &&
-    isNonNegativeSafeInteger(value.max_concurrency) &&
-    isNonNegativeSafeInteger(value.max_output_tokens) &&
-    (value.output_token_field === "max_tokens" || value.output_token_field === "max_completion_tokens") &&
-    isNonNegativeSafeInteger(value.disk_floor_bytes) &&
-    value.no_progress_timeout_ms === EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS;
-}
-
-function isReceiptPrice(value: unknown): boolean {
-  return isObject(value) && typeof value.input_usd_per_million === "number" &&
-    typeof value.output_usd_per_million === "number" &&
-    isNonNegativeSafeInteger(value.maximum_input_tokens_per_attempt) &&
-    typeof value.estimated_upper_usd === "number";
 }
 
 function assertReceiptIdentity(receipt: ExtractionAuthorityReceipt): void {

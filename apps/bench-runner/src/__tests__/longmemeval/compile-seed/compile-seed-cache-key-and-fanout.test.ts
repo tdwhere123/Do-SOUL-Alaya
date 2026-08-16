@@ -31,6 +31,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
+import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
 import {
   computeExtractionTurnCacheKeys,
   computeExtractionTurnCacheKey,
@@ -158,7 +159,9 @@ describe("canonical extraction request cache identity", () => {
     // Full-chain check: run_id is absent from the canonical request and cannot
     // change a cache identity.
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async (input) => ({
+        rawJson: buildGroundedSignalResponse(input.userPrompt)
+      }))
     };
     const cachingExtractor = createCachingSignalExtractor({
       delegate,
@@ -181,8 +184,7 @@ describe("canonical extraction request cache identity", () => {
       surface_id: null,
       turn_messages: []
     });
-    // The first strict-empty live result is rechecked once by the transport.
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
 
     await provider.compile("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
@@ -190,8 +192,7 @@ describe("canonical extraction request cache identity", () => {
       surface_id: null,
       turn_messages: []
     });
-    // Still 2: the second turn was a cache hit despite the new run_id.
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
   it("passes the live semantic validator through the cache delegate boundary", async () => {
@@ -230,7 +231,9 @@ describe("canonical extraction request cache identity", () => {
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async (input) => ({
+        rawJson: buildGroundedSignalResponse(input.userPrompt)
+      }))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -262,7 +265,7 @@ describe("canonical extraction request cache identity", () => {
       ]
     });
 
-    expect(delegate.extract).toHaveBeenCalledTimes(4);
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 
   it("replays a non-empty canonical shard against its assertion id", async () => {

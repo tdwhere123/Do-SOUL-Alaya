@@ -43,6 +43,7 @@ export interface ExtractionReplayFactFrameFormation {
 
 export interface ExtractionReplayEntry {
   readonly index: number;
+  readonly sourceCacheKey: string;
   readonly disposition: ExtractionReplayDisposition;
   readonly stage: string;
   readonly reason: string;
@@ -97,6 +98,8 @@ export function replayExtractionOccurrences(input: {
   readonly occurrences: readonly ExtractionOccurrence[];
   readonly audit?: ExtractionReplayAuditor;
   readonly requireSemanticFactorGraph?: boolean;
+  /** Keys rejected by the strict first pass and reserved for provider refill. */
+  readonly semanticQuarantinedCacheKeys?: ReadonlySet<string>;
   /** A refill audit may defer absent shards while still rejecting malformed ones. */
   readonly allowMissingShards?: boolean;
 }): ExtractionReplayResult {
@@ -147,6 +150,7 @@ function replayOccurrence(input: {
   readonly cached: Map<string, CachedExtractionInspection>;
   readonly audit: ExtractionReplayAuditor;
   readonly requireSemanticFactorGraph?: boolean;
+  readonly semanticQuarantinedCacheKeys?: ReadonlySet<string>;
   readonly allowMissingShards?: boolean;
 }): ExtractionReplayOccurrence {
   const shards = inspectOccurrenceShards(input);
@@ -190,6 +194,7 @@ function auditOccurrenceShards(
     });
     entries.push(...result.entries.map((entry) => Object.freeze({
       index: entryOffset + entry.index,
+      sourceCacheKey: input.occurrence.cacheKeys[batchIndex]!,
       disposition: entry.disposition,
       stage: entry.stage,
       reason: entry.reason,
@@ -258,6 +263,9 @@ function inspectOccurrenceShards(
   input: Parameters<typeof replayOccurrence>[0]
 ): readonly Readonly<{ cacheKey: string; inspection: CachedExtractionInspection }>[] {
   return input.occurrence.cacheKeys.map((cacheKey) => {
+    if (input.semanticQuarantinedCacheKeys?.has(cacheKey) === true) {
+      return { cacheKey, inspection: { status: "missing" as const } };
+    }
     const existing = input.cached.get(cacheKey);
     if (existing !== undefined) return { cacheKey, inspection: existing };
     const inspection = inspectCachedExtraction(
@@ -283,6 +291,7 @@ function unavailableOccurrence(
     rawJsonSha256s: null,
     entries: Object.freeze([{
       index: -1,
+      sourceCacheKey: cacheKey,
       disposition: cached.status === "missing" && allowMissing
         ? "deferred" as const
         : "invalid" as const,

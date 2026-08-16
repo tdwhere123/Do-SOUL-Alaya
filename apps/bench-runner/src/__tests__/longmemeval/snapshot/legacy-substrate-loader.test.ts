@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
   closeCachedDatabase,
   readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import { LongMemEvalRunProvenanceSchema } from "../../../longmemeval/provenance/run.js";
 import {
@@ -55,6 +55,19 @@ interface Fixture {
 
 let fixture: Fixture;
 let fetchSpy: ReturnType<typeof vi.spyOn>;
+let databaseTemplateRoot = "";
+let databaseTemplatePath = "";
+
+beforeAll(async () => {
+  databaseTemplateRoot = await mkdtemp(join(tmpdir(), "legacy-loader-template-"));
+  databaseTemplatePath = join(databaseTemplateRoot, "legacy-v103.db");
+  createDatabaseThroughMigration(databaseTemplatePath, 103);
+});
+
+afterAll(async () => {
+  closeCachedDatabase(databaseTemplatePath);
+  await rm(databaseTemplateRoot, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   fixture = await createFixture();
@@ -111,7 +124,7 @@ describe("strict legacy snapshot loader", () => {
       await rm(sized.root, { recursive: true, force: true });
       fixture = original;
     }
-  }, 20_000);
+  });
 
   it("rejects v1 through the default current-snapshot path", async () => {
     await expect(withRecallEvalSnapshot({
@@ -275,7 +288,7 @@ async function createFixture(requestedRoot?: string, questionCount = 2): Promise
     variant: VARIANT, dataDir, pinnedMetaRoot, questions
   });
   const snapshotDbPath = join(root, "legacy.db");
-  createDatabaseThroughMigration(snapshotDbPath, 103);
+  await copyFile(databaseTemplatePath, snapshotDbPath);
   const sidecar = buildSidecar(questions);
   seedLegacyIdentityRows(snapshotDbPath, sidecar);
   await writeFile(snapshotSidecarPath(snapshotDbPath), JSON.stringify(sidecar));
@@ -363,7 +376,7 @@ function seedLegacyIdentityRows(path: string, sidecar: LegacySidecar): void {
       );
     `);
   }
-  executeSqlite(path, statements.join("\n"));
+  executeSqlite(path, `BEGIN IMMEDIATE;\n${statements.join("\n")}\nCOMMIT;`);
 }
 
 function sql(value: string): string {

@@ -64,7 +64,7 @@ function inspectPlainChatCompletionBody(
 function inspectSseChatCompletionBody(
   bodyText: string
 ): ChatCompletionResponseInspection {
-  let accumulated = "";
+  let contentState: SseContentState = { mode: null, content: "" };
   let finishReason: string | null = null;
   let usage: BenchProviderUsage | undefined;
   for (const rawLine of bodyText.split("\n")) {
@@ -72,15 +72,20 @@ function inspectSseChatCompletionBody(
     if (chunkText === null) continue;
     if (chunkText === "[DONE]") break;
     const chunk = tryParseChatCompletionSseChunk(chunkText);
-    accumulated += extractContentFromChunk(chunk);
+    contentState = acceptSseChunkContent(contentState, chunk);
     finishReason = normalizeFinishReason(chunk.choices?.[0]?.finish_reason) ?? finishReason;
     usage = usageFromParsedPayload(chunk) ?? usage;
   }
   return {
-    content: accumulated,
+    content: contentState.content,
     finishReason,
     ...(usage === undefined ? {} : { usage })
   };
+}
+
+interface SseContentState {
+  readonly mode: "delta" | "message" | null;
+  readonly content: string;
 }
 
 function readSseDataLine(rawLine: string): string | null {
@@ -91,14 +96,38 @@ function readSseDataLine(rawLine: string): string | null {
   return line.slice("data:".length).trim();
 }
 
-function extractContentFromChunk(
+function acceptSseChunkContent(
+  state: SseContentState,
   chunk: z.infer<typeof ChatCompletionPayloadSchema>
-): string {
+): SseContentState {
   const choice = chunk.choices?.[0];
-  const deltaContent = choice?.delta?.content;
-  if (typeof deltaContent === "string") return deltaContent;
-  const messageContent = choice?.message?.content;
-  return typeof messageContent === "string" ? messageContent : "";
+  const rawDeltaContent = choice?.delta?.content;
+  const rawMessageContent = choice?.message?.content;
+  const deltaContent = typeof rawDeltaContent === "string" && rawDeltaContent.length > 0
+    ? rawDeltaContent
+    : undefined;
+  const messageContent = typeof rawMessageContent === "string" && rawMessageContent.length > 0
+    ? rawMessageContent
+    : undefined;
+  if (typeof deltaContent === "string" && typeof messageContent === "string") {
+    if (deltaContent !== messageContent || state.mode === "delta") {
+      throw mixedSseContentMode();
+    }
+    return { mode: "message", content: messageContent };
+  }
+  if (typeof deltaContent === "string") {
+    if (state.mode === "message") throw mixedSseContentMode();
+    return { mode: "delta", content: state.content + deltaContent };
+  }
+  if (typeof messageContent === "string") {
+    if (state.mode === "delta") throw mixedSseContentMode();
+    return { mode: "message", content: messageContent };
+  }
+  return state;
+}
+
+function mixedSseContentMode(): Error {
+  return new Error("garden extraction chat completion stream mixes delta and message content");
 }
 
 function parseChatCompletionPayload(

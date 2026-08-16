@@ -20,8 +20,12 @@ import {
   readExtractionCacheManifest,
   writeExtractionCacheManifest
 } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 
 const temporaryRoots: string[] = [];
+const STARTING_MISSING = 10;
+const MAXIMUM_ATTEMPTS = computeExtractionFillAttemptCeiling(STARTING_MISSING);
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -33,6 +37,12 @@ afterEach(async () => {
 it("settles an interrupted authority ledger under an exclusive cache lease", async () => {
   const assertOwned = vi.fn();
   const release = vi.fn();
+  const acquireLease = vi.fn(() => ({
+    cacheRoot: "/cache",
+    stableRootPath: "/proc/self/fd/1",
+    assertOwned,
+    release
+  }));
   const recover = vi.fn(() => recoveredSnapshot());
   const recoverManifest = vi.fn(() => inProgressManifest(7));
   const authority = receipt();
@@ -44,17 +54,13 @@ it("settles an interrupted authority ledger under an exclusive cache lease", asy
     "--recover-in-progress-manifest"
   ], {
     readReceipt: () => authority,
-    acquireLease: () => ({
-      cacheRoot: "/cache",
-      stableRootPath: "/proc/self/fd/1",
-      assertOwned,
-      release
-    }),
+    acquireLease,
     recover,
     recoverManifest
   });
 
   expect(exitCode).toBe(0);
+  expect(acquireLease).toHaveBeenCalledWith("/cache");
   expect(assertOwned).toHaveBeenCalledTimes(2);
   expect(release).toHaveBeenCalledOnce();
   expect(recover).toHaveBeenCalledWith({
@@ -64,9 +70,9 @@ it("settles an interrupted authority ledger under an exclusive cache lease", asy
       model: "DeepSeek-V4-Flash",
       requestProfile: "deepseek-v4-nonthinking-v1"
     },
-    startingMissing: 10,
-    maximumAttempts: 50,
-    successfulShardCeiling: 10
+    startingMissing: STARTING_MISSING,
+    maximumAttempts: MAXIMUM_ATTEMPTS,
+    successfulShardCeiling: STARTING_MISSING
   });
   expect(recoverManifest).toHaveBeenCalledWith({
     cacheRoot: "/proc/self/fd/1",
@@ -83,7 +89,16 @@ it("settles an interrupted authority ledger under an exclusive cache lease", asy
       windowOffset: 0,
       windowLimit: 100,
       expectedTurns: 10,
-      expectedKeySetSha256: "b".repeat(64)
+      expectedKeySetSha256: "b".repeat(64),
+      preservedValidClosure: {
+        shard_count: 0,
+        key_set_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        content_closure_sha256:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      inheritedSuccessfulKeys: [],
+      authorizedNewKeys: undefined,
+      ledgerSuccessfulShardCeiling: STARTING_MISSING
     }
   });
   expect(stdout).toHaveBeenCalledWith(
@@ -117,6 +132,29 @@ it("refuses a valid authority when the selected cache has no predecessor ledger"
   expect(exitCode).toBe(2);
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining("requires an existing attempt ledger"));
   expect(await readdir(cacheRoot)).toEqual([]);
+});
+
+it("does not take over an unverifiable legacy writer lock", async () => {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "attempt-ledger-recovery-legacy-"));
+  temporaryRoots.push(cacheRoot);
+  const lockPath = join(cacheRoot, ".extraction-fill.lock");
+  await mkdir(lockPath);
+  await writeFile(join(lockPath, "owner.json"), JSON.stringify({
+    pid: process.pid,
+    token: "legacy-live-owner",
+    started_at: new Date().toISOString()
+  }));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  expect(await runRecoverExtractionAttemptLedgerCommand([
+    "--extraction-cache-root", cacheRoot,
+    "--extraction-authority", "/authority.json"
+  ], { readReceipt: () => receipt() })).toBe(2);
+
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining(
+    "unverifiable legacy writer lock"
+  ));
+  expect(await readdir(lockPath)).toEqual(["owner.json"]);
 });
 
 it("settles a real ledger through the descriptor-bound lease path", async () => {
@@ -157,7 +195,8 @@ it("settles a real ledger through the descriptor-bound lease path", async () => 
   });
   expect(recovered.pendingKeys).toEqual([]);
   expect(recovered.unresolvedAttempts).toEqual([]);
-  expect(recovered.telemetry.terminalRetryClassifications.failure_aborted).toBe(1);
+  expect(recovered.telemetry.terminalRetryClassifications.failure_aborted).toBe(0);
+  expect(recovered.telemetry.usageUnavailableRequests).toBe(2);
   expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
     fill_status: "in_progress",
     cached_turns: 1,
@@ -251,9 +290,9 @@ function recoveredSnapshot(): ExtractionAttemptLedgerSnapshot {
     rawLedgerSha256: "1".repeat(64),
     ledgerSha256: "2".repeat(64),
     lineageDigest: "b".repeat(64),
-    startingMissing: 10,
-    maximumAttempts: 50,
-    successfulShardCeiling: 10,
+    startingMissing: STARTING_MISSING,
+    maximumAttempts: MAXIMUM_ATTEMPTS,
+    successfulShardCeiling: STARTING_MISSING,
     attempts: 12,
     successfulShards: 7,
     successfulEntries: [],

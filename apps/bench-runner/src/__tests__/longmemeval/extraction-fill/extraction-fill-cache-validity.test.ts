@@ -13,6 +13,7 @@ import {
   inspectCachedExtraction
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -108,12 +109,16 @@ describe("extraction-fill cache validity", () => {
     const shardPath = firstShardPath();
     const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
     writeFileSync(shardPath, JSON.stringify({ ...shard, raw_json: '{"signals":[42]}' }));
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn<BenchSignalExtractor["extract"]>(
+      async () => ({ rawJson: '{"signals":[]}' })
+    );
 
     const result = await fill(delegate);
 
     expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
     expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
+    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
       raw_json: '{"signals":[]}'
     });
@@ -207,14 +212,14 @@ describe("extraction-fill cache validity", () => {
   });
 });
 
-async function fill(extract: () => Promise<{ rawJson: string }> | { rawJson: string }) {
+async function fill(extract: BenchSignalExtractor["extract"]) {
   return runExtractionFill({
     variant: VARIANT,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
     concurrency: 1,
-    extractorFactory: () => ({ extract: async () => extract() }),
+    extractorFactory: () => ({ extract }),
     log: () => undefined
   });
 }

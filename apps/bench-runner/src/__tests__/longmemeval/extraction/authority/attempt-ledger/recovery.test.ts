@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,15 +11,8 @@ import {
 } from "../../../../../longmemeval/extraction/authority/attempt-ledger.js";
 import { recoverInterruptedExtractionAttemptLedger } from
   "../../../../../longmemeval/extraction/authority/attempt-ledger/interruption-recovery.js";
-import { recoverInterruptedExtractionFillManifest } from
-  "../../../../../longmemeval/extraction/authority/attempt-ledger/interruption-manifest-recovery.js";
-import {
-  EXTRACTION_CACHE_KEY_ALGO,
-  readExtractionCacheManifest,
-  writeExtractionCacheManifest
-} from "../../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { computeExtractionKeySetSha256 } from
-  "../../../../../longmemeval/extraction/content-closure.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../../../longmemeval/extraction/authority/receipt-limits.js";
 
 const key = (digit: string): string => digit.repeat(64);
 const cacheIdentity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;
@@ -70,7 +62,8 @@ describe("extraction attempt ledger lineage isolation", () => {
     });
 
     expect(forked).toMatchObject({
-      lineageDigest: successorLineage, startingMissing: 2, maximumAttempts: 10,
+      lineageDigest: successorLineage, startingMissing: 2,
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
       successfulShardCeiling: 2, attempts: 2, successfulShards: 1,
       successfulKeys: [key("1")]
     });
@@ -84,6 +77,33 @@ describe("extraction attempt ledger lineage isolation", () => {
     const resumed = openLedger(successorLineage, 2);
     await settleAndCommit(resumed, key("3"));
     expect(resumed.snapshot()).toMatchObject({ attempts: 3, successfulShards: 2 });
+  });
+
+  it("expands a legacy fork ceiling while preserving consumed attempts and successes", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const predecessorLineage = "1".repeat(64);
+    const successorLineage = "2".repeat(64);
+    const predecessor = openLedger(predecessorLineage, 2, 8, 2);
+    await settleAndCommit(predecessor, key("3"));
+    const settled = readSettledExtractionAttemptLedger({
+      cacheRoot, lineageDigest: predecessorLineage, cacheIdentity
+    });
+
+    const forked = forkSettledExtractionAttemptLedger({
+      cacheRoot,
+      predecessorLineageDigest: predecessorLineage,
+      predecessorLedgerSha256: settled.ledgerSha256,
+      successorLineageDigest: successorLineage,
+      successorMaximumAttempts: computeExtractionFillAttemptCeiling(2),
+      cacheIdentity
+    });
+
+    expect(forked).toMatchObject({
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
+      attempts: 1,
+      successfulShards: 1,
+      successfulKeys: [key("3")]
+    });
   });
 });
 
@@ -131,7 +151,7 @@ describe("extraction attempt ledger fork recovery", () => {
 });
 
 describe("interrupted extraction attempt recovery", () => {
-  it("settles missing in-flight requests as aborted with unknown usage", async () => {
+  it("settles interrupted requests as unknown without fabricating provider failures", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
     const lineageDigest = "a".repeat(64);
     const cacheKey = key("4");
@@ -149,13 +169,10 @@ describe("interrupted extraction attempt recovery", () => {
       telemetry: {
         usageUnavailableRequests: 2,
         usageUnknownAttempts: 2,
-        terminalRetryClassifications: { failure_aborted: 1 }
+        terminalRetryClassifications: { failure_aborted: 0 }
       }
     });
-    expect(recovered.transportFailures).toEqual([
-      expect.objectContaining({ attemptOrdinal: 1, cacheKey, kind: "aborted" }),
-      expect.objectContaining({ attemptOrdinal: 2, cacheKey, kind: "aborted" })
-    ]);
+    expect(recovered.transportFailures).toEqual([]);
     expect(recoverInterrupted(lineageDigest)).toEqual(recovered);
     expect(readSettledExtractionAttemptLedger({
       cacheRoot, lineageDigest, cacheIdentity
@@ -234,58 +251,6 @@ describe("interrupted extraction attempt recovery", () => {
   });
 });
 
-describe("interrupted extraction manifest recovery", () => {
-  it("repins an in-progress manifest to the settled ledger inventory", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-recovery-"));
-    const lineageDigest = "e".repeat(64);
-    const ledger = openLedger(lineageDigest, 2);
-    await settleAndCommit(ledger, key("1"));
-    writeInProgressManifest(0);
-
-    const recovered = recoverManifest(lineageDigest, "2026-08-15T12:30:00.000Z");
-
-    expect(recovered).toMatchObject({
-      fill_status: "in_progress",
-      requested_turns: 2,
-      cached_turns: 1,
-      coverage: 0.5,
-      built_at: "2026-08-15T12:30:00.000Z"
-    });
-    expect(readExtractionCacheManifest(cacheRoot)).toEqual(recovered);
-  });
-
-  it("keeps the manifest artifact stable after recovery is already closed", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-15T12:30:00.000Z"));
-    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-recovery-"));
-    const lineageDigest = "a".repeat(64);
-    const ledger = openLedger(lineageDigest, 2);
-    await settleAndCommit(ledger, key("1"));
-    writeInProgressManifest(0);
-
-    recoverManifest(lineageDigest);
-    const firstSha256 = await manifestSha256();
-    const firstManifest = readExtractionCacheManifest(cacheRoot);
-    vi.setSystemTime(new Date("2026-08-15T12:31:00.000Z"));
-    recoverManifest(lineageDigest);
-
-    expect(await manifestSha256()).toBe(firstSha256);
-    expect(readExtractionCacheManifest(cacheRoot)).toEqual(firstManifest);
-  });
-
-  it("rejects a shard that is not closed by the settled ledger", async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-recovery-"));
-    const lineageDigest = "f".repeat(64);
-    const ledger = openLedger(lineageDigest, 2);
-    await settleAndCommit(ledger, key("1"));
-    await writeProviderShard(key("2"));
-    writeInProgressManifest(0);
-
-    expect(() => recoverManifest(lineageDigest)).toThrow(/ledger inventory/u);
-    expect(readExtractionCacheManifest(cacheRoot)?.cached_turns).toBe(0);
-  });
-});
-
 function openLedger(
   lineageDigest: string, startingMissing: number,
   maximumAttempts?: number, successfulShardCeiling?: number
@@ -324,7 +289,7 @@ function recoverInterrupted(lineageDigest: string, startingMissing = 2) {
     lineageDigest,
     cacheIdentity,
     startingMissing,
-    maximumAttempts: startingMissing * 5,
+    maximumAttempts: computeExtractionFillAttemptCeiling(startingMissing),
     successfulShardCeiling: startingMissing
   });
 }
@@ -342,58 +307,4 @@ async function writeProviderShard(cacheKey: string): Promise<void> {
       model: cacheIdentity.model
     }
   }), "utf8");
-}
-
-function recoverManifest(lineageDigest: string, builtAt?: string) {
-  return recoverInterruptedExtractionFillManifest({
-    cacheRoot,
-    ledger: readSettledExtractionAttemptLedger({
-      cacheRoot, lineageDigest, cacheIdentity
-    }),
-    expected: {
-      model: cacheIdentity.model,
-      modelFamily: cacheIdentity.model,
-      requestProfile: cacheIdentity.requestProfile,
-      providerUrl: "https://example.test/v1",
-      systemPromptSha256: key("c"),
-      cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
-      datasetVariant: "longmemeval_s",
-      datasetRevisionSha256: key("d"),
-      windowOffset: 0,
-      windowLimit: 2,
-      expectedTurns: 2,
-      expectedKeySetSha256: computeExtractionKeySetSha256([key("1"), key("2")])
-    },
-    ...(builtAt === undefined ? {} : { builtAt })
-  });
-}
-
-async function manifestSha256(): Promise<string> {
-  const raw = await readFile(join(cacheRoot, "manifest.json"));
-  return createHash("sha256").update(raw).digest("hex");
-}
-
-function writeInProgressManifest(cachedTurns: number): void {
-  writeExtractionCacheManifest(cacheRoot, {
-    schema_version: 3,
-    extraction_model: cacheIdentity.model,
-    model_family: cacheIdentity.model,
-    request_profile: cacheIdentity.requestProfile,
-    provider_url: "https://example.test/v1",
-    system_prompt_sha256: key("c"),
-    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-    dataset: "longmemeval-s",
-    dataset_revision: key("d"),
-    requested_turns: 2,
-    cached_turns: cachedTurns,
-    coverage: cachedTurns / 2,
-    fill_status: "in_progress",
-    window_offset: 0,
-    window_limit: 2,
-    expected_turns: 2,
-    expected_key_set_sha256: computeExtractionKeySetSha256([key("1"), key("2")]),
-    storage: "git-tracked",
-    built_at: "2026-08-15T12:00:00.000Z",
-    builder: "extraction-fill"
-  });
 }

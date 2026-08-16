@@ -332,7 +332,6 @@ async function seedFixture(
 ): Promise<SeededAuthorityFixture> {
   const question = sourceEvidenceQuestion();
   const keySpace = inspectTurnContentKeySpace([question]);
-  let extractionIndex = 0;
   const runner = createCompileSeedRunner({
     config: CREDENTIALLED_CONFIG,
     cacheRoot,
@@ -342,12 +341,10 @@ async function seedFixture(
     requiredQuestionWindow: { offset: 0, limit: 1 },
     extractorFactory: () => ({
       extract: async () => ({
-        rawJson: extractionIndex++ === 0
-          ? "{\"signals\":[]}"
-          : signalsEnvelope([{
-            matched: "I check the platform near the main entrance.",
-            distilled: "The user checks the platform near the main entrance."
-          }])
+        rawJson: signalsEnvelope([{
+          matched: "I check the platform near the main entrance.",
+          distilled: "The user checks the platform near the main entrance."
+        }])
       })
     })
   });

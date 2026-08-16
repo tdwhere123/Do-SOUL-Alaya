@@ -282,8 +282,7 @@ describe("materialize-audited-extraction-target command committed recovery", () 
       const result = await runFailing(fixture);
       expect(result.code).toBe(2);
       expect(result.stderr).toContain(fixture.sourceRoot);
-      expect(result.stderr).toMatch(/remove.*\.extraction-fill\.lock/iu);
-      expect(result.stderr).toMatch(/verifying.*owner process|verify.*owner/iu);
+      expect(result.stderr).toMatch(/active writer lock/iu);
     } finally {
       lease.release();
     }
@@ -293,8 +292,8 @@ describe("materialize-audited-extraction-target command committed recovery", () 
     const fixture = createFixture();
     const lockPath = join(fixture.targetRoot, ".extraction-fill.lock");
     mkdirSync(lockPath);
-    const actionable = `extraction cache root ${fixture.targetRoot} already has a writer lock; ` +
-      `remove ${lockPath} only after verifying its owner process is stopped`;
+    const actionable = `extraction cache writer lock ${lockPath} metadata is unreadable; ` +
+      "manual removal requires independent proof that the prior writer stopped";
 
     const result = await runFailing(fixture);
 

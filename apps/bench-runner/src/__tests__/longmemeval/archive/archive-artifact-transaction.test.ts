@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, truncate, writeFile } from
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from
   "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -127,15 +127,24 @@ describe("LongMemEval committed artifact cleanup failures", () => {
 });
 
 describe("LongMemEval diagnostics staging retention", () => {
-  it("bounds stale staging by bytes as well as file count", async () => {
+  it("never prunes active artifacts when one process stages more than eight", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-stale-"));
-    const stagingRoot = path.join(root, ".staging");
-    const oversized = path.join(stagingRoot, "abandoned.tmp");
-    await mkdir(stagingRoot, { recursive: true });
-    await writeFile(oversized, "x");
-    await truncate(oversized, 513 * 1024 * 1024);
+    const paths = await Promise.all(Array.from({ length: 12 }, async (_, index) => {
+      const stagedPath = await prepareDiagnosticsArtifactStagingPath(root, `active-${index}`);
+      await writeFile(stagedPath, `evidence-${index}`);
+      return stagedPath;
+    }));
+
+    await Promise.all(paths.map((stagedPath) => expect(access(stagedPath)).resolves.toBeUndefined()));
+  });
+
+  it("removes staging sessions whose owning process has exited", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-stale-"));
+    const abandoned = path.join(root, ".staging", `2147483647-${"a".repeat(36)}`);
+    await mkdir(abandoned, { recursive: true });
+    await writeFile(path.join(abandoned, "artifact.tmp"), "abandoned");
 
     await prepareDiagnosticsArtifactStagingPath(root, "next");
-    await expect(access(oversized)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(abandoned)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

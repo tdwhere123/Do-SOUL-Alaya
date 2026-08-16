@@ -15,13 +15,25 @@ import { join, resolve } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
+import {
+  acquireKernelWriteLease,
+  isKernelWriteLeaseActive,
+  type KernelWriteLease
+} from "./kernel-write-lease.js";
 
 const EXTRACTION_FILL_LOCK_DIR = ".extraction-fill.lock";
 const MAX_EXTRACTION_FILL_OWNER_BYTES = 16 * 1024;
+const EXTRACTION_FILL_OWNER_SCHEMA_VERSION = 2;
 
 interface DirectoryIdentity {
   readonly device: string;
   readonly inode: string;
+}
+
+interface BoundCacheRoot {
+  readonly path: string;
+  readonly descriptor: number;
+  readonly identity: DirectoryIdentity;
 }
 
 export interface ExtractionCacheWriteLease {
@@ -36,6 +48,45 @@ export function isStableLeasePath(path: string): boolean {
   return /^\/proc\/self\/fd\/\d+(?:\/|$)/u.test(path);
 }
 
+export function inspectExtractionCacheWriterLock(
+  cacheRoot: string
+): "absent" | "present" {
+  let boundRoot: BoundCacheRoot;
+  try {
+    boundRoot = openExistingCacheRoot(cacheRoot);
+  } catch {
+    return "present";
+  }
+  const lockPath = join(boundRoot.path, EXTRACTION_FILL_LOCK_DIR);
+  let stat;
+  try {
+    stat = lstatSync(lockPath);
+  } catch (cause) {
+    closeSync(boundRoot.descriptor);
+    return hasErrorCode(cause, "ENOENT") ? "absent" : "present";
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    closeSync(boundRoot.descriptor);
+    return "present";
+  }
+  try {
+    const owner = JSON.parse(readBoundedCanonicalUtf8Artifact({
+      path: join(lockPath, "owner.json"),
+      maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
+      label: "extraction cache writer lock owner"
+    })) as { readonly schema_version?: unknown };
+    if (owner.schema_version !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION) return "present";
+    return isKernelWriteLeaseActive({
+      ...boundRoot.identity,
+      displayPath: boundRoot.path
+    }) ? "present" : "absent";
+  } catch {
+    return "present";
+  } finally {
+    closeSync(boundRoot.descriptor);
+  }
+}
+
 export interface ExtractionCacheWriteLeaseSet {
   readonly leases: readonly ExtractionCacheWriteLease[];
   leaseFor(cacheRoot: string): ExtractionCacheWriteLease;
@@ -46,48 +97,51 @@ export interface ExtractionCacheWriteLeaseSet {
 export function acquireExtractionCacheWriteLease(
   cacheRoot: string
 ): ExtractionCacheWriteLease {
-  const absoluteRoot = resolve(cacheRoot);
-  mkdirSync(absoluteRoot, { recursive: true });
-  const rootFd = openBoundDirectory(absoluteRoot);
+  const boundRoot = openOrCreateCacheRoot(cacheRoot);
+  const absoluteRoot = boundRoot.path;
+  const rootFd = boundRoot.descriptor;
   const stableRootPath = `/proc/self/fd/${rootFd}`;
   const lockPath = join(absoluteRoot, EXTRACTION_FILL_LOCK_DIR);
   const token = randomUUID();
+  const rootIdentity = boundRoot.identity;
+  let kernelLease: KernelWriteLease | undefined;
+  let metadataCreated = false;
   try {
-    mkdirSync(lockPath);
-    writeFileSync(
-      join(lockPath, "owner.json"),
-      `${JSON.stringify({ pid: process.pid, token, started_at: new Date().toISOString() })}\n`,
-      "utf8"
-    );
+    kernelLease = acquireKernelWriteLease({ ...rootIdentity, displayPath: absoluteRoot });
+    prepareWriterLockDirectory(lockPath);
+    publishWriterLock(lockPath, token);
+    metadataCreated = true;
+    const lockIdentity = readDirectoryIdentity(lockPath, "extraction cache writer lock");
+    return createWriteLease({
+      cacheRoot: absoluteRoot, stableRootPath, rootFd, lockPath, token,
+      rootIdentity, lockIdentity, kernelLease
+    });
   } catch (cause) {
-    if (hasErrorCode(cause, "EEXIST")) {
-      closeSync(rootFd);
-      throw new ExtractionCacheInvariantError(
-        `extraction cache root ${absoluteRoot} already has a writer lock; ` +
-          `remove ${lockPath} only after verifying its owner process is stopped`
-      );
-    }
-    rmSync(lockPath, { recursive: true, force: true });
-    closeSync(rootFd);
-    throw cause;
+    const acquiredKernelLease = kernelLease;
+    const cleanupFailures = runCleanupActions([
+      ...(metadataCreated
+        ? [() => rmSync(lockPath, { recursive: true, force: true })]
+        : []),
+      () => closeSync(rootFd),
+      ...(acquiredKernelLease === undefined ? [] : [() => acquiredKernelLease.release()])
+    ]);
+    const primary = cause instanceof ExtractionCacheInvariantError
+      ? cause
+      : new ExtractionCacheInvariantError(String(cause), { cause });
+    throwWithCleanupFailures(primary, cleanupFailures, "writer lease acquisition");
   }
-  const rootIdentity = readDirectoryIdentity(absoluteRoot, "extraction cache root");
-  const lockIdentity = readDirectoryIdentity(lockPath, "extraction cache writer lock");
+}
+
+function createWriteLease(binding: LeaseOwnerBinding): ExtractionCacheWriteLease {
   let released = false;
   return {
-    cacheRoot: absoluteRoot,
-    stableRootPath,
-    assertOwned: () => assertExtractionCacheWriteLeaseOwner({
-      cacheRoot: absoluteRoot, stableRootPath, rootFd, lockPath, token,
-      rootIdentity, lockIdentity
-    }),
+    cacheRoot: binding.cacheRoot,
+    stableRootPath: binding.stableRootPath,
+    assertOwned: () => assertExtractionCacheWriteLeaseOwner(binding),
     release: () => {
       if (released) throw new Error("extraction cache writer lease was already released");
       released = true;
-      releaseExtractionCacheWriteLease({
-        cacheRoot: absoluteRoot, stableRootPath, rootFd, lockPath, token,
-        rootIdentity, lockIdentity
-      });
+      releaseExtractionCacheWriteLease(binding);
     }
   };
 }
@@ -154,14 +208,9 @@ function releaseLeases(leases: readonly ExtractionCacheWriteLease[]): Error[] {
 }
 
 function canonicalLeaseRoot(cacheRoot: string): string {
-  const absolute = resolve(cacheRoot);
-  const stat = lstatSync(absolute);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(absolute) !== absolute) {
-    throw new ExtractionCacheInvariantError(
-      "ordered extraction cache leases require canonical non-symlink roots"
-    );
-  }
-  return absolute;
+  const root = openExistingCacheRoot(cacheRoot);
+  closeSync(root.descriptor);
+  return root.path;
 }
 
 export async function withExtractionCacheWriteLease<T>(
@@ -238,19 +287,31 @@ interface LeaseOwnerBinding {
   readonly token: string;
   readonly rootIdentity: DirectoryIdentity;
   readonly lockIdentity: DirectoryIdentity;
+  readonly kernelLease: KernelWriteLease;
 }
 
 function releaseExtractionCacheWriteLease(binding: LeaseOwnerBinding): void {
+  const failures: Error[] = [];
   try {
     assertExtractionCacheWriteLeaseOwner(binding);
     rmSync(binding.lockPath, { recursive: true, force: true });
-  } finally {
-    closeSync(binding.rootFd);
+  } catch (cause) {
+    failures.push(asError(cause));
+  }
+  failures.push(...runCleanupActions([
+    () => closeSync(binding.rootFd),
+    () => binding.kernelLease.release()
+  ]));
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "extraction cache writer lease cleanup failed");
   }
 }
 
 function assertExtractionCacheWriteLeaseOwner(binding: LeaseOwnerBinding): void {
+  binding.kernelLease.assertOwned();
   let currentToken: unknown;
+  let schemaVersion: unknown;
   try {
     assertBoundDirectoryIdentity(binding.rootFd, binding.rootIdentity, "extraction cache root");
     assertDirectoryIdentity(binding.cacheRoot, binding.rootIdentity, "extraction cache root");
@@ -260,18 +321,89 @@ function assertExtractionCacheWriteLeaseOwner(binding: LeaseOwnerBinding): void 
       maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
       label: "extraction cache writer lock owner"
     })) as {
+      readonly schema_version?: unknown;
       readonly token?: unknown;
     };
+    schemaVersion = owner.schema_version;
     currentToken = owner.token;
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
       `cannot verify extraction cache writer lock owner: ${String(cause)}`
     );
   }
-  if (currentToken !== binding.token) {
+  if (schemaVersion !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION ||
+      currentToken !== binding.token) {
     throw new ExtractionCacheInvariantError(
       "extraction cache writer lock ownership changed before release"
     );
+  }
+}
+
+function prepareWriterLockDirectory(lockPath: string): void {
+  let stat;
+  try {
+    stat = lstatSync(lockPath);
+  } catch (cause) {
+    if (hasErrorCode(cause, "ENOENT")) return;
+    throw cause;
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new ExtractionCacheInvariantError("extraction cache writer lock is not a real directory");
+  }
+  let schemaVersion: unknown;
+  try {
+    schemaVersion = (JSON.parse(readBoundedCanonicalUtf8Artifact({
+      path: join(lockPath, "owner.json"),
+      maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
+      label: "extraction cache writer lock owner"
+    })) as { readonly schema_version?: unknown }).schema_version;
+  } catch (cause) {
+    throw new ExtractionCacheInvariantError(
+      `extraction cache writer lock ${lockPath} metadata is unreadable; ` +
+        "manual removal requires independent proof that the prior writer stopped",
+      { cause }
+    );
+  }
+  if (schemaVersion !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION) {
+    throw new ExtractionCacheInvariantError(
+      `extraction cache has an unverifiable legacy writer lock at ${lockPath}; ` +
+        "manual removal requires independent proof that the prior writer stopped"
+    );
+  }
+  rmSync(lockPath, { recursive: true, force: true });
+}
+
+function publishWriterLock(lockPath: string, token: string): void {
+  try {
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "owner.json"), `${JSON.stringify({
+      schema_version: EXTRACTION_FILL_OWNER_SCHEMA_VERSION,
+      pid: process.pid,
+      token,
+      started_at: new Date().toISOString()
+    })}\n`, "utf8");
+  } catch (cause) {
+    throwWithCleanupFailures(cause, runCleanupActions([
+      () => rmSync(lockPath, { recursive: true, force: true })
+    ]), "writer lock publication");
+  }
+}
+
+function openOrCreateCacheRoot(cacheRoot: string): BoundCacheRoot {
+  mkdirSync(resolve(cacheRoot), { recursive: true });
+  return openExistingCacheRoot(cacheRoot);
+}
+
+function openExistingCacheRoot(cacheRoot: string): BoundCacheRoot {
+  const path = realpathSync(resolve(cacheRoot));
+  const descriptor = openBoundDirectory(path);
+  try {
+    const identity = readBoundDirectoryIdentity(descriptor, "extraction cache root");
+    assertDirectoryIdentity(path, identity, "extraction cache root");
+    return Object.freeze({ path, descriptor, identity });
+  } catch (cause) {
+    closeSync(descriptor);
+    throw cause;
   }
 }
 
@@ -296,6 +428,14 @@ function readDirectoryIdentity(path: string, label: string): DirectoryIdentity {
   const stat = lstatSync(path, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new ExtractionCacheInvariantError(`${label} is not a real directory`);
+  }
+  return Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
+}
+
+function readBoundDirectoryIdentity(descriptor: number, label: string): DirectoryIdentity {
+  const stat = fstatSync(descriptor, { bigint: true });
+  if (!stat.isDirectory()) {
+    throw new ExtractionCacheInvariantError(`${label} descriptor is not a directory`);
   }
   return Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
 }
@@ -326,4 +466,32 @@ function assertBoundDirectoryIdentity(
 function hasErrorCode(cause: unknown, code: string): boolean {
   return typeof cause === "object" && cause !== null &&
     "code" in cause && cause.code === code;
+}
+
+function runCleanupActions(actions: readonly (() => void)[]): Error[] {
+  const failures: Error[] = [];
+  for (const action of actions) {
+    try {
+      action();
+    } catch (cause) {
+      failures.push(asError(cause));
+    }
+  }
+  return failures;
+}
+
+function throwWithCleanupFailures(
+  primary: unknown,
+  cleanupFailures: readonly Error[],
+  operation: string
+): never {
+  if (cleanupFailures.length === 0) throw primary;
+  throw new AggregateError(
+    [asError(primary), ...cleanupFailures],
+    `extraction cache ${operation} failed and cleanup was incomplete`
+  );
+}
+
+function asError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
 }

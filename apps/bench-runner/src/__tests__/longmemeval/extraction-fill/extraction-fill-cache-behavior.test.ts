@@ -19,6 +19,7 @@ import { cacheFilePath, computeSourceTurnCacheKey } from "../../../longmemeval/c
 
 import {
   buildExtractionFillQuestion as buildQuestion,
+  buildGroundedSignalResponse,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
   registerExtractionFillHooks
@@ -43,8 +44,8 @@ describe("runExtractionFill", () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
+      rawJson: buildGroundedSignalResponse(input.userPrompt)
     }));
     const factory = (): BenchSignalExtractor => ({ extract });
 
@@ -71,7 +72,7 @@ describe("runExtractionFill", () => {
     // first run's 2.
     expect(second.cacheHits).toBe(2);
     expect(second.newlyExtracted).toBe(0);
-    expect(extract).toHaveBeenCalledTimes(4);
+    expect(extract).toHaveBeenCalledTimes(2);
     expect(second.coverage).toBe(1);
   });
 
@@ -152,8 +153,8 @@ describe("runExtractionFill", () => {
       buildQuestion("q002", "I remember two.", "I prefer decoy two."),
       buildQuestion("q003", "I remember three.", "I prefer decoy three.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
+      rawJson: buildGroundedSignalResponse(input.userPrompt)
     }));
     const result = await runExtractionFill({
       variant: VARIANT,
@@ -166,7 +167,7 @@ describe("runExtractionFill", () => {
     });
     // Only q001 -> answer round + decoy = 2 distinct turns.
     expect(result.requestedTurns).toBe(2);
-    expect(extract).toHaveBeenCalledTimes(4);
+    expect(extract).toHaveBeenCalledTimes(2);
   });
 
 });

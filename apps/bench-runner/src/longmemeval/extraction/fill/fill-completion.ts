@@ -118,6 +118,31 @@ export function inspectExtractionCacheContentClosure(input: {
   };
 }
 
+export function inspectExtractionCacheContentClosureExcluding(input: {
+  readonly cacheRoot: string;
+  readonly model: string;
+  readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly excludeCacheKeys: readonly string[];
+}): ExtractionCacheContentInspection {
+  const inventory = inspectShardInventory(input.cacheRoot);
+  const counts = inspectExpectedShards(input, inventory.keys);
+  const invalidTurns = inventory.invalidEntries + counts.invalid + counts.missing;
+  const excluded = new Set(input.excludeCacheKeys);
+  const entries = counts.entries.filter((entry) => !excluded.has(entry.cacheKey));
+  return {
+    shardTurns: entries.length,
+    validTurns: invalidTurns === 0 ? entries.length : 0,
+    invalidTurns,
+    keySetSha256: computeExtractionKeySetSha256(entries.map((entry) => entry.cacheKey)),
+    contentClosureSha256: invalidTurns === 0
+      ? computeExtractionContentClosureSha256(entries)
+      : null,
+    rawContentClosureSha256: invalidTurns === 0
+      ? computeExtractionRawContentClosureSha256(entries)
+      : null
+  };
+}
+
 export function inspectExtractionCacheRawContentClosure(
   input: ShardInspectionInput
 ): ExtractionCacheContentInspection {

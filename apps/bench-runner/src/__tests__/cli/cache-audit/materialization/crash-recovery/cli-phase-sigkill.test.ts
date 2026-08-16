@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import {
-  existsSync, mkdirSync, readFileSync, rmSync, writeFileSync
+  existsSync, mkdirSync, readFileSync, writeFileSync
 } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -36,8 +36,6 @@ if (process.env[CHILD_ARGS_ENV] !== undefined) {
       expect(crashed).toMatchObject({ code: null, signal: "SIGKILL" });
       expect(existsSync(fixture.receiptPath)).toBe(false);
 
-      expect(await runQuiet(fixture.args)).toBe(2);
-      removeExactFixtureLocks(fixture.sourceRoot, fixture.targetRoot);
       expect(await runQuiet(fixture.args)).toBe(0);
       const receipt = readFileSync(fixture.receiptPath);
       expect(await runQuiet(fixture.args)).toBe(0);
@@ -90,14 +88,6 @@ async function runQuiet(args: readonly string[]): Promise<number> {
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
   return await runCli(args);
-}
-
-function removeExactFixtureLocks(sourceRoot: string, targetRoot: string): void {
-  for (const root of [sourceRoot, targetRoot]) {
-    const path = join(root, ".extraction-fill.lock");
-    expect(existsSync(path)).toBe(true);
-    rmSync(path, { recursive: true });
-  }
 }
 
 function json(value: unknown): string {

@@ -32,6 +32,10 @@ const TURN_CONTENT = "I moved to Berlin.";
 const TURN_REQUEST = stringifyOfficialApiExtractionRequest(
   buildOfficialApiExtractionRequest(TURN_CONTENT, [])
 );
+const TURN_RESPONSE = signalsEnvelope([{
+  matched: TURN_CONTENT,
+  distilled: "The user moved to Berlin."
+}]);
 
 describe("cache-only compile seed smoke", () => {
   let cacheRoot: string;
@@ -104,7 +108,7 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => ({ rawJson: TURN_RESPONSE }))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -133,7 +137,7 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => ({ rawJson: TURN_RESPONSE }))
     };
     const writer = createCachingSignalExtractor({
       delegate,
@@ -141,7 +145,7 @@ describe("single-source extraction model", () => {
       cacheRoot
     });
     await writer.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST });
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
 
     const reader = createCachingSignalExtractor({
       delegate,
@@ -156,7 +160,7 @@ describe("single-source extraction model", () => {
     await expect(
       reader.extract({ systemPrompt: "sys", userPrompt: TURN_REQUEST })
     ).rejects.toThrow(/extraction model mismatch/u);
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
   it("rejects a request-profile change before the delegate or shard write", async () => {

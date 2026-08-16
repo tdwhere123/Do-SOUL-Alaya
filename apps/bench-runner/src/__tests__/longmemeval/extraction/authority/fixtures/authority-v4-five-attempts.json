@@ -1,0 +1,71 @@
+{
+  "schema_version": 4,
+  "kind": "longmemeval-extraction-authority",
+  "action": "fill",
+  "generated_at": "2026-08-15T09:29:28.024Z",
+  "identity_digest": "ca588c207c242497f401a265e33c9eaeb79804bfa53b838bb0d50fd602857825",
+  "lineage_digest": "30aa789dc5ccdd2c2fb9941d0749e269e7b54e484de2ba18b5b8974a2771d69f",
+  "observation": {
+    "revision": "git-worktree-v1:35562dd57b4c9b1c5916eb988ab9197fe76b9c27:d1c16aaaa5e1bff6b626b957eabf9ed5b522ecd310f5e6fbecf16978f58636c5",
+    "commandDigest": "6b8698c623f96f5b8e11b47d6536d91837fb4b0e60059592830da6782e897095",
+    "selectionDigest": "9d3268b59a9f3fed7477489a20d133077acbda323a646890aac1d53a9ef1fabd",
+    "keyDigest": "48f38a4f37fced04c0fac5bf980065fa6dbb332cd05428c79681cd7eb4ace9eb",
+    "dataset": {
+      "variant": "longmemeval_s",
+      "revisionSha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "windowOffset": 0,
+      "windowLimit": 100,
+      "windowTurnOccurrences": 25127,
+      "windowUniqueCacheKeys": 24305,
+      "authorizedQuestionCount": 100,
+      "authorizedTurnOccurrences": 25127,
+      "authorizedUniqueCacheKeys": 24305,
+      "expectedKeySetSha256": "48f38a4f37fced04c0fac5bf980065fa6dbb332cd05428c79681cd7eb4ace9eb"
+    },
+    "extraction": {
+      "model": "DeepSeek-V4-Flash",
+      "modelFamily": "deepseek-v4-flash-nonthinking",
+      "requestProfile": "deepseek-v4-nonthinking-v1",
+      "providerUrl": "https://api.fshencoding.cn/v1",
+      "systemPromptSha256": "80467c581a30c6b6892984c027e752015fbce64636b8f9acba89c925af290796",
+      "cacheKeyAlgorithm": "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)",
+      "manifestSha256": null,
+      "rawContentClosureSha256": null
+    },
+    "transport": {
+      "providerUrl": "https://api.fshencoding.cn/v1",
+      "model": "deepseek-v4-flash"
+    },
+    "inventory": {
+      "expectedTurns": 24305,
+      "validTurns": 0,
+      "missingTurns": 24305,
+      "invalidTurns": 0,
+      "orphanTurns": 0
+    }
+  },
+  "inspection": {
+    "writerLock": "absent",
+    "disk": { "status": "available", "freeBytes": 895318212608 },
+    "credentialStatus": "present",
+    "modelReadiness": "not_probed"
+  },
+  "limits": {
+    "starting_missing": 24305,
+    "maximum_attempts": 121525,
+    "successful_shard_ceiling": 24305,
+    "max_concurrency": 32,
+    "max_output_tokens": 8192,
+    "output_token_field": "max_tokens",
+    "disk_floor_bytes": 21474836480,
+    "no_progress_timeout_ms": 1800000
+  },
+  "price": {
+    "input_usd_per_million": 0,
+    "output_usd_per_million": 0,
+    "maximum_input_tokens_per_attempt": 65536,
+    "estimated_upper_usd": 0
+  },
+  "target_selection_digest": "a5e080261965c90a5c546a5f27f284a9a7983f934f160a7a2a2456cb515ffdaa",
+  "receipt_digest": "92f3ea7f3316fc8d0779d881c6f0726eb4f85ce962f406a10390c2b9036a0637"
+}

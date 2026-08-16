@@ -407,7 +407,9 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(firstSeeded).toHaveLength(0);
     expect(firstRunner.stats.liveExtractionFailures).toBe(1);
 
-    const delegate = vi.fn(async () => ({ rawJson: signalsEnvelope([]) }));
+    const delegate = vi.fn<BenchSignalExtractor["extract"]>(
+      async () => ({ rawJson: signalsEnvelope([]) })
+    );
     const seeded: BenchSignalSeedInput[] = [];
     const secondDaemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -430,6 +432,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
     expect(seeded).toHaveLength(0);
     expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
+    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(secondRunner.stats.cacheHits).toBe(0);
     expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);

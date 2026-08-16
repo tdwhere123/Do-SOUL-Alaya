@@ -32,6 +32,8 @@ import {
 } from "../../../longmemeval/extraction/fill/manifest/fill-manifest.js";
 import { parseExtractionCacheManifestContents } from
   "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { quarantineExtractionCacheInventory } from
+  "../../../longmemeval/extraction/cache-audit/quarantine/semantic-quarantine.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
@@ -43,9 +45,11 @@ const roots: string[] = [];
 export interface MaterializerFixtureOptions {
   readonly hitCount?: number;
   readonly totalCount?: number;
+  readonly orphanCount?: number;
   readonly selectionExpectedTurns?: number;
   readonly selectionKeyDigest?: string;
   readonly rawJsonPaddingBytes?: number;
+  readonly semanticQuarantineIndex?: number;
 }
 
 export function cleanupMaterializerFixtures(): void {
@@ -66,12 +70,24 @@ export function createMaterializerFixture(options: MaterializerFixtureOptions = 
   for (const key of expectedKeys.slice(0, hitCount)) {
     writeShard(sourceRoot, key, options.rawJsonPaddingBytes ?? 0);
   }
+  const orphanKeys = Array.from(
+    { length: options.orphanCount ?? 0 },
+    (_, index) => sha256(`orphan-${index}`)
+  );
+  for (const key of orphanKeys) writeShard(sourceRoot, key, 0);
   const sourceManifestRaw = sourceManifest(expectedKeys, hitCount);
   const sourceManifestPath = join(sourceRoot, "manifest.json");
   writeFileSync(sourceManifestPath, sourceManifestRaw, "utf8");
-  const inventory = inspectExtractionCacheInventory({
+  const inspectedInventory = inspectExtractionCacheInventory({
     cacheRoot: sourceRoot, cacheKeys: expectedKeys, model, requestProfile
   });
+  const quarantinedKey = options.semanticQuarantineIndex === undefined
+    ? undefined
+    : expectedKeys[options.semanticQuarantineIndex];
+  const inventory = quarantineExtractionCacheInventory(
+    inspectedInventory,
+    new Set(quarantinedKey === undefined ? [] : [quarantinedKey])
+  );
   const auditReceipt = auditReceiptFor(
     sourceRoot,
     sha256(sourceManifestRaw),
@@ -84,7 +100,10 @@ export function createMaterializerFixture(options: MaterializerFixtureOptions = 
   });
   return {
     root, sourceRoot, targetRoot, sourceManifestPath, sourceManifestRaw,
-    expectedKeys, hitKeys: expectedKeys.slice(0, hitCount), inventory,
+    expectedKeys,
+    hitKeys: inventory.shards.filter((shard) => shard.status === "hit")
+      .map((shard) => shard.cacheKey),
+    orphanKeys, inventory,
     auditReceipt, targetSelection
   };
 }

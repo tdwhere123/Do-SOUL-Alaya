@@ -237,6 +237,33 @@ describe("garden HTTP typed transport failures", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect((authorityFailure as { readonly benchRetry?: unknown }).benchRetry).toBeUndefined();
   });
+
+  it("preserves prior transport failures when a later reservation is rejected", async () => {
+    const authorityFailure = new Error("authority attempt cap reached");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("limited", { status: 429 })
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    let reservations = 0;
+
+    const error = await captureExtractorFailure(extractor, {
+      onTransportAttempt: () => {
+        reservations += 1;
+        if (reservations > 1) throw authorityFailure;
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(error).toMatchObject({ cause: authorityFailure });
+    expect(readBenchRetry(error)).toMatchObject({ retryCount: 0, rateLimitRetries: 1 });
+    expect(readTransportFailures(error)).toMatchObject([{
+      kind: "http_error", httpStatus: 429, attempt: 1
+    }]);
+  });
 });
 
 function jsonResponse(body: unknown): Response {
@@ -270,6 +297,7 @@ async function captureExtractorFailure(
     readonly timeoutMs?: number;
     readonly abortSignal?: AbortSignal;
     readonly retryMode?: "default" | "disabled";
+    readonly onTransportAttempt?: () => void | Promise<void>;
   } = {}
 ): Promise<unknown> {
   try {

@@ -42,6 +42,7 @@ export function prepareAuthorityContinuation(input: {
   readonly predecessorAuthorityPath: string | undefined;
   readonly cacheRoot: string;
   readonly inspection: ExtractionAuthorityInspection;
+  readonly predecessorBaseInspection?: ExtractionAuthorityInspection;
   readonly targetSelection: ExtractionTargetSelectionReceipt | undefined;
   readonly dependencies?: AuthorityContinuationDependencies;
 }): PreparedAuthorityContinuation | undefined {
@@ -67,7 +68,10 @@ export function prepareAuthorityContinuation(input: {
     predecessor,
     predecessorLedger,
     targetSelection: input.targetSelection,
-    inspection: input.inspection
+    inspection: input.inspection,
+    ...(input.predecessorBaseInspection === undefined ? {} : {
+      predecessorBaseInspection: input.predecessorBaseInspection
+    })
   });
   return Object.freeze({ predecessor, predecessorLedger, evidence });
 }
@@ -107,6 +111,7 @@ export function persistContinuationAuthority(input: {
     predecessorLedgerSha256: livePredecessor.ledgerSha256,
     predecessorRawLedgerSha256: livePredecessor.rawLedgerSha256,
     successorLineageDigest: input.receipt.lineage_digest,
+    successorMaximumAttempts: input.receipt.limits.maximum_attempts,
     cacheIdentity: {
       model: input.receipt.observation.extraction.model,
       requestProfile: input.receipt.observation.extraction.requestProfile

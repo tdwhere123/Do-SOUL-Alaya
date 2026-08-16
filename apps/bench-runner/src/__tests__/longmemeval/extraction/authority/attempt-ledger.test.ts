@@ -200,6 +200,43 @@ describe("extraction attempt ledger transport mapping", () => {
     expect(JSON.parse(persisted)).toMatchObject({ schema_version: 5 });
     expect(persisted).not.toMatch(/must-not-persist|secret\.invalid|authorization|private stack/u);
   });
+
+  it("settles multiple successful partition requests into one durable shard", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "8".repeat(64);
+    const cacheKey = key("7");
+    const ledger = openLedger(lineageDigest, 4, 4, 1);
+    for (let index = 0; index < 4; index += 1) ledger.reserveAttempt(cacheKey);
+
+    ledger.recordTransportOutcome(cacheKey, {
+      retryCount: 2,
+      rateLimitRetries: 0,
+      successfulRequestCount: 2,
+      usageRequestCount: 2,
+      transportFailures: [failureAttempt(1, "d"), failureAttempt(3, "e")],
+      usage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 }
+    });
+    await writeValidShard(cacheKey);
+    ledger.commitSuccessfulShard(cacheKey);
+
+    expect(ledger.snapshot()).toMatchObject({
+      attempts: 4,
+      successfulShards: 1,
+      pendingKeys: [],
+      unresolvedAttempts: [],
+      transportFailures: [
+        expect.objectContaining({ attemptOrdinal: 1, cacheKey, fingerprint: key("d") }),
+        expect.objectContaining({ attemptOrdinal: 3, cacheKey, fingerprint: key("e") })
+      ],
+      telemetry: {
+        retrySuccesses: 1,
+        inputTokens: 40,
+        outputTokens: 12,
+        totalTokens: 52,
+        usageUnavailableRequests: 2
+      }
+    });
+  });
 });
 
 describe("extraction attempt ledger transport validation", () => {
@@ -218,7 +255,7 @@ describe("extraction attempt ledger transport validation", () => {
     expect(() => ledger.recordTransportOutcome(cacheKey, {
       retryCount: 1,
       rateLimitRetries: 0,
-      transportFailures: [failureAttempt(2, "d")]
+      transportFailures: [failureAttempt(3, "d")]
     })).toThrow(/ordered|attempt/u);
     expect(ledger.snapshot()).toMatchObject({
       attempts: 2,

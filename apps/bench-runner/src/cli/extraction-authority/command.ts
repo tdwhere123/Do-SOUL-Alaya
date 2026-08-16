@@ -7,8 +7,10 @@ import {
   type ExtractionAuthorityInspection
 } from "../../longmemeval/extraction/authority/inspection.js";
 import {
+  assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt,
-  computeExtractionAuthorityLineageDigest
+  computeExtractionAuthorityLineageDigest,
+  readExtractionAuthorityReceipt
 } from "../../longmemeval/extraction/authority/receipt.js";
 import {
   createFreshDirectDeepSeek500Authorization,
@@ -23,7 +25,10 @@ import {
   requiresExtractionTargetSelection,
   type ExtractionTargetSelectionReceipt
 } from "../../longmemeval/extraction/authority/target-selection/receipt.js";
-import { readExtractionAttemptLedger } from
+import {
+  readExtractionAttemptLedger,
+  readSettledExtractionAttemptLedger
+} from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
 import { createExtractionRepairScope } from
   "../../longmemeval/extraction/authority/repair/repair-scope.js";
@@ -44,6 +49,8 @@ import {
 } from "./continuation.js";
 import { sameRootContinuationMode } from
   "../../longmemeval/extraction/authority/continuation/contract.js";
+import { continuationPredecessorNewSuccessfulKeys } from
+  "../../longmemeval/extraction/authority/continuation/predecessor-state.js";
 import {
   publishAuthorizedExtractionReceipt,
   type AuthorityPublicationDependencies
@@ -105,9 +112,10 @@ async function buildAuthorizedReceipt(
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
   const directSpend = createDirectSpend(authority, flags, cacheRoot, deps);
   onFreshDirectSpend(directSpend, cacheRoot);
-  const { inspection, ledger, inspectInput } = await inspectAuthorityForReceipt(
-    flags, authority, cacheRoot, deps
-  );
+  const { inspection, ledger, inspectInput, predecessorBaseInspection } =
+    await inspectAuthorityForReceipt(
+      flags, authority, cacheRoot, deps
+    );
   assertInspectableAuthority(inspection, authority);
   const catalogRefillScope = flags.catalogRefillAllowlist === undefined
     ? undefined
@@ -118,7 +126,7 @@ async function buildAuthorizedReceipt(
     });
   return finishAuthorizedReceipt({
     authority, flags, cacheRoot, directSpend, inspection, ledger, inspectInput,
-    catalogRefillScope, deps
+    catalogRefillScope, predecessorBaseInspection, deps
   });
 }
 
@@ -131,6 +139,7 @@ function finishAuthorizedReceipt(input: {
   readonly ledger: ReturnType<typeof readExtractionAttemptLedger>;
   readonly inspectInput: Parameters<typeof inspectExtractionAuthority>[0];
   readonly catalogRefillScope: ExtractionCatalogRefillScope | undefined;
+  readonly predecessorBaseInspection: ExtractionAuthorityInspection | undefined;
   readonly deps: AuthorizeExtractionDependencies;
 }) {
   const targetSelection = readTargetSelection(
@@ -145,6 +154,9 @@ function finishAuthorizedReceipt(input: {
       predecessorAuthorityPath: input.authority.predecessorAuthorityPath,
       cacheRoot: input.cacheRoot,
       inspection: input.inspection,
+      ...(input.predecessorBaseInspection === undefined ? {} : {
+        predecessorBaseInspection: input.predecessorBaseInspection
+      }),
       targetSelection,
       dependencies: input.deps
     })
@@ -268,13 +280,52 @@ async function inspectAuthorityForReceipt(
   } as const;
   const inspect = deps.inspect ?? inspectExtractionAuthority;
   const initial = await inspect(inspectInput);
+  const predecessorProgress = readContinuationPredecessorProgress(
+    authority.predecessorAuthorityPath, cacheRoot, deps
+  );
   const ledger = (deps.readLedger ?? readExtractionAttemptLedger)(ledgerReadInput(
     cacheRoot, initial.observation
   ));
-  const inspection = ledger === undefined
+  const inspection = ledger === undefined || authority.predecessorAuthorityPath !== undefined
     ? initial
     : await inspect({ ...inspectInput, excludeContentClosureKeys: ledger.successfulKeys });
-  return Object.freeze({ inspection, ledger, inspectInput });
+  const predecessorBaseInspection = predecessorProgress === undefined
+    ? undefined
+    : predecessorProgress.successfulKeys.length === 0
+      ? initial
+      : await inspect({
+        ...inspectInput,
+        excludeContentClosureKeys: predecessorProgress.successfulKeys,
+        preservedValidExclusionKeys: predecessorProgress.successfulKeys
+      });
+  return Object.freeze({ inspection, ledger, inspectInput, predecessorBaseInspection });
+}
+
+function readContinuationPredecessorProgress(
+  predecessorAuthorityPath: string | undefined,
+  cacheRoot: string,
+  deps: AuthorizeExtractionDependencies
+): { readonly successfulKeys: readonly string[] } | undefined {
+  if (predecessorAuthorityPath === undefined) return undefined;
+  const predecessor = (deps.readPredecessorAuthority ?? readExtractionAuthorityReceipt)(
+    predecessorAuthorityPath
+  );
+  assertExtractionAuthorityReceipt(predecessor, predecessor.observation);
+  const ledger = (deps.readSettledLedger ?? readSettledExtractionAttemptLedger)({
+    cacheRoot,
+    lineageDigest: predecessor.lineage_digest,
+    cacheIdentity: {
+      model: predecessor.observation.extraction.model,
+      requestProfile: predecessor.observation.extraction.requestProfile
+    }
+  });
+  if (predecessor.catalog_refill !== undefined) {
+    return Object.freeze({ successfulKeys: ledger.successfulKeys });
+  }
+  if (predecessor.continuation === undefined) return undefined;
+  return Object.freeze({
+    successfulKeys: continuationPredecessorNewSuccessfulKeys(predecessor, ledger)
+  });
 }
 
 function ledgerReadInput(
@@ -316,7 +367,8 @@ function createReceipt(
     }
     : {
       startingMissing: inheritedLedger.startingMissing,
-      maximumAttempts: inheritedLedger.maximumAttempts,
+      maximumAttempts: continuation?.evidence.successor_maximum_attempts ??
+        inheritedLedger.maximumAttempts,
       successfulShardCeiling: inheritedLedger.successfulShardCeiling
     };
   return createExtractionAuthorityReceipt(buildReceiptInput({

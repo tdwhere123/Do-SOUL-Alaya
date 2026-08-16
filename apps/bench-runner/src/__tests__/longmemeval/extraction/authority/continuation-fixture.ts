@@ -16,6 +16,8 @@ import {
   createExtractionAuthorityReceipt,
   type ExtractionAuthorityObservation
 } from "../../../../longmemeval/extraction/authority/receipt.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../../longmemeval/extraction/authority/receipt-limits.js";
 import { createExtractionPreservedValidClosure } from
   "../../../../longmemeval/extraction/authority/repair/preserved-valid-closure.js";
 import {
@@ -226,7 +228,7 @@ export function spendLegacySuccessor(scenario: ContinuationScenario): void {
     lineageDigest: scenario.successorReceipt.lineage_digest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   recordFailedAttempt(ledger, secondKey, "8".repeat(64));
@@ -265,7 +267,8 @@ function persistGrandchild(
     predecessor: scenario.successorReceipt,
     predecessorLedger,
     targetSelection: selection,
-    inspection
+    inspection,
+    predecessorBaseInspection: scenario.inspection
   });
   const receipt = createReceipt({
     observation: observationValue,
@@ -287,7 +290,7 @@ export function addFailedPredecessorAttempt(scenario: ContinuationScenario): voi
     lineageDigest: scenario.predecessorReceipt.lineage_digest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   recordFailedAttempt(ledger, secondKey, "7".repeat(64));
@@ -299,7 +302,7 @@ function seedSuccessfulPredecessor(cacheRoot: string, lineageDigest: string): vo
     lineageDigest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   ledger.reserveAttempt(firstKey);
@@ -396,7 +399,7 @@ function continuationInspection(
   };
 }
 
-function createReceipt(input: {
+export function createReceipt(input: {
   readonly observation: ExtractionAuthorityObservation;
   readonly targetSelectionDigest: string;
   readonly continuation?: Parameters<typeof createExtractionAuthorityReceipt>[0]["continuation"];
@@ -409,7 +412,7 @@ function createReceipt(input: {
     targetSelectionDigest: input.targetSelectionDigest,
     cumulativeLimits: {
       startingMissing: 2,
-      maximumAttempts: 10,
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
       successfulShardCeiling: 2
     },
     outputTokenCap: { field: "max_tokens", value: input.outputTokenCap ?? 512 },

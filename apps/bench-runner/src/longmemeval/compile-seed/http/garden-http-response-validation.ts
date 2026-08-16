@@ -1,4 +1,5 @@
 import type { ChatCompletionResponseInspection } from "../../extraction/chat-completion-response.js";
+import type { BenchProviderUsage } from "../compile-seed-types.js";
 import {
   markOutputTokenTruncation
 } from "./output-token-retry.js";
@@ -13,17 +14,21 @@ export function extractValidGardenHttpContent(
       new Error("garden extraction stopped at the provider output-token limit")
     ), {
       kind: "response_schema_error",
-      phase: "response_schema"
+      phase: "response_schema",
+      ...(response.usage === undefined ? {} : { usage: response.usage })
     });
   }
   const content = response.content;
   if (content.trim().length === 0) {
     throw markGardenHttpFailure(new Error("garden extraction returned no content"), {
       kind: "empty_response",
-      phase: "response_schema"
+      phase: "response_schema",
+      ...(response.usage === undefined ? {} : { usage: response.usage })
     });
   }
-  if (validation === "default_envelope") validateDefaultSignalsEnvelope(content);
+  if (validation === "default_envelope") {
+    validateDefaultSignalsEnvelope(content, response.usage);
+  }
   return content;
 }
 
@@ -42,7 +47,10 @@ export function buildGardenHttpAttemptResponse(
   };
 }
 
-function validateDefaultSignalsEnvelope(content: string): void {
+function validateDefaultSignalsEnvelope(
+  content: string,
+  usage: BenchProviderUsage | undefined
+): void {
   try {
     inspectSignalsEnvelope(content);
   } catch (parseError) {
@@ -53,7 +61,8 @@ function validateDefaultSignalsEnvelope(content: string): void {
     ), {
       kind: "response_parse_error",
       phase: "response_parse",
-      rawBody: content
+      rawBody: content,
+      ...(usage === undefined ? {} : { usage })
     });
   }
 }

@@ -52,9 +52,9 @@ export interface BenchSignalExtractor {
   }): Promise<{
     readonly rawJson: string;
     readonly extractorMeta?: BenchSignalExtractorMeta;
-    /** Keeps adaptive backoff from losing earlier 429s when strict-empty performs a second call. */
+    /** Keeps task-level backoff aware of earlier calls composed by the cache layer. */
     readonly taskRateLimitRetries?: number;
-    /** Exact provider-reported request usage, never locally estimated. */
+    /** Exact provider-reported usage summed across represented physical requests. */
     readonly usage?: BenchProviderUsage;
     /** Provider completion metadata bound to the exact successful attempt. */
     readonly responseMetadata?: BenchProviderResponseMetadata;
@@ -95,6 +95,8 @@ export interface BenchTransportFailureAttempt {
   readonly phase: BenchTransportFailurePhase;
   readonly httpStatus: number | null;
   readonly fingerprint: string;
+  /** Exact usage when the provider returned a parseable HTTP response. */
+  readonly usage?: BenchProviderUsage;
   /** One-based HTTP attempt number within the current delegate.extract call. */
   readonly attempt: number;
 }
@@ -128,6 +130,10 @@ export interface BenchSignalExtractorMeta {
   readonly retryCount: number;
   readonly retryClassification: BenchRetryClassification;
   readonly rateLimitRetries: number;
+  /** Provider responses deterministically composed into this logical extraction. */
+  readonly successfulRequestCount?: number;
+  /** Provider responses represented by the aggregate usage totals. */
+  readonly usageRequestCount?: number;
   /** Ordered failures preceding the successful response; live HTTP always supplies this. */
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
 }

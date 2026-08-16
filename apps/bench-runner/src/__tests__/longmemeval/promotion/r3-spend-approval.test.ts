@@ -4,6 +4,11 @@ import {
   parseR3SpendApproval,
   verifyR3SpendApproval
 } from "../../../longmemeval/promotion/r3-spend-approval.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
+
+const STARTING_MISSING = 72_277;
+const MAXIMUM_ATTEMPTS = computeExtractionFillAttemptCeiling(STARTING_MISSING);
 
 describe("R3 spend approval", () => {
   it("accepts a fresh approval bound to qualified A/B diagnostics and exact 500Q target", () => {
@@ -48,7 +53,7 @@ describe("R3 spend approval", () => {
       ...fixture(), target: { ...fixture().target, selected_count: 501 }
     })).toThrow(/selected_count/u);
     expect(() => verifyR3SpendApproval({
-      ...fixture(), spend: { ...fixture().spend, maximum_attempts: 361386 }
+      ...fixture(), spend: { ...fixture().spend, maximum_attempts: MAXIMUM_ATTEMPTS + 1 }
     }, expectation())).toThrow(/transport attempt/u);
   });
 });
@@ -75,9 +80,9 @@ function fixture() {
       cache_identity_sha256: "3".repeat(64)
     },
     spend: {
-      starting_missing: 72277,
-      maximum_attempts: 361385,
-      successful_shard_ceiling: 72277,
+      starting_missing: STARTING_MISSING,
+      maximum_attempts: MAXIMUM_ATTEMPTS,
+      successful_shard_ceiling: STARTING_MISSING,
       estimated_cost_usd: 99.5,
       disk_floor_bytes: 1000000
     }
@@ -92,9 +97,9 @@ function expectation() {
     finalCacheIdentitySha256: "3".repeat(64),
     targetSelectionSha256: "4".repeat(64),
     targetSelectedCount: 500,
-    startingMissing: 72277,
-    maximumAttempts: 361385,
-    successfulShardCeiling: 72277,
+    startingMissing: STARTING_MISSING,
+    maximumAttempts: MAXIMUM_ATTEMPTS,
+    successfulShardCeiling: STARTING_MISSING,
     materialEffect: {
       paired_r_at_5: {
         answerable_count: 94 as const,

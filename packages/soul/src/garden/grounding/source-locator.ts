@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   buildSourceVerificationText,
+  isAmbiguousBareStandaloneAssertion,
   PREFERENCE_SOURCE_ASSERTION_MAX_CHARS,
   resolveAtomicSourceAssertion,
   resolveSourceAssertion,
@@ -71,7 +72,9 @@ export function buildOfficialApiSourceCorpus(
 export function buildOfficialApiSourceAssertions(
   sourceText: string
 ): readonly OfficialApiSourceAssertion[] {
-  return Object.freeze(indexSourceAssertions(sourceText).map(({ assertion_id, text }) =>
+  const assertions = indexSourceAssertions(sourceText);
+  if (assertions.length === 1 && isAmbiguousBareStandaloneAssertion(assertions[0]!.text)) return [];
+  return Object.freeze(assertions.map(({ assertion_id, text }) =>
     Object.freeze({ assertion_id, text })
   ));
 }

@@ -2,27 +2,31 @@ import { describe, expect, it } from "vitest";
 import {
   resolveExtractionFillProviderTimeBudget
 } from "../../../longmemeval/extraction/fill/policy/provider-time-budget.js";
+import { EXTRACTION_REQUEST_TIMEOUT_MS } from
+  "../../../longmemeval/compile-seed/compile-seed-http.js";
+import { EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 
 describe("extraction provider time budget", () => {
   it("keeps the default budget for one output-token quantum", () => {
-    expect(resolveExtractionFillProviderTimeBudget()).toEqual({
-      requestTimeoutMs: 60_000,
-      providerWallClockBudgetMs: 333_000
-    });
-    expect(resolveExtractionFillProviderTimeBudget(2_048)).toEqual({
-      requestTimeoutMs: 60_000,
-      providerWallClockBudgetMs: 333_000
-    });
+    const defaultBudget = resolveExtractionFillProviderTimeBudget();
+    expect(defaultBudget).toEqual(resolveExtractionFillProviderTimeBudget(2_048));
+    expect(defaultBudget.requestTimeoutMs).toBe(EXTRACTION_REQUEST_TIMEOUT_MS);
+    expect(defaultBudget.providerWallClockBudgetMs).toBeGreaterThan(
+      defaultBudget.requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD
+    );
   });
 
   it("scales from the authority-bound output ceiling without wall-clock waiting", () => {
-    expect(resolveExtractionFillProviderTimeBudget(8_192)).toEqual({
-      requestTimeoutMs: 240_000,
-      providerWallClockBudgetMs: 1_233_000
-    });
-    expect(resolveExtractionFillProviderTimeBudget(16_384)).toEqual({
-      requestTimeoutMs: 480_000,
-      providerWallClockBudgetMs: 2_433_000
-    });
+    const base = resolveExtractionFillProviderTimeBudget(2_048);
+    const overhead = base.providerWallClockBudgetMs -
+      base.requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD;
+    for (const multiplier of [4, 8]) {
+      const budget = resolveExtractionFillProviderTimeBudget(2_048 * multiplier);
+      expect(budget.requestTimeoutMs).toBe(EXTRACTION_REQUEST_TIMEOUT_MS * multiplier);
+      expect(budget.providerWallClockBudgetMs).toBe(
+        budget.requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD + overhead
+      );
+    }
   });
 });

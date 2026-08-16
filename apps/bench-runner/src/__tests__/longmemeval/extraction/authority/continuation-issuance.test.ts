@@ -26,6 +26,7 @@ import {
   cleanupContinuationRoots,
   createAuthorityRenewalScenario,
   createContinuationScenario,
+  createReceipt,
   createSiblingReceipt,
   persistScenario,
   readSuccessorLedger
@@ -139,7 +140,8 @@ describe("same-root continuation issuance", () => {
     persistScenario(scenario);
     const ledger = readSuccessorLedger(scenario)!;
     expect(scenario.continuation.predecessor).toMatchObject({
-      attempts_consumed: 1, remaining_attempts: 9,
+      attempts_consumed: 1,
+      remaining_attempts: scenario.predecessorReceipt.limits.maximum_attempts - 1,
       successful_shards: 1, remaining_successful_shards: 1
     });
     expect(() => assertExtractionAuthorityHasNoContinuationChild({
@@ -181,6 +183,32 @@ describe("same-root continuation issuance", () => {
       receipt: createSiblingReceipt(scenario),
       prepared: scenario.prepared
     })).toThrow(/sibling child/u);
+  });
+
+  it("validates a schema-6 continuation against its signed receipt ceiling", () => {
+    const scenario = createContinuationScenario();
+    const { successor_maximum_attempts: _removed, ...current } = scenario.continuation;
+    const continuation = { ...current, schema_version: 6 as const };
+    const receipt = createReceipt({
+      observation: scenario.successorObservation,
+      targetSelectionDigest: scenario.successorSelection.receipt_digest,
+      continuation
+    });
+    const successorLedger = {
+      ...scenario.predecessorLedger,
+      lineageDigest: receipt.lineage_digest,
+      maximumAttempts: receipt.limits.maximum_attempts
+    };
+
+    expect(() => assertSameRootExtractionContinuationRuntime({
+      cacheRoot: scenario.cacheRoot,
+      receipt,
+      predecessor: scenario.predecessorReceipt,
+      predecessorLedger: scenario.predecessorLedger,
+      successorLedger,
+      targetSelection: scenario.successorSelection,
+      inspection: scenario.inspection
+    })).not.toThrow();
   });
 });
 

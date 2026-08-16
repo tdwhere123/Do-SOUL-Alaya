@@ -18,6 +18,8 @@ import { readStableRegularFileNoFollow } from "./descriptor-io.js";
 import type { MaterializationShardDescriptor } from "./contract.js";
 import { decodeCanonicalUtf8Artifact } from "../bounded-artifact-reader.js";
 import { isStableLeasePath } from "../../fill/manifest/fill-root-guard.js";
+import { SEMANTIC_QUARANTINE_REASON } from
+  "../quarantine/semantic-quarantine.js";
 
 export function inspectBoundedMaterializationInventory(input: {
   readonly sourceRoot: string;
@@ -40,20 +42,24 @@ export function inspectBoundedMaterializationInventory(input: {
     model: input.model, requestProfile: input.requestProfile
   });
   const expected = new Set(auditedKeys);
-  const inspected = input.audited.shards.map((shard) => inspectShard(input, shard.cacheKey));
+  const inspected = input.audited.shards.map((shard) => inspectShard(input, shard));
   const shards = inspected.map((entry) => entry.shard);
-  const discoveredRetiredKeys = discovered.orphanKeys.filter((key) => !expected.has(key));
-  if (!sameStrings(discoveredRetiredKeys, input.audited.retiredKeys)) {
-    throw new Error("live source retired-key set changed since cache audit");
+  const discoveredExtraKeys = discovered.orphanKeys.filter((key) => !expected.has(key));
+  const auditedExtraKeys = [
+    ...input.audited.orphanKeys,
+    ...input.audited.retiredKeys
+  ].sort((left, right) => left.localeCompare(right));
+  if (!sameStrings(discoveredExtraKeys, auditedExtraKeys)) {
+    throw new Error("live source extra-key set changed since cache audit");
   }
-  const orphanKeys: readonly string[] = [];
   return Object.freeze({
     inventory: Object.freeze({
-      shards: Object.freeze(shards), orphanKeys: Object.freeze(orphanKeys),
+      shards: Object.freeze(shards),
+      orphanKeys: Object.freeze(input.audited.orphanKeys),
       retiredKeys: Object.freeze(input.audited.retiredKeys),
       controlArtifactPaths: discovered.controlArtifactPaths,
       unexpectedPaths: discovered.unexpectedPaths,
-      counts: Object.freeze(countsFor(shards, orphanKeys))
+      counts: Object.freeze(countsFor(shards, input.audited.orphanKeys))
     }),
     descriptors: Object.freeze(inspected.flatMap((entry) =>
       entry.descriptor === undefined ? [] : [entry.descriptor]
@@ -63,8 +69,9 @@ export function inspectBoundedMaterializationInventory(input: {
 
 function inspectShard(
   input: Parameters<typeof inspectBoundedMaterializationInventory>[0],
-  cacheKey: string
+  audited: ExtractionCacheShard
 ): { readonly shard: ExtractionCacheShard; readonly descriptor?: MaterializationShardDescriptor } {
+  const cacheKey = audited.cacheKey;
   const path = cacheFilePath(input.sourceRoot, cacheKey);
   if (!existsNoFollow(path)) return { shard: Object.freeze({ cacheKey, status: "missing" }) };
   if (!isStableLeasePath(path) && realpathSync(path) !== path) {
@@ -72,6 +79,10 @@ function inspectShard(
   }
   const read = readStableRegularFileNoFollow(path, input.maxShardBytes);
   const shard = inspectShardBytes(read.bytes, cacheKey, input.model, input.requestProfile);
+  if (audited.reason === SEMANTIC_QUARANTINE_REASON) {
+    assertSemanticQuarantineStillBound(audited, shard);
+    return { shard: audited };
+  }
   if (shard.status !== "hit" || shard.rawJsonSha256 === undefined) return { shard };
   return {
     shard,
@@ -80,6 +91,16 @@ function inspectShard(
       file_sha256: read.identity.sha256, byte_length: read.identity.byteLength
     })
   };
+}
+
+function assertSemanticQuarantineStillBound(
+  audited: ExtractionCacheShard,
+  live: ExtractionCacheShard
+): void {
+  if (audited.status !== "invalid" || audited.rawJsonSha256 === undefined ||
+      live.status !== "hit" || live.rawJsonSha256 !== audited.rawJsonSha256) {
+    throw new Error("semantically quarantined source shard changed since cache audit");
+  }
 }
 
 function inspectShardBytes(

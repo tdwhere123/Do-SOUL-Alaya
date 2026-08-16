@@ -49,6 +49,14 @@ interface StoredEvidenceRow {
   readonly source_hash?: string | null;
 }
 
+interface StoredSubstrateIndex {
+  readonly objectsByWorkspace: ReadonlyMap<string, ReadonlyMap<string, StoredObjectRow>>;
+  readonly evidenceByWorkspace: ReadonlyMap<string, ReadonlyMap<string, StoredEvidenceRow>>;
+}
+
+const EMPTY_STORED_OBJECTS: ReadonlyMap<string, StoredObjectRow> = new Map();
+const EMPTY_STORED_EVIDENCE: ReadonlyMap<string, StoredEvidenceRow> = new Map();
+
 export function assertSnapshotDatasetSubstrateIdentity(input: {
   readonly dbPath: string;
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
@@ -61,15 +69,20 @@ export function assertSnapshotDatasetSubstrateIdentity(input: {
   }
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
   try {
+    const substrate = readStoredSubstrateIndex(
+      db,
+      new Set(input.sidecar.questions.map((question) => question.workspaceId))
+    );
     input.sidecar.questions.forEach((sidecar, index) => {
       const source = input.questions[index];
       if (source === undefined) throw new Error("snapshot canonical question order mismatch");
       assertCanonicalQuestion(sidecar, source, input.runtimeIdentity ?? "canonical");
       assertQuestionObjectIdentity(
-        db,
         sidecar,
         source,
-        input.duplicateObjectLabel ?? "snapshot sidecar object"
+        input.duplicateObjectLabel ?? "snapshot sidecar object",
+        substrate.objectsByWorkspace.get(sidecar.workspaceId) ?? EMPTY_STORED_OBJECTS,
+        substrate.evidenceByWorkspace.get(sidecar.workspaceId) ?? EMPTY_STORED_EVIDENCE
       );
       assertDirectSourceEvidenceClosure({
         db,
@@ -108,19 +121,18 @@ function assertCanonicalQuestion(
 }
 
 function assertQuestionObjectIdentity(
-  db: DatabaseSync,
   sidecar: LongMemEvalSnapshotQuestion,
   source: LongMemEvalQuestion,
-  duplicateObjectLabel: string
+  duplicateObjectLabel: string,
+  stored: ReadonlyMap<string, StoredObjectRow>,
+  evidence: ReadonlyMap<string, StoredEvidenceRow>
 ): void {
   const expected = indexSidecarObjects(sidecar.sidecar, duplicateObjectLabel);
-  const stored = readStoredObjects(db, sidecar.workspaceId);
   const expectedStoredCount = [...expected.values()]
     .filter((entry) => entry.objectKind !== "evidence_capsule").length;
   if (stored.size !== expectedStoredCount) {
     throw new Error(`snapshot sidecar DB object count mismatch for ${sidecar.questionId}`);
   }
-  const evidence = readStoredEvidence(db, sidecar.workspaceId);
   assertNoMemoryEvidenceIdCollision(stored, evidence, sidecar.questionId);
   for (const entry of expected.values()) {
     if (entry.objectKind === "evidence_capsule") {
@@ -189,26 +201,45 @@ function indexSidecarObjects(
   return indexed;
 }
 
-function readStoredObjects(db: DatabaseSync, workspaceId: string) {
+function readStoredSubstrateIndex(
+  db: DatabaseSync,
+  expectedWorkspaces: ReadonlySet<string>
+): StoredSubstrateIndex {
+  return {
+    objectsByWorkspace: readStoredObjectsByWorkspace(db, expectedWorkspaces),
+    evidenceByWorkspace: readStoredEvidenceByWorkspace(db, expectedWorkspaces)
+  };
+}
+
+function readStoredObjectsByWorkspace(
+  db: DatabaseSync,
+  expectedWorkspaces: ReadonlySet<string>
+) {
   const rows = db.prepare(`
     SELECT object_id, object_kind, workspace_id, run_id, surface_id,
            NULL AS topic_key, evidence_refs
-      FROM memory_entries WHERE workspace_id = ?
+      FROM memory_entries
     UNION ALL
     SELECT object_id, object_kind, workspace_id, run_id, NULL AS surface_id,
            topic_key, evidence_refs
-      FROM synthesis_capsules WHERE workspace_id = ?
-  `).all(workspaceId, workspaceId) as unknown as readonly StoredObjectRow[];
-  const indexed = new Map<string, StoredObjectRow>();
+      FROM synthesis_capsules
+  `).all() as unknown as readonly StoredObjectRow[];
+  const indexed = new Map<string, Map<string, StoredObjectRow>>();
   for (const row of rows) {
+    if (!expectedWorkspaces.has(row.workspace_id)) continue;
+    const workspace = indexed.get(row.workspace_id) ?? new Map<string, StoredObjectRow>();
     const key = objectIdentity(row.object_kind, row.object_id);
-    if (indexed.has(key)) throw new Error(`ambiguous snapshot DB object ${key}`);
-    indexed.set(key, row);
+    if (workspace.has(key)) throw new Error(`ambiguous snapshot DB object ${key}`);
+    workspace.set(key, row);
+    indexed.set(row.workspace_id, workspace);
   }
   return indexed;
 }
 
-function readStoredEvidence(db: DatabaseSync, workspaceId: string) {
+function readStoredEvidenceByWorkspace(
+  db: DatabaseSync,
+  expectedWorkspaces: ReadonlySet<string>
+) {
   const sourceHash = db.prepare(`
     SELECT name FROM pragma_table_info('evidence_capsules')
      WHERE name = 'source_hash'
@@ -218,9 +249,19 @@ function readStoredEvidence(db: DatabaseSync, workspaceId: string) {
   const rows = db.prepare(`
     SELECT object_id, object_kind, workspace_id, run_id, surface_id,
            physical_anchor, ${sourceHash}
-      FROM evidence_capsules WHERE workspace_id = ?
-  `).all(workspaceId) as unknown as readonly StoredEvidenceRow[];
-  return new Map(rows.map((row) => [row.object_id, row]));
+      FROM evidence_capsules
+  `).all() as unknown as readonly StoredEvidenceRow[];
+  const indexed = new Map<string, Map<string, StoredEvidenceRow>>();
+  for (const row of rows) {
+    if (!expectedWorkspaces.has(row.workspace_id)) continue;
+    const workspace = indexed.get(row.workspace_id) ?? new Map<string, StoredEvidenceRow>();
+    if (workspace.has(row.object_id)) {
+      throw new Error(`ambiguous snapshot DB evidence ${row.object_id}`);
+    }
+    workspace.set(row.object_id, row);
+    indexed.set(row.workspace_id, workspace);
+  }
+  return indexed;
 }
 
 function assertStoredObjectIdentity(

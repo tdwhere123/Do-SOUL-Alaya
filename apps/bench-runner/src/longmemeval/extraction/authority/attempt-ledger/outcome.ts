@@ -14,6 +14,10 @@ import type {
 export interface ExtractionTransportOutcome {
   readonly retryCount: number;
   readonly rateLimitRetries: number;
+  readonly successfulRequestCount?: number;
+  readonly usageRequestCount?: number;
+  readonly unknownRequestCount?: number;
+  readonly postComposeFailure?: true;
   readonly terminalRetryClassification?: BenchTerminalRetryClassification;
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
   readonly usage?: BenchProviderUsage;
@@ -81,7 +85,9 @@ export function settleTransportOutcome(
   const failures = input.transportFailures ?? [];
   const terminal = input.terminalRetryClassification !== undefined;
   assertFailureCount(input, failures.length, terminal);
-  const currentReservationCount = failures.length + (terminal ? 0 : 1);
+  const successfulRequestCount = input.successfulRequestCount ?? (terminal ? 0 : 1);
+  const unknownRequestCount = input.unknownRequestCount ?? 0;
+  const currentReservationCount = failures.length + successfulRequestCount + unknownRequestCount;
   if (currentReservationCount === 0 || unresolved.length < currentReservationCount) {
     throw new ExtractionAttemptLimitError(
       "extraction outcome failure count does not match its latest reservations"
@@ -101,9 +107,11 @@ function mapTransportFailures(
       "extraction outcome failure count exceeds its latest reservations"
     );
   }
-  return failures.map((failure, index) => {
-    assertFailureAttempt(failure, index + 1);
-    const reservation = reservations[index];
+  let previousAttempt = 0;
+  return failures.map((failure) => {
+    assertFailureAttempt(failure, previousAttempt, reservations.length);
+    previousAttempt = failure.attempt;
+    const reservation = reservations[failure.attempt - 1];
     if (reservation === undefined) {
       throw new ExtractionAttemptLimitError("extraction outcome has no matching reservation");
     }
@@ -132,7 +140,8 @@ function applySettledOutcome(
         current.telemetry.terminal[input.terminalRetryClassification] + 1
     })
   };
-  const knownUsageAttempts = input.usage === undefined ? 0 : 1;
+  const knownUsageAttempts = input.usageRequestCount ??
+    (input.usage === undefined ? 0 : 1);
   const usage = input.usage;
   return {
     ...current,
@@ -143,7 +152,9 @@ function applySettledOutcome(
       .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal),
     telemetry: {
       retry_successes: current.telemetry.retry_successes +
-        (!terminalOutcome(input) && input.retryCount > 0 ? 1 : 0),
+        (!terminalOutcome(input) && input.postComposeFailure !== true && input.retryCount > 0
+          ? 1
+          : 0),
       rate_limit_retries: current.telemetry.rate_limit_retries + input.rateLimitRetries,
       terminal,
       input_tokens: current.telemetry.input_tokens + (usage?.inputTokens ?? 0),
@@ -173,8 +184,20 @@ function terminalOutcome(input: ExtractionTransportOutcome): boolean {
 }
 
 function assertOutcome(input: ExtractionTransportOutcome): void {
+  const terminal = input.terminalRetryClassification !== undefined;
+  const successfulRequestCount = input.successfulRequestCount ?? (terminal ? 0 : 1);
+  const usageRequestCount = input.usageRequestCount ?? (input.usage === undefined ? 0 : 1);
+  const unknownRequestCount = input.unknownRequestCount ?? 0;
   if (!isNonNegativeSafeInteger(input.retryCount) ||
       !isNonNegativeSafeInteger(input.rateLimitRetries) ||
+      !isNonNegativeSafeInteger(successfulRequestCount) ||
+      !isNonNegativeSafeInteger(unknownRequestCount) ||
+      (!terminal && input.postComposeFailure !== true &&
+        successfulRequestCount + unknownRequestCount < 1) ||
+      (terminal && input.postComposeFailure === true) ||
+      !isNonNegativeSafeInteger(usageRequestCount) ||
+      usageRequestCount > successfulRequestCount + input.retryCount + (terminal ? 1 : 0) ||
+      (input.usage === undefined && usageRequestCount !== 0) ||
       (input.transportFailures !== undefined && !Array.isArray(input.transportFailures)) ||
       (input.usage !== undefined && (!isNonNegativeSafeInteger(input.usage.inputTokens) ||
         !isNonNegativeSafeInteger(input.usage.outputTokens) ||
@@ -193,9 +216,11 @@ const FAILURE_PHASES = new Set<BenchTransportFailurePhase>([
 
 function assertFailureAttempt(
   failure: BenchTransportFailureAttempt,
-  expectedAttempt: number
+  previousAttempt: number,
+  requestCount: number
 ): void {
-  if (failure.attempt !== expectedAttempt || !FAILURE_KINDS.has(failure.kind) ||
+  if (!Number.isSafeInteger(failure.attempt) || failure.attempt <= previousAttempt ||
+      failure.attempt > requestCount || !FAILURE_KINDS.has(failure.kind) ||
       !FAILURE_PHASES.has(failure.phase) || !isHttpStatus(failure.httpStatus) ||
       !isDigest(failure.fingerprint)) {
     throw new ExtractionAttemptLimitError(

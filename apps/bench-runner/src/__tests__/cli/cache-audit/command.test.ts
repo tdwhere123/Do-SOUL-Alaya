@@ -24,6 +24,8 @@ import { buildExtractionOccurrenceIndex } from
   "../../../longmemeval/extraction/cache-audit/occurrence-index.js";
 import { buildLongMemEvalFixtureQuestion } from
   "../../longmemeval/longmemeval-fixture.js";
+import { withOpenSemanticFactorGraph } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -90,6 +92,56 @@ describe("audit-extraction-cache command", () => {
       rejected: 0,
       factKeyProjectionCount: 0
     });
+  });
+
+  it("quarantines inner-contract-invalid shards for refill without weakening replay closure", async () => {
+    const fixture = createFixture();
+    const quarantinedKey = fixture.occurrences[0]!.cacheKeys[0]!;
+    const signal = withOpenSemanticFactorGraph({
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      confidence: 0.8,
+      matched_text: "source fact"
+    });
+    writeShard(fixture.sourceRoot, quarantinedKey, JSON.stringify({ signals: [{
+      ...signal,
+      semantic_factor_graph: {
+        ...signal.semantic_factor_graph,
+        factors: [{
+          factor_id: "fact",
+          semantic_identity: "DIFFERENT IDENTITY",
+          surface: "source fact",
+          source_occurrence: 0
+        }]
+      }
+    }] }));
+    const stdout: string[] = [];
+    const args = commandArgs(fixture);
+    args[args.indexOf("--rebuild-cache-root") + 1] = fixture.targetRoot;
+
+    const code = await runAuditExtractionCacheCommand(args, {
+      now: () => "2026-07-17T00:00:00.000Z",
+      writeStdout: (text) => stdout.push(text)
+    });
+
+    const receipt = readExtractionCacheAuditReceipt(
+      join(fixture.auditOutput, "audit-receipt.json")
+    );
+    const rawInventory = JSON.parse(
+      readFileSync(join(fixture.auditOutput, "raw-inventory.json"), "utf8")
+    ) as { readonly inventory: { readonly shards: readonly {
+      readonly cacheKey: string;
+      readonly status: string;
+      readonly reason?: string;
+    }[] } };
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("raw=rebuild projection=replay");
+    expect(receipt.decision.projection.replay.invalid).toBe(0);
+    expect(rawInventory.inventory.shards).toContainEqual(expect.objectContaining({
+      cacheKey: quarantinedKey,
+      status: "invalid",
+      reason: "projection_replay_invalid"
+    }));
   });
 
   it("refuses any scope other than the authorized offline 100Q replay", async () => {
@@ -201,17 +253,24 @@ function createFixture() {
     builder: "test"
   }, null, 2)}\n`;
   writeFileSync(join(sourceRoot, "manifest.json"), manifestRaw, "utf8");
-  return { root, dataDir, pinnedMetaRoot, sourceRoot, targetRoot, auditOutput, manifestRaw };
+  return {
+    root, dataDir, pinnedMetaRoot, sourceRoot, targetRoot, auditOutput,
+    manifestRaw, occurrences
+  };
 }
 
-function writeShard(cacheRoot: string, cacheKey: string): void {
+function writeShard(
+  cacheRoot: string,
+  cacheKey: string,
+  rawJson = JSON.stringify({ signals: [] })
+): void {
   const path = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, JSON.stringify({
     cache_key: cacheKey,
     model,
     request_profile: requestProfile,
-    raw_json: JSON.stringify({ signals: [] })
+    raw_json: rawJson
   }), "utf8");
 }
 

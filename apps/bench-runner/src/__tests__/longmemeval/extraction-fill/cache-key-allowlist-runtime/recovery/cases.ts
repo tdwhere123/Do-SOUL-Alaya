@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
@@ -109,7 +109,6 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     expect(fixture.controlArtifacts(".catalog-refill-resume.")).toEqual([]);
     const staleLock = join(roots.cacheRoot, ".extraction-fill.lock");
     expect(existsSync(staleLock)).toBe(true);
-    rmSync(staleLock, { recursive: true });
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       expect(fixture.controlArtifacts(".catalog-refill-resume.")).toHaveLength(1);
       await input.onTransportAttempt?.();

@@ -6,6 +6,8 @@ import type { ExtractionTargetSelectionReceipt } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -82,7 +84,9 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
     receipt_digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
     target_selection_digest: "9".repeat(64)
   });
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("attempt_cap=10"));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining(
+    `attempt_cap=${computeExtractionFillAttemptCeiling(2)}`
+  ));
 });
 
 it("does not require target selection outside the canonical longmemeval_s windows", async () => {
@@ -115,7 +119,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   const ledger = {
     lineageDigest: "f".repeat(64),
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2,
     attempts: 1,
     successfulShards: 1,
@@ -156,13 +160,60 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     limits: {
       starting_missing: 2,
-      maximum_attempts: 10,
+      maximum_attempts: computeExtractionFillAttemptCeiling(2),
       successful_shard_ceiling: 2
     },
     observation: {
       extraction: { rawContentClosureSha256: "b".repeat(64) }
     }
   });
+});
+
+it("keeps the full predecessor closure when authorizing a same-root continuation", async () => {
+  const inspect = vi.fn(async () => authorityInspection("a".repeat(64)));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runAuthorizeExtractionCommand([
+    ...authorizeArgs(),
+    "--extraction-predecessor-authority", "/tmp/missing-parent.json"
+  ], {
+    inspect,
+    readRevision: () => "a".repeat(40),
+    readLedger: () => ({
+      lineageDigest: "f".repeat(64),
+      startingMissing: 2,
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
+      successfulShardCeiling: 2,
+      attempts: 1,
+      successfulShards: 1,
+      successfulKeys: ["1".repeat(64)],
+      pendingKeys: [],
+      telemetry: {
+        retrySuccesses: 0,
+        rateLimitRetries: 0,
+        terminalRetryClassifications: {
+          failure_max_retries: 0,
+          failure_non_retryable_4xx: 0,
+          failure_timeout: 0,
+          failure_aborted: 0
+        },
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        usageUnavailableRequests: 0,
+        unresolvedTransportAttempts: 0,
+        usageUnknownAttempts: 0
+      }
+    }),
+    ...targetSelectionDependencies()
+  });
+
+  expect(exitCode).toBe(2);
+  expect(inspect).toHaveBeenCalledOnce();
+  expect(inspect).toHaveBeenCalledWith(expect.not.objectContaining({
+    excludeContentClosureKeys: expect.anything()
+  }));
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("missing-parent.json"));
 });
 
 it("writes a direct DeepSeek 500 receipt only after explicit operator authorization", async () => {

@@ -1,6 +1,8 @@
 import type { BenchSignalExtractor } from "../compile-seed-types.js";
 
-const INITIAL_EXTRACTION_OUTPUT_TOKENS = 2048;
+export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
+export const EXTRACTION_OUTPUT_TOKEN_QUANTUM = 2_048;
+
 type GardenHttpExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
 export function withAttemptOutputTokenLimit(
@@ -10,8 +12,15 @@ export function withAttemptOutputTokenLimit(
   if (input.maxOutputTokens === undefined) return input;
   const maxOutputTokens = useCeiling
     ? input.maxOutputTokens
-    : Math.min(INITIAL_EXTRACTION_OUTPUT_TOKENS, input.maxOutputTokens);
+    : Math.min(EXTRACTION_OUTPUT_TOKEN_QUANTUM, input.maxOutputTokens);
   return { ...input, maxOutputTokens };
+}
+
+export function resolveAttemptIdleTimeoutMs(input: GardenHttpExtractInput): number {
+  return Math.min(
+    input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS,
+    EXTRACTION_REQUEST_TIMEOUT_MS
+  );
 }
 
 export function markOutputTokenTruncation(error: Error): Error {

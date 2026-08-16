@@ -1,12 +1,14 @@
 import {
-  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS,
+  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS
+} from "../../../compile-seed/http/garden-http-retry-policy.js";
+import {
+  EXTRACTION_OUTPUT_TOKEN_QUANTUM,
   EXTRACTION_REQUEST_TIMEOUT_MS
-} from "../../../compile-seed/compile-seed-http.js";
+} from "../../../compile-seed/http/output-token-retry.js";
 import {
   EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD
 } from "../../authority/receipt-limits.js";
 
-const OUTPUT_TOKEN_TIMEOUT_QUANTUM = 2_048;
 const PROVIDER_WALL_CLOCK_GRACE_MS = 30_000;
 
 export interface ExtractionFillProviderTimeBudget {
@@ -15,13 +17,13 @@ export interface ExtractionFillProviderTimeBudget {
 }
 
 export function resolveExtractionFillProviderTimeBudget(
-  maxOutputTokens = OUTPUT_TOKEN_TIMEOUT_QUANTUM
+  maxOutputTokens = EXTRACTION_OUTPUT_TOKEN_QUANTUM
 ): ExtractionFillProviderTimeBudget {
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1) {
     throw new Error("extraction output-token ceiling must be a positive integer");
   }
   const requestTimeoutMs = EXTRACTION_REQUEST_TIMEOUT_MS * Math.ceil(
-    maxOutputTokens / OUTPUT_TOKEN_TIMEOUT_QUANTUM
+    maxOutputTokens / EXTRACTION_OUTPUT_TOKEN_QUANTUM
   );
   const providerWallClockBudgetMs =
     requestTimeoutMs * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD +

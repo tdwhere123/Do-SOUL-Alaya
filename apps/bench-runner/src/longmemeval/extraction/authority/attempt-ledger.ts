@@ -113,6 +113,7 @@ export function forkSettledExtractionAttemptLedger(input: {
   readonly predecessorLineageDigest: string;
   readonly predecessorLedgerSha256: string;
   readonly successorLineageDigest: string;
+  readonly successorMaximumAttempts?: number;
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
 }): ExtractionAttemptLedgerSnapshot {
   assertDigest(input.successorLineageDigest);
@@ -127,7 +128,9 @@ export function forkSettledExtractionAttemptLedger(input: {
     throw new Error("predecessor extraction attempt ledger changed before continuation fork");
   }
   assertSuccessfulShards(input.cacheRoot, predecessor);
-  const successor = { ...predecessor, lineage_digest: input.successorLineageDigest };
+  const successor = successorForkRecord(
+    predecessor, input.successorLineageDigest, input.successorMaximumAttempts
+  );
   persistAttemptLedgerRecordExclusive(
     ledgerPath(input.cacheRoot, input.successorLineageDigest), successor
   );
@@ -140,6 +143,7 @@ export function ensureForkedExtractionAttemptLedger(input: {
   readonly predecessorLedgerSha256: string;
   readonly predecessorRawLedgerSha256: string;
   readonly successorLineageDigest: string;
+  readonly successorMaximumAttempts?: number;
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
 }): ExtractionAttemptLedgerSnapshot {
   assertDigest(input.successorLineageDigest);
@@ -156,7 +160,9 @@ export function ensureForkedExtractionAttemptLedger(input: {
     throw new Error("predecessor extraction attempt ledger changed before continuation fork");
   }
   assertSuccessfulShards(input.cacheRoot, predecessor);
-  const successor = { ...predecessor, lineage_digest: input.successorLineageDigest };
+  const successor = successorForkRecord(
+    predecessor, input.successorLineageDigest, input.successorMaximumAttempts
+  );
   const successorPath = ledgerPath(input.cacheRoot, input.successorLineageDigest);
   try {
     persistAttemptLedgerRecordExclusive(successorPath, successor);
@@ -169,6 +175,25 @@ export function ensureForkedExtractionAttemptLedger(input: {
   }
   assertSuccessfulShards(input.cacheRoot, successor);
   return toSnapshot(successor, successorPath);
+}
+
+function successorForkRecord(
+  predecessor: ExtractionAttemptLedgerRecord,
+  successorLineageDigest: string,
+  successorMaximumAttempts: number | undefined
+): ExtractionAttemptLedgerRecord {
+  const maximumAttempts = successorMaximumAttempts ?? predecessor.maximum_attempts;
+  const derivedMaximum = computeExtractionAttemptCeiling(predecessor.starting_missing);
+  if (!Number.isSafeInteger(maximumAttempts) ||
+      maximumAttempts < predecessor.maximum_attempts ||
+      maximumAttempts > derivedMaximum) {
+    throw new Error("successor extraction attempt ceiling is not a monotonic bounded expansion");
+  }
+  return {
+    ...predecessor,
+    lineage_digest: successorLineageDigest,
+    maximum_attempts: maximumAttempts
+  };
 }
 
 export function discardPristineForkedExtractionAttemptLedger(input: {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, statfsSync } from "node:fs";
+import { lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
@@ -28,8 +28,9 @@ import {
 } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
+import { inspectExtractionCacheWriterLock } from
+  "../fill/manifest/fill-root-guard.js";
 
-const WRITE_LOCK_DIRECTORY = ".extraction-fill.lock";
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 
 export interface ExtractionAuthorityInspection {
@@ -189,7 +190,7 @@ function buildExtractionAuthorityInspection(
     missingKeys: Object.freeze(shardStatus.missingKeys),
     invalidShards: Object.freeze(shardStatus.invalidShards),
     preservedValidClosure: createExtractionPreservedValidClosure(shardStatus.validEntries),
-    writerLock: existsSync(join(input.cacheRoot, WRITE_LOCK_DIRECTORY)) ? "present" : "absent",
+    writerLock: inspectExtractionCacheWriterLock(input.cacheRoot),
     disk: inspectExtractionAuthorityDisk(input.cacheRoot),
     credentialStatus: config.apiKey === null ? "absent" : "present",
     modelReadiness: "not_probed"

@@ -71,6 +71,7 @@ describe("extraction cache replay occurrence accounting", () => {
     expect(calls).toEqual([]);
     expect(result.occurrences[0]?.entries).toEqual([{
       index: -1,
+      sourceCacheKey: "b".repeat(64),
       disposition: "invalid",
       stage: "cache",
       reason: `shard_missing:${"b".repeat(12)}`
@@ -93,6 +94,7 @@ describe("extraction cache replay occurrence accounting", () => {
     expect(calls).toEqual([]);
     expect(result.occurrences[0]?.entries).toEqual([{
       index: -1,
+      sourceCacheKey: "b".repeat(64),
       disposition: "deferred",
       stage: "cache",
       reason: `shard_missing:${"b".repeat(12)}`
@@ -112,6 +114,42 @@ describe("extraction cache replay occurrence accounting", () => {
 
     expect(result.occurrences[0]?.entries).toEqual([]);
     expect(result.closure).toMatchObject({ occurrenceCount: 1, accountedOccurrences: 1, elementCount: 0, invalid: 0 });
+  });
+
+  it("binds each audited entry to its source shard and defers quarantined shards", () => {
+    const root = cacheRoot();
+    const first = "1".repeat(64);
+    const second = "2".repeat(64);
+    writeShard(root, first, validRaw());
+    writeShard(root, second, validRaw());
+    const audited = replayExtractionOccurrences({
+      cacheRoot: root, model, requestProfile,
+      occurrences: [multiShardOccurrence("q-s0-r0", [first, second])],
+      audit: auditor(() => resultFor([{
+        index: 0, disposition: "invalid", stage: "parse", reason: "entry_schema_invalid"
+      }]))
+    });
+
+    expect(audited.occurrences[0]?.entries.map((entry) => entry.sourceCacheKey))
+      .toEqual([first, second]);
+
+    const replayed = replayExtractionOccurrences({
+      cacheRoot: root, model, requestProfile,
+      occurrences: [multiShardOccurrence("q-s0-r0", [first, second])],
+      semanticQuarantinedCacheKeys: new Set([second]),
+      allowMissingShards: true,
+      audit: auditor(() => {
+        throw new Error("quarantined occurrence must not be audited");
+      })
+    });
+    expect(replayed.occurrences[0]?.entries).toEqual([{
+      index: -1,
+      sourceCacheKey: second,
+      disposition: "deferred",
+      stage: "cache",
+      reason: `shard_missing:${second.slice(0, 12)}`
+    }]);
+    expect(replayed.closure).toMatchObject({ deferred: 1, invalid: 0 });
   });
 });
 
@@ -378,6 +416,13 @@ function occurrence(id: string, cacheKey: string, sourceObservedAt: string) {
     turnContent: "User: source fact",
     turnMessages: [{ message_id: `${id}-m0`, role: "user" as const, content: "source fact" }],
     cacheKeys: [cacheKey]
+  };
+}
+
+function multiShardOccurrence(id: string, cacheKeys: readonly string[]) {
+  return {
+    ...occurrence(id, cacheKeys[0]!, "2025-01-01T00:00:00.000Z"),
+    cacheKeys
   };
 }
 

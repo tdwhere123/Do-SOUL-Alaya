@@ -250,6 +250,9 @@ function classifyProviderFailureReason(cause: unknown): string {
   if (/semantic_factor_graph_missing/iu.test(message)) {
     return "semantic_factor_graph_missing";
   }
+  if (/semantic_factor_graph_required/iu.test(message)) {
+    return "semantic_factor_graph_required";
+  }
   const graphInvalid = /semantic_factor_graph_invalid_[a-z_]+/iu.exec(message);
   if (graphInvalid !== null) {
     return graphInvalid[0]!.toLowerCase();

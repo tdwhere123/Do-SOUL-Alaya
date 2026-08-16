@@ -23,6 +23,7 @@ const config = {
 };
 const first = turn("alpha", "first");
 const second = turn("beta", "second");
+const third = turn("gamma", "third");
 
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -139,6 +140,65 @@ describe("extraction cache-key allowlist continuation", () => {
     });
   });
 
+  it("keeps audited predecessor hits outside the continuation ledger", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({ pinnedCachedTurns: 1 }),
+      authority: continuationAuthority(1),
+      successfulKeys: [],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey])
+    });
+  });
+
+  it("preserves canonical turn order across a continuation", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    const thirdKey = cacheKey(third);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({
+        pinnedCachedTurns: 1,
+        distinctExtractionTurns: [first, second, third],
+        executionExtractionTurns: [first, second, third]
+      }),
+      authority: continuationAuthority(),
+      successfulKeys: [firstKey],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second, third],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey, thirdKey])
+    });
+  });
+
   it.each([
     ["without authority", undefined, prepared()],
     ["for a probe", { ...catalogAuthority([cacheKey(first)]), action: "probe" as const }, prepared()],
@@ -229,10 +289,12 @@ function catalogAuthority(keys: readonly string[]) {
   };
 }
 
-function continuationAuthority() {
+function continuationAuthority(initialPreservedShards = 0) {
   return {
     action: "fill" as const,
-    continuation: {} as never
+    continuation: {
+      predecessor: { initial_preserved_shards: initialPreservedShards }
+    } as never
   };
 }
 
@@ -240,6 +302,7 @@ function prepared(overrides: {
   readonly expansion?: object;
   readonly questionBatchLimit?: number;
   readonly pinnedCachedTurns?: number;
+  readonly distinctExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns?: readonly LongMemEvalExtractionTurn[];
 } = {}) {
   return {

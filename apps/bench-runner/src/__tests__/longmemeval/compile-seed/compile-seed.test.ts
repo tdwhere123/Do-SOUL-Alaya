@@ -48,8 +48,12 @@ afterEach(async () => {
 describe("createCachingSignalExtractor provider execution", () => {
   it("delegates to the real extractor on a cache miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const rawJson = signalsEnvelope([{
+      distilled: "The user has a dog.",
+      matched: "I have a dog."
+    }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => ({ rawJson }))
     };
     const stats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -85,8 +89,8 @@ describe("createCachingSignalExtractor provider execution", () => {
       userPrompt: canonicalExtractionUserPrompt("I have a dog.")
     });
 
-    expect(result.rawJson).toBe('{"signals":[]}');
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(result.rawJson).toBe(rawJson);
+    expect(delegate.extract).toHaveBeenCalledOnce();
     expect(stats.llmCalls).toBe(1);
     expect(stats.cacheHits).toBe(0);
     expect(stats.liveExtractionFailures).toBe(0);

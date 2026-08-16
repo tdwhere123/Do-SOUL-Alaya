@@ -93,7 +93,9 @@ export function resolveContinuationMissingTurns(input: {
   assertContinuationScope(input.prepared, input.authority);
   const successfulKeys = validatedCompletedKeys(input.successfulKeys);
   const pinnedCachedTurns = requirePinnedCachedTurns(input.prepared.pinnedCachedTurns);
-  if (successfulKeys.length !== pinnedCachedTurns) {
+  const initialPreserved = input.authority.continuation.predecessor
+    .initial_preserved_shards ?? 0;
+  if (successfulKeys.length + initialPreserved !== pinnedCachedTurns) {
     throw new ExtractionCacheInvariantError(
       "continuation ledger success count does not match the pinned manifest"
     );
@@ -104,7 +106,15 @@ export function resolveContinuationMissingTurns(input: {
       "continuation ledger contains a success outside the production full window"
     );
   }
-  const completed = new Set(successfulKeys);
+  const completed = inspectContinuationCacheHits(
+    expected, input.cacheRoot, input.prepared.config
+  );
+  if (completed.size !== pinnedCachedTurns ||
+      successfulKeys.some((key) => !completed.has(key))) {
+    throw new ExtractionCacheInvariantError(
+      "continuation cache hits do not match the pinned manifest and ledger"
+    );
+  }
   const remainingKeys = [...expected.keys()].filter((key) => !completed.has(key));
   if (remainingKeys.length === 0) {
     throw new ExtractionCacheInvariantError(
@@ -119,9 +129,29 @@ export function resolveContinuationMissingTurns(input: {
     turns: selectUniqueMissingTurns(
       remainingKeys, expected, executable, input.cacheRoot, input.prepared.config
     ),
-    skippedCacheHits: successfulKeys.length,
+    skippedCacheHits: pinnedCachedTurns,
     executionCacheKeys: new Set(remainingKeys)
   });
+}
+
+function inspectContinuationCacheHits(
+  expected: ReadonlyMap<string, LongMemEvalExtractionTurn>,
+  cacheRoot: string,
+  config: CacheKeyAllowlistPrepared["config"]
+): ReadonlySet<string> {
+  const hits = new Set<string>();
+  for (const key of expected.keys()) {
+    const status = inspectCachedExtraction(
+      cacheRoot, key, config.model, config.requestProfile
+    ).status;
+    if (status === "hit") hits.add(key);
+    if (status === "invalid") {
+      throw new ExtractionCacheInvariantError(
+        `continuation cache contains an invalid shard: ${key}`
+      );
+    }
+  }
+  return hits;
 }
 
 function completedScopeKeys(

@@ -96,6 +96,7 @@ export function assertDirectSourceEvidenceClosure(input: {
   readonly ledger: readonly LongMemEvalSnapshotSeedRound[];
 }): void {
   const contexts = indexDeclaredBindings(input.question, input.ledger);
+  if (contexts.size === 0) return;
   if (!hasAuthorityColumns(input.db)) {
     if (contexts.size > 0) {
       throw new Error("snapshot direct evidence authority columns are missing");

@@ -11,6 +11,10 @@ import { inspectExtractionRawJson } from "../content-closure.js";
 export interface ExtractionLiveTransportOutcome {
   readonly retryCount: number;
   readonly rateLimitRetries: number;
+  readonly successfulRequestCount?: number;
+  readonly usageRequestCount?: number;
+  readonly unknownRequestCount?: number;
+  readonly postComposeFailure?: true;
   readonly terminalRetryClassification?: BenchTerminalRetryClassification;
   readonly transportFailures: readonly BenchTransportFailureAttempt[];
   readonly usage?: BenchProviderUsage;
@@ -25,24 +29,23 @@ export async function extractLiveDelegate(input: {
 }): ReturnType<BenchSignalExtractor["extract"]> {
   const result = await extractReportedAttempt(input, input.request);
   if (!shouldRecheckStrictEmptyResult(input.request, result.rawJson)) return result;
-  let rechecked: Awaited<ReturnType<BenchSignalExtractor["extract"]>>;
   try {
-    rechecked = await extractReportedAttempt(
+    const rechecked = await extractReportedAttempt(
       input, { ...input.request, retryMode: "disabled" }
     );
+    return {
+      ...rechecked,
+      taskRateLimitRetries: taskRateLimitRetries(result) + taskRateLimitRetries(rechecked)
+    };
   } catch (cause) {
     throw attachTaskRateLimitRetries(
       cause,
-      readTaskRateLimitRetries(result) + (readBenchRetryFailure(cause)?.rateLimitRetries ?? 0)
+      taskRateLimitRetries(result) + (readBenchRetryFailure(cause)?.rateLimitRetries ?? 0)
     );
   }
-  return {
-    ...rechecked,
-    taskRateLimitRetries: readTaskRateLimitRetries(result) + readTaskRateLimitRetries(rechecked)
-  };
 }
 
-function readTaskRateLimitRetries(
+function taskRateLimitRetries(
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>
 ): number {
   return result.taskRateLimitRetries ?? result.extractorMeta?.rateLimitRetries ?? 0;
@@ -111,6 +114,9 @@ function successOutcome(result: Awaited<ReturnType<BenchSignalExtractor["extract
   return {
     retryCount: result.extractorMeta?.retryCount ?? 0,
     rateLimitRetries: result.extractorMeta?.rateLimitRetries ?? 0,
+    successfulRequestCount: result.extractorMeta?.successfulRequestCount ?? 1,
+    usageRequestCount: result.extractorMeta?.usageRequestCount ??
+      (result.usage === undefined ? 0 : 1),
     transportFailures: result.extractorMeta?.transportFailures ?? [],
     ...(result.usage === undefined ? {} : { usage: result.usage })
   };
@@ -122,8 +128,21 @@ function failureOutcome(cause: unknown): ExtractionLiveTransportOutcome | undefi
   return {
     retryCount: meta.retryCount,
     rateLimitRetries: meta.rateLimitRetries,
-    terminalRetryClassification: meta.retryClassification,
-    transportFailures: meta.transportFailures ?? []
+    ...(meta.successfulRequestCount === undefined
+      ? {}
+      : { successfulRequestCount: meta.successfulRequestCount }),
+    ...(meta.usageRequestCount === undefined
+      ? {}
+      : { usageRequestCount: meta.usageRequestCount }),
+    ...(meta.unknownRequestCount === undefined
+      ? {}
+      : { unknownRequestCount: meta.unknownRequestCount }),
+    ...(meta.postComposeFailure === true ? { postComposeFailure: true as const } : {}),
+    ...(meta.retryClassification === undefined
+      ? {}
+      : { terminalRetryClassification: meta.retryClassification }),
+    transportFailures: meta.transportFailures ?? [],
+    ...(meta.usage === undefined ? {} : { usage: meta.usage })
   };
 }
 
@@ -143,6 +162,7 @@ function recordRetryFailure(stats: CompileSeedExtractionStats | undefined, cause
   const meta = readBenchRetryFailure(cause);
   if (meta === undefined) return;
   stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
+  if (meta.retryClassification === undefined) return;
   const totals = stats.terminalRetryClassifications ?? {};
   totals[meta.retryClassification] = (totals[meta.retryClassification] ?? 0) + 1;
   stats.terminalRetryClassifications = totals;
@@ -151,7 +171,12 @@ function recordRetryFailure(stats: CompileSeedExtractionStats | undefined, cause
 function readBenchRetryFailure(cause: unknown): {
   readonly retryCount: number;
   readonly rateLimitRetries: number;
-  readonly retryClassification: BenchTerminalRetryClassification;
+  readonly retryClassification?: BenchTerminalRetryClassification;
+  readonly successfulRequestCount?: number;
+  readonly usageRequestCount?: number;
+  readonly unknownRequestCount?: number;
+  readonly postComposeFailure?: true;
+  readonly usage?: BenchProviderUsage;
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
 } | undefined {
   if (typeof cause !== "object" || cause === null) return undefined;
@@ -162,7 +187,12 @@ function readBenchRetryFailure(cause: unknown): {
 function isBenchRetryFailure(value: unknown): value is {
   readonly retryCount: number;
   readonly rateLimitRetries: number;
-  readonly retryClassification: BenchTerminalRetryClassification;
+  readonly retryClassification?: BenchTerminalRetryClassification;
+  readonly successfulRequestCount?: number;
+  readonly usageRequestCount?: number;
+  readonly unknownRequestCount?: number;
+  readonly postComposeFailure?: true;
+  readonly usage?: BenchProviderUsage;
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
 } {
   if (typeof value !== "object" || value === null) return false;
@@ -170,10 +200,21 @@ function isBenchRetryFailure(value: unknown): value is {
     retryCount?: unknown;
     rateLimitRetries?: unknown;
     retryClassification?: unknown;
+    successfulRequestCount?: unknown;
+    usageRequestCount?: unknown;
+    unknownRequestCount?: unknown;
+    postComposeFailure?: unknown;
+    usage?: unknown;
     transportFailures?: unknown;
   };
+  const isTerminal = isTerminalRetryClassification(input.retryClassification);
+  const isPostCompose = input.postComposeFailure === true;
   return isNonNegativeSafeInteger(input.retryCount) && isNonNegativeSafeInteger(input.rateLimitRetries) &&
-    isTerminalRetryClassification(input.retryClassification) &&
+    (isTerminal !== isPostCompose) &&
+    isOptionalNonNegativeSafeInteger(input.successfulRequestCount) &&
+    isOptionalNonNegativeSafeInteger(input.usageRequestCount) &&
+    isOptionalNonNegativeSafeInteger(input.unknownRequestCount) &&
+    isOptionalUsage(input.usage) &&
     (input.transportFailures === undefined || Array.isArray(input.transportFailures));
 }
 
@@ -186,4 +227,17 @@ function isTerminalRetryClassification(value: unknown): value is BenchTerminalRe
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isOptionalNonNegativeSafeInteger(value: unknown): boolean {
+  return value === undefined || isNonNegativeSafeInteger(value);
+}
+
+function isOptionalUsage(value: unknown): value is BenchProviderUsage | undefined {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+  const usage = value as Partial<BenchProviderUsage>;
+  return isNonNegativeSafeInteger(usage.inputTokens) &&
+    isNonNegativeSafeInteger(usage.outputTokens) &&
+    isNonNegativeSafeInteger(usage.totalTokens);
 }

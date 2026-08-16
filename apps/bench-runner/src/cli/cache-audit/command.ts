@@ -44,9 +44,11 @@ import {
 import {
   EXTRACTION_REPLAY_FORMATION_POLICY,
   hashExtractionReplay,
-  replayExtractionOccurrences,
   type ExtractionReplayResult
 } from "../../longmemeval/extraction/cache-audit/replay.js";
+import {
+  replayWithSemanticQuarantine
+} from "../../longmemeval/extraction/cache-audit/quarantine/semantic-quarantine.js";
 import { computeExtractionKeySetSha256 } from
   "../../longmemeval/extraction/content-closure.js";
 import { writeExtractionCacheAuditBundle } from "./bundle-writer.js";
@@ -195,16 +197,16 @@ function analyzeExtractionCache(input: {
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile
   });
-  const inventory = classifyRetiredSourceKeys(input.sourceManifest, inspectedInventory);
-  const inventorySha256 = hashExtractionCacheInventory(inventory);
-  const replay = replayExtractionOccurrences({
+  const classifiedInventory = classifyRetiredSourceKeys(input.sourceManifest, inspectedInventory);
+  const audited = replayWithSemanticQuarantine({
     cacheRoot: input.sourceRoot,
     model: input.sourceManifest.extraction_model,
     requestProfile: input.sourceManifest.request_profile,
     occurrences,
-    requireSemanticFactorGraph: true,
-    allowMissingShards: true
+    inventory: classifiedInventory
   });
+  const { inventory, replay } = audited;
+  const inventorySha256 = hashExtractionCacheInventory(inventory);
   const decision = decideExtractionCacheCompatibility({
     sourceRoot: input.sourceRoot,
     source: sourceIdentity(input.sourceManifest, inventorySha256),

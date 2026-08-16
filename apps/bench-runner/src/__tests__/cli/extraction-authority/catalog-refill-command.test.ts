@@ -8,6 +8,8 @@ import { runAuthorizeExtractionCommand } from
   "../../../cli/extraction-authority/command.js";
 import { openExtractionAttemptLedger, readExtractionAttemptLedger } from
   "../../../longmemeval/extraction/authority/attempt-ledger.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 
 const roots: string[] = [];
 
@@ -40,7 +42,7 @@ it("embeds an audited existing-root missing-key set bound to target selection", 
     action: "fill",
     limits: expect.objectContaining({
       starting_missing: 1,
-      maximum_attempts: 5,
+      maximum_attempts: computeExtractionFillAttemptCeiling(1),
       successful_shard_ceiling: 1
     }),
     catalog_refill: expect.objectContaining({
@@ -60,7 +62,7 @@ it("embeds an audited existing-root missing-key set bound to target selection", 
   });
   expect(ledger).toMatchObject({
     startingMissing: 1,
-    maximumAttempts: 5,
+    maximumAttempts: computeExtractionFillAttemptCeiling(1),
     successfulShardCeiling: 1,
     attempts: 0,
     successfulShards: 0,

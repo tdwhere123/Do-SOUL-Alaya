@@ -1,5 +1,11 @@
+import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
+import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
+
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
-export const EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD = 5;
+const MAX_ASSERTION_PARTITION_TREE_NODES =
+  OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH * 2 - 1;
+export const EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD =
+  MAX_ASSERTION_PARTITION_TREE_NODES * (BENCH_HTTP_MAX_RETRIES + 1) + 1;
 const DEFAULT_MAX_CONCURRENCY = 32;
 const MILLION = 1_000_000;
 
@@ -108,7 +114,7 @@ export function computeExtractionFillAttemptCeiling(missing: number): number {
   if (!Number.isSafeInteger(missing) || missing < 0) {
     throw new Error("extraction fill starting missing must be a non-negative safe integer");
   }
-  // Normal transport can spend three retries and one strict-empty recheck after its first attempt.
+  // Every partition tree node has bounded retries; the final slot confirms a strict empty result.
   const ceiling = missing * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD;
   if (!Number.isSafeInteger(ceiling)) {
     throw new Error("extraction fill attempt ceiling exceeds the safe integer range");

@@ -145,7 +145,7 @@ describe("runExtractionFill writer lease", () => {
       pinnedMetaRoot,
       extractorFactory: secondFactory,
       log: () => undefined
-    })).rejects.toThrow(/fill.*lock|already.*fill/iu);
+    })).rejects.toThrow(/already has an active writer lock/iu);
     expect(secondFactory).not.toHaveBeenCalled();
     releaseFirst();
     await first;
@@ -334,7 +334,7 @@ describe("runExtractionFill finalization", () => {
       pinnedMetaRoot,
       extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
       log: () => undefined
-    })).rejects.toThrow(/writer lock.*verifying its owner process/iu);
+    })).rejects.toThrow(/writer lock.*metadata is unreadable/iu);
     expect(existsSync(lockPath)).toBe(true);
   });
 

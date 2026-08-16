@@ -6,7 +6,12 @@ import type {
 export interface GardenHttpRetryDecision {
   readonly classification: BenchRetryClassification;
   readonly retry: boolean;
+  readonly counters: GardenHttpRetryCounters;
+}
+
+export interface GardenHttpRetryCounters {
   readonly timeoutRetries: number;
+  readonly responseSchemaRetries: number;
 }
 
 export interface GardenHttpRetryLoopInput<Response> {
@@ -18,7 +23,7 @@ export interface GardenHttpRetryLoopInput<Response> {
   readonly decideRetry: (
     error: unknown,
     attempt: number,
-    timeoutRetries: number,
+    counters: GardenHttpRetryCounters,
     maxRetries: number
   ) => GardenHttpRetryDecision;
   readonly waitForRetry: (attempt: number, rateLimitRetries: number) => Promise<void>;
@@ -42,56 +47,95 @@ export interface GardenHttpRetryResult<Response> {
   readonly transportFailures: readonly BenchTransportFailureAttempt[];
 }
 
+interface GardenHttpRetryState {
+  readonly attempt: number;
+  readonly counters: GardenHttpRetryCounters;
+  readonly rateLimitRetries: number;
+  readonly classification: BenchRetryClassification;
+  readonly transportFailures: readonly BenchTransportFailureAttempt[];
+}
+
 export async function runGardenHttpRetryLoop<Response>(
   input: GardenHttpRetryLoopInput<Response>
 ): Promise<GardenHttpRetryResult<Response>> {
-  let attempt = 0;
-  let timeoutRetries = 0;
-  let rateLimitRetries = 0;
-  let lastError: unknown = null;
-  let lastClassification: BenchRetryClassification = "failure_max_retries";
-  const transportFailures: BenchTransportFailureAttempt[] = [];
-  while (attempt <= input.maxRetries) {
-    await input.beforeAttempt(attempt, rateLimitRetries);
-    try {
-      return {
-        response: await input.runAttempt(attempt),
-        attempt,
-        rateLimitRetries,
-        transportFailures: Object.freeze([...transportFailures])
-      };
-    } catch (error) {
-      lastError = error;
-      const failure = input.describeFailure(error, attempt);
-      if (failure !== undefined) transportFailures.push(failure);
-      if (input.isRateLimited(error)) rateLimitRetries += 1;
-      const decision = input.decideRetry(error, attempt, timeoutRetries, input.maxRetries);
-      lastClassification = decision.classification;
-      if (!decision.retry) {
-        throw input.wrapFailure(
-          error, decision.classification, attempt, rateLimitRetries, transportFailures
-        );
-      }
-      timeoutRetries = decision.timeoutRetries;
-      try {
-        await input.waitForRetry(attempt, rateLimitRetries);
-      } catch (waitError) {
-        const waitDecision = input.decideRetry(
-          waitError, attempt, timeoutRetries, input.maxRetries
-        );
-        if (waitDecision.classification !== "failure_aborted") throw waitError;
-        throw input.wrapFailure(
-          waitError,
-          waitDecision.classification,
-          attempt,
-          rateLimitRetries,
-          transportFailures
-        );
-      }
-      attempt += 1;
+  return runRetryAttempt(input, {
+    attempt: 0,
+    counters: { timeoutRetries: 0, responseSchemaRetries: 0 },
+    rateLimitRetries: 0,
+    classification: "failure_max_retries",
+    transportFailures: []
+  });
+}
+
+async function runRetryAttempt<Response>(
+  input: GardenHttpRetryLoopInput<Response>,
+  state: GardenHttpRetryState
+): Promise<GardenHttpRetryResult<Response>> {
+  await runBeforeAttempt(input, state);
+  try {
+    return {
+      response: await input.runAttempt(state.attempt),
+      attempt: state.attempt,
+      rateLimitRetries: state.rateLimitRetries,
+      transportFailures: Object.freeze([...state.transportFailures])
+    };
+  } catch (error) {
+    const failure = input.describeFailure(error, state.attempt);
+    const transportFailures = failure === undefined
+      ? state.transportFailures
+      : [...state.transportFailures, failure];
+    const rateLimitRetries = state.rateLimitRetries + (input.isRateLimited(error) ? 1 : 0);
+    const decision = input.decideRetry(
+      error, state.attempt, state.counters, input.maxRetries
+    );
+    if (!decision.retry) {
+      throw input.wrapFailure(
+        error, decision.classification, state.attempt, rateLimitRetries, transportFailures
+      );
     }
+    await waitForRetry(input, state, decision.counters, rateLimitRetries, transportFailures);
+    return runRetryAttempt(input, {
+      attempt: state.attempt + 1,
+      counters: decision.counters,
+      rateLimitRetries,
+      classification: decision.classification,
+      transportFailures
+    });
   }
-  throw input.wrapFailure(
-    lastError, lastClassification, attempt, rateLimitRetries, transportFailures
-  );
+}
+
+async function runBeforeAttempt<Response>(
+  input: GardenHttpRetryLoopInput<Response>,
+  state: GardenHttpRetryState
+): Promise<void> {
+  try {
+    await input.beforeAttempt(state.attempt, state.rateLimitRetries);
+  } catch (cause) {
+    if (state.attempt === 0) throw cause;
+    throw input.wrapFailure(
+      cause,
+      state.classification,
+      state.attempt - 1,
+      state.rateLimitRetries,
+      state.transportFailures
+    );
+  }
+}
+
+async function waitForRetry<Response>(
+  input: GardenHttpRetryLoopInput<Response>,
+  state: GardenHttpRetryState,
+  counters: GardenHttpRetryCounters,
+  rateLimitRetries: number,
+  transportFailures: readonly BenchTransportFailureAttempt[]
+): Promise<void> {
+  try {
+    await input.waitForRetry(state.attempt, rateLimitRetries);
+  } catch (cause) {
+    const decision = input.decideRetry(cause, state.attempt, counters, input.maxRetries);
+    if (decision.classification !== "failure_aborted") throw cause;
+    throw input.wrapFailure(
+      cause, decision.classification, state.attempt, rateLimitRetries, transportFailures
+    );
+  }
 }

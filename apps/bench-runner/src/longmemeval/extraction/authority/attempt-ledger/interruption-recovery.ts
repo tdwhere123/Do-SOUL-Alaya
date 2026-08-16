@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger,
@@ -36,21 +35,15 @@ export function recoverInterruptedExtractionAttemptLedger(
       (attempt) => attempt.cacheKey === cacheKey
     );
     if (reservations.length === 0) continue;
-    const recoveredShard = snapshot.successfulKeys.includes(cacheKey);
-    const failedReservations = recoveredShard ? reservations.slice(0, -1) : reservations;
     ledger.recordTransportOutcome(cacheKey, {
-      retryCount: reservations.length - 1,
+      retryCount: 0,
       rateLimitRetries: 0,
-      ...(recoveredShard ? {} : { terminalRetryClassification: "failure_aborted" as const }),
-      transportFailures: failedReservations.map((reservation, index) => ({
-        attempt: index + 1,
-        kind: "aborted" as const,
-        phase: "request" as const,
-        httpStatus: null,
-        fingerprint: interruptionFingerprint(input.lineageDigest, reservation)
-      }))
+      successfulRequestCount: 0,
+      usageRequestCount: 0,
+      unknownRequestCount: reservations.length,
+      transportFailures: []
     });
-    if (!recoveredShard) ledger.abandonPendingShard(cacheKey);
+    if (!snapshot.successfulKeys.includes(cacheKey)) ledger.abandonPendingShard(cacheKey);
   }
   const recovered = ledger.snapshot();
   if (recovered.pendingKeys.length > 0 || recovered.unresolvedAttempts.length > 0) {
@@ -75,15 +68,4 @@ function settledPendingKeys(snapshot: ExtractionAttemptLedgerSnapshot): readonly
 
 function unresolvedKeys(snapshot: ExtractionAttemptLedgerSnapshot): readonly string[] {
   return [...new Set(snapshot.unresolvedAttempts.map((attempt) => attempt.cacheKey))].sort();
-}
-
-function interruptionFingerprint(
-  lineageDigest: string,
-  reservation: ExtractionAttemptLedgerSnapshot["unresolvedAttempts"][number]
-): string {
-  return createHash("sha256")
-    .update("interrupted-extraction-attempt-v1\0", "utf8")
-    .update(lineageDigest, "utf8")
-    .update(`\0${reservation.attemptOrdinal}\0${reservation.cacheKey}`, "utf8")
-    .digest("hex");
 }

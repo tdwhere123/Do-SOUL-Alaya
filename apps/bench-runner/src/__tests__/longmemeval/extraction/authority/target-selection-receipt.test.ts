@@ -140,7 +140,7 @@ it("allows a revision-only successor while resuming the canonical 500Q expansion
       ...expanded,
       extraction: { ...expanded.extraction, model: "semantic-drift" }
     }
-  })).toThrow(/identity.*revision-only successor/u);
+  })).toThrow(/logical identity drifted/u);
   expect(() => assertExtractionTargetSelectionReceipt({
     receipt,
     cacheRoot,
@@ -148,7 +148,7 @@ it("allows a revision-only successor while resuming the canonical 500Q expansion
   })).toThrow(/identity drifted/u);
 });
 
-it("carries the selected root forward only across a revision-only continuation", () => {
+it("carries the selected root across a revision continuation without semantic drift", () => {
   const parent = createTemporaryRoot();
   const cacheRoot = join(parent, "cache");
   const predecessor = createFreshRetiredSourceRebuildTargetSelection({
@@ -196,7 +196,46 @@ it("carries the selected root forward only across a revision-only continuation",
       ...successorObservation,
       extraction: { ...successorObservation.extraction, model: "semantic-drift" }
     }
-  })).toThrow(/revision-only successor/u);
+  })).toThrow(/logical identity drifted/u);
+});
+
+it("carries the selected root across a same-revision output-cap continuation", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const predecessor = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const continuedObservation = {
+    ...initialObservation(),
+    extraction: {
+      ...initialObservation().extraction,
+      manifestSha256: "7".repeat(64),
+      rawContentClosureSha256: "6".repeat(64)
+    },
+    inventory: {
+      expectedTurns: 10,
+      validTurns: 4,
+      missingTurns: 6,
+      invalidTurns: 0,
+      orphanTurns: 0
+    }
+  };
+
+  const successor = createSameRootContinuationTargetSelectionReceipt({
+    predecessor,
+    predecessorAuthorityReceiptDigest: "5".repeat(64),
+    observation: continuedObservation
+  });
+
+  expect(successor.target_root).toEqual(predecessor.target_root);
+  expect(successor.final_identity.revision).toBe(predecessor.final_identity.revision);
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt: successor,
+    cacheRoot,
+    observation: continuedObservation
+  })).not.toThrow();
 });
 
 function expansionObservation(): ExtractionAuthorityObservation {

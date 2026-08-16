@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  BenchProviderUsage,
   BenchTransportFailureAttempt,
   BenchTransportFailureKind,
   BenchTransportFailurePhase
@@ -17,6 +18,7 @@ interface SafeFailureFingerprintInput {
 }
 
 const FAILURE_INPUT = Symbol("gardenHttpFailureFingerprintInput");
+const FAILURE_USAGE = Symbol("gardenHttpFailureUsage");
 const MAX_FINGERPRINT_TOKEN_LENGTH = 128;
 const MAX_RAW_BODY_FINGERPRINT_BYTES = 16_384;
 
@@ -27,6 +29,7 @@ export function markGardenHttpFailure(
     phase: BenchTransportFailurePhase;
     httpStatus?: number | null;
     rawBody?: string;
+    usage?: BenchProviderUsage;
   }>
 ): Error {
   const error = cause instanceof Error ? cause : new Error("garden HTTP transport failed");
@@ -47,6 +50,11 @@ export function markGardenHttpFailure(
       : digestBoundedRawBody(descriptor.rawBody)
   });
   Object.defineProperty(error, FAILURE_INPUT, { value: input, configurable: true });
+  if (descriptor.usage !== undefined) {
+    Object.defineProperty(error, FAILURE_USAGE, {
+      value: Object.freeze({ ...descriptor.usage }), configurable: true
+    });
+  }
   return error;
 }
 
@@ -76,6 +84,7 @@ export function toBenchTransportFailureAttempt(
 ): BenchTransportFailureAttempt | undefined {
   const input = readSafeFailureInput(error);
   if (input === undefined) return undefined;
+  const usage = readGardenHttpFailureUsage(error);
   return Object.freeze({
     kind: input.kind,
     phase: input.phase,
@@ -83,8 +92,31 @@ export function toBenchTransportFailureAttempt(
     fingerprint: createHash("sha256")
       .update(JSON.stringify(input), "utf8")
       .digest("hex"),
-    attempt: zeroBasedAttempt + 1
+    attempt: zeroBasedAttempt + 1,
+    ...(usage === undefined ? {} : { usage })
   });
+}
+
+export function aggregateGardenHttpAttemptUsage(
+  failures: readonly BenchTransportFailureAttempt[],
+  successfulUsage?: BenchProviderUsage
+): { readonly usage?: BenchProviderUsage; readonly usageRequestCount: number } {
+  const usages = failures.flatMap((failure) => failure.usage === undefined ? [] : [failure.usage]);
+  if (successfulUsage !== undefined) usages.push(successfulUsage);
+  if (usages.length === 0) return { usageRequestCount: 0 };
+  return {
+    usageRequestCount: usages.length,
+    usage: usages.reduce<BenchProviderUsage>((total, usage) => ({
+      inputTokens: total.inputTokens + usage.inputTokens,
+      outputTokens: total.outputTokens + usage.outputTokens,
+      totalTokens: total.totalTokens + usage.totalTokens
+    }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+  };
+}
+
+function readGardenHttpFailureUsage(error: unknown): BenchProviderUsage | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  return (error as { readonly [FAILURE_USAGE]?: BenchProviderUsage })[FAILURE_USAGE];
 }
 
 export function classifyResponseFailureKind(

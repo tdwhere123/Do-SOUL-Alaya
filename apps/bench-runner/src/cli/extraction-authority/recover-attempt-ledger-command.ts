@@ -2,7 +2,10 @@ import process from "node:process";
 import {
   recoverInterruptedExtractionAttemptLedger
 } from "../../longmemeval/extraction/authority/attempt-ledger/interruption-recovery.js";
-import { recoverInterruptedExtractionFillManifest } from
+import {
+  interruptedFillRecoveryEvidence,
+  recoverInterruptedExtractionFillManifest
+} from
   "../../longmemeval/extraction/authority/attempt-ledger/interruption-manifest-recovery.js";
 import {
   assertExtractionAuthorityReceipt,
@@ -65,7 +68,8 @@ export async function runRecoverExtractionAttemptLedgerCommand(
             windowOffset: receipt.observation.dataset.windowOffset,
             windowLimit: receipt.observation.dataset.windowLimit,
             expectedTurns: receipt.observation.inventory.expectedTurns,
-            expectedKeySetSha256: receipt.observation.dataset.expectedKeySetSha256
+            expectedKeySetSha256: receipt.observation.dataset.expectedKeySetSha256,
+            ...interruptedFillRecoveryEvidence(receipt)
           }
         })
         : undefined;

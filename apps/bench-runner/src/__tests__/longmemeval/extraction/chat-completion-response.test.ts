@@ -86,6 +86,27 @@ describe("extractContentFromChatCompletionBody", () => {
     );
   });
 
+  it("uses the latest cumulative content from repeated dual-field frames", () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":"x"},"message":{"content":"x"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":"xy"},"message":{"content":"xy"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "xy"
+    );
+  });
+
+  it("treats empty content frames as neutral", () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":""}}]}\n\n' +
+      'data: {"choices":[{"message":{"content":"ok"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":""},"message":{"content":""}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "ok"
+    );
+  });
+
   it("reports terminal finish metadata from SSE and plain responses", () => {
     const sse =
       'data: {"choices":[{"delta":{"content":"x"}}]}\n\n' +

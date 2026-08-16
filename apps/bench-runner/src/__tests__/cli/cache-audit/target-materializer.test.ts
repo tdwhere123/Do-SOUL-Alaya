@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readExtractionCacheManifest } from
@@ -60,6 +60,37 @@ describe("audited extraction cache target materializer", () => {
       kind: "longmemeval-extraction-cache-materialization",
       materialized_key_count: 3,
       target_selection_receipt_digest: fixture.targetSelection.receipt_digest
+    });
+  });
+
+  it("excludes audited orphan shards from the rebuilt target", () => {
+    const fixture = createMaterializerFixture({
+      hitCount: 2,
+      totalCount: 3,
+      orphanCount: 1
+    });
+
+    const receipt = materialize(fixture);
+
+    expect(receipt.materialized_key_count).toBe(2);
+    expect(fixture.inventory.orphanKeys).toEqual(fixture.orphanKeys);
+    expect(existsSync(sourceShardPath(fixture, fixture.orphanKeys[0]!))).toBe(true);
+    expect(existsSync(targetShardPath(fixture, fixture.orphanKeys[0]!))).toBe(false);
+  });
+
+  it("revalidates but does not copy a semantically quarantined raw shard", () => {
+    const fixture = createMaterializerFixture({ semanticQuarantineIndex: 1 });
+    const quarantined = fixture.expectedKeys[1]!;
+
+    const receipt = materialize(fixture);
+
+    expect(existsSync(sourceShardPath(fixture, quarantined))).toBe(true);
+    expect(existsSync(targetShardPath(fixture, quarantined))).toBe(false);
+    expect(receipt.materialized_key_count).toBe(2);
+    expect(readExtractionCacheManifest(fixture.targetRoot)).toMatchObject({
+      cached_turns: 2,
+      requested_turns: 5,
+      fill_status: "in_progress"
     });
   });
 

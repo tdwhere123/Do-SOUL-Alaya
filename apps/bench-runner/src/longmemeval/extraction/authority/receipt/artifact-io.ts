@@ -6,15 +6,16 @@ import { readBoundedCanonicalUtf8Artifact } from
 import { publishBytesExclusiveDurable } from
   "../../fill/manifest/durable-exclusive-publication.js";
 
-const MAX_EXTRACTION_AUTHORITY_RECEIPT_BYTES = 64 * 1024;
+export const MAX_EXTRACTION_AUTHORITY_RECEIPT_BYTES = 16 * 1024 * 1024;
 
 export function writeExtractionAuthorityReceiptArtifact(
   outputPath: string,
   receipt: object
 ): void {
+  const bytes = serializeReceipt(receipt);
   mkdirSync(dirname(outputPath), { recursive: true });
   const temporary = `${outputPath}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, bytes);
   renameSync(temporary, outputPath);
 }
 
@@ -23,10 +24,11 @@ export function writeExtractionAuthorityReceiptArtifactExclusive(
   receipt: object,
   ownerIdentity: string
 ): void {
+  const bytes = serializeReceipt(receipt);
   mkdirSync(dirname(outputPath), { recursive: true });
   publishBytesExclusiveDurable({
     destination: outputPath,
-    bytes: Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8"),
+    bytes,
     ownerIdentity,
     temporaryDirectory: dirname(outputPath),
     allowExistingExact: true
@@ -43,4 +45,12 @@ export function readExtractionAuthorityReceiptArtifact(outputPath: string): unkn
   } catch (cause) {
     throw new Error(`extraction authority receipt is unreadable: ${outputPath}`, { cause });
   }
+}
+
+function serializeReceipt(receipt: object): Buffer {
+  const bytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  if (bytes.byteLength > MAX_EXTRACTION_AUTHORITY_RECEIPT_BYTES) {
+    throw new Error("extraction authority receipt exceeds its size limit");
+  }
+  return bytes;
 }

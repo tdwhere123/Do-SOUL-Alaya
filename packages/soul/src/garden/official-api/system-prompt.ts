@@ -129,6 +129,7 @@ export const OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT = joinPrompt([
   OFFICIAL_API_SYSTEM_PROMPT,
   "This is a coverage repair request containing exactly one source_assertions entry that produced no valid candidate in the primary extraction.",
   "Re-evaluate that assertion independently and preserve every durable source-supported detail if it qualifies.",
+  "A bare topic, search phrase, title, or information request is not a durable assertion; return an empty signals array for it.",
   "The repair pass does not lower the durability threshold; return an empty signals array when the assertion is not durable."
 ]);
 
