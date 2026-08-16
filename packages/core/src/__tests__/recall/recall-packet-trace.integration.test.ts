@@ -82,8 +82,8 @@ describe("RecallService packet trace integration", () => {
         assessment_path: path,
         actual_candidate_keys: packetCandidateKeys(traced.result.candidates),
         decision: {
-          status: "accepted",
-          reason: "strict_tail_consensus"
+          status: "rejected",
+          reason: "coverage_order_retained"
         }
       });
       expect(trace.added_candidate_keys).toEqual(
@@ -94,7 +94,9 @@ describe("RecallService packet trace integration", () => {
           (key) => !trace.actual_candidate_keys.includes(key)
         )
       );
-      expect(trace?.planned_candidate_keys).toEqual(trace?.actual_candidate_keys);
+      expect(trace.actual_candidate_keys).toEqual(
+        packetCandidateKeys(traced.result.candidates)
+      );
       expect(traced.result.candidates).toEqual(control.result.candidates);
       expect(traced.result.diagnostics?.candidates).toEqual(
         control.result.diagnostics?.candidates

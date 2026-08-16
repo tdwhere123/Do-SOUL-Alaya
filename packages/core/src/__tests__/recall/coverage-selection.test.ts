@@ -600,15 +600,15 @@ describe("coverage-aware delivery", () => {
       ])
     });
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "embedding-head",
+      "conflict",
       "protected"
     ]);
     expect(result.diagnostics.find(
       (candidate) => candidate.object_id === "conflict"
-    )?.dropped_reason).toBe("max_entries");
+    )?.dropped_reason).toBeNull();
     expect(result.diagnostics.find(
       (candidate) => candidate.object_id === "embedding-head"
-    )?.dropped_reason).toBeNull();
+    )?.dropped_reason).toBe("max_entries");
   });
 
   it("uses diminishing returns without discarding repeated-gist items", () => {

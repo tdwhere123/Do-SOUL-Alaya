@@ -1,11 +1,8 @@
+import type { SelectGammaRequest, SelectGammaResult } from "@do-soul/alaya-protocol";
 import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
-import {
-  buildFinalSelectorOrder,
-  fineAssessmentPacketMatchesPlannedMembership,
-  resolveFinalPacketConsensusPlan
-} from "./final-order/final-packet-consensus.js";
+import { resolveFinalPacketConsensusPlan } from "./final-order/final-packet-consensus.js";
 import {
   collectAdmittedCandidates,
   createAdmissionState,
@@ -13,6 +10,10 @@ import {
   recordAcceptedAdmission,
   resolveAdmission
 } from "./fine-assessment-selection/admission.js";
+import {
+  bindFineAssessmentSelectGammaPort,
+  eligibleFineAssessmentKeys
+} from "./select-gamma/bind-fine-assessment.js";
 import {
   buildSelectionResult,
   createSelectionBoundary,
@@ -59,17 +60,28 @@ export function selectFineAssessmentCandidates(
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
   const coverage = prepareCanonicalCoverage(selectionParams, context);
+  const selectGamma = selectBoundGamma(
+    selectionParams,
+    context,
+    coverage.order.candidates
+  );
   const selection = resolveAdmissionAwareFinalSelection(
     coverage.order,
     context
   );
-  return finalizeCanonicalSelection(
+  const result = finalizeCanonicalSelection(
     selectionParams,
     context,
     coverage.selection,
     selection,
     boundaryCapture
   );
+  assertSelectGammaDeliveryOrder(
+    result.candidates,
+    selectGamma,
+    selectionParams.orderedCandidates
+  );
+  return result;
 }
 
 function prepareCanonicalCoverage(
@@ -171,20 +183,63 @@ function resolveAdmissionAwareFinalSelection(
     evidenceSemanticActivationsByCandidateKey:
       context.supplementaryData.evidenceSemanticActivationsByCandidateKey
   });
-  const proposedOrder = buildFinalSelectorOrder(consensus, order.candidates);
-  const feasiblePacket = collectAdmittedCandidates(proposedOrder, context);
-  const applied = consensus.decision.status === "accepted" &&
-    fineAssessmentPacketMatchesPlannedMembership(consensus, feasiblePacket);
-  const finalCandidates = applied ? proposedOrder : order.candidates;
   return Object.freeze({
     consensus,
     order: advanceFineAssessmentOrderState(
       order,
-      finalCandidates,
+      order.candidates,
       "consensus",
-      collectMembershipKeys(finalCandidates, context)
+      collectMembershipKeys(order.candidates, context)
     )
   });
+}
+
+function selectBoundGamma(
+  params: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext,
+  orderedCandidates: readonly FineAssessmentCandidate[]
+): SelectGammaResult {
+  return bindFineAssessmentSelectGammaPort({
+    ...params,
+    orderedCandidates
+  }, context).select(buildSelectGammaRequest(params, context, orderedCandidates));
+}
+
+function buildSelectGammaRequest(
+  params: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext,
+  orderedCandidates: readonly FineAssessmentCandidate[]
+): SelectGammaRequest {
+  return Object.freeze({
+    workspace_id: params.orderedCandidates[0]?.entry.workspace_id ?? "unspecified",
+    generation_id: "unspecified",
+    condition_digest: "unspecified",
+    eligible_candidate_keys: eligibleFineAssessmentKeys(orderedCandidates),
+    token_budget: context.config.budgets.max_total_tokens
+  });
+}
+
+function assertSelectGammaDeliveryOrder(
+  delivered: FineAssessmentSelectionResult["candidates"],
+  selectGamma: SelectGammaResult,
+  source: readonly FineAssessmentCandidate[]
+): void {
+  const byKey = new Map(source.map((candidate) => [
+    candidate.fusion.candidate_key,
+    candidate.entry.object_id
+  ]));
+  const selectedIds = selectGamma.selected_candidate_keys.map((key) => {
+    const objectId = byKey.get(key);
+    if (objectId === undefined) {
+      throw new Error("Select_Gamma selected an unknown candidate key");
+    }
+    return objectId;
+  });
+  const deliveredIds = delivered.map((candidate) => candidate.object_id);
+  if (deliveredIds.length !== selectedIds.length ||
+      deliveredIds.some((objectId, index) => objectId !== selectedIds[index])) {
+    throw new Error("Select_Gamma admission order must be the delivery order");
+  }
 }
 
 function collectMembershipKeys(
