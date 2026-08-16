@@ -45,7 +45,7 @@ export interface AttributedAssociativeFactKeyProjection {
 }
 
 export const EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID =
-  "evidence_fact_frame_formation_v1";
+  "evidence_fact_frame_formation_v1" as const;
 export const EvidenceFactFrameFormationStatusSchema = z.enum([
   "formed",
   "ineligible",

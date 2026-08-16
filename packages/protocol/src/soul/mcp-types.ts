@@ -58,8 +58,7 @@ import {
 } from "./mcp-context-usage-types.js";
 import { deriveJsonSchema } from "./mcp-json-schema.js";
 import {
-  SoulMemorySearchRequestSchema,
-  SoulMemorySearchResponseSchema
+  SoulMemorySearchRequestSchema
 } from "./mcp-memory-search-types.js";
 
 export {

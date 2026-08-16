@@ -64,7 +64,7 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(121);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(122);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,
@@ -124,7 +124,7 @@ describe("temporal cutover startup gate", () => {
         WHERE state_id = 1
       `).get();
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(121);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(122);
       expect(database.connection.prepare("SELECT COUNT(*) AS count FROM relation_assertions").get())
         .toEqual({ count: 0 });
       expect(database.connection.prepare(

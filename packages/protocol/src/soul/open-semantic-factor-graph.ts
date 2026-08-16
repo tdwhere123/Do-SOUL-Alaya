@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION = 1 as const;
 export const OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID =
-  "open_semantic_factor_formation_v1";
+  "open_semantic_factor_formation_v1" as const;
 export const OPEN_SEMANTIC_FACTOR_LIMIT = 32;
 export const OPEN_SEMANTIC_VARIABLE_LIMIT = 8;
 export const OPEN_SEMANTIC_PROPOSITION_LIMIT = 8;

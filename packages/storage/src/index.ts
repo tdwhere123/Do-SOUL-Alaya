@@ -181,6 +181,31 @@ export {
   type SoftAssociationPathReadOptions
 } from "./repos/path/index.js";
 export {
+  SqliteFieldCausalUsageRepo,
+  SqliteFieldDerivationJobRepo,
+  SqliteFieldEraseBarrierRepo,
+  SqliteFieldFactorRepo,
+  SqliteFieldProjectionGenerationRepo,
+  SqliteFieldProofEffectRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteFieldSourceSpanRepo,
+  type FieldCausalUsageRepo,
+  type FieldCausalUsageRow,
+  type FieldDerivationJobRepo,
+  type FieldDerivationJobRow,
+  type FieldEraseBarrierRepo,
+  type FieldEraseBarrierRow,
+  type FieldFactorRepo,
+  type FieldProjectionGenerationRepo,
+  type FieldProjectionGenerationRow,
+  type FieldProofEffectRepo,
+  type FieldProofEffectRow,
+  type FieldSourceRecordRepo,
+  type FieldSourceRecordRow,
+  type FieldSourceSpanRepo,
+  type FieldSourceSpanRow
+} from "./repos/field/index.js";
+export {
   assertRelationProjectionCurrent,
   digestRelationFormationEventSource,
   isLegacyPathIndexUnbound,

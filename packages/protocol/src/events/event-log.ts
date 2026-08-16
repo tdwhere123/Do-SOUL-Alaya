@@ -18,6 +18,7 @@ import { ProjectMappingEventTypeSchema } from "./project-mapping.js";
 import { FileApprovalEventTypeSchema } from "./file-approval.js";
 import { SoulGardenEventLogOrphanDetectedEventTypeSchema } from "./event-log-orphan.js";
 import { StreamingEventTypeSchema } from "./message-delta.js";
+import { FieldGenerationEventTypeSchema } from "./field-generation.js";
 import { TrustStateEventTypeSchema } from "../soul/trust-state.js";
 import {
   BoundedIdSchema,
@@ -75,7 +76,8 @@ export const EventTypeSchema = z.union([
   FileApprovalEventTypeSchema,
   SoulGardenEventLogOrphanDetectedEventTypeSchema,
   TrustStateEventTypeSchema,
-  StreamingEventTypeSchema
+  StreamingEventTypeSchema,
+  FieldGenerationEventTypeSchema
 ]);
 
 /**
