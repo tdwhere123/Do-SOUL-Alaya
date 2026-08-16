@@ -4,6 +4,7 @@ import { NonEmptyStringSchema } from "../../shared/schema-primitives.js";
 export const FIELD_CONTRACT_DIGEST_PREFIX = "sha256:";
 export const FIELD_CONTRACT_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 export const FIELD_CONTRACT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+export const FIELD_CONTRACT_SCHEMA_VERSION = "1";
 export const FieldContractDigestSchema = z.string().regex(FIELD_CONTRACT_DIGEST_PATTERN);
 
 export type FieldContractSha256 = (preimage: string) => string;
@@ -104,14 +105,14 @@ export function hashFactorId(
   input: Readonly<{
     readonly family: string;
     readonly canonical_payload: string;
-    readonly operator_version: string;
+    readonly operator_id: string;
   }>,
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("factor", [
     input.family,
     input.canonical_payload,
-    input.operator_version
+    input.operator_id
   ], sha256);
 }
 
@@ -120,7 +121,7 @@ export function hashIncidenceId(
     readonly span_id: string;
     readonly factor_id: string;
     readonly scope: string;
-    readonly operator_version: string;
+    readonly operator_id: string;
   }>,
   sha256: FieldContractSha256
 ): string {
@@ -128,21 +129,21 @@ export function hashIncidenceId(
     input.span_id,
     input.factor_id,
     input.scope,
-    input.operator_version
+    input.operator_id
   ], sha256);
 }
 
 export function hashDerivationJobId(
   input: Readonly<{
     readonly purpose: string;
-    readonly operator_version: string;
+    readonly operator_id: string;
     readonly input_evidence_ids: readonly string[];
   }>,
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("derivation_job", [
     input.purpose,
-    input.operator_version,
+    input.operator_id,
     ...sortedText(input.input_evidence_ids)
   ], sha256);
 }
@@ -168,6 +169,9 @@ export function hashGenerationId(
   }>,
   sha256: FieldContractSha256
 ): string {
+  if (input.field_schema_version !== FIELD_CONTRACT_SCHEMA_VERSION) {
+    throw new Error("field contract schema version drift");
+  }
   const expected = hashOperatorManifestDigest(input.operators, sha256);
   if (input.operator_manifest_digest !== expected) {
     throw new Error("field generation operator manifest digest mismatch");
@@ -186,7 +190,7 @@ export function hashBundleId(
     readonly scope: string;
     readonly anchor_digest: string;
     readonly level: number;
-    readonly operator_version: string;
+    readonly operator_id: string;
     readonly generation_id: string;
   }>,
   sha256: FieldContractSha256
@@ -195,7 +199,7 @@ export function hashBundleId(
     input.scope,
     input.anchor_digest,
     input.level,
-    input.operator_version,
+    input.operator_id,
     input.generation_id
   ], sha256);
 }
@@ -219,11 +223,11 @@ export function hashConditionDigest(
 ): string {
   return hashLabeledIdentity("condition", [
     condition.principal,
-    ...sortedText(condition.authorized_scopes),
-    ...sortedText(condition.explicit_bridges),
+    ...condition.authorized_scopes,
+    ...condition.explicit_bridges,
     condition.workspace_project,
     condition.effective_as_of,
-    ...sortedText(condition.query_task_factors),
+    ...condition.query_task_factors,
     condition.governance_state,
     condition.activation_budget,
     condition.token_budget
@@ -234,14 +238,14 @@ export function hashQueryCacheKey(
   input: Readonly<{
     readonly generation_id: string;
     readonly condition_digest: string;
-    readonly query_operator_version: string;
+    readonly query_operator_id: string;
   }>,
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("query_cache", [
     input.generation_id,
     input.condition_digest,
-    input.query_operator_version
+    input.query_operator_id
   ], sha256);
 }
 
@@ -264,9 +268,26 @@ export function hashEffectRequestDigest(
   ], sha256);
 }
 
-export function assertFieldOperatorVersion(actual: string, expected: string): void {
+export function hashCausalUsageId(
+  input: Readonly<{
+    readonly causal_key: string;
+    readonly downstream_ref: string;
+    readonly scope: string;
+    readonly operator_id: string;
+  }>,
+  sha256: FieldContractSha256
+): string {
+  return hashLabeledIdentity("causal_usage", [
+    input.causal_key,
+    input.downstream_ref,
+    input.scope,
+    input.operator_id
+  ], sha256);
+}
+
+export function assertFieldOperatorId(actual: string, expected: string): void {
   if (actual !== expected) {
-    throw new Error("field contract operator version drift");
+    throw new Error("field contract operator id drift");
   }
 }
 
@@ -276,6 +297,11 @@ export function assertFieldIdentity(actual: string, expected: string, label: str
   }
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
 function sortedText(values: readonly string[]): readonly string[] {
-  return [...values].sort((left, right) => left.localeCompare(right));
+  return [...values].sort(compareCodeUnits);
 }

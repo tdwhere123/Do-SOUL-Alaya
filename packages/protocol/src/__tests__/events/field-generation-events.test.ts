@@ -9,7 +9,8 @@ import {
   SoulFieldGenerationActivatedPayloadSchema,
   SoulFieldGenerationRebuildStartedPayloadSchema,
   SoulFieldSourceRecordAdmittedPayloadSchema,
-  SoulFieldUsageCausalRecordedPayloadSchema
+  SoulFieldUsageCausalRecordedPayloadSchema,
+  parseFieldGenerationEventPayload
 } from "../../index.js";
 
 const occurredAt = "2026-08-16T00:00:00.000Z";
@@ -42,7 +43,10 @@ describe("field generation protocol events", () => {
       content_digest: digest,
       evidence_object_id: null,
       recorded_at: occurredAt,
-      operator_version: "source_span_identity_v1"
+      event_time: null,
+      valid_from: null,
+      valid_to: null,
+      operator_id: "source_span_identity_v1"
     })).toMatchObject({ record_id: digest });
     expect(() => SoulFieldSourceRecordAdmittedPayloadSchema.parse({
       workspace_id: "workspace-1",
@@ -52,7 +56,10 @@ describe("field generation protocol events", () => {
       content_digest: digest,
       evidence_object_id: null,
       recorded_at: occurredAt,
-      operator_version: "source_span_identity_v1",
+      event_time: null,
+      valid_from: null,
+      valid_to: null,
+      operator_id: "source_span_identity_v1",
       source_bytes: "plaintext"
     })).toThrow();
     expect(() => SoulFieldEraseBarrierPayloadSchema.parse({
@@ -91,13 +98,29 @@ describe("field generation protocol events", () => {
     }).decision).toBe("deny");
     expect(SoulFieldUsageCausalRecordedPayloadSchema.parse({
       workspace_id: "workspace-1",
-      receipt_id: "usage-1",
+      identity: digest,
       causal_key: "use-1",
       occurred_at: occurredAt,
       downstream_ref: "path-1",
       weight: 0,
-      scope: "workspace-1"
+      scope: "workspace-1",
+      usage_kind: "causal",
+      operator_id: "causal_usage_v1"
     }).weight).toBe(0);
+    expect(() => parseFieldGenerationEventPayload(
+      FieldGenerationEventType.SOUL_FIELD_USAGE_CAUSAL_RECORDED,
+      {
+        workspace_id: "workspace-1",
+        identity: digest,
+        causal_key: "use-1",
+        occurred_at: occurredAt,
+        downstream_ref: "path-1",
+        weight: 0,
+        scope: "workspace-1",
+        usage_kind: "delivery",
+        operator_id: "causal_usage_v1"
+      }
+    )).toThrow();
   });
 
   it("accepts the event log envelope for field generation events", () => {

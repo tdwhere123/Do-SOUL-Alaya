@@ -1,5 +1,11 @@
+import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { parseOptionalRow } from "../shared/parse-row.js";
+import {
+  assertSubjectNotErased,
+  verifyPersistedSourceRecord,
+  verifyPersistedSourceSpan
+} from "./identity.js";
 import {
   fieldSourceRecordParser,
   fieldSourceSpanParser,
@@ -16,22 +22,31 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly insertStatement;
   private readonly selectStatement;
 
-  public constructor(database: StorageDatabase) {
+  public constructor(
+    private readonly database: StorageDatabase,
+    private readonly sha256: FieldContractSha256
+  ) {
     this.insertStatement = database.connection.prepare(`
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
-        evidence_object_id, recorded_at, operator_version, source_body
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(record_id) DO NOTHING
+        evidence_object_id, recorded_at, event_time, valid_from, valid_to,
+        operator_id, source_body
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(`
       SELECT record_id, workspace_id, source_id, source_version, content_digest,
-             evidence_object_id, recorded_at, operator_version, source_body
-      FROM source_records WHERE record_id = ? LIMIT 1
+             evidence_object_id, recorded_at, event_time, valid_from, valid_to,
+             operator_id, source_body
+      FROM source_records WHERE workspace_id = ? AND record_id = ? LIMIT 1
     `);
   }
 
   public insert(row: FieldSourceRecordRow): FieldSourceRecordRow {
+    verifyPersistedSourceRecord(row, this.sha256);
+    if (this.findById(row.workspace_id, row.record_id) === null) {
+      assertSubjectNotErased(this.database, row.workspace_id, "source_record", row.record_id);
+    }
     return insertIdempotent(
       () => this.insertStatement.run(
         row.record_id,
@@ -41,18 +56,21 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
         row.content_digest,
         row.evidence_object_id,
         row.recorded_at,
-        row.operator_version,
+        row.event_time,
+        row.valid_from,
+        row.valid_to,
+        row.operator_id,
         row.source_body
       ),
-      () => this.findById(row.record_id),
+      () => this.findById(row.workspace_id, row.record_id),
       (existing) => sameRecord(existing, row),
       "source record"
     );
   }
 
-  public findById(recordId: string): FieldSourceRecordRow | null {
+  public findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null {
     return parseOptionalRow(
-      this.selectStatement.get(recordId),
+      this.selectStatement.get(workspaceId, recordId),
       fieldSourceRecordParser,
       "source record"
     );
@@ -63,20 +81,26 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
   private readonly insertStatement;
   private readonly selectStatement;
 
-  public constructor(database: StorageDatabase) {
+  public constructor(
+    database: StorageDatabase,
+    private readonly sha256: FieldContractSha256
+  ) {
     this.insertStatement = database.connection.prepare(`
       INSERT INTO source_spans (
-        span_id, record_id, start_offset, end_offset, purpose, producer_version, workspace_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(span_id) DO NOTHING
+        span_id, record_id, start_offset, end_offset, purpose, producer_version,
+        workspace_id, recorded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, span_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(`
-      SELECT span_id, record_id, start_offset, end_offset, purpose, producer_version, workspace_id
-      FROM source_spans WHERE span_id = ? LIMIT 1
+      SELECT span_id, record_id, start_offset, end_offset, purpose, producer_version,
+             workspace_id, recorded_at
+      FROM source_spans WHERE workspace_id = ? AND span_id = ? LIMIT 1
     `);
   }
 
   public insert(row: FieldSourceSpanRow): FieldSourceSpanRow {
+    verifyPersistedSourceSpan(row, this.sha256);
     return insertIdempotent(
       () => this.insertStatement.run(
         row.span_id,
@@ -85,17 +109,18 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
         row.end_offset,
         row.purpose,
         row.producer_version,
-        row.workspace_id
+        row.workspace_id,
+        row.recorded_at
       ),
-      () => this.findById(row.span_id),
+      () => this.findById(row.workspace_id, row.span_id),
       (existing) => sameSpan(existing, row),
       "source span"
     );
   }
 
-  public findById(spanId: string): FieldSourceSpanRow | null {
+  public findById(workspaceId: string, spanId: string): FieldSourceSpanRow | null {
     return parseOptionalRow(
-      this.selectStatement.get(spanId),
+      this.selectStatement.get(workspaceId, spanId),
       fieldSourceSpanParser,
       "source span"
     );
@@ -103,13 +128,14 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
 }
 
 function sameRecord(existing: FieldSourceRecordRow, incoming: FieldSourceRecordRow): boolean {
-  return existing.workspace_id === incoming.workspace_id &&
-    existing.source_id === incoming.source_id &&
+  return existing.source_id === incoming.source_id &&
     existing.source_version === incoming.source_version &&
     existing.content_digest === incoming.content_digest &&
     existing.evidence_object_id === incoming.evidence_object_id &&
-    existing.operator_version === incoming.operator_version &&
-    existing.source_body === incoming.source_body;
+    existing.operator_id === incoming.operator_id &&
+    existing.event_time === incoming.event_time &&
+    existing.valid_from === incoming.valid_from &&
+    existing.valid_to === incoming.valid_to;
 }
 
 function sameSpan(existing: FieldSourceSpanRow, incoming: FieldSourceSpanRow): boolean {
@@ -117,6 +143,5 @@ function sameSpan(existing: FieldSourceSpanRow, incoming: FieldSourceSpanRow): b
     existing.start_offset === incoming.start_offset &&
     existing.end_offset === incoming.end_offset &&
     existing.purpose === incoming.purpose &&
-    existing.producer_version === incoming.producer_version &&
-    existing.workspace_id === incoming.workspace_id;
+    existing.producer_version === incoming.producer_version;
 }

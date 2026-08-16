@@ -37,8 +37,19 @@ export const SoulFieldSourceRecordAdmittedPayloadSchema = z.object({
   content_digest: FieldContractDigestSchema,
   evidence_object_id: BoundedIdSchema.nullable(),
   recorded_at: IsoDatetimeStringSchema,
-  operator_version: NonEmptyStringSchema.max(128)
-}).strict().readonly();
+  event_time: IsoDatetimeStringSchema.nullable(),
+  valid_from: IsoDatetimeStringSchema.nullable(),
+  valid_to: IsoDatetimeStringSchema.nullable(),
+  operator_id: NonEmptyStringSchema.max(128)
+}).strict().superRefine((payload, context) => {
+  if (payload.valid_from === null && payload.valid_to !== null) {
+    context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
+  }
+  if (payload.valid_from !== null && payload.valid_to !== null &&
+      payload.valid_to <= payload.valid_from) {
+    context.addIssue({ code: "custom", message: "valid interval must be half-open" });
+  }
+}).readonly();
 
 export const SoulFieldGenerationRebuildStartedPayloadSchema = z.object({
   workspace_id: BoundedIdSchema,
@@ -79,13 +90,43 @@ export const SoulFieldEffectDecidedPayloadSchema = z.object({
 
 export const SoulFieldUsageCausalRecordedPayloadSchema = z.object({
   workspace_id: BoundedIdSchema,
-  receipt_id: BoundedIdSchema,
+  identity: FieldContractDigestSchema,
   causal_key: NonEmptyStringSchema.max(256),
   occurred_at: IsoDatetimeStringSchema,
   downstream_ref: NonEmptyStringSchema.max(256),
   weight: NonNegativeFiniteNumberSchema,
-  scope: NonEmptyStringSchema.max(256)
+  scope: NonEmptyStringSchema.max(256),
+  usage_kind: z.literal("causal"),
+  operator_id: NonEmptyStringSchema.max(128)
 }).strict().readonly();
+
+export const fieldGenerationPayloadSchemas = {
+  [FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED]:
+    SoulFieldSourceRecordAdmittedPayloadSchema,
+  [FieldGenerationEventType.SOUL_FIELD_GENERATION_REBUILD_STARTED]:
+    SoulFieldGenerationRebuildStartedPayloadSchema,
+  [FieldGenerationEventType.SOUL_FIELD_GENERATION_ACTIVATED]:
+    SoulFieldGenerationActivatedPayloadSchema,
+  [FieldGenerationEventType.SOUL_FIELD_ERASE_BARRIER]: SoulFieldEraseBarrierPayloadSchema,
+  [FieldGenerationEventType.SOUL_FIELD_EFFECT_DECIDED]: SoulFieldEffectDecidedPayloadSchema,
+  [FieldGenerationEventType.SOUL_FIELD_USAGE_CAUSAL_RECORDED]:
+    SoulFieldUsageCausalRecordedPayloadSchema
+} as const;
+
+export type FieldGenerationEventPayloadMap = {
+  [K in keyof typeof fieldGenerationPayloadSchemas]:
+    z.infer<(typeof fieldGenerationPayloadSchemas)[K]>;
+};
+
+export function parseFieldGenerationEventPayload<
+  T extends keyof typeof fieldGenerationPayloadSchemas
+>(
+  type: T,
+  payload: Record<string, unknown>
+): FieldGenerationEventPayloadMap[T] {
+  const schema = fieldGenerationPayloadSchemas[type];
+  return schema.parse(payload) as FieldGenerationEventPayloadMap[T];
+}
 
 export type FieldGenerationEventType = z.infer<typeof FieldGenerationEventTypeSchema>;
 export type SoulFieldSourceRecordAdmittedPayload =

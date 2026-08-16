@@ -1,17 +1,24 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../../shared/schema-primitives.js";
 import {
   FieldContractDigestSchema,
-  FieldReceiptContractFieldsSchema
+  FieldReceiptContractFieldsSchema,
+  assertFieldIdentity,
+  assertFieldOperatorId,
+  hashConditionDigest,
+  hashQueryCacheKey,
+  type FieldContractSha256
 } from "./canonical-identity.js";
 import { QUERY_CONDITION_OPERATOR_ID } from "./operator-manifest.js";
 
 export const QueryConditionSchema = z.object({
   principal: NonEmptyStringSchema.max(256),
+  workspace_id: BoundedIdSchema,
   authorized_scopes: z.array(NonEmptyStringSchema.max(256)).readonly(),
   explicit_bridges: z.array(NonEmptyStringSchema.max(256)).readonly(),
   workspace_project: NonEmptyStringSchema.max(256),
@@ -29,7 +36,7 @@ export const QueryConditionReceiptSchema = FieldReceiptContractFieldsSchema.exte
   schema_version: z.literal(1),
   condition: QueryConditionSchema,
   generation_id: FieldContractDigestSchema,
-  query_operator_version: z.literal(QUERY_CONDITION_OPERATOR_ID),
+  query_operator_id: z.literal(QUERY_CONDITION_OPERATOR_ID),
   query_cache_key: FieldContractDigestSchema,
   recorded_at: IsoDatetimeStringSchema
 }).strict().readonly();
@@ -49,4 +56,19 @@ export function classifyFieldValidTime(
   if (time.valid_from > asOf) return "inactive";
   if (time.valid_to !== null && asOf >= time.valid_to) return "inactive";
   return "hard_active";
+}
+
+export function verifyQueryConditionReceipt(
+  receipt: QueryConditionReceipt,
+  sha256: FieldContractSha256
+): QueryConditionReceipt {
+  assertFieldOperatorId(receipt.query_operator_id, QUERY_CONDITION_OPERATOR_ID);
+  const conditionDigest = hashConditionDigest(receipt.condition, sha256);
+  assertFieldIdentity(receipt.identity, conditionDigest, "query condition");
+  assertFieldIdentity(receipt.query_cache_key, hashQueryCacheKey({
+    generation_id: receipt.generation_id,
+    condition_digest: conditionDigest,
+    query_operator_id: receipt.query_operator_id
+  }, sha256), "query cache key");
+  return receipt;
 }

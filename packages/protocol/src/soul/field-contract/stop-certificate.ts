@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BoundedIdSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
 } from "../../shared/schema-primitives.js";
@@ -7,7 +8,7 @@ import {
   FieldContractDigestSchema,
   FieldReceiptContractFieldsSchema
 } from "./canonical-identity.js";
-import { FIELD_STOP_CERTIFICATE_OPERATOR_ID } from "./operator-manifest.js";
+import { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID } from "./operator-manifest.js";
 
 export const FieldStopCertificateStatusSchema = z.enum(["certified", "uncertified"]);
 export const FieldStopFrontierSchema = z.enum(["closed", "incomplete"]);
@@ -21,13 +22,22 @@ export const FieldStopReasonSchema = z.enum([
   "activation_budget_exhausted"
 ]);
 
+export const FieldStopExchangeBoundSchema = z.object({
+  removed_candidate_key: NonEmptyStringSchema.max(256).nullable(),
+  incumbent_loss: z.number().finite(),
+  unseen_gain_upper_bound: z.number().finite(),
+  improvement_upper_bound: z.number().finite()
+}).strict().readonly();
+
 export const FieldStopCertificateReceiptSchema = FieldReceiptContractFieldsSchema.extend({
   schema_version: z.literal(1),
-  operator_id: z.literal(FIELD_STOP_CERTIFICATE_OPERATOR_ID),
+  workspace_id: BoundedIdSchema,
+  operator_id: z.literal(RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID),
   status: FieldStopCertificateStatusSchema,
   frontier: FieldStopFrontierSchema,
   reason: FieldStopReasonSchema,
-  selected_candidate_keys: z.array(NonEmptyStringSchema.max(256)).max(5).readonly(),
+  selected_candidate_keys: z.array(NonEmptyStringSchema.max(256)).readonly(),
+  exchange_bounds: z.array(FieldStopExchangeBoundSchema).readonly(),
   improvement_upper_bound: z.number().finite().nullable(),
   generation_id: FieldContractDigestSchema,
   condition_digest: FieldContractDigestSchema,
@@ -59,4 +69,5 @@ export const FieldStopCertificateReceiptSchema = FieldReceiptContractFieldsSchem
 export type FieldStopCertificateStatus = z.infer<typeof FieldStopCertificateStatusSchema>;
 export type FieldStopFrontier = z.infer<typeof FieldStopFrontierSchema>;
 export type FieldStopReason = z.infer<typeof FieldStopReasonSchema>;
+export type FieldStopExchangeBound = z.infer<typeof FieldStopExchangeBoundSchema>;
 export type FieldStopCertificateReceipt = z.infer<typeof FieldStopCertificateReceiptSchema>;

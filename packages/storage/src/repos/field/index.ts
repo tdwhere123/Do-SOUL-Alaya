@@ -1,22 +1,17 @@
 export type {
-  FieldCausalUsageKind,
   FieldCausalUsageRepo,
   FieldCausalUsageRow,
   FieldDerivationJobRepo,
   FieldDerivationJobRow,
-  FieldDerivationJobStatus,
   FieldEraseBarrierRepo,
   FieldEraseBarrierRow,
-  FieldEraseSubjectKind,
   FieldFactorDescriptorRow,
-  FieldFactorFamily,
   FieldFactorIncidenceRow,
   FieldFactorRepo,
   FieldProjectionGenerationRepo,
   FieldProjectionGenerationRow,
-  FieldProjectionGenerationStatus,
+  FieldProjectionPinRow,
   FieldProjectionPointerRow,
-  FieldProofDecision,
   FieldProofEffectRepo,
   FieldProofEffectRow,
   FieldSourceRecordRepo,
@@ -28,10 +23,8 @@ export {
   SqliteFieldDerivationJobRepo,
   SqliteFieldFactorRepo
 } from "./factor-repo.js";
-export {
-  SqliteFieldEraseBarrierRepo,
-  SqliteFieldProjectionGenerationRepo
-} from "./generation-repo.js";
+export { SqliteFieldEraseBarrierRepo } from "./erase-repo.js";
+export { SqliteFieldProjectionGenerationRepo } from "./generation-repo.js";
 export {
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo

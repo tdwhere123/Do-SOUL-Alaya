@@ -58,8 +58,11 @@ import {
 } from "./mcp-context-usage-types.js";
 import { deriveJsonSchema } from "./mcp-json-schema.js";
 import {
-  SoulMemorySearchRequestSchema
+  SoulMemorySearchRequestSchema,
+  SoulMemorySearchResponseSchema
 } from "./mcp-memory-search-types.js";
+
+export { SoulMemorySearchResponseSchema };
 
 export {
   SoulRecallStrategyMixSchema,
@@ -71,7 +74,6 @@ export {
   SoulRecallTokenizerHintSchema,
   SoulRecallHostContextSchema,
   SoulMemorySearchRequestSchema,
-  SoulMemorySearchResponseSchema,
   type MemorySearchResult,
   type SoulActiveConstraintGovernanceState,
   type SoulActiveConstraint,

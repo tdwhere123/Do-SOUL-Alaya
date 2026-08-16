@@ -8,12 +8,17 @@ import {
 } from "../../../soul/open-semantic-factor-graph.js";
 import {
   ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID,
+  CAUSAL_USAGE_OPERATOR_ID,
+  FACTOR_INCIDENCE_OPERATOR_ID,
+  FIELD_CONTRACT_SCHEMA_VERSION,
   FIELD_OPERATOR_MANIFEST,
   QUERY_CONDITION_OPERATOR_ID,
+  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   fieldOperatorManifestDigest,
   hashAddressableSourceSpanId,
   hashBundleId,
+  hashCausalUsageId,
   hashConditionDigest,
   hashContentDigest,
   hashDerivationJobId,
@@ -102,7 +107,7 @@ describe("field-contract identities", () => {
     const generation = hashGenerationId({
       operators,
       operator_manifest_digest: digest,
-      field_schema_version: "1",
+      field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
       input_event_frontier: "event-10",
       governance_frontier: "gov-3"
     }, sha256);
@@ -113,10 +118,17 @@ describe("field-contract identities", () => {
     expect(() => hashGenerationId({
       operators: driftedOperators,
       operator_manifest_digest: digest,
-      field_schema_version: "1",
+      field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
       input_event_frontier: "event-10",
       governance_frontier: "gov-3"
     }, sha256)).toThrow(/manifest digest/u);
+    expect(() => hashGenerationId({
+      operators,
+      operator_manifest_digest: digest,
+      field_schema_version: "2",
+      input_event_frontier: "event-10",
+      governance_frontier: "gov-3"
+    }, sha256)).toThrow(/schema version/u);
     expect(() => verifySourceRecordIdentity({
       schema_version: 1,
       producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
@@ -139,8 +151,8 @@ describe("field-contract identities", () => {
       event_time: null,
       valid_from: null,
       valid_to: null,
-      operator_version: "source_span_identity_v2"
-    }, sha256)).toThrow(/operator version/u);
+      operator_id: "source_span_identity_v2"
+    }, sha256)).toThrow(/operator id/u);
     expect(() => verifyFactorDescriptor({
       schema_version: 1,
       producer: "factor_incidence_v1",
@@ -148,24 +160,49 @@ describe("field-contract identities", () => {
       identity: hashFactorId({
         family: "f0",
         canonical_payload: "token",
-        operator_version: "factor_incidence_v1"
+        operator_id: FACTOR_INCIDENCE_OPERATOR_ID
       }, sha256),
       replay_rule: "idempotent_same_identity",
       failure_disposition: "fail_closed",
       governance_effect: "none",
       deletion_behavior: "rebuildable",
+      workspace_id: "workspace-1",
       family: "f0",
       canonical_payload: "token",
-      operator_version: "factor_incidence_v2",
+      operator_id: "factor_incidence_v2",
       recorded_at: "2026-08-16T00:00:00.000Z"
-    }, sha256, "factor_incidence_v1")).toThrow(/operator version/u);
-    expect(generation).not.toBe(hashGenerationId({
-      operators,
-      operator_manifest_digest: digest,
-      field_schema_version: "2",
-      input_event_frontier: "event-10",
-      governance_frontier: "gov-3"
-    }, sha256));
+    }, sha256, FACTOR_INCIDENCE_OPERATOR_ID)).toThrow(/operator id/u);
+    expect(generation).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it("does not let manifest version 1 substitute for operator_id", () => {
+    const fromOperatorId = hashFactorId({
+      family: "f0",
+      canonical_payload: "token",
+      operator_id: FACTOR_INCIDENCE_OPERATOR_ID
+    }, sha256);
+    const fromManifestVersion = hashFactorId({
+      family: "f0",
+      canonical_payload: "token",
+      operator_id: "1"
+    }, sha256);
+
+    expect(fromOperatorId).not.toBe(fromManifestVersion);
+    expect(() => verifyFactorDescriptor({
+      schema_version: 1,
+      producer: FACTOR_INCIDENCE_OPERATOR_ID,
+      consumer: "projection_generation",
+      identity: fromManifestVersion,
+      replay_rule: "idempotent_same_identity",
+      failure_disposition: "fail_closed",
+      governance_effect: "none",
+      deletion_behavior: "rebuildable",
+      workspace_id: "workspace-1",
+      family: "f0",
+      canonical_payload: "token",
+      operator_id: "1",
+      recorded_at: "2026-08-16T00:00:00.000Z"
+    }, sha256)).toThrow(/operator id/u);
   });
 
   it("changes generation_id when the manifest or frontier changes", () => {
@@ -173,7 +210,7 @@ describe("field-contract identities", () => {
     const base = {
       operators: FIELD_OPERATOR_MANIFEST,
       operator_manifest_digest: digest,
-      field_schema_version: "1",
+      field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
       input_event_frontier: "event-10",
       governance_frontier: "gov-3"
     };
@@ -188,7 +225,7 @@ describe("field-contract identities", () => {
     expect(hashGenerationId(base, sha256)).not.toBe(hashGenerationId({
       operators: drifted,
       operator_manifest_digest: hashOperatorManifestDigest(drifted, sha256),
-      field_schema_version: "1",
+      field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
       input_event_frontier: "event-10",
       governance_frontier: "gov-3"
     }, sha256));
@@ -197,12 +234,12 @@ describe("field-contract identities", () => {
   it("canonicalizes derivation job evidence order before hashing", () => {
     const first = hashDerivationJobId({
       purpose: "f3_semantic",
-      operator_version: "open_semantic_factor_formation_v1",
+      operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
       input_evidence_ids: ["ev-b", "ev-a"]
     }, sha256);
     const second = hashDerivationJobId({
       purpose: "f3_semantic",
-      operator_version: "open_semantic_factor_formation_v1",
+      operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
       input_evidence_ids: ["ev-a", "ev-b"]
     }, sha256);
 
@@ -211,14 +248,14 @@ describe("field-contract identities", () => {
       `sha256:${sha256(JSON.stringify([
         "derivation_job",
         "f3_semantic",
-        "open_semantic_factor_formation_v1",
+        OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
         "ev-a",
         "ev-b"
       ]))}`
     );
   });
 
-  it("ignores ephemeral tracing ids in condition_digest", () => {
+  it("preserves condition scope-stack order and isolates incidence scopes", () => {
     const canonical = {
       principal: "agent",
       authorized_scopes: ["workspace-1", "project-a"],
@@ -230,40 +267,60 @@ describe("field-contract identities", () => {
       activation_budget: 8,
       token_budget: 400
     };
-    const withTrace = {
+    const reversedScopes = {
+      ...canonical,
+      authorized_scopes: ["project-a", "workspace-1"]
+    };
+    const spanId = "sha256:" + "b".repeat(64);
+    const factorId = hashFactorId({
+      family: "f1",
+      canonical_payload: "frame",
+      operator_id: FACTOR_INCIDENCE_OPERATOR_ID
+    }, sha256);
+
+    expect(hashConditionDigest({
       ...canonical,
       request_id: "req-1",
       trace_id: "trace-9",
       span_id: "span-3"
-    };
-
-    expect(hashConditionDigest(withTrace, sha256)).toBe(hashConditionDigest(canonical, sha256));
+    }, sha256)).toBe(hashConditionDigest(canonical, sha256));
+    expect(hashConditionDigest(canonical, sha256))
+      .not.toBe(hashConditionDigest(reversedScopes, sha256));
     expect(hashQueryCacheKey({
       generation_id: "sha256:" + "a".repeat(64),
       condition_digest: hashConditionDigest(canonical, sha256),
-      query_operator_version: QUERY_CONDITION_OPERATOR_ID
+      query_operator_id: QUERY_CONDITION_OPERATOR_ID
     }, sha256)).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(hashIncidenceId({
-      span_id: "sha256:" + "b".repeat(64),
-      factor_id: hashFactorId({
-        family: "f1",
-        canonical_payload: "frame",
-        operator_version: "factor_incidence_v1"
-      }, sha256),
+      span_id: spanId,
+      factor_id: factorId,
       scope: "workspace-1",
-      operator_version: "factor_incidence_v1"
-    }, sha256)).toMatch(/^sha256:[0-9a-f]{64}$/u);
+      operator_id: FACTOR_INCIDENCE_OPERATOR_ID
+    }, sha256)).not.toBe(hashIncidenceId({
+      span_id: spanId,
+      factor_id: factorId,
+      scope: "project-a",
+      operator_id: FACTOR_INCIDENCE_OPERATOR_ID
+    }, sha256));
     expect(hashBundleId({
       scope: "workspace-1",
       anchor_digest: "sha256:" + "c".repeat(64),
       level: 1,
-      operator_version: "projection_generation_v1",
+      operator_id: "projection_generation_v1",
       generation_id: "sha256:" + "d".repeat(64)
+    }, sha256)).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(hashCausalUsageId({
+      causal_key: "use-1",
+      downstream_ref: "path-1",
+      scope: "workspace-1",
+      operator_id: CAUSAL_USAGE_OPERATOR_ID
     }, sha256)).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 
   it("cites existing operator ids instead of forking them", () => {
     expect(ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID).toBe("attributed_coverage_atoms_v1");
+    expect(RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID)
+      .toBe("recall_field_selector_exchange_bound_v1");
     expect(FIELD_OPERATOR_MANIFEST.map((entry) => entry.id)).toEqual([
       EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
       OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
@@ -275,7 +332,7 @@ describe("field-contract identities", () => {
       "causal_usage_v1",
       "proof_effect_v1",
       "select_gamma_v1",
-      "field_stop_certificate_v1"
+      RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID
     ]);
   });
 });

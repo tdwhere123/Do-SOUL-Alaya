@@ -1,10 +1,15 @@
 import type { AddressableSourceSpan, AddressableSourceSpanPurpose, SourceRecordIdentity } from "./source-span.js";
-import type { FactorFamily } from "./factor-incidence.js";
-import type { ProjectionEraseSubjectKind, ProjectionGenerationStatus } from "./projection-generation.js";
-import type { EffectDecision, EffectRequest } from "./proof-effect.js";
-import type { FieldStopCertificateStatus, FieldStopFrontier } from "./stop-certificate.js";
-
-export type FieldPortFailureDisposition = "fail_closed" | "explicit_incomplete";
+import type { DerivationJobReceipt, FactorIncidence } from "./factor-incidence.js";
+import type {
+  FieldProjectionGeneration,
+  ProjectionEraseBarrier,
+  ProjectionGenerationPointer,
+  ProjectionPin
+} from "./projection-generation.js";
+import type { QueryCondition, QueryConditionReceipt } from "./query-condition.js";
+import type { CausalUsageReceipt } from "./causal-usage.js";
+import type { EffectDecisionReceipt, EffectRequest } from "./proof-effect.js";
+import type { FieldStopCertificateReceipt } from "./stop-certificate.js";
 
 export type SourceAdmissionRequest = Readonly<{
   readonly workspace_id: string;
@@ -28,110 +33,46 @@ export type SourceAdmissionResult = Readonly<{
   readonly spans: readonly AddressableSourceSpan[];
 }>;
 
-export type SourceAdmissionPort = Readonly<{
-  readonly input_receipt: SourceAdmissionRequest;
-  readonly output_receipt: SourceAdmissionResult;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface SourceAdmissionPort {
+  admit(input: SourceAdmissionRequest): SourceAdmissionResult;
+}
 
-export type FactorIncidencePort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly span_id: string;
-    readonly family: FactorFamily;
-    readonly canonical_payload: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly incidence_id: string;
-    readonly job_id: string | null;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface FactorIncidencePort {
+  recordIncidence(input: FactorIncidence): FactorIncidence;
+  nominateJob(input: DerivationJobReceipt): DerivationJobReceipt;
+}
 
-export type ProjectionGenerationPort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly workspace_id: string;
-    readonly input_event_frontier: string;
-    readonly governance_frontier: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly generation_id: string;
-    readonly status: ProjectionGenerationStatus;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface ProjectionGenerationPort {
+  snapshot(input: FieldProjectionGeneration): FieldProjectionGeneration;
+  verify(input: FieldProjectionGeneration): FieldProjectionGeneration;
+  activatePointer(input: ProjectionGenerationPointer): ProjectionGenerationPointer;
+  pin(input: ProjectionPin): ProjectionPin;
+}
 
-export type QueryConditionPort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly principal: string;
-    readonly effective_as_of: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly condition_digest: string;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface QueryConditionPort {
+  captureCondition(input: QueryCondition): QueryConditionReceipt;
+}
 
-export type AttributedActivationPort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly generation_id: string;
-    readonly condition_digest: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly activation_receipt_id: string;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface AttributedActivationPort {
+  attribute(input: QueryConditionReceipt): QueryConditionReceipt;
+}
 
-export type StopCertificatePort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly generation_id: string;
-    readonly condition_digest: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly status: FieldStopCertificateStatus;
-    readonly frontier: FieldStopFrontier;
-  }>;
-  readonly failure_disposition: "explicit_incomplete";
-}>;
+export interface StopCertificatePort {
+  certify(input: FieldStopCertificateReceipt): FieldStopCertificateReceipt;
+}
 
-export type ProofEffectPort = Readonly<{
-  readonly input_receipt: EffectRequest;
-  readonly output_receipt: Readonly<{
-    readonly decision: EffectDecision;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface ProofEffectPort {
+  decide(input: EffectRequest): EffectDecisionReceipt;
+}
 
-export type CausalUsagePort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly causal_key: string;
-    readonly downstream_ref: string;
-    readonly weight: number;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly receipt_id: string;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface CausalUsagePort {
+  recordUsage(input: CausalUsageReceipt): CausalUsageReceipt;
+}
 
-export type SelectGammaPort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly generation_id: string;
-    readonly condition_digest: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly selected_candidate_keys: readonly string[];
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface SelectGammaPort {
+  select(input: FieldStopCertificateReceipt): FieldStopCertificateReceipt;
+}
 
-export type EraseBarrierPort = Readonly<{
-  readonly input_receipt: Readonly<{
-    readonly subject_kind: ProjectionEraseSubjectKind;
-    readonly subject_id: string;
-  }>;
-  readonly output_receipt: Readonly<{
-    readonly barrier_id: string;
-  }>;
-  readonly failure_disposition: "fail_closed";
-}>;
+export interface EraseBarrierPort {
+  erase(input: ProjectionEraseBarrier): ProjectionEraseBarrier;
+}

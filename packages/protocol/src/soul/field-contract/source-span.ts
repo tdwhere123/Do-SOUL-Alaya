@@ -8,7 +8,8 @@ import {
   FieldContractDigestSchema,
   FieldReceiptContractFieldsSchema,
   assertFieldIdentity,
-  assertFieldOperatorVersion,
+  assertFieldOperatorId,
+  hashAddressableSourceSpanId,
   hashSourceRecordId,
   type FieldContractSha256
 } from "./canonical-identity.js";
@@ -33,7 +34,7 @@ export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.exten
   event_time: IsoDatetimeStringSchema.nullable(),
   valid_from: IsoDatetimeStringSchema.nullable(),
   valid_to: IsoDatetimeStringSchema.nullable(),
-  operator_version: NonEmptyStringSchema.max(128)
+  operator_id: NonEmptyStringSchema.max(128)
 }).strict().superRefine((record, context) => {
   if (record.valid_from === null && record.valid_to !== null) {
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
@@ -69,13 +70,25 @@ export type AddressableSourceSpan = z.infer<typeof AddressableSourceSpanSchema>;
 export function verifySourceRecordIdentity(
   receipt: SourceRecordIdentity,
   sha256: FieldContractSha256,
-  expectedOperatorVersion: string = SOURCE_SPAN_IDENTITY_OPERATOR_ID
+  expectedOperatorId: string = SOURCE_SPAN_IDENTITY_OPERATOR_ID
 ): SourceRecordIdentity {
-  assertFieldOperatorVersion(receipt.operator_version, expectedOperatorVersion);
+  assertFieldOperatorId(receipt.operator_id, expectedOperatorId);
   assertFieldIdentity(
     receipt.identity,
     hashSourceRecordId(receipt, sha256),
     "source record"
+  );
+  return receipt;
+}
+
+export function verifyAddressableSourceSpan(
+  receipt: AddressableSourceSpan,
+  sha256: FieldContractSha256
+): AddressableSourceSpan {
+  assertFieldIdentity(
+    receipt.identity,
+    hashAddressableSourceSpanId(receipt, sha256),
+    "source span"
   );
   return receipt;
 }

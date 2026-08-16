@@ -2,6 +2,7 @@ export {
   FIELD_CONTRACT_DIGEST_PATTERN,
   FIELD_CONTRACT_DIGEST_PREFIX,
   FIELD_CONTRACT_HEX_PATTERN,
+  FIELD_CONTRACT_SCHEMA_VERSION,
   FieldContractDigestSchema,
   FieldReceiptContractFieldsSchema,
   FieldReceiptDeletionBehaviorSchema,
@@ -9,10 +10,11 @@ export {
   FieldReceiptGovernanceEffectSchema,
   FieldReceiptReplayRuleSchema,
   assertFieldIdentity,
-  assertFieldOperatorVersion,
+  assertFieldOperatorId,
   formatFieldContractDigest,
   hashAddressableSourceSpanId,
   hashBundleId,
+  hashCausalUsageId,
   hashConditionDigest,
   hashContentDigest,
   hashDerivationJobId,
@@ -36,12 +38,11 @@ export {
   ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID,
   CAUSAL_USAGE_OPERATOR_ID,
   FACTOR_INCIDENCE_OPERATOR_ID,
-  FIELD_CONTRACT_SCHEMA_VERSION,
   FIELD_OPERATOR_MANIFEST,
-  FIELD_STOP_CERTIFICATE_OPERATOR_ID,
   PROJECTION_GENERATION_OPERATOR_ID,
   PROOF_EFFECT_OPERATOR_ID,
   QUERY_CONDITION_OPERATOR_ID,
+  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
   SELECT_GAMMA_OPERATOR_ID,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   fieldOperatorManifestDigest
@@ -50,6 +51,7 @@ export {
   AddressableSourceSpanPurposeSchema,
   AddressableSourceSpanSchema,
   SourceRecordIdentitySchema,
+  verifyAddressableSourceSpan,
   verifySourceRecordIdentity,
   type AddressableSourceSpan,
   type AddressableSourceSpanPurpose,
@@ -61,6 +63,7 @@ export {
   FactorDescriptorSchema,
   FactorFamilySchema,
   FactorIncidenceSchema,
+  verifyDerivationJobReceipt,
   verifyFactorDescriptor,
   verifyFactorIncidence,
   type DerivationJobReceipt,
@@ -76,6 +79,7 @@ export {
   ProjectionGenerationPointerSchema,
   ProjectionGenerationStatusSchema,
   ProjectionPinSchema,
+  verifyFieldProjectionGeneration,
   type FieldProjectionGeneration,
   type ProjectionEraseBarrier,
   type ProjectionEraseSubjectKind,
@@ -87,6 +91,7 @@ export {
   QueryConditionReceiptSchema,
   QueryConditionSchema,
   classifyFieldValidTime,
+  verifyQueryConditionReceipt,
   type FieldValidTimeClass,
   type QueryCondition,
   type QueryConditionReceipt
@@ -94,6 +99,7 @@ export {
 export {
   CausalUsageKindSchema,
   CausalUsageReceiptSchema,
+  verifyCausalUsageReceipt,
   type CausalUsageKind,
   type CausalUsageReceipt
 } from "./causal-usage.js";
@@ -101,6 +107,7 @@ export {
   EffectDecisionReceiptSchema,
   EffectDecisionSchema,
   EffectRequestSchema,
+  verifyEffectDecisionReceipt,
   type EffectDecision,
   type EffectDecisionReceipt,
   type EffectRequest
@@ -108,10 +115,12 @@ export {
 export {
   FieldStopCertificateReceiptSchema,
   FieldStopCertificateStatusSchema,
+  FieldStopExchangeBoundSchema,
   FieldStopFrontierSchema,
   FieldStopReasonSchema,
   type FieldStopCertificateReceipt,
   type FieldStopCertificateStatus,
+  type FieldStopExchangeBound,
   type FieldStopFrontier,
   type FieldStopReason
 } from "./stop-certificate.js";
@@ -120,7 +129,6 @@ export type {
   CausalUsagePort,
   EraseBarrierPort,
   FactorIncidencePort,
-  FieldPortFailureDisposition,
   ProjectionGenerationPort,
   ProofEffectPort,
   QueryConditionPort,

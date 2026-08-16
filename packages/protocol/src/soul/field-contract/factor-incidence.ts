@@ -8,7 +8,8 @@ import {
   FieldContractDigestSchema,
   FieldReceiptContractFieldsSchema,
   assertFieldIdentity,
-  assertFieldOperatorVersion,
+  assertFieldOperatorId,
+  hashDerivationJobId,
   hashFactorId,
   hashIncidenceId,
   type FieldContractSha256
@@ -26,9 +27,10 @@ export const DerivationJobStatusSchema = z.enum([
 
 export const FactorDescriptorSchema = FieldReceiptContractFieldsSchema.extend({
   schema_version: z.literal(1),
+  workspace_id: BoundedIdSchema,
   family: FactorFamilySchema,
-  canonical_payload: NonEmptyStringSchema,
-  operator_version: NonEmptyStringSchema.max(128),
+  canonical_payload: NonEmptyStringSchema.nullable(),
+  operator_id: NonEmptyStringSchema.max(128),
   recorded_at: IsoDatetimeStringSchema
 }).strict().readonly();
 
@@ -38,14 +40,15 @@ export const FactorIncidenceSchema = FieldReceiptContractFieldsSchema.extend({
   span_id: FieldContractDigestSchema,
   factor_id: FieldContractDigestSchema,
   scope: NonEmptyStringSchema.max(256),
-  operator_version: NonEmptyStringSchema.max(128),
+  operator_id: NonEmptyStringSchema.max(128),
   recorded_at: IsoDatetimeStringSchema
 }).strict().readonly();
 
 export const DerivationJobReceiptSchema = FieldReceiptContractFieldsSchema.extend({
   schema_version: z.literal(1),
+  workspace_id: BoundedIdSchema,
   purpose: NonEmptyStringSchema.max(128),
-  operator_version: NonEmptyStringSchema.max(128),
+  operator_id: NonEmptyStringSchema.max(128),
   input_evidence_ids: z.array(BoundedIdSchema).readonly(),
   status: DerivationJobStatusSchema,
   disposition: NonEmptyStringSchema.max(128),
@@ -61,19 +64,38 @@ export type DerivationJobReceipt = z.infer<typeof DerivationJobReceiptSchema>;
 export function verifyFactorDescriptor(
   receipt: FactorDescriptor,
   sha256: FieldContractSha256,
-  expectedOperatorVersion: string = FACTOR_INCIDENCE_OPERATOR_ID
+  expectedOperatorId: string = FACTOR_INCIDENCE_OPERATOR_ID
 ): FactorDescriptor {
-  assertFieldOperatorVersion(receipt.operator_version, expectedOperatorVersion);
-  assertFieldIdentity(receipt.identity, hashFactorId(receipt, sha256), "factor");
+  assertFieldOperatorId(receipt.operator_id, expectedOperatorId);
+  if (receipt.canonical_payload === null) {
+    return receipt;
+  }
+  assertFieldIdentity(receipt.identity, hashFactorId({
+    family: receipt.family,
+    canonical_payload: receipt.canonical_payload,
+    operator_id: receipt.operator_id
+  }, sha256), "factor");
   return receipt;
 }
 
 export function verifyFactorIncidence(
   receipt: FactorIncidence,
   sha256: FieldContractSha256,
-  expectedOperatorVersion: string = FACTOR_INCIDENCE_OPERATOR_ID
+  expectedOperatorId: string = FACTOR_INCIDENCE_OPERATOR_ID
 ): FactorIncidence {
-  assertFieldOperatorVersion(receipt.operator_version, expectedOperatorVersion);
+  assertFieldOperatorId(receipt.operator_id, expectedOperatorId);
   assertFieldIdentity(receipt.identity, hashIncidenceId(receipt, sha256), "incidence");
+  return receipt;
+}
+
+export function verifyDerivationJobReceipt(
+  receipt: DerivationJobReceipt,
+  sha256: FieldContractSha256
+): DerivationJobReceipt {
+  assertFieldIdentity(
+    receipt.identity,
+    hashDerivationJobId(receipt, sha256),
+    "derivation job"
+  );
   return receipt;
 }
