@@ -309,17 +309,18 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
+describe("recall usage: delivery never accrues co-recall plasticity", () => {
 
-  it("records an EventLog audit row when co-recall fire-and-forget fails", async () => {
+  it("does not schedule delivery-based co-recall even when the seeder would fail", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => true);
+    const onCoRecall = vi.fn(async () => {
+      throw new Error("co-recall db down");
+    });
     const harness = await createHarness([MEM_A, MEM_B], {
       recallCandidateIds: [MEM_A, MEM_B],
       pathRelationProposalService: {
         onCoUsage: vi.fn(async () => {}),
-        onCoRecall: vi.fn(async () => {
-          throw new Error("co-recall db down");
-        })
+        onCoRecall
       },
       coRecallCoherenceGate: {
         coherentPairKeys: vi.fn(async () => new Set([`${MEM_A}|${MEM_B}`]))
@@ -345,33 +346,15 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
       });
 
       expect(result).toMatchObject({ ok: true });
-      await vi.waitFor(async () => {
-        const events = await harness.eventLogRepo.queryByWorkspaceAndType(
-          "workspace-1",
-          RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED
-        );
-        expect(events).toHaveLength(1);
-      });
+      expect(onCoRecall).not.toHaveBeenCalled();
       const events = await harness.eventLogRepo.queryByWorkspaceAndType(
         "workspace-1",
         RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED
       );
-      expect(events[0]).toMatchObject({
-        event_type: RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
-        entity_type: "context_delivery",
-        entity_id: "delivery_00000000-0000-4000-8000-000000000001",
-        workspace_id: "workspace-1",
-        run_id: "run-1"
-      });
-      expect(events[0]?.payload_json).toMatchObject({
-        source: "mcp-memory.recall",
-        operation: "co_recall_plasticity_accrual",
-        error_message: "co-recall db down"
-      });
-      expect(harness.runtimeNotifier.notifyEntry).toHaveBeenCalledWith(events[0]);
-      expect(emitWarning).toHaveBeenCalledWith(
+      expect(events).toEqual([]);
+      expect(emitWarning).not.toHaveBeenCalledWith(
         "[RecallUsage] co-recall plasticity side effect failed",
-        expect.objectContaining({ code: "ALAYA_CO_RECALL_PLASTICITY_FAILED" })
+        expect.anything()
       );
     } finally {
       emitWarning.mockRestore();

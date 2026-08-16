@@ -309,66 +309,20 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
+describe("recall usage: report_context_usage(used) does not mint ungoverned RECALLS", () => {
 
-  it("keeps RECALLS proposals pending until explicit accept mints a governed path relation", async () => {
+  it("does not queue ungoverned RECALLS proposals from a used report", async () => {
     const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realEdgeProposals: true });
 
     await reportUsed(harness, [MEM_A, MEM_B]);
 
-    // Proposals are pending; no path minted yet.
     expect(await harness.pathRelationRepo.findByWorkspace("workspace-1")).toEqual([]);
-    expect(harness.edgeProposalRepo.listPending("workspace-1").map((proposal) => ({
-      source: proposal.source_memory_id,
-      target: proposal.target_memory_id,
-      edgeType: proposal.edge_type,
-      triggerSource: proposal.trigger_source
-    }))).toEqual(
-      expect.arrayContaining([
-        { source: MEM_A, target: MEM_B, edgeType: "recalls", triggerSource: "recall_cross_link" },
-        { source: MEM_B, target: MEM_A, edgeType: "recalls", triggerSource: "recall_cross_link" }
-      ])
-    );
-
-    const reviewResult = await harness.handler.call({
-      toolName: "soul.batch_review_edge_proposals",
-      arguments: {
-        verdict: "accept",
-        filter: { edge_type: "recalls" },
-        reason: "accept recall cross-links",
-        reviewer_identity: "user:reviewer"
-      },
-      context: {
-        workspaceId: "workspace-1",
-        runId: "run-1",
-        agentTarget: "cli",
-        sessionId: "recall-cross-link-session"
-      }
-    });
-    expect(reviewResult).toMatchObject({ ok: true });
-
-    // invariant (accept->path, DB-level): accept mints governed path relations.
-    // A->B and B->A dedup to one undirected path.
-    const paths = await harness.pathRelationRepo.findByWorkspace("workspace-1");
-    expect(paths.length).toBeGreaterThanOrEqual(1);
-    for (const path of paths) {
-      expect(path.constitution.relation_kind).toBe("recalls");
-      expect(path.legitimacy.governance_class).toBe("recall_allowed");
-      expect(path.effect_vector.recall_bias).toBeGreaterThan(0);
-    }
-    const pathEndpoints = paths.map((path) => {
-      const source = path.anchors.source_anchor;
-      const target = path.anchors.target_anchor;
-      return {
-        source: source.kind === "object" ? source.object_id : null,
-        target: target.kind === "object" ? target.object_id : null
-      };
-    });
-    expect(pathEndpoints).toEqual(
-      expect.arrayContaining([{ source: MEM_A, target: MEM_B }])
-    );
     expect(harness.edgeProposalRepo.listPending("workspace-1")).toEqual([]);
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
+});
+
+describe("recall usage: used-report failures stay non-fatal", () => {
 
   it("never fails the report when the graph edge port throws", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);

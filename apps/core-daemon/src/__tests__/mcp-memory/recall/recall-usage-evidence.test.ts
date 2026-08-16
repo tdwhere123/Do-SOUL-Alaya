@@ -112,14 +112,8 @@ describe("recall usage evidence proof", () => {
         ]
       })
     );
-    await vi.waitFor(() => {
-      expect(coherentPairKeys).toHaveBeenCalledWith(context.workspaceId, ["mem1", "mem2"]);
-      expect(onCoRecall).toHaveBeenCalledWith(
-        ["mem1", "mem2"],
-        context.workspaceId,
-        new Set(["mem1|mem2"])
-      );
-    });
+    expect(coherentPairKeys).not.toHaveBeenCalled();
+    expect(onCoRecall).not.toHaveBeenCalled();
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({

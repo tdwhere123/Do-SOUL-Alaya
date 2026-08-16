@@ -1,7 +1,5 @@
 import {
-  EdgeProposalTriggerSource,
   MemoryGovernanceEventType,
-  MemoryGraphEdgeType,
   SoulMemoryTierPromotedPayloadSchema,
   StorageTier,
   type ContextDeliveryRecord,
@@ -27,76 +25,8 @@ export {
 } from "../usage/recall-usage-object-validation.js";
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
-const MAX_CROSS_LINK_FANOUT = 8;
 
 export class RecallHitTierPromotionCasMiss extends Error {}
-
-export async function accrueCoRecallPlasticity(
-  params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly warn: WarnPort }>,
-  deliveredObjectIds: readonly string[],
-  workspaceId: string
-): Promise<void> {
-  const { deps } = params;
-  if (deps.pathRelationProposalService === undefined || deliveredObjectIds.length < 2) {
-    return;
-  }
-  const allowedPairKeys =
-    deps.coRecallCoherenceGate === undefined
-      ? new Set<string>()
-      : await deps.coRecallCoherenceGate.coherentPairKeys(workspaceId, deliveredObjectIds);
-  if (allowedPairKeys.size === 0) {
-    return;
-  }
-  await deps.pathRelationProposalService.onCoRecall(
-    deliveredObjectIds,
-    workspaceId,
-    allowedPairKeys
-  );
-}
-
-export async function crossLinkRecalledMemories(
-  params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly warn: WarnPort }>,
-  usedObjectIds: readonly string[],
-  workspaceId: string,
-  runId: string | null
-): Promise<void> {
-  if (params.deps.graphEdgePort === undefined || usedObjectIds.length < 2) {
-    return;
-  }
-  if (usedObjectIds.length > MAX_CROSS_LINK_FANOUT) {
-    params.warn("mcp-memory-tool-handler: cross-link truncated to fanout cap", {
-      usedObjectCount: usedObjectIds.length,
-      truncatedTo: MAX_CROSS_LINK_FANOUT,
-      droppedCount: usedObjectIds.length - MAX_CROSS_LINK_FANOUT
-    });
-  }
-  const targets = usedObjectIds.slice(0, MAX_CROSS_LINK_FANOUT);
-  for (const source of targets) {
-    for (const target of targets) {
-      if (source === target) {
-        continue;
-      }
-      try {
-        await params.deps.graphEdgePort.createEdge({
-          sourceMemoryId: source,
-          targetMemoryId: target,
-          edgeType: MemoryGraphEdgeType.RECALLS,
-          workspaceId,
-          runId,
-          triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
-          confidence: 0.5,
-          reason: "report_context_usage used-memory cross-link"
-        });
-      } catch (err) {
-        params.warn("mcp-memory-tool-handler: recalls edge creation failed", {
-          sourceMemoryId: source,
-          targetMemoryId: target,
-          error: err instanceof Error ? err.message : String(err)
-        });
-      }
-    }
-  }
-}
 
 export async function promoteRecallHitMemories(
   params: Readonly<{

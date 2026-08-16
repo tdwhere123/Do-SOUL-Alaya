@@ -1,6 +1,5 @@
 import {
   reportAsyncSideEffectFailure,
-  scheduleAuditedAsyncSideEffect,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort
 } from "@do-soul/alaya-core";
@@ -14,6 +13,7 @@ import {
   SoulReportContextUsageResponseSchema,
   StorageTier,
   TaskObjectSurfaceSchema,
+  type CausalUsagePort,
   type ContextDeliveryRecord,
   type EventLogEntry,
   type MemoryEntry,
@@ -43,8 +43,6 @@ import {
   emitRecallDeliveredTelemetry
 } from "./recall-usage-telemetry.js";
 import {
-  accrueCoRecallPlasticity,
-  crossLinkRecalledMemories,
   promoteRecallHitMemories,
   resolveUsageState,
   resolveUsedMemoryObjectIds,
@@ -53,6 +51,10 @@ import {
   validateReportedRecallHits,
   validateUsageStateConsistency
 } from "./recall-usage-support.js";
+import {
+  InMemoryCausalUsageRecorder,
+  recordCausalUsedReceipts
+} from "../usage/causal-usage-recorder.js";
 
 type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
@@ -178,6 +180,7 @@ export interface RecallUsageHandlerDependencies {
     }): Promise<void>;
   };
   readonly graphEdgePort?: GraphEdgeCreationPort;
+  readonly causalUsagePort?: CausalUsagePort;
   readonly gardenTaskRepo?: {
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
     findById(taskId: string): GardenTaskRow | null;
@@ -302,31 +305,7 @@ function runRecallAsyncSideEffects(
   context: RecallUsageToolCallContext,
   delivery: ReturnType<typeof buildRecallDelivery>
 ): void {
-  scheduleAuditedAsyncSideEffect(
-    accrueCoRecallPlasticity(params, delivery.deliveredMemoryObjectIds, context.workspaceId),
-    recallPlasticityAuditOptions(params, context, delivery.deliveryId)
-  );
   enqueueRecallExtractTask(params, request, context, delivery.deliveredMemoryObjectIds);
-}
-
-function recallPlasticityAuditOptions(
-  params: RecallHandlerParams,
-  context: RecallUsageToolCallContext,
-  deliveryId: string
-) {
-  return {
-    source: "mcp-memory.recall",
-    operation: "co_recall_plasticity_accrual",
-    subjectType: "context_delivery",
-    subjectId: deliveryId,
-    workspaceId: context.workspaceId,
-    runId: context.runId,
-    warningCode: "ALAYA_CO_RECALL_PLASTICITY_FAILED",
-    warningMessage: "[RecallUsage] co-recall plasticity side effect failed",
-    eventLogRepo: params.deps.asyncSideEffectAudit?.eventLogRepo,
-    runtimeNotifier: params.deps.asyncSideEffectAudit?.runtimeNotifier,
-    now: params.now
-  };
 }
 
 function buildRecallResponse(
@@ -355,6 +334,7 @@ export function createReportContextUsageHandler(params: Readonly<{
   readonly warn: WarnPort;
 }>) {
   const { deps } = params;
+  const causalUsagePort = deps.causalUsagePort ?? new InMemoryCausalUsageRecorder();
 
   return async function reportContextUsage(
     request: SoulReportContextUsageRequest,
@@ -386,7 +366,14 @@ export function createReportContextUsageHandler(params: Readonly<{
       { expectedWorkspaceId: context.workspaceId }
     );
     await promoteRecallHitMemories(params, request, context, linkedDelivery, reportedAt);
-    await maybeEmitCoUsage(params, linkedDelivery, usedMemoryObjectIds, request, context);
+    await maybeEmitCoUsage(
+      params,
+      linkedDelivery,
+      usedMemoryObjectIds,
+      request,
+      context,
+      causalUsagePort
+    );
     enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,
@@ -437,27 +424,29 @@ async function maybeEmitCoUsage(
   linkedDelivery: Readonly<ContextDeliveryRecord> | null,
   usedObjectIds: readonly string[],
   request: SoulReportContextUsageRequest,
-  context: RecallUsageToolCallContext
+  context: RecallUsageToolCallContext,
+  causalUsagePort: CausalUsagePort
 ): Promise<void> {
   if (linkedDelivery === null) {
     return;
   }
-  await crossLinkRecalledMemories(
-    params,
+  const workspaceId = linkedDelivery.workspace_id ?? context.workspaceId;
+  recordCausalUsedReceipts(causalUsagePort, {
+    workspaceId,
+    deliveryId: request.delivery_id,
     usedObjectIds,
-    linkedDelivery.workspace_id ?? context.workspaceId,
-    linkedDelivery.run_id ?? context.runId ?? null
-  );
+    occurredAt: params.now(),
+    scope: workspaceId
+  });
   if (params.deps.pathRelationProposalService === undefined || usedObjectIds.length < 2) {
     return;
   }
   try {
     await params.deps.pathRelationProposalService.onCoUsage(
       usedObjectIds,
-      linkedDelivery.workspace_id ?? context.workspaceId
+      workspaceId
     );
   } catch (err) {
-    const workspaceId = linkedDelivery.workspace_id ?? context.workspaceId;
     await reportAsyncSideEffectFailure(
       {
         source: "mcp-memory.report_context_usage",

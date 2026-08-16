@@ -309,42 +309,25 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("recall cross-link: report_context_usage(used) proposes RECALLS edges", () => {
+describe("recall usage: report_context_usage never mints ungoverned RECALLS", () => {
 
-  it("proposes one RECALLS edge per ordered pair when 2 memories are reported used", async () => {
+  it("does not propose RECALLS edges when 2 memories are reported used", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
 
     await reportUsed(harness, [MEM_A, MEM_B]);
 
-    // 2 memories -> 2 ordered pairs (A->B, B->A); each proposal fire-and-forget.
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(2);
-    const pairs = harness.graphEdgePort.createEdge.mock.calls.map((call) => ({
-      source: call[0].sourceMemoryId,
-      target: call[0].targetMemoryId,
-      edgeType: call[0].edgeType
-    }));
-    expect(pairs).toEqual(
-      expect.arrayContaining([
-        { source: MEM_A, target: MEM_B, edgeType: "recalls" },
-        { source: MEM_B, target: MEM_A, edgeType: "recalls" }
-      ])
-    );
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
-  it("proposes N*(N-1) RECALLS edges for 3 used memories", async () => {
+  it("does not propose RECALLS edges for 3 used memories", async () => {
     const harness = await createHarness([MEM_A, MEM_B, MEM_C]);
 
     await reportUsed(harness, [MEM_A, MEM_B, MEM_C]);
 
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(6);
-    for (const call of harness.graphEdgePort.createEdge.mock.calls) {
-      expect(call[0].edgeType).toBe("recalls");
-      expect(call[0].sourceMemoryId).not.toBe(call[0].targetMemoryId);
-      expect(call[0].workspaceId).toBe("workspace-1");
-    }
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
-  it("skips cross-link when only 1 memory is reported used", async () => {
+  it("skips hard edges when only 1 memory is reported used", async () => {
     const harness = await createHarness([MEM_A]);
 
     await reportUsed(harness, [MEM_A]);
@@ -352,7 +335,7 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
     expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
-  it("skips cross-link for skipped/not_applicable reports (no used_object_ids semantics)", async () => {
+  it("skips hard edges for skipped/not_applicable reports", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
 
     await reportUsage(harness, "skipped", []);
@@ -360,8 +343,7 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
     expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 
-  it("emits an observable warning when used_object_ids exceeds the fan-out cap", async () => {
-    // Create 10 memories so the used report exceeds MAX_CROSS_LINK_FANOUT = 8.
+  it("does not create ungoverned RECALLS when many used ids are reported", async () => {
     const memoryIds = Array.from({ length: 10 }, (_, idx) =>
       `11111111-aaaa-4aaa-8aaa-0000000000${(idx + 1).toString().padStart(2, "0")}`
     );
@@ -370,15 +352,10 @@ describe("recall cross-link: report_context_usage(used) proposes RECALLS edges",
 
     await reportUsed(harness, memoryIds);
 
-    // 8 ordered * 7 cross targets = 56 proposal writes; truncation warned once.
-    expect(harness.graphEdgePort.createEdge).toHaveBeenCalledTimes(56);
-    expect(warn).toHaveBeenCalledWith(
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith(
       "mcp-memory-tool-handler: cross-link truncated to fanout cap",
-      expect.objectContaining({
-        usedObjectCount: 10,
-        truncatedTo: 8,
-        droppedCount: 2
-      })
+      expect.anything()
     );
   });
 });
