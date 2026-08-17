@@ -87,7 +87,6 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
       },
       counterStore: coUsageCounterRepo,
       eventPublisher: eventPublisher as never,
-      threshold: 3,
       generateId: () => "11111111-1111-4111-8111-aaaaaaaaaaaa",
       now: () => "2026-05-16T00:00:00.000Z"
     });
@@ -311,7 +310,6 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
         },
         counterStore: coUsageCounterRepo,
         eventPublisher: eventPublisher as never,
-        threshold: 3,
         generateId: () => "33333333-3333-4333-8333-aaaaaaaaaaaa",
         now: () => "2026-05-16T00:00:00.000Z"
       });

@@ -6,7 +6,6 @@ import {
   resolveProductFormationOptIn,
   resolveProductMaterializationConfidenceFloor,
   resolveProductPathRelationCounterTtlMs,
-  resolveProductPathRelationThreshold,
   resolveProductGardenProviderKind
 } from "@do-soul/alaya-core";
 
@@ -52,9 +51,6 @@ export function resolveProductFormationIdentity(
     ),
     pathRelationCounterTtlMs: resolveProductPathRelationCounterTtlMs(
       env.ALAYA_PATHREL_COUNTER_TTL_MS
-    ),
-    pathRelationCoUsageThreshold: resolveProductPathRelationThreshold(
-      env.ALAYA_PATHREL_CO_USAGE_THRESHOLD
     )
   });
 }

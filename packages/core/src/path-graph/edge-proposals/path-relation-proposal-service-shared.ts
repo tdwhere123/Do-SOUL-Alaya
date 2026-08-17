@@ -1,13 +1,10 @@
 import {
-  DYNAMICS_CONSTANTS,
   type PathGovernanceClass,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
 import type { PathFailureHealthInboxPort } from "../path-relations/path-failure-health-inbox.js";
 
-export const PATH_RELATION_PROPOSE_THRESHOLD =
-  DYNAMICS_CONSTANTS.path_plasticity.co_usage_threshold;
 export const PATH_RELATION_COUNTER_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PathSeedProfile {
@@ -172,7 +169,6 @@ export interface PathRelationProposalServiceDeps {
   readonly eventPublisher: PathRelationProposalEventPublisherPort;
   readonly memoryExistence?: MemoryAnchorExistencePort;
   readonly healthInboxPort?: PathFailureHealthInboxPort;
-  readonly threshold?: number;
   readonly now?: () => string;
   readonly nowMs?: () => number;
   readonly counterTtlMs?: number;

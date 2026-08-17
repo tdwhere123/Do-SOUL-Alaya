@@ -1,8 +1,6 @@
 import type { RuntimeGardenProviderKind } from "@do-soul/alaya-protocol";
-import {
-  PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
-  PATH_RELATION_PROPOSE_THRESHOLD
-} from "../../path-graph/edge-proposals/path-relation-proposal-service-shared.js";
+import { PATH_RELATION_COUNTER_DEFAULT_TTL_MS } from
+  "../../path-graph/edge-proposals/path-relation-proposal-service-shared.js";
 
 const GARDEN_PROVIDER_KINDS = new Set<RuntimeGardenProviderKind>([
   "official_api",
@@ -20,8 +18,7 @@ export const PRODUCT_FORMATION_DEFAULTS = Object.freeze({
   materializationConfidenceFloor: 0.5,
   edgeProducerLlmEnabled: false,
   edgeClassifyHostWorker: true,
-  pathRelationCounterTtlMs: PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
-  pathRelationCoUsageThreshold: PATH_RELATION_PROPOSE_THRESHOLD
+  pathRelationCounterTtlMs: PATH_RELATION_COUNTER_DEFAULT_TTL_MS
 });
 
 export function resolveProductFormationEnabled(
@@ -74,13 +71,4 @@ export function resolveProductPathRelationCounterTtlMs(
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : PRODUCT_FORMATION_DEFAULTS.pathRelationCounterTtlMs;
-}
-
-export function resolveProductPathRelationThreshold(
-  value: string | undefined
-): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1
-    ? parsed
-    : PRODUCT_FORMATION_DEFAULTS.pathRelationCoUsageThreshold;
 }

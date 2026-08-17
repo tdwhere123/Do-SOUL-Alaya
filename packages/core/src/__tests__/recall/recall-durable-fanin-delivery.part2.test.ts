@@ -290,7 +290,7 @@ function buildRecallService(params: {
     }
   };
 
-  return createFieldBackedRecallService(deps);
+  return createFieldBackedRecallService(deps, WS);
 }
 
 function buildWideOpenPolicy(recallService: RecallService): RecallPolicy {

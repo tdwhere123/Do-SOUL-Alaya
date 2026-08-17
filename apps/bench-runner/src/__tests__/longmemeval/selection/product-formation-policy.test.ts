@@ -16,8 +16,7 @@ describe("LongMemEval product formation policy", () => {
       ALAYA_MATERIALIZATION_CONF_FLOOR: "0.5",
       ALAYA_EDGE_PRODUCER_LLM_ENABLED: "false",
       ALAYA_EDGE_CLASSIFY_HOST_WORKER: "true",
-      ALAYA_PATHREL_COUNTER_TTL_MS: "86400000",
-      ALAYA_PATHREL_CO_USAGE_THRESHOLD: "3"
+      ALAYA_PATHREL_COUNTER_TTL_MS: "86400000"
     }, "snapshot producer")).not.toThrow();
   });
 
@@ -32,7 +31,6 @@ describe("LongMemEval product formation policy", () => {
     ["edge LLM", { ALAYA_EDGE_PRODUCER_LLM_ENABLED: "true" }],
     ["edge host worker", { ALAYA_EDGE_CLASSIFY_HOST_WORKER: "false" }],
     ["path TTL", { ALAYA_PATHREL_COUNTER_TTL_MS: "1" }],
-    ["path threshold", { ALAYA_PATHREL_CO_USAGE_THRESHOLD: "9" }],
     ["conflict LLM route", { ALAYA_CONFLICT_LLM_PROVIDER_URL: "https://example.invalid" }],
     ["conflict LLM key", { ALAYA_CONFLICT_LLM_API_KEY: "secret" }]
   ])("rejects the stale benchmark %s override", (_label, env) => {
@@ -55,5 +53,14 @@ describe("LongMemEval product formation policy", () => {
     expect(collectPairedEnvironment({
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
     })).not.toHaveProperty("ALAYA_RECALL_CONF_H1_MAX_PRODUCT");
+  });
+
+  it("omits the retired co-usage mint threshold from paired provenance", () => {
+    expect(collectPairedEnvironment({
+      ALAYA_PATHREL_CO_USAGE_THRESHOLD: "9"
+    })).not.toHaveProperty("ALAYA_PATHREL_CO_USAGE_THRESHOLD");
+    expect(() => assertProductFormationEnvironment({
+      ALAYA_PATHREL_CO_USAGE_THRESHOLD: "9"
+    }, "snapshot producer")).not.toThrow();
   });
 });

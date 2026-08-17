@@ -203,19 +203,9 @@ function readPositiveNumberEnv(name: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function readPositiveIntegerEnv(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") {
-    return undefined;
-  }
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
-}
-
 function readPathRelationRuntimeConfig() {
   return {
-    counterTtlMs: readPositiveNumberEnv("ALAYA_PATHREL_COUNTER_TTL_MS"),
-    threshold: readPositiveIntegerEnv("ALAYA_PATHREL_CO_USAGE_THRESHOLD")
+    counterTtlMs: readPositiveNumberEnv("ALAYA_PATHREL_COUNTER_TTL_MS")
   };
 }
 
@@ -257,7 +247,6 @@ function createPathRelationProposalService(
     ...(runtimeConfig.counterTtlMs === undefined
       ? {}
       : { counterTtlMs: runtimeConfig.counterTtlMs }),
-    ...(runtimeConfig.threshold === undefined ? {} : { threshold: runtimeConfig.threshold }),
     warn: input.warn
   });
 }

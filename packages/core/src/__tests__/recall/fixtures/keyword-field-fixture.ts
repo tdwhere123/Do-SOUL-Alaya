@@ -12,19 +12,20 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 export function createFieldBackedRecallService(
-  dependencies: Readonly<RecallServiceDependencies>
+  dependencies: Readonly<RecallServiceDependencies>,
+  pinWorkspaceId?: string
 ): RecallService {
-  return new RecallService(withKeywordFieldFixturePorts(dependencies));
+  return new RecallService(withKeywordFieldFixturePorts(dependencies, pinWorkspaceId));
 }
 
 export function withKeywordFieldFixturePorts(
-  dependencies: Readonly<RecallServiceDependencies>
+  dependencies: Readonly<RecallServiceDependencies>,
+  pinWorkspaceId?: string
 ): RecallServiceDependencies {
   return {
     ...dependencies,
     testOnlyAllowInMemoryFieldQuerySession: true,
-    fieldQuerySession: dependencies.fieldQuerySession ??
-      createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
+    fieldQuerySession: resolveFixtureFieldQuerySession(dependencies, pinWorkspaceId),
     memoryRepo: withMemoryFieldFixture(dependencies.memoryRepo),
     evidenceSearchPort: dependencies.evidenceSearchPort === undefined
       ? undefined
@@ -33,6 +34,17 @@ export function withKeywordFieldFixturePorts(
       ? undefined
       : withSynthesisFieldFixture(dependencies.synthesisSearchPort)
   };
+}
+
+function resolveFixtureFieldQuerySession(
+  dependencies: Readonly<RecallServiceDependencies>,
+  pinWorkspaceId: string | undefined
+) {
+  if (dependencies.fieldQuerySession !== undefined) return dependencies.fieldQuerySession;
+  if (pinWorkspaceId !== undefined && pinWorkspaceId !== "") {
+    return createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, pinWorkspaceId);
+  }
+  throw new Error("keyword field fixture requires fieldQuerySession or pinWorkspaceId");
 }
 
 function withMemoryFieldFixture(

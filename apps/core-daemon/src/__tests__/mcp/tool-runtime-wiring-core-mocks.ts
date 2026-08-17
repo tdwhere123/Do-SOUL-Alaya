@@ -120,7 +120,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
         produce: vi.fn(async () => [])
       };
     }),
-    PATH_RELATION_PROPOSE_THRESHOLD: 3,
     PATH_RELATION_COUNTER_DEFAULT_TTL_MS: 24 * 60 * 60 * 1000,
     ConstitutionalFragmentService: makeClass({
       ensureRegistered: vi.fn(async (fragment: unknown) => fragment),
