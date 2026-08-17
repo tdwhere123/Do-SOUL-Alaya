@@ -1,7 +1,7 @@
 # Backlog
 
 Cross-phase unresolved issues that are **not** the recall-field landing.
-Recall algorithm work (UGAF target vs live degenerate projection) lives in
+Recall algorithm closure (current live path and remaining proof seams) lives in
 [`recall.md`](recall.md).
 Do not add a fusion stream, ranker, promoter, or weight/cap retune from
 this list — that is the UGAF §1.1 failure mode.
@@ -21,6 +21,10 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 `#BL-064` closed (LongMemEval domain layout). Remaining open items
 retargeted to HEAD `10da1318` paths. Audit leftovers below are
 engineering debt, not recall-field work.
+
+**2026-08-17 documentation note**: `10da1318` citations below identify the
+snapshot on which each backlog fact was last checked. They are not claims about
+current HEAD `892ebde0`; each item must be reverified at implementation time.
 
 ---
 

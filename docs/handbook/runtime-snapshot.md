@@ -1,29 +1,36 @@
 # Runtime Snapshot
 
-Package version is still `0.3.11` (`package.json` on committed
-`10da1318`). This file is readiness vocabulary and dated snapshots.
-It is **not** a claim that the associative field has landed, that a
-KPI gate passed, or that the tree is ready to merge.
+Package version is `0.3.11`; the current documentation anchor is committed HEAD
+`892ebde0` on 2026-08-17. This file is readiness vocabulary and dated
+snapshots. It is **not** a KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture (2026-08-14 docs-governance pass)
-
-Source: committed `10da1318`. Counts: B-arm dump bound in
-[`recall.md`](recall.md) (19431 candidates / 18344 answerable;
-snapshot `7cac6e0d…00a6a`; B KPI `ed061c00…642a`). That dump is not
-`gate passed`.
+## Recall posture (2026-08-17 live-source pass)
 
 | Fact | Status |
 |---|---|
-| Target algorithm | UGAF read path. In-repo owner: [`recall.md`](recall.md) |
+| Algorithm contract | UGAF read path. In-repo owner: [`recall.md`](recall.md) |
 | Live composition operator | `lightweight_deep_head_prob_or_v1` (`packages/core/src/recall/rerank/deep-head-assessment-builder.ts:18`) |
-| `family_grouped_composition_v2` | Deleted (no `packages/` / `apps/` hit at `10da1318`) |
-| Typed path transfer \(G_L\) | Not connected (`path_status = inactive:pass_through`, `fuel_verified = false` on 19431/19431 in that dump) |
-| Evidence flood axis | Not uniformly dead (`active` 16277 / `inactive:pass_through` 3154). Fuel still fails because path withholds. |
-| Direct activation | Family-max RRF is live |
-| Coverage selector | Live on that dump |
+| Pinned field generation and field admission | Live in Core and SQLite daemon composition |
+| Graph/PathRelation candidate expansion | Live; path fuel activates only with attributed eligible inflow |
+| Slice compatibility and integrated flood | Live; missing or rejected inputs retain explicit status |
+| F3-only field membership | Closure proof pending |
+| Progressive bundle opening as visibility control | Closure proof pending |
+| Final selector | `Select_Gamma` is the sole admission-order owner; delivery asserts the same order |
+| Exact selection-boundary replay | Live contract and capture/restore path |
 | Official 100Q / 500Q promotion | **Not claimed** |
+
+The previous integrated implementation is therefore not a degenerate
+projection and must not be reimplemented wholesale. P217 is a planted
+end-to-end acceptance gate that repairs only a demonstrated missing live seam.
+
+## Historical recall snapshot (2026-08-14, `10da1318`)
+
+The old B-arm dump recorded 19,431 candidates / 18,344 answerable, snapshot
+`7cac6e0d…00a6a`, and KPI `ed061c00…642a`. Its path/Slice/fuel counts describe
+that commit only. It remains diagnostic evidence and is not `gate passed` or a
+current connectedness claim.
 
 ## v0.3.11 card snapshot (2026-07-08, `60fed2f`) — not re-verified here
 
@@ -87,4 +94,4 @@ Not re-verified here.
 | `#BL-052` | Wire LongMemEval CI sample-floor |
 | `#BL-051` | Abstention calibration verdict on a 500q archive |
 | `#BL-057` | Warm-workspace recall prior witness |
-| UGAF field landing | Typed \(G_L\), write-side Keys, open-semantic candidate comparison, embedding-as-\(\Omega\)-seed — see `recall.md`. Not a `#BL-NNN`. |
+| UGAF algorithm closure | F3-only candidate membership, real bundle-frontier visibility control, and planted SQLite/direct/worker/replay proof — see `recall.md`. Not a `#BL-NNN`. |

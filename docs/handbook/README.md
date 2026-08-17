@@ -4,7 +4,7 @@
 |---|---|
 | [`invariants.md`](invariants.md) | Rules that always win |
 | [`architecture.md`](architecture.md) | Package shape, surfaces, write model, governance routes |
-| [`recall.md`](recall.md) | Recall algorithm: UGAF target vs live degenerate projection |
+| [`recall.md`](recall.md) | Recall algorithm: UGAF contract, connected live path, and closure boundary |
 | [`runtime-snapshot.md`](runtime-snapshot.md) | Current release posture and readiness claims |
 | [`backlog.md`](backlog.md) | Open `#BL-NNN` issues that are **not** the recall field |
 | [`glossary.md`](glossary.md) | Stable SOUL / Alaya vocabulary |

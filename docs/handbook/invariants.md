@@ -63,7 +63,8 @@ These rules always win over lower-level docs and task-card convenience.
     resulting fused score are runtime decisions and projections.
     Rebuildable SliceKey routing views remain workspace-scoped
     projections. Live connectedness of flood, SliceKey matching, and
-    typed path transfer is **not** implied by this constraint; see
+    typed path transfer must be proved by their producer-to-consumer path,
+    not inferred from this ontology constraint; see
     `docs/handbook/recall.md`.
 12a. **Temporal relation authority.** Evidence owns the source
     observation/event time. Storage or ingestion timestamps, including
@@ -319,7 +320,7 @@ required anti-recurrence step when a cause class recurs across independent revie
 32. `docs/archive/v0.1-port-record/` is the historical v0.1 port-era task-card record
     (v0.1.0 shipped 2026-05-05). Track ordinary engineering debt in
     `docs/handbook/backlog.md` and PR descriptions. The in-repo
-    authority for recall-field target versus live projection is
+    authority for the recall-field contract and current live state is
     `docs/handbook/recall.md`. Gitignored local work artifacts under
     `.do-it/` (including `.do-it/plans/`) are execution tracking, not
     handbook or invariant truth.

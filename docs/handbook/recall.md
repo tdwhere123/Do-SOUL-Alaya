@@ -1,117 +1,180 @@
 # Recall Algorithm
 
-This page is the in-repo authority for *how recall is supposed to work*
-versus *what the runtime actually does* (invariant §32). It is not a
-promotion gate and not a claim that the field has landed.
+This page is the in-repo authority for the recall contract and the current live
+implementation state (invariant §32). It is not a benchmark-promotion gate and
+does not turn a local plan or historical score into product truth.
 
-Package version on the cited freeze: `0.3.11` (`package.json`).
-Recall-path citations are committed `10da1318` (the B-arm dump
-commit). Later commits on this branch may exist; they are not this
-page's source freeze. Runtime counts below are from that dump:
+Current documentation anchor: package `0.3.11`, committed HEAD `892ebde0` on
+2026-08-17. The earlier `10da1318` B-arm dump remains historical benchmark
+evidence only; it no longer describes the implementation on HEAD.
 
-- 19431 candidates / 18344 answerable (6 abstention questions out)
-- snapshot sqlite sha256 `7cac6e0d1ebdb89761546c26516a1a6722556f0e4f617145436ff38a51500a6a`
-- B KPI sha256 `ed061c008db5603c5f53ef3d3d84c7d20a598774751aee6c5a0a75795827642a`
+The mathematics is the Unified Governed Associative Field (UGAF) read path.
+Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
+physics.
 
-The dump is **not** `gate passed`. Gitignored local review notes and
-execution plans are tracking artifacts, not handbook truth.
+## Contract (UGAF)
 
-The intended mathematics is the Unified Governed Associative Field
-(UGAF) read path, summarized below. Hopfield / Lyapunov / attractor
-language is a **design lens**, not a proved runtime physics. Do not
-quote it as an Alaya theorem.
-
-## Target (UGAF)
-
-Intended recall is one continuous governed associative-memory field,
-not a stack of post-processors. Read path:
+Recall is one governed associative field, not a stack of independent rankers:
 
 ```text
-q, S_t → Q_q → Ω(H_q, C_seal) → A(X_q) → G_L(~X_q) → M(Z_q) → Select_Γ → D_q
+q, S_t -> Q_q -> Omega(H_q, C_seal) -> A(X_q) -> G_L(~X_q)
+       -> M(Z_q) -> Select_Gamma -> D_q
 ```
 
 | Piece | Meaning | Must not |
 | --- | --- | --- |
-| \(S_t\) | Durable plane | Surfaces or ranks become truth |
-| \(H_q\) | Typed candidate field, monotone expand | A rank list; a mid-pipeline top-\(B\) authority |
-| \(C_q^{seal}\) | Per-channel depth, unseen bound, path-frontier flag | A digest that claims completeness with no bound |
-| \(A_i(q)\) | Attributed multi-channel activation | A global energy scalar that erases channels |
-| \(G_L\) | Bounded typed path transfer | A second ranker; unbounded flood |
-| \(\operatorname{Select}_\Gamma\) | One monotone submodular walk; order **is** admission | A second ranker after the set exists |
-| \(D_q\) | Unique pack, \(\lvert D_q\rvert \le B\) | Further reorder after the budget cut |
+| \(S_t\) | Durable evidence and memory plane | Surface, score, or projection becomes truth |
+| \(H_q\) | Typed candidate field with monotone growth | Mid-pipeline top-B authority |
+| \(C_q^{seal}\) | Per-channel depth and unseen-frontier proof | Digest claiming closure without a bound |
+| \(A_i(q)\) | Attributed multi-channel activation | Global scalar that erases provenance |
+| \(G_L\) | Bounded typed path transfer | Second ranker or unbounded flood |
+| \(\operatorname{Select}_\Gamma\) | One budgeted marginal-gain walk; order is admission | Reorder after the selected set exists |
+| \(D_q\) | Unique evidence pack within entry and token budgets | Later membership change or hidden destructive cut |
 
-Before \(\operatorname{Select}_\Gamma\), operators may add information,
-bind evidence, transfer activation, mark governance, or build views.
-They may not silently drop members or reset order. The only destructive
-compression is the final governed budget cut (UGAF I3, I4).
+Before `Select_Gamma`, an operator may add a grounded candidate, attach
+evidence, transfer activation, enforce governance, or materialize a rebuildable
+view. It may not silently remove a previously eligible member. `Select_Gamma`
+is the one destructive budget cut and its admission order is delivery order.
 
-Do not add a fusion stream, promoter, or head-drop cap to "fix"
-coverage. That is the failure mode UGAF §1.1 already named.
+Do not add another fusion stream, promoter, duplicate reranker, consensus
+reorder, or head-drop rule to repair benchmark coverage.
 
-## Live system (degenerate projection)
+## Current live path
 
-Verified live read order after Wave 2 composition (order-only after the
-coarse union until the token/`max_entries` cut):
+The integrated path now present on HEAD is:
 
 ```text
-prepare: capture effective_as_of once, pin one projection generation
-coarse union (lexical/FTS, trigram, graph/path/entity, global,
-             synthesis, embedding inject)
-  → observation table
-  → family-max RRF inside a family, sum across families = fused_score
-  → flood as bounded refinement on that base
-  → deep-head probabilistic OR (lightweight_deep_head_prob_or_v1)
-  → Select_Gamma (greedy ΔGamma / token; eligibility first)
-  → token / dimension / entry constraints during admission
-  → max_entries  (only destructive cut)
+prepare
+  capture one effective_as_of
+  pin one active projection generation
+  select attributed field candidates under one query condition
+  resolve selected evidence identities to memory candidates
+
+candidate field
+  lexical/FTS + exact/trigram + temporal + entity
+  + field projection + graph/PathRelation expansion
+  + global + synthesis + embedding injection
+
+assessment
+  collect routing keys, evidence support, path inflow, governance,
+  semantic activation, and field receipts
+  -> effective object scoring
+  -> family-max RRF fusion
+  -> integrated Slice/path/evidence flood refinement
+  -> deep-head relevance
+  -> Select_Gamma under eligibility, source, lineage, dimension,
+     max-entry, and token constraints
+  -> ordered ContextPack and selection-boundary receipt
 ```
 
-`family_grouped_composition_v2` has **no** remaining source hit under
-`packages/` / `apps/` at committed `10da1318`.
+The principal owners are:
 
-| Target piece | Live stand-in | What the stand-in actually is |
+- query condition and generation pinning:
+  `prepareRecallRequest`, `RecallFieldQuerySession`, and
+  `selectPinnedProjectionCandidates`;
+- field candidate introduction: `resolveFieldProjectionMemories` and
+  `buildFieldProjectionCandidate`;
+- graph/path candidate introduction: `structural-expansion.ts`,
+  `path-expansion.ts`, and the daemon recall path read ports;
+- Slice compatibility: `resolveSliceAxis` in `flood-slice-axis.ts`;
+- path/evidence flood: `computeIntegratedFloodScore` in
+  `integrated-flood-scoring.ts`;
+- final admission and order: `selectFineAssessmentCandidates` and
+  `selectGammaWalk`;
+- exact capture/replay: `delivery/selection-boundary/`.
+
+## Connectedness matrix
+
+| UGAF mechanism | Current state on `892ebde0` | Boundary |
 | --- | --- | --- |
-| \(\Omega\) monotone field | Coarse union | A packet. Graph/path/synthesis/facet streams contributed 0 ranks on the B dump. Embedding first-admitted 9/19431 candidates. |
-| \(C_q^{seal}\) | `field_refinement_stop_certificate` | `activation_mode` is the literal `"shadow"` (`packages/core/src/recall/field/refinement/field-refinement-stop-certificate.ts:44,152`). Receipt, not a sealing condition on \(\Omega\). |
-| Direct activation \(b_i\) | Family-max RRF `fused_score` | Live. `familyMaxContributionsById` (`packages/core/src/recall/delivery/fusion-delivery-families.ts:59-76`); default stream weights (`packages/core/src/recall/delivery/fusion-delivery-streams.ts:19-25`). On the B dump `flood_potential.final_score === R_obj` on 19431/19431. |
-| Typed path transfer \(G_L\) | Flood + `path_expansion` / `graph_expansion` | Path never counts as fuel: `resolvePathAxis` without inflow returns `inactive:pass_through`, `countsAsFuel: false` (`packages/core/src/recall/scoring/integrated-flood-scoring.ts:67-76,105-111`). B dump: `path_status = inactive:pass_through` and `fuel_verified = false` on 19431/19431. |
-| Slice / fiber restrict \(\Pi_q\) | `resolveSliceAxis()` | Constant stub `{ value: 1, status: "inactive:pass_through", countsAsFuel: true }` (`packages/core/src/recall/scoring/integrated-flood-scoring.ts:63-65`). Gate open, feature absent. |
-| Evidence flood axis | `resolveEvidenceAxis` | **Not** uniformly dead. B dump: `evidence_status` `active` 16277 / `inactive:pass_through` 3154. Fuel still fails because path withholds. |
-| Evidence multiplier | `ALAYA_RECALL_CONF_EVIDENCE_BETA` | Defaults to **0** (`packages/core/src/recall/scoring/conformant-fusion-scoring.ts:62-64`). B dump: `e_direct_status = inactive:beta_disabled` 19431/19431. Do not retune beta against a dead transfer. |
-| Open-semantic channel | Query-factor cache + compatibility | Query side formed 100/100 on the B dump. Candidate side 0 `compatible`. Composition/activation `unavailable` 100/100. |
-| Embedding as a seed of \(\Omega\) | `semantic_supplement` + deep-head / fusion overlay | Live as a scorer (`provider_returned` 100/100 on that dump). Almost unused as a discoverer (9/19431 first-admits). Invariant §18 still holds: embedding never decides durable truth. |
-| Write-side Keys / facets | Daemon materialization + `memory_object_keys` | Complementary Keys (gist remainder, OSF surfaces, temporal/numeric aliases) mint at memory write and join keyword discovery. Closed-vocab facet-tag write, `facet_overlap`, and query-side `FACET_VOCABULARY` slice keys / demand atoms are deleted (no memory-side partner). Protocol `facet_tags` / `FACET_VOCABULARY` remain schema-only. Read-side `ALAYA_RECALL_PROJECTIONS` remains scoring floors, default ON. |
-| \(\operatorname{Select}_\Gamma\) | `selectGammaWalk` greedy \(\Delta\Gamma / \mathrm{token}\) with decision receipts | Admission order is the delivery order. Packet-plan observations do not reorder. Live requests bind a real pinned `generation_id` and `condition_digest`. |
-| One destructive cut | `max_entries` | Holds. Do not add another. |
-| Deep-head composition | `lightweight_deep_head_prob_or_v1` | Live operator id (`packages/core/src/recall/rerank/deep-head-assessment-builder.ts:18`). Score is `probOr(resolvedEvidence, embedding?, fusionBaseline?)` (`:147-156`). |
+| One query time and generation | Live | Preparation captures one `effective_as_of`, pins one active generation, and fails closed when the pin or generation is unavailable. |
+| Field candidate membership | Live | Attributed evidence keys are resolved through evidence-bound memory lookup and admitted on the `activation` plane. This can add candidates outside lexical recall. |
+| Graph and `PathRelation` expansion | Live | Active, recall-eligible paths can introduce graph-expansion candidates. Direction, lifecycle, sign, and governance are rechecked. |
+| Slice/fiber compatibility | Live | Query and source routing keys are matched by `selectSliceCompatibilityV2`; rejected slices withhold fuel. Missing slice material is explicit pass-through, not a fabricated match. |
+| Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
+| Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
+| Open-semantic candidate attribution | Live for existing candidates | Accepted semantic solutions are source/evidence attributed and can affect activation. F3-only field membership still needs the closure proof below. |
+| Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool. It never authorizes durable truth. |
+| Integrated flood | Live | Flood requires Slice, path, and evidence fuel; the pass-through object score cannot be demoted. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
+| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. |
+| Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
+| Retrieval-field stop certificate | Live receipt | It binds field captures/refinement receipts to final selection. It must not be confused with projection-bundle frontier control. |
+| Projection-bundle progressive opening | Contract present; control proof pending | The current selector computes candidate matches before producing the opened-bundle/stop result. P217 must prove that closed or budget-exhausted bundles cannot leak candidates. |
 
-Net: activation transfer is not connected. The live selector is one
-Select_Gamma walk on a family-max RRF candidate field. Query entry
-captures one `effective_as_of` and pins one generation; usage is
-causal-receipt only and is constructed at the daemon composition
-root. Optional formation failure does not delete the root evidence
-capsule.
+## Algorithm-closure boundary
 
-## Env names that will mislead you
+The integrated implementation must not be described as a degenerate projection
+or as unimplemented. It also must not yet be described as fully closed. Two
+specific live-path questions remain:
 
-These are parsed. They are not product knobs for landing the field.
+1. **F3-only membership.** `querySemanticFactorFormationCapture` extends recall
+   probes, while the pinned field `QueryConditionReceipt.query_task_factors`
+   currently derives from raw query text. A planted candidate reachable only by
+   a grounded F3 semantic identity must prove whether that identity can enter
+   field candidate membership.
+2. **Progressive opening as control.** A planted closed bundle must remain
+   invisible until opened, and a budget-exhausted frontier must remain invisible
+   with an explicit incomplete result. A stop receipt created after unrestricted
+   matching is not closure proof.
 
-| Name | Live fact | Cite |
-| --- | --- | --- |
-| `ALAYA_RECALL_PROJECTIONS` | **Read-side scoring only**, default **ON** unless `0\|false\|off\|no\|disabled` (`packages/core/src/config/recall-runtime-config.ts:16-18,53`). Intent/preference weight floors, not write-side Key supply. |
-| `ALAYA_RECALL_CONF_EVIDENCE_BETA` | Default 0; multiplier is identically 1 until path fuel exists. | `conformant-fusion-scoring.ts:62-64` |
-| `ALAYA_RECALL_ANSWERS_WITH` | `recallAnswersWithEnabled()` is hardcoded `true` with no closable off-switch (`packages/core/src/config/recall-env-access.ts:66-69`). Exported from `packages/core/src/config/index.ts:28`. No other production consumer at committed `10da1318`. Bench provenance still stamps the name. |
-| `ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP` | Parsed into `finalAuthorityMaxHeadDrop` (`recall-runtime-config.ts:13,55-57`) and re-emitted by `recallEnvRaw` (`recall-env-access.ts:47-48`). No production consumer under `packages/core` or `apps/core-daemon` beyond config parse/tests. Still appears in bench provenance. |
+The P217 completion gate also requires ordinary SQLite/daemon proof for
+field-only, path-only, governance-rejected, direct-read, worker-read, and exact
+replay cases. A helper test with a fixed candidate map proves a formula, not
+candidate discovery.
 
-Connecting \(G_L\), write-side Keys, open-semantic candidate comparison,
-and embedding-as-\(\Omega\)-seed is the work. Do not retune weights,
-caps, or cutoffs against the current bench matrix (anti-fitting).
+If a planted case already passes, preserve the evidence and do not rewrite that
+mechanism. If it fails, repair the smallest existing owner; do not create a
+second field, selector, query condition, or recall path.
 
-## What to read instead of this page
+## Semantic formation boundary
+
+The model is optional semantic proposal machinery, not the source-admission or
+truth authority:
+
+```text
+immutable source/span
+  -> deterministic F0-F2 incidence
+  -> optional source-bound F3 proposal
+  -> runtime grounding and versioned soft projection
+  -> governed recall field
+```
+
+Provider failure, empty output, or invalid F3 cannot delete root evidence or
+deterministic F0-F2 material. A model cannot directly write
+`RelationAssertion`, `PathRelation`, `ClaimForm`, governance state, or learning
+effects. The algorithm-consumer contract is proved with provider-neutral
+fixtures before a final provider prompt is selected.
+
+## Configuration names that can mislead
+
+| Name | Current fact |
+| --- | --- |
+| `ALAYA_RECALL_PROJECTIONS` | Default-on read-side scoring control. It is not projection-generation authority and does not prove field connectedness. |
+| `ALAYA_RECALL_CONF_RHO_PATH`, `ALAYA_RECALL_CONF_RHO_EVIDENCE`, `ALAYA_RECALL_CONF_W_PATH`, flood caps | Parsed advanced runtime parameters. Do not tune them against an unclosed candidate/frontier proof. |
+| `ALAYA_RECALL_CONF_EVIDENCE_BETA` | Deleted from the runtime contract. Legacy tests/manifests may reject or strip it; it is not a live scoring knob. |
+| `ALAYA_RECALL_ANSWERS_WITH` | Not parsed by Core. `recallAnswersWithEnabled()` is always true; benchmark provenance may still stamp the historical name. |
+| `ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP` | Parsed for compatibility/provenance but has no production delivery consumer. It must not become a post-`Select_Gamma` reorder authority. |
+
+## Historical benchmark evidence
+
+The 2026-08-14 B-arm dump at `10da1318` recorded 19,431 candidates and
+18,344 answerable candidates, with snapshot digest
+`7cac6e0d1ebdb89761546c26516a1a6722556f0e4f617145436ff38a51500a6a`
+and KPI digest
+`ed061c008db5603c5f53ef3d3d84c7d20a598774751aee6c5a0a75795827642a`.
+It correctly described that old commit's inactive path/Slice behavior. It must
+not be used to describe current connectedness or to claim a current score gate.
+
+Historical scores, caches, and fixed-candidate replays remain diagnostic
+evidence. Promotion requires a current source-bound authority, real candidate
+discovery, identical control/treatment substrate, and a fresh native benchmark.
+
+## Related authority
 
 | Need | File |
 | --- | --- |
-| Numbered invariants (truth boundary, axes, EventLog) | [`invariants.md`](invariants.md) |
-| Packages, surfaces, write model, governance routes | [`architecture.md`](architecture.md) |
-| Open engineering issues that are **not** the recall field | [`backlog.md`](backlog.md) |
+| Numbered truth, governance, and EventLog rules | [`invariants.md`](invariants.md) |
+| Packages, surfaces, write model, and ownership | [`architecture.md`](architecture.md) |
+| Current dated readiness posture | [`runtime-snapshot.md`](runtime-snapshot.md) |
+| Open engineering issues outside recall closure | [`backlog.md`](backlog.md) |
 | Dated full-dataset KPI archives | [`../bench-history/README.md`](../bench-history/README.md) |

@@ -111,16 +111,19 @@ operate a compatibility mixture.
 ## Recall algorithm
 
 Do not implement recall from flood / SliceKey / fused-score prose.
-The intended algorithm is the UGAF read path; the live runtime is a
-degenerate projection of that path (typed \(G_L\) transfer is not
-connected; family-max RRF plus one Select_Gamma walk). Owner:
+The algorithm is the UGAF read path. The live runtime now connects pinned
+field-generation candidate admission, graph/PathRelation expansion, Slice
+compatibility, attributed path/evidence flood, and one Select_Gamma admission
+walk. Owner and current closure boundary:
 
 [`recall.md`](recall.md)
 
 `PathRelation` remains a derived current/as-of routing projection over
 immutable `RelationAssertion` history (invariant §12). That ontology
-constraint is not a claim that query-time flood or SliceKey matching
-is live. The pre-UGAF wording is archived at
+constraint does not by itself prove any query-time path. Connectedness is
+established only by the live producer-to-consumer evidence recorded in
+`recall.md`; F3-only membership and bundle-frontier control remain explicit
+closure questions there. The pre-UGAF wording is archived at
 `docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
 
 ## Package Shape
@@ -281,7 +284,13 @@ review finding:
    - HealthJournalService, EventPublisher
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`). Helper presence is not connectedness — graph/path fusion streams and flood fuel are degenerate on HEAD `10da1318`; see [`recall.md`](recall.md).
+   - RecallService (needs Memory + Embedding repos; fusion, delivery,
+     graph-expansion, path-relation, field-generation, and diagnostics helpers
+     live under `packages/core/src/recall/`). Helper presence is not
+     connectedness. Current HEAD has live field/path/Slice/flood/Select_Gamma
+     wiring, while F3-only membership and progressive bundle-frontier control
+     still require planted end-to-end closure proof; see
+     [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
