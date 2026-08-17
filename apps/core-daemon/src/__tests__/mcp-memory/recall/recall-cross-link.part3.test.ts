@@ -55,12 +55,7 @@ async function createHarness(
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
     readonly recallCandidateIds?: readonly string[];
     readonly pathRelationProposalService?: {
-      onCoUsage(usedObjectIds: readonly string[], workspaceId: string): Promise<void>;
-      onCoRecall(
-        recalledObjectIds: readonly string[],
-        workspaceId: string,
-        allowedPairKeys?: ReadonlySet<string>
-      ): Promise<void>;
+      submitCandidate(input: unknown): Promise<string>;
     };
     readonly coRecallCoherenceGate?: {
       coherentPairKeys(
@@ -313,15 +308,8 @@ describe("recall usage: delivery never accrues co-recall plasticity", () => {
 
   it("does not schedule delivery-based co-recall even when the seeder would fail", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => true);
-    const onCoRecall = vi.fn(async () => {
-      throw new Error("co-recall db down");
-    });
     const harness = await createHarness([MEM_A, MEM_B], {
       recallCandidateIds: [MEM_A, MEM_B],
-      pathRelationProposalService: {
-        onCoUsage: vi.fn(async () => {}),
-        onCoRecall
-      },
       coRecallCoherenceGate: {
         coherentPairKeys: vi.fn(async () => new Set([`${MEM_A}|${MEM_B}`]))
       }
@@ -346,7 +334,6 @@ describe("recall usage: delivery never accrues co-recall plasticity", () => {
       });
 
       expect(result).toMatchObject({ ok: true });
-      expect(onCoRecall).not.toHaveBeenCalled();
       const events = await harness.eventLogRepo.queryByWorkspaceAndType(
         "workspace-1",
         RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED

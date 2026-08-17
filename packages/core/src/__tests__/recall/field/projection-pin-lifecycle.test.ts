@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { RecallService } from "../../../recall/recall-service.js";
-import { createTestOnlyInMemoryFieldQuerySession } from
+import {
+  createSeededTestOnlyInMemoryFieldQuerySession,
+  createTestOnlyInMemoryFieldQuerySession
+} from
   "../../../recall/runtime/query/field-query-session.js";
 import { captureQueryCondition } from
   "../../../recall/query/condition/query-condition-capture.js";
@@ -18,12 +21,34 @@ const CLOCK = "2026-08-16T00:00:00.000Z";
 describe("projection reader lifecycle", () => {
   it("requires an explicit production field session", () => {
     const fixture = createDependencies([]).dependencies;
-    const { testOnlyAllowInMemoryFieldQuerySession: _testOnly, ...production } = fixture;
+    const {
+      testOnlyAllowInMemoryFieldQuerySession: _testOnly,
+      fieldQuerySession: _session,
+      ...production
+    } = fixture;
     expect(() => new RecallService(production)).toThrow(/production field query session/u);
   });
 
+  it("refuses to pin when no generation was activated", () => {
+    const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    expect(() => session.pinActiveGeneration("workspace-1", CLOCK))
+      .toThrow(/active projection generation is missing/u);
+  });
+
+  it("does not mint a generation for a workspace the test never activated", async () => {
+    const fixture = createDependencies([]).dependencies;
+    const { fieldQuerySession: _seeded, ...unseeded } = fixture;
+    const service = new RecallService({
+      ...unseeded,
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      now: () => CLOCK
+    });
+    await expect(runRecall(service, "workspace-other"))
+      .rejects.toThrow(/active projection generation is missing/u);
+  });
+
   it("releases the pin when candidate selection fails", async () => {
-    const delegate = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const release = vi.fn(delegate.release);
     const service = createService({
       ...delegate,
@@ -38,7 +63,7 @@ describe("projection reader lifecycle", () => {
   });
 
   it("binds selection to a live unreleased reader identity", () => {
-    const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", CLOCK);
     const live = queryCondition(pin, "2026-08-16T00:01:00.000Z");
     expect(session.selectCandidates(live, pin, "2026-08-16T00:01:00.000Z").candidate_keys)
@@ -54,7 +79,7 @@ describe("projection reader lifecycle", () => {
   });
 
   it("keeps the reader live across awaits through an injected heartbeat", () => {
-    const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", CLOCK);
     let operationalTime = "2026-08-16T00:04:00.000Z";
     let heartbeat: (() => void) | null = null;
@@ -79,7 +104,7 @@ describe("projection reader lifecycle", () => {
   });
 
   it("releases the pin when preparation input loading fails", async () => {
-    const delegate = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const release = vi.fn(delegate.release);
     const dependencies = createDependencies([]).dependencies;
     const service = new RecallService({
@@ -99,7 +124,7 @@ describe("projection reader lifecycle", () => {
   });
 
   it("releases the pin when evidence-bound memory loading fails", async () => {
-    const delegate = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const release = vi.fn(delegate.release);
     const dependencies = createDependencies([]).dependencies;
     const service = new RecallService({
@@ -140,10 +165,10 @@ function createService(
   });
 }
 
-async function runRecall(service: RecallService) {
+async function runRecall(service: RecallService, workspaceId = "workspace-1") {
   return await service.recall({
     taskSurface: createTaskSurface("Ada"),
-    workspaceId: "workspace-1",
+    workspaceId,
     strategy: "build"
   });
 }

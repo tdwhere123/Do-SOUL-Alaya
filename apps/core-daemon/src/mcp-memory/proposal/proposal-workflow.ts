@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DynamicsService, EffectDecisionStore } from "@do-soul/alaya-core";
+import type { DynamicsService, EffectDecisionStore, ProofEffectLookup } from "@do-soul/alaya-core";
 import type {
   MemoryEntryMutableFields,
   PathAnchorRef,
@@ -39,6 +39,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   readonly privacyEffectDecisionStore?: Readonly<{
     readonly transactionScope: object;
     readonly store: EffectDecisionStore;
+    readonly lookup: Pick<ProofEffectLookup, "isErased" | "isBridgeRevoked" | "competingClaims">;
   }>;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
   readonly memoryService?: Readonly<{

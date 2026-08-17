@@ -16,14 +16,9 @@ const NOW = "2026-04-30T00:00:00.000Z";
 describe("recall usage causal receipts", () => {
   it("does not record learning receipts for delivered-but-unused context", async () => {
     const recorder = new InMemoryCausalUsageRecorder();
-    const onCoRecall = vi.fn(async () => undefined);
     const deps = {
       ...createDeps(),
-      causalUsagePort: recorder,
-      pathRelationProposalService: {
-        onCoRecall,
-        onCoUsage: vi.fn(async () => undefined)
-      }
+      causalUsagePort: recorder
     } as RecallUsageHandlerDependencies;
     const recall = createRecallHandler({
       deps,
@@ -41,7 +36,6 @@ describe("recall usage causal receipts", () => {
     }, context);
 
     expect(recorder.list()).toEqual([]);
-    expect(onCoRecall).not.toHaveBeenCalled();
   });
 
   it("treats a used self-report as telemetry and does not mint causal receipts", async () => {

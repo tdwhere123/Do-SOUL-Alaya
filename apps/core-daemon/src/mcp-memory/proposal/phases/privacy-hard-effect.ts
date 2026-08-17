@@ -14,12 +14,29 @@ import {
   buildEffectAuditEventInput,
   fieldContractSha256,
   type EffectDecisionStore,
+  type ProofEffectLookup,
   type ProofRecord
 } from "@do-soul/alaya-core";
 import type { ProposalResolutionEventInput } from "../proposal-workflow-types.js";
 
+export type PrivacyEffectLookup = Pick<
+  ProofEffectLookup,
+  "isErased" | "isBridgeRevoked" | "competingClaims"
+>;
+
+export function createPrivacyEffectLookup(erase: Readonly<{
+  isErased(workspaceId: string, subjectId: string): boolean;
+}>): PrivacyEffectLookup {
+  return {
+    isErased: (workspaceId, target) => erase.isErased(workspaceId, target),
+    isBridgeRevoked: () => false,
+    competingClaims: () => []
+  };
+}
+
 export function authorizePrivacyErase(input: Readonly<{
   readonly store: EffectDecisionStore;
+  readonly lookup: PrivacyEffectLookup;
   readonly storedReviewEvents: readonly EventLogEntry[];
   readonly proposalId: string;
   readonly workspaceId: string;
@@ -59,6 +76,7 @@ function findAuthorityEvent(input: Readonly<{
 
 function decidePrivacyErase(
   input: Readonly<{
+    readonly lookup: PrivacyEffectLookup;
     readonly workspaceId: string;
     readonly proposalId: string;
     readonly targetObjectId: string;
@@ -88,9 +106,9 @@ function decidePrivacyErase(
     lookup: {
       findReceipts: (workspaceId, ids) => proofs.filter((proof) =>
         proof.workspace_id === workspaceId && ids.includes(proof.id)),
-      isBridgeRevoked: () => false,
-      competingClaims: () => [],
-      isErased: () => false
+      isBridgeRevoked: input.lookup.isBridgeRevoked,
+      competingClaims: input.lookup.competingClaims,
+      isErased: input.lookup.isErased
     },
     now: () => input.reviewedAt,
     sha256: fieldContractSha256

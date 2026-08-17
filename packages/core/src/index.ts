@@ -47,9 +47,11 @@ export {
 } from "./memory/evidence-create/field-stores.js";
 export {
   activateTestOnlyEmptyGeneration,
+  createSeededTestOnlyInMemoryFieldQuerySession,
   createTestOnlyInMemoryFieldQuerySession,
   SEALED_EMPTY_FRONTIER,
-  type RecallFieldQuerySession
+  type RecallFieldQuerySession,
+  type TestOnlyInMemoryFieldQuerySession
 } from "./recall/runtime/query/field-query-session.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";

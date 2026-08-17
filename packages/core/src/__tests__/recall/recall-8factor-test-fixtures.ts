@@ -20,6 +20,9 @@ import type {
   RecallServiceFieldDeps
 } from "../../recall/recall-service.js";
 import { PATH_PLASTICITY_WEIGHT } from "../../recall/runtime/recall-service-helpers.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
 
 export function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
@@ -154,6 +157,10 @@ export function createDependencies(
 
   const dependencies: RecallServiceDependencies & RecallServiceFieldDeps = {
     testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+      fieldContractSha256,
+      "workspace-1"
+    ),
     now: () => "2026-03-23T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

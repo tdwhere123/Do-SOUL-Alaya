@@ -55,12 +55,7 @@ async function createHarness(
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
     readonly recallCandidateIds?: readonly string[];
     readonly pathRelationProposalService?: {
-      onCoUsage(usedObjectIds: readonly string[], workspaceId: string): Promise<void>;
-      onCoRecall(
-        recalledObjectIds: readonly string[],
-        workspaceId: string,
-        allowedPairKeys?: ReadonlySet<string>
-      ): Promise<void>;
+      submitCandidate(input: unknown): Promise<string>;
     };
     readonly coRecallCoherenceGate?: {
       coherentPairKeys(

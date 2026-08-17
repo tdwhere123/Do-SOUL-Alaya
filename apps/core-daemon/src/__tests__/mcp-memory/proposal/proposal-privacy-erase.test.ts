@@ -21,6 +21,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createMcpMemoryProposalWorkflow } from "../../../mcp-memory/proposal/proposal-workflow.js";
+import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 
 const WORKSPACE_ID = "workspace-privacy-erase";
 const RECORD_ID = "source-record-private";
@@ -86,6 +87,32 @@ describe("privacy erase proposal review", () => {
       FieldGenerationEventType.SOUL_FIELD_EFFECT_DECIDED
     )).toBe(1);
     expect(readPrivacyAuditText(harness.database)).not.toContain(SENSITIVE_MARKER);
+  });
+
+  it("denies accept when the hard-effect lookup reports a revoked bridge", async () => {
+    const harness = createHarness();
+    const created = await proposePrivacyErase(harness.workflow);
+    const workflow = createWorkflow(
+      harness.proposalRepo,
+      harness.eventLogRepo,
+      harness.eraseRepo,
+      {
+        ...harness.effectPort,
+        lookup: {
+          ...harness.effectPort.lookup,
+          isBridgeRevoked: () => true
+        }
+      }
+    );
+
+    await expect(acceptPrivacyErase(workflow, created.proposal_id)).rejects.toThrow(
+      /Failed to accept privacy erase proposal/u
+    );
+    expect(readSourceBody(harness.database)).toBe(SENSITIVE_MARKER);
+    expect(harness.eraseRepo.findById(WORKSPACE_ID, BARRIER_ID)).toBeNull();
+    await expect(harness.proposalRepo.findScopedById(created.proposal_id)).resolves.toMatchObject({
+      proposal: { resolution_state: ProposalResolutionState.PENDING }
+    });
   });
 
   it("keeps plaintext and creates no barrier when the review rejects", async () => {
@@ -332,7 +359,8 @@ function createEffectDecisionPort(
         });
         return receipt;
       }
-    }
+    },
+    lookup: createPrivacyEffectLookup(eraseRepo)
   };
 }
 

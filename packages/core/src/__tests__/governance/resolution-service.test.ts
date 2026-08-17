@@ -464,6 +464,42 @@ describe("ResolutionService dispatch", () => {
     );
   });
 
+  it("reject of a memory_entry is audit-only and returns noop", async () => {
+    const harness = createHarness();
+    harness.memoryRepo.findById.mockResolvedValueOnce(buildMemory());
+    const outcome = await harness.service.resolve({
+      ...baseInput,
+      targetObjectId: "mem-1",
+      resolution: SoulResolutionKind.REJECT
+    });
+    expect(outcome.status).toBe("noop");
+    expect(outcome.auditEventType).toBe(
+      GovernanceResolutionEventType.SOUL_RESOLUTION_REJECT_APPLIED
+    );
+    expect(harness.claimService.transitionLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("reject of an already-archived claim is audit-only and returns noop", async () => {
+    const harness = createHarness();
+    harness.claimRepo.findById.mockResolvedValueOnce(
+      buildClaim({ claim_status: ClaimLifecycleState.ARCHIVED })
+    );
+    const outcome = await harness.service.resolve({
+      ...baseInput,
+      resolution: SoulResolutionKind.REJECT
+    });
+    expect(outcome.status).toBe("noop");
+    expect(harness.claimService.transitionLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("reject of an unknown target fails closed", async () => {
+    const harness = createHarness();
+    await expect(harness.service.resolve({
+      ...baseInput,
+      resolution: SoulResolutionKind.REJECT
+    })).rejects.toThrow(/not found/u);
+  });
+
   it("correct requires a non-empty correction prose and emits the correct event", async () => {
     const harness = createHarness();
     harness.claimRepo.findById.mockResolvedValue(

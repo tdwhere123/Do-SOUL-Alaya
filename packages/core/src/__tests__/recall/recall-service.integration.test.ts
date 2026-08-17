@@ -15,6 +15,9 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import {
   REAL_SQLITE_TEST_RUN_ID,
@@ -65,6 +68,7 @@ function buildRecallService(params: {
   const memoryRepo = params.memoryEntryRepo;
   const deps: RecallServiceDependencies = {
     testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
     now: () => "2026-05-16T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

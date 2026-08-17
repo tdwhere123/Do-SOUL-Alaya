@@ -16,6 +16,9 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fieldSearchFromScalar } from
   "../recall/fixtures/keyword-field-fixture.js";
 
@@ -115,6 +118,10 @@ export function deps(
   return {
     dependencies: {
       testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        WS
+      ),
       now: () => NOW,
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {

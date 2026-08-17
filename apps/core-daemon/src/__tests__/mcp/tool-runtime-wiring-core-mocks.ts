@@ -101,8 +101,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       }))
     }),
     PathRelationProposalService: makeClass({
-      onCoUsage: vi.fn(async () => undefined),
-      onCoRecall: vi.fn(async () => undefined),
+      submitCandidate: vi.fn(async () => "applied"),
       evictExpired: vi.fn(async () => 0),
       counterSize: vi.fn(async () => 0)
     }),

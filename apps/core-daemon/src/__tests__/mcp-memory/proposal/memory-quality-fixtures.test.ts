@@ -15,6 +15,8 @@ import {
   RecallService,
   SignalService,
   buildRecallEvidencePack,
+  createSeededTestOnlyInMemoryFieldQuerySession,
+  fieldContractSha256,
   type RecallServiceDependencies
 } from "@do-soul/alaya-core";
 import {
@@ -221,6 +223,10 @@ async function recallWithMemories(memories: readonly MemoryEntry[], query: strin
 function createRecallDependencies(memories: readonly MemoryEntry[]): RecallServiceDependencies {
   return {
     testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+      fieldContractSha256,
+      "workspace-1"
+    ),
     now: () => "2026-05-13T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

@@ -368,10 +368,7 @@ class ResolutionEffectAuthority implements
   }
 
   private isSubjectErased(workspaceId: string, subjectId: string): boolean {
-    return this.deps.database.connection.prepare(`
-      SELECT 1 FROM projection_erase_barriers
-      WHERE workspace_id = ? AND subject_id = ? LIMIT 1
-    `).get(workspaceId, subjectId) !== undefined;
+    return this.deps.fieldComposition.fieldRepos.erase.isErased(workspaceId, subjectId);
   }
 
   private proofId(kind: string, input: EffectInput, witness: string): string {

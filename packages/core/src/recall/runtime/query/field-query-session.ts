@@ -32,14 +32,21 @@ export interface RecallFieldQuerySession {
   release(pin: ProjectionPin, releasedAt: string): ProjectionPin;
 }
 
+export interface TestOnlyInMemoryFieldQuerySession extends RecallFieldQuerySession {
+  activateEmptyGeneration(workspaceId: string, recordedAt: string): FieldProjectionGeneration;
+}
+
 export function createTestOnlyInMemoryFieldQuerySession(
   sha256: FieldContractSha256
-): RecallFieldQuerySession {
+): TestOnlyInMemoryFieldQuerySession {
   const store = new InMemoryProjectionGenerationStore(sha256);
   return {
+    activateEmptyGeneration(workspaceId, recordedAt) {
+      return activateTestOnlyEmptyGeneration(store, sha256, workspaceId, recordedAt);
+    },
     pinActiveGeneration(workspaceId, recordedAt) {
-      const active = store.readActive(workspaceId) ??
-        activateTestOnlyEmptyGeneration(store, sha256, workspaceId, recordedAt);
+      const active = store.readActive(workspaceId);
+      if (active === null) throw new Error("active projection generation is missing");
       return store.pin({
         workspace_id: workspaceId,
         generation_id: active.generation_id,
@@ -79,6 +86,16 @@ export function createTestOnlyInMemoryFieldQuerySession(
       return released;
     }
   };
+}
+
+export function createSeededTestOnlyInMemoryFieldQuerySession(
+  sha256: FieldContractSha256,
+  workspaceId: string,
+  recordedAt = "1970-01-01T00:00:00.000Z"
+): TestOnlyInMemoryFieldQuerySession {
+  const session = createTestOnlyInMemoryFieldQuerySession(sha256);
+  session.activateEmptyGeneration(workspaceId, recordedAt);
+  return session;
 }
 
 function assertPinMatchesCondition(condition: QueryConditionReceipt, pin: ProjectionPin): void {

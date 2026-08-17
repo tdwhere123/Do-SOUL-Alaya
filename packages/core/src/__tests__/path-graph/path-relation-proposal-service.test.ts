@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { PathRelationSchema, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
-import { PathRelationProposalService, PATH_RELATION_PROPOSE_THRESHOLD, CO_RECALLED_SEED_PROFILE, type PathRelationProposalRepoPort } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import {
+  PathRelationProposalService,
+  CO_RECALLED_SEED_PROFILE,
+  type PathRelationProposalRepoPort,
+  type SubmitCandidateInput
+} from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createCounterStore, createEventPublisher } from "./path-relation-proposal-service.test-support.js";
 import { firstDefined, mockCallAt, requireAt } from "../helpers/defined.js";
@@ -11,27 +16,25 @@ function firstMockEventInputs(mock: { mock: { calls: readonly unknown[][] } }): 
   return requireAt(mockCallAt(mock, 0), 0) as readonly RelationEventInput[];
 }
 
+function coRecalledCandidate(
+  overrides: Partial<SubmitCandidateInput> = {}
+): SubmitCandidateInput {
+  return {
+    workspaceId: "workspace-1",
+    sourceAnchor: { kind: "object", object_id: "mem-A" },
+    targetAnchor: { kind: "object", object_id: "mem-B" },
+    relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+    initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+    governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+    evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+    recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+    recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude,
+    ...overrides
+  };
+}
+
 describe("PathRelationProposalService", () => {
-  it("does not propose before the threshold is reached", async () => {
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher
-    });
-
-    for (let i = 1; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
-
-    expect(repo.create).not.toHaveBeenCalled();
-  });
-
-  it("proposes a PathRelation when the same pair co-occurs K times", async () => {
+  it("mints a PathRelation from submitCandidate", async () => {
     const repo = {
       create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
@@ -43,10 +46,7 @@ describe("PathRelationProposalService", () => {
       eventPublisher: publisher
     });
 
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
-
+    expect(await service.submitCandidate(coRecalledCandidate())).toBe("applied");
     expect(repo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
     const written = firstDefined(mockCallAt(repo.create, 0));
@@ -66,12 +66,7 @@ describe("PathRelationProposalService", () => {
     expect(firstDefined(eventInputs).workspace_id).toBe("workspace-1");
   });
 
-  it("mints a co-usage path at attention_only — not a recall-eligible class", async () => {
-    // A co-usage path is an agent self-report aggregate. It must be born
-    // below the recall-eligible governance band: attention_only is
-    // auditable and lens-visible but earns no recall-expansion boost and
-    // cannot bias agent dialogue until it accrues support_events_count >= 8
-    // through the legitimate path-manifestation-policy ladder.
+  it("mints a co_recalled path at attention_only — not a recall-eligible class", async () => {
     const repo = {
       create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
@@ -83,9 +78,7 @@ describe("PathRelationProposalService", () => {
       eventPublisher: publisher
     });
 
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
+    await service.submitCandidate(coRecalledCandidate());
 
     const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.legitimacy.governance_class).toBe("attention_only");
@@ -97,9 +90,6 @@ describe("PathRelationProposalService", () => {
   });
 
   it("does not double-propose the same pair", async () => {
-    // invariant: durable dedup. A persisted PathRelation is surfaced by
-    // findByAnchorMemoryId, so the pair does not re-propose even when its
-    // counter row drops on propose and then re-accrues from co-usage.
     const created: any[] = [];
     const repo = {
       create: vi.fn((relation: any) => {
@@ -115,50 +105,9 @@ describe("PathRelationProposalService", () => {
       eventPublisher: publisher
     });
 
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD + 5; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
-
+    expect(await service.submitCandidate(coRecalledCandidate())).toBe("applied");
+    expect(await service.submitCandidate(coRecalledCandidate())).toBe("already_present");
     expect(repo.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts pairs symmetrically (mem-A,mem-B == mem-B,mem-A)", async () => {
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher,
-      threshold: 3
-    });
-
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    await service.onCoUsage(["mem-B", "mem-A"], "workspace-1");
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-
-    expect(repo.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores single-used pairs (no propose when len < 2)", async () => {
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher
-    });
-
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A"], "workspace-1");
-    }
-
-    expect(repo.create).not.toHaveBeenCalled();
   });
 
   it("skips propose when a PathRelation already exists between the pair", async () => {
@@ -180,46 +129,11 @@ describe("PathRelationProposalService", () => {
     const service = new PathRelationProposalService({
       repo,
       counterStore: createCounterStore(),
-      eventPublisher: publisher,
-      threshold: 1
+      eventPublisher: publisher
     });
 
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-
+    expect(await service.submitCandidate(coRecalledCandidate())).toBe("already_present");
     expect(repo.create).not.toHaveBeenCalled();
-  });
-
-  it("reads the default threshold from DYNAMICS_CONSTANTS (3) and honors a lower override", async () => {
-    const overrideRepo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher: overridePublisher } = createEventPublisher();
-    const overrideService = new PathRelationProposalService({
-      repo: overrideRepo,
-      counterStore: createCounterStore(),
-      eventPublisher: overridePublisher,
-      threshold: 1
-    });
-    await overrideService.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    expect(overrideRepo.create).toHaveBeenCalledTimes(1);
-
-    const defaultRepo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher: defaultPublisher } = createEventPublisher();
-    const defaultService = new PathRelationProposalService({
-      repo: defaultRepo,
-      counterStore: createCounterStore(),
-      eventPublisher: defaultPublisher
-    });
-    expect(PATH_RELATION_PROPOSE_THRESHOLD).toBe(3);
-    await defaultService.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    await defaultService.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    expect(defaultRepo.create).not.toHaveBeenCalled();
-    await defaultService.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    expect(defaultRepo.create).toHaveBeenCalledTimes(1);
   });
 
   it("evictExpired shrinks the counter for stale sub-threshold pairs", async () => {
@@ -228,20 +142,30 @@ describe("PathRelationProposalService", () => {
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
+    const counterStore = createCounterStore();
     let nowMs = 1_000_000;
     const service = new PathRelationProposalService({
       repo,
-      counterStore: createCounterStore(),
+      counterStore,
       eventPublisher: publisher,
-      threshold: 5,
       now: () => new Date(nowMs).toISOString(),
       nowMs: () => nowMs,
       counterTtlMs: 1_000
     });
 
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-A",
+      highMemoryId: "mem-B",
+      seenAt: new Date(nowMs).toISOString()
+    });
     nowMs = 1_001_500;
-    await service.onCoUsage(["mem-C", "mem-D"], "workspace-1");
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-C",
+      highMemoryId: "mem-D",
+      seenAt: new Date(nowMs).toISOString()
+    });
     expect(await service.counterSize()).toBe(2);
 
     nowMs = 1_002_000;
@@ -256,41 +180,44 @@ describe("PathRelationProposalService", () => {
   });
 
   it("evictExpired keys on updated_at: a re-incremented pair refreshes and survives", async () => {
-    // Durable counters DELETE WHERE updated_at < cutoff. A pair that is
-    // re-used inside the TTL window refreshes updated_at and is therefore not
-    // evicted, even if its first observation predates the cutoff.
     const repo = {
       create: vi.fn((relation: any) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
+    const counterStore = createCounterStore();
     let nowMs = 1_000_000;
     const service = new PathRelationProposalService({
       repo,
-      counterStore: createCounterStore(),
+      counterStore,
       eventPublisher: publisher,
-      threshold: 10,
       now: () => new Date(nowMs).toISOString(),
       nowMs: () => nowMs,
       counterTtlMs: 5_000
     });
 
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-A",
+      highMemoryId: "mem-B",
+      seenAt: new Date(nowMs).toISOString()
+    });
     expect(await service.counterSize()).toBe(1);
 
-    // Re-use at +4s refreshes updated_at to 1_004_000.
     nowMs = 1_004_000;
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-A",
+      highMemoryId: "mem-B",
+      seenAt: new Date(nowMs).toISOString()
+    });
     expect(await service.counterSize()).toBe(1);
 
-    // At +5.5s the cutoff (now - ttl = 1_000_500) is below the refreshed
-    // updated_at, so the pair survives.
     nowMs = 1_005_500;
     const removed = await service.evictExpired();
     expect(removed).toBe(0);
     expect(await service.counterSize()).toBe(1);
 
-    // Once the refreshed updated_at falls past the cutoff it is evicted.
     nowMs = 1_010_000;
     expect(await service.evictExpired()).toBe(1);
     expect(await service.counterSize()).toBe(0);
@@ -302,19 +229,29 @@ describe("PathRelationProposalService", () => {
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
+    const counterStore = createCounterStore();
     let nowMs = 2_000_000;
     const service = new PathRelationProposalService({
       repo,
-      counterStore: createCounterStore(),
+      counterStore,
       eventPublisher: publisher,
-      threshold: 5,
       now: () => new Date(nowMs).toISOString(),
       nowMs: () => nowMs,
       counterTtlMs: 10_000
     });
 
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    await service.onCoUsage(["mem-C", "mem-D"], "workspace-1");
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-A",
+      highMemoryId: "mem-B",
+      seenAt: new Date(nowMs).toISOString()
+    });
+    await counterStore.increment({
+      workspaceId: "workspace-1",
+      lowMemoryId: "mem-C",
+      highMemoryId: "mem-D",
+      seenAt: new Date(nowMs).toISOString()
+    });
     expect(await service.counterSize()).toBe(2);
 
     nowMs = 2_005_000;
@@ -331,82 +268,15 @@ describe("PathRelationProposalService", () => {
     const service = new PathRelationProposalService({
       repo,
       counterStore: createCounterStore(),
-      eventPublisher: publisher,
-      threshold: 1
+      eventPublisher: publisher
     });
 
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
+    await service.submitCandidate(coRecalledCandidate());
 
     const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.constitution.relation_kind).toBe("co_recalled");
     expect(written.plasticity_state.strength).toBe(CO_RECALLED_SEED_PROFILE.initialStrength);
     expect(written.legitimacy.governance_class).toBe("attention_only");
     expect(written.effect_vector.recall_bias).toBeGreaterThan(0);
-  });
-});
-
-describe("PathRelationProposalService — co-recall seeding", () => {
-  it("counts co-recalled pairs and mints a co_recalled path at K", async () => {
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher
-    });
-
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD - 1; i += 1) {
-      await service.onCoRecall(["mem-A", "mem-B"], "workspace-1");
-    }
-    expect(repo.create).not.toHaveBeenCalled();
-
-    await service.onCoRecall(["mem-A", "mem-B"], "workspace-1");
-    expect(repo.create).toHaveBeenCalledTimes(1);
-    const written = firstDefined(mockCallAt(repo.create, 0));
-    expect(written.constitution.relation_kind).toBe("co_recalled");
-    expect(written.legitimacy.governance_class).toBe("attention_only");
-  });
-
-  it("co-recall ignores fewer than two recalled objects", async () => {
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher,
-      threshold: 1
-    });
-
-    await service.onCoRecall(["mem-solo"], "workspace-1");
-    expect(repo.create).not.toHaveBeenCalled();
-  });
-
-  it("co-recall and co-usage share one counter space toward the same threshold", async () => {
-    // invariant: one pair == one relation across both signals, so a mix of
-    // co-recall and co-usage increments accrue toward a single threshold.
-    const repo = {
-      create: vi.fn((relation: any) => relation),
-      findByAnchorMemoryId: vi.fn(async () => [])
-    };
-    const { publisher } = createEventPublisher();
-    const service = new PathRelationProposalService({
-      repo,
-      counterStore: createCounterStore(),
-      eventPublisher: publisher,
-      threshold: 3
-    });
-
-    await service.onCoRecall(["mem-A", "mem-B"], "workspace-1");
-    await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    expect(repo.create).not.toHaveBeenCalled();
-
-    await service.onCoRecall(["mem-A", "mem-B"], "workspace-1");
-    expect(repo.create).toHaveBeenCalledTimes(1);
   });
 });

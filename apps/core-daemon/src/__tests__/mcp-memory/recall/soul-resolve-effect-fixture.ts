@@ -10,6 +10,7 @@ import {
 import {
   ProofCarryingEffectOwner,
   fieldContractSha256,
+  type CompetingClaim,
   type ProofEffectLookup,
   type ProofRecord
 } from "@do-soul/alaya-core";
@@ -29,6 +30,7 @@ type EffectInput = Readonly<{
 export function createSoulResolveEffectFixture(input: Readonly<{
   claims: ReadonlyMap<string, ClaimForm>;
   deliveries: ReadonlyMap<string, ContextDeliveryRecord>;
+  erased?: ReadonlySet<string>;
 }>) {
   return {
     deliveryAuthority: {
@@ -63,7 +65,7 @@ export function createSoulResolveEffectFixture(input: Readonly<{
         }));
         const effectRequest = buildRequest(request, witnesses);
         return new ProofCarryingEffectOwner({
-          lookup: new TestProofLookup(input.claims, proofs),
+          lookup: new TestProofLookup(input.claims, proofs, input.erased ?? new Set()),
           now: () => request.effectiveAsOf
         }).decide(effectRequest);
       }
@@ -74,7 +76,8 @@ export function createSoulResolveEffectFixture(input: Readonly<{
 class TestProofLookup implements ProofEffectLookup {
   public constructor(
     private readonly claims: ReadonlyMap<string, ClaimForm>,
-    private readonly proofs: readonly ProofRecord[]
+    private readonly proofs: readonly ProofRecord[],
+    private readonly erased: ReadonlySet<string>
   ) {}
 
   public findReceipts(workspaceId: string, ids: readonly string[]): readonly ProofRecord[] {
@@ -86,8 +89,32 @@ class TestProofLookup implements ProofEffectLookup {
     return workspaceId !== scope;
   }
 
-  public competingClaims(): readonly [] { return []; }
-  public isErased(): boolean { return false; }
+  public competingClaims(
+    workspaceId: string,
+    target: string,
+    _scope: string
+  ): readonly CompetingClaim[] {
+    const targetClaim = this.claims.get(target);
+    if (targetClaim === undefined || targetClaim.workspace_id !== workspaceId) return [];
+    return [...this.claims.values()]
+      .filter((claim) =>
+        claim.workspace_id === workspaceId &&
+        claim.governance_subject.canonical_key === targetClaim.governance_subject.canonical_key &&
+        isLiveClaim(claim))
+      .map((claim) => ({
+        id: claim.object_id,
+        has_evidence: claim.evidence_refs.length > 0,
+        scope_compatible: claim.scope_class === targetClaim.scope_class,
+        recorded_at: claim.created_at,
+        event_time: claim.created_at,
+        valid_from: claim.created_at,
+        valid_to: null
+      }));
+  }
+
+  public isErased(_workspaceId: string, target: string): boolean {
+    return this.erased.has(target);
+  }
 
   public readTargetTime(_workspaceId: string, target: string) {
     const claim = this.claims.get(target);
@@ -144,4 +171,8 @@ function proof(
         delivery_id: input.deliveryId
       })
     : Object.freeze(common);
+}
+
+function isLiveClaim(claim: ClaimForm): boolean {
+  return !["archived", "rejected", "superseded"].includes(claim.claim_status);
 }

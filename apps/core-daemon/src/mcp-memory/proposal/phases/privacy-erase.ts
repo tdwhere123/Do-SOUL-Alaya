@@ -44,6 +44,7 @@ export function prepareAcceptedPrivacyErase(input: Readonly<{
     applySynchronousResolutionMutation: (storedReviewEvents) => [
       ...authorizePrivacyErase({
         store: effectStore.store,
+        lookup: effectStore.lookup,
         storedReviewEvents,
         proposalId: input.proposalId,
         workspaceId: input.context.workspaceId,

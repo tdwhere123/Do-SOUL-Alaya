@@ -4,6 +4,7 @@ import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { HqAnswerOverlapPairSource } from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
+import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
@@ -79,7 +80,8 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     privacyErasePort: input.fieldComposition.fieldRepos.erase,
     privacyEffectDecisionStore: {
       transactionScope: input.fieldComposition.fieldRepos.erase.transactionScope,
-      store: input.fieldComposition.effectDecisionStore
+      store: input.fieldComposition.effectDecisionStore,
+      lookup: createPrivacyEffectLookup(input.fieldComposition.fieldRepos.erase)
     },
     runtimeNotifier: input.runtimeNotifier,
     resolutionService: input.resolutionService,

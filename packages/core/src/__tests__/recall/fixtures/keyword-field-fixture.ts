@@ -7,6 +7,9 @@ import type {
   RecallServiceSynthesisSearchPort
 } from "../../../recall/runtime/recall-service-types.js";
 import { RecallService } from "../../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 export function createFieldBackedRecallService(
   dependencies: Readonly<RecallServiceDependencies>
@@ -20,6 +23,8 @@ export function withKeywordFieldFixturePorts(
   return {
     ...dependencies,
     testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: dependencies.fieldQuerySession ??
+      createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
     memoryRepo: withMemoryFieldFixture(dependencies.memoryRepo),
     evidenceSearchPort: dependencies.evidenceSearchPort === undefined
       ? undefined

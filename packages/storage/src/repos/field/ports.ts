@@ -228,6 +228,7 @@ export interface FieldProjectionGenerationRepo {
 export interface FieldEraseBarrierRepo {
   apply(row: FieldEraseBarrierInput): FieldEraseBarrierRow;
   findById(workspaceId: string, barrierId: string): FieldEraseBarrierRow | null;
+  isErased(workspaceId: string, subjectId: string): boolean;
 }
 
 export interface FieldCausalUsageRepo {

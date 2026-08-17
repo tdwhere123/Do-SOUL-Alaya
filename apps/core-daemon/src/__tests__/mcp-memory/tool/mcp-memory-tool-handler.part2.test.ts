@@ -201,12 +201,9 @@ describe("mcp memory tool handler", () => {
   });
 
   it("records causal used receipts without the independent co-usage counter", async () => {
-    const onCoUsage = vi.fn(async () => undefined);
-    const onCoRecall = vi.fn(async () => undefined);
     const baseDeps = createDeps();
     const deps: McpMemoryToolHandlerDependencies = {
-      ...baseDeps,
-      pathRelationProposalService: { onCoUsage, onCoRecall }
+      ...baseDeps
     };
     deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
       ...createDeliveryRecord(deliveryId),
@@ -225,9 +222,7 @@ describe("mcp memory tool handler", () => {
       context
     });
     expect(legitimate.ok).toBe(true);
-    expect(onCoUsage).not.toHaveBeenCalled();
 
-    onCoUsage.mockClear();
     deps.trustStateRecorder.findDeliveryById = vi.fn(async () => null);
     const unresolved = await handler.call({
       toolName: "soul.report_context_usage",
@@ -240,7 +235,6 @@ describe("mcp memory tool handler", () => {
       context
     });
     expect(unresolved.ok).toBe(true);
-    expect(onCoUsage).not.toHaveBeenCalled();
   });
 
   it("uses delivered_objects as the canonical used object list", async () => {

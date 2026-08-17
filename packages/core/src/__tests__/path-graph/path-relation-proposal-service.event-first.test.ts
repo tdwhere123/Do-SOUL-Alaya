@@ -3,7 +3,7 @@ import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
   PathRelationProposalService,
-  PATH_RELATION_PROPOSE_THRESHOLD,
+  CO_RECALLED_SEED_PROFILE,
   type CoUsageCounterPort,
   type PathRelationProposalEventPublisherPort
 } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
@@ -76,9 +76,17 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       generateId: () => "path-fixed-1"
     });
 
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
+    await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+      initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+      governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+      evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+      recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+      recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude
+    });
 
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(repoCreate).toHaveBeenCalledTimes(1);
@@ -92,8 +100,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     expect(firstDefined(eventInputs).event_type).toBe("path.relation_created");
     expect(firstDefined(eventInputs).entity_type).toBe("path_relation");
     expect(firstDefined(eventInputs).entity_id).toBe("path-fixed-1");
-    // Counter-gated co-recall accrues across runs; no single run owns the
-    // mint, so the audit row's run attribution stays null.
+    // submitCandidate without runId leaves audit attribution null.
     expect(firstDefined(eventInputs).run_id).toBeNull();
     expect(firstDefined(eventInputs).payload_json).toMatchObject({
       path_id: "path-fixed-1",
@@ -353,14 +360,22 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       warn
     });
 
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
-    }
+    await service.submitCandidate({
+      workspaceId: "workspace-1",
+      sourceAnchor: { kind: "object", object_id: "mem-A" },
+      targetAnchor: { kind: "object", object_id: "mem-B" },
+      relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+      initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+      governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+      evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+      recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+      recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude
+    });
 
     expect(repoCreate).toHaveBeenCalledTimes(1);
     expect(persistedEvents).toHaveLength(0);
     expect(warn).toHaveBeenCalledWith(
-      "PathRelation propose failed",
+      "PathRelation submitCandidate failed",
       expect.objectContaining({
         workspace_id: "workspace-1",
         error: "simulated row-insert failure"

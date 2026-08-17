@@ -72,15 +72,10 @@ describe("recall usage evidence proof", () => {
       fine_assessment_count: 3
     })) as typeof deps.recallService.recall;
     const coherentPairKeys = vi.fn(async () => new Set(["mem1|mem2"]));
-    const onCoRecall = vi.fn(async () => undefined);
     const enqueue = vi.fn((input: { readonly id: string }) => ({ task_id: input.id }));
     const handler = createMcpMemoryToolHandler({
       ...deps,
       coRecallCoherenceGate: { coherentPairKeys },
-      pathRelationProposalService: {
-        onCoRecall,
-        onCoUsage: vi.fn(async () => undefined)
-      },
       gardenTaskRepo: {
         enqueue,
         findById: vi.fn(() => null),
@@ -113,7 +108,6 @@ describe("recall usage evidence proof", () => {
       })
     );
     expect(coherentPairKeys).not.toHaveBeenCalled();
-    expect(onCoRecall).not.toHaveBeenCalled();
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
@@ -176,8 +170,6 @@ describe("recall usage evidence proof", () => {
 
   it("keeps mixed self-report telemetry free of memory and co-usage mutation", async () => {
     const deps = createDeps();
-    const onCoUsage = vi.fn(async () => undefined);
-    const onCoRecall = vi.fn(async () => undefined);
     const deliveredObjects = [
       { object_id: "mem1", object_kind: "memory_entry" },
       { object_id: EVIDENCE_ID, object_kind: "evidence_capsule" },
@@ -187,13 +179,7 @@ describe("recall usage evidence proof", () => {
       createEvidenceDelivery(deliveredObjects)
     );
     const handler = createMcpMemoryToolHandler(
-      withEvidenceService(
-        {
-          ...deps,
-          pathRelationProposalService: { onCoUsage, onCoRecall }
-        },
-        vi.fn(async () => createEvidence())
-      )
+      withEvidenceService(deps, vi.fn(async () => createEvidence()))
     );
 
     const result = await handler.call({
@@ -226,7 +212,6 @@ describe("recall usage evidence proof", () => {
       })
     );
     expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
-    expect(onCoUsage).not.toHaveBeenCalled();
   });
 
   it.each([

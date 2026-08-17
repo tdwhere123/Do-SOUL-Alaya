@@ -60,7 +60,9 @@ describe("field privacy erase", () => {
     seedDerivedPrivacyClosure(environment.database, graph.evidenceId);
     seedDecisionHistory(environment.database);
 
+    expect(environment.erase.isErased("workspace-1", graph.record.record_id)).toBe(false);
     environment.erase.apply(barrier(graph.record.record_id));
+    expect(environment.erase.isErased("workspace-1", graph.record.record_id)).toBe(true);
 
     expect(environment.records.findById("workspace-1", graph.record.record_id)?.source_body)
       .toBeNull();

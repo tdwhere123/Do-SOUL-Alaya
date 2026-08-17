@@ -86,6 +86,11 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     }, "erase barrier");
   }
 
+  public isErased(workspaceId: string, subjectId: string): boolean {
+    return this.statements.active().selectBySubjectIdStatement.get(workspaceId, subjectId) !==
+      undefined;
+  }
+
   public findById(workspaceId: string, barrierId: string): FieldEraseBarrierRow | null {
     return parseOptionalRow(
       this.statements.active().selectStatement.get(workspaceId, barrierId),
@@ -287,6 +292,10 @@ function prepareEraseStatements(database: StorageDatabase) {
         subject_kind, subject_id, erased_at
       FROM projection_erase_barriers
       WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ? LIMIT 1
+    `),
+    selectBySubjectIdStatement: database.connection.prepare(`
+      SELECT 1 FROM projection_erase_barriers
+      WHERE workspace_id = ? AND subject_id = ? LIMIT 1
     `)
   };
 }

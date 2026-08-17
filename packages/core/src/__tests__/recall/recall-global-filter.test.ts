@@ -14,6 +14,9 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { requireAt } from "../helpers/defined.js";
 
 function createTaskSurface(): TaskObjectSurface {
@@ -104,6 +107,10 @@ function createDependencies(
   return {
     dependencies: {
       testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        "workspace-1"
+      ),
       now: () => "2026-03-29T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {

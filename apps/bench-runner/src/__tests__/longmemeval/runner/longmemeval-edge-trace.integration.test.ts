@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createTestOnlyInMemoryFieldQuerySession,
+  createSeededTestOnlyInMemoryFieldQuerySession,
   fieldContractSha256,
   RecallService,
   resetCoreConfigForTests,
@@ -299,7 +299,7 @@ function createRecallService(
     now: () => "2026-07-10T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     sha256: fieldContractSha256,
-    fieldQuerySession: createTestOnlyInMemoryFieldQuerySession(fieldContractSha256),
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WORKSPACE_ID),
     memoryRepo: {
       findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),

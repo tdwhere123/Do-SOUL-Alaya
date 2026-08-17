@@ -16,6 +16,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallResult, type RecallServiceDependencies } from
   "../../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 type TierCascadeFixtureParams = Readonly<{
   readonly hot?: readonly MemoryEntry[];
@@ -119,6 +122,10 @@ function createDependencies(params: TierCascadeFixtureParams = {}): {
   return {
     dependencies: {
       testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        "workspace-1"
+      ),
       now: () => "2026-05-07T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: createMemoryRepo(params, findByWorkspaceIdSpy),

@@ -130,17 +130,11 @@ export class ResolutionService {
     return claim;
   }
 
-  // invariant: reject archives the claim_form regardless of starting
-  // state. Draft claims archive directly via the claim_form
-  // transition matrix (draft -> archived); active / contested /
-  // winner / superseded archive through the standard path. For
-  // memory_entry targets the resolution emits the audit event only —
-  // durable memory is not mutated by the reject path.
-  // invariant: when reject archives a claim, the claim_status mutation
-  // and the resolution audit event are appended in one SQLite
-  // transaction. The audit-only branches (already-archived claim,
-  // memory_entry target) publish the audit event standalone — no
-  // governance mutation to pair it with.
+  // invariant: reject archives a live claim_form. Draft archives
+  // directly; active / contested / winner / superseded use the
+  // standard path. memory_entry and already-archived targets emit
+  // audit only and return noop — no lifecycle or proof-effect row
+  // changes.
   // see also: packages/protocol/src/soul/claim-form.ts claimTransitions
   private async applyReject(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
@@ -153,10 +147,11 @@ export class ResolutionService {
     if (claim !== null && claim.claim_status !== ClaimLifecycleState.ARCHIVED) {
       return await this.applyClaimReject(input, claim, effectiveAsOf);
     }
+    if (claim === null) await this.requireTargetExists(input);
     const entry = await this.emitAuditEvent(input, effectiveAsOf, {});
     return {
       resolution: input.resolution,
-      status: "applied",
+      status: "noop",
       auditEventType: entry.event_type,
       auditEventId: entry.event_id
     };

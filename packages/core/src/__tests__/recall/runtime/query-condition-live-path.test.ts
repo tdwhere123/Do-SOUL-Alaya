@@ -7,7 +7,7 @@ import {
 import { queryConditionParityView } from
   "../../../recall/runtime/query-condition-parity.js";
 import {
-  createTestOnlyInMemoryFieldQuerySession
+  createSeededTestOnlyInMemoryFieldQuerySession
 } from "../../../recall/runtime/query/field-query-session.js";
 import { prepareRecallQueryCondition } from
   "../../../recall/runtime/query/prepare-recall-query-condition.js";
@@ -31,7 +31,7 @@ describe("live query condition capture", () => {
     const operationalAt = "2026-08-16T00:00:01.000Z";
     const now = entranceThenOperationalClock(CLOCK_AS_OF, operationalAt);
     const { dependencies, appendSpy } = createDependencies([]);
-    const baseSession = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const baseSession = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const session = {
       pinActiveGeneration: vi.fn(baseSession.pinActiveGeneration),
       selectCandidates: vi.fn(baseSession.selectCandidates),
@@ -83,7 +83,7 @@ describe("live query condition capture", () => {
       testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: frozenClock(),
-      fieldQuerySession: createTestOnlyInMemoryFieldQuerySession(fieldContractSha256),
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
       sha256: fieldContractSha256,
       pathExpansionPort: { findByAnchors }
     });
@@ -107,7 +107,7 @@ describe("live query condition capture", () => {
       testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: frozenClock(),
-      fieldQuerySession: createTestOnlyInMemoryFieldQuerySession(fieldContractSha256),
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
       sha256: fieldContractSha256,
       pathExpansionPort: { findByAnchors }
     });
@@ -129,7 +129,7 @@ describe("live query condition capture", () => {
 
   it("separates explicit semantic as-of from operational capture time", () => {
     const clock = countingClock("2026-08-16T23:59:59.000Z");
-    const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", EXPLICIT_AS_OF);
     const receipt = prepareRecallQueryCondition({
       workspaceId: "workspace-1",
@@ -150,7 +150,7 @@ describe("live query condition capture", () => {
   });
 
   it("keeps direct and worker receipts on the same captured condition", () => {
-    const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
+    const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", CLOCK_AS_OF);
     const deps = { sha256: fieldContractSha256, now: frozenClock(), pin };
     const draft = {

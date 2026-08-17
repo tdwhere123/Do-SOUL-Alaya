@@ -16,6 +16,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 import { createDaemonMcpMemoryToolHandler } from "../../../mcp-memory/tool/daemon-handler.js";
 import { createSqliteCausalUsagePort } from "../../../runtime/field/sqlite-causal-usage-port.js";
 import { createDeps } from "./mcp-memory-tool-handler-fixture.js";
@@ -139,7 +140,8 @@ function createHarness() {
           });
           return receipt;
         }
-      }
+      },
+      lookup: createPrivacyEffectLookup(eraseRepo)
     },
     eventPublisher: new EventPublisher({
       eventLogRepo,

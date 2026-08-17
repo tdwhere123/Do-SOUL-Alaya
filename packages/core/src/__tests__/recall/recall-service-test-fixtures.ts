@@ -19,6 +19,9 @@ import type {
   RecallServiceDependencies,
   RecallServiceFieldDeps
 } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 
 export function createTaskSurface(): TaskObjectSurface {
   return {
@@ -225,6 +228,10 @@ export function createDependencies(
   return {
     dependencies: {
       testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        "workspace-1"
+      ),
       now: () => "2026-03-23T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {

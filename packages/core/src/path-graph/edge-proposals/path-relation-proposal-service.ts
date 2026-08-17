@@ -5,9 +5,7 @@ import {
   type PathAnchorRef} from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
-  CO_RECALLED_SEED_PROFILE,
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
-  PATH_RELATION_PROPOSE_THRESHOLD,
   clampGovernanceToAutoBuildCeiling,
   errorMessage,
   type AnchorValidationFailure,
@@ -50,41 +48,23 @@ export type {
 } from "./path-relation-proposal-service-shared.js";
 
 // invariant: PathRelationProposalService is the single producer of
-// PathRelation entities. It accepts seeding signals from many producers
-// (co-usage, co-recall, LLM supports/derives, shared-entity, signal
-// graph-ref) and mints a PathRelation through one shared materialize path.
-// Each signal differs only in its seed profile (relation_kind / initial
-// strength / governance_class / evidence_basis / recall_bias sign); the
-// propose/materialize machinery is identical. invariant: counter-gated
-// seeders (co-usage, co-recall) accrue to a threshold before minting;
-// candidate-driven seeders (LLM/entity/signal via submitCandidate) mint
-// once on submission. invariant: counter state is durable via
-// CoUsageCounterPort; counts toward the threshold are persisted, not held
-// in process memory.
+// PathRelation entities. Producers submit a fully differentiated
+// candidate through submitCandidate; seed profiles differ only in
+// relation_kind / strength / governance / evidence / recall_bias sign.
 // invariant: agents and producers only propose; Alaya decides durable
 // recall topology. auto-build governance has a hard ceiling of
 // recall_allowed — strictly_governed is reserved for user/operator action
 // and submitCandidate clamps any caller that asks for it down to
-// recall_allowed. A counter-seeded path is born at attention_only and
-// remains non-recallable until an explicit governed promotion. Causal
-// usage receipts affect only the bounded temporal soft-strength projection.
+// recall_allowed. Causal usage receipts affect only the bounded temporal
+// soft-strength projection.
 // invariant: positive and negative relation families share one plasticity
 // model. The family is expressed only by the sign of effect_vector
-// .recall_bias (supports +, contradicts/supersedes -). Negative families
-// carry harder initial seed parameters (evidence_basis >= 1, higher
-// initial strength, governance >= recall_allowed) but run the same
-// decay/reinforcement/lifecycle dynamics — there is no second mechanism.
-// invariant: counter rows carry updated_at timestamps so the daemon can
-// periodically call evictExpired(now, ttlMs) to discard stale pairs that
-// never reached the threshold. A pair that reaches the threshold has its
-// counter row dropped once its PathRelation is written; durable
-// double-propose protection comes from findByAnchorMemoryId against
-// persisted PathRelations.
+// .recall_bias (supports +, contradicts/supersedes -).
+// invariant: leftover co-usage counter rows carry updated_at so the
+// daemon can evict stale pairs. Durable double-propose protection comes
+// from findByAnchorMemoryId against persisted PathRelations.
 // invariant: row insert and `path.relation_created` EventLog row are
 // emitted in one SQLite transaction via EventPublisher.appendManyWithMutation.
-// Crash-mid-write cannot leave
-// a path_relations row without its audit event or vice versa.
-// see also: crossLinkRecalledMemories — co-usage caller hook
 // see also: PathRelationRepo — durable write side
 // see also: SqliteCoUsageCounterRepo — durable counter backing
 // see also: spine-activation-design.md §E2 — seed-profile table source
@@ -92,7 +72,6 @@ export type {
 
 export class PathRelationProposalService {
   private readonly counterStore: CoUsageCounterPort;
-  private readonly threshold: number;
   private readonly now: () => string;
   private readonly nowMs: () => number;
   private readonly counterTtlMs: number;
@@ -100,49 +79,13 @@ export class PathRelationProposalService {
 
   public constructor(private readonly deps: PathRelationProposalServiceDeps) {
     this.counterStore = deps.counterStore;
-    this.threshold = deps.threshold ?? PATH_RELATION_PROPOSE_THRESHOLD;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.nowMs = deps.nowMs ?? (() => Date.now());
     this.counterTtlMs = deps.counterTtlMs ?? PATH_RELATION_COUNTER_DEFAULT_TTL_MS;
     this.generateId = deps.generateId ?? (() => randomUUID());
   }
 
-  // Co-usage seeder: memories reported used together. Counter-gated; on
-  // reaching the threshold it mints a co_recalled-family path. Co-usage and
-  // co-recall share one counter space and one seed profile.
-  public async onCoUsage(
-    usedObjectIds: readonly string[],
-    workspaceId: string
-  ): Promise<void> {
-    await this.accrueCoOccurrence(usedObjectIds, workspaceId);
-  }
-
-  // invariant: co-recall seeder. Counts a pair when delivered together in
-  // one recall; does not require a used-report. This is the receiving API —
-  // the recall-side hook that calls it is owned by the recall delivery path,
-  // not this file. Shares one counter space and the co_recalled seed profile
-  // with onCoUsage, so both signals reinforce one count toward the threshold.
-  //
-  // `allowedPairKeys`, when provided, restricts accrual to the listed
-  // unordered pairs (canonical `${low}|${high}` keys, low/high = sorted
-  // object_ids — the same ordering accrueCoOccurrence derives internally). The
-  // recall delivery path computes this set from object-to-object semantic
-  // endpoint coherence so only genuinely-related deliveries strengthen a path;
-  // the embedding math stays on the recall/embedding side and never enters this
-  // truth-boundary service. When undefined, every unordered pair accrues — the
-  // unchanged behavior the bench-harness co-recall warmup and the unit tests
-  // depend on.
-  // see also: apps/core-daemon/src/mcp-memory/tool-handler.ts accrueCoRecallPlasticity (production caller)
-  // see also: apps/core-daemon/src/index.ts CO_RECALL_COHERENCE_FLOOR (gate floor)
-  public async onCoRecall(
-    recalledObjectIds: readonly string[],
-    workspaceId: string,
-    allowedPairKeys?: ReadonlySet<string>
-  ): Promise<void> {
-    await this.accrueCoOccurrence(recalledObjectIds, workspaceId, allowedPairKeys);
-  }
-
-  // Generalized candidate intake. Non-counter producers submit a fully
+  // Generalized candidate intake. Producers submit a fully
   // differentiated candidate; it mints once (subject to durable dedup and
   // governance clamp). Edge folding reuses this entry point instead of a
   // parallel mint path. Returns a discriminated PathMintOutcome: applied / already_present
@@ -235,86 +178,6 @@ export class PathRelationProposalService {
 
   public async counterSize(): Promise<number> {
     return await this.counterStore.size();
-  }
-
-  // Shared counter-gated accrual for co-usage and co-recall. Each unordered
-  // pair increments the durable counter; on reaching the threshold it mints
-  // a co_recalled-family path via the same materialize path submitCandidate
-  // uses. When `allowedPairKeys` is provided, only the listed unordered pairs
-  // accrue (semantic-coherence gate, computed on the recall/embedding side);
-  // an undefined set keeps the all-pairs behavior every other caller relies on.
-  private async accrueCoOccurrence(
-    objectIds: readonly string[],
-    workspaceId: string,
-    allowedPairKeys?: ReadonlySet<string>
-  ): Promise<void> {
-    if (objectIds.length < 2) {
-      return;
-    }
-    const unique = [...new Set(objectIds)].sort();
-    const seenAt = this.now();
-    for (let i = 0; i < unique.length; i += 1) {
-      for (let j = i + 1; j < unique.length; j += 1) {
-        const low = unique[i]!;
-        const high = unique[j]!;
-        // Coherence gate: skip any pair the caller did not mark as a
-        // semantically-related endpoint. `low`/`high` are already sorted, so
-        // the key matches the canonical `${low}|${high}` the caller built.
-        if (allowedPairKeys !== undefined && !allowedPairKeys.has(`${low}|${high}`)) {
-          continue;
-        }
-        const count = await this.counterStore.increment({
-          workspaceId,
-          lowMemoryId: low,
-          highMemoryId: high,
-          seenAt
-        });
-        if (count < this.threshold) {
-          continue;
-        }
-        try {
-          const proposed = await this.proposeCoRecalled(workspaceId, low, high);
-          // applied / already_present / rejected all settle the pair: a
-          // permanent rejection (bad anchor) can never mint, so keeping the
-          // counter would re-query it on every future co-occurrence. Only a
-          // transient "failed" leaves the counter so a later threshold hit
-          // retries the mint.
-          if (proposed !== "failed") {
-            await this.counterStore.delete(workspaceId, low, high);
-          }
-        } catch (err) {
-          this.warn("PathRelation propose failed", {
-            workspace_id: workspaceId,
-            source_object_id: low,
-            target_object_id: high,
-            error: errorMessage(err)
-          });
-        }
-      }
-    }
-  }
-
-  private async proposeCoRecalled(
-    workspaceId: string,
-    sourceMemoryId: string,
-    targetMemoryId: string
-  ): Promise<PathMintOutcome> {
-    const profile = CO_RECALLED_SEED_PROFILE;
-    return await this.materialize({
-      workspaceId,
-      sourceAnchor: { kind: "object", object_id: sourceMemoryId },
-      targetAnchor: { kind: "object", object_id: targetMemoryId },
-      relationKind: profile.relationKind,
-      initialStrength: profile.initialStrength,
-      governanceClass: clampGovernanceToAutoBuildCeiling(profile.governanceClass),
-      evidenceBasis: profile.evidenceBasis,
-      recallBias: profile.recallBiasSign * profile.recallBiasMagnitude,
-      supportEventsCount: this.threshold,
-      why: [`co-recalled-used >= ${this.threshold} times`],
-      // Counter-gated co-recall accrues across many runs; no single run
-      // owns the mint, so attribution stays null.
-      runId: null
-    });
   }
 
   // Single materialize path for every seeder. Differentiated parameters

@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 import { captureQueryCondition } from "../../recall/query/condition/query-condition-capture.js";
-import { createTestOnlyInMemoryFieldQuerySession } from
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
@@ -142,7 +142,7 @@ export function liveFieldPins(): Readonly<{
   readonly generation_id: string;
   readonly condition_digest: string;
 }> {
-  const pin = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256)
+  const pin = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1")
     .pinActiveGeneration("workspace-1", LIVE_CAPTURE_AS_OF);
   const receipt = captureQueryCondition({
     principal: "workspace-1",
