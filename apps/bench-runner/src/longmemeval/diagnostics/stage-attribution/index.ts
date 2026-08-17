@@ -10,3 +10,8 @@ export {
 export {
   writeStageAttributionTables
 } from "./write-tables.js";
+export {
+  DIAGNOSTIC_500Q_CLOSED,
+  compareF0F2VsCachedF3,
+  mapQuestionToDiagnosticStage
+} from "./diagnostic-100q.js";
