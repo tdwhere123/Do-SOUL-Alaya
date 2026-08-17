@@ -49,6 +49,7 @@ describe("bench-runner CLI", () => {
     const exitCode = await runCli(["--help"]);
 
     expect(exitCode).toBe(0);
+    expect(stdoutBuf).toContain("diagnostic-loop --work-root <dir>");
     expect(stdoutBuf).toContain("extraction-fill");
     expect(stdoutBuf).not.toContain("recover-extraction-attempt-ledger");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");

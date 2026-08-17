@@ -56,6 +56,8 @@ export {
   TopologyService,
   reviewPathGraphSnapshotHistory,
   OfficialApiGardenProvider,
+  createPiMonoExtractor,
+  type SignalExtractor,
   auditOfficialApiSignalFormation,
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
   OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION,

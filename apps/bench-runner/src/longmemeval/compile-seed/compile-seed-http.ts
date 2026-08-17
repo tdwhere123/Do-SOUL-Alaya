@@ -44,7 +44,8 @@ import {
 import { buildGardenHttpAttemptResponse } from "./http/garden-http-response-validation.js";
 import { observeLateGardenHttpRejection } from "./http/garden-http-late-rejection.js";
 import {
-  startGardenHttpAttemptSettlement
+  startGardenHttpAttemptSettlement,
+  type GardenHttpAttemptSettlement
 } from "./http/stream/garden-http-attempt-settlement.js";
 import { resolveGardenSchemaRetryInstruction, withGardenResponseSchemaRepair } from
   "./http/garden-http-schema-retry.js";

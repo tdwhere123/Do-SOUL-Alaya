@@ -18,6 +18,7 @@ import { runEmbeddingCacheOverlayBuildCommand } from
 import { runSelectionOrderLedgerCommand } from
   "./selection-order-ledger/command.js";
 import { runCaptureParityCommand } from "./capture-parity/command.js";
+import { runDiagnosticLoopCommand } from "./diagnostic-loop/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -58,6 +59,8 @@ Usage:
   alaya-bench-runner fact-frame-formation-audit --snapshot <db> [--output <json>]
   alaya-bench-runner retrofit-object-keys --snapshot <scratch.sqlite> [--output <json>]
   alaya-bench-runner selection-order-ledger --selection-boundaries <ndjson.gz> --selection-boundaries-sha256 <sha256> --expected-question-count <n> --expected-question-id-digest <sha256> --output <ledger.ndjson.gz> [--captured-score-fidelity assert|recompute-live] [--gold-map <gold.json>]
+  alaya-bench-runner diagnostic-loop --work-root <dir> --dataset-revision <sha256> --requested-keys <sha256,...> --provider-route <name> --model <name> --request-profile <profile> --prompt-digest <sha256> --schema-digest <sha256> --operator-digest <sha256> [--mode smoke|run|cache-only|report-only] [--from-phase <phase>] [--variant oracle|s|m] [--limit N] [--offset N] [--worker] [--extraction-cache-root <path>] [--snapshot <db>] [--snapshot-out <db>] [--query-semantic-factor-cache <json>] [--data-dir <path>] [--history-root <path>]
+    One resumable cache-only campaign: preflight → authority/cache → extraction proof → snapshot → control/treatment recall → miss ledger → report. Smoke uses the same path including host_worker. Report-only never reruns extraction or recall.
   alaya-bench-runner capture-parity --snapshot <db> --output <json> [--query-semantic-factor-cache <json>] [--variant oracle|s|m] [--policy-shape stress|chat] [--data-dir-root <path>] [--history-root <path>]
   alaya-bench-runner query-semantic-factor-cache-fill --snapshot <db> --query-semantic-factor-cache <new-cache.json> [--concurrency N]
   alaya-bench-runner embedding-cache-overlay-build --snapshot <db> --source <warmed.db> --snapshot-out <receipt.json> [--variant oracle|s|m] [--embedding-provider openai|local_onnx] [--data-dir <path>] [--pinned-meta-root <path>]
@@ -113,6 +116,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "capture-parity") {
     return runCaptureParityCommand(rest);
+  }
+  if (command === "diagnostic-loop") {
+    return runDiagnosticLoopCommand(rest);
   }
   const opts = parseCommandFlags(rest);
   if (opts === null) return 2;
