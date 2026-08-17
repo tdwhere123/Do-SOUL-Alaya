@@ -8,7 +8,13 @@ import {
   type DiagnosticLoopPhase
 } from "../../bench/diagnostic-loop/phases.js";
 import { isSha256Hex } from "../../bench/diagnostic-loop/identity.js";
+import { isExtractionRequestProfile } from "../../bench/extraction/request-profile.js";
 import type { DiagnosticLoopRequest } from "../../bench/diagnostic-loop/types.js";
+import {
+  isObsoleteRequestProfile,
+  resolveVendorModel
+} from "../../bench/provider/catalog.js";
+import { assertRequiredRequestProfile } from "../../bench/extraction/transport-route.js";
 import type { LongMemEvalVariant } from "../../longmemeval/ingestion/dataset.js";
 import {
   matchFlagToken,
@@ -36,6 +42,15 @@ export function parseDiagnosticLoopArgs(
   const variant = parseVariant(parsed.variant ?? "s");
   const requestedKeys = parseRequestedKeys(parsed.requestedKeys);
   const worker = parsed.worker === true || mode === "smoke";
+  const model = resolveVendorModel(parsed.model!);
+  const requestProfile = parsed.requestProfile!;
+  if (!isExtractionRequestProfile(requestProfile)) {
+    throw new Error(`unsupported request profile '${requestProfile}'`);
+  }
+  if (isObsoleteRequestProfile(requestProfile)) {
+    throw new Error(`diagnostic-loop refuses obsolete request profile ${requestProfile}`);
+  }
+  assertRequiredRequestProfile({ model, requestProfile });
   return {
     workRoot: path.resolve(parsed.workRoot!),
     mode,
@@ -44,8 +59,8 @@ export function parseDiagnosticLoopArgs(
       datasetRevision: parsed.datasetRevision!,
       requestedKeys,
       providerRoute: parsed.providerRoute!,
-      model: parsed.model!,
-      requestProfile: parsed.requestProfile!,
+      model,
+      requestProfile,
       promptDigest: parsed.promptDigest!,
       schemaDigest: parsed.schemaDigest!,
       operatorDigest: parsed.operatorDigest!,

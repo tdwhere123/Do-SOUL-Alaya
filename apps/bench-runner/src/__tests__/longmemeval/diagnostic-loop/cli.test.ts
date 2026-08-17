@@ -76,6 +76,17 @@ describe("diagnostic-loop CLI", () => {
     expect(text).toContain("--from-phase authority_cache");
   });
 
+  it("remaps a display model alias and refuses a mismatched profile", async () => {
+    const parsed = parseDiagnosticLoopArgs([
+      ...requiredFlags({ extra: ["--model", "Mimo-V2.5"] })
+    ]);
+    expect(parsed.request.model).toBe("mimo-v2.5");
+    expect(parsed.request.requestProfile).toBe("mimo-v2.5-nonthinking-v1");
+    expect(() => parseDiagnosticLoopArgs([
+      ...requiredFlags({ extra: ["--request-profile", "provider-default-v1"] })
+    ])).toThrow(/requires request profile mimo-v2.5-nonthinking-v1/u);
+  });
+
   it("rejects a bare diagnostic-loop command", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     expect(await runCli(["diagnostic-loop"])).toBe(2);
@@ -94,8 +105,8 @@ function requiredFlags(input: {
     "--dataset-revision", digest("dataset"),
     "--requested-keys", digest("key-1"),
     "--provider-route", "mimo",
-    "--model", "mimo-v2-flash",
-    "--request-profile", "provider-default-v1",
+    "--model", "mimo-v2.5",
+    "--request-profile", "mimo-v2.5-nonthinking-v1",
     "--prompt-digest", digest("prompt"),
     "--schema-digest", digest("schema"),
     "--operator-digest", digest("operator"),

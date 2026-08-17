@@ -440,6 +440,16 @@ describe("extraction-cache-manifest", () => {
       /extraction model is unresolved/u
     );
   });
+
+  it("resolveBenchExtractionModel remaps display aliases to the vendor id", () => {
+    expect(resolveBenchExtractionModel(
+      { OFFICIAL_API_GARDEN_MODEL: "Mimo-V2.5" }
+    )).toBe("mimo-v2.5");
+    expect(resolveBenchExtractionModel(
+      {},
+      { extraction_model: "mimo-v2-flash" }
+    )).toBe("mimo-v2.5");
+  });
 });
 
 function scopedManifest(

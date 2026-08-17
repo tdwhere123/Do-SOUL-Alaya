@@ -28,6 +28,8 @@ import {
   assertManifestlessCacheIsEmpty
 } from "./manifest/fill-root-guard.js";
 import { prepareExtractionFillWindow } from "./fill-window.js";
+import { assertRequiredRequestProfile } from "../transport-route.js";
+import { isObsoleteRequestProfile } from "../../provider/catalog.js";
 import type { LongMemEvalExpansionCapability } from
   "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import {
@@ -273,11 +275,19 @@ function resolveFillConfig(
   manifest: ExtractionCacheManifest | undefined
 ): CompileSeedExtractionConfig {
   const config = resolveCompileSeedExtractionConfig(process.env, manifest);
-  if (config.model.trim().length > 0) return config;
-  throw new Error(
-    "extraction-fill: resolved extraction model is empty; refusing to fill " +
-      "the cache with an unkeyable model."
-  );
+  if (config.model.trim().length === 0) {
+    throw new Error(
+      "extraction-fill: resolved extraction model is empty; refusing to fill " +
+        "the cache with an unkeyable model."
+    );
+  }
+  assertRequiredRequestProfile(config);
+  if (isObsoleteRequestProfile(config.requestProfile)) {
+    throw new Error(
+      `extraction-fill refuses obsolete request profile ${config.requestProfile}`
+    );
+  }
+  return config;
 }
 
 function assertPreparationIdentityUnchanged(

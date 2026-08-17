@@ -1,4 +1,7 @@
-import type { ExtractionRequestProfile } from "../request-profile.js";
+import {
+  isExtractionRequestProfile,
+  type ExtractionRequestProfile
+} from "../request-profile.js";
 import { isDeepStrictEqual } from "node:util";
 import { inspectCachedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
 import type { ExtractionTransportProvenance } from "../transport-route.js";
@@ -30,8 +33,7 @@ export function assertExtractionAttemptLedgerCacheIdentity(
   }
   const identity = value as Partial<ExtractionAttemptLedgerCacheIdentity>;
   if (typeof identity.model !== "string" || identity.model.length === 0 ||
-      (identity.requestProfile !== "provider-default-v1" &&
-        identity.requestProfile !== "deepseek-v4-nonthinking-v1")) {
+      !isExtractionRequestProfile(identity.requestProfile)) {
     throw new Error("extraction attempt ledger cache identity is invalid");
   }
 }

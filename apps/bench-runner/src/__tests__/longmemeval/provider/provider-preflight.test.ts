@@ -12,6 +12,7 @@ import {
 import { probeProviderProtocol } from "../../../bench/provider/protocol-probe.js";
 import { proveProviderZeroCallReplay } from "../../../bench/provider/replay-proof.js";
 import { retireObsoleteCache } from "../../../bench/provider/retire-obsolete-cache.js";
+import { assertRequiredRequestProfile } from "../../../bench/extraction/transport-route.js";
 import { digest, loopRequest } from "../diagnostic-loop/fixture.js";
 
 const MIMO = requireProviderBinding("mimo-v2.5");
@@ -26,6 +27,17 @@ describe("provider catalog", () => {
     expect(resolveVendorModel("Mimo-V2.5")).toBe(MIMO.id);
     expect(resolveVendorModel("mimo-v2-flash")).toBe(MIMO.id);
     expect(findProviderBinding("unknown-model")).toBeUndefined();
+  });
+
+  it("refuses a bound vendor with the wrong request profile", () => {
+    expect(() => assertRequiredRequestProfile({
+      model: "Mimo-V2.5",
+      requestProfile: "provider-default-v1"
+    })).toThrow(/requires request profile mimo-v2.5-nonthinking-v1/u);
+    expect(() => assertRequiredRequestProfile({
+      model: MIMO.id,
+      requestProfile: MIMO.requestProfile
+    })).not.toThrow();
   });
 });
 

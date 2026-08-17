@@ -4,7 +4,11 @@ import { lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
-import { resolveExtractionTransportRoute } from "../transport-route.js";
+import {
+  assertRequiredRequestProfile,
+  resolveExtractionTransportRoute
+} from "../transport-route.js";
+import { isObsoleteRequestProfile } from "../../provider/catalog.js";
 import {
   computeExtractionTurnCacheKeys,
   inspectCachedExtraction
@@ -69,6 +73,12 @@ export async function inspectExtractionAuthority(input: {
 }): Promise<ExtractionAuthorityInspection> {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest);
+  assertRequiredRequestProfile(config);
+  if (isObsoleteRequestProfile(config.requestProfile)) {
+    throw new Error(
+      `extraction authority refuses obsolete request profile ${config.requestProfile}`
+    );
+  }
   const window = await prepareExtractionFillWindow(input, undefined);
   const authorizedTurns = input.repairInvalidShards === true
     ? window.executionExtractionTurns

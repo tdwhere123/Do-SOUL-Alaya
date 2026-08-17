@@ -6,3 +6,10 @@ export const EXTRACTION_REQUEST_PROFILES = [
 
 export type ExtractionRequestProfile =
   (typeof EXTRACTION_REQUEST_PROFILES)[number];
+
+export function isExtractionRequestProfile(
+  value: unknown
+): value is ExtractionRequestProfile {
+  return typeof value === "string" &&
+    (EXTRACTION_REQUEST_PROFILES as readonly string[]).includes(value);
+}

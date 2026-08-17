@@ -79,6 +79,37 @@ describe("extraction authority receipt", () => {
     expect(() => assertExtractionAuthorityReceipt(receipt, observation)).not.toThrow();
   });
 
+  it("accepts a MiMo request profile as sealed fill authority", () => {
+    const mimoObservation = {
+      ...observation,
+      extraction: {
+        ...observation.extraction,
+        model: "mimo-v2.5",
+        modelFamily: "mimo-v2.5",
+        requestProfile: "mimo-v2.5-nonthinking-v1" as const
+      }
+    };
+    const receipt = createExtractionAuthorityReceipt({
+      action: "fill",
+      observation: mimoObservation,
+      outputTokenCap: { field: "max_tokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 0,
+        outputUsdPerMillion: 0,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 1_024,
+      inspection: {
+        writerLock: "absent",
+        disk: { status: "available", freeBytes: 2_048 },
+        credentialStatus: "present",
+        modelReadiness: "not_probed"
+      }
+    });
+    expect(receipt.observation.extraction.requestProfile).toBe("mimo-v2.5-nonthinking-v1");
+    expect(() => assertExtractionAuthorityReceipt(receipt, mimoObservation)).not.toThrow();
+  });
+
   it("rejects a fresh fill cap that omits the bounded retry envelope", () => {
     expect(() => createExtractionAuthorityReceipt({
       action: "fill",

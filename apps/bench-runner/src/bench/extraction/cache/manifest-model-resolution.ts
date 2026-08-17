@@ -1,3 +1,5 @@
+import { resolveVendorModel } from "../../provider/catalog.js";
+
 export const BENCH_EXTRACTION_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 
 export function resolveBenchExtractionModel(
@@ -16,7 +18,7 @@ export function resolveBenchExtractionModel(
         "cache key and degrades to a full live extraction."
     );
   }
-  return model;
+  return resolveVendorModel(model);
 }
 
 function readNonEmptyEnv(value: string | undefined): string | undefined {

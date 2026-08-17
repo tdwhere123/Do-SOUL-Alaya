@@ -29,8 +29,8 @@ describe("cache-only extraction proof", () => {
     const cacheRoot = await tempRoot();
     const key = digest("present");
     writeCachedExtraction(cacheRoot, key, {
-      model: "mimo-v2-flash",
-      request_profile: "provider-default-v1",
+      model: "mimo-v2.5",
+      request_profile: "mimo-v2.5-nonthinking-v1",
       cache_key: key,
       raw_json: "{\"signals\":[]}",
       extracted_at: "2026-08-17T00:00:00.000Z"
@@ -39,8 +39,8 @@ describe("cache-only extraction proof", () => {
     const result = proveCacheOnlyExtraction(loopRequest({
       extractionCacheRoot: cacheRoot,
       requestedKeys: [key],
-      model: "mimo-v2-flash",
-      requestProfile: "provider-default-v1"
+      model: "mimo-v2.5",
+      requestProfile: "mimo-v2.5-nonthinking-v1"
     }));
 
     expect(result.physicalCalls).toBe(0);
@@ -51,8 +51,8 @@ describe("cache-only extraction proof", () => {
     const cacheRoot = await tempRoot();
     const key = digest("present");
     writeCachedExtraction(cacheRoot, key, {
-      model: "mimo-v2-flash",
-      request_profile: "provider-default-v1",
+      model: "mimo-v2.5",
+      request_profile: "mimo-v2.5-nonthinking-v1",
       cache_key: key,
       raw_json: "{\"signals\":[]}",
       extracted_at: "2026-08-17T00:00:00.000Z"
@@ -62,7 +62,7 @@ describe("cache-only extraction proof", () => {
       loopRequest({
         extractionCacheRoot: cacheRoot,
         requestedKeys: [key],
-        model: "mimo-v2-flash"
+        model: "mimo-v2.5"
       }),
       () => undefined
     )).toThrow(/must not receive a network adapter/u);

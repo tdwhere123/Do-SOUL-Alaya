@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import type { ExtractionRequestProfile } from "../request-profile.js";
+import {
+  isExtractionRequestProfile,
+  type ExtractionRequestProfile
+} from "../request-profile.js";
 import {
   assertDirectExtractionSpendAuthorization,
   isDirectExtractionSpendAuthorization,
@@ -399,8 +402,7 @@ function isObservation(value: unknown): value is ExtractionAuthorityObservation 
     isNonNegativeSafeInteger(dataset.windowLimit) && isDigest(dataset.expectedKeySetSha256) &&
     isObject(extraction) && typeof extraction.model === "string" &&
     typeof extraction.modelFamily === "string" &&
-    (extraction.requestProfile === "provider-default-v1" ||
-      extraction.requestProfile === "deepseek-v4-nonthinking-v1") &&
+    isExtractionRequestProfile(extraction.requestProfile) &&
     typeof extraction.providerUrl === "string" && isDigest(extraction.systemPromptSha256) &&
     typeof extraction.cacheKeyAlgorithm === "string" &&
     (extraction.manifestSha256 === null || isDigest(extraction.manifestSha256)) &&
