@@ -306,30 +306,10 @@ describe("initDatabase migration runner", () => {
     }
   }, 30_000);
 
-  it("repairs duplicate pending strict-governance proposals before adding the dedupe index", () => {
-    const migrationFiles = readMigrationInventory().files;
-    const seedFiles = migrationFiles.filter((file) => file.version < 100);
-    expect(seedFiles.length).toBeGreaterThan(0);
-    const seed = new BetterSqlite3(context.filename);
+  it("rejects a second pending strict-governance proposal for the same dossier key", () => {
+    const database = initDatabase({ filename: context.filename, temporalMode: "candidate" });
     try {
-      seed.pragma("foreign_keys = ON");
-      seed.exec(`
-        CREATE TABLE schema_version (
-          version INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL
-        )
-      `);
-      const markApplied = seed.prepare(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
-      );
-      for (const file of seedFiles) {
-        seed.transaction(() => {
-          seed.exec(file.sql);
-          markApplied.run(file.version, `2026-06-14T00:00:${String(file.version).padStart(2, "0")}.000Z`);
-        })();
-      }
-
-      const insertProposal = seed.prepare(`
+      const insertProposal = database.connection.prepare(`
         INSERT INTO proposals (
           runtime_id,
           object_kind,
@@ -359,7 +339,7 @@ describe("initDatabase migration runner", () => {
         "path_relation",
         "2026-03-21T00:00:00.000Z"
       );
-      insertProposal.run(
+      expect(() => insertProposal.run(
         "runtime-duplicate",
         "proposal-duplicate",
         "memory-1",
@@ -369,7 +349,7 @@ describe("initDatabase migration runner", () => {
         "workspace-1",
         "path_relation",
         "2026-03-21T00:01:00.000Z"
-      );
+      )).toThrow(/UNIQUE constraint failed/u);
       insertProposal.run(
         "runtime-other-memory",
         "proposal-other-memory",
@@ -381,29 +361,11 @@ describe("initDatabase migration runner", () => {
         "path_relation",
         "2026-03-21T00:02:00.000Z"
       );
-    } finally {
-      seed.close();
-    }
 
-    const database = initDatabase({ filename: context.filename, temporalMode: "candidate" });
-    try {
-      const rows = database.connection.prepare(`
-        SELECT proposal_id, resolution_state, reviewer_identity
-        FROM proposals
-        WHERE workspace_id = 'workspace-1'
-          AND dossier_ref = 'inspector.strict_governance_promotion'
-          AND target_object_kind = 'path_relation'
-        ORDER BY proposal_id ASC
-      `).all() as ReadonlyArray<{
-        readonly proposal_id: string;
-        readonly resolution_state: string;
-        readonly reviewer_identity: string | null;
-      }>;
       const pendingCount = database.connection.prepare(`
         SELECT COUNT(*) AS count
         FROM proposals
         WHERE workspace_id = 'workspace-1'
-          AND derived_from = 'memory-1'
           AND dossier_ref = 'inspector.strict_governance_promotion'
           AND target_object_kind = 'path_relation'
           AND resolution_state = 'pending'
@@ -415,24 +377,7 @@ describe("initDatabase migration runner", () => {
           AND name = 'idx_proposals_pending_strict_governance_unique'
       `).get() as { readonly name: string } | undefined;
 
-      expect(rows).toEqual([
-        {
-          proposal_id: "proposal-duplicate",
-          resolution_state: "rejected",
-          reviewer_identity: "migration.strict_governance_dedupe"
-        },
-        {
-          proposal_id: "proposal-oldest",
-          resolution_state: "pending",
-          reviewer_identity: null
-        },
-        {
-          proposal_id: "proposal-other-memory",
-          resolution_state: "pending",
-          reviewer_identity: null
-        }
-      ]);
-      expect(pendingCount.count).toBe(1);
+      expect(pendingCount.count).toBe(2);
       expect(indexRow?.name).toBe("idx_proposals_pending_strict_governance_unique");
     } finally {
       database.close();

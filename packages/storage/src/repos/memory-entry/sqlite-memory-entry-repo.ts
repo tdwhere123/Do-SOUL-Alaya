@@ -93,7 +93,7 @@ export class SqliteMemoryEntryRepo
   public get searchByKeywordStatement(): SqliteAllStatement {
     return this.workflowStatementHolder.active().searchByKeywordStatement;
   }
-  // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
+  // see also: packages/storage/src/migrations/003-memory-fts-and-garden.sql
   public get searchByKeywordPorterStatement(): SqliteAllStatement {
     return this.workflowStatementHolder.active().searchByKeywordPorterStatement;
   }

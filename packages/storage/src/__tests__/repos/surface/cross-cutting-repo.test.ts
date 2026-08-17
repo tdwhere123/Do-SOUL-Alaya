@@ -44,14 +44,14 @@ function createPermission(overrides: Partial<CrossCuttingPermission> = {}): Cros
 }
 
 describe("SqliteCrossCuttingPermissionRepo", () => {
-  it("applies migration 013", async () => {
+  it("records the rebuilt schema ledger", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 13 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(13);
+    expect(migration?.version).toBe(7);
   });
 
   it("creates and finds permission by object_id and permission_id", async () => {

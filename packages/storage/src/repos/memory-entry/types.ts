@@ -232,8 +232,8 @@ export interface MemoryEntryRepo {
     scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
     refinementDepths?: readonly number[]
   ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
-  // see also: packages/storage/src/migrations/005-evidence-capsules.sql
-  // see also: packages/storage/src/migrations/068-evidence-capsule-fts.sql
+  // see also: packages/storage/src/migrations/001-runtime-foundation.sql
+  // see also: packages/storage/src/migrations/003-memory-fts-and-garden.sql
   findByEvidenceRefs?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]

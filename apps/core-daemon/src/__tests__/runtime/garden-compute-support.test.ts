@@ -62,7 +62,7 @@ describe("createConflictDetectionLlmPort", () => {
 
     await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
     const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as { readonly model?: string };
-    expect(body.model).toBe("gpt-5.4-mini");
+    expect(body.model).toBe("Mimo-V2.5");
   });
 
   it("rejects transport failures instead of returning a no-conflict verdict", async () => {

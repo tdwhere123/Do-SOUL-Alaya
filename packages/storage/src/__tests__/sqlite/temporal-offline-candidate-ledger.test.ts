@@ -26,7 +26,7 @@ describe("prepareTemporalCandidate migration ledger", () => {
     const knownVersions = migrationFiles().map((migration) => migration.version);
 
     expect(result.source.schemaVersions).toEqual(
-      knownVersions.filter((version) => version < 108)
+      knownVersions.filter((version) => version < 7)
     );
     expect(result.candidate.schemaVersions).toEqual(knownVersions);
     expect(readSchemaMigrationLedger(fixture.candidateFilename)).toEqual(knownVersions);
@@ -38,7 +38,7 @@ describe("prepareTemporalCandidate migration ledger", () => {
     seedLegacySource(fixture.sourceFilename);
     const database = new BetterSqlite3(fixture.sourceFilename);
     try {
-      database.prepare("DELETE FROM schema_version WHERE version = 50").run();
+      database.prepare("DELETE FROM schema_version WHERE version = 3").run();
     } finally {
       database.close();
     }
@@ -70,7 +70,7 @@ function seedLegacySource(filename: string): void {
     const markApplied = database.prepare(
       "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
     );
-    for (const migration of migrationFiles().filter((candidate) => candidate.version < 108)) {
+    for (const migration of migrationFiles().filter((candidate) => candidate.version < 7)) {
       database.transaction(() => {
         database.exec(migration.sql);
         markApplied.run(migration.version, "2026-07-28T00:00:00.000Z");

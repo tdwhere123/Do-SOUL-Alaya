@@ -47,20 +47,20 @@ afterEach(() => {
 });
 
 describe("SqliteProjectMappingAnchorRepo", () => {
-  it("applies migrations 020 and 021, exports the repo, and removes the redundant index", async () => {
+  it("exports the repo and keeps the unique and workspace indexes", async () => {
     const { database } = await createRepo();
     const storage = (await import("../../../index.js")) as Record<string, unknown>;
 
     expect(storage.SqliteProjectMappingAnchorRepo).toBeTypeOf("function");
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version IN (20, 21) ORDER BY version ASC")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
     const indexes = database.connection
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'project_mapping_anchors'")
       .all() as ReadonlyArray<{ readonly name: string }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([20, 21]);
+    expect(versions.map((entry) => entry.version)).toEqual([7]);
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_unique");
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_workspace");
     expect(indexes.map((entry) => entry.name)).not.toContain("idx_pma_global_obj");

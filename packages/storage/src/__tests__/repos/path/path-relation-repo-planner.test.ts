@@ -28,17 +28,17 @@ afterEach(() => {
 });
 
 describe("SqlitePathRelationRepo SQL planner and cache behavior", () => {
-  it("keeps the anchor-key SQL byte-identical to the migration 048 index expression", async () => {
+  it("keeps the anchor-key SQL byte-identical to the path_relations index expression", async () => {
     const repoSource = await readFile(new URL("../../../repos/path/path-relation-repo.ts", import.meta.url), "utf8");
     const readQueriesSource = await readFile(
       new URL("../../../repos/path/path-relation-read-queries.ts", import.meta.url),
       "utf8"
     );
     const indexSource = await readFile(
-      new URL("../../../migrations/048-path-relations-and-event-log-indexes.sql", import.meta.url),
+      new URL("../../../migrations/004-temporal-and-recall.sql", import.meta.url),
       "utf8"
     );
-    const baseIndexSource = await readFile(new URL("../../../migrations/042-path-relations.sql", import.meta.url), "utf8");
+    const baseIndexSource = await readFile(new URL("../../../migrations/004-temporal-and-recall.sql", import.meta.url), "utf8");
 
     // The drifted serialize_path_anchor_ref SQL function defeated the index;
     // the repo must no longer register or query it.
@@ -349,7 +349,7 @@ describe("SqlitePathRelationRepo SQL planner and cache behavior", () => {
   // expression indexes, not degrade to a workspace SCAN — proven over the repo's
   // OWN prepared statement (.source), so a drift between the indexed expression
   // and the live statement fails this test.
-  it("findByBackingObjectId rides the migration-087 backing-object indexes (no workspace scan)", () => {
+  it("findByBackingObjectId rides the backing-object indexes (no workspace scan)", () => {
     const { database, repo } = createRepo();
     const repoSql = repo.__anchorLookupSqlForTest();
 

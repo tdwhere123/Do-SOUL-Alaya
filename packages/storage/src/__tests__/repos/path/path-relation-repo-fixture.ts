@@ -26,7 +26,7 @@ export function anchorKindsFromSchema(): readonly string[] {
 // (path-relation-repo.ts anchorKeySql). Used only by the byte-identity test to
 // assert the rendered branch appears verbatim in the migration 048 index; the
 // EXPLAIN test runs the repo's own prepared statements instead.
-// cross-file ref: migrations/048-path-relations-and-event-log-indexes.sql.
+// cross-file ref: migrations/004-temporal-and-recall.sql.
 export function reconstructedAnchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
   return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
       WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))

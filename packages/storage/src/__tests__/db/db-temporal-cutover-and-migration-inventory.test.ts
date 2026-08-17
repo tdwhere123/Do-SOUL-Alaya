@@ -10,7 +10,6 @@ import {
   initDatabase,
   readSchemaMigrationLedger
 } from "../../sqlite/db.js";
-import { migrateLegacyPathRelationsToTemporalCandidate } from "../../sqlite/temporal-cutover-gate.js";
 
 interface TempContext {
   readonly directory: string;
@@ -39,7 +38,7 @@ describe("temporal cutover startup gate", () => {
   });
 
   it("refuses a complete pre-temporal source before a runtime open can mutate it", () => {
-    seedMigrationsThrough(context.filename, 107);
+    seedMigrationsThrough(context.filename, 6);
     const before = readFileSha256(context.filename);
 
     expect(() => initDatabase({ filename: context.filename })).toThrow(
@@ -47,7 +46,7 @@ describe("temporal cutover startup gate", () => {
     );
 
     expect(readFileSha256(context.filename)).toBe(before);
-    expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(107);
+    expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(6);
   }, 30_000);
 
   it("fresh bootstrap records a verified empty temporal generation", () => {
@@ -64,7 +63,7 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(126);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(7);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,
@@ -94,69 +93,6 @@ describe("temporal cutover startup gate", () => {
 
     expect(readFileSha256(context.filename)).toBe(before);
   });
-
-  it("quarantines pre-receipt assertions and resets selected temporal state", () => {
-    seedMigrationsThrough(context.filename, 107);
-    seedTemporalMigrationsThrough(context.filename, 116);
-    seedLegacyRelationAssertion(context.filename);
-
-    const database = initDatabase({ filename: context.filename, temporalMode: "candidate" });
-    try {
-      const quarantine = database.connection.prepare(`
-        SELECT source_kind, source_identity, reason, source_json, source_digest
-        FROM relation_assertion_quarantine
-        WHERE source_kind = 'legacy_relation_assertion'
-          AND source_identity = 'legacy-assertion'
-      `).get() as {
-        readonly source_kind: string;
-        readonly source_identity: string;
-        readonly reason: string;
-        readonly source_json: string;
-        readonly source_digest: string;
-      };
-      const source = JSON.parse(quarantine.source_json) as Record<string, unknown>;
-      const state = database.connection.prepare(`
-        SELECT assertion_schema_generation, assertion_event_contract_generation,
-               projection_count, temporal_projection_selection_required,
-               temporal_projection_selected, selection_id,
-               projection_refresh_required
-        FROM temporal_schema_state
-        WHERE state_id = 1
-      `).get();
-
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(126);
-      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM relation_assertions").get())
-        .toEqual({ count: 0 });
-      expect(database.connection.prepare(
-        "SELECT COUNT(*) AS count FROM relation_assertion_resolution_current"
-      ).get()).toEqual({ count: 0 });
-      expect(quarantine).toMatchObject({
-        source_kind: "legacy_relation_assertion",
-        source_identity: "legacy-assertion",
-        reason: "missing_formation_receipt",
-        source_digest: "f".repeat(64)
-      });
-      expect(source).toMatchObject({
-        assertion_id: "legacy-assertion",
-        evidence_ids: ["legacy-evidence"],
-        resolution: {
-          resolution_id: "legacy-resolution",
-          resolution_kind: "retracted"
-        }
-      });
-      expect(state).toEqual({
-        assertion_schema_generation: "relation_assertion_v2",
-        assertion_event_contract_generation: "relation_assertion_event_v2",
-        projection_count: 0,
-        temporal_projection_selection_required: 1,
-        temporal_projection_selected: 0,
-        selection_id: null,
-        projection_refresh_required: 0
-      });
-    } finally {
-      database.close();
-    }
-  }, 30_000);
 });
 
 describe("SQLite migration inventory guardrail", () => {
@@ -217,10 +153,9 @@ describe("SQLite migration inventory guardrail", () => {
   });
 });
 
-const INTENTIONAL_MIGRATION_GAPS = new Set([70, 75]);
+const INTENTIONAL_MIGRATION_GAPS = new Set<number>([]);
 const INTENTIONAL_NOOP_MIGRATIONS = new Set([
-  "074-claim-kind-expanded.sql",
-  "104-engine-bindings-api-key-encrypt.sql",
+  "007-temporal-bootstrap.sql"
 ]);
 
 function readMigrationInventory(): {
@@ -277,115 +212,6 @@ function seedMigrationsThrough(filename: string, maxVersion: number): void {
         markApplied.run(file.version, `2026-07-17T00:00:${String(file.version).padStart(2, "0")}.000Z`);
       })();
     }
-  } finally {
-    seed.close();
-  }
-}
-
-function seedTemporalMigrationsThrough(filename: string, maxVersion: number): void {
-  const seed = new BetterSqlite3(filename);
-  try {
-    seed.pragma("foreign_keys = ON");
-    const markApplied = seed.prepare(
-      "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
-    );
-    for (const file of readMigrationInventory().files.filter(
-      (candidate) => candidate.version >= 108 && candidate.version <= maxVersion
-    )) {
-      seed.transaction(() => {
-        seed.exec(file.sql);
-        if (file.version === 108) {
-          migrateLegacyPathRelationsToTemporalCandidate(seed, { selectionRequired: false });
-        }
-        markApplied.run(file.version, `2026-07-17T00:01:${String(file.version).padStart(2, "0")}.000Z`);
-      })();
-    }
-  } finally {
-    seed.close();
-  }
-}
-
-function seedLegacyRelationAssertion(filename: string): void {
-  const seed = new BetterSqlite3(filename);
-  try {
-    seed.pragma("foreign_keys = ON");
-    seed.transaction(() => {
-      seed.prepare(`
-        INSERT INTO workspaces (
-          workspace_id, name, root_path, workspace_kind, default_engine_binding,
-          workspace_state, created_at, archived_at
-        ) VALUES ('workspace-legacy-assertion', 'Legacy assertion', '/tmp/legacy-assertion',
-                  'local_repo', NULL, 'active', '2026-07-17T00:00:00.000Z', NULL)
-      `).run();
-      seed.prepare(`
-        INSERT INTO relation_assertions (
-          assertion_id, workspace_id, admission_event_id, identity_key,
-          anchors_json, relation_kind, validity_json, admitted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        "legacy-assertion",
-        "workspace-legacy-assertion",
-        "legacy-admission-event",
-        "f".repeat(64),
-        JSON.stringify({
-          source_anchor: { kind: "object", object_id: "memory-a" },
-          target_anchor: { kind: "object", object_id: "memory-b" }
-        }),
-        "supports",
-        JSON.stringify({ kind: "open", valid_from: "2026-07-17T00:00:00.000Z" }),
-        "2026-07-17T00:00:00.000Z"
-      );
-      seed.prepare(
-        "INSERT INTO relation_assertion_evidence (assertion_id, evidence_id) VALUES (?, ?)"
-      ).run("legacy-assertion", "legacy-evidence");
-      seed.prepare(`
-        INSERT INTO relation_assertions (
-          assertion_id, workspace_id, admission_event_id, identity_key,
-          anchors_json, relation_kind, validity_json, admitted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        "legacy-assertion-other",
-        "workspace-legacy-assertion",
-        "legacy-admission-event-other",
-        "e".repeat(64),
-        JSON.stringify({
-          source_anchor: { kind: "object", object_id: "memory-c" },
-          target_anchor: { kind: "object", object_id: "memory-d" }
-        }),
-        "supports",
-        JSON.stringify({ kind: "open", valid_from: "2026-07-17T00:00:00.000Z" }),
-        "2026-07-17T00:00:00.000Z"
-      );
-      seed.prepare(
-        "INSERT INTO relation_assertion_evidence (assertion_id, evidence_id) VALUES (?, ?)"
-      ).run("legacy-assertion-other", "legacy-evidence-other");
-      seed.prepare(`
-        INSERT INTO relation_assertion_resolution_current (
-          assertion_id, resolution_id, workspace_id, resolution_event_id,
-          resolution_kind, resolved_at, reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        "legacy-assertion",
-        "legacy-resolution",
-        "workspace-legacy-assertion",
-        "legacy-resolution-event",
-        "retracted",
-        "2026-07-17T01:00:00.000Z",
-        "legacy resolution"
-      );
-      seed.prepare(`
-        INSERT INTO relation_path_projections (
-          generation, path_id, assertion_id, workspace_id, projection_json
-        ) VALUES ('temporal-bootstrap-empty-v1', 'legacy-path', ?, ?, '{}')
-      `).run("legacy-assertion", "workspace-legacy-assertion");
-      seed.prepare(`
-        UPDATE temporal_schema_state
-        SET temporal_projection_selected = 1,
-            selection_id = 'legacy-selection',
-            selected_at = '2026-07-17T02:00:00.000Z'
-        WHERE state_id = 1
-      `).run();
-    })();
   } finally {
     seed.close();
   }

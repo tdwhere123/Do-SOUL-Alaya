@@ -163,7 +163,7 @@ function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
   return {
     baseUrl,
     apiKey,
-    model: process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "gpt-5.4-mini",
+    model: process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "Mimo-V2.5",
     timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000
   };
 }

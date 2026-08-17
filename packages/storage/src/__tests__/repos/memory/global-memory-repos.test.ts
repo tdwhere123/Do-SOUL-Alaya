@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe("Global memory storage repos", () => {
-  it("applies migrations 050 and 051, exports the repos, and keeps global entries workspace-agnostic", async () => {
+  it("exports the repos and keeps global entries workspace-agnostic", async () => {
     const { database } = await createRepos();
     const storage = (await import("../../../index.js")) as Record<string, unknown>;
 
@@ -67,12 +67,12 @@ describe("Global memory storage repos", () => {
     expect(storage.SqliteGlobalMemoryRecallCacheRepo).toBeTypeOf("function");
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version IN (50, 51) ORDER BY version ASC")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
     const globalEntryColumns = getColumnNames(database, "global_memory_entries");
     const recallCacheColumns = getColumnNames(database, "global_memory_recall_cache");
 
-    expect(versions.map((entry) => entry.version)).toEqual([50, 51]);
+    expect(versions.map((entry) => entry.version)).toEqual([7]);
     expect(globalEntryColumns).toEqual([
       "global_object_id",
       "object_kind",

@@ -7,7 +7,7 @@ import { StorageError } from "../shared/errors.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
-export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 108;
+export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 7;
 
 export type TemporalDatabaseMode = "runtime" | "fresh-bootstrap" | "candidate";
 

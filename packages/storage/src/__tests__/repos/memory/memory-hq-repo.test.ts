@@ -80,14 +80,14 @@ function hqFormationReceipt(observationId: string, observationSha256: string) {
 
 
 describe("Memory HQ storage repo", () => {
-  it("applies migration 117 with current and immutable observation columns", async () => {
+  it("persists current and immutable observation columns", async () => {
     const { database } = await createRepoContext();
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 117")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([117]);
+    expect(versions.map((entry) => entry.version)).toEqual([7]);
     expect(getColumnNames(database, "memory_hq")).toEqual([
       "object_id",
       "workspace_id",

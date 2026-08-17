@@ -27,12 +27,12 @@ afterEach(() => {
 });
 
 describe("SqliteEnrichPendingRepo", () => {
-  it("applies migration 086 and exposes the enrich_pending columns", () => {
+  it("exposes the enrich_pending columns", () => {
     const database = openMemoryDb();
     const applied = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 86")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(86);
+    expect(applied?.version).toBe(7);
 
     const columns = (
       database.connection.prepare("PRAGMA table_info(enrich_pending)").all() as ReadonlyArray<{
@@ -52,12 +52,12 @@ describe("SqliteEnrichPendingRepo", () => {
     ]);
   });
 
-  it("applies migration 088 and defaults attempt_count to 0 with a null abandoned_at", () => {
+  it("defaults attempt_count to 0 with a null abandoned_at", () => {
     const database = openMemoryDb();
     const applied = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 88")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(88);
+    expect(applied?.version).toBe(7);
 
     const repo = new SqliteEnrichPendingRepo(database);
     repo.enqueue({

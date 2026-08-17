@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
@@ -25,18 +25,18 @@ afterEach(() => {
 });
 
 describe("Memory embedding storage repo", () => {
-  it("applies migration 052, exports the repo, and persists embeddings keyed by memory object id", async () => {
+  it("exports the repo and persists embeddings keyed by memory object id", async () => {
     const storage = (await import("../../../index.js")) as Record<string, unknown>;
     const { database, workspaceId, repo } = await createRepoContext();
 
     expect(storage.SqliteMemoryEmbeddingRepo).toBeTypeOf("function");
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 52")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
     const columns = getColumnNames(database, "memory_embeddings");
 
-    expect(versions.map((entry) => entry.version)).toEqual([52]);
+    expect(versions.map((entry) => entry.version)).toEqual([7]);
     expect(columns).toEqual([
       "object_id",
       "workspace_id",
@@ -92,16 +92,6 @@ describe("Memory embedding storage repo", () => {
     await expect(repo.listByWorkspace(workspaceId, { limit: 0 })).rejects.toMatchObject({
       code: "VALIDATION_FAILED"
     });
-  });
-
-  it("allows migration 052 DDL to be re-run without failing on existing objects", async () => {
-    const { database } = await createRepoContext();
-    const migrationSql = readFileSync(
-      new URL("../../../migrations/052-memory-embeddings.sql", import.meta.url),
-      "utf8"
-    );
-
-    expect(() => database.connection.exec(migrationSql)).not.toThrow();
   });
 
   it("updates existing rows in place and lists only requested object ids", async () => {

@@ -65,14 +65,13 @@ belonged in the tracked tree).
 
 The standing QA + seeding config for baseline runs, so it is not re-litigated:
 
-- **QA answer + judge model = `gpt-5.4-nano` (both).** nano is the stronger
-  5.4-generation model; baseline QA does **not** match the older gpt-4o
-  "official" judge. Set via `OFFICIAL_API_GARDEN_QA_MODEL` and
-  `OFFICIAL_API_GARDEN_QA_JUDGE_MODEL`; QA routed through the Clash proxy shim
-  (`.do-it/bench-runs/scripts/proxy-preload.mjs`, `NODE_OPTIONS=--import …`).
-- **Seeding = distilled extraction cache** (`--extraction-cache-root
-  docs/bench-history/datasets/longmemeval-extraction-cache`, model
-  `gpt-5.4-nano`, `coverage=1` → cache hits, zero live extraction calls);
+- **QA answer + judge model = `Mimo-V2.5` (both).** Set via `ALAYA_QA_MODEL`
+  and `ALAYA_QA_JUDGE_MODEL`. Extraction and Garden official API use OpenCode
+  Go (`https://opencode.ai/zen/go/v1`) from
+  `.do-it/bench-env/mimo-v2.5-opencode-go.env`.
+- **Seeding = distilled extraction cache** (`ALAYA_BENCH_EXTRACTION_CACHE_ROOT`
+  from the same bench-env, model `Mimo-V2.5`, `coverage=1` → cache hits, zero
+  live extraction calls);
   daemon reconciliation `ALAYA_GARDEN_PROVIDER_KIND=local_heuristics`.
 - **Embedding** local ONNX `paraphrase-multilingual-MiniLM-L12-v2`
   (`--embedding env --embedding-provider local_onnx`,

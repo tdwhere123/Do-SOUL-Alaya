@@ -17,8 +17,8 @@ import {
 // cap, dead-letters the marker (abandoned_at set, excluded from claims) so a
 // never-clearing fault cannot starve the per-pass claim budget forever; the
 // drain emits an auditable abandon event so the drop is never silent.
-// see also: migrations/086-enrich-pending.sql — base schema
-// see also: migrations/088-enrich-pending-attempt-bound.sql — attempt cap + dead-letter
+// see also: migrations/002-ops-and-control.sql — base schema
+// see also: migrations/002-ops-and-control.sql — attempt cap + dead-letter
 // see also: apps/core-daemon/src/garden/runtime.ts — drain worker
 // see also: packages/soul/src/garden/materialization-router/router.ts — enqueue producer
 

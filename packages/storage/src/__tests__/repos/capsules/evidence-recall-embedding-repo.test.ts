@@ -19,15 +19,13 @@ afterEach(() => {
 });
 
 describe("evidence recall embedding storage", () => {
-  it("exports migration 112 and lists only recall-authority document shapes", async () => {
+  it("lists only recall-authority document shapes", async () => {
     const storage = (await import("../../../index.js")) as Record<string, unknown>;
     const { database, repo } = await createFixture();
     seedEvidence(database);
 
     expect(storage.SqliteEvidenceRecallEmbeddingRepo).toBeTypeOf("function");
-    expect(database.connection.prepare(
-      "SELECT version FROM schema_version WHERE version = 112"
-    ).pluck().all()).toEqual([112]);
+    expect(database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").pluck().all()).toEqual([7]);
     expect(await repo.listSourcesByWorkspace("workspace-1")).toEqual([
       expect.objectContaining({
         ownerObjectId: "evidence-1",

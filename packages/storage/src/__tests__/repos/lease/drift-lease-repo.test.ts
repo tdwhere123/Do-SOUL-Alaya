@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceKind, WorkspaceState, type GovernanceDriftLease } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
@@ -29,14 +28,14 @@ function createLease(overrides: Partial<GovernanceDriftLease> = {}): GovernanceD
 }
 
 describe("SqliteDriftLeaseRepo", () => {
-  it("applies drift lease migrations", async () => {
+  it("records the rebuilt schema ledger", async () => {
     const { database } = await createRepo();
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version IN (45, 47) ORDER BY version ASC")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as Array<{ readonly version: number }>;
 
-    expect(versions.map((row) => row.version)).toEqual([45, 47]);
+    expect(versions.map((row) => row.version)).toEqual([7]);
   });
 
   it("creates indexes for active lookup and expiry cleanup query shapes", async () => {
@@ -193,81 +192,6 @@ describe("SqliteDriftLeaseRepo", () => {
       operation_type: "surface.bind_object",
       granted_to: "user-1"
     });
-  });
-
-  it("migration 047 preserves the active lease when deduping an expired and active duplicate", async () => {
-    const { database } = await createRepo();
-
-    database.connection.prepare("DROP INDEX idx_drift_leases_workspace_operation").run();
-    database.connection
-      .prepare(
-        `
-          INSERT INTO drift_leases (
-            lease_id,
-            workspace_id,
-            operation_type,
-            granted_to,
-            drift_id,
-            expires_at,
-            granted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `
-      )
-      .run(
-        "lease-expired",
-        "workspace-1",
-        "surface.bind_object",
-        "user-1",
-        "drift-1",
-        "2020-04-20T07:55:00.000Z",
-        "2020-04-20T07:50:00.000Z"
-      );
-    database.connection
-      .prepare(
-        `
-          INSERT INTO drift_leases (
-            lease_id,
-            workspace_id,
-            operation_type,
-            granted_to,
-            drift_id,
-            expires_at,
-            granted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `
-      )
-      .run(
-        "lease-active",
-        "workspace-1",
-        "surface.bind_object",
-        "user-2",
-        "drift-2",
-        "2099-04-20T08:05:00.000Z",
-        "2099-04-20T08:00:00.000Z"
-      );
-
-    database.connection.exec(readFileSync(new URL("../../../migrations/047-drift-lease-operation-unique.sql", import.meta.url), "utf8"));
-
-    const remaining = database.connection
-      .prepare(
-        `
-          SELECT lease_id, expires_at
-          FROM drift_leases
-          WHERE workspace_id = ? AND operation_type = ?
-          ORDER BY granted_at ASC, lease_id ASC
-        `
-      )
-      .all("workspace-1", "surface.bind_object") as Array<{
-      readonly lease_id: string;
-      readonly expires_at: string;
-    }>;
-
-    expect(remaining).toEqual([
-      {
-        lease_id: "lease-active",
-        expires_at: "2099-04-20T08:05:00.000Z"
-      }
-    ]);
   });
 });
 

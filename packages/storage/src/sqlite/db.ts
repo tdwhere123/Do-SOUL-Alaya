@@ -2,8 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
-import { migrateEngineBindingApiKeysToCiphertext } from "../repos/shared/api-key-cipher.js";
-import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { LruCache } from "./lru-cache.js";
 import { applySqliteWritePragmas } from "./apply-sqlite-write-pragmas.js";
 import {
@@ -380,8 +378,6 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
   number,
   (database: SqliteConnection, temporalMode: TemporalDatabaseMode) => void
 >>> = {
-  104: migrateEngineBindingApiKeysToCiphertext,
-  107: migrateEmbeddingVectorValidity,
   [TEMPORAL_OFFLINE_MIGRATION_VERSION]: (database, temporalMode) => {
     migrateLegacyPathRelationsToTemporalCandidate(database, {
       selectionRequired: temporalMode === "candidate"

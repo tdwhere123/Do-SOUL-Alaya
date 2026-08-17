@@ -6,7 +6,7 @@ import { StorageError } from "../../shared/errors.js";
 // threshold survive daemon restarts. Pairs are stored with the memory ids
 // ordered (low <= high) so (A,B) and (B,A) share one row.
 // see also: packages/core/src/path-graph/path-relation-proposal-service.ts — consumer
-// see also: migrations/083-path-relation-co-usage-counters.sql — schema
+// see also: migrations/002-ops-and-control.sql — schema
 
 export interface CoUsageCounterIncrementInput {
   readonly workspaceId: string;

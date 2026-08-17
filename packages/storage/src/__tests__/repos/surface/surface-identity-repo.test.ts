@@ -35,14 +35,14 @@ function createSurfaceIdentity(overrides: Partial<SurfaceIdentity> = {}): Surfac
 }
 
 describe("SqliteSurfaceIdentityRepo", () => {
-  it("applies migration 012 and creates surface tables", async () => {
+  it("creates surface tables", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 12 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(12);
+    expect(migration?.version).toBe(7);
   });
 
   it("creates and finds surface identity by id", async () => {

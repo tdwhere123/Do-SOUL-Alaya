@@ -1,10 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectFrozenPropertyWriteThrows } from "../../support/frozen-mutation.js";
 import {
-  StorageTier} from "@do-soul/alaya-protocol";
+  StorageTier
+} from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import {
   FIND_BY_EVIDENCE_REFS_INPUT_CAP,
@@ -185,47 +183,6 @@ describe("SqliteMemoryEntryRepo lifecycle search and reference queries", () => {
     const matches = await repo.searchByKeyword("workspace-1", "agreed 中文路径", 5);
     expect(matches.map((match) => match.object_id)).toEqual([
       "d1111111-1111-4111-8111-111111111111"
-    ]);
-  });
-
-  it("backfills the porter FTS index from rows that pre-date the porter table", async () => {
-    const { database, repo } = await createRepo();
-    await repo.create(
-      createMemoryEntry({
-        object_id: "f1111111-1111-4111-8111-111111111111",
-        content: "Indexing reconciliation collapses duplicated facts."
-      })
-    );
-
-    // Simulate an existing database that pre-dates migration 077: drop the
-    // porter table and its triggers, then re-run the migration's backfill +
-    // trigger SQL. A correct migration must reindex the pre-existing row.
-    database.connection.exec(`
-      DROP TRIGGER IF EXISTS memory_content_fts_porter_ai;
-      DROP TRIGGER IF EXISTS memory_content_fts_porter_ad;
-      DROP TRIGGER IF EXISTS memory_content_fts_porter_au;
-      DROP TABLE IF EXISTS memory_content_fts_porter;
-    `);
-
-    const migrationsDir = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../../../migrations"
-    );
-    const migrationSql = fs.readFileSync(
-      path.join(migrationsDir, "077-memory-content-fts-dual.sql"),
-      "utf8"
-    );
-    database.connection.exec(migrationSql);
-
-    const porterRows = database.connection
-      .prepare(
-        `SELECT object_id FROM memory_content_fts_porter
-         WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?`
-      )
-      .all("workspace-1", '"duplicate"') as Array<{ readonly object_id: string }>;
-
-    expect(porterRows.map((row) => row.object_id)).toEqual([
-      "f1111111-1111-4111-8111-111111111111"
     ]);
   });
 
