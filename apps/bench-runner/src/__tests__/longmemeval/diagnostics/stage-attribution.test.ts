@@ -148,6 +148,37 @@ describe("gate1 stage attribution (fixtures)", () => {
     });
     expect(classifyQuestionStage(writeQ).stage).toBe(1);
 
+    const f3Q = baseQuestion({
+      question_id: "q-f3",
+      gold_memory_ids: ["g-f3"],
+      miss_taxonomy: "candidate_absent",
+      query_open_semantic_factor_formation: {
+        schema_version: 1,
+        operator_id: "open_semantic_factor_formation_v1",
+        status: "rejected",
+        producer_operator_id: null,
+        source_sha256: null,
+        graph: null,
+        capture_digest: `sha256:${"a".repeat(64)}`
+      },
+      cohort_ledger: {
+        dataset_cohort: "answerable",
+        extraction_materialization: {
+          status: "memory_emitted",
+          emitted_memory_count: 1,
+          reason: null
+        },
+        evaluator_gold_identity: { status: "present", object_ids: ["g-f3"] },
+        retrieval_status: "miss_at_5",
+        evidence_status: "complete",
+        evaluation_issue_reason: null,
+        candidate_pool_complete: true,
+        stage_ranks: [],
+        final_verdict: "miss_at_5"
+      }
+    });
+    expect(classifyQuestionStage(f3Q).proof).toBe("semantic_factor_formation_rejected");
+
     const poolQ = baseQuestion({
       question_id: "q-pool",
       gold_memory_ids: ["g-pool"],

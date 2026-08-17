@@ -51,15 +51,21 @@ export function classifyQuestionStage(
     stage = 3;
     proof = "miss_taxonomy.fine_assessment_drop";
   } else if (taxonomy === "candidate_absent") {
+    const formation = question.query_open_semantic_factor_formation;
     const emitted =
       question.cohort_ledger?.extraction_materialization.status ===
         "memory_emitted" ||
       question.cohort_ledger?.extraction_materialization.status ===
         "evidence_preserved";
-    stage = emitted && !emptyGold ? 2 : 1;
-    proof = emitted
-      ? "miss_taxonomy.candidate_absent_with_emitted_gold"
-      : "miss_taxonomy.candidate_absent_unevaluable";
+    if (formation !== null && formation !== undefined && formation.status !== "formed") {
+      stage = 2;
+      proof = `semantic_factor_formation_${formation.status}`;
+    } else {
+      stage = emitted && !emptyGold ? 2 : 1;
+      proof = emitted
+        ? "miss_taxonomy.candidate_absent_with_emitted_gold"
+        : "miss_taxonomy.candidate_absent_unevaluable";
+    }
   } else if (
     taxonomy === "budget_drop" ||
     taxonomy === "answer_set_coverage_drop"

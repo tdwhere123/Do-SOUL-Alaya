@@ -16,6 +16,8 @@ describe("source-bound F3 seal", () => {
     assertSourceBoundF3SealCurrent();
     const seal = sourceBoundF3Seal();
     expect(seal.selected_capability).toBe("identities_only");
+    expect(seal.membership_capability).toBe("identities_only");
+    expect(seal.prompt_asks).toBe("identities_and_topology");
     expect(SELECTED_SOURCE_BOUND_F3_CAPABILITY).toBe("identities_only");
     expect(seal.evidence_prompt_sha256).toBe(SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256);
     expect(seal.query_prompt_sha256).toBe(SOURCE_BOUND_F3_QUERY_PROMPT_SHA256);

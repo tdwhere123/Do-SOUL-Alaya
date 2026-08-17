@@ -4,7 +4,8 @@ import type { DiagnosticLoopRequest } from "../diagnostic-loop/types.js";
 import {
   MIMO_MODEL_ID,
   MIMO_REQUEST_PROFILE,
-  OBSOLETE_DEEPSEEK_REQUEST_PROFILE
+  OBSOLETE_DEEPSEEK_REQUEST_PROFILE,
+  resolveMimoVendorModel
 } from "./profile.js";
 
 export function proveMimoZeroCallReplay(input: {
@@ -22,7 +23,7 @@ export function proveMimoZeroCallReplay(input: {
   if (input.request.requestProfile !== MIMO_REQUEST_PROFILE) {
     throw new Error(`MiMo replay requires request profile ${MIMO_REQUEST_PROFILE}`);
   }
-  if (input.request.model !== MIMO_MODEL_ID) {
+  if (resolveMimoVendorModel(input.request.model) !== MIMO_MODEL_ID) {
     throw new Error(`MiMo replay requires model ${MIMO_MODEL_ID}`);
   }
   const proof = proveCacheOnlyExtraction(input.request);

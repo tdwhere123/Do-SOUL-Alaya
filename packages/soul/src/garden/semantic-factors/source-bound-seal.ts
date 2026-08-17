@@ -18,6 +18,7 @@ export const SOURCE_BOUND_F3_CAPABILITIES = [
 export type SourceBoundF3Capability = (typeof SOURCE_BOUND_F3_CAPABILITIES)[number];
 
 export const SELECTED_SOURCE_BOUND_F3_CAPABILITY = "identities_only" as const;
+export const SOURCE_BOUND_F3_PROMPT_ASKS = "identities_and_topology" as const;
 
 export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
   "RelationAssertion",
@@ -36,6 +37,8 @@ export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
 export interface SourceBoundF3Seal {
   readonly schema_version: 1;
   readonly selected_capability: typeof SELECTED_SOURCE_BOUND_F3_CAPABILITY;
+  readonly membership_capability: typeof SELECTED_SOURCE_BOUND_F3_CAPABILITY;
+  readonly prompt_asks: typeof SOURCE_BOUND_F3_PROMPT_ASKS;
   readonly graph_schema_version: typeof OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION;
   readonly evidence_operator_id: typeof OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID;
   readonly query_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
@@ -48,6 +51,8 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
   return {
     schema_version: 1,
     selected_capability: SELECTED_SOURCE_BOUND_F3_CAPABILITY,
+    membership_capability: SELECTED_SOURCE_BOUND_F3_CAPABILITY,
+    prompt_asks: SOURCE_BOUND_F3_PROMPT_ASKS,
     graph_schema_version: OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION,
     evidence_operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
     query_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,

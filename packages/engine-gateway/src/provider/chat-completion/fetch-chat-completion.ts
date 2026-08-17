@@ -20,8 +20,10 @@ export async function fetchProviderChatCompletion(
     const response = await postChatCompletion(request, controller.signal);
     const bodyText = await readBody(response);
     if (!response.ok) {
+      const detail = compactProviderErrorDetail(bodyText);
       throw new ProviderChatCompletionError(
-        `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
+        `provider chat completion failed: HTTP ${response.status} ${response.statusText}` +
+          (detail.length === 0 ? "" : `: ${detail}`),
         "http_error",
         response.status
       );
@@ -104,4 +106,8 @@ function normalizeTransportError(
 
 function isLikelyFetchFailure(error: Error): boolean {
   return error.name === "TypeError" || error.name === "AbortError";
+}
+
+function compactProviderErrorDetail(bodyText: string): string {
+  return bodyText.replaceAll(/\s+/gu, " ").trim().slice(0, 240);
 }

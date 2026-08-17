@@ -1,6 +1,11 @@
 import { fetchProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
 import { assertSourceBoundF3SealCurrent } from "@do-soul/alaya-soul";
-import { MIMO_MODEL_ID, MIMO_PROBE_CALL_CEILING, MIMO_REQUEST_PROFILE } from "./profile.js";
+import {
+  MIMO_MODEL_ID,
+  MIMO_PROBE_CALL_CEILING,
+  MIMO_REQUEST_PROFILE,
+  resolveMimoVendorModel
+} from "./profile.js";
 
 export interface MimoProtocolProbeInput {
   readonly providerUrl: string;
@@ -34,15 +39,18 @@ export async function probeMimoProtocol(
     }
     return input.fetchImpl(url, init);
   };
+  const model = resolveMimoVendorModel(input.model ?? MIMO_MODEL_ID);
   const result = await fetchProviderChatCompletion({
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,
-    model: input.model ?? MIMO_MODEL_ID,
+    model,
     systemPrompt: "Return JSON only.",
     userPrompt: "{\"probe\":true}",
     profile: MIMO_REQUEST_PROFILE,
     mode: "json",
     jsonObject: true,
+    timeoutMs: 20_000,
+    maxOutputTokens: 256,
     fetchImpl
   });
   if (physicalCalls === 0) {
@@ -50,7 +58,7 @@ export async function probeMimoProtocol(
   }
   return {
     profile: MIMO_REQUEST_PROFILE,
-    model: input.model ?? MIMO_MODEL_ID,
+    model,
     physical_calls: physicalCalls,
     json_object: result.text.trim().startsWith("{"),
     usage_present: result.usage !== undefined,

@@ -77,6 +77,7 @@ export {
 } from "./semantic-factors/query-compiler.js";
 export {
   SELECTED_SOURCE_BOUND_F3_CAPABILITY,
+  SOURCE_BOUND_F3_PROMPT_ASKS,
   SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   assertSourceBoundF3SealCurrent,

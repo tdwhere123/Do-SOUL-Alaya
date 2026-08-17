@@ -16,7 +16,7 @@ describe("diagnostic 100Q stage map", () => {
       stage: 1, proof: "extraction_materialization_drop"
     }))).toBe("S1");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 2, proof: "f3_identity_missing"
+      stage: 2, proof: "semantic_factor_formation_rejected"
     }))).toBe("S2");
     expect(mapQuestionToDiagnosticStage(row({
       stage: 2, proof: "miss_taxonomy.candidate_absent_with_emitted_gold"
