@@ -4,9 +4,9 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation anchor: package `0.3.11`, committed HEAD `892ebde0` on
-2026-08-17. The earlier `10da1318` B-arm dump remains historical benchmark
-evidence only; it no longer describes the implementation on HEAD.
+Current documentation anchor: package `0.3.11`, worktree HEAD `d0e1aaed` plus
+P217 planted repairs on 2026-08-17. The earlier `10da1318` B-arm dump remains
+historical benchmark evidence only.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -85,46 +85,44 @@ The principal owners are:
 
 ## Connectedness matrix
 
-| UGAF mechanism | Current state on `892ebde0` | Boundary |
+| UGAF mechanism | Current state | Boundary |
 | --- | --- | --- |
 | One query time and generation | Live | Preparation captures one `effective_as_of`, pins one active generation, and fails closed when the pin or generation is unavailable. |
 | Field candidate membership | Live | Attributed evidence keys are resolved through evidence-bound memory lookup and admitted on the `activation` plane. This can add candidates outside lexical recall. |
-| Graph and `PathRelation` expansion | Live | Active, recall-eligible paths can introduce graph-expansion candidates. Direction, lifecycle, sign, and governance are rechecked. |
+| Graph and `PathRelation` expansion | Live | Soft-association `PathRelation` rows introduce path-expansion candidates through `findByAnchors`. The parent temporal+associative merge stays fail-closed until a verified temporal generation exists for the query as-of. |
 | Slice/fiber compatibility | Live | Query and source routing keys are matched by `selectSliceCompatibilityV2`; rejected slices withhold fuel. Missing slice material is explicit pass-through, not a fabricated match. |
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
-| Open-semantic candidate attribution | Live for existing candidates | Accepted semantic solutions are source/evidence attributed and can affect activation. F3-only field membership still needs the closure proof below. |
+| Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. They can also activate already-admitted candidates. F3 remains rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool. It never authorizes durable truth. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel; the pass-through object score cannot be demoted. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
 | `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live receipt | It binds field captures/refinement receipts to final selection. It must not be confused with projection-bundle frontier control. |
-| Projection-bundle progressive opening | Contract present; control proof pending | The current selector computes candidate matches before producing the opened-bundle/stop result. P217 must prove that closed or budget-exhausted bundles cannot leak candidates. |
+| Projection-bundle progressive opening | Live selector control; default rebuild opens all L1/L2 | The selector opens matching bundles before matching. A member listed on any still-closed matching bundle is withheld. Ordinary generation materialization still emits `opened: true`; closed frontiers must be planted on artifacts to exercise the gate. |
 
 ## Algorithm-closure boundary
 
 The integrated implementation must not be described as a degenerate projection
-or as unimplemented. It also must not yet be described as fully closed. Two
-specific live-path questions remain:
+or as unimplemented. Planted live-path proof now covers:
 
-1. **F3-only membership.** `querySemanticFactorFormationCapture` extends recall
-   probes, while the pinned field `QueryConditionReceipt.query_task_factors`
-   currently derives from raw query text. A planted candidate reachable only by
-   a grounded F3 semantic identity must prove whether that identity can enter
-   field candidate membership.
-2. **Progressive opening as control.** A planted closed bundle must remain
-   invisible until opened, and a budget-exhausted frontier must remain invisible
-   with an explicit incomplete result. A stop receipt created after unrestricted
-   matching is not closure proof.
+1. **F3-only membership.** Formed query captures add accepted semantic
+   identities to `query_task_factors`. Source formation emits both the grounded
+   surface and the identity as F3 factors. Proposed routing keys can open field
+   membership without becoming grounded truth.
+2. **Progressive opening as control.** `selectPinnedProjectionCandidates` opens
+   matching bundles first, then matches only owners visible on that frontier.
+   Keys not listed on a closed matching bundle stay visible.
 
-The P217 completion gate also requires ordinary SQLite/daemon proof for
-field-only, path-only, governance-rejected, direct-read, worker-read, and exact
-replay cases. A helper test with a fixed candidate map proves a formula, not
-candidate discovery.
+Ordinary SQLite/daemon planted proof now exists for field-only, path-only,
+F3-only, and governance revoke. Closed-bundle visibility is proved on the live
+selector with planted artifacts; default rebuild does not emit closed matching
+bundles. Post-`Select_Gamma` order is proved on the live selector. Worker-read
+re-resolves already selected evidence ids and does not re-run pin/select.
+Selection-boundary replay remains the exact-order owner when an observer is
+attached.
 
-If a planted case already passes, preserve the evidence and do not rewrite that
-mechanism. If it fails, repair the smallest existing owner; do not create a
-second field, selector, query condition, or recall path.
+Do not add a second field, selector, query condition, or recall path.
 
 ## Semantic formation boundary
 

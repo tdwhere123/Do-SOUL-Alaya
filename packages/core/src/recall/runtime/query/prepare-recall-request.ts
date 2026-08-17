@@ -36,7 +36,8 @@ export async function prepareRecallRequest(
     activationBudget: seed.policy.fine_assessment.budgets.max_entries,
     sha256: context.sha256,
     time,
-    session: context.fieldQuerySession
+    session: context.fieldQuerySession,
+    semanticCapture: params.querySemanticFactorFormationCapture
   });
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;

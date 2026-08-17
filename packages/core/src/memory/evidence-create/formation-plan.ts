@@ -260,5 +260,7 @@ function semanticSurfacesOf(
 ): readonly string[] {
   const graph = semantic.graph;
   if (graph === null) return Object.freeze([]);
-  return Object.freeze(graph.factors.map((factor) => factor.surface));
+  return Object.freeze([...new Set(graph.factors.flatMap((factor) =>
+    [factor.surface, factor.semantic_identity]
+  ))]);
 }

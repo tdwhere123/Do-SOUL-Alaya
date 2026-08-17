@@ -34,10 +34,13 @@ describe("pinned source projection selection", () => {
 
     expect(selected.candidate_keys).toEqual([
       "evidence-full",
-      "evidence-partial"
+      "evidence-partial",
+      "evidence-proposed"
     ]);
     expect(selected.candidate_activation["evidence-full"])
       .toBeGreaterThan(selected.candidate_activation["evidence-partial"]!);
+    expect(selected.candidate_activation["evidence-partial"])
+      .toBeGreaterThan(selected.candidate_activation["evidence-proposed"]!);
     expect(selected.candidate_receipts["evidence-full"]?.map((receipt) =>
       receipt.independence_group
     )).toEqual(["source-1", "source-2"]);

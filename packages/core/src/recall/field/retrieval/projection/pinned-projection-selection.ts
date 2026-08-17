@@ -23,7 +23,10 @@ import {
 } from "../../../flood/slice-key-contract.js";
 import { openProjectionBundlesProgressively } from "./progressive-opening.js";
 import type { ProjectionGenerationArtifacts } from "./generation-artifacts.js";
+import type { ProjectionL2Bundle } from "../../../flood/slice-key-l2-bundles.js";
 import type { SourceProjectionSliceKey } from "./source-projection.js";
+import { createFieldStopCertificateEnvelope } from
+  "../../refinement/field-refinement-stop-envelope.js";
 
 const PROPOSED_ROUTING_RELIABILITY_CEILING = 0.5;
 
@@ -56,9 +59,10 @@ export function selectPinnedProjectionCandidates(input: Readonly<{
 }>): PinnedProjectionCandidateSelection {
   assertPinnedArtifacts(input.condition, input.artifacts);
   const queryKeys = createQueryFactorKeys(input.condition);
+  const visibility = openVisibleBundleFrontier(input, queryKeys);
   const matches = matchCandidates(
     queryKeys,
-    input.artifacts.slice_keys,
+    visibility.slice_keys,
     input.condition.condition.effective_as_of
   );
   const trace = runAttributedActivation(input.condition, {
@@ -69,14 +73,14 @@ export function selectPinnedProjectionCandidates(input: Readonly<{
   const candidateKeys = trace.receipt.opened_candidate_keys.filter((key) =>
     candidateIds.has(key)
   );
-  const scores = scoreActivatedCandidates(trace, queryKeys.length, candidateIds);
-  const opened = certifyBundleFrontier(input, candidateKeys, trace.budget.remaining);
   return Object.freeze({
     candidate_keys: Object.freeze(candidateKeys),
-    candidate_activation: freezeRecord(scores),
+    candidate_activation: freezeRecord(
+      scoreActivatedCandidates(trace, queryKeys.length, candidateIds)
+    ),
     candidate_receipts: freezeReceipts(matches, candidateKeys),
     activation: trace.receipt,
-    stop: opened.stop
+    stop: recertifyVisibleFrontier(input, visibility, candidateKeys)
   });
 }
 
@@ -84,8 +88,10 @@ function createQueryFactorKeys(
   condition: QueryConditionReceipt
 ): readonly QueryFactorKey[] {
   const byKey = new Map<string, QueryFactorKey>();
-  for (const factor of condition.condition.query_task_factors) {
-    for (const value of factorTerms(factor)) {
+  const factors = condition.condition.query_task_factors;
+  for (const [index, factor] of factors.entries()) {
+    const values = index === 0 ? factorTerms(factor) : atomicFactorTerms(factor);
+    for (const value of values) {
       const key = createSelectedSliceKeyV2({
         workspace_id: condition.condition.workspace_id,
         owner_id: null,
@@ -122,6 +128,11 @@ function factorTerms(factor: string): readonly string[] {
   return Object.freeze([...new Set(values)]);
 }
 
+function atomicFactorTerms(factor: string): readonly string[] {
+  const normalized = normalizeMemoryObjectKeySurface(factor);
+  return normalized.length === 0 ? Object.freeze([]) : Object.freeze([normalized]);
+}
+
 function matchCandidates(
   queryKeys: readonly QueryFactorKey[],
   candidateKeys: readonly SelectedSliceKeyV2[],
@@ -153,7 +164,10 @@ function groupEligibleCandidateKeys(
     grouped.set(key.owner_id, values);
   }
   return new Map([...grouped.entries()].filter(([, values]) =>
-    values.some((key) => key.authority === "grounded" && key.reliability !== null)
+    values.some((key) =>
+      (key.authority === "grounded" && key.reliability !== null) ||
+      key.authority === "proposed_routing_only"
+    )
   ));
 }
 
@@ -355,31 +369,85 @@ function scoreActivatedCandidates(
   }));
 }
 
-function certifyBundleFrontier(
+type BundleVisibility = Readonly<{
+  readonly slice_keys: readonly SelectedSliceKeyV2[];
+  readonly remaining: ReturnType<typeof openProjectionBundlesProgressively>["remaining"];
+  readonly activation_budget_remaining: number;
+}>;
+
+function openVisibleBundleFrontier(
   input: Parameters<typeof selectPinnedProjectionCandidates>[0],
-  candidateKeys: readonly string[],
-  activationBudgetRemaining: number
-) {
-  const terms = new Set(createQueryFactorKeys(input.condition).map(
-    (query) => query.key.normalized_value
-  ));
-  const matching = input.artifacts.bundles.filter((bundle) =>
-    bundle.factor_summary.some((factor) => terms.has(factor.value))
-  );
-  return openProjectionBundlesProgressively({
+  queryKeys: readonly QueryFactorKey[]
+): BundleVisibility {
+  const matching = matchingQueryBundles(input.artifacts.bundles, queryKeys);
+  const budget = input.condition.condition.activation_budget;
+  const opened = openProjectionBundlesProgressively({
     workspace_id: input.condition.condition.workspace_id,
     generation_id: input.condition.generation_id,
     condition_digest: input.condition.identity,
     recorded_at: input.condition.recorded_at,
     sha256: input.sha256,
-    selected_candidate_keys: candidateKeys,
-    activationBudget: activationBudgetRemaining,
+    selected_candidate_keys: [],
+    activationBudget: budget,
     frontiers: matching.map((bundle) => ({
       bundle_id: bundle.bundle_id,
       unseen_gain_upper_bound: bundle.unseen_frontier_upper_bound,
       incumbent_loss: 0,
       opened: bundle.opened
     }))
+  });
+  return Object.freeze({
+    slice_keys: sliceKeysVisibleOnOpenedFrontier(
+      input.artifacts.slice_keys,
+      matching,
+      opened.remaining
+    ),
+    remaining: opened.remaining,
+    activation_budget_remaining: Math.max(0, budget - opened.opened_bundle_ids.length)
+  });
+}
+
+function matchingQueryBundles(
+  bundles: readonly ProjectionL2Bundle[],
+  queryKeys: readonly QueryFactorKey[]
+): readonly ProjectionL2Bundle[] {
+  const terms = new Set(queryKeys.map((query) => query.key.normalized_value));
+  return Object.freeze(bundles.filter((bundle) =>
+    bundle.factor_summary.some((factor) => terms.has(factor.value))
+  ));
+}
+
+function sliceKeysVisibleOnOpenedFrontier(
+  sliceKeys: readonly SelectedSliceKeyV2[],
+  matching: readonly ProjectionL2Bundle[],
+  remaining: BundleVisibility["remaining"]
+): readonly SelectedSliceKeyV2[] {
+  const openedIds = new Set(remaining.flatMap((frontier) =>
+    frontier.opened ? [frontier.bundle_id] : []
+  ));
+  const closedMembers = new Set(matching.flatMap((bundle) =>
+    openedIds.has(bundle.bundle_id) ? [] : bundle.member_refs
+  ));
+  if (closedMembers.size === 0) return sliceKeys;
+  return Object.freeze(sliceKeys.filter((key) =>
+    key.owner_id === null || !closedMembers.has(key.owner_id)
+  ));
+}
+
+function recertifyVisibleFrontier(
+  input: Parameters<typeof selectPinnedProjectionCandidates>[0],
+  visibility: BundleVisibility,
+  candidateKeys: readonly string[]
+): FieldStopCertificateReceipt {
+  return createFieldStopCertificateEnvelope({
+    workspace_id: input.condition.condition.workspace_id,
+    generation_id: input.condition.generation_id,
+    condition_digest: input.condition.identity,
+    recorded_at: input.condition.recorded_at,
+    sha256: input.sha256,
+    selected_candidate_keys: candidateKeys,
+    bundleFrontiers: visibility.remaining,
+    activationBudgetRemaining: visibility.activation_budget_remaining
   });
 }
 
