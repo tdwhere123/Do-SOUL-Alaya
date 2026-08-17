@@ -11,12 +11,14 @@ export interface MimoProtocolProbeInput {
   readonly providerUrl: string;
   readonly apiKey: string;
   readonly model?: string;
+  readonly framing?: "json" | "sse";
   readonly fetchImpl: typeof fetch;
 }
 
 export interface MimoProtocolProbeReceipt {
   readonly profile: typeof MIMO_REQUEST_PROFILE;
   readonly model: string;
+  readonly framing: "json" | "sse";
   readonly physical_calls: number;
   readonly json_object: boolean;
   readonly usage_present: boolean;
@@ -40,6 +42,7 @@ export async function probeMimoProtocol(
     return input.fetchImpl(url, init);
   };
   const model = resolveMimoVendorModel(input.model ?? MIMO_MODEL_ID);
+  const framing = input.framing ?? "json";
   const result = await fetchProviderChatCompletion({
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,
@@ -47,7 +50,7 @@ export async function probeMimoProtocol(
     systemPrompt: "Return JSON only.",
     userPrompt: "{\"probe\":true}",
     profile: MIMO_REQUEST_PROFILE,
-    mode: "json",
+    mode: framing,
     jsonObject: true,
     timeoutMs: 20_000,
     maxOutputTokens: 256,
@@ -59,6 +62,7 @@ export async function probeMimoProtocol(
   return {
     profile: MIMO_REQUEST_PROFILE,
     model,
+    framing,
     physical_calls: physicalCalls,
     json_object: result.text.trim().startsWith("{"),
     usage_present: result.usage !== undefined,

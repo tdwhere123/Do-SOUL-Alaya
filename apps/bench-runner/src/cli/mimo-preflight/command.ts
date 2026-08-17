@@ -9,8 +9,8 @@ export async function runMimoPreflightCommand(
 ): Promise<number> {
   try {
     const mode = readMode(args);
-    if (mode === "probe") {
-      return await runProbe(args);
+    if (mode === "probe" || mode === "probe-sse") {
+      return await runProbe(args, mode === "probe-sse" ? "sse" : "json");
     }
     if (mode === "replay") {
       const parsed = parseDiagnosticLoopArgs(withoutMode(args));
@@ -40,7 +40,10 @@ export async function runMimoPreflightCommand(
   }
 }
 
-async function runProbe(args: ReadonlyArray<string>): Promise<number> {
+async function runProbe(
+  args: ReadonlyArray<string>,
+  framing: "json" | "sse"
+): Promise<number> {
   const apiKey = process.env.OFFICIAL_API_GARDEN_API_KEY?.trim() ?? "";
   if (apiKey.length === 0) {
     throw new Error("probe mode requires OFFICIAL_API_GARDEN_API_KEY; use replay for cache-only");
@@ -48,24 +51,35 @@ async function runProbe(args: ReadonlyArray<string>): Promise<number> {
   const receipt = await probeMimoProtocol({
     providerUrl: required(args, "--provider-route"),
     apiKey,
+    framing,
     fetchImpl: fetch
   });
   process.stdout.write(
-    `Done. mimo-preflight probe physical_calls=${receipt.physical_calls} ` +
+    `Done. mimo-preflight probe framing=${receipt.framing} ` +
+    `physical_calls=${receipt.physical_calls} ` +
     `usage=${receipt.usage_present} finish=${receipt.finish_reason ?? "none"}\n`
   );
   return 0;
 }
 
-function readMode(args: ReadonlyArray<string>): "probe" | "replay" | "retire-deepseek" {
+function readMode(
+  args: ReadonlyArray<string>
+): "probe" | "probe-sse" | "replay" | "retire-deepseek" {
   const index = args.findIndex((token) => token === "--mode" || token.startsWith("--mode="));
   const value = index < 0
     ? "replay"
     : args[index]!.startsWith("--mode=")
       ? args[index]!.slice("--mode=".length)
       : args[index + 1];
-  if (value === "probe" || value === "replay" || value === "retire-deepseek") return value;
-  throw new Error("mimo-preflight --mode must be probe, replay, or retire-deepseek");
+  if (
+    value === "probe" || value === "probe-sse" ||
+    value === "replay" || value === "retire-deepseek"
+  ) {
+    return value;
+  }
+  throw new Error(
+    "mimo-preflight --mode must be probe, probe-sse, replay, or retire-deepseek"
+  );
 }
 
 function withoutMode(args: ReadonlyArray<string>): readonly string[] {

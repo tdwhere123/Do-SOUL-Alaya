@@ -38,6 +38,28 @@ describe("MiMo protocol probe", () => {
     const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
     expect(body.model).toBe(MIMO_MODEL_ID);
     expect(body.enable_thinking).toBe(false);
+    expect(body.stream).toBeUndefined();
+  });
+
+  it("requests SSE framing for the stream probe", async () => {
+    const fetchImpl = vi.fn(async () => new Response(
+      "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ok\\\":true}\" }}]}\n\n" +
+      "data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n" +
+      "data: [DONE]\n",
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+    const receipt = await probeMimoProtocol({
+      providerUrl: "https://proxy.example/v1",
+      apiKey: "sk-test",
+      framing: "sse",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    expect(receipt.framing).toBe("sse");
+    expect(receipt.physical_calls).toBe(1);
+    expect(receipt.json_object).toBe(true);
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body.stream).toBe(true);
+    expect(body.model).toBe(MIMO_MODEL_ID);
   });
 
   it("refuses an empty key", async () => {
