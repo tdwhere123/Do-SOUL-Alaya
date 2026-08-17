@@ -76,6 +76,17 @@ export {
   type OpenSemanticFactorQueryCompiler
 } from "./semantic-factors/query-compiler.js";
 export {
+  SELECTED_SOURCE_BOUND_F3_CAPABILITY,
+  SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
+  SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
+  assertSourceBoundF3SealCurrent,
+  sourceBoundF3Seal
+} from "./semantic-factors/source-bound-seal.js";
+export {
+  traceSourceBoundF3Proposal,
+  type SourceBoundF3Trace
+} from "./semantic-factors/source-bound-tracer.js";
+export {
   buildSourceVerificationText,
   resolveSourceAssertion,
   filterSourceAssertionEntities,
