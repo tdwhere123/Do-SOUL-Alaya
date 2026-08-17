@@ -21,6 +21,7 @@ import {
   createExtractionRequestPlanDeadline,
   resolveExtractionRequestPlanBudget
 } from "./policy/provider-request-plan-budget.js";
+import { inspectExtractionRawJson } from "../content-closure.js";
 
 export { EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS };
 
@@ -233,6 +234,10 @@ function createPlanBoundExtractor(
       const result = await extractor.extract(deadline.bindRequest({
         ...request,
         ...(transport === undefined ? {} : transport),
+        // Envelope-only: a graphless but well-formed {"signals":[...]} is an
+        // empty F3 proposal, not a transport failure. Requiring a graph here
+        // retries the provider 3-5 times on a systematic MiMo miss.
+        validateRawJson: inspectExtractionRawJson,
         abortSignal: request.abortSignal === undefined
           ? signal
           : AbortSignal.any([signal, request.abortSignal])
@@ -256,6 +261,10 @@ async function compileExtractionTurn(
       turn_messages: turn.turnMessages
     });
   } catch (error) {
+    const inner = error instanceof GardenProviderError && error.cause !== undefined
+      ? error.cause
+      : error;
+    if (isAcceptedGraphlessExtract(inner)) return;
     if (error instanceof GardenProviderError && error.cause !== undefined) {
       throw error.cause;
     }
@@ -318,6 +327,15 @@ function readTerminalClassification(cause: unknown): FillTaskRetryClassification
   const value = (retry as { readonly retryClassification?: unknown }).retryClassification;
   return value === "failure_max_retries" || value === "failure_non_retryable_4xx" ||
     value === "failure_timeout" || value === "failure_aborted" ? value : "unknown";
+}
+
+function isAcceptedGraphlessExtract(cause: unknown): boolean {
+  if (typeof cause === "object" && cause !== null && "benchRetry" in cause) {
+    return false;
+  }
+  const reason = classifyProviderFailureReason(cause);
+  return reason === "semantic_factor_graph_required" ||
+    reason === "no_valid_open_semantic_entries";
 }
 
 function classifyProviderFailureReason(cause: unknown): string {

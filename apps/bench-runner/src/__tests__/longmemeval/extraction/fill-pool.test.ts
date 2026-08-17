@@ -33,6 +33,40 @@ it("retains the originating task failure for terminal fill diagnostics", () => {
   expect(error.cause).toBe(cause);
 });
 
+it("does not require a semantic factor graph on the fill HTTP validator", async () => {
+  const graphless = JSON.stringify({
+    signals: [{
+      object_kind: "fact",
+      confidence: 0.8,
+      matched_text: "The build is green."
+    }]
+  });
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+    expect(() => input.validateRawJson?.(graphless)).not.toThrow();
+    return { rawJson: graphless };
+  });
+  const logs: string[] = [];
+
+  await runExtractionPool({
+    extractor: { extract },
+    turns: [{
+      turnContent: "User: The build is green.\nAssistant: Noted.",
+      turnMessages: [
+        { message_id: "q1-m0", role: "user", content: "The build is green." },
+        { message_id: "q1-m1", role: "assistant", content: "Noted." }
+      ]
+    }],
+    concurrency: 1,
+    requestedTurns: 1,
+    stats: newFillStats(),
+    log: (message) => logs.push(message),
+    tolerateProviderTaskFailures: true
+  });
+
+  expect(extract).toHaveBeenCalledOnce();
+  expect(logs.some((line) => line.includes("leaving provider failure"))).toBe(false);
+});
+
 it("uses the compact production extraction request", async () => {
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
     rawJson: '{"signals":[]}'
