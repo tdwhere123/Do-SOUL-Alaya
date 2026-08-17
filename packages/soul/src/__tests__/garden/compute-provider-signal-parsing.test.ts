@@ -252,7 +252,7 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
     } satisfies Partial<GardenProviderError>);
   });
 
-  it("keeps historical graphless parsing readable but rejects it from the current provider", async () => {
+  it("keeps historical graphless parsing readable and admits it under identities-only", async () => {
     const graphlessRaw = JSON.stringify({
       signals: [{
         signal_kind: "potential_claim",
@@ -276,9 +276,16 @@ describe("OfficialApiGardenProvider", () => {  it("accepts open signals without 
       apiKey: "sk-test",
       extractor: createExtractor(graphlessRaw)
     });
-    await expect(graphless.compile(
+    const graphlessSignals = await graphless.compile(
       "The build is green.", createContext("The build is green.")
-    )).rejects.toMatchObject({ kind: "invalid_response" });
+    );
+    expect(graphlessSignals.length).toBeGreaterThan(0);
+    expect(graphlessSignals[0]?.raw_payload).toMatchObject({
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      }
+    });
 
     const graphful = new OfficialApiGardenProvider({
       apiKey: "sk-test",

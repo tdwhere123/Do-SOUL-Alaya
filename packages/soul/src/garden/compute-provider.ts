@@ -50,6 +50,8 @@ import {
   createOpenSemanticFactorQueryCompiler,
   type OpenSemanticFactorQueryCompiler
 } from "./semantic-factors/query-compiler.js";
+import { SELECTED_SOURCE_BOUND_F3_CAPABILITY } from
+  "./semantic-factors/source-bound-seal.js";
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -407,7 +409,13 @@ function parseBoundedBatchSignals(
   rawJson: string,
   request: OfficialApiExtractionRequest
 ): readonly OfficialApiSignalDraft[] {
-  const drafts = parseOfficialApiSignals(rawJson, { requireSemanticFactorGraph: true });
+  // Membership is identities-only: keep grounded surfaces even when the
+  // prompt-asked topology is missing or rejected. Topology is required only
+  // if the sealed capability is identities_and_topology.
+  const drafts = parseOfficialApiSignals(rawJson, {
+    requireSemanticFactorGraph:
+      SELECTED_SOURCE_BOUND_F3_CAPABILITY === "identities_and_topology"
+  });
   const allowedIds = new Set(request.source_assertions.map(({ assertion_id }) => assertion_id));
   if (drafts.some(({ source_locator }) =>
     source_locator !== undefined && !allowedIds.has(source_locator.assertion_id)
