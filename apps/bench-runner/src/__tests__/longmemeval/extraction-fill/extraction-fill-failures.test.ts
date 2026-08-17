@@ -6,25 +6,25 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
-import { readExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/extraction/extraction-fill.js";
+import { readExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import { cacheFilePath, computeExtractionTurnCacheKey } from
-  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../bench/compile-seed/compile-seed-cache.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
-} from "../../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
+} from "../../../bench/extraction/fill/manifest/fill-root-guard.js";
 
 import {
   buildAuthorityQuestion,

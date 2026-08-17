@@ -9,7 +9,7 @@ import {
   fillQuerySemanticFactorSources,
   readQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../longmemeval/query-factors/query-semantic-factor-cache.js";
+} from "../../bench/query-factors/query-semantic-factor-cache.js";
 
 describe("query semantic factor cache", () => {
   it("replays a source-bound formation capture without provider configuration", async () => {

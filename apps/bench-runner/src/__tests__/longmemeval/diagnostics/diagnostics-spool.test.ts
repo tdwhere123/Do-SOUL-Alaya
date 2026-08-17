@@ -3,13 +3,13 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   LongMemEvalDiagnosticsSpool,
   withLongMemEvalDiagnosticsSpool
-} from "../../../longmemeval/diagnostics/spool.js";
-import { readExternalDiagnosticsSidecarArtifact } from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
-import type { LongMemEvalDiagnosticsSidecar } from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics/spool.js";
+import { readExternalDiagnosticsSidecarArtifact } from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+import type { LongMemEvalDiagnosticsSidecar } from "../../../bench/diagnostics.js";
 
 const roots: string[] = [];
 

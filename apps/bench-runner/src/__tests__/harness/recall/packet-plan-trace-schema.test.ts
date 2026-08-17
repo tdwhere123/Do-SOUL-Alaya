@@ -4,13 +4,13 @@ import {
 } from "../../../harness/recall/recall-diagnostics-schema.js";
 import {
   assembleQuestionDiagnostic
-} from "../../../longmemeval/diagnostics/question-assembly.js";
+} from "../../../bench/diagnostics/question-assembly.js";
 import {
   readRecallDiagnostics
-} from "../../../longmemeval/diagnostics/schema/diagnostics-private.js";
+} from "../../../bench/diagnostics/schema/diagnostics-private.js";
 import {
   LongMemEvalQuestionDiagnosticSchema
-} from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const obsoletePacketPlanTraceV1 = {
   schema_version: 1,

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseBenchRecallDiagnosticsForRun } from
   "../../../harness/recall/recall-diagnostics-schema.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+  "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   buildQuestionDiagnostic,
   summarizeProviderStates
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 
 const unusableReadyDiagnostics = {
   query_probes: {

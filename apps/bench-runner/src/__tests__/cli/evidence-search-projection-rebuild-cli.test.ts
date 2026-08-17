@@ -3,7 +3,7 @@ import { runCli } from "../../cli/index.js";
 import { parseFlags } from "../../cli/cli-options.js";
 import { buildRecallEvalOptions } from "../../cli/recall-eval/command.js";
 import { prepareRecallEvalRunContext } from
-  "../../longmemeval/lifecycle/recall-eval/recall-eval-run-context.js";
+  "../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
 
 describe("recall-eval derived evidence projection rebuild boundary", () => {
   let originalStderrWrite: typeof process.stderr.write;
@@ -76,13 +76,6 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     expect(buildRecallEvalOptions(flags, "/tmp/snapshot.db")).toMatchObject({
       embeddingCacheOverlayReceiptPath: "/tmp/embedding-overlay.json"
     });
-  });
-
-  it("routes the standalone overlay builder without reading benchmark inputs", async () => {
-    const exitCode = await runCli(["embedding-cache-overlay-build"]);
-
-    expect(exitCode).toBe(2);
-    expect(stderr).toMatch(/--source <warmed\.db>/u);
   });
 
   it("rejects warm restore unless recall-eval is explicitly experimental", async () => {

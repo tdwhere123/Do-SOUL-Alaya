@@ -7,7 +7,7 @@ import {
   createCompileSeedRunner,
   type BenchSignalExtractor,
   type CompileSeedDaemon
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   CREDENTIALLED_CONFIG,

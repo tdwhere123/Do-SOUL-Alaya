@@ -17,26 +17,20 @@ import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-ca
  * runs at recall time.
  *
  * Repeatability: every decision is cached to an on-disk fixture keyed by
- * a hash of (model + incoming fact + neighbor contents) — exactly the
- * caching discipline of the LongMemEval compile-seed extraction cache. A
- * cached decision re-runs with zero LLM calls. The cache directory lives
- * beside the extraction cache under docs/bench-history/datasets and is
- * git-ignored like it: both are regenerable, model-keyed, and not source
- * truth, so a fresh checkout re-populates them from a credentialled run.
+ * a hash of (model + incoming fact + neighbor contents). A cached
+ * decision re-runs with zero LLM calls. The cache directory lives under
+ * docs/bench-history/datasets, is git-ignored, and is not source truth:
+ * a fresh checkout re-populates it from a credentialled run.
  *
- * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
- *   (the extraction cache whose shape this mirrors)
  * see also: packages/core/src/governance/reconciliation-service.ts
  *   (ReconciliationLlmDecisionPort consumer)
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Beside the LongMemEval atomic-fact cache, sharing its caching discipline
-// and its git-ignore: a credentialled run populates it, later runs in the
-// same checkout reuse it with zero LLM calls, and it is not committed
-// (regenerable, model-keyed). Created lazily on the first credentialled
-// decision.
+// On-disk, git-ignored, model-keyed cache. A credentialled run populates
+// it; later runs reuse it with zero LLM calls. Created lazily on the
+// first credentialled decision.
 const RECONCILIATION_DECISION_CACHE_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets/reconciliation-decisions"
@@ -351,8 +345,8 @@ function parseDecision(
 
 /**
  * Live garden LLM call: OpenAI-compatible POST /chat/completions with a
- * JSON-object response format. Mirrors the LongMemEval extraction
- * transport without a new client dependency.
+ * JSON-object response format, reused from the garden chat transport
+ * instead of adding a second client.
  */
 async function requestDecisionFromGarden(
   prompt: string,

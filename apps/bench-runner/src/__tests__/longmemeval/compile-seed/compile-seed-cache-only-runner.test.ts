@@ -7,11 +7,11 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCompileSeedRunner,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   cacheFilePath,
   computeSourceTurnCacheKey
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   buildCompileSeedDaemon,

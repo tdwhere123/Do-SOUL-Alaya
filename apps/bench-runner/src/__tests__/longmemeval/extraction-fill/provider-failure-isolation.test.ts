@@ -2,27 +2,27 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { rmSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import { readExtractionAttemptLedger } from
-  "../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../bench/extraction/authority/attempt-ledger.js";
 import { receiptExtractionCacheIdentity } from
-  "../../../longmemeval/extraction/authority/receipt-cache-identity.js";
+  "../../../bench/extraction/authority/receipt-cache-identity.js";
 import {
   createFreshRetiredSourceRebuildTargetSelection,
   writeExtractionTargetSelectionReceipt
-} from "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../bench/extraction/authority/target-selection/receipt.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion,

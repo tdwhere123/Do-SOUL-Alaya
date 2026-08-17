@@ -1,13 +1,13 @@
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
 import { buildLongMemEvalSidecarKey, type LongMemEvalSidecarEntry } from "../runner-helpers.js";
-import { scoreQaQuestion, type QaDeliveredCandidate, type QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
-import { selectRelevantMemories } from "../../qa/qa-llm-filter.js";
-import { buildQaSupportPack } from "../../qa/qa-support-pack.js";
+import { scoreQaQuestion, type QaDeliveredCandidate, type QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
+import { selectRelevantMemories } from "../../../bench/qa/qa-llm-filter.js";
+import { buildQaSupportPack } from "../../../bench/qa/qa-support-pack.js";
 import { normalizeQaDeliveryContent } from "./delivery/qa-delivery-content.js";
 import { dumpQaDeliveryDiagnostic } from "./delivery/qa-delivery-diagnostics.js";
 import type { LongMemEvalGoldObjectIdentity } from
-  "../../diagnostics/gold-object-identities.js";
+  "../../../bench/diagnostics/gold-object-identities.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
 export const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([

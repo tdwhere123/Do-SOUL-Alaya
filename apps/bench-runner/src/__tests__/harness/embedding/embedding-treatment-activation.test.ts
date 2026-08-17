@@ -13,7 +13,7 @@ import {
   createBenchDaemonLaunchConfig,
   resolveBenchDaemonManagedEnvKeys
 } from "../../../harness/daemon/daemon-environment.js";
-import { recallEvalEmbeddingMode } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
+import { recallEvalEmbeddingMode } from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {

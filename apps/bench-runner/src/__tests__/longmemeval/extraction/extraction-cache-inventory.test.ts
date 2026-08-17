@@ -2,11 +2,11 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { cacheFilePath } from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   hashExtractionCacheInventory,
   inspectExtractionCacheInventory
-} from "../../../longmemeval/extraction/cache-audit/inventory.js";
+} from "../../../bench/extraction/cache-audit/inventory.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";

@@ -1,12 +1,12 @@
-import { sha256Utf8 } from "../../../longmemeval/diagnostic-loop/identity.js";
-import { sharedSubstrateIdentities } from "../../../longmemeval/diagnostic-loop/run.js";
+import { sha256Utf8 } from "../../../bench/diagnostic-loop/identity.js";
+import { sharedSubstrateIdentities } from "../../../bench/diagnostic-loop/run.js";
 import type {
   DiagnosticLoopAdapters,
   DiagnosticLoopIdentity,
   DiagnosticLoopPhaseResult,
   DiagnosticLoopRequest
-} from "../../../longmemeval/diagnostic-loop/types.js";
-import type { DiagnosticLoopPhase } from "../../../longmemeval/diagnostic-loop/phases.js";
+} from "../../../bench/diagnostic-loop/types.js";
+import type { DiagnosticLoopPhase } from "../../../bench/diagnostic-loop/phases.js";
 
 export function digest(seed: string): string {
   return sha256Utf8(seed);

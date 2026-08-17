@@ -5,7 +5,7 @@ import {
 } from "../runner-helpers.js";
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
 import type { LongMemEvalGoldObjectIdentity } from
-  "../../diagnostics/gold-object-identities.js";
+  "../../../bench/diagnostics/gold-object-identities.js";
 
 type RecallResult = {
   readonly results: readonly {

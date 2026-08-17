@@ -1,11 +1,9 @@
 /**
- * @internal Exposed via `@do-soul/alaya/cli/register` for the in-process
- * bench harness in `@do-soul/alaya-bench-runner`. Not a stability promise:
- * the export surface, symbol names, and signatures may change without a
- * deprecation period. If you rename or split this module, also update:
- *   - apps/core-daemon/package.json `exports."./cli/register"`
- *   - apps/bench-runner/src/harness/daemon.ts (the only known consumer)
- * @see apps/bench-runner/src/harness/daemon.ts
+ * @internal Unstable package export (`@do-soul/alaya/cli/register`).
+ * Not a stability promise: the export surface, symbol names, and
+ * signatures may change without a deprecation period. If you rename
+ * or split this module, also update the matching
+ * `apps/core-daemon/package.json` exports entry.
  */
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";

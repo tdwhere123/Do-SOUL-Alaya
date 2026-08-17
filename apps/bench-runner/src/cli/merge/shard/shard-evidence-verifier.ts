@@ -10,19 +10,19 @@ import {
 } from "@do-soul/alaya-eval";
 import {
   resolveBenchDiagnosticsArtifactRoot
-} from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
-import type { LongMemEvalDiagnosticsSidecar } from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+import type { LongMemEvalDiagnosticsSidecar } from "../../../bench/diagnostics.js";
 import {
   LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
   verifyLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput,
   type LongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/provenance/evidence-manifest.js";
 import {
   type LongMemEvalRunProvenance
-} from "../../../longmemeval/provenance/run.js";
+} from "../../../bench/provenance/run.js";
 import type { LoadedGlobalExtractionAuthority } from
-  "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
+  "../../../bench/provenance/contract/extraction-authority-reference.js";
 import {
   verifyShardRunProvenance,
   type ShardArchivedRunProvenance

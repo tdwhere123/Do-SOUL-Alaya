@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   RecallAnswerSupportObservationSchema,
   RecallAnswerShapePlanSchema,
@@ -11,12 +11,12 @@ import {
   buildQuestionDiagnostic,
   stripReplayCandidatePoolsForGateWrite,
   type LongMemEvalDiagnosticsSidecar
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildLongMemEvalEvidenceManifest,
   verifyLongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
-import { collectPairedEnvironment } from "../../../longmemeval/provenance/run.js";
+} from "../../../bench/provenance/evidence-manifest.js";
+import { collectPairedEnvironment } from "../../../bench/provenance/run.js";
 
 function diagnostic(input: {
   readonly id: string;

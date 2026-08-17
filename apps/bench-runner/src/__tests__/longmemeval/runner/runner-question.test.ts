@@ -6,7 +6,7 @@ import {
   prepareLongMemEvalQuestion,
   runLongMemEvalQuestion
 } from "../../../longmemeval/runner/question/runner-question.js";
-import { createEmptyLongMemEvalSeedDropReasons } from "../../../longmemeval/extraction/seed-fuel/seed-drop-reasons.js";
+import { createEmptyLongMemEvalSeedDropReasons } from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 afterEach(() => {

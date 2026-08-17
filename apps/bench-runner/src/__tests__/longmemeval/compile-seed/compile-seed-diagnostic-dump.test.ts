@@ -8,7 +8,7 @@ import {
   createCompileSeedRunner,
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
 describe("compile-seed extraction failure diagnostic", () => {

@@ -1,9 +1,9 @@
 import { appendFileSync } from "node:fs";
 import type { LongMemEvalQuestion } from "../../../ingestion/dataset.js";
-import type { QaDeliveredCandidate, QaQuestionVerdict } from "../../../qa/qa-harness.js";
+import type { QaDeliveredCandidate, QaQuestionVerdict } from "../../../../bench/qa/qa-harness.js";
 import { normalizeQaDeliveryContent } from "./qa-delivery-content.js";
 import type { LongMemEvalGoldObjectIdentity } from
-  "../../../diagnostics/gold-object-identities.js";
+  "../../../../bench/diagnostics/gold-object-identities.js";
 
 export interface QaDeliveryDiagnosticInput {
   readonly dumpPath: string;

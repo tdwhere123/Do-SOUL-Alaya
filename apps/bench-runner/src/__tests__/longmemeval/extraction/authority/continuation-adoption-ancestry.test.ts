@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertImmediateContinuationAdoptionParent } from
-  "../../../../longmemeval/extraction/authority/continuation/child-claim.js";
+  "../../../../bench/extraction/authority/continuation/child-claim.js";
 
 const parent = authority("1", "2", "3");
 const child = authority("4", "5", "6", parent);

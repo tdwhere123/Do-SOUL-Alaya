@@ -11,7 +11,7 @@ import {
 import {
   buildGoldUsageReport,
   collectDeliveredGoldObjectIdentities
-} from "../../../longmemeval/qa/question-recall-support.js";
+} from "../../../bench/qa/question-recall-support.js";
 
 function sidecar(
   entries: readonly LongMemEvalSidecarEntry[]

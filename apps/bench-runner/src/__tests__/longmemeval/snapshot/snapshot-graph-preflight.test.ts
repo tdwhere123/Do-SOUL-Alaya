@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectSnapshotGraphPreflight } from
-  "../../../longmemeval/snapshot/current/snapshot-graph-preflight.js";
+  "../../../bench/snapshot/current/snapshot-graph-preflight.js";
 import { validateSnapshotManifest } from
-  "../../../longmemeval/snapshot/manifest-validation.js";
+  "../../../bench/snapshot/manifest-validation.js";
 import { currentSnapshotManifestFor } from "./current-snapshot-fixture.js";
 
 const roots: string[] = [];

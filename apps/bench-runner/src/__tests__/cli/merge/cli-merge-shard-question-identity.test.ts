@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readShardPayload } from "../../../cli/merge/shard/shard-diagnostics-reader.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import {
   makeShardDiagnostics,
   makeShardKpi,

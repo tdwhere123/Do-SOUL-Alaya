@@ -1,13 +1,13 @@
 import { writeFileSync, unlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSettledExtractionAttemptLedger } from
-  "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../../bench/extraction/authority/attempt-ledger.js";
 import {
   adoptExistingContinuationChild,
   assertContinuationChildClaimBinding,
   assertExtractionAuthorityHasNoContinuationChild,
   continuationChildClaimPath
-} from "../../../../longmemeval/extraction/authority/continuation/child-claim.js";
+} from "../../../../bench/extraction/authority/continuation/child-claim.js";
 import {
   addFailedPredecessorAttempt,
   cleanupContinuationRoots,

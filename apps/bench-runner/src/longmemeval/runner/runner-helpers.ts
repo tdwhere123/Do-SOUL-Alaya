@@ -13,18 +13,18 @@ import type {
   BenchQueryEmbeddingWarmupSummary
 } from "../../harness/daemon.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon/daemon-types.js";
-import type { LongMemEvalSnapshotQuestion } from "../snapshot/materialize.js";
-import type { LongMemEvalRunProvenance } from "../provenance/run.js";
-import { writeRecallEvalSnapshotArtifacts } from "../snapshot/writer.js";
+import type { LongMemEvalSnapshotQuestion } from "../../bench/snapshot/materialize.js";
+import type { LongMemEvalRunProvenance } from "../../bench/provenance/run.js";
+import { writeRecallEvalSnapshotArtifacts } from "../../bench/snapshot/writer.js";
 import type {
   LongMemEvalEmbeddingVectorCacheSummary,
   LongMemEvalQueryEmbeddingCacheSummary
-} from "../diagnostics.js";
+} from "../../bench/diagnostics.js";
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
 import type { SourceAssertionSupplementBinding } from
-  "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+  "../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import type { ExtractionCachePreflightProof } from
-  "../compile-seed/compile-seed-types.js";
+  "../../bench/compile-seed/compile-seed-types.js";
 export {
   buildLongMemEvalReportContextUsage,
   readLongMemEvalReportSideEffectSnapshot,

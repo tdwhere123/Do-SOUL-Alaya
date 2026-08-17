@@ -7,10 +7,10 @@ import {
   type BenchDaemonHandle
 } from "../../harness/daemon.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon/daemon-types.js";
-import { collectBenchSeedFuelInventory } from "../extraction/seed-fuel/seed-fuel-collector.js";
-import { toSeedExtractionPathKpi } from "../compile-seed.js";
-import { QaChatError } from "../qa/qa-chat.js";
-import { selectionContractIdentity } from "../selection/contract.js";
+import { collectBenchSeedFuelInventory } from "../../bench/extraction/seed-fuel/seed-fuel-collector.js";
+import { toSeedExtractionPathKpi } from "../../bench/compile-seed.js";
+import { QaChatError } from "../../bench/qa/qa-chat.js";
+import { selectionContractIdentity } from "../../bench/selection/contract.js";
 import { writeRecallEvalSnapshot } from "./runner-helpers.js";
 import {
   prepareLongMemEvalSnapshotQuestion,
@@ -19,24 +19,24 @@ import {
   type LongMemEvalWorkerResult
 } from "./question/runner-question.js";
 import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
-import type { LongMemEvalSnapshotQuestion } from "../snapshot/materialize.js";
+import type { LongMemEvalSnapshotQuestion } from "../../bench/snapshot/materialize.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
-import { finalizeOwnedTempRoot } from "../lifecycle/owned-temp-root.js";
-import { buildLongMemEvalRunProvenance } from "../provenance/run.js";
-import { throwLifecycleErrors } from "../lifecycle/errors.js";
-import { runIsolatedQuestionSequence } from "../lifecycle/question-isolated-execution.js";
+import { finalizeOwnedTempRoot } from "../../bench/lifecycle/owned-temp-root.js";
+import { buildLongMemEvalRunProvenance } from "../../bench/provenance/run.js";
+import { throwLifecycleErrors } from "../../bench/lifecycle/errors.js";
+import { runIsolatedQuestionSequence } from "../../bench/lifecycle/question-isolated-execution.js";
 import type { LongMemEvalRunContext } from "./prepare-context.js";
 import {
   emptySeedFuelInventory,
   mergeSeedFuelInventories,
   type SeedFuelInventory
-} from "../extraction/seed-fuel/seed-fuel-inventory.js";
+} from "../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 import { awaitLongMemEvalSnapshotQuiescence } from
-  "../snapshot/quiescence.js";
+  "../../bench/snapshot/quiescence.js";
 import { inspectTurnContentKeySpace } from
-  "../extraction/turn-contents.js";
+  "../../bench/extraction/turn-contents.js";
 import { assertCurrentPostFillCacheAuthorityProof } from
-  "../snapshot/current/current-substrate-authority.js";
+  "../../bench/snapshot/current/current-substrate-authority.js";
 import { assertSnapshotProducerStaticPolicy } from
   "./policy/snapshot-producer-policy.js";
 

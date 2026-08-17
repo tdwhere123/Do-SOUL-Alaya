@@ -5,8 +5,8 @@ import {
   runDiagnosticLoop,
   type DiagnosticLoopAdapters,
   type DiagnosticLoopRunResult
-} from "../../longmemeval/diagnostic-loop/index.js";
-import { DiagnosticLoopFailure } from "../../longmemeval/diagnostic-loop/failures.js";
+} from "../../bench/diagnostic-loop/index.js";
+import { DiagnosticLoopFailure } from "../../bench/diagnostic-loop/failures.js";
 import { parseDiagnosticLoopArgs } from "./args.js";
 
 export interface DiagnosticLoopCommandDependencies {

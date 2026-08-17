@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtractionOccurrenceIndex,
   hashExtractionOccurrenceIndex
-} from "../../../longmemeval/extraction/cache-audit/occurrence-index.js";
+} from "../../../bench/extraction/cache-audit/occurrence-index.js";
 import { computeTrustedRoleCorpusDigest } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 
 const model = "gpt-5.4-mini";
 const prompt = "Extraction cache parser formation prompt";

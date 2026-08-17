@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildQuestionDiagnostic } from
-  "../../../longmemeval/diagnostics.js";
+  "../../../bench/diagnostics.js";
 import { readCandidateSelectorObservation } from
-  "../../../longmemeval/diagnostics/artifacts/candidate-selector-observation-reader.js";
+  "../../../bench/diagnostics/artifacts/candidate-selector-observation-reader.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+  "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const LEGACY_SELECTOR_OBSERVATION = {
   schema_version: 1,

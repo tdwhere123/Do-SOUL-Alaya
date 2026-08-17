@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
 import { ExtractionFillTaskError } from
-  "../../../longmemeval/extraction/fill/fill-pool.js";
+  "../../../bench/extraction/fill/fill-pool.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   })
 }));
 
-vi.mock("../../../longmemeval/extraction/extraction-fill.js", () => ({
+vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.fallbackRun
 }));
 
@@ -113,25 +113,6 @@ it("rejects a predecessor receipt without its child extraction authority", async
   expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/requires --extraction-authority/u));
 });
 
-it("rejects a catalog refill allowlist at runtime", async () => {
-  const signalSource = new FakeSignalSource();
-  const run = vi.fn(async () => completedFillResult());
-  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-  const command = runExtractionFillCommand as unknown as (
-    opts: ParsedFlags,
-    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
-  ) => Promise<number>;
-
-  const exitCode = await command({
-    variant: "longmemeval_s",
-    catalogRefillAllowlist: "/fixture/allowlist.json"
-  } as ParsedFlags, { runExtractionFill: run, signalSource });
-
-  expect(exitCode).toBe(2);
-  expect(run).not.toHaveBeenCalled();
-  expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/authorize-extraction/u));
-});
-
 it("loads the R3 approval file before handing the fill to the runtime gate", async () => {
   const signalSource = new FakeSignalSource();
   const approval = { kind: "r3" };
@@ -176,28 +157,6 @@ it("fail-closes when an R3 spend path is set but the reader dep is missing", asy
   expect(run).not.toHaveBeenCalled();
   expect(stderr).toHaveBeenCalledWith(
     expect.stringMatching(/R3 spend approval reader is unavailable/u)
-  );
-});
-
-it("fail-closes when a promotion contract is set but the expansion verifier dep is missing", async () => {
-  const signalSource = new FakeSignalSource();
-  const run = vi.fn(async () => completedFillResult());
-  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-  const command = runExtractionFillCommand as unknown as (
-    opts: ParsedFlags,
-    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
-  ) => Promise<number>;
-
-  const exitCode = await command({
-    variant: "longmemeval_oracle",
-    extractionAuthority: "/fixture/extraction-authority.json",
-    promotionContract: "/fixture/promotion-contract.json"
-  } as ParsedFlags, { runExtractionFill: run, signalSource });
-
-  expect(exitCode).toBe(2);
-  expect(run).not.toHaveBeenCalled();
-  expect(stderr).toHaveBeenCalledWith(
-    expect.stringMatching(/expansion contract verifier is unavailable/u)
   );
 });
 

@@ -5,7 +5,7 @@ import { expect, vi } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from
-  "../../../longmemeval/provenance/evidence-manifest.js";
+  "../../../bench/provenance/evidence-manifest.js";
 import { buildMockQuestion } from "../runner/longmemeval-runner-fixture.js";
 
 export interface RunnerIntegrationFixture {

@@ -3,16 +3,16 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import {
   buildAuthorityQuestion as question,
   buildExtractionFillQuestion,

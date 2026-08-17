@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DiagnosticLoopFailure } from "../../../longmemeval/diagnostic-loop/failures.js";
-import { runPreflightPhase } from "../../../longmemeval/diagnostic-loop/production-phases.js";
+import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
+import { runPreflightPhase } from "../../../bench/diagnostic-loop/production-phases.js";
 import { loopRequest } from "./fixture.js";
 
 describe("diagnostic-loop production preflight", () => {

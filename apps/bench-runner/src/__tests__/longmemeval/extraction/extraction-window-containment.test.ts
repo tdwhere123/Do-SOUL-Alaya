@@ -11,22 +11,22 @@ import {
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
+} from "../../../bench/extraction/extraction-fill.js";
 import {
   createCachingSignalExtractor,
   preflightExtractionCache,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest,
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 

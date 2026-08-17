@@ -8,8 +8,6 @@ export interface AuthorizeExtractionArgs {
   readonly maximumInputTokens: number;
   readonly diskFloorBytes: number;
   readonly probeKey?: string;
-  readonly directDeepSeek500Operator?: string;
-  readonly directNewApiDeepSeek500Operator?: string;
   readonly targetSelectionPath?: string;
   readonly predecessorAuthorityPath?: string;
   readonly repairInvalidShards: boolean;
@@ -48,10 +46,6 @@ function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtr
     maximumInputTokens: requiredNonNegativeInt(args, "--extraction-max-input-tokens"),
     diskFloorBytes: requiredNonNegativeInt(args, "--extraction-disk-floor-bytes"),
     probeKey: optionalString(args, "--extraction-probe-key"),
-    directDeepSeek500Operator: optionalRequiredString(args, "--direct-deepseek-500-operator"),
-    directNewApiDeepSeek500Operator: optionalRequiredString(
-      args, "--direct-newapi-deepseek-500-operator"
-    ),
     targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection"),
     predecessorAuthorityPath: optionalRequiredString(
       args, "--extraction-predecessor-authority"
@@ -67,23 +61,11 @@ function assertAuthorizeExtractionArgs(parsed: AuthorizeExtractionArgs): void {
   if (parsed.action === "fill" && parsed.probeKey !== undefined) {
     throw new Error("--extraction-probe-key is only valid when --extraction-action=probe");
   }
-  const directOperator = parsed.directDeepSeek500Operator ?? parsed.directNewApiDeepSeek500Operator;
-  if (parsed.directDeepSeek500Operator !== undefined &&
-      parsed.directNewApiDeepSeek500Operator !== undefined) {
-    throw new Error("only one direct DeepSeek 500 operator flag may be provided");
-  }
-  if (directOperator !== undefined && parsed.action !== "fill") {
-    throw new Error("direct DeepSeek 500 operator flags are only valid when --extraction-action=fill");
-  }
-  if (directOperator !== undefined && (parsed.targetSelectionPath !== undefined ||
-      parsed.predecessorAuthorityPath !== undefined)) {
-    throw new Error("direct DeepSeek 500 cannot mix target selection or continuation evidence");
-  }
   if (parsed.predecessorAuthorityPath !== undefined &&
       (parsed.action !== "fill" || parsed.targetSelectionPath === undefined)) {
     throw new Error("same-root continuation requires a fill target selection");
   }
-  if (parsed.repairInvalidShards && (parsed.action !== "fill" || directOperator !== undefined ||
+  if (parsed.repairInvalidShards && (parsed.action !== "fill" ||
       parsed.targetSelectionPath !== undefined || parsed.predecessorAuthorityPath !== undefined)) {
     throw new Error("--repair-invalid-shards is a standalone fill authority mode");
   }

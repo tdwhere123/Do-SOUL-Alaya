@@ -5,13 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildRecallEvalRuntimeAttribution,
   prepareRecallEvalDataDir
-} from "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
-import { resolveLocalArtifactTreeSha256 } from "../../../longmemeval/provenance/embedding/local-onnx.js";
-import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/materialize.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { buildEffectiveRecallConfigIdentity } from "../../../longmemeval/provenance/effective-recall-config.js";
+} from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import { resolveLocalArtifactTreeSha256 } from "../../../bench/provenance/embedding/local-onnx.js";
+import type { LongMemEvalSnapshotManifest } from "../../../bench/snapshot/materialize.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { buildEffectiveRecallConfigIdentity } from "../../../bench/provenance/effective-recall-config.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 
 function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
   const extractionClosure = syntheticExtractionClosure({

@@ -3,13 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics/schema/diagnostics-types.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics/schema/diagnostics-types.js";
 import {
   buildStageAttributionTables,
   classifyGoldObjectStage,
   classifyQuestionStage,
   writeStageAttributionTables
-} from "../../../longmemeval/diagnostics/stage-attribution/index.js";
+} from "../../../bench/diagnostics/stage-attribution/index.js";
 
 const WORKTREE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

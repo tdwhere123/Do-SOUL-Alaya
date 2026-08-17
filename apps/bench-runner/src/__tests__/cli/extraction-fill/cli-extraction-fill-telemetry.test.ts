@@ -3,7 +3,7 @@ import type { ParsedFlags } from "../../../cli/cli-options.js";
 
 const mocks = vi.hoisted(() => ({ runExtractionFill: vi.fn() }));
 
-vi.mock("../../../longmemeval/extraction/extraction-fill.js", () => ({
+vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.runExtractionFill
 }));
 

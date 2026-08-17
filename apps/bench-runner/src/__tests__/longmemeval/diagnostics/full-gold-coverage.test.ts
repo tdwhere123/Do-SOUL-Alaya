@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLongMemEvalFullGoldCoverage } from "../../../longmemeval/diagnostics.js";
+import { buildLongMemEvalFullGoldCoverage } from "../../../bench/diagnostics.js";
 import { buildLongMemEvalDetailedGoldCoverage } from
-  "../../../longmemeval/diagnostics/diagnostics-full-gold-coverage.js";
+  "../../../bench/diagnostics/diagnostics-full-gold-coverage.js";
 import {
   buildGoldDiagnostic as buildGold,
   buildQuestionDiagnosticFixture

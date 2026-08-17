@@ -3,7 +3,7 @@ import {
   extractContentFromChatCompletionBody,
   inspectChatCompletionResponse
 } from
-  "../../../longmemeval/extraction/chat-completion-response.js";
+  "../../../bench/extraction/chat-completion-response.js";
 
 describe("extractContentFromChatCompletionBody", () => {
   it("concatenates delta content across data frames up to done", () => {

@@ -7,14 +7,14 @@ import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
   writeExtractionCacheManifest,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { buildExtractionContentClosureIndex } from "../../../longmemeval/extraction/content-closure.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { buildExtractionContentClosureIndex } from "../../../bench/extraction/content-closure.js";
 
 const DEFAULT_RAW_JSON = '{"signals":[]}';
 

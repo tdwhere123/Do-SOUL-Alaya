@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EmbeddingReadinessTracker,
   runEmbeddingReadinessPass
-} from "../../../longmemeval/provenance/embedding/embedding-readiness.js";
+} from "../../../bench/provenance/embedding/embedding-readiness.js";
 
 describe("runEmbeddingReadinessPass", () => {
   it("returns ready and warns nothing when the pass resolves", async () => {

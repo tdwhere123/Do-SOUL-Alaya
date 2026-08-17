@@ -11,16 +11,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
 import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 
-import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../longmemeval/archive/archive-evidence.js";
+import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../bench/archive/archive-evidence.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-
-import { runLongMemEvalMultiturn } from "../../../longmemeval/multiturn.js";
-
-import { runLongMemEvalCrossQuestion } from "../../../longmemeval/crossquestion.js";
+} from "../../../bench/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,

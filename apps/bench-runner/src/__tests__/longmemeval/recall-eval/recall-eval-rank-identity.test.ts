@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { renderRecallEvalRankIdentity } from "../../../longmemeval/provenance/recall-eval/recall-eval-rank-identity.js";
+import { renderRecallEvalRankIdentity } from "../../../bench/provenance/recall-eval/recall-eval-rank-identity.js";
 import { RecallEvalRankIdentitySchema } from
   "../../../longmemeval/promotion/schema/evidence-schema.js";
-import { snapshotQuestionIdDigest } from "../../../longmemeval/snapshot/materialize.js";
+import { snapshotQuestionIdDigest } from "../../../bench/snapshot/materialize.js";
 
 describe("recall-eval rank identity", () => {
   it("preserves snapshot order and is sensitive to delivered rank order", () => {

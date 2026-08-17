@@ -25,13 +25,13 @@ import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReportSideEffectSnapshot
-} from "../../diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildGoldObjectIdentities,
   type LongMemEvalGoldObjectIdentity
-} from "../../diagnostics/gold-object-identities.js";
+} from "../../../bench/diagnostics/gold-object-identities.js";
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
-import type { CompileSeedRunner } from "../../compile-seed.js";
+import type { CompileSeedRunner } from "../../../bench/compile-seed.js";
 import {
   deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
@@ -40,9 +40,9 @@ import {
   runLongMemEvalRecallCycle,
   type LongMemEvalReportSimulationStats
 } from "../runner-helpers.js";
-import type { QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { LongMemEvalSnapshotQuestion } from "../../snapshot/materialize.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
+import type { QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { LongMemEvalSnapshotQuestion } from "../../../bench/snapshot/materialize.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
 import type { LongMemEvalQuestionSeedState } from
   "./runner-question-seeding.js";
@@ -50,9 +50,9 @@ import {
   buildLongMemEvalQuestionResult,
   buildLongMemEvalSnapshotQuestion
 } from "./runner-question-result.js";
-import { buildLongMemEvalQuestionRuntimeIdentity } from "../../selection/question-runtime-identity.js";
+import { buildLongMemEvalQuestionRuntimeIdentity } from "../../../bench/selection/question-runtime-identity.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
-import { warmLongMemEvalEmbeddingCaches } from "../../provenance/embedding/embedding-cache-warmup.js";
+import { warmLongMemEvalEmbeddingCaches } from "../../../bench/provenance/embedding/embedding-cache-warmup.js";
 import { resolveLongMemEvalEdgeFormationConfig } from
   "../edge-formation-config.js";
 

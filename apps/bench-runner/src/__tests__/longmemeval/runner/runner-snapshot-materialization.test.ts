@@ -26,7 +26,7 @@ vi.mock("../../../longmemeval/runner/runner-execution.js", () => ({
 vi.mock("../../../longmemeval/runner/archive/runner-archive.js", () => ({
   finalizeLongMemEvalRun: mocks.finalize
 }));
-vi.mock("../../../longmemeval/diagnostics/spool.js", () => ({
+vi.mock("../../../bench/diagnostics/spool.js", () => ({
   withLongMemEvalDiagnosticsSpool: mocks.withSpool
 }));
 

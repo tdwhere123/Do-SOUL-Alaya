@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DiagnosticLoopFailure } from "../../../longmemeval/diagnostic-loop/failures.js";
-import { runDiagnosticLoop } from "../../../longmemeval/diagnostic-loop/run.js";
+import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
+import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
 import { digest, loopRequest, trackingAdapters } from "./fixture.js";
 
 const roots: string[] = [];

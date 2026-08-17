@@ -18,7 +18,7 @@ import {
 import { runAnswersWithEdges } from
   "../../../longmemeval/runner/question/runner-question.js";
 import { assertSnapshotAnswersWithFormation } from
-  "../../../longmemeval/snapshot/current/snapshot-answers-with-formation.js";
+  "../../../bench/snapshot/current/snapshot-answers-with-formation.js";
 
 let daemon: BenchDaemonHandle | undefined;
 let root: string | undefined;

@@ -5,7 +5,7 @@ import {
   type LongMemEvalMaterialEffect
 } from "./schema/material-effect.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../extraction/authority/receipt-limits.js";
+  "../../bench/extraction/authority/receipt-limits.js";
 
 export interface R3SpendApproval {
   readonly schema_version: 1;

@@ -3,23 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import {
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type { SupplementalSourceManifestBinding } from
-  "../../../longmemeval/extraction/cache/supplemental-source-receipt.js";
+  "../../../bench/extraction/cache/supplemental-source-receipt.js";
 import { runExtractionFill } from
-  "../../../longmemeval/extraction/extraction-fill.js";
+  "../../../bench/extraction/extraction-fill.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
   captureSnapshotExtractionAuthority
-} from "../../../longmemeval/snapshot/extraction-authority.js";
+} from "../../../bench/snapshot/extraction-authority.js";
 import {
   buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,

@@ -17,21 +17,21 @@ import {
   type BenchDaemonHandle
 } from "../../../harness/daemon.js";
 import { createCompileSeedRunner } from
-  "../../../longmemeval/compile-seed.js";
+  "../../../bench/compile-seed.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import { buildLongMemEvalSnapshotQuestion } from
   "../../../longmemeval/runner/question/runner-question-result.js";
 import { seedLongMemEvalQuestion } from
@@ -40,12 +40,12 @@ import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   type LongMemEvalSnapshotSeedRound,
   type LongMemEvalSnapshotSidecarFile
-} from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
 import { captureSnapshotExtractionAuthority } from
-  "../../../longmemeval/snapshot/extraction-authority.js";
+  "../../../bench/snapshot/extraction-authority.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
-import { assertSnapshotDatasetSubstrateIdentity } from "../../../longmemeval/snapshot/substrate-binding.js";
+  "../../../bench/snapshot/seed-ledger/seed-ledger-binding.js";
+import { assertSnapshotDatasetSubstrateIdentity } from "../../../bench/snapshot/substrate-binding.js";
 import {
   CREDENTIALLED_CONFIG,
   signalsEnvelope

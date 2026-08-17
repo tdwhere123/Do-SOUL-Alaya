@@ -3,7 +3,7 @@ import {
   buildSupplementalSourceReceiptExtension,
   createSupplementalSourceReceipt,
   parseSupplementalSourceReceipt
-} from "../../../longmemeval/extraction/cache/supplemental-source-receipt.js";
+} from "../../../bench/extraction/cache/supplemental-source-receipt.js";
 
 describe("supplemental source receipt extension", () => {
   it("proves an exact same-source shard-set extension", () => {

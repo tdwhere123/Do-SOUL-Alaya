@@ -6,7 +6,7 @@ import {
   assertFreshExtractionCacheRoot,
   decideExtractionCacheCompatibility,
   hashExtractionCacheCompatibilityDecision
-} from "../../../longmemeval/extraction/cache-audit/compatibility.js";
+} from "../../../bench/extraction/cache-audit/compatibility.js";
 
 const roots: string[] = [];
 

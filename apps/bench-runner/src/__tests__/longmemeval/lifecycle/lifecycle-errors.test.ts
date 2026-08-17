@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { throwLifecycleErrors } from "../../../longmemeval/lifecycle/errors.js";
+import { throwLifecycleErrors } from "../../../bench/lifecycle/errors.js";
 
 describe("benchmark lifecycle errors", () => {
   it("preserves primary, shutdown, and cleanup failures in order", () => {

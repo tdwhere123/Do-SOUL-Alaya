@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { ExtractionAttemptLedgerSnapshot } from
-  "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../../bench/extraction/authority/attempt-ledger.js";
 import type { ExtractionAuthorityInspection } from
-  "../../../../longmemeval/extraction/authority/inspection.js";
+  "../../../../bench/extraction/authority/inspection.js";
 import type { ExtractionAuthorityReceipt } from
-  "../../../../longmemeval/extraction/authority/receipt.js";
+  "../../../../bench/extraction/authority/receipt.js";
 import {
   assertCatalogPredecessorState,
   assertContinuationInventory,
   assertInheritedContinuationPredecessorState,
   continuationPredecessorNewSuccessfulKeys
 } from
-  "../../../../longmemeval/extraction/authority/continuation/predecessor-state.js";
+  "../../../../bench/extraction/authority/continuation/predecessor-state.js";
 import type { SameRootExtractionContinuation } from
-  "../../../../longmemeval/extraction/authority/continuation/contract.js";
+  "../../../../bench/extraction/authority/continuation/contract.js";
 
 const successfulKey = "1".repeat(64);
 const missingKey = "2".repeat(64);

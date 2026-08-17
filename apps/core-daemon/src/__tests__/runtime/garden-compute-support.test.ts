@@ -49,9 +49,18 @@ describe("createConflictDetectionLlmPort", () => {
     expect(unref).toHaveBeenCalled();
   });
 
-  it("uses the default conflict model when the model env var is blank", async () => {
+  it("skips conflict LLM when the model env var is missing or blank", () => {
     configureConflictLlmEnv();
     process.env.ALAYA_CONFLICT_LLM_MODEL = "   ";
+    expect(createConflictDetectionLlmPort()).toBeNull();
+
+    delete process.env.ALAYA_CONFLICT_LLM_MODEL;
+    expect(createConflictDetectionLlmPort()).toBeNull();
+  });
+
+  it("forwards the configured conflict model when the env var is set", async () => {
+    configureConflictLlmEnv();
+    process.env.ALAYA_CONFLICT_LLM_MODEL = "conflict-test-model";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: "none" } }]
     }), {
@@ -62,7 +71,7 @@ describe("createConflictDetectionLlmPort", () => {
 
     await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
     const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as { readonly model?: string };
-    expect(body.model).toBe("Mimo-V2.5");
+    expect(body.model).toBe("conflict-test-model");
   });
 
   it("rejects transport failures instead of returning a no-conflict verdict", async () => {

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   runRecallEval: vi.fn()
 }));
 
-vi.mock("../../../longmemeval/lifecycle/recall-eval/recall-eval-impl.js", () => ({
+vi.mock("../../../bench/lifecycle/recall-eval/recall-eval-impl.js", () => ({
   runRecallEval: mocks.runRecallEval
 }));
 
@@ -62,16 +62,6 @@ it("reports bounded post-commit and memory-profile completion failures", async (
   );
 });
 
-it("rejects mixing local experiment and promotion authority", async () => {
-  await expect(runRecallEvalCommand({
-    ...flags(),
-    experiment: true,
-    promotionContract: "/tmp/promotion.json"
-  })).resolves.toBe(2);
-
-  expect(mocks.runRecallEval).not.toHaveBeenCalled();
-});
-
 it("requires projection rebuild for default fact-frame backfill", async () => {
   await expect(runRecallEvalCommand({
     ...flags(),
@@ -121,7 +111,6 @@ function flags(): ParsedFlags {
     policyShape: "stress",
     simulateReport: "none",
     force: false,
-    legacySnapshot: false,
     snapshot: "/tmp/snapshot.db",
     qa: false,
     edgePlane: false

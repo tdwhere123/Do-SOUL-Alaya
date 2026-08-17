@@ -6,13 +6,6 @@ export function consumePromotionEvidencePathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
-  const promotionContract = consumePathFlag(
-    args, index, token, "--promotion-contract", "--promotion-contract requires a path"
-  );
-  if (promotionContract !== undefined) {
-    state.promotionContract = promotionContract.value;
-    return promotionContract.nextIndex;
-  }
   const r3SpendApproval = consumePathFlag(
     args, index, token, "--r3-spend-approval", "--r3-spend-approval requires a path"
   );

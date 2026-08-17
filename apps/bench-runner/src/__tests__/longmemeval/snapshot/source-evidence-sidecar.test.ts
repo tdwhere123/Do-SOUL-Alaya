@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseSnapshotSidecar } from
-  "../../../longmemeval/snapshot/sidecar-validation.js";
+  "../../../bench/snapshot/sidecar-validation.js";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
-  "../../../longmemeval/snapshot/materialize.js";
+  "../../../bench/snapshot/materialize.js";
 
 describe("snapshot source evidence sidecar", () => {
   it("round-trips an evidence capsule with source-round provenance", () => {

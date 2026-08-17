@@ -159,11 +159,17 @@ function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
   ) {
     return null;
   }
+  // Conflict LLM is optional. Missing model is the same skip as missing
+  // URL/key — do not invent a vendor default.
+  const model = process.env.ALAYA_CONFLICT_LLM_MODEL?.trim();
+  if (model === undefined || model.length === 0) {
+    return null;
+  }
   const parsedTimeout = Number.parseInt(process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);
   return {
     baseUrl,
     apiKey,
-    model: process.env.ALAYA_CONFLICT_LLM_MODEL?.trim() || "Mimo-V2.5",
+    model,
     timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 8000
   };
 }

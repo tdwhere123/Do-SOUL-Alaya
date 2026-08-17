@@ -8,9 +8,9 @@ import {
   RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1
 } from "@do-soul/alaya-core";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+  "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import { buildQuestionDiagnostic } from
-  "../../../longmemeval/diagnostics/diagnostics-question.js";
+  "../../../bench/diagnostics/diagnostics-question.js";
 
 describe("recall field capture persistence", () => {
   it("preserves the fixed retrieval catalog and query entity receipt", async () => {

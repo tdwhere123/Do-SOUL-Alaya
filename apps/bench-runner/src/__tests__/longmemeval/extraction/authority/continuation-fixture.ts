@@ -7,35 +7,35 @@ import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
-} from "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+} from "../../../../bench/extraction/authority/attempt-ledger.js";
 import { persistContinuationAuthority } from
   "../../../../cli/extraction-authority/continuation.js";
 import { createSameRootExtractionContinuation } from
-  "../../../../longmemeval/extraction/authority/continuation/continuation.js";
+  "../../../../bench/extraction/authority/continuation/continuation.js";
 import {
   createExtractionAuthorityReceipt,
   type ExtractionAuthorityObservation
-} from "../../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../../bench/extraction/authority/receipt.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../../longmemeval/extraction/authority/receipt-limits.js";
+  "../../../../bench/extraction/authority/receipt-limits.js";
 import { createExtractionPreservedValidClosure } from
-  "../../../../longmemeval/extraction/authority/repair/preserved-valid-closure.js";
+  "../../../../bench/extraction/authority/repair/preserved-valid-closure.js";
 import {
   createFreshRetiredSourceRebuildTargetSelection,
   createSameRootContinuationTargetSelectionReceipt
-} from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../../bench/extraction/authority/target-selection/receipt.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionKeySetSha256,
   computeExtractionRawJsonSha256
-} from "../../../../longmemeval/extraction/content-closure.js";
+} from "../../../../bench/extraction/content-closure.js";
 import { buildExtractionTransportProvenance } from
-  "../../../../longmemeval/extraction/transport-route.js";
+  "../../../../bench/extraction/transport-route.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;

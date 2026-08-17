@@ -20,16 +20,16 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyEmbeddingCacheOverlay
-} from "../../../longmemeval/snapshot/recall-eval/embedding-cache-overlay/importer.js";
+} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/importer.js";
 import {
   writeEmbeddingCacheOverlay
-} from "../../../longmemeval/snapshot/recall-eval/embedding-cache-overlay/writer.js";
+} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/writer.js";
 import { sha256File } from
-  "../../../longmemeval/snapshot/integrity.js";
+  "../../../bench/snapshot/integrity.js";
 import { prepareRecallEvalDataRoot } from
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
+  "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
 import type { RecallEvalSnapshotBundle } from
-  "../../../longmemeval/snapshot/recall-eval/recall-eval-loader.js";
+  "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
 
 const SOURCE_MANIFEST_SHA = "b".repeat(64);
 const MODEL_ARTIFACT_SHA = "c".repeat(64);

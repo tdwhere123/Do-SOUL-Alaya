@@ -10,7 +10,7 @@ import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   computeExtractionTurnCacheKey
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
@@ -20,20 +20,20 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type {
   LongMemEvalSnapshotSidecarFile
-} from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
+  "../../../bench/snapshot/seed-ledger/seed-ledger-binding.js";
 import { assertSnapshotDatasetSubstrateIdentity } from
-  "../../../longmemeval/snapshot/substrate-binding.js";
+  "../../../bench/snapshot/substrate-binding.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from
-  "../../../longmemeval/selection/question-runtime-identity.js";
+  "../../../bench/selection/question-runtime-identity.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary
-} from "../../../longmemeval/snapshot/extraction-authority.js";
+} from "../../../bench/snapshot/extraction-authority.js";
 
 const roots: string[] = [];
 const CONTENT = "User: Same fact.";

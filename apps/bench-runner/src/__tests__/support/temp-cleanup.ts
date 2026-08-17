@@ -2,4 +2,4 @@ export {
   closeCachedDatabase,
   isTransientFsLockError,
   removeTempDirectory
-} from "../../longmemeval/lifecycle/temp-directory-cleanup.js";
+} from "../../bench/lifecycle/temp-directory-cleanup.js";

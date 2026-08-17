@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from "../../../longmemeval/snapshot/materialize.js";
-import { validateSnapshotManifest } from "../../../longmemeval/snapshot/manifest-validation.js";
+import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from "../../../bench/snapshot/materialize.js";
+import { validateSnapshotManifest } from "../../../bench/snapshot/manifest-validation.js";
 
 const FILE_PATH = "/tmp/snapshot.db.manifest.json";
 

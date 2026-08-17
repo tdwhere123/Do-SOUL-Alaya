@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { warmLongMemEvalEmbeddingCaches } from "../../../longmemeval/provenance/embedding/embedding-cache-warmup.js";
+import { warmLongMemEvalEmbeddingCaches } from "../../../bench/provenance/embedding/embedding-cache-warmup.js";
 
 const vectorSummary = {
   status: "ready" as const,

@@ -6,17 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../../bench/extraction/cache-audit/receipt.js";
 import { createExtractionAuthorityReceipt, type ExtractionAuthorityObservation } from
-  "../../../longmemeval/extraction/authority/receipt.js";
+  "../../../bench/extraction/authority/receipt.js";
 import { createFreshExtractionTargetSelection } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
 import { assertExtractionTargetSelectionRootBinding } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
 import { acquireExtractionCacheWriteLease } from
-  "../../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
+  "../../../bench/extraction/fill/manifest/fill-root-guard.js";
 import { createExtractionExecutionAuthority } from
-  "../../../longmemeval/extraction/fill/execution-authority.js";
+  "../../../bench/extraction/fill/execution-authority.js";
 
 const roots: string[] = [];
 

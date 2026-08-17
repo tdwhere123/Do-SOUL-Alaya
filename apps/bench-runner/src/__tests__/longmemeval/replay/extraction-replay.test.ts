@@ -14,13 +14,13 @@ import {
   GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
   parseOfficialApiSemanticFactorGraphProjectionAudit
 } from "@do-soul/alaya-soul";
-import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { cacheFilePath } from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_REPLAY_FORMATION_POLICY,
   hashExtractionReplay,
   replayExtractionOccurrences,
   type ExtractionReplayAuditor
-} from "../../../longmemeval/extraction/cache-audit/replay.js";
+} from "../../../bench/extraction/cache-audit/replay.js";
 import { withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
 

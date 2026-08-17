@@ -1,13 +1,13 @@
-import { computeQuestionIdDigest } from "../../../longmemeval/selection/question-manifest.js";
-import { computeCohortAssignmentDigest } from "../../../longmemeval/selection/contract.js";
+import { computeQuestionIdDigest } from "../../../bench/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../../bench/selection/contract.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/materialize.js";
+import type { LongMemEvalSnapshotManifest } from "../../../bench/snapshot/materialize.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary
-} from "../../../longmemeval/snapshot/extraction-authority.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+} from "../../../bench/snapshot/extraction-authority.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 
 export const currentCanonicalQuestions = [question("q-1"), question("q-99")];
 

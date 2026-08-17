@@ -33,8 +33,8 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { BenchRecallDiagnosticsSchema } from "../../../harness/recall/recall-diagnostics-schema.js";
-import { buildQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const WORKSPACE_ID = "workspace-edge-trace";
 const RUN_ID = "run-edge-trace";

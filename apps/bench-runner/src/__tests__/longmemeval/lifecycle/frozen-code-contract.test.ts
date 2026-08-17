@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveFrozenCodeIdentity } from "../../../longmemeval/provenance/contract/frozen-code-contract.js";
+import { resolveFrozenCodeIdentity } from "../../../bench/provenance/contract/frozen-code-contract.js";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];

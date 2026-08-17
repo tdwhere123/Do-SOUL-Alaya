@@ -12,7 +12,7 @@ import {
   computeExtractionKeySetSha256,
   computeExtractionTurnCacheKey,
   computeExtractionTurnCacheKeys
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
@@ -23,17 +23,17 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type {
   LongMemEvalSnapshotSeedRound,
   LongMemEvalSnapshotSidecarFile
-} from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
+  "../../../bench/snapshot/seed-ledger/seed-ledger-binding.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary
-} from "../../../longmemeval/snapshot/extraction-authority.js";
+} from "../../../bench/snapshot/extraction-authority.js";
 
 const roots: string[] = [];
 const MODEL = "fixture-model";

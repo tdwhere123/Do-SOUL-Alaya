@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../../../bench/extraction/cache-audit/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelection,
@@ -11,9 +11,9 @@ import {
   createSameRootContinuationTargetSelectionReceipt,
   readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection
-} from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../../bench/extraction/authority/target-selection/receipt.js";
 import type { ExtractionAuthorityObservation } from
-  "../../../../longmemeval/extraction/authority/receipt.js";
+  "../../../../bench/extraction/authority/receipt.js";
 
 const roots: string[] = [];
 

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import type { ExtractionRequestProfile } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import type { ExtractionRequestProfile } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   buildExtractionContentClosureIndex,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../longmemeval/extraction/content-closure.js";
+} from "../../../bench/extraction/content-closure.js";
 
 export function syntheticExtractionClosure(input: {
   readonly count: number;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectPairedEnvironment,
   resolveCredentialStateMarker
-} from "../../../longmemeval/provenance/paired-environment.js";
+} from "../../../bench/provenance/paired-environment.js";
 
 describe("paired-environment bench provenance", () => {
   it("omits retired local cross-encoder controls from current provenance", () => {

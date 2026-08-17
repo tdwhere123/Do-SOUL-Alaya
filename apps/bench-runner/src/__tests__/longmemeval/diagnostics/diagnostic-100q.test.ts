@@ -3,8 +3,8 @@ import {
   DIAGNOSTIC_500Q_CLOSED,
   compareF0F2VsCachedF3,
   mapQuestionToDiagnosticStage
-} from "../../../longmemeval/diagnostics/stage-attribution/diagnostic-100q.js";
-import type { QuestionStageRow } from "../../../longmemeval/diagnostics/stage-attribution/types.js";
+} from "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+import type { QuestionStageRow } from "../../../bench/diagnostics/stage-attribution/types.js";
 
 describe("diagnostic 100Q stage map", () => {
   it("maps the earliest failed stage and keeps 500Q closed", () => {

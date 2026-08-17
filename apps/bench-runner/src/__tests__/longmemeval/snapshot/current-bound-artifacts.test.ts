@@ -13,18 +13,18 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { bindCurrentSnapshotArtifacts } from
-  "../../../longmemeval/snapshot/current/current-bound-artifacts.js";
+  "../../../bench/snapshot/current/current-bound-artifacts.js";
 import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor,
   currentSnapshotSidecarFor
 } from "./current-snapshot-fixture.js";
 import { renderSnapshotExtractionAuthority } from
-  "../../../longmemeval/snapshot/extraction-authority.js";
+  "../../../bench/snapshot/extraction-authority.js";
 import {
   MAX_SNAPSHOT_MANIFEST_BYTES,
   MAX_SNAPSHOT_SIDECAR_BYTES
-} from "../../../longmemeval/snapshot/artifact-limits.js";
+} from "../../../bench/snapshot/artifact-limits.js";
 import { seedValidV1VerifiedAssertionReceipt } from
   "./fixtures/valid-v1-assertion-receipt-fixture.js";
 

@@ -6,13 +6,13 @@ import { expect, it, vi } from "vitest";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
   ExtractionFillTaskError,
   runExtractionPool
-} from "../../../longmemeval/extraction/fill/fill-pool.js";
-import { newFillStats } from "../../../longmemeval/extraction/fill/fill-stats.js";
+} from "../../../bench/extraction/fill/fill-pool.js";
+import { newFillStats } from "../../../bench/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest

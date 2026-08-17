@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { releaseGardenHttpReader } from
-  "../../../../longmemeval/compile-seed/http/stream/garden-http-reader-release.js";
+  "../../../../bench/compile-seed/http/stream/garden-http-reader-release.js";
 
 describe("garden HTTP reader release", () => {
   it("releases the reader lock when stream cancellation rejects", async () => {

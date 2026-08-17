@@ -1,22 +1,20 @@
 import {
   inspectExtractionAuthority,
   type ExtractionAuthorityInspection
-} from "../../longmemeval/extraction/authority/inspection.js";
+} from "../../bench/extraction/authority/inspection.js";
 import {
   writeExtractionAuthorityReceipt,
   writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt
-} from "../../longmemeval/extraction/authority/receipt.js";
+} from "../../bench/extraction/authority/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   type ExtractionTargetSelectionReceipt
-} from "../../longmemeval/extraction/authority/target-selection/receipt.js";
-import { initializeCatalogRefillIssuanceLedger } from
-  "../../longmemeval/extraction/authority/catalog-refill/issuance-ledger.js";
+} from "../../bench/extraction/authority/target-selection/receipt.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
-} from "../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
+} from "../../bench/extraction/fill/manifest/fill-root-guard.js";
 import {
   persistContinuationAuthority,
   type AuthorityContinuationDependencies,
@@ -28,7 +26,6 @@ export interface AuthorityPublicationDependencies extends AuthorityContinuationD
   readonly write?: typeof writeExtractionAuthorityReceipt;
   readonly writeExclusive?: typeof writeExtractionAuthorityReceiptExclusive;
   readonly assertTargetSelection?: typeof assertExtractionTargetSelectionReceipt;
-  readonly initializeCatalogLedger?: typeof initializeCatalogRefillIssuanceLedger;
 }
 
 function assertExactAuthorityIssuanceInspection(
@@ -62,10 +59,6 @@ export async function publishAuthorizedExtractionReceipt(
     await publishContinuation(input, deps);
     return;
   }
-  if (input.receipt.catalog_refill !== undefined) {
-    await publishCatalogRefill(input, deps);
-    return;
-  }
   (deps.write ?? writeExtractionAuthorityReceipt)(input.outputPath, input.receipt);
 }
 
@@ -84,36 +77,5 @@ async function publishContinuation(
       prepared: input.continuation!,
       dependencies: deps
     });
-  });
-}
-
-async function publishCatalogRefill(
-  input: PreparedAuthorityPublication,
-  deps: AuthorityPublicationDependencies
-): Promise<void> {
-  if (input.targetSelection === undefined) {
-    throw new Error("catalog refill authority requires target selection");
-  }
-  const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
-  await withExtractionCacheWriteLease(lease, async () => {
-    const live = await (deps.inspect ?? inspectExtractionAuthority)(input.inspectionInput);
-    assertExactAuthorityIssuanceInspection(input.inspection, live);
-    (deps.assertTargetSelection ?? assertExtractionTargetSelectionReceipt)({
-      receipt: input.targetSelection!,
-      cacheRoot: input.cacheRoot,
-      observation: live.observation,
-      writeLease: lease
-    });
-    (deps.initializeCatalogLedger ?? initializeCatalogRefillIssuanceLedger)({
-      cacheRoot: input.cacheRoot,
-      receipt: input.receipt,
-      inspection: live,
-      writeLease: lease
-    });
-    lease.assertOwned();
-    (deps.writeExclusive ?? writeExtractionAuthorityReceiptExclusive)(
-      input.outputPath,
-      input.receipt
-    );
   });
 }

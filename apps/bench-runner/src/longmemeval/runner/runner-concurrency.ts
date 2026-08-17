@@ -14,21 +14,21 @@ import {
 import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import type { VerifiedLongMemEvalDatasetAuthority } from "../ingestion/fetch.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "../runner.js";
-import { finalizeOwnedTempRoot } from "../lifecycle/owned-temp-root.js";
-import { throwLifecycleErrors } from "../lifecycle/errors.js";
-import { validateShardRunProvenancePlans } from "../provenance/shard-aggregate.js";
+import { finalizeOwnedTempRoot } from "../../bench/lifecycle/owned-temp-root.js";
+import { throwLifecycleErrors } from "../../bench/lifecycle/errors.js";
+import { validateShardRunProvenancePlans } from "../../bench/provenance/shard-aggregate.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
-} from "../diagnostics/spool.js";
+} from "../../bench/diagnostics/spool.js";
 import { refuseRetiredLocalCrossEncoderTreatment } from
   "../../harness/strict-treatment-config.js";
-import { loadQuestionManifestSelection } from "../selection/question-manifest.js";
+import { loadQuestionManifestSelection } from "../../bench/selection/question-manifest.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from
   "../../cli/merge/release-evidence-authority.js";
 import {
   LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME
-} from "../provenance/contract/extraction-authority-reference.js";
+} from "../../bench/provenance/contract/extraction-authority-reference.js";
 import {
   verifiedExpansionRunAuthority,
   type VerifiedExpansionRunAuthority

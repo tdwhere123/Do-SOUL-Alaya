@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildQuestionDiagnostic, stripReplayCandidatePoolsForGateWrite } from
-  "../../../longmemeval/diagnostics.js";
+  "../../../bench/diagnostics.js";
 import { readRecallDiagnostics } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-private.js";
+  "../../../bench/diagnostics/schema/diagnostics-private.js";
 import { EvidenceCandidateScoringSelectionReceiptSchema } from
   "../../../harness/recall/recall-diagnostics-schema.js";
 

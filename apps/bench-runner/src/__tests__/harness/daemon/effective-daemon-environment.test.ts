@@ -15,7 +15,7 @@ import {
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import {
   buildEffectiveRecallConfigIdentity
-} from "../../../longmemeval/provenance/effective-recall-config.js";
+} from "../../../bench/provenance/effective-recall-config.js";
 
 const roots: string[] = [];
 let daemon: BenchDaemonHandle | undefined;

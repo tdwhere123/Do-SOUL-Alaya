@@ -8,10 +8,10 @@ import type {
   BenchReportContextUsageInput
 } from "../../harness/daemon.js";
 import type { BenchSimulateReportMode } from "@do-soul/alaya-eval";
-import type { LongMemEvalReportSideEffectSnapshot } from "../diagnostics.js";
+import type { LongMemEvalReportSideEffectSnapshot } from "../../bench/diagnostics.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../../shared/monotonic.js";
 import type { LongMemEvalGoldObjectIdentity } from
-  "../diagnostics/gold-object-identities.js";
+  "../../bench/diagnostics/gold-object-identities.js";
 import {
   buildLongMemEvalSidecarKey,
   resolveLongMemEvalGoldObjectKind

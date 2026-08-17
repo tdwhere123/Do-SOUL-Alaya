@@ -2,33 +2,33 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import { computeExtractionTurnCacheKey } from
-  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../bench/compile-seed/compile-seed-cache.js";
 import { extractionCacheManifestPath } from
-  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import {
   createFreshRetiredSourceRebuildTargetSelectionRoot,
   readExtractionTargetSelectionReceipt,
   type ExtractionTargetSelectionReceipt,
   writeExtractionTargetSelectionReceipt
-} from "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../bench/extraction/authority/target-selection/receipt.js";
 import { digestExtractionTargetSelectionReceipt } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt-shape.js";
+  "../../../bench/extraction/authority/target-selection/receipt-shape.js";
 import { createExtractionCatalogRefillScope } from
-  "../../../longmemeval/extraction/authority/catalog-refill/scope.js";
+  "../../../bench/extraction/authority/catalog-refill/scope.js";
 import { runExtractionFill } from
-  "../../../longmemeval/extraction/extraction-fill.js";
+  "../../../bench/extraction/extraction-fill.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import {

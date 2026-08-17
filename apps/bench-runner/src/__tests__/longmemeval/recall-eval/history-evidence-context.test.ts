@@ -16,12 +16,12 @@ import {
   createLongMemEvalHistoryLayout,
   resolveLongMemEvalEvidenceContext
 } from "../../../longmemeval/history/evidence-context.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import {
   buildLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput,
   type LongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/provenance/evidence-manifest.js";
 import {
   archiveRoot,
   cleanupRoots,

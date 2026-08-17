@@ -4,19 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from
-  "../../../longmemeval/compile-seed.js";
+  "../../../bench/compile-seed.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
-  "../../../longmemeval/extraction/authority/inspection.js";
+  "../../../bench/extraction/authority/inspection.js";
 import { createExtractionRepairScope } from
-  "../../../longmemeval/extraction/authority/repair/repair-scope.js";
+  "../../../bench/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../longmemeval/extraction/authority/receipt-limits.js";
+  "../../../bench/extraction/authority/receipt-limits.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import { runExtractionFill } from
-  "../../../longmemeval/extraction/extraction-fill.js";
+  "../../../bench/extraction/extraction-fill.js";
 import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion as buildExtractionFillQuestion,

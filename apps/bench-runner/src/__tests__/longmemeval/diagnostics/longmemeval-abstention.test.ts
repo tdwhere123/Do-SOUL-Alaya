@@ -3,15 +3,15 @@ import {
   isAbstentionQuestionId,
   resolvePremiseInvalid,
   scoreAbstentionQuestion
-} from "../../../longmemeval/diagnostics/abstention.js";
+} from "../../../bench/diagnostics/abstention.js";
 import {
   ABSTENTION_FUSED_MARGIN_SCALE,
   computeAbstentionConfidenceScore
-} from "../../../longmemeval/diagnostics/abstention-confidence.js";
+} from "../../../bench/diagnostics/abstention-confidence.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildLongMemEvalSidecarKey,
   resolveLongMemEvalHitVerdict

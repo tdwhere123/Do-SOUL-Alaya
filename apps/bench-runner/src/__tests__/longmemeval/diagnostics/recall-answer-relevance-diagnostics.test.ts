@@ -3,7 +3,7 @@ import {
   BenchRecallDiagnosticsSchema,
   parseBenchRecallDiagnosticsForRun
 } from "../../../harness/recall/recall-diagnostics-schema.js";
-import { buildQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
+import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
 
 const fusionStreams = [
   "lexical_fts",

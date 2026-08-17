@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertSnapshotAnswersWithFormation } from
-  "../../../longmemeval/snapshot/current/snapshot-answers-with-formation.js";
+  "../../../bench/snapshot/current/snapshot-answers-with-formation.js";
 
 const roots: string[] = [];
 

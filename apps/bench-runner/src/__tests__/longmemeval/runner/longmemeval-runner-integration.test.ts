@@ -14,21 +14,17 @@ import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   readLongMemEvalDiagnosticsSidecar
-} from "../../../longmemeval/archive/archive-evidence.js";
-import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/archive/archive-evidence.js";
+import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../bench/provenance/evidence-manifest.js";
 
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 
-import { QaChatError } from "../../../longmemeval/qa/qa-chat.js";
+import { QaChatError } from "../../../bench/qa/qa-chat.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-
-import { runLongMemEvalMultiturn } from "../../../longmemeval/multiturn.js";
-
-import { runLongMemEvalCrossQuestion } from "../../../longmemeval/crossquestion.js";
+} from "../../../bench/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,

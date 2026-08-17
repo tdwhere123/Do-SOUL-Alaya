@@ -1,4 +1,5 @@
 import type { EdgeProposalKpiEventRow, PerScenarioRow } from "@do-soul/alaya-eval";
+import { logSeedExtractionStats } from "../../../bench/seed.js";
 import type {
   BenchEmbeddingWarmupSummary,
   BenchQueryEmbeddingWarmupSummary,
@@ -8,14 +9,14 @@ import type { BenchRecallTokenEconomy } from "../../../harness/recall/recall-dia
 import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReportSideEffectSnapshot
-} from "../../diagnostics.js";
-import type { QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { CompileSeedExtractionStats } from "../../compile-seed.js";
+} from "../../../bench/diagnostics.js";
+import type { QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
 import type { LongMemEvalWorkerResult } from "../question/runner-question.js";
 import {
   classifyQuestionMeasurementCohort,
   classifyQuestionMeasurementStatus
-} from "../../measurement/question-validity.js";
+} from "../../../bench/measurement/question-validity.js";
 
 export interface LongMemEvalRunArchiveAggregate {
   readonly perScenario: PerScenarioRow[];
@@ -50,14 +51,7 @@ export interface LongMemEvalRunArchiveAggregate {
 export function logLongMemEvalExtractionStats(
   extractionStats: CompileSeedExtractionStats
 ): void {
-  process.stdout.write(
-    `[longmemeval compile-seed] path=${extractionStats.path} ` +
-      `cache_hits=${extractionStats.cacheHits} ` +
-      `llm_calls=${extractionStats.llmCalls} ` +
-      `offline_fallbacks=${extractionStats.offlineFallbacks} ` +
-      `facts=${extractionStats.factsProduced} ` +
-      `signals_dropped=${extractionStats.signalsDropped}\n`
-  );
+  logSeedExtractionStats("longmemeval", extractionStats);
 }
 
 export function aggregateLongMemEvalRunResults(

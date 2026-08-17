@@ -12,7 +12,7 @@ import {
 import { openContainedArtifact } from "../../cli/merge/contained-artifact-path.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import type { CapturedSnapshotExtractionAuthority } from
-  "../snapshot/extraction-authority.js";
+  "../../bench/snapshot/extraction-authority.js";
 import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability

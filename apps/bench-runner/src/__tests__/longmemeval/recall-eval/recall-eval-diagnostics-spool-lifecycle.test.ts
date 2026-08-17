@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecallEvalQuestionResult } from
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-contract.js";
+  "../../../bench/lifecycle/recall-eval/recall-eval-contract.js";
 
 const mocks = vi.hoisted(() => ({
   append: vi.fn(),
@@ -43,27 +43,27 @@ vi.mock("../../../harness/recall/recall-weight-overrides.js", () => ({
   formatBenchRecallWeightOverrides: vi.fn(),
   resolveBenchRecallWeightOverrides: vi.fn(() => undefined)
 }));
-vi.mock("../../../longmemeval/recall-eval-kpi.js", () => ({
+vi.mock("../../../bench/recall-eval-kpi.js", () => ({
   assembleRecallEvalKpi: vi.fn(() => ({
     bench_name: "public", split: "fixture", run_at: "2026-08-12T00:00:00.000Z",
     alaya_commit: "1749d78", evaluated_count: 1, dataset: {}
   }))
 }));
-vi.mock("../../../longmemeval/kpi/recall-eval-archive.js", () => ({
+vi.mock("../../../bench/kpi/recall-eval-archive.js", () => ({
   buildPerQuestionDelivered: vi.fn(() => new Map()),
   buildRecallEvalArchiveSlug: vi.fn(() => "fixture-slug")
 }));
 vi.mock(
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-archive-impl.js",
+  "../../../bench/lifecycle/recall-eval/recall-eval-archive-impl.js",
   () => ({ selectRecallEvalBaseline: vi.fn(async () => null) })
 );
-vi.mock("../../../longmemeval/snapshot/materialize.js", () => ({
+vi.mock("../../../bench/snapshot/materialize.js", () => ({
   snapshotQuestionIdDigest: vi.fn(() => "a".repeat(64))
 }));
-vi.mock("../../../longmemeval/lifecycle/owned-temp-root.js", () => ({
+vi.mock("../../../bench/lifecycle/owned-temp-root.js", () => ({
   finalizeOwnedTempRoot: mocks.finalizeOwnedRoot
 }));
-vi.mock("../../../longmemeval/lifecycle/errors.js", () => ({
+vi.mock("../../../bench/lifecycle/errors.js", () => ({
   boundLifecycleFailure: vi.fn((phase: string, error: unknown) => ({
     phase,
     name: error instanceof Error ? error.name : "UnknownError",
@@ -77,24 +77,24 @@ vi.mock("../../../longmemeval/lifecycle/errors.js", () => ({
   })
 }));
 vi.mock(
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-progress.js",
+  "../../../bench/lifecycle/recall-eval/recall-eval-progress.js",
   () => ({ writeRecallEvalProgress: vi.fn() })
 );
 vi.mock(
-  "../../../longmemeval/provenance/recall-eval/recall-eval-archive-bundle.js",
+  "../../../bench/provenance/recall-eval/recall-eval-archive-bundle.js",
   () => ({ buildRecallEvalArchiveBundle: mocks.archive })
 );
 vi.mock(
-  "../../../longmemeval/provenance/recall-eval/recall-eval-run.js",
+  "../../../bench/provenance/recall-eval/recall-eval-run.js",
   () => ({
     buildRecallEvalRunProvenance: vi.fn(async () => ({})),
     isRecallEvalRunEvidenceEligible: vi.fn(() => false)
   })
 );
-vi.mock("../../../longmemeval/measurement/artifact-transaction.js", () => ({
+vi.mock("../../../bench/measurement/artifact-transaction.js", () => ({
   withPublishedDiagnosticsArtifact: mocks.published
 }));
-vi.mock("../../../longmemeval/measurement/recall-eval-memory-profile.js", () => ({
+vi.mock("../../../bench/measurement/recall-eval-memory-profile.js", () => ({
   withRecallEvalMemoryProfile: vi.fn(async (_options, run) => {
     const profile = mocks.profileEnabled ? {
       sample: mocks.profileSample,
@@ -111,14 +111,14 @@ vi.mock("../../../longmemeval/measurement/recall-eval-memory-profile.js", () => 
   })
 }));
 vi.mock(
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-run-context.js",
+  "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js",
   () => ({ prepareRecallEvalRunContext: mocks.prepareContext })
 );
-vi.mock("../../../longmemeval/kpi/recall-eval-report.js", () => ({
+vi.mock("../../../bench/kpi/recall-eval-report.js", () => ({
   renderRecallEvalReport: vi.fn(() => "# report\n")
 }));
 vi.mock(
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-selection-replay.js",
+  "../../../bench/lifecycle/recall-eval/recall-eval-selection-replay.js",
   () => ({
     RECALL_EVAL_SELECTION_BOUNDARY_FILENAME: "selection.ndjson.gz",
     captureRecallEvalQuestion: vi.fn(async (_spool, _questionId, run) => {
@@ -130,16 +130,16 @@ vi.mock(
   })
 );
 vi.mock(
-  "../../../longmemeval/lifecycle/recall-eval/question/recall-eval-question.js",
+  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js",
   () => ({ recallEvalOneQuestion: mocks.question })
 );
 vi.mock(
-  "../../../longmemeval/provenance/recall-eval/recall-eval-diagnostics-spool.js",
+  "../../../bench/provenance/recall-eval/recall-eval-diagnostics-spool.js",
   () => ({ RecallEvalDiagnosticsSpool: { create: mocks.createSpool } })
 );
 
 import { runRecallEval } from
-  "../../../longmemeval/lifecycle/recall-eval/recall-eval-impl.js";
+  "../../../bench/lifecycle/recall-eval/recall-eval-impl.js";
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) =>

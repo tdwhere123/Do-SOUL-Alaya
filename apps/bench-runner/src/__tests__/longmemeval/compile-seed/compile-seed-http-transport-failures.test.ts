@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGardenHttpExtractor } from "../../../longmemeval/compile-seed.js";
+import { createGardenHttpExtractor } from "../../../bench/compile-seed.js";
 import type {
   BenchTransportFailureAttempt,
   CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed/compile-seed-types.js";
+} from "../../../bench/compile-seed/compile-seed-types.js";
 import {
   readBoundedGardenHttpErrorBody
-} from "../../../longmemeval/compile-seed/http/garden-http-error-body.js";
+} from "../../../bench/compile-seed/http/garden-http-error-body.js";
 
 const HTTP_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://provider.invalid/v1",

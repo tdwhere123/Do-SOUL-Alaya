@@ -1,6 +1,6 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
-import { buildPerPlaneRecallCoverage, ratio } from "../../../longmemeval/diagnostics/quality/diagnostics-quality-helpers.js";
-import { createEmptyMissTaxonomyDistribution } from "../../../longmemeval/diagnostics/miss/diagnostics-miss-taxonomy.js";
+import { buildPerPlaneRecallCoverage, ratio } from "../../../bench/diagnostics/quality/diagnostics-quality-helpers.js";
+import { createEmptyMissTaxonomyDistribution } from "../../../bench/diagnostics/miss/diagnostics-miss-taxonomy.js";
 import {
   accumulateMeasurementAccounting,
   buildMeasurementAccounting,

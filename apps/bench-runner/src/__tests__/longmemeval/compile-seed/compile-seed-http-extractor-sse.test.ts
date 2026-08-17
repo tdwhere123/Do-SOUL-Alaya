@@ -20,7 +20,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG

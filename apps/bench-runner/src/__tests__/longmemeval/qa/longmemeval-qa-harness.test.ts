@@ -5,15 +5,15 @@ import {
   judgeIsCorrect,
   scoreQaQuestion,
   type QaQuestionVerdict
-} from "../../../longmemeval/qa/qa-harness.js";
-import type { QaChatFn } from "../../../longmemeval/qa/qa-chat.js";
+} from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import {
   QA_ENV_API_KEY,
   QA_ENV_MODEL,
   QA_ENV_PROVIDER_URL,
   createGardenChatFn,
   resolveQaChatConfig
-} from "../../../longmemeval/qa/qa-chat.js";
+} from "../../../bench/qa/qa-chat.js";
 
 // A fake chat fn that records every (system,user) call and replays scripted
 // replies. Zero network, zero cost — the whole point of the --qa unit gate.

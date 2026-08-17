@@ -21,16 +21,16 @@ import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
-} from "../../../longmemeval/archive/archive-evidence.js";
+} from "../../../bench/archive/archive-evidence.js";
 import {
   type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalQueryEmbeddingCacheSummary
-} from "../../../longmemeval/diagnostics.js";
-import { resolveBenchDiagnosticsArtifactRoot } from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../bench/diagnostics.js";
+import { resolveBenchDiagnosticsArtifactRoot } from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
-} from "../../../longmemeval/selection/cohort-ledger.js";
+} from "../../../bench/selection/cohort-ledger.js";
 import {
   buildMergedEvidenceManifest
 } from "../merged/merged-evidence-manifest.js";
@@ -38,16 +38,16 @@ import {
   buildMergedRunProvenanceSidecars,
   resolveMergedRequestedConcurrency,
   type MergedRunProvenanceSidecars
-} from "../../../longmemeval/provenance/shard-aggregate.js";
-import type { LoadedGlobalExtractionAuthority } from "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
-import { buildBenchmarkMeasurementAttribution } from "../../../longmemeval/measurement/attribution.js";
-import { assertMeasurementCohortBinding } from "../../../longmemeval/measurement/cohort-binding.js";
-import { prepareDiagnosticsArtifactStagingPath } from "../../../longmemeval/measurement/artifact-transaction.js";
+} from "../../../bench/provenance/shard-aggregate.js";
+import type { LoadedGlobalExtractionAuthority } from "../../../bench/provenance/contract/extraction-authority-reference.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { buildBenchmarkMeasurementAttribution } from "../../../bench/measurement/attribution.js";
+import { assertMeasurementCohortBinding } from "../../../bench/measurement/cohort-binding.js";
+import { prepareDiagnosticsArtifactStagingPath } from "../../../bench/measurement/artifact-transaction.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
-} from "../../../longmemeval/extraction/seed-fuel/seed-extraction-release-blocker.js";
+} from "../../../bench/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import {
   aggregateEmbeddingVectorCache,
   aggregateQueryEmbeddingCache,
@@ -62,7 +62,7 @@ import { hasVerifiedShardEvidence } from "../shard/shard-evidence-verifier.js";
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
 import { publishMergedArchive } from "../archive-publisher.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from

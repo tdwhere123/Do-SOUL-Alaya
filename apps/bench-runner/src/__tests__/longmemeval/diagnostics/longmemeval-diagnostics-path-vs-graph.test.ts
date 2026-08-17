@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLongMemEvalQualityMetrics,
   type LongMemEvalQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture

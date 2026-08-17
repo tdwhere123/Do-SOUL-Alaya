@@ -11,15 +11,15 @@ import {
   createCachingSignalExtractor,
   createGardenHttpExtractor,
   type BenchSignalExtractor
-} from "../../../../longmemeval/compile-seed.js";
+} from "../../../../bench/compile-seed.js";
 import { cacheFilePath, computeSourceTurnCacheKey } from
-  "../../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../../bench/compile-seed/compile-seed-cache.js";
 import { extractLiveDelegate } from
-  "../../../../longmemeval/extraction/cache/cache-live-delegate.js";
+  "../../../../bench/extraction/cache/cache-live-delegate.js";
 import { openExtractionAttemptLedger } from
-  "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../../bench/extraction/authority/attempt-ledger.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../../longmemeval/extraction/authority/receipt-limits.js";
+  "../../../../bench/extraction/authority/receipt-limits.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest

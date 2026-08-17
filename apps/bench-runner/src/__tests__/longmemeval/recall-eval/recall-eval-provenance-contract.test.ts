@@ -7,15 +7,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildRecallEvalRunProvenance,
   isRecallEvalRunEvidenceEligible
-} from "../../../longmemeval/provenance/recall-eval/recall-eval-run.js";
-import { resolveLocalArtifactTreeSha256 } from "../../../longmemeval/provenance/embedding/local-onnx.js";
+} from "../../../bench/provenance/recall-eval/recall-eval-run.js";
+import { resolveLocalArtifactTreeSha256 } from "../../../bench/provenance/embedding/local-onnx.js";
 import {
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
-} from "../../../longmemeval/provenance/run.js";
-import type { RecallEvalRuntimeAttribution } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
-import { buildEffectiveRecallConfigIdentity } from "../../../longmemeval/provenance/effective-recall-config.js";
-import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/provenance/run.js";
+import type { RecallEvalRuntimeAttribution } from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import { buildEffectiveRecallConfigIdentity } from "../../../bench/provenance/effective-recall-config.js";
+import type { LongMemEvalSnapshotManifest } from "../../../bench/snapshot/materialize.js";
 import {
   DATASET_SHA,
   dataset,
@@ -25,8 +25,8 @@ import { syntheticExtractionClosure } from "../extraction/extraction-closure-fix
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary
-} from "../../../longmemeval/snapshot/extraction-authority.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+} from "../../../bench/snapshot/extraction-authority.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 
 const archived = LongMemEvalRunProvenanceSchema.parse(provenance(false));
 const EXTRACTION_CLOSURE = syntheticExtractionClosure({

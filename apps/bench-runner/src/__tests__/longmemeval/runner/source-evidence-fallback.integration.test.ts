@@ -10,7 +10,7 @@ import {
 } from "../../../harness/daemon.js";
 import {
   createCompileSeedRunner
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import { seedLongMemEvalQuestion } from
@@ -20,9 +20,9 @@ import { scoreLongMemEvalRecallHits } from
 import { buildLongMemEvalSnapshotQuestion } from
   "../../../longmemeval/runner/question/runner-question-result.js";
 import { assertSnapshotDatasetSubstrateIdentity } from
-  "../../../longmemeval/snapshot/substrate-binding.js";
+  "../../../bench/snapshot/substrate-binding.js";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
-  "../../../longmemeval/snapshot/materialize.js";
+  "../../../bench/snapshot/materialize.js";
 import { CREDENTIALLED_CONFIG, withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from

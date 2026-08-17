@@ -5,12 +5,12 @@ import {
 import {
   createExtractionRequestPlanDeadline,
   resolveExtractionRequestPlanBudget
-} from "../../../longmemeval/extraction/fill/policy/provider-request-plan-budget.js";
+} from "../../../bench/extraction/fill/policy/provider-request-plan-budget.js";
 import {
   resolveExtractionFillProviderTimeBudget
-} from "../../../longmemeval/extraction/fill/policy/provider-time-budget.js";
+} from "../../../bench/extraction/fill/policy/provider-time-budget.js";
 import { createGardenHttpExtractor } from
-  "../../../longmemeval/compile-seed/compile-seed-http.js";
+  "../../../bench/compile-seed/compile-seed-http.js";
 
 afterEach(() => vi.useRealTimers());
 

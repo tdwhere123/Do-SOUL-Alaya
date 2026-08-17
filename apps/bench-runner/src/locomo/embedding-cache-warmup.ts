@@ -1,3 +1,4 @@
+import { warmDocumentEmbeddingCaches } from "../bench/embedding-warmup.js";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingWarmupSummary,
@@ -7,7 +8,6 @@ import type {
 
 export interface LocomoEmbeddingCacheWarmup {
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
-  // Always null: query encode belongs inside the timed recall window.
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
 }
 
@@ -26,10 +26,13 @@ export async function warmLocomoEmbeddingCaches(input: {
   readonly queryTexts: readonly string[];
 }): Promise<LocomoEmbeddingCacheWarmup> {
   void input.queryTexts;
-  if (input.embeddingMode !== "env") {
-    return { embeddingWarmup: null, queryEmbeddingWarmup: null };
-  }
-  const embeddingWarmup = await input.workspace.warmEmbeddingCache(input.objectIds);
-  // Do not call warmQueryEmbeddingCache: encode must land in the timed recall.
-  return { embeddingWarmup, queryEmbeddingWarmup: null };
+  const warmed = await warmDocumentEmbeddingCaches({
+    embeddingMode: input.embeddingMode,
+    workspace: input.workspace,
+    objectIds: input.objectIds
+  });
+  return {
+    embeddingWarmup: warmed.embeddingWarmup,
+    queryEmbeddingWarmup: warmed.queryEmbeddingWarmup
+  };
 }

@@ -11,32 +11,32 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../../../harness/token/token-economy.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
-import { aggregateRecallTokenEconomy } from "../../qa/recall-token-economy.js";
+import { aggregateRecallTokenEconomy } from "../../../bench/qa/recall-token-economy.js";
 import {
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeProviderStates
-} from "../../diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import { buildLongMemEvalDetailedGoldCoverage } from
-  "../../diagnostics/diagnostics-full-gold-coverage.js";
+  "../../../bench/diagnostics/diagnostics-full-gold-coverage.js";
 import {
   aggregateQaVerdicts,
   buildQaDeliverySettings
-} from "../../qa/qa-harness.js";
+} from "../../../bench/qa/qa-harness.js";
 import {
   computePercentile,
   summarizeEmbeddingVectorCache,
   summarizeQueryEmbeddingCache
 } from "../runner-helpers.js";
 import type { LongMemEvalRunOptions } from "../../runner.js";
-import { toSeedExtractionPathKpi, type CompileSeedExtractionStats } from "../../compile-seed.js";
-import { toSeedFuelInventoryKpi } from "../../extraction/seed-fuel/seed-fuel-inventory-kpi.js";
+import { toSeedExtractionPathKpi, type CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
+import { toSeedFuelInventoryKpi } from "../../../bench/extraction/seed-fuel/seed-fuel-inventory-kpi.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 import {
   assertSelectionCohortBinding,
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../selection/contract.js";
+} from "../../../bench/selection/contract.js";
 
 const LONGMEMEVAL_SEED_POLICY = Object.freeze({
   mode: "label_independent_open_vocabulary_extraction",
@@ -67,7 +67,7 @@ export function buildLongMemEvalRunPayload(input: {
   readonly selectionContract: LongMemEvalSelectionContract;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly extractionStats: CompileSeedExtractionStats;
-  readonly seedFuelInventory: import("../../extraction/seed-fuel/seed-fuel-inventory.js").SeedFuelInventory;
+  readonly seedFuelInventory: import("../../../bench/extraction/seed-fuel/seed-fuel-inventory.js").SeedFuelInventory;
   readonly alayaVersion: string;
   readonly commitSha7: string;
   readonly runAt: Date;

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   copyRegularFileNoFollow,
   readRegularFileNoFollow
-} from "../../../longmemeval/snapshot/bound-file.js";
+} from "../../../bench/snapshot/bound-file.js";
 
 const roots: string[] = [];
 

@@ -3,8 +3,8 @@ import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-import { readRecallDiagnostics } from "../../../longmemeval/diagnostics/schema/diagnostics-private.js";
+} from "../../../bench/diagnostics.js";
+import { readRecallDiagnostics } from "../../../bench/diagnostics/schema/diagnostics-private.js";
 import { buildLongMemEvalArchivePayload } from "./longmemeval-runner-fixture.js";
 
 function answerFeatures(content: string) {

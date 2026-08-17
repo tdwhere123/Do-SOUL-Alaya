@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   runIsolatedQuestionSequence,
   type IsolatedQuestionSequenceInput
-} from "../../../longmemeval/lifecycle/question-isolated-execution.js";
+} from "../../../bench/lifecycle/question-isolated-execution.js";
 import {
   emptySeedFuelInventory,
   mergeSeedFuelInventories,
   type SeedFuelInventory
-} from "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
+} from "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 
 interface TestDaemon {
   readonly db: DatabaseSync;

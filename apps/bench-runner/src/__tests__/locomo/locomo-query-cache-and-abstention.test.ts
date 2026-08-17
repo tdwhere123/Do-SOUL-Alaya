@@ -12,7 +12,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { runLocomo } from "../../locomo/runner.js";
 import { buildLongMemEvalQualityMetrics } from
-  "../../longmemeval/diagnostics/quality/diagnostics-quality.js";
+  "../../bench/diagnostics/quality/diagnostics-quality.js";
 import { promotionMeasurementDiagnostic } from
   "../longmemeval/recall-eval/specialized-answerable-recall-fixture.js";
 

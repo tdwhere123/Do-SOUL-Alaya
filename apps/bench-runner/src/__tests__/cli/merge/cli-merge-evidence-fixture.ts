@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   buildLongMemEvalEvidenceManifest,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/provenance/evidence-manifest.js";
 import {
   makeShardDiagnostics,
   makeShardKpi,
@@ -18,9 +18,9 @@ import {
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { computeQuestionIdDigest } from "../../../longmemeval/selection/question-manifest.js";
-import { computeCohortAssignmentDigest } from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { computeQuestionIdDigest } from "../../../bench/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../../bench/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 import { syntheticExtractionClosure } from "../../longmemeval/extraction/extraction-closure-fixture.js";
 

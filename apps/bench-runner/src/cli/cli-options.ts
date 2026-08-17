@@ -33,7 +33,6 @@ export interface ParsedFlags {
   readonly historyRoot: string;
   readonly dataDir?: string;
   readonly shards?: ReadonlyArray<string>;
-  readonly source?: string;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly policyShape: BenchPolicyShape;
@@ -50,20 +49,14 @@ export interface ParsedFlags {
   readonly extractionCacheRoot?: string;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
-  /** Audited missing-key allowlist accepted only by authorize-extraction. */
-  readonly catalogRefillAllowlist?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
   readonly extractionTargetSelection?: string;
   readonly extractionPredecessorAuthority?: string;
-  readonly promotionContract?: string;
   readonly r3SpendApproval?: string;
   readonly concurrency?: number;
   readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
   readonly tolerateProviderTaskFailures: boolean;
-  readonly legacySnapshot: boolean;
-  readonly legacyManifestSha256?: string;
-  readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
   readonly backfillMissingFactFrameFormations?: boolean;
@@ -86,7 +79,6 @@ export interface ParsedFlagsState {
   offset?: number;
   historyRoot: string;
   dataDir?: string;
-  source?: string;
   embeddingMode: BenchEmbeddingMode;
   embeddingProviderKind: BenchEmbeddingProviderKind;
   policyShape: BenchPolicyShape;
@@ -102,18 +94,13 @@ export interface ParsedFlagsState {
   questionManifest?: string;
   extractionCacheRoot?: string;
   extractionAuthority?: string;
-  catalogRefillAllowlist?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
-  promotionContract?: string;
   r3SpendApproval?: string;
   concurrency?: number;
   extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
   tolerateProviderTaskFailures: boolean;
-  legacySnapshot: boolean;
-  legacyManifestSha256?: string;
-  legacyDatasetSha256?: string;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
   backfillMissingFactFrameFormations: boolean;
@@ -131,7 +118,6 @@ export interface ParsedFlagsState {
 
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
-  assertFlagAtMostOnce(args, "--catalog-refill-allowlist");
   assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
   assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
@@ -165,7 +151,6 @@ function createParsedFlagsState(): ParsedFlagsState {
     rebuildEvidenceSearchProjections: false,
     backfillMissingFactFrameFormations: false,
     tolerateProviderTaskFailures: false,
-    legacySnapshot: false,
     shards: [],
     collectingShards: false
   };
@@ -315,8 +300,6 @@ function consumeOtherPathFlags(
 ): number | undefined {
   const promotionEvidenceIndex = consumePromotionEvidencePathFlags(args, index, token, state);
   if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
-  const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
-  if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
   const recallEvalIndex = consumeRecallEvalPathFlag(args, index, token, state);
   if (recallEvalIndex !== undefined) return recallEvalIndex;
   if (token === "--data-dir") {
@@ -346,16 +329,6 @@ function consumeOtherPathFlags(
       token,
       "--extraction-authority",
       "--extraction-authority requires a receipt path"
-    );
-    return nextIndex(index, token);
-  }
-  if (matchFlagToken(token, "--catalog-refill-allowlist")) {
-    state.catalogRefillAllowlist = readRequiredFlagValue(
-      args,
-      index,
-      token,
-      "--catalog-refill-allowlist",
-      "--catalog-refill-allowlist requires an allowlist path"
     );
     return nextIndex(index, token);
   }
@@ -400,29 +373,6 @@ function consumeOtherPathFlags(
     state.questionBatchLimit = parsePositiveInt(
       readFlagValue(args, index, token, "--question-batch-limit"),
       "--question-batch-limit"
-    );
-    return nextIndex(index, token);
-  }
-  return undefined;
-}
-
-function consumeLegacyIdentityFlags(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number | undefined {
-  if (matchFlagToken(token, "--legacy-manifest-sha256")) {
-    state.legacyManifestSha256 = readRequiredFlagValue(
-      args, index, token, "--legacy-manifest-sha256",
-      "--legacy-manifest-sha256 requires a SHA-256 value"
-    );
-    return nextIndex(index, token);
-  }
-  if (matchFlagToken(token, "--legacy-dataset-sha256")) {
-    state.legacyDatasetSha256 = readRequiredFlagValue(
-      args, index, token, "--legacy-dataset-sha256",
-      "--legacy-dataset-sha256 requires a SHA-256 value"
     );
     return nextIndex(index, token);
   }

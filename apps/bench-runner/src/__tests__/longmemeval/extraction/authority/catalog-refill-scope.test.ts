@@ -6,11 +6,11 @@ import {
   assertCatalogRefillRootBinding,
   assertCatalogRefillScopeMatchesInspection,
   createExtractionCatalogRefillScope
-} from "../../../../longmemeval/extraction/authority/catalog-refill/scope.js";
+} from "../../../../bench/extraction/authority/catalog-refill/scope.js";
 import { createExtractionAuthorityReceipt } from
-  "../../../../longmemeval/extraction/authority/receipt.js";
+  "../../../../bench/extraction/authority/receipt.js";
 import type { ExtractionAuthorityInspection } from
-  "../../../../longmemeval/extraction/authority/inspection.js";
+  "../../../../bench/extraction/authority/inspection.js";
 
 const roots: string[] = [];
 const firstKey = "1".repeat(64);

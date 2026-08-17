@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CompileSeedExtractionStats } from
-  "../../../longmemeval/compile-seed.js";
+  "../../../bench/compile-seed.js";
 import { buildRoundExtractionLedger } from
   "../../../longmemeval/runner/question/seed-round-extraction-ledger.js";
 

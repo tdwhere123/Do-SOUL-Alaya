@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { publishBytesExclusiveDurable } from
-  "../../longmemeval/extraction/fill/manifest/durable-exclusive-publication.js";
+  "../../bench/extraction/fill/manifest/durable-exclusive-publication.js";
 
 interface DurableExclusiveOutputInput {
   readonly outputPath: string;

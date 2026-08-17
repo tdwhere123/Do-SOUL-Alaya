@@ -6,13 +6,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   readExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
+} from "../../../bench/extraction/extraction-fill.js";
 import type {
   BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type {
   LongMemEvalQuestion
 } from "../../../longmemeval/ingestion/dataset.js";

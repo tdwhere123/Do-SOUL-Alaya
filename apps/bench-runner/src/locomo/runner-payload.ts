@@ -11,48 +11,35 @@ import type { BenchEmbeddingMode } from "../harness/daemon.js";
 import {
   aggregateQaVerdicts,
   buildQaDeliverySettings
-} from "../longmemeval/qa/qa-harness.js";
-import type { CompileSeedExtractionStats } from "../longmemeval/compile-seed.js";
-import { toSeedExtractionPathKpi } from "../longmemeval/compile-seed.js";
+} from "../bench/qa/qa-harness.js";
+import type { CompileSeedExtractionStats } from "../bench/compile-seed.js";
+import { toSeedExtractionPathKpi } from "../bench/compile-seed.js";
 import {
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar
-} from "../longmemeval/diagnostics.js";
+} from "../bench/diagnostics.js";
 import { buildLongMemEvalDetailedGoldCoverage } from
-  "../longmemeval/diagnostics/diagnostics-full-gold-coverage.js";
-import { aggregateRecallTokenEconomy } from "../longmemeval/qa/recall-token-economy.js";
+  "../bench/diagnostics/diagnostics-full-gold-coverage.js";
+import { aggregateRecallTokenEconomy } from "../bench/qa/recall-token-economy.js";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
+import {
+  computePercentile,
+  summarizeEmbeddingVectorCache,
+  summarizeQueryEmbeddingCache
+} from "../bench/summaries.js";
 import type { LocomoSample } from "./dataset.js";
 import type { LocomoConversationAggregate } from "./runner-window.js";
 import type { LocomoRunOptions } from "./runner-types.js";
-import {
-  computePercentile,
-  resolveLocomoSampleSize,
-  summarizeEmbeddingVectorCache,
-  summarizeQueryEmbeddingCache
-} from "./runner-utils.js";
+import { resolveLocomoSampleSize } from "./runner-utils.js";
 
 const LOCOMO_SOURCE_URL = "https://github.com/snap-research/locomo/blob/main/data/locomo10.json";
 
 export interface LocomoPayloadBuild {
   readonly payload: KpiPayload;
   readonly diagnosticsPayload: LongMemEvalDiagnosticsSidecar;
-}
-
-export function logLocomoSeedExtractionStats(
-  extractionStats: CompileSeedExtractionStats
-): void {
-  process.stdout.write(
-    `[locomo compile-seed] path=${extractionStats.path} ` +
-      `cache_hits=${extractionStats.cacheHits} ` +
-      `llm_calls=${extractionStats.llmCalls} ` +
-      `offline_fallbacks=${extractionStats.offlineFallbacks} ` +
-      `facts=${extractionStats.factsProduced} ` +
-      `signals_dropped=${extractionStats.signalsDropped}\n`
-  );
 }
 
 export function buildLocomoPayload(input: {

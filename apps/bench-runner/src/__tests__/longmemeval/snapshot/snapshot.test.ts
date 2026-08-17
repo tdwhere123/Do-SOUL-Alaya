@@ -21,8 +21,8 @@ import {
   writeSnapshotSidecar,
   type LongMemEvalSnapshotManifest,
   type SnapshotExtractionProvenanceV3
-} from "../../../longmemeval/snapshot/materialize.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/snapshot/materialize.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
 // copy, version binding, and sidecar/manifest round-trip. Uses a freshly

@@ -7,7 +7,7 @@ import type { SeededObjectResult } from
 import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 
 /**
  * A test CompileSeedDaemon stub. The compile (credentialled) seed path

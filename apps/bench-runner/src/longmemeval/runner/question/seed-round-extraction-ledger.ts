@@ -1,5 +1,5 @@
-import type { CompileSeedExtractionStats } from "../../compile-seed.js";
-import type { LongMemEvalSnapshotSeedRound } from "../../snapshot/materialize.js";
+import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
+import type { LongMemEvalSnapshotSeedRound } from "../../../bench/snapshot/materialize.js";
 
 export function buildRoundExtractionLedger(
   stats: CompileSeedExtractionStats

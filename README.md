@@ -80,11 +80,11 @@ The v0.3.11 bench surface is published through
 
 | Root | `bench_name` / `split` | Release use |
 |---|---|---|
-| `public/` | `public` / `longmemeval-s` | LongMemEval-S single-turn recall. |
-| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | Repeated recall plus `soul.report_context_usage` rounds. |
-| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Cross-question LongMemEval-S recall. |
-| `public-locomo/` | `public-locomo` / `locomo10` | LoCoMo full recall gates, embedding-off and local ONNX embedding-on. |
-| `live/` | `live` / `strict-real` | Sanitized strict-real live-check imports. |
+| `public/` | `public` / `longmemeval-s` | Operator LongMemEval-S single-turn recall. |
+| `public-locomo/` | `public-locomo` / `locomo10` | Operator LoCoMo recall gates, embedding-off and local ONNX embedding-on. |
+| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | Historical archive only; runner retired. |
+| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Historical archive only; runner retired. |
+| `live/` | `live` / `strict-real` | Historical archive only; runner retired. |
 
 Every archive write updates `latest-run*.json`. Only a run with no
 findings and passing executable hard gates updates
@@ -104,19 +104,11 @@ The core release runs are reproducible by:
 # LongMemEval-S single-turn sharded embedding-off gate.
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --embedding disabled --shards 2 --data-dir <shared-cache>/longmemeval
 
-# LongMemEval-S multiturn and cross-question Tier 1 runs.
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --embedding disabled --data-dir <shared-cache>/longmemeval
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --embedding disabled --data-dir <shared-cache>/longmemeval
-
 # LoCoMo embedding-off gate.
 apps/bench-runner/scripts/run-full-locomo-bench.sh --embedding disabled --data-dir <shared-cache>/locomo
 
 # LoCoMo local ONNX embedding-on gate.
 ALAYA_LOCAL_EMBEDDING_CACHE_DIR=<user-cache> node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --embedding env --embedding-provider local_onnx --data-dir <shared-cache>/locomo
-
-# Local smoke/import surfaces.
-node apps/bench-runner/bin/alaya-bench-runner.mjs self
-node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
 Checkpoint note (2026-06-04): v0.3.11 is implementation complete but the full

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import { buildSnapshotMeasurementOracle } from
-  "../../../longmemeval/snapshot/measurement-oracle.js";
+  "../../../bench/snapshot/measurement-oracle.js";
 
 describe("snapshot measurement oracle", () => {
   it("matches live scoring when a canonical question repeats a session id", () => {

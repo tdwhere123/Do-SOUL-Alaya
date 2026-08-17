@@ -3,13 +3,13 @@ import {
   drainAuditedAsyncSideEffects,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
-import { createLongMemEvalSelectionContractFromAssignments } from "../../../longmemeval/selection/contract.js";
+import { createLongMemEvalSelectionContractFromAssignments } from "../../../bench/selection/contract.js";
 import { executeLongMemEvalRun } from "../../../longmemeval/runner/runner-execution.js";
 import type { LongMemEvalRunContext } from "../../../longmemeval/runner/prepare-context.js";
 import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { emptySeedFuelInventory } from
-  "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
+  "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -42,10 +42,10 @@ interface SnapshotPolicyDrift {
 vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: mocks.startDaemon
 }));
-vi.mock("../../../longmemeval/extraction/seed-fuel/seed-fuel-collector.js", () => ({
+vi.mock("../../../bench/extraction/seed-fuel/seed-fuel-collector.js", () => ({
   collectBenchSeedFuelInventory: mocks.collectInventory
 }));
-vi.mock("../../../longmemeval/snapshot/quiescence.js", () => ({
+vi.mock("../../../bench/snapshot/quiescence.js", () => ({
   awaitLongMemEvalSnapshotQuiescence: mocks.quiesce
 }));
 vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({
@@ -57,11 +57,11 @@ vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({
 vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
   writeRecallEvalSnapshot: mocks.writeSnapshot
 }));
-vi.mock("../../../longmemeval/provenance/run.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../longmemeval/provenance/run.js")>(),
+vi.mock("../../../bench/provenance/run.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../bench/provenance/run.js")>(),
   buildLongMemEvalRunProvenance: mocks.buildProvenance
 }));
-vi.mock("../../../longmemeval/snapshot/current/current-substrate-authority.js", () => ({
+vi.mock("../../../bench/snapshot/current/current-substrate-authority.js", () => ({
   assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority,
   assertCurrentPostFillCacheAuthorityProof: mocks.snapshotAuthorityProof
 }));

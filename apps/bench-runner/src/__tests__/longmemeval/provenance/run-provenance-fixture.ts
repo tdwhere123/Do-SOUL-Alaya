@@ -8,16 +8,16 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   buildLongMemEvalRunProvenance,
   buildLongMemEvalRunProvenanceSidecar
-} from "../../../longmemeval/provenance/run.js";
+} from "../../../bench/provenance/run.js";
 import {
   createLongMemEvalSelectionContract,
   selectionContractIdentity
-} from "../../../longmemeval/selection/contract.js";
-import { createStratifiedQuestionManifest } from "../../../longmemeval/selection/question-manifest.js";
+} from "../../../bench/selection/contract.js";
+import { createStratifiedQuestionManifest } from "../../../bench/selection/question-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 
 const EXTRACTION_CLOSURE = syntheticExtractionClosure({

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeLongMemEvalRun } from "../../../longmemeval/runner/runner-execution.js";
 import type { LongMemEvalRunContext } from "../../../longmemeval/runner/prepare-context.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
-import { createLongMemEvalSelectionContractFromAssignments } from "../../../longmemeval/selection/contract.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { createLongMemEvalSelectionContractFromAssignments } from "../../../bench/selection/contract.js";
 
 const mocks = vi.hoisted(() => ({
   collectInventory: vi.fn(),
@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: mocks.startDaemon
 }));
-vi.mock("../../../longmemeval/extraction/seed-fuel/seed-fuel-collector.js", () => ({
+vi.mock("../../../bench/extraction/seed-fuel/seed-fuel-collector.js", () => ({
   collectBenchSeedFuelInventory: mocks.collectInventory
 }));
 vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({

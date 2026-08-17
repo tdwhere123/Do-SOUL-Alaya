@@ -8,10 +8,8 @@ import { measurementUnscorableReason } from "../../../../scripts/longmemeval-rep
 import {
   HASH,
   candidate,
-  cliPath,
   cohortRow,
   contract,
-  execFileAsync,
   qualityAxes,
   question,
   sha,
@@ -400,25 +398,5 @@ describe("LongMemEval stage matrix replay", () => {
       ), invalidRows);
       expect(() => validateEvidenceBundle(invalid)).toThrow(/NUL-free/u);
     }
-  });
-
-  it("runs as a thin manifest CLI and exposes help without loading evidence", async () => {
-    const help = await execFileAsync("node", [cliPath, "--help"]);
-    expect(help.stdout).toContain("--manifest <file>");
-
-    const row = cohortRow({ id: "q-cli", goldIds: ["gold-a"], retrieval: "hit_at_5" });
-    const ranks = {
-      fused_rank: 1, rank_after_fusion: 1, feature: 1, lexical: 1,
-      coverage: 1, session: 1, synthesis: 1, structural: 1,
-      selection_order: 1, final_rank: 1
-    };
-    const bundle = await writeBundle(contract([
-      question("q-cli", [candidate("gold-a", ranks)], row)
-    ], [row]));
-    const result = await execFileAsync("node", [cliPath, "--manifest", bundle.manifestPath]);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      kind: "longmemeval_stage_matrix",
-      summary: { dataset_answerable: 1, scorable_answerable: 1 }
-    });
   });
 });

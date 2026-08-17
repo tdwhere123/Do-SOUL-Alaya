@@ -44,7 +44,7 @@ import {
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 
 const handles: BenchDaemonHandle[] = [];
 

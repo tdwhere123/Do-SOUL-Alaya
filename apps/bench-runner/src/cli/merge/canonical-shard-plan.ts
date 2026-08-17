@@ -2,9 +2,9 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import type {
   LongMemEvalDiagnosticsSidecar,
   LongMemEvalQuestionDiagnostic
-} from "../../longmemeval/diagnostics.js";
+} from "../../bench/diagnostics.js";
 import type { LongMemEvalDiagnosticsSpool } from
-  "../../longmemeval/diagnostics/spool.js";
+  "../../bench/diagnostics/spool.js";
 import { pct } from "../result-format.js";
 import {
   isCurrentStreamedDiagnostics,
@@ -17,7 +17,7 @@ import path from "node:path";
 import {
   loadGlobalExtractionAuthority,
   type LoadedGlobalExtractionAuthority
-} from "../../longmemeval/provenance/contract/extraction-authority-reference.js";
+} from "../../bench/provenance/contract/extraction-authority-reference.js";
 
 export interface ShardArchiveRef {
   readonly root: string;

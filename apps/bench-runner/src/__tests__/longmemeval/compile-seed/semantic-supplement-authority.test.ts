@@ -18,20 +18,20 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock(
-  "../../../longmemeval/extraction/cache/semantic-supplement/" +
+  "../../../bench/extraction/cache/semantic-supplement/" +
     "source-assertion-supplement-runtime.js",
   () => ({ createSourceAssertionSupplementRuntime: fixture.createRuntime })
 );
 
 vi.mock(
-  "../../../longmemeval/compile-seed/compile-seed-cache.js",
+  "../../../bench/compile-seed/compile-seed-cache.js",
   () => ({ createCachingSignalExtractor: fixture.createCachingExtractor })
 );
 
 import {
   createCompileSeedRunner,
   toSeedExtractionPathKpi
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 
 describe("semantic supplement run authority", () => {
   it("is fixed when the runner is created, before any turn is seeded", () => {

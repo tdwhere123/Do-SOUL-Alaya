@@ -21,7 +21,7 @@ import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemo
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import { writeExtractionCacheTestManifest } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";

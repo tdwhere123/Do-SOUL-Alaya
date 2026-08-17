@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BenchWorkspaceHandle } from "../../../harness/daemon.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import type { CompileSeedExtractionStats } from "../../../longmemeval/compile-seed.js";
+import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
 import { seedLongMemEvalQuestion } from "../../../longmemeval/runner/question/runner-question-seeding.js";
 import { deriveLongMemEvalGoldMemoryIds } from "../../../longmemeval/runner/runner-scoring.js";
 

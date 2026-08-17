@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeCachedExtraction } from "../../../longmemeval/compile-seed/cache/cache-shard.js";
-import { proveCacheOnlyExtraction } from "../../../longmemeval/diagnostic-loop/cache-only.js";
-import { DiagnosticLoopFailure } from "../../../longmemeval/diagnostic-loop/failures.js";
+import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-shard.js";
+import { proveCacheOnlyExtraction } from "../../../bench/diagnostic-loop/cache-only.js";
+import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
 import { digest, loopRequest } from "./fixture.js";
 
 const roots: string[] = [];

@@ -3,11 +3,11 @@ import {
   buildLongMemEvalQualityMetrics,
   buildPerPlaneRecallCoverage,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalQuestionDiagnosticSchema
-} from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 // Diagnostics for a question whose single gold candidate is admitted via
 // the named planes and lands at the given final rank.

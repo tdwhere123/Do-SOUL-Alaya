@@ -7,8 +7,7 @@ import {
   snapshotQuestionIdDigest,
   type LongMemEvalSnapshotManifest,
   type LongMemEvalSnapshotQuestion
-} from "../../../longmemeval/snapshot/materialize.js";
-import { computeLegacySnapshotQuestionIdDigestV1 } from "../../../longmemeval/snapshot/legacy/legacy-question-id-digest.js";
+} from "../../../bench/snapshot/materialize.js";
 
 interface DigestVector {
   readonly name: string;
@@ -43,8 +42,6 @@ describe("snapshot selection digest binding", () => {
       )).toBe(vector.canonical_nul_v1);
       expect(computeLongMemEvalQuestionIdDigest(vector.question_ids))
         .toBe(vector.canonical_nul_v1);
-      expect(computeLegacySnapshotQuestionIdDigestV1(vector.question_ids))
-        .toBe(vector.legacy_snapshot_length_prefix_v1);
     }
   );
 

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import {
   writeExtractionCacheManifest
-} from "../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { writeRecallEvalSnapshot } from
   "../../../../longmemeval/runner/runner-helpers.js";
 import {
@@ -14,10 +14,10 @@ import {
   snapshotExtractionAuthorityPath,
   snapshotManifestPath,
   snapshotSidecarPath
-} from "../../../../longmemeval/snapshot/materialize.js";
+} from "../../../../bench/snapshot/materialize.js";
 import {
   createCurrentPostFillCacheAuthorityProof
-} from "../../../../longmemeval/snapshot/current/current-substrate-authority.js";
+} from "../../../../bench/snapshot/current/current-substrate-authority.js";
 import { writeCompletedExtractionCacheFixture } from
   "../../extraction/completed-extraction-cache-fixture.js";
 import { makeShardProvenance } from "../../runner/runner-concurrency-fixture.js";

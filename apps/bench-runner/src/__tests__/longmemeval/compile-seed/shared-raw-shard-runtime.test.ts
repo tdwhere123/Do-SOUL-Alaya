@@ -11,15 +11,15 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import { createCompileSeedRunner } from "../../../longmemeval/compile-seed.js";
+import { createCompileSeedRunner } from "../../../bench/compile-seed.js";
 import { computeCacheKey } from
-  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../bench/compile-seed/compile-seed-cache.js";
 import { writeCachedExtraction } from
-  "../../../longmemeval/compile-seed/cache/cache-shard.js";
+  "../../../bench/compile-seed/cache/cache-shard.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { createSourceAssertionSupplementReceipt } from
-  "../../../longmemeval/extraction/cache/semantic-supplement/source-assertion-supplement.js";
+  "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest

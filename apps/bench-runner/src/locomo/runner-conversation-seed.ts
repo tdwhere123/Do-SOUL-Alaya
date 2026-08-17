@@ -5,7 +5,7 @@ import type { BenchWorkspaceHandle } from "../harness/daemon.js";
 import {
   computeNextTurnSeedRefs,
   type CompileSeedRunner
-} from "../longmemeval/compile-seed.js";
+} from "../bench/compile-seed.js";
 import { extractSessions, type LocomoSample, type LocomoTurn } from "./dataset.js";
 import { buildLocomoSeedContent } from "./runner-utils.js";
 import { isSeededMemoryResult } from

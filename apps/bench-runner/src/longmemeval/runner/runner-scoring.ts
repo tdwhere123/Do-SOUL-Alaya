@@ -1,13 +1,13 @@
-import { scoreAbstentionQuestion } from "../diagnostics/abstention.js";
-import { attachAbstentionConfidenceScore } from "../diagnostics/abstention-confidence.js";
+import { scoreAbstentionQuestion } from "../../bench/diagnostics/abstention.js";
+import { attachAbstentionConfidenceScore } from "../../bench/diagnostics/abstention-confidence.js";
 import {
   buildObjectIdentityKey,
   readRecallDiagnostics
-} from "../diagnostics/schema/diagnostics-private.js";
+} from "../../bench/diagnostics/schema/diagnostics-private.js";
 import {
   isLongMemEvalGoldSource,
   type LongMemEvalSourceRound
-} from "../provenance/source-rounds.js";
+} from "../../bench/provenance/source-rounds.js";
 
 export interface LongMemEvalSidecarEntry {
   readonly objectId: string;

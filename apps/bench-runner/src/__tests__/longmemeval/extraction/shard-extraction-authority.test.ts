@@ -18,17 +18,20 @@ import {
   buildShardExtractionAuthorityReference,
   loadGlobalExtractionAuthority,
   renderShardExtractionAuthorityReference
-} from "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
+} from "../../../bench/provenance/contract/extraction-authority-reference.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary,
   renderSnapshotExtractionAuthority
-} from "../../../longmemeval/snapshot/extraction-authority.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+} from "../../../bench/snapshot/extraction-authority.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 import { verifyShardRunProvenance } from
   "../../../cli/merge/shard/shard-provenance-verifier.js";
-import { canonicalProductRecallProvenanceConfig } from "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
-import { resolveMergedRequestedConcurrency } from "../../../longmemeval/provenance/shard-aggregate.js";
+import {
+  buildEffectiveRecallConfigIdentity,
+  readRecallEvalMaxResults
+} from "../../../bench/provenance/effective-recall-config.js";
+import { resolveMergedRequestedConcurrency } from "../../../bench/provenance/shard-aggregate.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) =>
@@ -143,7 +146,13 @@ async function authorityFixture() {
       gate_sha256: promotion.contract_sha256
     },
     runtime: productRuntime(),
-    recall_config: canonicalProductRecallProvenanceConfig(),
+    recall_config: Object.freeze({
+      conf_slice_compatibility: false,
+      ...buildEffectiveRecallConfigIdentity({}, {
+        maxResults: readRecallEvalMaxResults(undefined),
+        conflictAwareness: true
+      })
+    }),
     seed_capabilities: { facet_tags_enabled: false }
   };
   const cache = expansionCache(base.extraction_cache!);

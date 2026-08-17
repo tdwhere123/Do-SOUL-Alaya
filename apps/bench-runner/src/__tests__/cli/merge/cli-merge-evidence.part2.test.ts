@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../../../cli/index.js";
 import { runMergeLongMemEvalCommand } from "../../../cli/merge/command/merge-command.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 // @ts-expect-error The executable MJS verifier is intentionally outside the package declaration surface.
 import { loadEvidenceBundle } from "../../../../scripts/longmemeval-replay/contract.mjs";
 import {

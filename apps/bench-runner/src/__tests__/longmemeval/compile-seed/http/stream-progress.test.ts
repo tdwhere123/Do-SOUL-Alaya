@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGardenHttpExtractor } from
-  "../../../../longmemeval/compile-seed/compile-seed-http.js";
+  "../../../../bench/compile-seed/compile-seed-http.js";
 import type { CompileSeedExtractionConfig } from
-  "../../../../longmemeval/compile-seed/compile-seed-types.js";
+  "../../../../bench/compile-seed/compile-seed-types.js";
 
 const HTTP_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://example.test/v1",

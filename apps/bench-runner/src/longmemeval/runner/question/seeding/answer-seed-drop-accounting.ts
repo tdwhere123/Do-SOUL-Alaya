@@ -1,6 +1,6 @@
-import type { CompileSeedExtractionStats } from "../../../compile-seed.js";
+import type { CompileSeedExtractionStats } from "../../../../bench/compile-seed.js";
 import type { LongMemEvalSeedDropReasons } from
-  "../../../extraction/seed-fuel/seed-drop-reasons.js";
+  "../../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
 
 export interface SeedCounterSnapshot {
   readonly factsProduced: number;

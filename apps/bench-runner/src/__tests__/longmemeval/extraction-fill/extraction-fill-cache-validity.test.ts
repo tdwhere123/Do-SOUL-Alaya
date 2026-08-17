@@ -5,15 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
-import { readExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { readExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   cacheFilePath,
   computeCacheKey,
   inspectCachedExtraction
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;

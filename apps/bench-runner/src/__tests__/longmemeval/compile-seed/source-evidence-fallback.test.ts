@@ -6,7 +6,7 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCompileSeedRunner,
   type CompileSeedDaemon
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type {
   BenchSignalSeedInput
 } from "../../../harness/daemon.js";

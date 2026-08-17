@@ -2,10 +2,10 @@ import type { BenchDaemonHandle, BenchWorkspaceHandle } from "../../../harness/d
 import type { BenchTokenMetrics } from "../../../harness/token/token-metrics.js";
 import type { BenchRecallTokenEconomy } from "../../../harness/recall/recall-diagnostics-schema.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
-import { buildQuestionDiagnostic, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportSideEffectSnapshot } from "../../diagnostics.js";
-import { isAbstentionQuestionId } from "../../diagnostics/abstention.js";
+import { buildQuestionDiagnostic, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportSideEffectSnapshot } from "../../../bench/diagnostics.js";
+import { isAbstentionQuestionId } from "../../../bench/diagnostics/abstention.js";
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
-import { extractRecallTokenEconomy } from "../../qa/recall-token-economy.js";
+import { extractRecallTokenEconomy } from "../../../bench/qa/recall-token-economy.js";
 import { scoreLongMemEvalQaIfRequested } from "./runner-question-delivery.js";
 import {
   readLongMemEvalReportSideEffectSnapshot,
@@ -14,19 +14,19 @@ import {
   type LongMemEvalRecallCycleResult,
   type LongMemEvalSidecarEntry
 } from "../runner-helpers.js";
-import type { QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
+import type { QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import type { LongMemEvalQuestionSeedState } from "./runner-question-seeding.js";
 import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
-import { hasLongMemEvalSeedDropReasons } from "../../extraction/seed-fuel/seed-drop-reasons.js";
-import { attachQuestionMeasurementAxes } from "../../diagnostics/diagnostics-measurement-axes.js";
+import { hasLongMemEvalSeedDropReasons } from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
+import { attachQuestionMeasurementAxes } from "../../../bench/diagnostics/diagnostics-measurement-axes.js";
 import {
   buildLongMemEvalSourceDatesBySession,
   requireLongMemEvalTimestamp
 } from "../../ingestion/source-time.js";
 import { buildGoldObjectIdentities } from
-  "../../diagnostics/gold-object-identities.js";
+  "../../../bench/diagnostics/gold-object-identities.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;

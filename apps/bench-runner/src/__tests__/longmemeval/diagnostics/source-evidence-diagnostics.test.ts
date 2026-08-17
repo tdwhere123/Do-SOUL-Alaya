@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { buildQuestionMeasurementAxes } from
-  "../../../longmemeval/diagnostics/diagnostics-measurement-axes.js";
+  "../../../bench/diagnostics/diagnostics-measurement-axes.js";
 import {
   buildLongMemEvalDetailedGoldCoverage
-} from "../../../longmemeval/diagnostics/diagnostics-full-gold-coverage.js";
+} from "../../../bench/diagnostics/diagnostics-full-gold-coverage.js";
 import { buildQuestionDiagnostic } from
-  "../../../longmemeval/diagnostics/diagnostics-question.js";
+  "../../../bench/diagnostics/diagnostics-question.js";
 import { readGoldObjectIds } from
-  "../../../longmemeval/diagnostics/gold-object-identities.js";
+  "../../../bench/diagnostics/gold-object-identities.js";
 import { buildLongMemEvalQualityMetrics } from
-  "../../../longmemeval/diagnostics/quality/diagnostics-quality.js";
+  "../../../bench/diagnostics/quality/diagnostics-quality.js";
 import {
   LongMemEvalQuestionDiagnosticSchema
-} from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-types.js";
+  "../../../bench/diagnostics/schema/diagnostics-types.js";
 
 describe("LongMemEval source-evidence diagnostics", () => {
   it("persists evidence gold separately and joins delivery by object identity", () => {

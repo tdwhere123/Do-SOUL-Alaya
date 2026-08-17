@@ -1,14 +1,15 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
+import { selectOffsetLimitWindow } from "../../bench/window.js";
 import type { BenchRecallWeightOverrides } from
   "../../harness/recall/recall-weight-overrides.js";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import {
   createCompileSeedRunner,
   EXTRACTION_CACHE_ROOT
-} from "../compile-seed.js";
-import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
-import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
+} from "../../bench/compile-seed.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../bench/diagnostics/spool.js";
+import { inspectTurnContentKeySpace } from "../../bench/extraction/turn-contents.js";
 import {
   loadDatasetWindowWithIdentity,
   loadDatasetWithIdentity
@@ -16,7 +17,7 @@ import {
 import {
   createOwnedTempRoot,
   externalTempRoot
-} from "../lifecycle/owned-temp-root.js";
+} from "../../bench/lifecycle/owned-temp-root.js";
 import { deriveLongMemEvalRunnerReleaseEvidenceAuthority } from
   "../release-evidence-authority.js";
 import {
@@ -26,19 +27,19 @@ import {
 } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import { loadQuestionManifestSelection } from
-  "../selection/question-manifest.js";
+  "../../bench/selection/question-manifest.js";
 import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
-} from "../selection/contract.js";
+} from "../../bench/selection/contract.js";
 import { resolveSourceAssertionSupplementOptions } from
-  "../extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+  "../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 import { createCurrentPostFillCacheAuthorityProof } from
-  "../snapshot/current/current-substrate-authority.js";
+  "../../bench/snapshot/current/current-substrate-authority.js";
 import { readExtractionCacheManifest } from
-  "../extraction/cache/extraction-cache-manifest.js";
+  "../../bench/extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from
-  "../extraction/fill/fill-authority.js";
+  "../../bench/extraction/fill/fill-authority.js";
 import {
   assertSnapshotProducerInvocationPolicy,
   assertSnapshotProducerReleaseAuthority
@@ -208,9 +209,7 @@ function selectQuestionWindow(
   questions: LongMemEvalQuestions,
   opts: LongMemEvalRunOptions
 ) {
-  const offset = Math.max(0, opts.offset ?? 0);
-  const sliceEnd = opts.limit !== undefined ? offset + opts.limit : questions.length;
-  return questions.slice(offset, sliceEnd);
+  return selectOffsetLimitWindow(questions, opts);
 }
 
 function createLongMemEvalSeedRunner(

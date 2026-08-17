@@ -12,12 +12,12 @@ import {
 import type {
   CompileSeedExtractionStats,
   CompileSeedTurnInput
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import { seedLongMemEvalQuestion } from "../../../longmemeval/runner/question/runner-question-seeding.js";
 import { buildLongMemEvalSnapshotQuestion } from "../../../longmemeval/runner/question/runner-question-result.js";
 import { deriveLongMemEvalGoldMemoryIds } from "../../../longmemeval/runner/runner-scoring.js";
-import { assertSeedLedgerMaterializationProof } from "../../../longmemeval/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
+import { assertSeedLedgerMaterializationProof } from "../../../bench/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
 
 let daemon: BenchDaemonHandle | undefined;
 let root: string | undefined;

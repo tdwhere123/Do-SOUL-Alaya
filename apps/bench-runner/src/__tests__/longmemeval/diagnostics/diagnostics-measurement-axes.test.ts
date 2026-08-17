@@ -3,11 +3,11 @@ import {
   attachQuestionMeasurementAxes,
   buildQuestionMeasurementAxes,
   type QuestionMeasurementInput
-} from "../../../longmemeval/diagnostics/diagnostics-measurement-axes.js";
-import { LongMemEvalQuestionMeasurementAxesSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
-import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics/schema/diagnostics-types.js";
-import { renderLongMemEvalCohortLedger } from "../../../longmemeval/selection/cohort-ledger.js";
-import { buildLongMemEvalQualityMetrics } from "../../../longmemeval/diagnostics/quality/diagnostics-quality.js";
+} from "../../../bench/diagnostics/diagnostics-measurement-axes.js";
+import { LongMemEvalQuestionMeasurementAxesSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics/schema/diagnostics-types.js";
+import { renderLongMemEvalCohortLedger } from "../../../bench/selection/cohort-ledger.js";
+import { buildLongMemEvalQualityMetrics } from "../../../bench/diagnostics/quality/diagnostics-quality.js";
 
 type MeasurementCandidate = QuestionMeasurementInput["candidates"][number];
 type AnswerFeatures = NonNullable<MeasurementCandidate["answer_features"]>;

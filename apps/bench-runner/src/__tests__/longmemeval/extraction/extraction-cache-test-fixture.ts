@@ -3,7 +3,7 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 const TEST_EXTRACTION_PROVIDER_URL = "https://provider.invalid/v1";
 

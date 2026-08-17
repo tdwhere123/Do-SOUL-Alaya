@@ -15,16 +15,16 @@ import {
   type CompileSeedExtractionStats,
   type CompileSeedRunner,
   type SessionSeededTurn
-} from "../../compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   buildLongMemEvalSidecarKey,
   type LongMemEvalSidecarEntry
 } from "../runner-helpers.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import {
   createEmptyLongMemEvalSeedDropReasons,
   type LongMemEvalSeedDropReasons
-} from "../../extraction/seed-fuel/seed-drop-reasons.js";
+} from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
 import {
   assertLongMemEvalTimeline,
   requireLongMemEvalTimestamp
@@ -32,13 +32,13 @@ import {
 import type {
   LongMemEvalAnswersWithFormationReceipt,
   LongMemEvalSnapshotSeedRound
-} from "../../snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
 import { isSeededMemoryResult } from
   "../../../harness/daemon/seed/daemon-seed-results.js";
 import {
   mergeLongMemEvalSourceRounds,
   type LongMemEvalSourceRound
-} from "../../provenance/source-rounds.js";
+} from "../../../bench/provenance/source-rounds.js";
 import {
   isVerifiedEmptyAnswerWipe,
   recordAnswerSeedDrops,

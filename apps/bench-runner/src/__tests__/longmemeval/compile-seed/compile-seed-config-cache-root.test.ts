@@ -16,14 +16,14 @@ it("redirects to ALAYA_BENCH_EXTRACTION_CACHE_ROOT (staging) when set", async ()
   const staging = join(tmpdir(), "alaya-staging-cache");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", staging);
   vi.resetModules();
-  const { EXTRACTION_CACHE_ROOT } = await import("../../../longmemeval/compile-seed/compile-seed-config.js");
+  const { EXTRACTION_CACHE_ROOT } = await import("../../../bench/compile-seed/compile-seed-config.js");
   expect(pathsEqual(EXTRACTION_CACHE_ROOT, resolve(staging))).toBe(true);
 });
 
 it("falls back to the canonical git-tracked fixture path when unset", async () => {
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", undefined as unknown as string);
   vi.resetModules();
-  const { EXTRACTION_CACHE_ROOT } = await import("../../../longmemeval/compile-seed/compile-seed-config.js");
+  const { EXTRACTION_CACHE_ROOT } = await import("../../../bench/compile-seed/compile-seed-config.js");
   expect(
     pathEndsWithPosixSegments(
       EXTRACTION_CACHE_ROOT,
@@ -45,7 +45,7 @@ it("resolves an explicit run root ahead of environment and canonical defaults", 
   const explicit = join(tmpdir(), "alaya-explicit-cache");
   const staging = join(tmpdir(), "alaya-staging-cache");
   const { resolveEffectiveExtractionCacheRoot } = await import(
-    "../../../longmemeval/compile-seed/compile-seed-config.js"
+    "../../../bench/compile-seed/compile-seed-config.js"
   );
 
   expect(resolveEffectiveExtractionCacheRoot(explicit, {
@@ -56,7 +56,7 @@ it("resolves an explicit run root ahead of environment and canonical defaults", 
 it("resolves the environment root at the run boundary when no explicit root exists", async () => {
   const staging = join(tmpdir(), "alaya-late-staging-cache");
   const { resolveEffectiveExtractionCacheRoot } = await import(
-    "../../../longmemeval/compile-seed/compile-seed-config.js"
+    "../../../bench/compile-seed/compile-seed-config.js"
   );
 
   expect(resolveEffectiveExtractionCacheRoot(undefined, {

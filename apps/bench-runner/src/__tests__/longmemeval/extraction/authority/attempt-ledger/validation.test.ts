@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger
-} from "../../../../../longmemeval/extraction/authority/attempt-ledger.js";
+} from "../../../../../bench/extraction/authority/attempt-ledger.js";
 
 const key = (digit: string): string => digit.repeat(64);
 const cacheIdentity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;

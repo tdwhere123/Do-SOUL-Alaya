@@ -3,11 +3,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parseFlags } from "../cli-options.js";
 import { resolveEffectiveExtractionCacheRoot } from
-  "../../longmemeval/compile-seed/compile-seed-config.js";
+  "../../bench/compile-seed/compile-seed-config.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../longmemeval/extraction/authority/inspection.js";
+} from "../../bench/extraction/authority/inspection.js";
 import {
   createExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelectionRoot,
@@ -21,24 +21,24 @@ import {
   writeExtractionTargetSelectionReceipt,
   type ExtractionTargetRootBinding,
   type ExtractionTargetSelectionReceipt
-} from "../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../bench/extraction/authority/target-selection/receipt.js";
 import {
   materializationReceiptFromCommit,
   readExtractionCacheMaterializationReceipt
-} from "../../longmemeval/extraction/cache-audit/materialization/receipt.js";
+} from "../../bench/extraction/cache-audit/materialization/receipt.js";
 import { verifyCommittedAuditedExtractionCacheSuccessor } from
-  "../../longmemeval/extraction/cache-audit/target-materializer.js";
+  "../../bench/extraction/cache-audit/target-materializer.js";
 import { readExtractionCacheAuditReceipt } from
-  "../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../bench/extraction/cache-audit/receipt.js";
 import { readExtractionAuthorityReceipt } from
-  "../../longmemeval/extraction/authority/receipt.js";
+  "../../bench/extraction/authority/receipt.js";
 import {
   assertExtractionAuthorityHasNoContinuationChild,
   assertImmediateContinuationAdoptionParent,
   claimExtractionContinuationChild,
   prepareExistingContinuationChildAdoption,
   type ExtractionContinuationChildClaim
-} from "../../longmemeval/extraction/authority/continuation/child-claim.js";
+} from "../../bench/extraction/authority/continuation/child-claim.js";
 
 interface TargetSelectionArgs {
   readonly authority: TargetSelectionAuthority;

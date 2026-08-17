@@ -1,9 +1,9 @@
 import type { PerScenarioRow } from "@do-soul/alaya-eval";
+import { startCampaignDaemon } from "../bench/index.js";
 import type { BenchDaemonHandle, BenchEmbeddingMode } from "../harness/daemon.js";
-import { startBenchDaemon } from "../harness/daemon.js";
-import type { CompileSeedRunner } from "../longmemeval/compile-seed.js";
-import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
-import { QaChatError } from "../longmemeval/qa/qa-chat.js";
+import type { CompileSeedRunner } from "../bench/compile-seed.js";
+import type { LongMemEvalQuestionDiagnostic } from "../bench/diagnostics.js";
+import { QaChatError } from "../bench/qa/qa-chat.js";
 import type { LocomoSample } from "./dataset.js";
 import { runOneConversation, type ConversationResult } from "./runner-conversation.js";
 import type { LocomoRunOptions } from "./runner-types.js";
@@ -57,14 +57,12 @@ function createLocomoConversationAggregate(): LocomoConversationAggregate {
   };
 }
 
-async function startLocomoDaemon(
+function startLocomoDaemon(
   embeddingMode: BenchEmbeddingMode,
   opts: LocomoRunOptions
 ): Promise<BenchDaemonHandle> {
-  const benchRunId = `locomo-bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return await startBenchDaemon({
-    workspaceId: `${benchRunId}-default`,
-    runId: `${benchRunId}-default-run`,
+  return startCampaignDaemon({
+    runLabel: "locomo",
     embeddingMode,
     ...(opts.embeddingProviderKind === undefined
       ? {}

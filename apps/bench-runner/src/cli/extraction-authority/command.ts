@@ -1,44 +1,33 @@
 import process from "node:process";
 import { parseFlags } from "../cli-options.js";
-import { resolveEffectiveExtractionCacheRoot } from "../../longmemeval/compile-seed/compile-seed-config.js";
+import { resolveEffectiveExtractionCacheRoot } from "../../bench/compile-seed/compile-seed-config.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision,
   type ExtractionAuthorityInspection
-} from "../../longmemeval/extraction/authority/inspection.js";
+} from "../../bench/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt,
   computeExtractionAuthorityLineageDigest,
   readExtractionAuthorityReceipt
-} from "../../longmemeval/extraction/authority/receipt.js";
-import {
-  createFreshDirectDeepSeek500Authorization,
-  createFreshNewApiDeepSeek500Authorization,
-  discardFreshDirectExtractionSpendAuthorization,
-  type DirectExtractionSpendAuthorization
-} from "../../longmemeval/extraction/authority/direct-deepseek-500.js";
+} from "../../bench/extraction/authority/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   assertExtractionTargetSelectionWindow,
   readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection,
   type ExtractionTargetSelectionReceipt
-} from "../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../bench/extraction/authority/target-selection/receipt.js";
 import {
   readExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
 } from
-  "../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../bench/extraction/authority/attempt-ledger.js";
 import { createExtractionRepairScope } from
-  "../../longmemeval/extraction/authority/repair/repair-scope.js";
-import {
-  createExtractionCatalogRefillScope,
-  readExtractionCatalogRefillAllowlist,
-  type ExtractionCatalogRefillScope
-} from "../../longmemeval/extraction/authority/catalog-refill/scope.js";
+  "../../bench/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../longmemeval/extraction/authority/receipt-limits.js";
+  "../../bench/extraction/authority/receipt-limits.js";
 import {
   parseAuthorizeExtractionArgs,
   type AuthorizeExtractionArgs
@@ -48,9 +37,9 @@ import {
   type PreparedAuthorityContinuation
 } from "./continuation.js";
 import { sameRootContinuationMode } from
-  "../../longmemeval/extraction/authority/continuation/contract.js";
+  "../../bench/extraction/authority/continuation/contract.js";
 import { continuationPredecessorNewSuccessfulKeys } from
-  "../../longmemeval/extraction/authority/continuation/predecessor-state.js";
+  "../../bench/extraction/authority/continuation/predecessor-state.js";
 import {
   publishAuthorizedExtractionReceipt,
   type AuthorityPublicationDependencies
@@ -59,9 +48,6 @@ import {
 interface AuthorizeExtractionDependencies extends AuthorityPublicationDependencies {
   readonly readRevision?: () => string;
   readonly readLedger?: typeof readExtractionAttemptLedger;
-  readonly createDirectSpend?: typeof createFreshDirectDeepSeek500Authorization;
-  readonly createNewApiDirectSpend?: typeof createFreshNewApiDeepSeek500Authorization;
-  readonly discardDirectSpend?: typeof discardFreshDirectExtractionSpendAuthorization;
   readonly readTargetSelection?: typeof readExtractionTargetSelectionReceipt;
   readonly assertTargetSelection?: typeof assertExtractionTargetSelectionReceipt;
   readonly assertTargetSelectionWindow?: typeof assertExtractionTargetSelectionWindow;
@@ -71,24 +57,12 @@ export async function runAuthorizeExtractionCommand(
   args: ReadonlyArray<string>,
   deps: AuthorizeExtractionDependencies = {}
 ): Promise<number> {
-  let freshDirectSpend: DirectExtractionSpendAuthorization | undefined;
-  let freshDirectCacheRoot: string | undefined;
   try {
-    const authorized = await buildAuthorizedReceipt(args, deps, (spend, cacheRoot) => {
-      freshDirectSpend = spend;
-      freshDirectCacheRoot = cacheRoot;
-    });
+    const authorized = await buildAuthorizedReceipt(args, deps);
     await publishAuthorizedExtractionReceipt(authorized, deps);
-    freshDirectSpend = undefined;
     process.stdout.write(renderAuthorizedReceipt(authorized.outputPath, authorized.receipt));
     return 0;
   } catch (error) {
-    if (freshDirectSpend !== undefined && freshDirectCacheRoot !== undefined) {
-      (deps.discardDirectSpend ?? discardFreshDirectExtractionSpendAuthorization)({
-        authorization: freshDirectSpend,
-        cacheRoot: freshDirectCacheRoot
-      });
-    }
     process.stderr.write(
       `alaya-bench-runner authorize-extraction: ${error instanceof Error
         ? error.message
@@ -100,33 +74,17 @@ export async function runAuthorizeExtractionCommand(
 
 async function buildAuthorizedReceipt(
   args: ReadonlyArray<string>,
-  deps: AuthorizeExtractionDependencies,
-  onFreshDirectSpend: (
-    spend: DirectExtractionSpendAuthorization | undefined,
-    cacheRoot: string
-  ) => void
+  deps: AuthorizeExtractionDependencies
 ) {
   const flags = parseFlags(args);
   const authority = parseAuthorizeExtractionArgs(args);
-  assertCatalogRefillFlagScope(authority, flags);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
-  const directSpend = createDirectSpend(authority, flags, cacheRoot, deps);
-  onFreshDirectSpend(directSpend, cacheRoot);
   const { inspection, ledger, inspectInput, predecessorBaseInspection } =
-    await inspectAuthorityForReceipt(
-      flags, authority, cacheRoot, deps
-    );
+    await inspectAuthorityForReceipt(flags, authority, cacheRoot, deps);
   assertInspectableAuthority(inspection, authority);
-  const catalogRefillScope = flags.catalogRefillAllowlist === undefined
-    ? undefined
-    : createExtractionCatalogRefillScope({
-      cacheRoot,
-      inspection,
-      allowlist: readExtractionCatalogRefillAllowlist(flags.catalogRefillAllowlist)
-    });
   return finishAuthorizedReceipt({
-    authority, flags, cacheRoot, directSpend, inspection, ledger, inspectInput,
-    catalogRefillScope, predecessorBaseInspection, deps
+    authority, flags, cacheRoot, inspection, ledger, inspectInput,
+    predecessorBaseInspection, deps
   });
 }
 
@@ -134,33 +92,28 @@ function finishAuthorizedReceipt(input: {
   readonly authority: AuthorizeExtractionArgs;
   readonly flags: ReturnType<typeof parseFlags>;
   readonly cacheRoot: string;
-  readonly directSpend: DirectExtractionSpendAuthorization | undefined;
   readonly inspection: ExtractionAuthorityInspection;
   readonly ledger: ReturnType<typeof readExtractionAttemptLedger>;
   readonly inspectInput: Parameters<typeof inspectExtractionAuthority>[0];
-  readonly catalogRefillScope: ExtractionCatalogRefillScope | undefined;
   readonly predecessorBaseInspection: ExtractionAuthorityInspection | undefined;
   readonly deps: AuthorizeExtractionDependencies;
 }) {
   const targetSelection = readTargetSelection(
-    input.authority, input.directSpend, input.catalogRefillScope,
-    input.inspection.observation, input.deps
+    input.authority, input.inspection.observation, input.deps
   );
   assertTargetSelection(
     targetSelection, input.cacheRoot, input.inspection.observation, input.deps
   );
-  const continuation = input.catalogRefillScope === undefined
-    ? prepareAuthorityContinuation({
-      predecessorAuthorityPath: input.authority.predecessorAuthorityPath,
-      cacheRoot: input.cacheRoot,
-      inspection: input.inspection,
-      ...(input.predecessorBaseInspection === undefined ? {} : {
-        predecessorBaseInspection: input.predecessorBaseInspection
-      }),
-      targetSelection,
-      dependencies: input.deps
-    })
-    : undefined;
+  const continuation = prepareAuthorityContinuation({
+    predecessorAuthorityPath: input.authority.predecessorAuthorityPath,
+    cacheRoot: input.cacheRoot,
+    inspection: input.inspection,
+    ...(input.predecessorBaseInspection === undefined ? {} : {
+      predecessorBaseInspection: input.predecessorBaseInspection
+    }),
+    targetSelection,
+    dependencies: input.deps
+  });
   if (continuation !== undefined && input.ledger !== undefined &&
       (sameRootContinuationMode(continuation.evidence) !== "output_token_cap_renewal" ||
        input.ledger.lineageDigest !== continuation.predecessor.lineage_digest)) {
@@ -174,46 +127,17 @@ function finishAuthorizedReceipt(input: {
     targetSelection,
     receipt: createReceipt(
       input.authority, input.flags.concurrency, input.inspection, input.ledger,
-      input.directSpend, targetSelection, input.catalogRefillScope, continuation
+      targetSelection, continuation
     ),
     ...(continuation === undefined ? {} : { continuation })
   });
 }
 
-function createDirectSpend(
-  authority: AuthorizeExtractionArgs,
-  flags: ReturnType<typeof parseFlags>,
-  cacheRoot: string,
-  deps: AuthorizeExtractionDependencies
-) {
-  const operator = authority.directDeepSeek500Operator ?? authority.directNewApiDeepSeek500Operator;
-  if (operator === undefined) return undefined;
-  assertDirectExtraction500Scope(flags);
-  if (authority.directNewApiDeepSeek500Operator !== undefined) {
-    return (deps.createNewApiDirectSpend ?? createFreshNewApiDeepSeek500Authorization)({
-      cacheRoot,
-      operator
-    });
-  }
-  return (deps.createDirectSpend ?? createFreshDirectDeepSeek500Authorization)({
-    cacheRoot,
-    operator
-  });
-}
-
 function readTargetSelection(
   authority: AuthorizeExtractionArgs,
-  directSpend: DirectExtractionSpendAuthorization | undefined,
-  catalogRefillScope: ExtractionCatalogRefillScope | undefined,
   observation: Awaited<ReturnType<typeof inspectExtractionAuthority>>["observation"],
   deps: AuthorizeExtractionDependencies
 ): ExtractionTargetSelectionReceipt | undefined {
-  if (directSpend !== undefined) {
-    if (authority.targetSelectionPath !== undefined) {
-      throw new Error("direct extraction cannot mix an extraction target selection receipt");
-    }
-    return undefined;
-  }
   if (authority.repairInvalidShards ||
       !requiresExtractionTargetSelection(observation)) {
     if (authority.targetSelectionPath !== undefined) {
@@ -246,16 +170,6 @@ function assertTargetSelection(
     observation
   });
   (deps.assertTargetSelectionWindow ?? assertExtractionTargetSelectionWindow)(selection, observation);
-}
-
-function assertDirectExtraction500Scope(flags: ReturnType<typeof parseFlags>): void {
-  if (flags.variant !== "longmemeval_s" || flags.offset !== 0 || flags.limit !== 500 ||
-      flags.pinnedMetaRoot !== undefined || flags.promotionContract !== undefined ||
-      flags.r3SpendApproval !== undefined) {
-    throw new Error(
-      "direct extraction 500 requires canonical longmemeval_s 0..500 without custom metadata or R3 evidence"
-    );
-  }
 }
 
 async function inspectAuthorityForReceipt(
@@ -347,9 +261,7 @@ function createReceipt(
   maxConcurrency: number | undefined,
   inspection: ExtractionAuthorityInspection,
   ledger: ReturnType<typeof readExtractionAttemptLedger>,
-  directSpend: DirectExtractionSpendAuthorization | undefined,
   targetSelection: ExtractionTargetSelectionReceipt | undefined,
-  catalogRefillScope: ExtractionCatalogRefillScope | undefined,
   continuation: PreparedAuthorityContinuation | undefined
 ) {
   const repairScope = authority.repairInvalidShards
@@ -372,8 +284,8 @@ function createReceipt(
       successfulShardCeiling: inheritedLedger.successfulShardCeiling
     };
   return createExtractionAuthorityReceipt(buildReceiptInput({
-    authority, maxConcurrency, inspection, directSpend, targetSelection,
-    catalogRefillScope, continuation, repairScope, carriedLimits
+    authority, maxConcurrency, inspection, targetSelection,
+    continuation, repairScope, carriedLimits
   }));
 }
 
@@ -381,9 +293,7 @@ function buildReceiptInput(input: {
   readonly authority: AuthorizeExtractionArgs;
   readonly maxConcurrency: number | undefined;
   readonly inspection: ExtractionAuthorityInspection;
-  readonly directSpend: DirectExtractionSpendAuthorization | undefined;
   readonly targetSelection: ExtractionTargetSelectionReceipt | undefined;
-  readonly catalogRefillScope: ExtractionCatalogRefillScope | undefined;
   readonly continuation: PreparedAuthorityContinuation | undefined;
   readonly repairScope: ReturnType<typeof createExtractionRepairScope> | undefined;
   readonly carriedLimits: { readonly startingMissing: number; readonly maximumAttempts: number;
@@ -408,14 +318,9 @@ function buildReceiptInput(input: {
     ...(input.targetSelection === undefined ? {} : {
       targetSelectionDigest: input.targetSelection.receipt_digest
     }),
-    ...(input.directSpend === undefined ? {} : { directSpend: input.directSpend }),
     ...(input.repairScope === undefined ? {} : { repairScope: input.repairScope }),
-    ...(input.catalogRefillScope === undefined ? {} : {
-      catalogRefillScope: input.catalogRefillScope
-    }),
     ...(input.continuation === undefined ? {} : { continuation: input.continuation.evidence }),
-    ...(input.targetSelection === undefined ||
-        (input.continuation === undefined && input.catalogRefillScope === undefined) ? {} : {
+    ...(input.targetSelection === undefined || input.continuation === undefined ? {} : {
       now: new Date(input.targetSelection.created_at)
     })
   };
@@ -437,26 +342,7 @@ function renderAuthorizedReceipt(
   return `Extraction authority receipt written: ${outputPath}\n` +
     `  action=${receipt.action} identity=${receipt.identity_digest} ` +
     `receipt=${receipt.receipt_digest} missing=${receipt.limits.starting_missing} ` +
-    `attempt_cap=${receipt.limits.maximum_attempts}` +
-    (receipt.direct_spend === undefined ? "" : ` spend=${receipt.direct_spend.kind}`) +
-    (receipt.catalog_refill === undefined ? "" : " scope=catalog-refill") +
-    "\n";
-}
-
-function assertCatalogRefillFlagScope(
-  authority: AuthorizeExtractionArgs,
-  flags: ReturnType<typeof parseFlags>
-): void {
-  if (flags.catalogRefillAllowlist === undefined) return;
-  if (authority.action !== "fill" || authority.repairInvalidShards ||
-      authority.targetSelectionPath === undefined || authority.predecessorAuthorityPath !== undefined ||
-      authority.directDeepSeek500Operator !== undefined ||
-      authority.directNewApiDeepSeek500Operator !== undefined ||
-      flags.questionBatchLimit !== undefined) {
-    throw new Error(
-      "catalog refill requires a target selection and a normal fill without repair, direct spend, or batching"
-    );
-  }
+    `attempt_cap=${receipt.limits.maximum_attempts}\n`;
 }
 
 function assertInspectableAuthority(

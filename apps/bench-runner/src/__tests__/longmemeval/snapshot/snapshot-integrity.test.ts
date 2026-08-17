@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildSnapshotArtifactIntegrity,
   verifySnapshotArtifactIntegrity
-} from "../../../longmemeval/snapshot/integrity.js";
+} from "../../../bench/snapshot/integrity.js";
 
 const roots: string[] = [];
 

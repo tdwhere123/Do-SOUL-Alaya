@@ -1,11 +1,9 @@
 /**
- * @internal Exposed via `@do-soul/alaya/mcp-server` for the in-process
- * bench harness in `@do-soul/alaya-bench-runner`. Not a stability promise:
- * the export surface, symbol names, and signatures may change without a
- * deprecation period. If you rename or split this module, also update:
- *   - apps/core-daemon/package.json `exports."./mcp-server"`
- *   - apps/bench-runner/src/harness/daemon.ts (the only known consumer)
- * @see apps/bench-runner/src/harness/daemon.ts
+ * @internal Unstable package export (`@do-soul/alaya/mcp-server`).
+ * Not a stability promise: the export surface, symbol names, and
+ * signatures may change without a deprecation period. If you rename
+ * or split this module, also update the matching
+ * `apps/core-daemon/package.json` exports entry.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

@@ -7,9 +7,9 @@ import {
 } from "@do-soul/alaya-eval";
 import path from "node:path";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
-  "../../longmemeval/archive/archive-evidence.js";
+  "../../bench/archive/archive-evidence.js";
 import { withPublishedDiagnosticsArtifact } from
-  "../../longmemeval/measurement/artifact-transaction.js";
+  "../../bench/measurement/artifact-transaction.js";
 import { resolveLongMemEvalEvidenceContext } from
   "../../longmemeval/history/evidence-context.js";
 

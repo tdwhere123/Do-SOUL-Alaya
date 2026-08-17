@@ -17,10 +17,10 @@ import {
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects,
   type LongMemEvalDiagnosticsSidecar
-} from "../../diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   resolveBenchDiagnosticsArtifactRoot
-} from "../../diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
 import path from "node:path";
 import {
   buildLongMemEvalColdWarmComparisonSidecar,
@@ -28,32 +28,32 @@ import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
-} from "../../archive/archive-evidence.js";
-import { selectFullRunBaseline } from "../../lifecycle/recall-eval/recall-eval-archive-impl.js";
-import { appendSeedExtractionReleaseBlockerToFindings, appendSeedExtractionReleaseBlockerToReport } from "../../extraction/seed-fuel/seed-extraction-release-blocker.js";
+} from "../../../bench/archive/archive-evidence.js";
+import { selectFullRunBaseline } from "../../../bench/lifecycle/recall-eval/recall-eval-archive-impl.js";
+import { appendSeedExtractionReleaseBlockerToFindings, appendSeedExtractionReleaseBlockerToReport } from "../../../bench/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import type { BenchCommitInfo } from "../runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "../../runner.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 import type { LongMemEvalPayloadBuild } from "./runner-archive-payload.js";
 import { buildArchiveRunProvenanceBundle } from
-  "../../provenance/archive/archive-run-provenance.js";
+  "../../../bench/provenance/archive/archive-run-provenance.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
-} from "../../selection/cohort-ledger.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../diagnostics/spool.js";
-import { withCurrentMeasurementAttribution } from "../../measurement/archive-attribution.js";
+} from "../../../bench/selection/cohort-ledger.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { withCurrentMeasurementAttribution } from "../../../bench/measurement/archive-attribution.js";
 import {
   prepareDiagnosticsArtifactStagingPath,
   withPublishedDiagnosticsArtifact,
   type StagedDiagnosticsArtifact
-} from "../../measurement/artifact-transaction.js";
+} from "../../../bench/measurement/artifact-transaction.js";
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../selection/contract.js";
+} from "../../../bench/selection/contract.js";
 import { buildArchiveEvidenceManifestSidecar } from
-  "../../provenance/archive/archive-evidence-sidecar.js";
+  "../../../bench/provenance/archive/archive-evidence-sidecar.js";
 import {
   createLongMemEvalHistoryLayout,
   resolveLongMemEvalEvidenceContext

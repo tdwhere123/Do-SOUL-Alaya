@@ -16,7 +16,7 @@ import {
 } from "../harness/recall/recall-weight-overrides.js";
 import type { FetchResult } from "./ingestion/fetch.js";
 import type { LongMemEvalVariant } from "./ingestion/dataset.js";
-import type { QaChatFn } from "./qa/qa-chat.js";
+import type { QaChatFn } from "../bench/qa/qa-chat.js";
 import { finalizeLongMemEvalRun } from "./runner/archive/runner-archive.js";
 import {
   runLongMemEvalConcurrent,
@@ -27,7 +27,7 @@ import { prepareLongMemEvalRun } from "./runner/prepare-context.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
-} from "./diagnostics/spool.js";
+} from "../bench/diagnostics/spool.js";
 import { assertExpansionRunAuthority } from
   "./promotion/expansion/authority/expansion-run-authority.js";
 import type { LongMemEvalExpansionCapability } from

@@ -15,12 +15,12 @@ import {
   writeExtractionCacheManifest,
   type ExtractionCacheManifest,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { hasCompleteExtractionFillAuthority } from "../../../longmemeval/extraction/fill/fill-authority.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from "../../../bench/extraction/fill/fill-authority.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../longmemeval/extraction/content-closure.js";
+} from "../../../bench/extraction/content-closure.js";
 
 const BASE_MANIFEST: ExtractionCacheManifest = {
   schema_version: 1,

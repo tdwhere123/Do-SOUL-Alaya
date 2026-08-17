@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectCachedExtraction, writeCachedExtraction } from
-  "../../../../../longmemeval/compile-seed/cache/cache-shard.js";
+  "../../../../../bench/compile-seed/cache/cache-shard.js";
 import { readValidLedgerShard } from
-  "../../../../../longmemeval/extraction/authority/attempt-ledger-shards.js";
+  "../../../../../bench/extraction/authority/attempt-ledger-shards.js";
 import { buildExtractionTransportProvenance } from
-  "../../../../../longmemeval/extraction/transport-route.js";
+  "../../../../../bench/extraction/transport-route.js";
 
 describe("attempt ledger raw observation validation", () => {
   let root: string | undefined;

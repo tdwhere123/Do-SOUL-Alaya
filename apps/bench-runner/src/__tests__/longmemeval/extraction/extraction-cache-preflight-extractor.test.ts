@@ -9,9 +9,9 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
-import { writeExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/compile-seed.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../bench/compile-seed/compile-seed-cache.js";
+import { writeExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,

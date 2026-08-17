@@ -6,9 +6,9 @@ import {
   isDiagnosticLoopPhase,
   type DiagnosticLoopMode,
   type DiagnosticLoopPhase
-} from "../../longmemeval/diagnostic-loop/phases.js";
-import { isSha256Hex } from "../../longmemeval/diagnostic-loop/identity.js";
-import type { DiagnosticLoopRequest } from "../../longmemeval/diagnostic-loop/types.js";
+} from "../../bench/diagnostic-loop/phases.js";
+import { isSha256Hex } from "../../bench/diagnostic-loop/identity.js";
+import type { DiagnosticLoopRequest } from "../../bench/diagnostic-loop/types.js";
 import type { LongMemEvalVariant } from "../../longmemeval/ingestion/dataset.js";
 import {
   matchFlagToken,

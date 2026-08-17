@@ -22,7 +22,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {

@@ -4,7 +4,7 @@ import {
   renderDiagnosticLoopFailure,
   renderResumeCommand,
   wrapPhaseError
-} from "../../../longmemeval/diagnostic-loop/failures.js";
+} from "../../../bench/diagnostic-loop/failures.js";
 import { loopRequest } from "./fixture.js";
 
 describe("diagnostic-loop failures", () => {

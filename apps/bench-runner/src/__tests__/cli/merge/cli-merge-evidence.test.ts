@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../../cli/index.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 // @ts-expect-error The executable replay verifier is intentionally outside package declarations.
 import { loadEvidenceBundle } from "../../../../scripts/longmemeval-replay/contract.mjs";
 import {

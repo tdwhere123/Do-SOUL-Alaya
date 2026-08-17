@@ -8,6 +8,22 @@ import {
   type SignalExtractor
 } from "@do-soul/alaya-soul";
 
+type VendorModelAlias = Readonly<{
+  readonly id: string;
+  readonly aliases: readonly string[];
+  readonly profile?: ProviderRequestProfile;
+}>;
+
+// Display names stay as aliases so OpenCode Go still receives the vendor
+// catalog id (for example mimo-v2.5), not a UI/display label.
+const VENDOR_MODEL_ALIASES: readonly VendorModelAlias[] = [
+  {
+    id: "mimo-v2.5",
+    aliases: ["Mimo-V2.5", "mimo-v2-flash"],
+    profile: "mimo-v2.5-nonthinking-v1"
+  }
+];
+
 export function createOfficialGardenExtractor(input: Readonly<{
   readonly apiKey: string;
   readonly model: string;
@@ -17,7 +33,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
   const providerUrl = normalizeProviderBaseUrl(
     input.endpoint ?? "https://api.openai.com/v1"
   );
-  const profile = input.profile ?? mimoProfileFor(input.model);
+  const profile = input.profile ?? resolveVendorModelAlias(input.model).profile;
   return createPiMonoExtractor({
     apiKey: input.apiKey,
     model: input.model,
@@ -26,7 +42,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
       const result = await fetchProviderChatCompletion({
         providerUrl: model.baseUrl || providerUrl,
         apiKey: options?.apiKey ?? input.apiKey,
-        model: vendorModelId(model.id),
+        model: resolveVendorModelAlias(model.id).id,
         systemPrompt: context.systemPrompt,
         userPrompt: context.messages[0]?.content ?? "",
         temperature: options?.temperature ?? 0,
@@ -43,10 +59,18 @@ export function createOfficialGardenExtractor(input: Readonly<{
   });
 }
 
-function mimoProfileFor(model: string): ProviderRequestProfile | undefined {
-  return vendorModelId(model) === "mimo-v2.5" ? "mimo-v2.5-nonthinking-v1" : undefined;
-}
-
-function vendorModelId(model: string): string {
-  return model === "Mimo-V2.5" || model === "mimo-v2-flash" ? "mimo-v2.5" : model;
+export function resolveVendorModelAlias(model: string): Readonly<{
+  readonly id: string;
+  readonly profile?: ProviderRequestProfile;
+}> {
+  const normalized = model.trim();
+  const row = VENDOR_MODEL_ALIASES.find(
+    (entry) => entry.id === normalized || entry.aliases.includes(normalized)
+  );
+  if (row === undefined) {
+    return { id: model };
+  }
+  return row.profile === undefined
+    ? { id: row.id }
+    : { id: row.id, profile: row.profile };
 }

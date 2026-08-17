@@ -9,9 +9,9 @@ import {
 import {
   createSourceAssertionSupplementReceipt,
   createSourceAssertionSupplementReader
-} from "../../../longmemeval/extraction/cache/semantic-supplement/source-assertion-supplement.js";
+} from "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { computeSourceAssertionSupplementReceiptEntrySetSha256 } from
-  "../../../longmemeval/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
+  "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
 
 const PRIMARY_CACHE_KEY = "abcdeffedcba".padEnd(64, "5");
 const SOURCE_CACHE_KEY = "012345abcdef".padEnd(64, "6");

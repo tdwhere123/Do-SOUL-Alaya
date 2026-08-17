@@ -7,7 +7,7 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics } from "../../../harness/token/token-economy.js";
 import type { BenchTokenMetrics } from "../../../harness/daemon.js";
-import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 import { buildMergedFullGoldCoverage } from "../merge-full-gold.js";
 import {
@@ -29,7 +29,7 @@ import { buildMergedSelectionContract } from "../merged/merged-selection-contrac
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 import { buildMergedRates, type MergedRates } from "../merged/merged-rates.js";
 
 export interface MergedLongMemEvalBuild {

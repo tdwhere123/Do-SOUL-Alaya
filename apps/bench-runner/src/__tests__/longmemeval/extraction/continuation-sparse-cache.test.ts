@@ -10,9 +10,9 @@ import {
 import {
   computeCacheKey,
   createCachingSignalExtractor
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { BenchSignalExtractor } from
-  "../../../longmemeval/compile-seed/compile-seed-types.js";
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 const roots: string[] = [];
 const config = {

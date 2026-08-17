@@ -17,7 +17,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -37,8 +37,8 @@ import {
   computeExtractionTurnCacheKey,
   computeSourceTurnCacheKeys,
   computeSourceTurnCacheKey
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
-import { writeCachedExtraction } from "../../../longmemeval/compile-seed/cache/cache-shard.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
+import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-shard.js";
 
 describe("canonical extraction request cache identity", () => {
   let cacheRoot: string;

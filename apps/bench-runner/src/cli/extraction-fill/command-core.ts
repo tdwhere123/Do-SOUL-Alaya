@@ -1,22 +1,20 @@
 import process from "node:process";
-import { ExtractionFillTaskError } from "../../longmemeval/extraction/fill/fill-pool.js";
-import type { runExtractionFill } from "../../longmemeval/extraction/extraction-fill.js";
+import { ExtractionFillTaskError } from "../../bench/extraction/fill/fill-pool.js";
+import type { runExtractionFill } from "../../bench/extraction/extraction-fill.js";
 import type { ParsedFlags } from "../cli-options.js";
-import type { verifyLongMemEvalExpansionContractInput } from "../promotion/expansion-input.js";
 import type { readR3SpendApproval } from "../../longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
-import { countTerminalProviderFailures } from "../../longmemeval/extraction/fill/fill-stats.js";
+import { countTerminalProviderFailures } from "../../bench/extraction/fill/fill-stats.js";
 import {
   ExtractionFillInterruptedError,
   withExtractionFillSignalScope,
   type ExtractionFillSignalSource
 } from "./signal-scope.js";
-import type { ExtractionFillResult } from "../../longmemeval/extraction/extraction-fill.js";
+import type { ExtractionFillResult } from "../../bench/extraction/extraction-fill.js";
 
 export interface ExtractionFillCommandDependencies {
   readonly runExtractionFill: typeof runExtractionFill;
   readonly signalSource: ExtractionFillSignalSource;
-  readonly verifyExpansionContract?: typeof verifyLongMemEvalExpansionContractInput;
   readonly readR3SpendApproval?: typeof readR3SpendApproval;
 }
 
@@ -25,23 +23,12 @@ export async function runExtractionFillCommand(
   deps: ExtractionFillCommandDependencies
 ): Promise<number> {
   try {
-    if (opts.catalogRefillAllowlist !== undefined) {
-      throw new Error(
-        "--catalog-refill-allowlist is accepted only by authorize-extraction; " +
-        "extraction-fill uses the receipt-bound key set"
-      );
-    }
     if (opts.extractionPredecessorAuthority !== undefined &&
         opts.extractionAuthority === undefined) {
       throw new Error(
         "--extraction-predecessor-authority requires --extraction-authority"
       );
     }
-    const expansionCapability = opts.promotionContract === undefined
-      ? undefined
-      : deps.verifyExpansionContract === undefined
-        ? (() => { throw new Error("expansion contract verifier is unavailable"); })()
-        : await deps.verifyExpansionContract(opts.promotionContract);
     const r3SpendApproval = opts.r3SpendApproval === undefined
       ? undefined
       : deps.readR3SpendApproval === undefined
@@ -80,7 +67,6 @@ export async function runExtractionFillCommand(
         ...(opts.pinnedMetaRoot === undefined ? {} : {
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
-        ...(expansionCapability === undefined ? {} : { expansionCapability }),
         ...(r3SpendApproval === undefined ? {} : { r3SpendApproval }),
         signal
       })

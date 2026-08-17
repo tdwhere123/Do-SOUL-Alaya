@@ -3,11 +3,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
-import type { BenchSignalExtractor } from "../../../../../longmemeval/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../../../bench/compile-seed.js";
 import { extractionCacheManifestPath } from
-  "../../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill } from
-  "../../../../../longmemeval/extraction/extraction-fill.js";
+  "../../../../../bench/extraction/extraction-fill.js";
 import type { LongMemEvalQuestion } from
   "../../../../../longmemeval/ingestion/dataset.js";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeFullGoldDeliveryContribution } from "../../../longmemeval/diagnostics/miss/full-gold-delivery-analysis.js";
+import { analyzeFullGoldDeliveryContribution } from "../../../bench/diagnostics/miss/full-gold-delivery-analysis.js";
 
 describe("analyzeFullGoldDeliveryContribution", () => {
   it("reports delivery contribution separately from fusion-stage order", () => {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecallEvalOneQuestionInput } from
-  "../../../longmemeval/lifecycle/recall-eval/question/recall-eval-question.js";
+  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js";
 
 const mocks = vi.hoisted(() => ({
   warm: vi.fn(),
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock(
-  "../../../longmemeval/provenance/embedding/embedding-cache-warmup.js",
+  "../../../bench/provenance/embedding/embedding-cache-warmup.js",
   () => ({ warmLongMemEvalEmbeddingCaches: mocks.warm })
 );
 vi.mock("../../../longmemeval/runner.js", () => ({
@@ -23,21 +23,21 @@ vi.mock("../../../longmemeval/runner.js", () => ({
   })),
   runLongMemEvalRecallCycle: mocks.recall
 }));
-vi.mock("../../../longmemeval/diagnostics.js", () => ({
+vi.mock("../../../bench/diagnostics.js", () => ({
   buildQuestionDiagnostic: vi.fn(() => ({
     delivered_results: [], candidates: [], is_abstention: false
   }))
 }));
-vi.mock("../../../longmemeval/diagnostics/diagnostics-measurement-axes.js", () => ({
+vi.mock("../../../bench/diagnostics/diagnostics-measurement-axes.js", () => ({
   attachQuestionMeasurementAxes: vi.fn((diagnostic) => diagnostic)
 }));
-vi.mock("../../../longmemeval/diagnostics/gold-object-identities.js", () => ({
+vi.mock("../../../bench/diagnostics/gold-object-identities.js", () => ({
   buildGoldObjectIdentities: vi.fn(() => [])
 }));
-vi.mock("../../../longmemeval/provenance/recall-eval/recall-eval-pool-dump.js", () => ({
+vi.mock("../../../bench/provenance/recall-eval/recall-eval-pool-dump.js", () => ({
   writeRecallEvalPoolDump: vi.fn()
 }));
-vi.mock("../../../longmemeval/qa/recall-token-economy.js", () => ({
+vi.mock("../../../bench/qa/recall-token-economy.js", () => ({
   extractRecallTokenEconomy: vi.fn(() => null)
 }));
 vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
@@ -45,7 +45,7 @@ vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
 }));
 
 import { recallEvalOneQuestion } from
-  "../../../longmemeval/lifecycle/recall-eval/question/recall-eval-question.js";
+  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js";
 
 describe("recall-eval question memory profile wiring", () => {
   beforeEach(() => {

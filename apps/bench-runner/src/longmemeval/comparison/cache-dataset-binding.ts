@@ -1,4 +1,4 @@
-import type { LongMemEvalRunProvenance } from "../provenance/run.js";
+import type { LongMemEvalRunProvenance } from "../../bench/provenance/run.js";
 import {
   parseLongMemEvalVariant,
   requireNonEmptyString

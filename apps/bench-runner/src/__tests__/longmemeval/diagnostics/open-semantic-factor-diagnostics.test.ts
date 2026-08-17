@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildQuestionDiagnostic } from
-  "../../../longmemeval/diagnostics/diagnostics-question.js";
+  "../../../bench/diagnostics/diagnostics-question.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+  "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const digest = (value: string) => `sha256:${value.repeat(64)}`;
 

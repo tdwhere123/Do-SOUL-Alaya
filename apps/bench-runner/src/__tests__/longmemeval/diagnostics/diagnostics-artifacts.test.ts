@@ -11,12 +11,12 @@ import {
   writeExternalDiagnosticsArtifact,
   writeExternalGzipDiagnosticsArtifact,
   writeExternalGzipDiagnosticsSidecarArtifact
-} from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   renderDiagnosticsSidecar,
   type LongMemEvalDiagnosticsSidecar
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 
 const roots: string[] = [];
 

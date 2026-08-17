@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ExtractionNoProgressError,
   createExtractionNoProgressWatchdog
-} from "../../../../longmemeval/extraction/authority/no-progress-watchdog.js";
+} from "../../../../bench/extraction/authority/no-progress-watchdog.js";
 
 describe("extraction no-progress watchdog", () => {
   it("aborts only after a full no-progress window and resets on durable progress", () => {

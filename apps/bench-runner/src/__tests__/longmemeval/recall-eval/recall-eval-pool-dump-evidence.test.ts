@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeRecallEvalPoolDump } from
-  "../../../longmemeval/provenance/recall-eval/recall-eval-pool-dump.js";
+  "../../../bench/provenance/recall-eval/recall-eval-pool-dump.js";
 
 const roots: string[] = [];
 
