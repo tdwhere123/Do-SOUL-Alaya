@@ -144,110 +144,48 @@ describe("pi-mono-extractor-contract", () => {
     expect(model.baseUrl).toBe("https://proxy.example.test/v1");
   });
 
-  it("default fetch transport POSTs to {baseUrl}/chat/completions with bearer auth and JSON body", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: '{"signals":[]}' } }]
-          }),
-          { status: 200, headers: { "content-type": "application/json" } }
-        )
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      // No injected complete: exercises the production fetch default.
-      const extractor = createPiMonoExtractor({
-        apiKey: "sk-live",
-        model: "custom-model",
-        endpoint: "https://proxy.example.test/v1/chat/completions"
-      });
-
-      await expect(
-        extractor.extract({
-          systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-          userPrompt: "turn payload"
-        })
-      ).resolves.toEqual({
-        rawJson: '{"signals":[]}',
-        extractorMeta: {
-          recoveryKind: "none",
-          retryCount: 0,
-          retryClassification: "success_first_try"
-        }
-      });
-
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0]!;
-      expect(url).toBe("https://proxy.example.test/v1/chat/completions");
-      expect(init!.method).toBe("POST");
-      const headers = init!.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer sk-live");
-      expect(headers["content-type"]).toBe("application/json");
-      expect(JSON.parse(init!.body as string)).toEqual({
-        model: "custom-model",
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: OFFICIAL_API_SYSTEM_PROMPT },
-          { role: "user", content: "turn payload" }
-        ]
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it("retries a 5xx from the injected transport and reports failure_max_retries", async () => {
+    const complete = vi.fn(async () => {
+      const error = new Error("HTTP 503 Service Unavailable");
+      (error as { status?: number }).status = 503;
+      throw error;
+    });
+    const extractor = createPiMonoExtractor({
+      apiKey: "sk-live",
+      model: "custom-model",
+      complete,
+      sleep: async () => undefined,
+      random: () => 0
+    });
+    await expect(
+      extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
+    ).rejects.toMatchObject({
+      kind: "transport_failure",
+      retryClassification: "failure_max_retries"
+    });
+    expect(complete).toHaveBeenCalledTimes(4);
   });
 
-  it("retries a 5xx from the real fetch transport and reports failure_max_retries", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response("", { status: 503, statusText: "Service Unavailable" }));
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const extractor = createPiMonoExtractor({
-        apiKey: "sk-live",
-        model: "custom-model",
-        endpoint: "https://proxy.example.test/v1",
-        sleep: async () => undefined,
-        random: () => 0
-      });
-      await expect(
-        extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
-      ).rejects.toMatchObject({
-        kind: "transport_failure",
-        retryClassification: "failure_max_retries"
-      });
-      // 1 initial attempt + MAX_EXTRACTOR_RETRIES retries.
-      expect(fetchMock).toHaveBeenCalledTimes(4);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("does not retry a 4xx from the real fetch transport", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response("", { status: 401, statusText: "Unauthorized" }));
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const extractor = createPiMonoExtractor({
-        apiKey: "sk-live",
-        model: "custom-model",
-        endpoint: "https://proxy.example.test/v1",
-        sleep: async () => undefined,
-        random: () => 0
-      });
-      await expect(
-        extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
-      ).rejects.toMatchObject({
-        kind: "transport_failure",
-        retryClassification: "failure_non_retryable_4xx"
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it("does not retry a 4xx from the injected transport", async () => {
+    const complete = vi.fn(async () => {
+      const error = new Error("HTTP 401 Unauthorized");
+      (error as { status?: number }).status = 401;
+      throw error;
+    });
+    const extractor = createPiMonoExtractor({
+      apiKey: "sk-live",
+      model: "custom-model",
+      complete,
+      sleep: async () => undefined,
+      random: () => 0
+    });
+    await expect(
+      extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
+    ).rejects.toMatchObject({
+      kind: "transport_failure",
+      retryClassification: "failure_non_retryable_4xx"
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("maps invalid JSON, timeout, and transport failures to typed extractor errors", async () => {

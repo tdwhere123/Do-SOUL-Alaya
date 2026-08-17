@@ -33,6 +33,7 @@ import {
   LocalHeuristics,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
+import { createOfficialGardenExtractor } from "../../garden-wiring/official-garden-extractor.js";
 import { GardenComputeProviderResolver } from "../../../services/support/garden-compute-provider-resolver.js";
 import type { AppConfigService } from "../../../services/config/config-service.js";
 import { createSoulApprovalService } from "../../../services/soul/soul-approval-service.js";
@@ -167,7 +168,12 @@ export async function createGardenComputeRuntime(
       new OfficialApiGardenProvider({
         apiKey,
         model,
-        ...(endpoint === null ? {} : { endpoint })
+        ...(endpoint === null ? {} : { endpoint }),
+        extractor: createOfficialGardenExtractor({
+          apiKey,
+          model,
+          ...(endpoint === null ? {} : { endpoint })
+        })
       })
   });
   const officialGardenProvider = gardenComputeProviderResolver;

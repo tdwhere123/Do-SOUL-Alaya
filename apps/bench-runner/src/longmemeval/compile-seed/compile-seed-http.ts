@@ -5,13 +5,13 @@ import type {
   BenchProviderResponseMetadata,
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
-import { buildGardenHttpRequestInit } from "../extraction/http-request.js";
+import {
+  fetchProviderChatCompletion,
+  ProviderChatCompletionError,
+  type ProviderRequestProfile
+} from "@do-soul/alaya-engine-gateway";
 import { extractGardenHttpWithAssertionPartition } from "./http/garden-http-assertion-partition.js";
 import { wrapGardenHttpTransportError } from "./http/garden-http-terminal-error.js";
-import {
-  inspectChatCompletionResponse,
-  type ChatCompletionResponseInspection
-} from "../extraction/chat-completion-response.js";
 import {
   runGardenHttpRetryLoop,
   type GardenHttpRetryCounters,
@@ -35,7 +35,6 @@ import {
 } from "./http/garden-http-error.js";
 import {
   aggregateGardenHttpAttemptUsage,
-  classifyResponseFailureKind,
   markGardenHttpFailure,
   readGardenHttpAttemptTimedOut,
   readGardenHttpFailureKind,
@@ -43,14 +42,10 @@ import {
   toBenchTransportFailureAttempt
 } from "./http/garden-http-failure-attempt.js";
 import { buildGardenHttpAttemptResponse } from "./http/garden-http-response-validation.js";
-import { readBoundedGardenHttpErrorBody } from "./http/garden-http-error-body.js";
 import { observeLateGardenHttpRejection } from "./http/garden-http-late-rejection.js";
 import {
-  startGardenHttpAttemptSettlement,
-  type GardenHttpAttemptSettlement
+  startGardenHttpAttemptSettlement
 } from "./http/stream/garden-http-attempt-settlement.js";
-import { readGardenHttpResponseText } from
-  "./http/stream/garden-http-body-reader.js";
 import { resolveGardenSchemaRetryInstruction, withGardenResponseSchemaRepair } from
   "./http/garden-http-schema-retry.js";
 import { resolveExtractionTransportRoute } from "../extraction/transport-route.js";
@@ -250,34 +245,52 @@ async function runGardenHttpAttempt(
   });
   let attemptSettled = false;
   try {
-    const response = await fetchGardenHttpResponse({
-      config,
+    const transport = resolveExtractionTransportRoute(config);
+    const completePromise = fetchProviderChatCompletion({
+      providerUrl: transport.providerUrl,
       apiKey,
-      deps,
-      input,
-      attempt,
-      controller,
-      settlement,
-      isAttemptSettled: () => attemptSettled
+      model: transport.model,
+      systemPrompt: input.systemPrompt,
+      userPrompt: input.userPrompt,
+      mode: "sse",
+      jsonObject: true,
+      profile: config.requestProfile as ProviderRequestProfile,
+      abortSignal: controller.signal,
+      fetchImpl: deps.fetch,
+      ...(input.maxOutputTokens === undefined ? {} : {
+        maxOutputTokens: input.maxOutputTokens,
+        outputTokenField: input.outputTokenField
+      })
     });
-    const responseInspection = await inspectGardenHttpAttemptResponse(
-      response,
-      settlement,
-      controller,
-      () => attemptSettled,
-      attempt
+    observeLateGardenHttpRejection(
+      { attempt, controller, isAttemptSettled: () => attemptSettled },
+      completePromise,
+      "fetch"
     );
-    return buildGardenHttpAttemptResponse(
-      responseInspection,
-      input.maxOutputTokens,
-      input.validateRawJson === undefined ? "default_envelope" : "caller_owned"
-    );
+    const result = await Promise.race([completePromise, settlement.promise]);
+    settlement.noteProgress();
+    return buildGardenHttpAttemptResponse({
+      content: result.text,
+      finishReason: result.finishReason,
+      ...(result.usage === undefined ? {} : { usage: result.usage })
+    }, input.maxOutputTokens, input.validateRawJson === undefined
+      ? "default_envelope"
+      : "caller_owned");
   } catch (error) {
-    throw settleGardenHttpFailure(error, settlement, input);
+    throw settleGardenHttpFailure(mapProviderChatError(error), settlement, input);
   } finally {
     attemptSettled = true;
     settlement.dispose();
   }
+}
+
+function mapProviderChatError(error: unknown): unknown {
+  if (!(error instanceof ProviderChatCompletionError)) return error;
+  return markGardenHttpFailure(error, {
+    kind: error.kind === "http_error" ? "http_error" : "network_error",
+    phase: error.kind === "http_error" ? "response_status" : "request",
+    ...(error.httpStatus === null ? {} : { httpStatus: error.httpStatus })
+  });
 }
 
 function settleGardenHttpFailure(
@@ -291,28 +304,6 @@ function settleGardenHttpFailure(
     settlement.hasTimedOut() || planTimedOut,
     input.abortSignal?.aborted === true && !planTimedOut
   );
-}
-
-async function inspectGardenHttpAttemptResponse(
-  response: Response,
-  settlement: GardenHttpAttemptSettlement,
-  controller: AbortController,
-  isAttemptSettled: () => boolean,
-  attempt: number
-): Promise<ChatCompletionResponseInspection> {
-  const bodyText = await readGardenHttpBodyText(
-    response, settlement, controller, isAttemptSettled, attempt
-  );
-  try {
-    return inspectChatCompletionResponse(bodyText, response.headers.get("content-type"));
-  } catch (error) {
-    const kind = classifyResponseFailureKind(error);
-    throw markGardenHttpFailure(error, {
-      kind,
-      phase: kind === "response_schema_error" ? "response_schema" : "response_parse",
-      rawBody: bodyText
-    });
-  }
 }
 
 function buildGardenHttpSuccess(
@@ -397,68 +388,4 @@ function decideGardenHttpTimeoutRetry(
     retry: true,
     counters: { ...counters, timeoutRetries: counters.timeoutRetries + 1 }
   };
-}
-
-type GardenHttpFetchInput = { readonly config: CompileSeedExtractionConfig; readonly apiKey: string; readonly deps: GardenHttpExtractorDeps; readonly input: GardenHttpExtractInput; readonly attempt: number; readonly controller: AbortController; readonly settlement: GardenHttpAttemptSettlement; readonly isAttemptSettled: () => boolean };
-
-async function fetchGardenHttpResponse(
-  input: GardenHttpFetchInput
-): Promise<Response> {
-  const transport = resolveExtractionTransportRoute(input.config);
-  const fetchPromise = input.deps.fetch(
-    `${transport.providerUrl}/chat/completions`,
-    buildGardenHttpRequestInit(
-      input.config,
-      input.apiKey,
-      input.input,
-      input.controller.signal
-    )
-  );
-  observeLateGardenHttpRejection(input, fetchPromise, "fetch");
-  let response: Response;
-  try {
-    response = await Promise.race([fetchPromise, input.settlement.promise]);
-  } catch (error) {
-    throw markGardenHttpFailure(error, { kind: "network_error", phase: "request" });
-  }
-  input.settlement.noteProgress();
-  if (!response.ok) {
-    const rawBody = await readBoundedGardenHttpErrorBody(
-      response, input.settlement.promise, input.settlement.noteProgress
-    );
-    const err = new Error(
-      `garden extraction HTTP ${response.status} ${response.statusText}`
-    );
-    (err as { status?: number }).status = response.status;
-    throw markGardenHttpFailure(err, {
-      kind: "http_error",
-      phase: "response_status",
-      httpStatus: response.status,
-      ...(rawBody === undefined ? {} : { rawBody })
-    });
-  }
-  return response;
-}
-
-async function readGardenHttpBodyText(
-  response: Response,
-  settlement: GardenHttpAttemptSettlement,
-  controller: AbortController,
-  isAttemptSettled: () => boolean,
-  attempt: number
-): Promise<string> {
-  const bodyTextPromise = readGardenHttpResponseText(response, settlement);
-  observeLateGardenHttpRejection(
-    { attempt, controller, isAttemptSettled },
-    bodyTextPromise,
-    "body read"
-  );
-  try {
-    return await Promise.race([bodyTextPromise, settlement.promise]);
-  } catch (error) {
-    throw markGardenHttpFailure(error, {
-      kind: "body_read_error",
-      phase: "response_body"
-    });
-  }
 }

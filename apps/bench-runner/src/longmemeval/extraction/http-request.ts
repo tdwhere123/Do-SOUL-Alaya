@@ -1,3 +1,7 @@
+import {
+  buildProviderChatRequestInit,
+  type ProviderRequestProfile
+} from "@do-soul/alaya-engine-gateway";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { resolveExtractionTransportRoute } from "./transport-route.js";
 
@@ -13,33 +17,19 @@ export function buildGardenHttpRequestInit(
   signal: AbortSignal
 ): RequestInit {
   const transport = resolveExtractionTransportRoute(config);
-  return {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: transport.model,
-      temperature: 0,
-      stream: true,
-      stream_options: { include_usage: true },
-      response_format: { type: "json_object" },
-      ...(input.maxOutputTokens === undefined ? {} : {
-        [input.outputTokenField ?? "max_tokens"]: input.maxOutputTokens
-      }),
-      ...(config.requestProfile === "deepseek-v4-nonthinking-v1"
-        ? {
-          reasoning_effort: "none",
-          enable_thinking: false,
-          thinking: { type: "disabled" }
-        }
-        : {}),
-      messages: [
-        { role: "system", content: input.systemPrompt },
-        { role: "user", content: input.userPrompt }
-      ]
-    }),
-    signal
-  };
+  return buildProviderChatRequestInit({
+    providerUrl: transport.providerUrl,
+    apiKey,
+    model: transport.model,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    mode: "sse",
+    jsonObject: true,
+    profile: config.requestProfile as ProviderRequestProfile,
+    abortSignal: signal,
+    ...(input.maxOutputTokens === undefined ? {} : {
+      maxOutputTokens: input.maxOutputTokens,
+      outputTokenField: input.outputTokenField
+    })
+  });
 }

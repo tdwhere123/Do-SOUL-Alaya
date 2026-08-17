@@ -12,7 +12,6 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   SignalExtractorError,
-  createPiMonoExtractor,
   type SignalExtractor
 } from "./pi-mono-extractor.js";
 import {
@@ -199,13 +198,11 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     this.wallClockBudgetMs =
       normalizePositiveTimeoutMs(deps.wallClockBudgetMs) ??
       wallClockBudgetFor(this.requestTimeoutMs);
-    this.extractor = deps.extractor ?? (this.apiKey === null
-      ? null
-      : createPiMonoExtractor({
-          apiKey: this.apiKey,
-          model: this.model,
-          ...(this.endpoint === null ? {} : { endpoint: this.endpoint })
-        }));
+    this.extractor = deps.extractor ?? null;
+    if (this.extractor === null && this.apiKey !== null &&
+        !this.canUseCredentiallessCacheExtractor) {
+      throw new TypeError("OfficialApiGardenProvider requires an injected extractor");
+    }
     this.queryCompiler = this.extractor === null
       ? null
       : createOpenSemanticFactorQueryCompiler({

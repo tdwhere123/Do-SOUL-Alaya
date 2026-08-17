@@ -1,6 +1,6 @@
 import { SignalExtractorError, type RetryClassification } from "./pi-mono-errors.js";
 import { parseOrRecoverJson, type JsonRecoveryKind } from "./pi-mono-json-recovery.js";
-import { fetchComplete, readTextContent, requestJsonPayload, selectModel } from "./pi-mono-transport.js";
+import { readTextContent, requestJsonPayload, selectModel } from "./pi-mono-transport.js";
 
 export { SignalExtractorError } from "./pi-mono-errors.js";
 export type { RetryClassification, SignalExtractorErrorKind } from "./pi-mono-errors.js";
@@ -144,7 +144,10 @@ type ExtractInput = Parameters<SignalExtractor["extract"]>[0];
 function createExtractorRuntime(
   deps: PiMonoExtractorDependencies
 ): ExtractorRuntime {
-  const completeImpl = deps.complete ?? fetchComplete;
+  if (deps.complete === undefined) {
+    throw new TypeError("createPiMonoExtractor requires an injected complete transport");
+  }
+  const completeImpl = deps.complete;
   // The default carries no provider catalog; selectModel falls through to the
   // OpenAI-compatible handle that pins the resolved baseUrl.
   const getModelImpl = deps.getModel ?? (() => undefined);

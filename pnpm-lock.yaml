@@ -43,6 +43,9 @@ importers:
       '@do-soul/alaya-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@do-soul/alaya-engine-gateway':
+        specifier: workspace:*
+        version: link:../../packages/engine-gateway
       '@do-soul/alaya-eval':
         specifier: workspace:*
         version: link:../../packages/eval

@@ -452,6 +452,11 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
 
+  it("refuses to construct a live provider without an injected extractor", () => {
+    expect(() => new OfficialApiGardenProvider({ apiKey: "sk-test" }))
+      .toThrow(/injected extractor/u);
+  });
+
   it("still fails the turn hard when the response envelope itself is malformed", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
