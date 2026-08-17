@@ -1,0 +1,5 @@
+export const MIMO_REQUEST_PROFILE = "mimo-v2.5-nonthinking-v1" as const;
+export const MIMO_MODEL_ID = "Mimo-V2.5";
+export const MIMO_PROBE_CALL_CEILING = 3;
+
+export const OBSOLETE_DEEPSEEK_REQUEST_PROFILE = "deepseek-v4-nonthinking-v1" as const;

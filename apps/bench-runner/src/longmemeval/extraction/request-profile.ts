@@ -1,6 +1,7 @@
 export const EXTRACTION_REQUEST_PROFILES = [
   "provider-default-v1",
-  "deepseek-v4-nonthinking-v1"
+  "deepseek-v4-nonthinking-v1",
+  "mimo-v2.5-nonthinking-v1"
 ] as const;
 
 export type ExtractionRequestProfile =

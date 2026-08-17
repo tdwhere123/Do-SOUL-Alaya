@@ -394,8 +394,8 @@ function requireRequestProfile(
   value: unknown,
   filePath: string
 ): ExtractionRequestProfile {
-  if (value === "provider-default-v1" || value === "deepseek-v4-nonthinking-v1") {
-    return value;
+  if ((EXTRACTION_REQUEST_PROFILES as readonly string[]).includes(value as string)) {
+    return value as ExtractionRequestProfile;
   }
   throw new Error(
     `extraction cache manifest at ${filePath} schema_version 3 requires request_profile ` +

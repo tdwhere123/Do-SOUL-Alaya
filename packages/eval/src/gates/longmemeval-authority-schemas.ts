@@ -13,7 +13,8 @@ export const LONGMEMEVAL_FANOUT_AUTHORITY_FILENAME =
 export const MAX_LONGMEMEVAL_EXTRACTION_AUTHORITY_BYTES = 64 * 1024 * 1024;
 export const LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES = [
   "provider-default-v1",
-  "deepseek-v4-nonthinking-v1"
+  "deepseek-v4-nonthinking-v1",
+  "mimo-v2.5-nonthinking-v1"
 ] as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);

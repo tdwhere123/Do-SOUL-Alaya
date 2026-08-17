@@ -29,7 +29,7 @@ describe("provider chat completion", () => {
       model: "mimo-v2.5",
       systemPrompt: "sys",
       userPrompt: "user",
-      profile: "deepseek-v4-nonthinking-v1",
+      profile: "mimo-v2.5-nonthinking-v1",
       fetchImpl: fetchImpl as unknown as typeof fetch
     });
 
