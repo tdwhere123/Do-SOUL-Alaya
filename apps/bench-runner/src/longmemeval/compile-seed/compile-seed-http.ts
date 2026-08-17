@@ -49,7 +49,10 @@ import {
 } from "./http/stream/garden-http-attempt-settlement.js";
 import { resolveGardenSchemaRetryInstruction, withGardenResponseSchemaRepair } from
   "./http/garden-http-schema-retry.js";
-import { resolveExtractionTransportRoute } from "../extraction/transport-route.js";
+import {
+  assertMimoRequestProfile,
+  resolveExtractionTransportRoute
+} from "../extraction/transport-route.js";
 import {
   isExtractionPlanDeadlineError
 } from "./http/extraction-plan-deadline.js";
@@ -247,6 +250,7 @@ async function runGardenHttpAttempt(
   let attemptSettled = false;
   try {
     const transport = resolveExtractionTransportRoute(config);
+    assertMimoRequestProfile(config);
     const completePromise = fetchProviderChatCompletion({
       providerUrl: transport.providerUrl,
       apiKey,

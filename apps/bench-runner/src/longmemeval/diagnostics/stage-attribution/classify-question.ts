@@ -57,9 +57,9 @@ export function classifyQuestionStage(
         "memory_emitted" ||
       question.cohort_ledger?.extraction_materialization.status ===
         "evidence_preserved";
-    if (formation !== null && formation !== undefined && formation.status !== "formed") {
+    if (formation?.status === "rejected") {
       stage = 2;
-      proof = `semantic_factor_formation_${formation.status}`;
+      proof = "semantic_factor_formation_rejected";
     } else {
       stage = emitted && !emptyGold ? 2 : 1;
       proof = emitted

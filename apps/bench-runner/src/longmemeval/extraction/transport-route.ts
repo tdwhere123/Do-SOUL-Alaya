@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
+import {
+  MIMO_MODEL_ID,
+  MIMO_REQUEST_PROFILE,
+  resolveMimoVendorModel
+} from "../mimo/profile.js";
 
 export interface ExtractionTransportRoute {
   readonly providerUrl: string;
@@ -19,8 +24,19 @@ export function resolveExtractionTransportRoute(
 ): ExtractionTransportRoute {
   return Object.freeze({
     providerUrl: config.transportProviderUrl ?? config.providerUrl,
-    model: config.transportModel ?? config.model
+    model: resolveMimoVendorModel(config.transportModel ?? config.model)
   });
+}
+
+export function assertMimoRequestProfile(
+  config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile" | "transportModel">
+): void {
+  const vendor = resolveMimoVendorModel(config.transportModel ?? config.model);
+  if (vendor === MIMO_MODEL_ID && config.requestProfile !== MIMO_REQUEST_PROFILE) {
+    throw new Error(
+      `MiMo model ${vendor} requires request profile ${MIMO_REQUEST_PROFILE}`
+    );
+  }
 }
 
 export function buildExtractionTransportProvenance(

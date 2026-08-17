@@ -81,6 +81,26 @@ describe("createGardenHttpExtractor retry policy", () => {
       .toBe("provider-model-alias");
   });
 
+  it("remaps the MiMo display model and requires the MiMo request profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    await expect(createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "Mimo-V2.5",
+      requestProfile: "provider-default-v1"
+    }, { fetch: fetchMock }).extract({ systemPrompt: "system", userPrompt: "turn" }))
+      .rejects.toThrow(/mimo-v2.5-nonthinking-v1/u);
+
+    await createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "Mimo-V2.5",
+      requestProfile: "mimo-v2.5-nonthinking-v1"
+    }, { fetch: fetchMock }).extract({ systemPrompt: "system", userPrompt: "turn" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).model).toBe("mimo-v2.5");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).enable_thinking).toBe(false);
+  });
+
   it("leaves reasoning controls absent for the provider-default profile", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })

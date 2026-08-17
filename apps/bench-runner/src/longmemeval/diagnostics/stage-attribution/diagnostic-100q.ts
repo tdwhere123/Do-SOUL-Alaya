@@ -43,7 +43,7 @@ export function mapQuestionToDiagnosticStage(
     }
     return "S1";
   }
-  if (row.proof.includes("f3") || row.proof.includes("semantic_factor")) return "S2";
+  if (row.proof === "semantic_factor_formation_rejected") return "S2";
   if (row.stage === 2 || row.stage === 3) return "S3";
   return "S4";
 }

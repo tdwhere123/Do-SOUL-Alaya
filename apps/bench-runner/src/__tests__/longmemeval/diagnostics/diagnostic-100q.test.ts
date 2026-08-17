@@ -19,6 +19,9 @@ describe("diagnostic 100Q stage map", () => {
       stage: 2, proof: "semantic_factor_formation_rejected"
     }))).toBe("S2");
     expect(mapQuestionToDiagnosticStage(row({
+      stage: 2, proof: "semantic_factor_formation_unavailable"
+    }))).toBe("S3");
+    expect(mapQuestionToDiagnosticStage(row({
       stage: 2, proof: "miss_taxonomy.candidate_absent_with_emitted_gold"
     }))).toBe("S3");
     expect(mapQuestionToDiagnosticStage(row({
