@@ -179,6 +179,18 @@ describe("gate1 stage attribution (fixtures)", () => {
     });
     expect(classifyQuestionStage(f3Q).proof).toBe("semantic_factor_formation_rejected");
 
+    const unavailableQ = {
+      ...f3Q,
+      question_id: "q-f3-unavailable",
+      query_open_semantic_factor_formation: {
+        ...f3Q.query_open_semantic_factor_formation!,
+        status: "unavailable" as const
+      }
+    };
+    expect(classifyQuestionStage(unavailableQ).proof).toBe(
+      "miss_taxonomy.candidate_absent_with_emitted_gold"
+    );
+
     const poolQ = baseQuestion({
       question_id: "q-pool",
       gold_memory_ids: ["g-pool"],
