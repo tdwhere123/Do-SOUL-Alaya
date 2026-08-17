@@ -50,8 +50,10 @@ import {
   createOpenSemanticFactorQueryCompiler,
   type OpenSemanticFactorQueryCompiler
 } from "./semantic-factors/query-compiler.js";
-import { SELECTED_SOURCE_BOUND_F3_CAPABILITY } from
-  "./semantic-factors/source-bound-seal.js";
+import {
+  SELECTED_SOURCE_BOUND_F3_CAPABILITY,
+  type SourceBoundF3Capability
+} from "./semantic-factors/source-bound-seal.js";
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -405,6 +407,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   }
 }
 
+const REQUIRE_GRAPH_FOR_MEMBERSHIP: Readonly<Record<SourceBoundF3Capability, boolean>> = {
+  f0_f2_only: false,
+  identities_only: false,
+  identities_and_topology: true
+};
+
 function parseBoundedBatchSignals(
   rawJson: string,
   request: OfficialApiExtractionRequest
@@ -414,7 +422,7 @@ function parseBoundedBatchSignals(
   // if the sealed capability is identities_and_topology.
   const drafts = parseOfficialApiSignals(rawJson, {
     requireSemanticFactorGraph:
-      SELECTED_SOURCE_BOUND_F3_CAPABILITY === "identities_and_topology"
+      REQUIRE_GRAPH_FOR_MEMBERSHIP[SELECTED_SOURCE_BOUND_F3_CAPABILITY]
   });
   const allowedIds = new Set(request.source_assertions.map(({ assertion_id }) => assertion_id));
   if (drafts.some(({ source_locator }) =>
