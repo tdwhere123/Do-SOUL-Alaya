@@ -5,7 +5,6 @@ import {
   type RecallUsageHandlerDependencies
 } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { InMemoryCausalUsageRecorder } from "../../../mcp-memory/usage/causal-usage-recorder.js";
-import { hashUsageIdentity } from "../../../mcp-memory/usage/causal-usage-identity.js";
 import {
   context,
   createDeliveryRecord,
@@ -45,7 +44,7 @@ describe("recall usage causal receipts", () => {
     expect(onCoRecall).not.toHaveBeenCalled();
   });
 
-  it("records one causal receipt per used object and replays the same identity", async () => {
+  it("treats a used self-report as telemetry and does not mint causal receipts", async () => {
     const recorder = new InMemoryCausalUsageRecorder();
     const deps = withDelivery(recorder, ["mem1", "mem2"]);
     const report = createReportContextUsageHandler({
@@ -67,16 +66,7 @@ describe("recall usage causal receipts", () => {
       reason: "cited again"
     }, context);
 
-    const receipts = recorder.list();
-    expect(receipts).toHaveLength(2);
-    expect(receipts.every((receipt) => receipt.usage_kind === "causal")).toBe(true);
-    expect(receipts.every((receipt) => receipt.weight === 1)).toBe(true);
-    expect(receipts.map((receipt) => receipt.downstream_ref).sort()).toEqual(["mem1", "mem2"]);
-    expect(receipts[0]?.identity).toBe(hashUsageIdentity({
-      causal_key: "delivery_1:mem1",
-      downstream_ref: "mem1",
-      scope: context.workspaceId
-    }));
+    expect(recorder.list()).toEqual([]);
   });
 
   it("does not assign top-k membership credit to unused delivered ids", async () => {
@@ -95,9 +85,29 @@ describe("recall usage causal receipts", () => {
       reason: "one citation"
     }, context);
 
-    expect(recorder.list().map((receipt) => receipt.downstream_ref)).toEqual(["mem1"]);
-    expect(recorder.list().some((receipt) => receipt.downstream_ref === "mem2")).toBe(false);
-    expect(recorder.list().some((receipt) => receipt.downstream_ref === "mem3")).toBe(false);
+    expect(recorder.list()).toEqual([]);
+  });
+
+  it("binds telemetry reports to workspace, agent, and the session-backed run", async () => {
+    const recorder = new InMemoryCausalUsageRecorder();
+    const deps = withDelivery(recorder, ["mem1"]);
+    const report = createReportContextUsageHandler({ deps, now: () => NOW, warn: vi.fn() });
+
+    await report({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      used_object_ids: ["mem1"],
+      reason: null
+    }, { ...context, runId: null, sessionId: "session-1" });
+
+    expect(deps.trustStateRecorder.recordUsage).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: "session-1"
+      }
+    );
   });
 });
 

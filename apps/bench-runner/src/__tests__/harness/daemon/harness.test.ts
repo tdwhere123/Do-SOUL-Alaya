@@ -35,8 +35,6 @@ import {
   resolveBenchReviewerCredentials
 } from "../../../harness/daemon/daemon-support.js";
 
-import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../../../harness/embedding/co-recall-warmup.js";
-
 import {
   BenchRecallDiagnosticsSchema,
   type BenchRecallDiagnostics
@@ -82,37 +80,6 @@ function readDerivesFromPathRelation(
           AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
     )
     .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
-}
-
-interface CoRecalledPathRow {
-  readonly source_object_id: string;
-  readonly target_object_id: string;
-  readonly recall_bias: number;
-  readonly lifecycle_status: string;
-  readonly governance_class: string;
-}
-
-// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
-// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
-// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
-// the durable row, not from a re-import of the predicate.
-// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
-function readCoRecalledPathRelations(
-  db: BenchDatabase,
-  workspaceId: string
-): readonly CoRecalledPathRow[] {
-  return db.connection
-    .prepare(
-      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
-              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
-              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
-              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
-              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
-         FROM path_relations
-        WHERE workspace_id = ?
-          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
-    )
-    .all(workspaceId) as readonly CoRecalledPathRow[];
 }
 
 function edgeProposalCount(

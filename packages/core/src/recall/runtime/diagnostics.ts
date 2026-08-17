@@ -40,6 +40,8 @@ import type { OpenSemanticFactorCompositionReceipt } from
   "../field/open-semantic-factors/composition.js";
 import type { OpenSemanticFactorActivationReceipt } from
   "../field/open-semantic-factors/activation.js";
+import type { PinnedProjectionCandidateSelection } from
+  "../field/retrieval/projection/pinned-projection-selection.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -61,6 +63,12 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly fieldRefinementStopCertificate?:
     Readonly<RecallFieldRefinementStopCertificate>;
   readonly queryCondition?: QueryConditionParityView;
+  readonly fieldProjectionTrace?: Readonly<
+    PinnedProjectionCandidateSelection & {
+      readonly generation_id: string;
+      readonly condition_digest: string;
+    }
+  >;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
@@ -137,6 +145,9 @@ export function buildRecallDiagnostics(
     ...(params.queryCondition === undefined
       ? {}
       : { query_condition: params.queryCondition }),
+    ...(params.fieldProjectionTrace === undefined
+      ? {}
+      : { field_projection_trace: params.fieldProjectionTrace }),
     ...(params.answerShapePlan === undefined
       ? {}
       : { answer_shape_plan: params.answerShapePlan }),

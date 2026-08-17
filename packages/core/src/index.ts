@@ -42,18 +42,22 @@ export * from "./shared/errors.js";
 export { fieldContractSha256 } from "./shared/field-hash.js";
 export {
   createInMemoryFieldStores,
-  type FieldFormationStores
+  type FieldFormationStores,
+  type SourceRecordEvidenceBinding
 } from "./memory/evidence-create/field-stores.js";
 export {
-  activateEmptyGeneration,
-  createInMemoryFieldQuerySession,
+  activateTestOnlyEmptyGeneration,
+  createTestOnlyInMemoryFieldQuerySession,
   SEALED_EMPTY_FRONTIER,
   type RecallFieldQuerySession
 } from "./recall/runtime/query/field-query-session.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
+export * from "./recall/field/retrieval/projection/generation-artifacts.js";
+export * from "./recall/field/retrieval/projection/generation-lifecycle.js";
+export * from "./recall/field/retrieval/projection/pinned-projection-selection.js";
+export * from "./recall/field/retrieval/projection/source-projection.js";
 export {
-  createPortBackedGenerationStore,
   type ProjectionGenerationLifecycleStore
 } from "./recall/field/retrieval/projection/generation-store.js";
 export type { RecallServiceFieldDeps } from "./recall/recall-service.js";
@@ -102,6 +106,11 @@ export * from "./runs/project-mapping-service.js";
 export * from "./tooling/prompt-asset-registry.js";
 export * from "./governance/proposals/proposal-service.js";
 export * from "./governance/proposals/resolution-service.js";
+export * from "./governance/proposals/resolution-service-effects.js";
+export * from "./governance/effects/proof-effect-policy.js";
+export { buildEraseBarrierEventInput } from "./governance/effects/erase-barrier.js";
+export { createProjectionEraseBarrier } from
+  "./recall/field/retrieval/projection/generation-erase.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
 export * from "./recall/query/recall-query-probes.js";
@@ -172,6 +181,10 @@ export {
 export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
+export { buildSelectGammaPacketObservation } from
+  "./recall/delivery/select-gamma/packet-observation.js";
+export { captureSupportSetPacketPlanTrace } from
+  "./recall/delivery/packet-plan/packet-plan-trace.js";
 export {
   assertFineAssessmentOrderLedgerAttribution,
   buildFineAssessmentOrderLedger,
@@ -192,20 +205,6 @@ export {
   type CandidateSemanticActivationScopeInput,
   type CandidateSemanticActivationSource
 } from "./recall/scoring/candidate-semantic-activation.js";
-export {
-  DUPLICATE_GIST_COVERAGE_OPERATOR_ID,
-  materializeCoverageSelectionCandidateStates,
-  orderCoverageSelectionCandidateStatesByMarginalGain,
-  orderByCoverageMarginalGain,
-  resolveCoverageIdentity,
-  type CoverageIdentity,
-  type CoverageMarginalObservation,
-  type CoverageSelectableCandidate,
-  type CoverageSelectionCandidateState,
-  type DuplicateGistCoverageState,
-  type CoverageSelectionObjective,
-  type CoverageSelectionSupplementary
-} from "./recall/delivery/coverage-selection.js";
 export {
   COVERAGE_ATOM_OPERATOR_ID,
   buildCoverageProjectionFormKey,
@@ -231,6 +230,8 @@ export * from "./recall/field/facility/selection-objective.js";
 export * from "./recall/field/query-facility-demand.js";
 export * from "./recall/field/fact-frame-semantic-factors.js";
 export * from "./recall/field/query-attribution/query-field-attribution.js";
+export { projectionPinExpiry } from
+  "./recall/runtime/query/projection-pin-lease.js";
 export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";

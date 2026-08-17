@@ -18,7 +18,7 @@ import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-ca
  * EdgeAutoProducerService.classifyPair, which submits an accepted verdict
  * as a weak attention_only PathRelation candidate via submitCandidate; the
  * confidence floor (LLM_CONFIDENCE_FLOOR in edge-auto-producer-service.ts)
- * gates entry and PathPlasticityService reinforcement gates recall.
+ * gates entry. Governed promotion remains the recall-authority boundary.
  *
  * The transport mirrors apps/core-daemon/src/ai/reconciliation-llm-decision.ts:
  * - garden compute local path only (invariant: no new cloud dependency

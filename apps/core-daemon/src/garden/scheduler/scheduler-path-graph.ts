@@ -40,7 +40,8 @@ function createPathGraphSnapshotter(
       findActiveAll:
         pathRelationRepo.findActiveAll?.bind(input.pathRelationRepo) ??
         pathRelationRepo.findActive?.bind(input.pathRelationRepo)
-    }
+    },
+    now: () => new Date(input.now())
   });
 }
 
@@ -131,7 +132,7 @@ async function runPathGraphSnapshotTask(
   reviewHistory: (workspaceId: string) => Promise<void>,
   pruneHistory: (workspaceId: string, snapshotAt: string) => Promise<void>
 ): Promise<void> {
-  const completedAt = new Date().toISOString();
+  const completedAt = input.now();
   try {
     const snapshot = await maybePersistPathGraphSnapshot(task.workspace_id, input, persistSnapshot);
     if (snapshot !== null) {
@@ -160,7 +161,7 @@ async function maybePersistPathGraphSnapshot(
   ) => Promise<PathGraphSnapshotRecord>
 ): Promise<PathGraphSnapshotRecord | null> {
   const previousSnapshot = await input.pathGraphSnapshotRepo.findLatest(workspaceId);
-  return isPathGraphSnapshotDue(previousSnapshot, Date.now())
+  return isPathGraphSnapshotDue(previousSnapshot, Date.parse(input.now()))
     ? await persistSnapshot(workspaceId, previousSnapshot)
     : null;
 }

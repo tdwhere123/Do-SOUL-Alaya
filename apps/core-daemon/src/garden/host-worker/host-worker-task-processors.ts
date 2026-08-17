@@ -38,6 +38,7 @@ type PostTurnExtractTaskRow = Readonly<{
 }>;
 
 type PostTurnExtractRuntimeInput = Readonly<{
+  readonly now: () => string;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
@@ -102,7 +103,7 @@ async function claimPostTurnExtractTask(
   if (provider === null) {
     return null;
   }
-  const claimedAt = new Date().toISOString();
+  const claimedAt = input.now();
   const claimResult = await input.gardenTaskRepo.claimAtomic(
     row.id,
     IN_PROCESS_POST_TURN_CLAIMANT,
@@ -142,9 +143,21 @@ async function processClaimedPostTurnExtractTask(
       task.provider,
       input
     );
-    await completePostTurnExtractTask(task.row, payload.run_id, emittedSignalIds, input.gardenTaskRepo);
+    await completePostTurnExtractTask(
+      task.row,
+      payload.run_id,
+      emittedSignalIds,
+      input.gardenTaskRepo,
+      input.now
+    );
   } catch (error) {
-    await failPostTurnExtractTask(task.row, payload.run_id, error, input.gardenTaskRepo);
+    await failPostTurnExtractTask(
+      task.row,
+      payload.run_id,
+      error,
+      input.gardenTaskRepo,
+      input.now
+    );
   }
 }
 
@@ -152,6 +165,7 @@ function selectPostTurnExtractProvider(
   config: RuntimeGardenComputeConfig,
   row: GardenTaskRow,
   input: Readonly<{
+    readonly now: () => string;
     readonly localHeuristicsProvider?: GardenComputeProvider;
     readonly officialApiGardenProvider?: GardenComputeProvider | null;
   }>
@@ -160,7 +174,7 @@ function selectPostTurnExtractProvider(
     const enqueuedAtMs = Date.parse(row.created_at);
     const pendingForMs = Number.isNaN(enqueuedAtMs)
       ? 0
-      : Date.now() - enqueuedAtMs;
+      : Date.parse(input.now()) - enqueuedAtMs;
     if (pendingForMs < HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS) {
       return null;
     }
@@ -231,19 +245,24 @@ async function emitPostTurnExtractSignals(
     sourceObservation: payload.source_observation,
     candidates: stableCandidates,
     signalReceiver: input.signalReceiver,
-    beforeReceive: async () => await refreshPostTurnExtractClaim(input.gardenTaskRepo, row.id)
+    beforeReceive: async () => await refreshPostTurnExtractClaim(
+      input.gardenTaskRepo,
+      row.id,
+      input.now
+    )
   });
 }
 
 async function refreshPostTurnExtractClaim(
   gardenTaskRepo: SqliteGardenTaskRepo,
-  taskId: string
+  taskId: string,
+  now: () => string
 ): Promise<void> {
   if (
     gardenTaskRepo.refreshClaim(
       taskId,
       IN_PROCESS_POST_TURN_CLAIMANT,
-      new Date().toISOString()
+      now()
     )
   ) {
     return;
@@ -255,9 +274,10 @@ async function completePostTurnExtractTask(
   row: GardenTaskRow,
   runId: string,
   emittedSignalIds: readonly string[],
-  gardenTaskRepo: SqliteGardenTaskRepo
+  gardenTaskRepo: SqliteGardenTaskRepo,
+  now: () => string
 ): Promise<void> {
-  const completedAt = new Date().toISOString();
+  const completedAt = now();
   await gardenTaskRepo.completeWithEvents(
     row.id,
     {
@@ -283,9 +303,10 @@ async function failPostTurnExtractTask(
   row: GardenTaskRow,
   runId: string,
   error: unknown,
-  gardenTaskRepo: SqliteGardenTaskRepo
+  gardenTaskRepo: SqliteGardenTaskRepo,
+  now: () => string
 ): Promise<void> {
-  const completedAt = new Date().toISOString();
+  const completedAt = now();
   await gardenTaskRepo.completeWithEvents(
     row.id,
     {

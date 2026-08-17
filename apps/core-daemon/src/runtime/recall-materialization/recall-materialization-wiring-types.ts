@@ -16,6 +16,7 @@ import type {
   PathFailureHealthInboxPort,
   RecallFailureHealthInboxPort
 } from "@do-soul/alaya-core";
+import type { ContextDeliveryRecord } from "@do-soul/alaya-protocol";
 import type {
   GlobalMemoryRecallCacheRepo,
   GlobalMemoryRepo,
@@ -72,12 +73,7 @@ export type CreateRecallMaterializationWiringInput = {
   readonly sessionOverrideService: SessionOverrideService;
   readonly taskSurfaceBuilder: TaskSurfaceBuilder;
   readonly trustStateRecorder: {
-    findDeliveryById(deliveryId: string): Promise<
-      | Readonly<{
-          readonly delivered_object_ids: readonly string[];
-        }>
-      | null
-    >;
+    findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   };
   readonly edgeProposalService: EdgeProposalService;
   readonly dynamicsService: DynamicsService;
@@ -102,7 +98,8 @@ export type CreateRecallMaterializationWiringInput = {
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
   readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
-  readonly fieldQuerySession?: import("@do-soul/alaya-core").RecallFieldQuerySession;
+  readonly fieldQuerySession: import("@do-soul/alaya-core").RecallFieldQuerySession;
+  readonly fieldComposition: import("../field/field-composition.js").DaemonFieldComposition;
   readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")
     .OpenSemanticFactorExtractionPort;
 };

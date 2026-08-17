@@ -56,6 +56,7 @@ export function createGardenTaskRepo(
 
 export function createGardenScheduler(
   input: CreateGardenRuntimeInput,
+  now: () => string,
   schedulerEventLogPort: GardenSchedulerEventLogPort,
   healthJournalPort: HealthJournalRecordPort,
   gardenTaskRepo: SqliteGardenTaskRepo | undefined,
@@ -64,6 +65,7 @@ export function createGardenScheduler(
   return new GardenScheduler(
     schedulerEventLogPort,
     {
+      now,
       backlogWarningThresholds: {
         warning_queue_depth: input.backlogThresholds.warning_queue_depth,
         warning_rearm_depth: input.backlogThresholds.warning_rearm_depth

@@ -81,6 +81,7 @@ const PROPOSAL_CREATE_SQL: SqlDefinitionMap<ProposalCreateStatements> = {
         last_updated_at,
         workspace_id,
         run_id,
+        proposal_operation,
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
@@ -88,7 +89,7 @@ const PROPOSAL_CREATE_SQL: SqlDefinitionMap<ProposalCreateStatements> = {
         created_at,
         target_baseline_updated_at,
         source_delivery_ids
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 };
 

@@ -210,6 +210,8 @@ const EVENT_LOG_WORKSPACE_QUERY_SQL: SqlDefinitionMap<EventLogWorkspaceQueryStat
           OR CASE
             WHEN json_type(payload_json, '$.reported_at') = 'text'
               THEN json_extract(payload_json, '$.reported_at')
+            WHEN json_type(payload_json, '$.occurred_at') = 'text'
+              THEN json_extract(payload_json, '$.occurred_at')
             ELSE created_at
           END > ?
         )
@@ -218,6 +220,8 @@ const EVENT_LOG_WORKSPACE_QUERY_SQL: SqlDefinitionMap<EventLogWorkspaceQueryStat
           OR CASE
             WHEN json_type(payload_json, '$.reported_at') = 'text'
               THEN json_extract(payload_json, '$.reported_at')
+            WHEN json_type(payload_json, '$.occurred_at') = 'text'
+              THEN json_extract(payload_json, '$.occurred_at')
             ELSE created_at
           END <= ?
         )

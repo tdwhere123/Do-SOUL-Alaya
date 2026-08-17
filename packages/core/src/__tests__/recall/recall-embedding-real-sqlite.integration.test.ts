@@ -132,6 +132,7 @@ function buildRecallService(params: {
   });
 
   const deps: RecallServiceDependencies = {
+    testOnlyAllowInMemoryFieldQuerySession: true,
     now: () => NOW,
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

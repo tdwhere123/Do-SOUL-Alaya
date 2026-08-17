@@ -87,11 +87,12 @@ export function createBulkEnrichReporter(input: Readonly<{
 }
 
 export async function runBulkEnrichTask(input: Readonly<{
+  readonly now: () => string;
   readonly task: Readonly<GardenTaskDescriptor>;
   readonly availability: BulkEnrichAvailability;
   readonly reporter: BulkEnrichReporter;
 }>): Promise<void> {
-  const completedAt = new Date().toISOString();
+  const completedAt = input.now();
   if (input.availability.kind === "missing_repo") {
     await input.reporter.reportCompletion(input.task, completedAt, true, [
       "bulk_enrich_skipped:no_enrich_pending_table"
@@ -128,6 +129,7 @@ export async function runBulkEnrichTask(input: Readonly<{
 }
 
 export async function runClaimableBulkEnrichWorkspacePass(input: Readonly<{
+  readonly now: () => string;
   readonly availability: BulkEnrichAvailability;
   readonly workspaceId: string;
   readonly maxBatches: number;
@@ -138,7 +140,7 @@ export async function runClaimableBulkEnrichWorkspacePass(input: Readonly<{
   }
 
   for (let batch = 0; batch < input.maxBatches; batch += 1) {
-    const processedAt = new Date().toISOString();
+    const processedAt = input.now();
     const claimed = claimBulkEnrichBatch(
       input.availability.ports.enrichPendingRepo,
       input.workspaceId,

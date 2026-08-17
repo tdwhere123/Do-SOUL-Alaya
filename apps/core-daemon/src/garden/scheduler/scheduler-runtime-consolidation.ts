@@ -21,7 +21,7 @@ async function runConsolidationCycleTask(
   input: CreateGardenSchedulerRuntimeSupportInput,
   task: Readonly<GardenTaskDescriptor>
 ): Promise<void> {
-  const completedAt = new Date().toISOString();
+  const completedAt = input.now();
   try {
     const skipAuditEntry = await resolveConsolidationSkipAuditEntry(input, task.workspace_id);
     if (skipAuditEntry !== null) {

@@ -28,6 +28,11 @@ export function buildSignalSummary(signal: CandidateMemorySignal): string {
     return excerpt.trim();
   }
 
+  const gist = signal.raw_payload.gist;
+  if (typeof gist === "string" && gist.trim().length > 0) {
+    return gist.trim();
+  }
+
   const matchedText = signal.raw_payload.matched_text;
   if (typeof matchedText === "string" && matchedText.trim().length > 0) {
     return matchedText.trim();

@@ -18,26 +18,24 @@ afterEach(async () => {
 });
 
 describe("captured-to-live membership owner", () => {
-  it("names the first captured-versus-live stage, not the live-walk first flip", () => {
+  it("attributes captured-versus-live membership changes to Gamma", () => {
     const captured = [
       stage("coarse", ["a", "b"]),
       stage("fusion", ["a", "b"]),
       stage("deep_head", ["a", "b"]),
-      stage("coverage", ["b"]),
-      stage("direct_evidence_promotion", ["a", "b"]),
+      stage("select_gamma", ["a", "b"]),
       stage("final_budget", ["a", "b"])
     ];
     const live = [
       stage("coarse", ["a", "b"]),
       stage("fusion", ["a", "b"]),
       stage("deep_head", ["a", "b"]),
-      stage("coverage", ["b"]),
-      stage("direct_evidence_promotion", ["b"]),
+      stage("select_gamma", ["b"]),
       stage("final_budget", ["b"])
     ];
 
     expect(firstCapturedToLiveMembershipOwner(captured, live, "a"))
-      .toBe("direct_evidence_promotion");
+      .toBe("select_gamma");
   });
 
   it("fails closed when captured-to-live coarse membership diverges", () => {

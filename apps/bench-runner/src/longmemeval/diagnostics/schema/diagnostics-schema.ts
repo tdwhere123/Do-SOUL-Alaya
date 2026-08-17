@@ -260,7 +260,7 @@ const LongMemEvalReplayCandidateSchema = z
     reserved_by: z.string().nullable().default(null),
     answer_features: DiagnosticCandidateAnswerFeaturesSchema.nullable().default(null),
     deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
-    coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
+    coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
     selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     score_factors: DiagnosticScoreFactorsSchema

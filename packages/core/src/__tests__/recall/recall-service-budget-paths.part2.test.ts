@@ -63,6 +63,7 @@ it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion"
         });
       });
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         pathExpansionPort: { findByAnchors }
       });
@@ -145,6 +146,7 @@ it("demotes a low-base victim to a floor residual without erasing it from the ca
         return wirePath && ids.has("seed-memory") ? [negativePath] : [];
       });
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         pathExpansionPort: { findByAnchors }
       });
@@ -226,6 +228,7 @@ it("does not let a weak attention_only negative path move rankings", async () =>
         return wirePath && ids.has("seed-memory") ? [weakNegativePath] : [];
       });
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         pathExpansionPort: { findByAnchors }
       });

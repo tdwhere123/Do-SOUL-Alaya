@@ -6,6 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { vi } from "vitest";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { captureRecallRequestTime } from
+  "../../recall/runtime/query/recall-request-time.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { collectSupplementaryData } from "../../recall/supplements/supplementary-data.js";
 import { createDependencies, createTaskSurface } from "./recall-service-test-fixtures.js";
@@ -28,6 +30,7 @@ interface CollectWithParams {
   readonly captureAnswerFeatures?: boolean;
   readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
+  readonly referenceTime?: string;
 }
 
 interface EvidenceCapsuleOverrides {
@@ -45,6 +48,10 @@ interface EvidenceCapsuleOverrides {
 export async function collectWith(params: CollectWithParams) {
   const { dependencies } = createDependencies([]);
   const service = new RecallService(dependencies);
+  const referenceTime = captureRecallRequestTime({
+    explicitAsOf: params.referenceTime,
+    now: dependencies.now
+  }).effectiveAsOf;
   return await collectSupplementaryData({
     dependencies: {
       ...dependencies,
@@ -64,7 +71,7 @@ export async function collectWith(params: CollectWithParams) {
     warn: params.warn ?? (() => undefined),
     candidates: params.candidates,
     routingKeyOwnerIds: params.candidates.map((candidate) => candidate.object_id),
-    routingKeyAsOfMs: 1_773_811_200_000,
+    referenceTime,
     workspaceId: "workspace-1",
     runId: params.runId ?? null,
     queryText: params.queryText ?? null,

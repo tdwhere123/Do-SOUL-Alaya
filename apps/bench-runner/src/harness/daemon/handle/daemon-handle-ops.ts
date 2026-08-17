@@ -14,8 +14,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   accrueAnswersWithCoRelevance,
-  accrueCoherenceCoRecall,
-  accrueSessionCoRecall,
   proposeMemoriesFromCompileSignals,
   proposeMemory,
   proposeMemoryFromSignal,
@@ -121,8 +119,6 @@ export function createBenchDaemonOps(
   | "proposeMemoryFromSignal"
   | "proposeMemoriesFromCompileSignals"
   | "proposeSynthesis"
-  | "accrueSessionCoRecall"
-  | "accrueCoherenceCoRecall"
   | "accrueAnswersWithCoRelevance"
   | "shutdown"
 > {
@@ -344,8 +340,6 @@ function createBenchSeedOperations(
   | "proposeMemoryFromSignal"
   | "proposeMemoriesFromCompileSignals"
   | "proposeSynthesis"
-  | "accrueSessionCoRecall"
-  | "accrueCoherenceCoRecall"
   | "accrueAnswersWithCoRelevance"
 > {
   const seedInput = {
@@ -373,10 +367,6 @@ function createBenchSeedOperations(
       await proposeMemoriesFromCompileSignals(seedInput, signalInputs),
     proposeSynthesis: async (synthesisInput) =>
       await proposeSynthesis(seedInput, synthesisInput),
-    accrueSessionCoRecall: async (memberMemoryIds) =>
-      await accrueSessionCoRecall(seedInput, memberMemoryIds),
-    accrueCoherenceCoRecall: async (members, options) =>
-      await accrueCoherenceCoRecall(seedInput, members, options),
     accrueAnswersWithCoRelevance: async (members, options) =>
       await accrueAnswersWithCoRelevance(seedInput, members, options)
   };

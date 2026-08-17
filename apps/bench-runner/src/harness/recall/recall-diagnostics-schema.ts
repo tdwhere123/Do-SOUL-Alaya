@@ -26,6 +26,8 @@ import {
 } from "./h1/recall-h1-diagnostics-schema.js";
 import { RecallCandidateSelectorObservationSchema } from
   "./candidate-selector-observation-schema.js";
+import { FieldProjectionTraceSchema, RecallQueryConditionParitySchema } from
+  "./field/field-projection-diagnostics-schema.js";
 import {
   RecallAdmissionAttemptDiagnosticSchema,
   RecallEvidenceProjectionMatchReceiptSchema
@@ -230,7 +232,7 @@ const RecallCandidateDiagnosticSchema = z
     path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
     answer_features: RecallCandidateAnswerFeaturesSchema.nullable().default(null),
     deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
-    coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
+    coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
     selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
@@ -331,6 +333,7 @@ export const BenchRecallDiagnosticsSchema = z
       z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly().optional(),
     field_refinement_stop_certificate:
       RecallFieldRefinementStopCertificateSchema.optional(),
+    query_condition: RecallQueryConditionParitySchema.optional(),
     query_entity_extraction: RecallQueryEntityExtractionCaptureSchema.optional(),
     query_fact_frame_extraction:
       RecallQueryFactFrameExtractionCaptureSchema.optional(),
@@ -349,6 +352,7 @@ export const BenchRecallDiagnosticsSchema = z
     pre_budget_count: z.number().int().nonnegative(),
     delivered_count: z.number().int().nonnegative(),
     packet_plan_trace: RecallPacketPlanTraceSchema.optional(),
+    field_projection_trace: FieldProjectionTraceSchema.optional(),
     embedding_provider_status: z.enum([
       "provider_returned",
       "provider_pending",

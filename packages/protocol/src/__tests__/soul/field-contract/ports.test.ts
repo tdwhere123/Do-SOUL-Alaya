@@ -7,7 +7,6 @@ import type {
   ProjectionGenerationPort,
   ProofEffectPort,
   QueryConditionPort,
-  SelectGammaPort,
   SourceAdmissionPort,
   StopCertificatePort
 } from "../../../soul/field-contract/index.js";
@@ -40,7 +39,13 @@ describe("field-contract ports", () => {
       snapshot: (input) => input,
       verify: (input) => input,
       activatePointer: (input) => input,
-      pin: (input) => input
+      pin: (input) => input,
+      release: (input) => ({
+        ...input,
+        pinned_at: input.released_at,
+        expires_at: input.released_at,
+        released_at: input.released_at
+      })
     };
     const condition: QueryConditionPort = {
       captureCondition: (input) => ({
@@ -95,12 +100,7 @@ describe("field-contract ports", () => {
       })
     };
     const usage: CausalUsagePort = {
-      recordUsage: (input) => input
-    };
-    const select: SelectGammaPort = {
-      select: (input) => ({
-        selected_candidate_keys: input.eligible_candidate_keys
-      })
+      recordUsage: (input) => ({ receipt: input, inserted: true })
     };
     const erase: EraseBarrierPort = {
       erase: (input) => input
@@ -115,7 +115,6 @@ describe("field-contract ports", () => {
     expect(stop.certify).toEqual(expect.any(Function));
     expect(proof.decide).toEqual(expect.any(Function));
     expect(usage.recordUsage).toEqual(expect.any(Function));
-    expect(select.select).toEqual(expect.any(Function));
     expect(erase.erase).toEqual(expect.any(Function));
   });
 });

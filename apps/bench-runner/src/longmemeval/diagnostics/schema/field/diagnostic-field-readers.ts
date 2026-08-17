@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { RecallAnswerShapePlanSchema } from
   "../../../../harness/recall/answer-trace-schema.js";
+import { RecallQueryConditionParitySchema } from
+  "../../../../harness/recall/field/field-projection-diagnostics-schema.js";
 import { RecallFieldRefinementStopCertificateSchema,
   RecallFiniteFieldChannelCaptureSchema, RecallQueryEntityExtractionCaptureSchema,
   RecallQueryFactFrameExtractionCaptureSchema,
@@ -16,7 +18,7 @@ import type { NarrowRecallDiagnostics } from "../diagnostics-types.js";
 
 type DiagnosticFields = Pick<NarrowRecallDiagnostics,
   | "queryProbes" | "retrievalFieldCaptures" | "retrievalFieldRefinementReceipts"
-  | "fieldRefinementStopCertificate" | "queryEntityExtraction"
+  | "fieldRefinementStopCertificate" | "queryCondition" | "queryEntityExtraction"
   | "queryFactFrameExtraction" | "queryOpenSemanticFactorFormation"
   | "openSemanticFactorCompatibilityTrace" | "openSemanticFactorComposition"
   | "openSemanticFactorActivation" | "answerShapePlan" | "querySoughtFacets">;
@@ -55,6 +57,7 @@ function diagnosticFieldReaders() {
       z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly()),
     fieldRefinementStopCertificate: schemaReader("field_refinement_stop_certificate",
       RecallFieldRefinementStopCertificateSchema),
+    queryCondition: schemaReader("query_condition", RecallQueryConditionParitySchema),
     queryEntityExtraction: schemaReader("query_entity_extraction",
       RecallQueryEntityExtractionCaptureSchema),
     queryFactFrameExtraction: schemaReader("query_fact_frame_extraction",

@@ -1,4 +1,5 @@
 import {
+  buildOfficialApiExtractionRequests,
   GardenProviderError,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
@@ -16,6 +17,10 @@ import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
   resolveExtractionFillProviderTimeBudget
 } from "./policy/provider-time-budget.js";
+import {
+  createExtractionRequestPlanDeadline,
+  resolveExtractionRequestPlanBudget
+} from "./policy/provider-request-plan-budget.js";
 
 export { EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS };
 
@@ -71,57 +76,80 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
     initial: initialConcurrency,
     minimumConcurrency: 1
   });
-  let processed = 0;
-  let toleratedFailures = 0;
-  const progressEvery = Math.max(1, Math.floor(input.requestedTurns / 20));
+  const state: ExtractionPoolState = {
+    processed: 0,
+    toleratedFailures: 0,
+    progressEvery: Math.max(1, Math.floor(input.requestedTurns / 20))
+  };
   try {
-    await runBoundedPool(input.turns, input.concurrency, async (turn) => {
-      scope.signal.throwIfAborted();
-      await adaptive.acquire(scope.signal);
-      let releaseOutcome: AdaptiveConcurrencyReleaseOutcome = "neutral";
-      try {
-        releaseOutcome = await extractTurn(
-          input.extractor, turn, scope.signal, input.transport
-        ) > 0 ? "rate_limit" : "success";
-      } catch (cause) {
-        releaseOutcome = releaseOutcomeForFailure(cause);
-        scope.signal.throwIfAborted();
-        if (cause instanceof ExtractionCacheInvariantError) {
-          scope.abort(cause);
-          throw cause;
-        }
-        processed += 1;
-        if (input.tolerateProviderTaskFailures === true && isContinuableProviderFailure(cause)) {
-          toleratedFailures += 1;
-          input.log(
-            `[extraction-fill] leaving provider failure for a later fill: ` +
-              `retry_classification=${readTerminalClassification(cause)} ` +
-              `failure_reason=${classifyProviderFailureReason(cause)} ` +
-              `processed_turns=${processed}/${input.requestedTurns}`
-          );
-          logProgress(
-            input, processed, progressEvery, toleratedFailures
-          );
-          return;
-        }
-        const failure = buildTaskFailure(input, cause, processed);
-        input.log(`[extraction-fill] stopping: ${failure.message}`);
-        scope.abort(failure);
-        throw failure;
-      } finally {
-        const prior = adaptive.snapshot();
-        const concurrency = adaptive.release(releaseOutcome);
-        recordAdaptiveTelemetry(
-          input, releaseOutcome, prior, concurrency
-        );
-      }
-      processed += 1;
-      logProgress(input, processed, progressEvery, toleratedFailures);
-    });
+    await runBoundedPool(input.turns, input.concurrency, (turn) =>
+      runExtractionTask(input, scope, adaptive, state, turn)
+    );
   } finally {
     adaptive.dispose();
     scope.dispose();
   }
+}
+
+interface ExtractionPoolState {
+  processed: number;
+  toleratedFailures: number;
+  readonly progressEvery: number;
+}
+
+async function runExtractionTask(
+  input: ExtractionPoolInput,
+  scope: ReturnType<typeof createPoolAbortScope>,
+  adaptive: ReturnType<typeof createAdaptiveConcurrencyController>,
+  state: ExtractionPoolState,
+  turn: LongMemEvalExtractionTurn
+): Promise<void> {
+  scope.signal.throwIfAborted();
+  await adaptive.acquire(scope.signal);
+  let outcome: AdaptiveConcurrencyReleaseOutcome = "neutral";
+  try {
+    outcome = await extractTurn(input.extractor, turn, scope.signal, input.transport) > 0
+      ? "rate_limit"
+      : "success";
+  } catch (cause) {
+    outcome = releaseOutcomeForFailure(cause);
+    if (handleExtractionTaskFailure(input, scope, state, cause)) return;
+  } finally {
+    const prior = adaptive.snapshot();
+    const concurrency = adaptive.release(outcome);
+    recordAdaptiveTelemetry(input, outcome, prior, concurrency);
+  }
+  state.processed += 1;
+  logProgress(input, state.processed, state.progressEvery, state.toleratedFailures);
+}
+
+function handleExtractionTaskFailure(
+  input: ExtractionPoolInput,
+  scope: ReturnType<typeof createPoolAbortScope>,
+  state: ExtractionPoolState,
+  cause: unknown
+): boolean {
+  scope.signal.throwIfAborted();
+  if (cause instanceof ExtractionCacheInvariantError) {
+    scope.abort(cause);
+    throw cause;
+  }
+  state.processed += 1;
+  if (input.tolerateProviderTaskFailures === true && isContinuableProviderFailure(cause)) {
+    state.toleratedFailures += 1;
+    input.log(
+      `[extraction-fill] leaving provider failure for a later fill: ` +
+        `retry_classification=${readTerminalClassification(cause)} ` +
+        `failure_reason=${classifyProviderFailureReason(cause)} ` +
+        `processed_turns=${state.processed}/${input.requestedTurns}`
+    );
+    logProgress(input, state.processed, state.progressEvery, state.toleratedFailures);
+    return true;
+  }
+  const failure = buildTaskFailure(input, cause, state.processed);
+  input.log(`[extraction-fill] stopping: ${failure.message}`);
+  scope.abort(failure);
+  throw failure;
 }
 
 async function runBoundedPool<T>(
@@ -150,28 +178,76 @@ async function extractTurn(
   signal: AbortSignal,
   transport: ExtractionPoolInput["transport"]
 ): Promise<number> {
-  let rateLimitRetries = 0;
+  const runtime = createExtractionTurnRuntime(extractor, turn, signal, transport);
+  try {
+    await compileExtractionTurn(runtime.provider, turn);
+  } finally {
+    runtime.dispose();
+  }
+  return runtime.rateLimitRetries();
+}
+
+function createExtractionTurnRuntime(
+  extractor: BenchSignalExtractor,
+  turn: LongMemEvalExtractionTurn,
+  signal: AbortSignal,
+  transport: ExtractionPoolInput["transport"]
+) {
   const timeBudget = resolveExtractionFillProviderTimeBudget(transport?.maxOutputTokens);
-  const provider = new OfficialApiGardenProvider({
-    apiKey: "extraction-fill-injected",
-    requestTimeoutMs: timeBudget.requestTimeoutMs,
-    wallClockBudgetMs: timeBudget.providerWallClockBudgetMs,
-    diagnosticDir: null,
-    extractor: {
-      extract: async (request) => {
-        const result = await extractor.extract({
-          ...request,
-          ...(transport === undefined ? {} : transport),
-          abortSignal: request.abortSignal === undefined
-            ? signal
-            : AbortSignal.any([signal, request.abortSignal])
-        });
-        rateLimitRetries = result.taskRateLimitRetries ??
-          result.extractorMeta?.rateLimitRetries ?? 0;
-        return result;
-      }
-    }
+  const requests = buildOfficialApiExtractionRequests(
+    turn.turnContent,
+    turn.turnMessages
+  );
+  const planBudget = resolveExtractionRequestPlanBudget(
+    requests,
+    transport?.maxOutputTokens ?? 2_048
+  );
+  const deadline = createExtractionRequestPlanDeadline({
+    budgetMs: planBudget.wallClockBudgetMs
   });
+  const state = { rateLimitRetries: 0 };
+  return {
+    provider: new OfficialApiGardenProvider({
+      apiKey: "extraction-fill-injected",
+      requestTimeoutMs: timeBudget.requestTimeoutMs,
+      wallClockBudgetMs: planBudget.wallClockBudgetMs,
+      diagnosticDir: null,
+      extractor: createPlanBoundExtractor(
+        extractor, signal, transport, deadline, state
+      )
+    }),
+    rateLimitRetries: () => state.rateLimitRetries,
+    dispose: deadline.dispose
+  };
+}
+
+function createPlanBoundExtractor(
+  extractor: BenchSignalExtractor,
+  signal: AbortSignal,
+  transport: ExtractionPoolInput["transport"],
+  deadline: ReturnType<typeof createExtractionRequestPlanDeadline>,
+  state: { rateLimitRetries: number }
+): BenchSignalExtractor {
+  return {
+    extract: async (request) => {
+      const result = await extractor.extract(deadline.bindRequest({
+        ...request,
+        ...(transport === undefined ? {} : transport),
+        abortSignal: request.abortSignal === undefined
+          ? signal
+          : AbortSignal.any([signal, request.abortSignal])
+      }));
+      state.rateLimitRetries = result.taskRateLimitRetries ??
+        result.extractorMeta?.rateLimitRetries ?? 0;
+      return result;
+    }
+  };
+}
+
+async function compileExtractionTurn(
+  provider: OfficialApiGardenProvider,
+  turn: LongMemEvalExtractionTurn
+): Promise<void> {
   try {
     await provider.compile(turn.turnContent, {
       workspace_id: "extraction-fill",
@@ -185,7 +261,6 @@ async function extractTurn(
     }
     throw error;
   }
-  return rateLimitRetries;
 }
 
 function readRateLimitRetries(cause: unknown): number {

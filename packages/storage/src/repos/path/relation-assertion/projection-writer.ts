@@ -54,6 +54,11 @@ function pruneUnreadableProjectionHistories(
   db.connection.prepare(`
     DELETE FROM temporal_projection_generations
     WHERE history_digest <> ?
+      AND generation <> (
+        SELECT active_projection_generation
+        FROM temporal_schema_state
+        WHERE state_id = 1
+      )
   `).run(currentHistoryDigest);
 }
 

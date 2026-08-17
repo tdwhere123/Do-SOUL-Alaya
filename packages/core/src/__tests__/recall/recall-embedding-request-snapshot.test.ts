@@ -57,6 +57,7 @@ describe("RecallService embedding request score snapshot", () => {
     const { dependencies } = createDependencies([memory]);
     const fixture = createExclusiveSnapshotPort(memory.object_id);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: fixture.port
     });
@@ -224,6 +225,7 @@ describe("RecallService embedding request score snapshot", () => {
     const { dependencies } = createDependencies([pooled]);
     const fixture = createNeighborSnapshotPort(pooled.object_id, neighbor);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds: fixture.findByIds },
       embeddingRecallService: fixture.port

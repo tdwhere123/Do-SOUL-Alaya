@@ -1,5 +1,5 @@
 import { CoreError } from "../../../shared/errors.js";
-
+import { isSelectGammaIdentityObservation } from "./select-gamma-identity-validation.js";
 export const DIRECT_QUERY_EVIDENCE_STREAMS = Object.freeze([
   "lexical_fts",
   "trigram_fts",
@@ -21,7 +21,7 @@ export type RecallPacketPlanDecision =
     }>
   | Readonly<{
       readonly status: "no_op";
-      readonly reason: "no_finite_embedding_head" | "unchanged_consensus";
+      readonly reason: "select_gamma_identity" | "no_finite_embedding_head" | "unchanged_consensus";
     }>
   | Readonly<{
       readonly status: "rejected";
@@ -428,6 +428,10 @@ function assertDecisionReason(
   );
   if (reason === "no_finite_embedding_head" && hasEmbeddingHead) {
     throw validationError("Absent embedding head decision contains ranked candidates");
+  }
+  if (reason === "select_gamma_identity" &&
+      !isSelectGammaIdentityObservation(observation)) {
+    throw validationError("Select_Gamma identity observation is inconsistent");
   }
   if (reason === "unchanged_consensus" && (!hasEmbeddingHead || changed)) {
     throw validationError("Unchanged consensus decision is inconsistent");

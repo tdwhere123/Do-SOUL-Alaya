@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import {
   EvidenceHealthStateSchema,
   MemoryGovernanceEventType,
-  SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
   type EvidenceCapsule,
@@ -129,6 +128,10 @@ export interface EvidenceServiceDependencies {
   readonly factorIncidence?: FactorIncidencePort;
   readonly fieldStores?: FieldFormationStores;
   readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
+  readonly projectionLifecycle?: Readonly<{
+    requestRebuild(workspaceId: string, requestedAt: string): void;
+    drainPending(): void;
+  }>;
 }
 
 export class EvidenceService {
@@ -180,38 +183,6 @@ export class EvidenceService {
     });
   }
 
-  public async deleteCreatedEvidence(objectId: string): Promise<void> {
-    const parsedObjectId = parseObjectId(objectId);
-    const existing = await this.dependencies.evidenceCapsuleRepo.findById(parsedObjectId);
-    if (existing === null) {
-      return;
-    }
-
-    const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
-      entity_type: "evidence_capsule",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: "system",
-      payload_json: SoulEvidenceDeletedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        from_state: existing.lifecycle_state,
-        to_state: "deleted",
-        reason_code: "memory_materialization_failed_after_evidence_creation",
-        caused_by: "system",
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    });
-    await this.dependencies.evidenceCapsuleRepo.deleteById(parsedObjectId);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-  }
-
   public async transitionHealth(
     objectId: string,
     newHealth: EvidenceHealthState,
@@ -258,6 +229,9 @@ export class EvidenceService {
       parsedHealth,
       occurredAt
     );
+
+    this.dependencies.projectionLifecycle?.requestRebuild(updated.workspace_id, occurredAt);
+    this.dependencies.projectionLifecycle?.drainPending();
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     await this.emitEvidenceGainIfPromoted({

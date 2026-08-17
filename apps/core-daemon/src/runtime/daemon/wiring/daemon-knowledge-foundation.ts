@@ -99,6 +99,7 @@ function createEvidenceService(
     evidenceCapsuleRepo: input.evidenceCapsuleRepo,
     eventLogRepo: input.eventLogRepo,
     fieldStores: input.fieldComposition.stores,
+    projectionLifecycle: input.fieldComposition.projectionLifecycle,
     runtimeNotifier: input.runtimeNotifier,
     factFrameProposalNormalizer:
       RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,

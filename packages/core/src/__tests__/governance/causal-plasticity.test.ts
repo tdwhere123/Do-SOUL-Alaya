@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as defaultFieldSha256 } from "../../shared/field-hash.js";
 import {
+  USAGE_MASS_CAP,
   projectSoftUsage,
   usageWeightFor
 } from "../../governance/effects/causal-plasticity.js";
@@ -54,13 +55,33 @@ describe("causal plasticity", () => {
     expect(inhibited.strength).toBe(0);
     expect(inhibited.hard_relation).toBe(false);
   });
+
+  it("caps accumulated usage mass before projecting strength", () => {
+    const credits = Array.from({ length: USAGE_MASS_CAP + 5 }, (_, index) => ({
+      receipt: receipt(`use-${index}`, "path-1", 1, "causal"),
+      channel: "usage" as const
+    }));
+
+    expect(projectSoftUsage(credits, T0, 0).mass).toBe(USAGE_MASS_CAP);
+  });
+
+  it("excludes receipts that had not occurred by the projection as-of", () => {
+    const future = receipt("future-use", "path-1", 1, "causal", T1);
+
+    expect(projectSoftUsage([{ receipt: future, channel: "usage" }], T0, 0)).toEqual({
+      mass: 0,
+      strength: 0,
+      hard_relation: false
+    });
+  });
 });
 
 function receipt(
   causalKey: string,
   downstreamRef: string,
   weight: number,
-  usageKind: "causal" | "delivery" | "inspection"
+  usageKind: "causal" | "delivery" | "inspection",
+  occurredAt: string = T0
 ): CausalUsageReceipt {
   return CausalUsageReceiptSchema.parse({
     schema_version: 1,
@@ -78,12 +99,12 @@ function receipt(
     deletion_behavior: "retain_identity",
     workspace_id: "workspace-1",
     causal_key: causalKey,
-    occurred_at: T0,
+    occurred_at: occurredAt,
     downstream_ref: downstreamRef,
     weight,
     scope: "workspace-1",
     usage_kind: usageKind,
     operator_id: CAUSAL_USAGE_OPERATOR_ID,
-    recorded_at: T0
+    recorded_at: occurredAt
   });
 }

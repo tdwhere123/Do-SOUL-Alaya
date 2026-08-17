@@ -100,7 +100,6 @@ async function seedQuestionSession(
   if (session === undefined) return seedIndex;
   const sessionId = input.question.haystack_session_ids[sessionIndex] ?? `session-${sessionIndex}`;
   const sessionTurns: SessionSeededTurn[] = [];
-  const sessionMemberMemoryIds: string[] = [];
   let sessionHasAnswer = false;
   let previousTurnSeedMemoryIds: readonly string[] = [];
   for (let ri = 0; ri < pairSessionIntoRounds(session).length; ri++) {
@@ -112,15 +111,11 @@ async function seedQuestionSession(
       sessionId,
       seedIndex,
       previousTurnSeedMemoryIds,
-      sessionTurns,
-      sessionMemberMemoryIds
+      sessionTurns
     });
     seedIndex += 1;
     sessionHasAnswer = sessionHasAnswer || round.hasAnswer;
     previousTurnSeedMemoryIds = result.nextTurnSeedMemoryIds;
-  }
-  if (input.seedFormationMode === "diagnostic_warmup") {
-    await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
   }
   await seedSessionSynthesis(input.workspace, state, {
     questionId: input.question.question_id,
@@ -139,7 +134,6 @@ interface SeedRoundContext {
   readonly seedIndex: number;
   readonly previousTurnSeedMemoryIds: readonly string[];
   readonly sessionTurns: SessionSeededTurn[];
-  readonly sessionMemberMemoryIds: string[];
 }
 
 async function seedQuestionRound(
@@ -293,9 +287,6 @@ function addSeedSidecarEntries(
       ...optionalSeedContent(input, context.sessionIndex, round.content)
     });
     context.sessionTurns.push({ turnContent: round.content, evidenceId: seed.evidenceId });
-    if (!context.sessionMemberMemoryIds.includes(seed.memoryId)) {
-      context.sessionMemberMemoryIds.push(seed.memoryId);
-    }
     if (!state.coherenceMembers.some((member) => member.memoryId === seed.memoryId)) {
       state.coherenceMembers.push({
         memoryId: seed.memoryId,

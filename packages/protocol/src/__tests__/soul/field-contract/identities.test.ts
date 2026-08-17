@@ -286,6 +286,15 @@ describe("field-contract identities", () => {
     }, sha256)).toBe(hashConditionDigest(canonical, sha256));
     expect(hashConditionDigest(canonical, sha256))
       .not.toBe(hashConditionDigest(reversedScopes, sha256));
+    expect(hashConditionDigest({
+      ...canonical,
+      authorized_scopes: ["workspace-1"],
+      explicit_bridges: ["project-a"]
+    }, sha256)).not.toBe(hashConditionDigest({
+      ...canonical,
+      authorized_scopes: ["workspace-1", "project-a"],
+      explicit_bridges: []
+    }, sha256));
     expect(hashQueryCacheKey({
       generation_id: "sha256:" + "a".repeat(64),
       condition_digest: hashConditionDigest(canonical, sha256),
@@ -328,7 +337,7 @@ describe("field-contract identities", () => {
       "source_span_identity_v1",
       "factor_incidence_v1",
       "projection_generation_v1",
-      "query_condition_v1",
+      QUERY_CONDITION_OPERATOR_ID,
       "causal_usage_v1",
       "proof_effect_v1",
       "select_gamma_v1",

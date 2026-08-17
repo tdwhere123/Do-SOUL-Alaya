@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ClaimLifecycleState,
+  FieldGenerationEventType,
   GovernanceResolutionEventType,
+  PROOF_EFFECT_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_VERSION,
   ScopeClass,
   canonicalGovernanceSubject,
+  hashEffectGovernanceFrontier,
   type ClaimForm,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -14,6 +18,9 @@ import {
   REAL_SQLITE_TEST_WORKSPACE_ID,
   createResolutionServiceRealStorage
 } from "../shared/real-sqlite.test-support.js";
+import { buildEffectDecisionReceipt } from "../../governance/effects/proof-effect-policy.js";
+import { buildEffectAuditEventInput } from "../../governance/proposals/resolution-service-effects.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 
@@ -67,6 +74,37 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
       databases.add(database);
     });
     claimFormRepo.create(buildDraftClaim());
+    database.connection.exec(`
+      CREATE TABLE test_effect_decisions (
+        request_digest TEXT PRIMARY KEY,
+        decision TEXT NOT NULL
+      )
+    `);
+
+    const witnesses = [
+      { receipt_id: "auth-1", kind: "actor_authority", authority_event_id: "delivery-event-1",
+        source_record_id: null,
+        source_content_digest: null },
+      { receipt_id: "source-1", kind: "source_grounding", authority_event_id: null,
+        source_record_id: "record-1",
+        source_content_digest: "digest-1" }
+    ];
+    const effectDecision = buildEffectDecisionReceipt({
+      schema_version: 2,
+      workspace_id: WS,
+      actor_id: "codex",
+      run_id: "run-1",
+      delivery_id: "delivery-1",
+      action: "activate",
+      target: CLAIM_ID,
+      scope: WS,
+      effective_as_of: FIXED_NOW,
+      supporting_receipt_ids: ["auth-1", "source-1"],
+      supporting_proof_witnesses: witnesses,
+      governance_frontier: hashEffectGovernanceFrontier(witnesses, fieldContractSha256),
+      policy_operator_id: PROOF_EFFECT_OPERATOR_ID,
+      policy_operator_version: PROOF_EFFECT_OPERATOR_VERSION
+    }, "allow", FIXED_NOW, fieldContractSha256);
 
     const eventPublisher = new EventPublisher({
       eventLogRepo,
@@ -94,6 +132,14 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
       eventLogRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
       eventPublisher,
+      effectDecisionStore: {
+        insert: (receipt) => {
+          database.connection.prepare(`
+            INSERT INTO test_effect_decisions (request_digest, decision) VALUES (?, ?)
+          `).run(receipt.request_digest, receipt.decision);
+          return receipt;
+        }
+      },
       now: () => FIXED_NOW
     });
 
@@ -129,9 +175,11 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
                 reason: null,
                 resolved_at: FIXED_NOW
               }
-            }
+            },
+            buildEffectAuditEventInput(effectDecision)
           ],
-          additionalEventsSink: auditEventsSink
+          additionalEventsSink: auditEventsSink,
+          effectDecisionReceipt: effectDecision
         }
       )
     ).rejects.toThrow("synthetic claim_status mutation failure");
@@ -149,6 +197,16 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
       .prepare(`SELECT COUNT(*) AS n FROM event_log WHERE event_type = ?`)
       .get("soul.claim.lifecycle_changed") as { n: number };
     expect(lifecycleRows.n).toBe(0);
+
+    const effectAuditRows = database.connection
+      .prepare(`SELECT COUNT(*) AS n FROM event_log WHERE event_type = ?`)
+      .get(FieldGenerationEventType.SOUL_FIELD_EFFECT_DECIDED) as { n: number };
+    expect(effectAuditRows.n).toBe(0);
+
+    const effectDecisionRows = database.connection
+      .prepare(`SELECT COUNT(*) AS n FROM test_effect_decisions`)
+      .get() as { n: number };
+    expect(effectDecisionRows.n).toBe(0);
 
     // The claim_status mutation must NOT have persisted — still DRAFT.
     // This is the durable atomicity proof: the event_log rows and the

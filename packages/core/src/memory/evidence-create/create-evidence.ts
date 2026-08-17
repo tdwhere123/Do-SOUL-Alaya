@@ -118,16 +118,13 @@ function planOptionalFormation(
       factFrameProposalNormalizer: input.factFrameProposalNormalizer
     });
   } catch (error) {
-    if (error instanceof CoreError && error.code === "VALIDATION") throw error;
     input.warn?.("optional evidence formation failed", {
       evidence_object_id: evidence.object_id,
       error: error instanceof Error ? error.message : String(error)
     });
     return planEvidenceFormation({
       evidence,
-      searchProjections: input.searchProjections.filter(
-        (projection) => projection.projection_kind !== "fact_key"
-      )
+      searchProjections: []
     });
   }
 }

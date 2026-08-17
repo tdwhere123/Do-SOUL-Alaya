@@ -1,11 +1,67 @@
 import { describe, expect, it, vi } from "vitest";
-import { ClaimLifecycleState, TransitionCausedBy, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
+import {
+  ClaimLifecycleState,
+  PROOF_EFFECT_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_VERSION,
+  TransitionCausedBy,
+  hashEffectGovernanceFrontier,
+  type EffectRequest,
+  type EventLogEntry,
+  type Slot
+} from "@do-soul/alaya-protocol";
 import { ClaimService, derivePrecedenceBasis } from "../../governance/claims/claim-service.js";
 import { CanonicalAliasService } from "../../governance/claims/canonical-alias-service.js";
 import { StubEventPublisher } from "../support/event-publisher-stub.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
+import { buildEffectDecisionReceipt } from "../../governance/effects/proof-effect-policy.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 
 import { createClaimForm, createClaimInput, createDependencies, createEventLogHistory } from "./claim-service.test-support.js";
+
+function lifecycleAuditInput(
+  claim: ReturnType<typeof createClaimForm>,
+  eventType: string
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  return {
+    event_type: eventType,
+    entity_type: "claim_form",
+    entity_id: claim.object_id,
+    workspace_id: claim.workspace_id,
+    run_id: "run-1",
+    caused_by: "actor-1",
+    payload_json: {}
+  };
+}
+
+function effectReceipt(
+  claim: ReturnType<typeof createClaimForm>,
+  decision: "allow" | "deny" = "allow"
+) {
+  const witnesses = [
+    { receipt_id: "auth-1", kind: "actor_authority", authority_event_id: "delivery-event-1",
+      source_record_id: null,
+      source_content_digest: null },
+    { receipt_id: "source-1", kind: "source_grounding", authority_event_id: null,
+      source_record_id: "record-1",
+      source_content_digest: "digest-1" }
+  ];
+  return buildEffectDecisionReceipt({
+    schema_version: 2,
+    workspace_id: claim.workspace_id,
+    actor_id: "actor-1",
+    run_id: "run-1",
+    delivery_id: "delivery-1",
+    action: "activate",
+    target: claim.object_id,
+    scope: claim.workspace_id,
+    effective_as_of: "2026-03-21T01:00:00.000Z",
+    supporting_receipt_ids: ["auth-1", "source-1"],
+    supporting_proof_witnesses: witnesses,
+    governance_frontier: hashEffectGovernanceFrontier(witnesses, fieldContractSha256),
+    policy_operator_id: PROOF_EFFECT_OPERATOR_ID,
+    policy_operator_version: PROOF_EFFECT_OPERATOR_VERSION
+  } satisfies EffectRequest, decision, "2026-03-21T01:00:00.000Z", fieldContractSha256);
+}
 
 describe("ClaimService", () => {
   it("creates a draft claim and emits soul.claim.created", async () => {
@@ -163,10 +219,19 @@ describe("ClaimService", () => {
 
   it("uses the atomic EventPublisher path for lifecycle transitions when the repo exposes sync CAS", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    const mutationOrder: string[] = [];
     const publishedBatches: Array<readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]> = [];
-    const updateStatusSync = vi.fn((_objectId, status, updatedAt) =>
-      Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
-    );
+    const updateStatusSync = vi.fn((_objectId, status, updatedAt) => {
+      mutationOrder.push("claim-cas");
+      return Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt });
+    });
+    const effectDecisionReceipt = effectReceipt(existing);
+    const effectDecisionStore = {
+      insert: vi.fn(() => {
+        mutationOrder.push("effect-decision");
+        return effectDecisionReceipt;
+      })
+    };
     const appendManyWithMutation = vi.fn(
       async (
         events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
@@ -194,6 +259,7 @@ describe("ClaimService", () => {
         }),
         updateStatusSync
       },
+      effectDecisionStore,
       eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
@@ -203,7 +269,14 @@ describe("ClaimService", () => {
       ClaimLifecycleState.ACTIVE,
       "review_accept",
       TransitionCausedBy.REVIEW,
-      { skipSlotElection: true }
+      {
+        skipSlotElection: true,
+        additionalEventInputs: [
+          lifecycleAuditInput(existing, "resolution.audit"),
+          lifecycleAuditInput(existing, "effect.audit")
+        ],
+        effectDecisionReceipt
+      }
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
@@ -213,9 +286,50 @@ describe("ClaimService", () => {
       "2026-03-21T01:00:00.000Z",
       ClaimLifecycleState.DRAFT
     );
-    expect(publishedBatches[0]?.map((event) => event.event_type)).toEqual(["soul.claim.lifecycle_changed"]);
+    expect(publishedBatches[0]?.map((event) => event.event_type)).toEqual([
+      "soul.claim.lifecycle_changed",
+      "resolution.audit",
+      "effect.audit"
+    ]);
+    expect(mutationOrder).toEqual(["effect-decision", "claim-cas"]);
     expect(appendSpy).not.toHaveBeenCalled();
     expect(broadcastSpy).not.toHaveBeenCalled();
+  });
+
+  it("propagates effect-decision replay conflicts before any claim CAS", async () => {
+    const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    const updateStatusSync = vi.fn(() => existing);
+    const appendManyWithMutation = vi.fn(async (
+      events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => mutate(events.map((event, index) => ({
+      ...event,
+      event_id: `evt-${index}`,
+      created_at: "2026-03-21T01:00:00.000Z",
+      revision: index
+    }))));
+    const { dependencies } = createDependencies({
+      claimFormRepo: {
+        create: vi.fn((claim) => claim),
+        findById: vi.fn(async () => existing),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByStatus: vi.fn(async () => []),
+        findByCanonicalKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => existing),
+        updateStatusSync
+      },
+      effectDecisionStore: {
+        insert: vi.fn(() => { throw new Error("proof effect decision replay conflict"); })
+      },
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
+    });
+    const service = new ClaimService(dependencies);
+
+    await expect(service.recordEffectDecision(
+      effectReceipt(existing, "deny"),
+      lifecycleAuditInput(existing, "soul.field.effect.decided")
+    )).rejects.toThrow(/replay conflict/);
+    expect(updateStatusSync).not.toHaveBeenCalled();
   });
 
   it("supports active to contested transition", async () => {

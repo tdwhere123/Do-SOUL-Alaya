@@ -112,22 +112,27 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     });
     const judgeChat = vi.fn(async () => "yes");
     const checkpointRelationProjection = vi.fn(async () => undefined);
+    const accrueSessionCoRecall = vi.fn(async () => ({
+      pairsObserved: 0,
+      minted: 0,
+      belowThreshold: 0
+    }));
+    const accrueAnswersWithCoRelevance = vi.fn(async () => ({
+      coRelevantPairs: 0,
+      keptPairs: 0,
+      admitted: 0
+    }));
+    const recall = vi.fn(async () =>
+      buildRecallResult("delivery-1", ["memory-decoy-1"])
+    );
 
     const workspace = {
       workspaceId: "workspace-q-gold-only",
       runId: "run-q-gold-only",
-      accrueSessionCoRecall: vi.fn(async () => ({
-        pairsObserved: 0,
-        minted: 0,
-        belowThreshold: 0
-      })),
-      accrueAnswersWithCoRelevance: vi.fn(async () => ({
-        coRelevantPairs: 0,
-        keptPairs: 0,
-        admitted: 0
-      })),
+      accrueSessionCoRecall,
+      accrueAnswersWithCoRelevance,
       proposeSynthesis: vi.fn(async () => ({ synthesisId: null })),
-      recall: vi.fn(async () => buildRecallResult("delivery-1", ["memory-decoy-1"])),
+      recall,
       queryTokenMetrics: vi.fn(async () => ({
         raw_history_tokens: 100,
         stored_memory_tokens: 20,
@@ -190,16 +195,16 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     expect(countOccurrences(answerPrompt, "Duplicated gold turn.")).toBe(1);
     expect(countOccurrences(answerPrompt, "Unique gold turn.")).toBe(1);
     expect(answerPrompt).not.toContain("Distractor turn.");
-    expect(workspace.recall).toHaveBeenCalledWith(
+    expect(recall).toHaveBeenCalledWith(
       question.question,
       expect.objectContaining({ referenceTime: "2026-01-01T00:00:00.000Z" })
     );
-    expect(workspace.accrueSessionCoRecall).not.toHaveBeenCalled();
+    expect(accrueSessionCoRecall).not.toHaveBeenCalled();
     expect(checkpointRelationProjection).toHaveBeenCalledTimes(1);
     expect(checkpointRelationProjection.mock.invocationCallOrder[0])
-      .toBeGreaterThan(workspace.accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
+      .toBeGreaterThan(accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
     expect(checkpointRelationProjection.mock.invocationCallOrder[0])
-      .toBeLessThan(workspace.recall.mock.invocationCallOrder[0]!);
+      .toBeLessThan(recall.mock.invocationCallOrder[0]!);
     expect(result.snapshotQuestion?.questionDate).toBe("2026-01-01T00:00:00.000Z");
   });
 });

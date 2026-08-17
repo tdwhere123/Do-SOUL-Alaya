@@ -210,12 +210,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -267,12 +261,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -312,12 +300,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -351,12 +333,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -383,12 +359,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const error = new Error("Failed to append event log entry.", { cause });
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: { handle: vi.fn(async () => { throw error; }) }
       }),
       warn
@@ -422,12 +392,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({
             objectsAffected: ["memory-1", "memory-2"],
@@ -471,12 +435,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({ objectsAffected: ["memory-1"], auditEntries: [] }))
         }

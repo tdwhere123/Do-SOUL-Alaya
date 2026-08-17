@@ -6,28 +6,26 @@ import {
   RelationAssertionService,
   ResolutionService,
   appendEventLogSynchronously,
+  fieldContractSha256,
   type GlobalMemoryRecallSubscription,
   type ManifestationResolverEventLogWriterPort,
   type PathActivationCandidateProducerPathReaderPort
 } from "@do-soul/alaya-core";
 import {
-  isLegacyPathIndexUnbound,
-  isTemporalProjectionSelected,
+  SqliteFieldCausalUsageRepo,
   SqliteTemporalPathProjectionReader
 } from "@do-soul/alaya-storage";
 import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { SqliteHandoffGapAdapter } from "../../handoff/gap-adapter.js";
 import { createRecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
+import { createCausalUsageTemporalPathReader } from
+  "../recall/causal-usage-temporal-path-reader.js";
 import {
-  createPreparedTemporalRecallPathReadPorts,
   createRecallPathReadPorts,
   createRecallTemporalProjectionEnsurer
 } from "../recall/recall-path-readers.js";
-import {
-  resolveRecallPathReadBind,
-  wrapLegacyPathReaderForIndexHealth
-} from "../recall/recall-path-read-bind.js";
+import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import {
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
@@ -36,6 +34,7 @@ import {
 import { warnOnRejectedBackgroundTask } from "../daemon/lifecycle/daemon-runtime-helpers.js";
 import { createEdgeAndReconciliationRuntime } from "./recall-materialization-edge-reconciliation.js";
 import { createPathRelationRuntime } from "./recall-materialization-path-relation.js";
+import { createResolutionEffectAuthority } from "./resolution-effect-authority.js";
 import {
   createRecallSearchRuntime,
   createRecallServiceRuntime,
@@ -188,13 +187,21 @@ function createResolutionService(input: CreateRecallMaterializationWiringInput) 
     repo: input.deferredObligationRepo,
     eventPublisher: input.eventPublisher
   });
+  const effectAuthority = createResolutionEffectAuthority({
+    database: input.database,
+    fieldComposition: input.fieldComposition,
+    claimRepo: input.claimFormRepo,
+    memoryRepo: input.memoryEntryRepo,
+    deliveryReader: input.trustStateRecorder
+  });
   return new ResolutionService({
     eventPublisher: input.eventPublisher,
     claimRepo: input.claimFormRepo,
     memoryRepo: input.memoryEntryRepo,
     claimService: input.claimService,
     memoryService: input.memoryService,
-    deferredObligationService
+    deferredObligationService,
+    ...effectAuthority
   });
 }
 
@@ -306,33 +313,21 @@ function createDirectRecallPathReadPorts(
   input: CreateRecallMaterializationWiringInput,
   bindTemporalPathReads: boolean
 ) {
-  if (isTemporalProjectionSelected(input.database)) {
-    const relationAssertionService = new RelationAssertionService({
-      repo: input.relationAssertionRepo,
-      eventPublisher: input.eventPublisher,
-      eventHistory: input.eventLogRepo
-    });
-    return createRecallPathReadPorts({
-      temporalProjectionSelected: true,
-      temporalPathProjectionReader: new SqliteTemporalPathProjectionReader(
-        input.relationAssertionRepo
-      ),
-      softAssociationPathReader: input.softAssociationPathRepo,
-      ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
-    });
-  }
-  if (bindTemporalPathReads) {
-    return createPreparedTemporalRecallPathReadPorts(
-      new SqliteTemporalPathProjectionReader(input.relationAssertionRepo),
-      input.softAssociationPathRepo
-    );
-  }
+  if (!bindTemporalPathReads) throw new Error("recall path reads require temporal projection");
+  const relationAssertionService = new RelationAssertionService({
+    repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher,
+    eventHistory: input.eventLogRepo
+  });
+  const temporalReader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
   return createRecallPathReadPorts({
-    legacyPathReader: wrapLegacyPathReaderForIndexHealth(
-      input.pathRelationRepo,
-      () => isLegacyPathIndexUnbound(input.database) ? "index_unavailable" : "ready"
-    ),
-    softAssociationPathReader: input.softAssociationPathRepo
+    temporalProjectionSelected: true,
+    temporalPathProjectionReader: createCausalUsageTemporalPathReader({
+      base: temporalReader,
+      usageRepo: new SqliteFieldCausalUsageRepo(input.database, fieldContractSha256)
+    }),
+    softAssociationPathReader: input.softAssociationPathRepo,
+    ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
   });
 }
 

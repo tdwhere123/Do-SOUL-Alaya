@@ -15,7 +15,10 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import type {
+  RecallServiceDependencies,
+  RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 import { PATH_PLASTICITY_WEIGHT } from "../../recall/runtime/recall-service-helpers.js";
 import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
 
@@ -103,7 +106,7 @@ export function createDependencies(
     readonly pathPlasticityByMemoryId?: Readonly<Record<string, number>>;
   }> = {}
 ): {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps;
   readonly searchByKeyword: ReturnType<typeof vi.fn>;
   readonly countInboundSupports: ReturnType<typeof vi.fn>;
   readonly countInboundEdgesWeighted: ReturnType<typeof vi.fn>;
@@ -149,7 +152,8 @@ export function createDependencies(
     })
   );
 
-  const dependencies: RecallServiceDependencies = {
+  const dependencies: RecallServiceDependencies & RecallServiceFieldDeps = {
+    testOnlyAllowInMemoryFieldQuerySession: true,
     now: () => "2026-03-23T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

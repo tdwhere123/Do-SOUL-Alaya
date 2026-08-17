@@ -55,7 +55,8 @@ describe("edge-classify-queue-adapter", () => {
   it("dedups a pair already queued (findById hit -> no enqueue)", async () => {
     const enqueue = enqueueFn();
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => ({ id: "already-here" }) }
+      gardenTaskRepo: { enqueue, findById: () => ({ id: "already-here" }) },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await adapter.enqueueEdgeClassify(makeInput());
@@ -68,7 +69,8 @@ describe("edge-classify-queue-adapter", () => {
       throw new Error("UNIQUE constraint failed: garden_tasks.id");
     });
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => null }
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await expect(adapter.enqueueEdgeClassify(makeInput())).resolves.toBeUndefined();
@@ -79,7 +81,8 @@ describe("edge-classify-queue-adapter", () => {
       throw new Error("disk is full");
     });
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => null }
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await expect(adapter.enqueueEdgeClassify(makeInput())).rejects.toThrow("disk is full");

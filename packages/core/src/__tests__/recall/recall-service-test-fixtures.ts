@@ -15,7 +15,10 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import type {
+  RecallServiceDependencies,
+  RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 
 export function createTaskSurface(): TaskObjectSurface {
   return {
@@ -207,7 +210,7 @@ export function createDependencies(
   claimSourceRefs: Readonly<Record<string, readonly string[]>> = {},
   activeConstraints: readonly Readonly<SoulActiveConstraint>[] = []
 ): {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps;
   readonly appendSpy: ReturnType<typeof vi.fn>;
   readonly warnSpy: ReturnType<typeof vi.fn>;
 } {
@@ -221,6 +224,7 @@ export function createDependencies(
 
   return {
     dependencies: {
+      testOnlyAllowInMemoryFieldQuerySession: true,
       now: () => "2026-03-23T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {

@@ -12,7 +12,6 @@ import type {
   DynamicsService,
   EmbeddingBackfillHandler,
   EventPublisher,
-  PathPlasticityService,
   StrongRefService
 } from "@do-soul/alaya-core";
 import type {
@@ -169,6 +168,7 @@ export interface EdgeProposalReconcilePort {
 }
 
 export type CreateGardenRuntimeInput = {
+  readonly now?: () => string;
   readonly databaseConnection: StorageDatabase["connection"];
   readonly backlogThresholds: GardenBacklogThresholds;
   readonly eventLogRepo: SqliteEventLogRepo;
@@ -193,7 +193,6 @@ export type CreateGardenRuntimeInput = {
   // temporal assertion provenance.
   readonly legacyTopologyMutationsEnabled?: boolean;
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
-  readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly coherenceEdgeProducerPort?: BulkFormationFollowUpPort;
   readonly answersWithEdgeProducerPort?: BulkFormationFollowUpPort;
@@ -217,6 +216,10 @@ export type CreateGardenRuntimeInput = {
   readonly edgeProposalReconcile?: EdgeProposalReconcilePort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly dynamicsService?: Pick<DynamicsService, "scanRetentionDecay">;
+};
+
+export type ClockBoundGardenRuntimeInput = Omit<CreateGardenRuntimeInput, "now"> & {
+  readonly now: () => string;
 };
 
 export type GardenRuntime = Readonly<{

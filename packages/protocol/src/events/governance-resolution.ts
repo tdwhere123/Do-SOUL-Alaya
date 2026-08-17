@@ -67,8 +67,11 @@ const GovernanceResolutionPayloadObjectSchema = z.object({
   policy: BoundedLabelSchema.nullable(),
   policy_classification: GovernanceResolutionPolicyClassificationSchema.nullable(),
   reason: BoundedReasonSchema.nullable(),
+  correction: BoundedReasonSchema.nullable().default(null),
   obligation_id: NonEmptyStringSchema.nullable(),
   activated_claim_id: NonEmptyStringSchema.nullable(),
+  predecessor_receipt_id: NonEmptyStringSchema.nullable().default(null),
+  successor_receipt_id: NonEmptyStringSchema.nullable().default(null),
   occurred_at: IsoDatetimeStringSchema
 });
 

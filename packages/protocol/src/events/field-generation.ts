@@ -70,6 +70,7 @@ export const SoulFieldGenerationActivatedPayloadSchema = z.object({
 
 export const SoulFieldEraseBarrierPayloadSchema = z.object({
   workspace_id: BoundedIdSchema,
+  receipt_identity: FieldContractDigestSchema,
   barrier_id: BoundedIdSchema,
   generation_id: FieldContractDigestSchema.nullable(),
   subject_kind: ProjectionEraseSubjectKindSchema,

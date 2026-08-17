@@ -14,18 +14,22 @@ import type {
   RecallResult,
   RecallTokenEconomy
 } from "./recall-service-types.js";
+import type { SelectGammaSynthesisStatus } from
+  "../delivery/select-gamma/synthesis-adapter.js";
 
 export function buildRecallResult(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   assessment: RecallAssessmentStageResult,
   manifested: RecallManifestedResult,
-  degradationReasons: ReadonlySet<RecallDegradationReason>
+  degradationReasons: ReadonlySet<RecallDegradationReason>,
+  synthesis: SelectGammaSynthesisStatus
 ): RecallResult {
   const phaseLatencyMs = buildPhaseLatencyMs(coarse, assessment, manifested);
   const tokenEconomy = buildTokenEconomy(assessment, coarse.combinedCoarseCandidates.length, manifested);
   return Object.freeze({
     candidates: manifested.candidates,
+    synthesis,
     active_constraints: prepared.activeConstraints.constraints,
     active_constraints_count: prepared.activeConstraints.total_count,
     total_scanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
@@ -52,6 +56,11 @@ export function buildRecallResult(
       fieldRefinementStopCertificate:
         assessment.finalAssessment.fieldRefinementStopCertificate,
       queryCondition: queryConditionParityView(prepared.queryCondition),
+      fieldProjectionTrace: Object.freeze({
+        generation_id: prepared.queryCondition.generation_id,
+        condition_digest: prepared.queryCondition.identity,
+        ...prepared.fieldProjectionSelection
+      }),
       querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
       answerShapePlan: prepared.answerShapePlan,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,

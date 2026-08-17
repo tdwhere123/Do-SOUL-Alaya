@@ -84,6 +84,7 @@ export function runAttributedActivation(
   const receipt = verifyQueryConditionReceipt(input, deps.sha256);
   // Snapshot so a write-back into the caller's graph cannot mint seeds after start.
   const frozen = { ...deps, graph: snapshotGraph(deps.graph) };
+  assertGraphGeneration(frozen.graph, receipt.generation_id);
   const authorized = authorizeGraph(frozen.graph, hardMaskFrom(receipt));
   const seeds = freezeSeeds(authorized, receipt.condition);
   const state = createState(
@@ -94,6 +95,13 @@ export function runAttributedActivation(
   );
   expandField(state, authorized, receipt.condition, frozen);
   return toTrace(receipt, seeds, state);
+}
+
+function assertGraphGeneration(graph: ActivationGraph, generationId: string): void {
+  if (graph.nodes.some((node) => node.generation_id !== generationId) ||
+      graph.edges.some((edge) => edge.generation_id !== generationId)) {
+    throw new Error("activation graph generation does not match the query pin");
+  }
 }
 
 function snapshotGraph(graph: ActivationGraph): ActivationGraph {

@@ -51,7 +51,7 @@ export async function verifyLongMemEvalSelectionBoundaryLedgerSample(
         reconstruction.result.orderSequence,
         reconstruction.result.candidates.length
       );
-      if (ledger.schema_version !== 1) {
+      if (ledger.schema_version !== 2) {
         throw new Error("selection ledger schema_version mismatch");
       }
       if (

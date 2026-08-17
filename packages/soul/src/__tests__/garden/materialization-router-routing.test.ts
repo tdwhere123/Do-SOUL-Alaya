@@ -8,7 +8,6 @@ import {
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
-type EvidenceDeleteCreated = MaterializationRouterDeps["evidenceService"]["deleteCreatedEvidence"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
 type SynthesisCreate = MaterializationRouterDeps["synthesisService"]["create"];
 type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
@@ -267,7 +266,7 @@ describe("MaterializationRouter routing-by-object_kind", () => {
 
 
 interface TestDeps {
-  readonly evidenceService: { create: Mock<EvidenceCreate>; deleteCreatedEvidence: Mock<EvidenceDeleteCreated> };
+  readonly evidenceService: { create: Mock<EvidenceCreate> };
   readonly memoryService: { create: Mock<MemoryCreate> };
   readonly synthesisService: { create: Mock<SynthesisCreate> };
   readonly claimService: { create: Mock<ClaimCreate> };
@@ -286,8 +285,7 @@ function createDeps(): TestDeps {
         object_kind: "evidence_capsule",
         object_id: `evidence-${evidenceCounter}`
       } as never;
-    }),
-    deleteCreatedEvidence: vi.fn<EvidenceDeleteCreated>(async () => undefined)
+    })
   };
   const memoryService = {
     create: vi.fn<MemoryCreate>(async () =>

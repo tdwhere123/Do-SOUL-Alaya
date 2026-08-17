@@ -75,8 +75,8 @@ export interface EdgeClassifyExistingPathReaderPort {
 // invariant: edge auto-producer sink is the governed path candidate
 // intake (PathCandidateSink), not memory_graph_edges. A supports/
 // derives_from candidate is born a weak attention_only path (recall_bias
-// +) that earns recall eligibility only through PathPlasticityService
-// reinforcement; it is never auto-accepted into a permanent edge.
+// +) and cannot become recall-eligible without governed promotion. Causal
+// usage projects soft strength but does not grant authority.
 // see also: path-candidate-sink.ts PathCandidateSink — the shared port.
 export interface EdgeAutoProducerServiceDependencies {
   readonly memoryRepo: EdgeAutoProducerMemoryRepoPort;

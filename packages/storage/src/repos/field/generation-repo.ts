@@ -10,6 +10,7 @@ import { generationFromRow, generationToRow } from "./field-receipts.js";
 import { verifyPersistedGeneration } from "./identity.js";
 import {
   fieldProjectionGenerationParser,
+  fieldProjectionArtifactsParser,
   fieldProjectionPinParser,
   fieldProjectionPointerParser,
   insertIdempotent,
@@ -18,6 +19,7 @@ import {
 } from "./mappers.js";
 import type {
   FieldProjectionGenerationRepo,
+  FieldProjectionArtifactsRow,
   FieldProjectionGenerationRow,
   FieldProjectionPinRow,
   FieldProjectionPointerRow
@@ -38,6 +40,12 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
   private readonly selectPointerStatement;
   private readonly insertPinStatement;
   private readonly selectPinStatement;
+  private readonly renewPinStatement;
+  private readonly releasePinStatement;
+  private readonly selectCollectableRetiredStatement;
+  private readonly deleteCollectableRetiredStatement;
+  private readonly insertArtifactsStatement;
+  private readonly selectArtifactsStatement;
 
   public constructor(
     private readonly database: StorageDatabase,
@@ -74,13 +82,65 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
       FROM projection_generation_pointer WHERE workspace_id = ? LIMIT 1
     `);
     this.insertPinStatement = database.connection.prepare(`
-      INSERT INTO projection_pins (workspace_id, generation_id, pinned_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(workspace_id, generation_id) DO NOTHING
+      INSERT INTO projection_pins (
+        workspace_id, generation_id, reader_id, pinned_at, expires_at, released_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, generation_id, reader_id) DO NOTHING
     `);
     this.selectPinStatement = database.connection.prepare(`
-      SELECT workspace_id, generation_id, pinned_at
-      FROM projection_pins WHERE workspace_id = ? AND generation_id = ? LIMIT 1
+      SELECT workspace_id, generation_id, reader_id, pinned_at, expires_at, released_at
+      FROM projection_pins
+      WHERE workspace_id = ? AND generation_id = ? AND reader_id = ? LIMIT 1
+    `);
+    this.releasePinStatement = database.connection.prepare(`
+      UPDATE projection_pins SET released_at = ?
+      WHERE workspace_id = ? AND generation_id = ? AND reader_id = ?
+        AND released_at IS NULL
+    `);
+    this.renewPinStatement = database.connection.prepare(`
+      UPDATE projection_pins SET expires_at = ?
+      WHERE workspace_id = ? AND generation_id = ? AND reader_id = ?
+        AND released_at IS NULL AND expires_at > ? AND expires_at < ?
+    `);
+    this.selectCollectableRetiredStatement = database.connection.prepare(`
+      SELECT generation_id FROM projection_generations AS generation
+      WHERE generation.workspace_id = ? AND generation.status = 'retired'
+        AND NOT EXISTS (
+          SELECT 1 FROM projection_generation_pointer AS pointer
+          WHERE pointer.workspace_id = generation.workspace_id
+            AND pointer.active_generation_id = generation.generation_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM projection_pins AS pin
+          WHERE pin.workspace_id = generation.workspace_id
+            AND pin.generation_id = generation.generation_id
+            AND pin.released_at IS NULL AND pin.expires_at > ?
+        )
+      ORDER BY generation_id
+    `);
+    this.deleteCollectableRetiredStatement = database.connection.prepare(`
+      DELETE FROM projection_generations
+      WHERE workspace_id = ? AND generation_id = ? AND status = 'retired'
+        AND NOT EXISTS (
+          SELECT 1 FROM projection_generation_pointer
+          WHERE workspace_id = ? AND active_generation_id = ?
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM projection_pins
+          WHERE workspace_id = ? AND generation_id = ?
+            AND released_at IS NULL AND expires_at > ?
+        )
+    `);
+    this.insertArtifactsStatement = database.connection.prepare(`
+      INSERT INTO projection_generation_artifacts (
+        workspace_id, generation_id, artifact_digest, artifacts_json, recorded_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, generation_id) DO NOTHING
+    `);
+    this.selectArtifactsStatement = database.connection.prepare(`
+      SELECT workspace_id, generation_id, artifact_digest, artifacts_json, recorded_at
+      FROM projection_generation_artifacts
+      WHERE workspace_id = ? AND generation_id = ? LIMIT 1
     `);
   }
 
@@ -121,8 +181,15 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
 
   public activatePointer(pointer: FieldProjectionPointerRow): FieldProjectionPointerRow {
     return persistFieldTransaction(this.database, () => {
-      if (this.readPinned(pointer.workspace_id, pointer.active_generation_id) === null) {
+      const target = this.readPinned(pointer.workspace_id, pointer.active_generation_id);
+      if (target === null) {
         throw new StorageError("NOT_FOUND", "projection generation is missing");
+      }
+      if (target.status !== "verified" && target.status !== "active") {
+        throw new StorageError(
+          "VALIDATION_FAILED",
+          "projection generation must be verified before activation"
+        );
       }
       this.upsertPointerStatement.run(
         pointer.workspace_id, pointer.active_generation_id, pointer.activated_at
@@ -140,14 +207,129 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
       throw new StorageError("NOT_FOUND", "projection generation is missing");
     }
     return insertIdempotent(
-      () => this.insertPinStatement.run(pin.workspace_id, pin.generation_id, pin.pinned_at),
+      () => this.insertPinStatement.run(
+        pin.workspace_id,
+        pin.generation_id,
+        pin.reader_id,
+        pin.pinned_at,
+        pin.expires_at,
+        pin.released_at
+      ),
       () => parseOptionalRow(
-        this.selectPinStatement.get(pin.workspace_id, pin.generation_id),
+        this.selectPinStatement.get(pin.workspace_id, pin.generation_id, pin.reader_id),
         fieldProjectionPinParser,
         "projection pin"
       ),
-      (existing) => existing.generation_id === pin.generation_id,
+      (existing) => samePin(existing, pin),
       "projection pin"
+    );
+  }
+
+  public releasePin(input: Readonly<{
+    readonly workspace_id: string;
+    readonly generation_id: string;
+    readonly reader_id: string;
+    readonly released_at: string;
+  }>): FieldProjectionPinRow {
+    return persistFieldTransaction(this.database, () => {
+      this.releasePinStatement.run(
+        input.released_at,
+        input.workspace_id,
+        input.generation_id,
+        input.reader_id
+      );
+      const row = this.readPin(input.workspace_id, input.generation_id, input.reader_id);
+      if (row === null) throw new StorageError("NOT_FOUND", "projection pin is missing");
+      return row;
+    }, "projection pin release");
+  }
+
+  public renewPin(input: Readonly<{
+    readonly workspace_id: string;
+    readonly generation_id: string;
+    readonly reader_id: string;
+    readonly renewed_at: string;
+    readonly expires_at: string;
+  }>): FieldProjectionPinRow {
+    return persistFieldTransaction(this.database, () => {
+      this.renewPinStatement.run(
+        input.expires_at,
+        input.workspace_id,
+        input.generation_id,
+        input.reader_id,
+        input.renewed_at,
+        input.expires_at
+      );
+      const row = this.readPin(input.workspace_id, input.generation_id, input.reader_id);
+      if (row === null || row.released_at !== null || row.expires_at <= input.renewed_at) {
+        throw new StorageError("NOT_FOUND", "projection pin is missing, released, or expired");
+      }
+      return row;
+    }, "projection pin renewal");
+  }
+
+  public readPin(
+    workspaceId: string,
+    generationId: string,
+    readerId: string
+  ): FieldProjectionPinRow | null {
+    return parseOptionalRow(
+      this.selectPinStatement.get(workspaceId, generationId, readerId),
+      fieldProjectionPinParser,
+      "projection pin"
+    );
+  }
+
+  public collectRetired(workspaceId: string, asOf: string): readonly string[] {
+    return persistFieldTransaction(this.database, () => {
+      const candidates = this.selectCollectableRetiredStatement.all(
+        workspaceId,
+        asOf
+      ) as readonly Readonly<{ generation_id: string }>[];
+      const collected: string[] = [];
+      for (const candidate of candidates) {
+        const result = this.deleteCollectableRetiredStatement.run(
+          workspaceId,
+          candidate.generation_id,
+          workspaceId,
+          candidate.generation_id,
+          workspaceId,
+          candidate.generation_id,
+          asOf
+        );
+        if (result.changes === 1) collected.push(candidate.generation_id);
+      }
+      return Object.freeze(collected);
+    }, "retired projection generation collection");
+  }
+
+  public putArtifacts(row: FieldProjectionArtifactsRow): FieldProjectionArtifactsRow {
+    if (this.readPinned(row.workspace_id, row.generation_id) === null) {
+      throw new StorageError("NOT_FOUND", "projection generation is missing");
+    }
+    return insertIdempotent(
+      () => this.insertArtifactsStatement.run(
+        row.workspace_id,
+        row.generation_id,
+        row.artifact_digest,
+        row.artifacts_json,
+        row.recorded_at
+      ),
+      () => this.readArtifacts(row.workspace_id, row.generation_id),
+      (existing) => existing.artifact_digest === row.artifact_digest &&
+        existing.artifacts_json === row.artifacts_json,
+      "projection generation artifacts"
+    );
+  }
+
+  public readArtifacts(
+    workspaceId: string,
+    generationId: string
+  ): FieldProjectionArtifactsRow | null {
+    return parseOptionalRow(
+      this.selectArtifactsStatement.get(workspaceId, generationId),
+      fieldProjectionArtifactsParser,
+      "projection generation artifacts"
     );
   }
 
@@ -176,7 +358,8 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
         this.persistStatus(input.workspace_id, input.generation_id, "verified")
       ),
       activatePointer: (input) => this.activatePointer(input),
-      pin: (input) => this.pin(input)
+      pin: (input) => this.pin(input),
+      release: (input) => this.releasePin(input)
     };
   }
 
@@ -199,6 +382,13 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
       "projection generation pointer"
     );
   }
+}
+
+function samePin(existing: FieldProjectionPinRow, incoming: FieldProjectionPinRow): boolean {
+  return existing.generation_id === incoming.generation_id &&
+    existing.reader_id === incoming.reader_id &&
+    existing.pinned_at === incoming.pinned_at &&
+    existing.expires_at === incoming.expires_at;
 }
 
 function rejectActiveStatus(status: ProjectionGenerationStatus): void {

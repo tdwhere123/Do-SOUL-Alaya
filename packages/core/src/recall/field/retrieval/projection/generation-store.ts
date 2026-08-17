@@ -6,7 +6,8 @@ import type {
   ProjectionGenerationPointer,
   ProjectionGenerationPort,
   ProjectionGenerationStatus,
-  ProjectionPin
+  ProjectionPin,
+  ProjectionPinRelease
 } from "@do-soul/alaya-protocol";
 import { verifyFieldProjectionGeneration } from "@do-soul/alaya-protocol";
 
@@ -34,28 +35,6 @@ export interface ProjectionGenerationLifecycleStore {
     workspaceId: string,
     generationId: string
   ): ProjectionGenerationArtifacts | null;
-}
-
-export function createPortBackedGenerationStore(
-  port: ProjectionGenerationPort
-): ProjectionGenerationLifecycleStore {
-  const artifacts = new Map<string, ProjectionGenerationArtifacts>();
-  return {
-    snapshot: (input) => port.snapshot(input),
-    verify: (input) => port.verify(input),
-    activatePointer: (input) => port.activatePointer(input),
-    putArtifacts(workspaceId, next) {
-      const key = generationKey(workspaceId, next.generation_id);
-      if (artifacts.has(key)) {
-        throw new Error("projection generation artifacts are immutable");
-      }
-      artifacts.set(key, next);
-      return next;
-    },
-    readArtifacts(workspaceId, generationId) {
-      return artifacts.get(generationKey(workspaceId, generationId)) ?? null;
-    }
-  };
 }
 
 export class ProjectionPointerCrash extends Error {
@@ -130,11 +109,67 @@ export class InMemoryProjectionGenerationStore {
 
   public pin(pin: ProjectionPin): ProjectionPin {
     this.requireGeneration(pin.workspace_id, pin.generation_id);
-    const key = generationKey(pin.workspace_id, pin.generation_id);
+    const key = pinKey(pin.workspace_id, pin.generation_id, pin.reader_id);
     const existing = this.pins.get(key);
     if (existing !== undefined) return existing;
     this.pins.set(key, Object.freeze({ ...pin }));
     return this.pins.get(key)!;
+  }
+
+  public release(input: ProjectionPinRelease): ProjectionPin {
+    const key = pinKey(input.workspace_id, input.generation_id, input.reader_id);
+    const existing = this.pins.get(key);
+    if (existing === undefined) throw new Error("projection pin is missing");
+    if (existing.released_at !== null) return existing;
+    const released = Object.freeze({ ...existing, released_at: input.released_at });
+    this.pins.set(key, released);
+    return released;
+  }
+
+  public renew(pin: ProjectionPin, renewedAt: string, expiresAt: string): ProjectionPin {
+    const key = pinKey(pin.workspace_id, pin.generation_id, pin.reader_id);
+    const existing = this.pins.get(key);
+    if (existing === undefined || existing.released_at !== null) {
+      throw new Error("projection pin is missing or released");
+    }
+    if (existing.expires_at <= renewedAt) {
+      throw new Error("projection pin is expired");
+    }
+    if (expiresAt <= existing.expires_at) return existing;
+    const renewed = Object.freeze({ ...existing, expires_at: expiresAt });
+    this.pins.set(key, renewed);
+    return renewed;
+  }
+
+  public readPin(workspaceId: string, generationId: string, readerId: string): ProjectionPin | null {
+    return this.pins.get(pinKey(workspaceId, generationId, readerId)) ?? null;
+  }
+
+  public requireActivePin(pin: ProjectionPin, asOf: string): ProjectionPin {
+    const existing = this.pins.get(pinKey(pin.workspace_id, pin.generation_id, pin.reader_id));
+    if (existing === undefined || !samePin(existing, pin)) {
+      throw new Error("projection reader pin is missing or mismatched");
+    }
+    if (existing.released_at !== null) throw new Error("projection reader pin is released");
+    if (existing.pinned_at > asOf || existing.expires_at <= asOf) {
+      throw new Error("projection reader pin is not live");
+    }
+    return existing;
+  }
+
+  public collectRetired(workspaceId: string, asOf: string): readonly string[] {
+    const collected: string[] = [];
+    for (const [key, generation] of this.generations) {
+      if (generation.workspace_id !== workspaceId || generation.status !== "retired") continue;
+      if (this.hasActivePin(workspaceId, generation.generation_id, asOf)) continue;
+      this.generations.delete(key);
+      this.artifacts.delete(key);
+      for (const pinKeyValue of this.pins.keys()) {
+        if (pinKeyValue.startsWith(`${key}\0`)) this.pins.delete(pinKeyValue);
+      }
+      collected.push(generation.generation_id);
+    }
+    return Object.freeze(collected.sort());
   }
 
   public erase(barrier: ProjectionEraseBarrier): ProjectionEraseBarrier {
@@ -208,7 +243,8 @@ export class InMemoryProjectionGenerationStore {
       snapshot: (input) => this.snapshot(input),
       verify: (input) => this.verify(input),
       activatePointer: (input) => this.activatePointer(input),
-      pin: (input) => this.pin(input)
+      pin: (input) => this.pin(input),
+      release: (input) => this.release(input)
     };
   }
 
@@ -251,6 +287,14 @@ export class InMemoryProjectionGenerationStore {
     }
   }
 
+  private hasActivePin(workspaceId: string, generationId: string, asOf: string): boolean {
+    const prefix = `${generationKey(workspaceId, generationId)}\0`;
+    for (const [key, pin] of this.pins) {
+      if (key.startsWith(prefix) && pin.released_at === null && pin.expires_at > asOf) return true;
+    }
+    return false;
+  }
+
   private consumeCrash(point: ProjectionCrashPoint): void {
     if (this.crashAt !== point) return;
     this.crashAt = null;
@@ -269,4 +313,16 @@ export class InMemoryProjectionGenerationStore {
 
 function generationKey(workspaceId: string, generationId: string): string {
   return `${workspaceId}\0${generationId}`;
+}
+
+function pinKey(workspaceId: string, generationId: string, readerId: string): string {
+  return `${generationKey(workspaceId, generationId)}\0${readerId}`;
+}
+
+function samePin(existing: ProjectionPin, incoming: ProjectionPin): boolean {
+  return existing.workspace_id === incoming.workspace_id &&
+    existing.generation_id === incoming.generation_id &&
+    existing.reader_id === incoming.reader_id &&
+    existing.pinned_at === incoming.pinned_at &&
+    existing.expires_at === incoming.expires_at;
 }

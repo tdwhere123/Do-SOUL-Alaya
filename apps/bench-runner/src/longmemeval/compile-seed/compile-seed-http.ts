@@ -54,6 +54,9 @@ import { readGardenHttpResponseText } from
 import { resolveGardenSchemaRetryInstruction, withGardenResponseSchemaRepair } from
   "./http/garden-http-schema-retry.js";
 import { resolveExtractionTransportRoute } from "../extraction/transport-route.js";
+import {
+  isExtractionPlanDeadlineError
+} from "./http/extraction-plan-deadline.js";
 export { extractContentFromChatCompletionBody } from "../extraction/chat-completion-response.js";
 export { EXTRACTION_HTTP_MAX_RETRY_JITTER_MS } from "./http/garden-http-retry-policy.js";
 export { EXTRACTION_REQUEST_TIMEOUT_MS } from "./http/output-token-retry.js";
@@ -152,8 +155,7 @@ async function extractGardenHttpRequest(
         input, error, attempt, counters, maxRetries, shouldEscalateOutputTokens
       );
     },
-    waitForRetry: (attempt, rateLimitRetries) =>
-      waitForGardenHttpRetry(deps, input, attempt, rateLimitRetries),
+    waitForRetry: (attempt) => waitForGardenHttpRetry(deps, input, attempt),
     describeFailure: toBenchTransportFailureAttempt,
     wrapFailure: wrapGardenHttpTransportError
   });
@@ -179,28 +181,26 @@ function validateGardenHttpRawJson(
 }
 
 function throwIfGardenHttpAborted(
-  input: GardenHttpExtractInput,
-  attempt: number,
-  rateLimitRetries: number
+  input: GardenHttpExtractInput
 ): void {
   if (input.abortSignal?.aborted !== true) return;
+  const planTimedOut = isExtractionPlanDeadlineError(input.abortSignal.reason);
   throw markGardenHttpFailure(
     input.abortSignal.reason ?? new Error("garden extraction operator aborted"),
-    { kind: "aborted", phase: "request" }
+    { kind: planTimedOut ? "timeout" : "aborted", phase: "request" }
   );
 }
 
 async function waitForGardenHttpRetry(
   deps: GardenHttpExtractorDeps,
   input: GardenHttpExtractInput,
-  attempt: number,
-  rateLimitRetries: number
+  attempt: number
 ): Promise<void> {
   const completed = await waitForRetryDelay(
     deps.sleep(computeGardenHttpJitterMs(attempt, deps.random)),
     input.abortSignal
   );
-  if (!completed) throwIfGardenHttpAborted(input, attempt, rateLimitRetries);
+  if (!completed) throwIfGardenHttpAborted(input);
 }
 
 async function waitForRetryDelay(
@@ -273,13 +273,24 @@ async function runGardenHttpAttempt(
       input.validateRawJson === undefined ? "default_envelope" : "caller_owned"
     );
   } catch (error) {
-    throw settleGardenHttpAttemptFailure(
-      error, settlement.hasTimedOut(), input.abortSignal?.aborted === true
-    );
+    throw settleGardenHttpFailure(error, settlement, input);
   } finally {
     attemptSettled = true;
     settlement.dispose();
   }
+}
+
+function settleGardenHttpFailure(
+  error: unknown,
+  settlement: GardenHttpAttemptSettlement,
+  input: GardenHttpExtractInput
+): Error {
+  const planTimedOut = isExtractionPlanDeadlineError(input.abortSignal?.reason);
+  return settleGardenHttpAttemptFailure(
+    error,
+    settlement.hasTimedOut() || planTimedOut,
+    input.abortSignal?.aborted === true && !planTimedOut
+  );
 }
 
 async function inspectGardenHttpAttemptResponse(
@@ -335,18 +346,14 @@ function decideGardenHttpRetry(
   maxRetries: number,
   allowOutputTokenEscalation: boolean
 ): GardenHttpRetryDecision {
+  if (isExtractionPlanDeadlineError(input.abortSignal?.reason)) {
+    return { classification: "failure_timeout", retry: false, counters };
+  }
   if (input.abortSignal?.aborted === true && !readGardenHttpAttemptTimedOut(error)) {
     return { classification: "failure_aborted", retry: false, counters };
   }
   if (readGardenHttpAttemptTimedOut(error)) {
-    if (counters.timeoutRetries >= BENCH_HTTP_MAX_TIMEOUT_RETRIES || attempt >= maxRetries) {
-      return { classification: "failure_timeout", retry: false, counters };
-    }
-    return {
-      classification: "failure_timeout",
-      retry: true,
-      counters: { ...counters, timeoutRetries: counters.timeoutRetries + 1 }
-    };
+    return decideGardenHttpTimeoutRetry(attempt, counters, maxRetries);
   }
   if (isOutputTokenTruncation(error)) {
     return {
@@ -375,6 +382,21 @@ function decideGardenHttpRetry(
     };
   }
   return { classification: classified.classification, retry: true, counters };
+}
+
+function decideGardenHttpTimeoutRetry(
+  attempt: number,
+  counters: GardenHttpRetryCounters,
+  maxRetries: number
+): GardenHttpRetryDecision {
+  if (counters.timeoutRetries >= BENCH_HTTP_MAX_TIMEOUT_RETRIES || attempt >= maxRetries) {
+    return { classification: "failure_timeout", retry: false, counters };
+  }
+  return {
+    classification: "failure_timeout",
+    retry: true,
+    counters: { ...counters, timeoutRetries: counters.timeoutRetries + 1 }
+  };
 }
 
 type GardenHttpFetchInput = { readonly config: CompileSeedExtractionConfig; readonly apiKey: string; readonly deps: GardenHttpExtractorDeps; readonly input: GardenHttpExtractInput; readonly attempt: number; readonly controller: AbortController; readonly settlement: GardenHttpAttemptSettlement; readonly isAttemptSettled: () => boolean };

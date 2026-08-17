@@ -116,6 +116,7 @@ function buildRecallServiceInput(
     recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
     evidenceService: foundation.evidenceService,
     fieldQuerySession: repositories.fieldComposition.querySession,
+    fieldComposition: repositories.fieldComposition,
     openSemanticFactorExtractionPort: {
       operator_id: gardenComputeRuntime.officialGardenProvider.operator_id,
       extract: async (

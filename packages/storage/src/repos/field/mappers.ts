@@ -20,9 +20,11 @@ import type {
   FieldFactorDescriptorRow,
   FieldFactorIncidenceRow,
   FieldProjectionGenerationRow,
+  FieldProjectionArtifactsRow,
   FieldProjectionPinRow,
   FieldProjectionPointerRow,
   FieldProofEffectRow,
+  FieldSourceEvidenceBindingRow,
   FieldSourceRecordRow,
   FieldSourceSpanRow
 } from "./ports.js";
@@ -43,6 +45,17 @@ export const fieldSourceRecordParser: RowParser<FieldSourceRecordRow> = {
       valid_to: readNullableStringField(row, "valid_to"),
       operator_id: readNonEmptyStringField(row, "operator_id"),
       source_body: readNullableStringField(row, "source_body")
+    });
+  }
+};
+
+export const fieldSourceEvidenceBindingParser: RowParser<FieldSourceEvidenceBindingRow> = {
+  parse(value: unknown): FieldSourceEvidenceBindingRow {
+    const row = readRecord(value, "source_record_evidence_ref");
+    return Object.freeze({
+      workspace_id: readNonEmptyStringField(row, "workspace_id"),
+      record_id: readNonEmptyStringField(row, "record_id"),
+      evidence_object_id: readNonEmptyStringField(row, "evidence_object_id")
     });
   }
 };
@@ -125,6 +138,19 @@ export const fieldProjectionGenerationParser: RowParser<FieldProjectionGeneratio
   }
 };
 
+export const fieldProjectionArtifactsParser: RowParser<FieldProjectionArtifactsRow> = {
+  parse(value: unknown): FieldProjectionArtifactsRow {
+    const row = readRecord(value, "projection_generation_artifacts");
+    return Object.freeze({
+      workspace_id: readNonEmptyStringField(row, "workspace_id"),
+      generation_id: readNonEmptyStringField(row, "generation_id"),
+      artifact_digest: readNonEmptyStringField(row, "artifact_digest"),
+      artifacts_json: readNonEmptyStringField(row, "artifacts_json"),
+      recorded_at: readNonEmptyStringField(row, "recorded_at")
+    });
+  }
+};
+
 export const fieldProjectionPointerParser: RowParser<FieldProjectionPointerRow> = {
   parse(value: unknown): FieldProjectionPointerRow {
     const row = readRecord(value, "projection_generation_pointer");
@@ -142,7 +168,10 @@ export const fieldProjectionPinParser: RowParser<FieldProjectionPinRow> = {
     return Object.freeze({
       workspace_id: readNonEmptyStringField(row, "workspace_id"),
       generation_id: readNonEmptyStringField(row, "generation_id"),
-      pinned_at: readNonEmptyStringField(row, "pinned_at")
+      reader_id: readNonEmptyStringField(row, "reader_id"),
+      pinned_at: readNonEmptyStringField(row, "pinned_at"),
+      expires_at: readNonEmptyStringField(row, "expires_at"),
+      released_at: readNullableStringField(row, "released_at")
     });
   }
 };
@@ -151,6 +180,7 @@ export const fieldEraseBarrierParser: RowParser<FieldEraseBarrierRow> = {
   parse(value: unknown): FieldEraseBarrierRow {
     const row = readRecord(value, "projection_erase_barrier");
     return Object.freeze({
+      identity: readNonEmptyStringField(row, "identity"),
       barrier_id: readNonEmptyStringField(row, "barrier_id"),
       workspace_id: readNonEmptyStringField(row, "workspace_id"),
       generation_id: readNullableStringField(row, "generation_id"),
@@ -185,18 +215,37 @@ export const fieldProofEffectParser: RowParser<FieldProofEffectRow> = {
   parse(value: unknown): FieldProofEffectRow {
     const row = readRecord(value, "proof_effect_decision");
     return Object.freeze({
+      schema_version: readProofEffectSchemaVersion(row),
       request_digest: readNonEmptyStringField(row, "request_digest"),
       workspace_id: readNonEmptyStringField(row, "workspace_id"),
+      actor_id: readNonEmptyStringField(row, "actor_id"),
+      run_id: readNonEmptyStringField(row, "run_id"),
+      delivery_id: readNonEmptyStringField(row, "delivery_id"),
       action: readNonEmptyStringField(row, "action"),
       target: readNonEmptyStringField(row, "target"),
       scope: readNonEmptyStringField(row, "scope"),
       effective_as_of: readNonEmptyStringField(row, "effective_as_of"),
       decision: EffectDecisionSchema.parse(readNonEmptyStringField(row, "decision")),
       supporting_receipt_ids_json: readNonEmptyStringField(row, "supporting_receipt_ids_json"),
+      supporting_proof_witnesses_json: readNonEmptyStringField(
+        row,
+        "supporting_proof_witnesses_json"
+      ),
+      governance_frontier: readNonEmptyStringField(row, "governance_frontier"),
+      policy_operator_id: readNonEmptyStringField(row, "policy_operator_id"),
+      policy_operator_version: readNonEmptyStringField(row, "policy_operator_version"),
       recorded_at: readNonEmptyStringField(row, "recorded_at")
     });
   }
 };
+
+function readProofEffectSchemaVersion(row: Record<string, unknown>): 2 {
+  const value = readFiniteNumberField(row, "schema_version");
+  if (value !== 2) {
+    throw new StorageError("VALIDATION_FAILED", "proof effect schema version must be 2");
+  }
+  return 2;
+}
 
 export function persistFieldWrite<T>(run: () => T, label: string): T {
   try {

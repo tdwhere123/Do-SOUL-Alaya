@@ -135,7 +135,10 @@ describe("direct evidence transient embedding assessment", () => {
   });
 
   it("uses a transient evidence score to change the bounded delivered survivor", async () => {
-    const evidence = [createEvidenceCapsule(0, "opaque receipt zxq-8842")];
+    const evidence = [createEvidenceCapsule(
+      0,
+      "opaque zxq-8842 neutral archival payload with extra tokens"
+    )];
     const [scoredResult, controlResult] = await Promise.all([
       runRecall(createRecallFixture({
         evidence, maxEntries: 1, scoreEvidenceCandidates: evidenceScorePort(0.99)

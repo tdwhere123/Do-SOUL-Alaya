@@ -7,7 +7,6 @@ import {
   createMcpMemoryToolOperations
 } from "./tool-handler-operations.js";
 import { createRecallHandler, createReportContextUsageHandler } from "../recall/recall-usage-handlers.js";
-import { InMemoryCausalUsageRecorder } from "../usage/causal-usage-recorder.js";
 import {
   classifyError,
   fail,
@@ -34,9 +33,8 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
   const warn = deps.warn ?? ((message: string, meta: Record<string, unknown>) => console.warn(message, meta));
   const gardenTasks = createGardenTaskHandlers({ deps, now, warn, generateId });
   const recall = createRecallHandler({ deps, now, warn, generateId });
-  const causalUsagePort = deps.causalUsagePort ?? new InMemoryCausalUsageRecorder();
   const reportContextUsage = createReportContextUsageHandler({
-    deps: { ...deps, causalUsagePort },
+    deps,
     now,
     warn
   });

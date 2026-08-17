@@ -61,6 +61,7 @@ describe("RecallService reference time", () => {
     const { dependencies } = createDependencies([unrelated, requested]);
     const findByEventTimeWindow = vi.fn(async () => [requested]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -101,6 +102,7 @@ describe("RecallService reference time", () => {
     const { dependencies } = createDependencies([]);
     const findByEventTimeWindow = vi.fn(async () => [requested]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -133,6 +135,7 @@ describe("RecallService reference time", () => {
     const { dependencies } = createDependencies([memory]);
     const findByEventTimeWindow = vi.fn(async () => [memory]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -164,6 +167,7 @@ describe("RecallService reference time", () => {
       taskSurface: createTaskSurface()
     });
     const treatment = await new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...treatmentDependencies,
       memoryRepo: { ...treatmentDependencies.memoryRepo, findByEventTimeWindow }
     }).recall({
@@ -184,6 +188,7 @@ describe("RecallService reference time", () => {
     const { dependencies } = createDependencies([]);
     const findByEventTimeWindow = vi.fn(async () => [requested]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -227,6 +232,7 @@ describe("RecallService reference time", () => {
       query: { readonly tier: keyof typeof byTier }
     ) => [byTier[query.tier]]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -283,6 +289,7 @@ describe("RecallService reference time", () => {
       return supplied;
     });
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByEventTimeWindow }
     });
@@ -323,6 +330,7 @@ describe("RecallService reference time", () => {
       const { dependencies } = createDependencies([]);
       const findByEventTimeWindow = vi.fn(async () => [requested]);
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
@@ -430,6 +438,7 @@ describe("RecallService reference time", () => {
     const countInboundEdgesWeighted = vi.fn(async () => 0);
     const countInboundRecalls = vi.fn(async () => 0);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort: { findByAnchors },
       pathPlasticityPort: { getStrengthByMemoryId },

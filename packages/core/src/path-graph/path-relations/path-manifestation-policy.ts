@@ -22,7 +22,7 @@ import {
 //   - stance_bias       -> silently biases agent stance, highest bar
 //
 // see also: packages/core/src/manifestation/manifestation-resolver.ts:ManifestationResolver.
-// see also: packages/core/src/path-plasticity/service.ts:PathPlasticityService.
+// see also: packages/core/src/path-plasticity/causal-usage-projection.ts.
 
 const MANIFESTATION_AUTHORITY: Readonly<
   Record<PathGovernanceClassValue, ReadonlySet<ManifestationLevelValue>>

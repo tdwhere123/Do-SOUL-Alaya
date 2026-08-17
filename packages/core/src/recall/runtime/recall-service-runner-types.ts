@@ -1,5 +1,7 @@
 import type {
   FieldContractSha256,
+  MemoryEntry,
+  ProjectionPin,
   QueryConditionReceipt,
   RecallPolicy,
   SoulRecallHostContext,
@@ -41,6 +43,11 @@ import type { RecallRetrievalFieldBundle } from
   "../field/retrieval/retrieval-field-bundle.js";
 import type { RecallFiniteFieldChannelCapture } from
   "../field/finite-field-capture.js";
+import type { PinnedProjectionCandidateSelection } from
+  "../field/retrieval/projection/pinned-projection-selection.js";
+import type { SelectGammaSynthesisDependencies } from
+  "../delivery/select-gamma/synthesis-adapter.js";
+import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -57,9 +64,6 @@ export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
   return capturesRecallAnswerFeatures(params.diagnosticCapture) ||
     params.selectionBoundaryObserver !== undefined;
 }
-
-export { resolvePreparedAsOf as resolveRecallReferenceTime } from
-  "./query/prepare-recall-query-condition.js";
 
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
@@ -84,13 +88,17 @@ export interface RecallExecutionParams {
 }
 
 export interface RecallExecutionContext {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & SelectGammaSynthesisDependencies;
   readonly warn: RecallServiceWarnPort;
   readonly now: () => string;
-  readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
+  readonly buildDefaultPolicy: (
+    strategy: NodeStrategy,
+    taskSurfaceRef: string,
+    capturedAt: string
+  ) => Readonly<RecallPolicy>;
   readonly degradationReasons?: Set<RecallDegradationReason>;
-  readonly fieldQuerySession?: RecallFieldQuerySession;
-  readonly sha256?: FieldContractSha256;
+  readonly fieldQuerySession: RecallFieldQuerySession;
+  readonly sha256: FieldContractSha256;
 }
 
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
@@ -99,6 +107,7 @@ export type FineAssessmentResult = ReturnType<typeof fineAssess>;
 export type FineAssessmentPreparation = ReturnType<typeof prepareFineAssessment>;
 
 export interface PreparedRecallRequest {
+  readonly time: RecallRequestTimeContext;
   readonly policy: Readonly<RecallPolicy>;
   readonly tokenEstimator: TokenEstimator;
   readonly queryText: string | null;
@@ -111,6 +120,11 @@ export interface PreparedRecallRequest {
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly queryCondition: QueryConditionReceipt;
+  readonly fieldProjectionSelection: PinnedProjectionCandidateSelection;
+  readonly fieldProjectionMemories: readonly Readonly<MemoryEntry>[];
+  readonly projectionPin: ProjectionPin;
+  readonly projectionPinLease: import("./query/projection-pin-lease.js").ProjectionPinLeaseGuard;
+  readonly releaseProjectionPin: () => void;
 }
 
 type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];

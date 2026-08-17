@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { DynamicsService } from "@do-soul/alaya-core";
-import type { MemoryEntryMutableFields, PathAnchorRef, SynthesisCapsule } from "@do-soul/alaya-protocol";
+import type { DynamicsService, EffectDecisionStore } from "@do-soul/alaya-core";
+import type {
+  MemoryEntryMutableFields,
+  PathAnchorRef,
+  ProjectionEraseBarrier,
+  SynthesisCapsule
+} from "@do-soul/alaya-protocol";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandlerDependencies
@@ -23,6 +28,18 @@ export { SourceDeliveryAnchorValidationError } from "./proposal-workflow-types.j
 export interface McpMemoryProposalWorkflowDependencies {
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
+  readonly privacyErasePort?: Readonly<{
+    readonly transactionScope: object;
+    apply(row: ProjectionEraseBarrier): Pick<
+      ProjectionEraseBarrier,
+      "identity" | "workspace_id" | "barrier_id" | "generation_id" |
+        "subject_kind" | "subject_id" | "erased_at"
+    >;
+  }>;
+  readonly privacyEffectDecisionStore?: Readonly<{
+    readonly transactionScope: object;
+    readonly store: EffectDecisionStore;
+  }>;
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
   readonly memoryService?: Readonly<{
     findByIdScoped(

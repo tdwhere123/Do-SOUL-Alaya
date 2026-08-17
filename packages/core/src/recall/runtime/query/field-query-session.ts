@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import type {
   FieldContractSha256,
   FieldProjectionGeneration,
-  ProjectionPin
+  ProjectionPin,
+  QueryConditionReceipt
 } from "@do-soul/alaya-protocol";
 import {
   activateProjectionGeneration,
@@ -12,31 +14,81 @@ import {
   InMemoryProjectionGenerationStore,
   type ProjectionGenerationLifecycleStore
 } from "../../field/retrieval/projection/generation-store.js";
-
+import {
+  selectPinnedProjectionCandidates,
+  type PinnedProjectionCandidateSelection
+} from "../../field/retrieval/projection/pinned-projection-selection.js";
+import { projectionPinExpiry } from "./projection-pin-lease.js";
 export const SEALED_EMPTY_FRONTIER = "sealed:empty";
 
 export interface RecallFieldQuerySession {
   pinActiveGeneration(workspaceId: string, recordedAt: string): ProjectionPin;
+  selectCandidates(
+    condition: QueryConditionReceipt,
+    pin: ProjectionPin,
+    selectedAt: string
+  ): PinnedProjectionCandidateSelection;
+  renew(pin: ProjectionPin, renewedAt: string): ProjectionPin;
+  release(pin: ProjectionPin, releasedAt: string): ProjectionPin;
 }
 
-export function createInMemoryFieldQuerySession(
+export function createTestOnlyInMemoryFieldQuerySession(
   sha256: FieldContractSha256
 ): RecallFieldQuerySession {
   const store = new InMemoryProjectionGenerationStore(sha256);
   return {
     pinActiveGeneration(workspaceId, recordedAt) {
       const active = store.readActive(workspaceId) ??
-        activateEmptyGeneration(store, sha256, workspaceId, recordedAt);
+        activateTestOnlyEmptyGeneration(store, sha256, workspaceId, recordedAt);
       return store.pin({
         workspace_id: workspaceId,
         generation_id: active.generation_id,
-        pinned_at: recordedAt
+        reader_id: randomUUID(),
+        pinned_at: recordedAt,
+        expires_at: projectionPinExpiry(recordedAt),
+        released_at: null
       });
+    },
+    selectCandidates(condition, pin, selectedAt) {
+      assertPinMatchesCondition(condition, pin);
+      store.requireActivePin(pin, selectedAt);
+      const artifacts = store.readArtifacts(
+        condition.condition.workspace_id,
+        condition.generation_id
+      );
+      if (artifacts === null) throw new Error("pinned projection artifacts are missing");
+      return selectPinnedProjectionCandidates({ condition, artifacts, sha256 });
+    },
+    renew(pin, renewedAt) {
+      const existing = store.readPin(pin.workspace_id, pin.generation_id, pin.reader_id);
+      if (existing === null || existing.released_at !== null) {
+        throw new Error("projection pin is missing or released");
+      }
+      return store.renew(pin, renewedAt, projectionPinExpiry(renewedAt));
+    },
+    release(pin, releasedAt) {
+      const existing = store.readPin(pin.workspace_id, pin.generation_id, pin.reader_id);
+      if (existing === null) throw new Error("projection pin is missing");
+      const released = store.release({
+        workspace_id: pin.workspace_id,
+        generation_id: pin.generation_id,
+        reader_id: pin.reader_id,
+        released_at: releasedAt
+      });
+      store.collectRetired(pin.workspace_id, releasedAt);
+      return released;
     }
   };
 }
 
-export function activateEmptyGeneration(
+function assertPinMatchesCondition(condition: QueryConditionReceipt, pin: ProjectionPin): void {
+  if (condition.condition.workspace_id !== pin.workspace_id ||
+      condition.generation_id !== pin.generation_id) {
+    throw new Error("projection reader pin does not match the query condition");
+  }
+}
+
+export function activateTestOnlyEmptyGeneration(
   store: ProjectionGenerationLifecycleStore,
   sha256: FieldContractSha256,
   workspaceId: string,

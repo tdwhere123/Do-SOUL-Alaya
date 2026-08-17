@@ -12,6 +12,7 @@ import {
   type FieldContractSha256
 } from "@do-soul/alaya-protocol";
 import { tokenizeWithSpans } from "../object-keys/normalize/tokenize.js";
+import { sliceUtf8Span } from "./source-span-views.js";
 
 export interface FactorEmitInput {
   readonly sha256: FieldContractSha256;
@@ -61,7 +62,7 @@ function emitExactSurface(
   factors: Map<string, FactorDescriptor>,
   incidences: FactorIncidence[]
 ): void {
-  const surface = input.content_bytes.slice(span.start_offset, span.end_offset);
+  const surface = sliceUtf8Span(input.content_bytes, span);
   addIncidence(input, span, "f0", surface, factors, incidences);
   addIncidence(input, span, "f0", `source_id:${input.source_id}`, factors, incidences);
   addIncidence(
@@ -80,7 +81,7 @@ function emitNormalizedTokens(
   factors: Map<string, FactorDescriptor>,
   incidences: FactorIncidence[]
 ): void {
-  const surface = input.content_bytes.slice(span.start_offset, span.end_offset);
+  const surface = sliceUtf8Span(input.content_bytes, span);
   for (const token of tokenizeWithSpans(surface)) {
     addIncidence(input, span, "f1", token.token, factors, incidences);
   }
@@ -96,7 +97,7 @@ function emitViewFactors(
     addIncidence(input, span, "f1", slot.text, factors, incidences);
   }
   for (const surface of input.semanticSurfaces) {
-    addIncidence(input, span, "f1", surface, factors, incidences);
+    addIncidence(input, span, "f3", surface, factors, incidences);
   }
 }
 

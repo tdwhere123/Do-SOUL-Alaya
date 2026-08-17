@@ -55,6 +55,7 @@ import { createAlayaCliBridge } from "../../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../../cli/register.js";
 
 import { createAlayaDaemonRuntime } from "../../../index.js";
+import { seedSourceBoundRecall } from "../../support/seed-source-bound-recall.js";
 import type { AlayaDaemonRuntime } from "../../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
@@ -150,7 +151,17 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
       run_state: RunState.IDLE,
       current_surface_id: null
     });
-    await memoryRepo.create(createMemoryEntry());
+    const primaryMemory = createMemoryEntry();
+    await memoryRepo.create(primaryMemory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: primaryMemory.workspace_id,
+      runId: primaryMemory.run_id,
+      evidenceId: primaryMemory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: primaryMemory.content,
+      recordedAt: primaryMemory.created_at
+    });
     await workspaceRepo.create({
       workspace_id: "workspace-2",
       name: "workspace two",
@@ -270,7 +281,7 @@ export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryE
     scope_class: ScopeClass.PROJECT,
     content: "Use pnpm for all workspace commands.",
     domain_tags: ["tooling", "workflow"],
-    evidence_refs: ["phase6-proof"],
+    evidence_refs: ["11111111-1111-4111-8111-111111111103"],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,

@@ -83,7 +83,7 @@ export type MergeCoarseFiltersFn = (
 export type AssessCoarseFilterParams = Readonly<{
   readonly dependencies: RecallServiceDependencies;
   readonly warn: RecallServiceWarnPort;
-  readonly now: () => string;
+  readonly referenceTime: string;
   readonly coarseFilter: CoarseFilterResult;
   readonly workspaceId: string;
   readonly pathProjectionAsOf?: string;
@@ -122,7 +122,7 @@ export async function collectCoarseFilterSupplementaryData(
     routingKeyOwnerIds: params.coarseFilter.candidates.map(
       (candidate) => candidate.entry.object_id
     ),
-    routingKeyAsOfMs: Date.parse(params.now()),
+    referenceTime: params.referenceTime,
     workspaceId: params.workspaceId,
     pathProjectionAsOf: params.pathProjectionAsOf,
     runId: params.runId,
@@ -157,12 +157,13 @@ export function runCoarseFineAssessment(
   supplementaryData: RecallSupplementaryData
 ): ReturnType<typeof fineAssess> {
   return fineAssess({
+    workspace_id: params.workspaceId,
     candidates: params.coarseFilter.candidates,
     policy: params.policy,
     winnerMemoryIds: params.winnerMemoryIds,
     supplementaryData,
     tokenEstimator: params.tokenEstimator,
-    now: params.now,
+    now: () => params.referenceTime,
     warn: params.warn,
     captureAnswerFeatures: params.captureAnswerFeatures
   });

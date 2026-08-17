@@ -21,6 +21,12 @@ export {
   hashContentDigest,
   hashDerivationJobId,
   hashEffectRequestDigest,
+  hashEffectGovernanceFrontier,
+  hashEffectDecisionFactSnapshot,
+  hashCorrectionPredecessorId,
+  hashCorrectionSuccessorId,
+  canonicalEffectClaimFact,
+  canonicalEffectMemoryFact,
   hashFactorId,
   hashGenerationId,
   hashIncidenceId,
@@ -44,6 +50,7 @@ export {
   FIELD_OPERATOR_MANIFEST,
   PROJECTION_GENERATION_OPERATOR_ID,
   PROOF_EFFECT_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_VERSION,
   QUERY_CONDITION_OPERATOR_ID,
   RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
   SELECT_GAMMA_OPERATOR_ID,
@@ -83,6 +90,7 @@ export {
   ProjectionGenerationPointerSchema,
   ProjectionGenerationStatusSchema,
   ProjectionPinSchema,
+  ProjectionPinReleaseSchema,
   sameEraseBarrier,
   verifyFieldProjectionGeneration,
   type FieldProjectionGeneration,
@@ -90,7 +98,8 @@ export {
   type ProjectionEraseSubjectKind,
   type ProjectionGenerationPointer,
   type ProjectionGenerationStatus,
-  type ProjectionPin
+  type ProjectionPin,
+  type ProjectionPinRelease
 } from "./projection-generation.js";
 export {
   QueryConditionReceiptSchema,
@@ -112,10 +121,12 @@ export {
   EffectDecisionReceiptSchema,
   EffectDecisionSchema,
   EffectRequestSchema,
+  ProofEffectWitnessSchema,
   verifyEffectDecisionReceipt,
   type EffectDecision,
   type EffectDecisionReceipt,
-  type EffectRequest
+  type EffectRequest,
+  type ProofEffectWitness
 } from "./proof-effect.js";
 export {
   FieldStopCertificateReceiptSchema,
@@ -138,9 +149,6 @@ export type {
   ProjectionGenerationPort,
   ProofEffectPort,
   QueryConditionPort,
-  SelectGammaPort,
-  SelectGammaRequest,
-  SelectGammaResult,
   SourceAdmissionPort,
   SourceAdmissionRequest,
   SourceAdmissionResult,

@@ -106,7 +106,6 @@ export function buildMockDaemon(overrides: {
   readonly recall?: ReturnType<typeof vi.fn>;
   readonly warmEmbeddingCache?: ReturnType<typeof vi.fn>;
   readonly warmQueryEmbeddingCache?: ReturnType<typeof vi.fn>;
-  readonly accrueSessionCoRecall?: ReturnType<typeof vi.fn>;
   readonly runEdgePlanePassIfConfigured?: ReturnType<typeof vi.fn>;
 }): Record<string, unknown> {
   const recall = overrides.recall ?? vi.fn(async () => buildRecallResult());
@@ -163,17 +162,6 @@ export function buildMockDaemon(overrides: {
       dropped: []
     })
   );
-  // Stubbed earned co-recall accrual: the LoCoMo seed loop calls it once per
-  // session; the fake returns a settled summary (one pair minted) so the runner
-  // exercises the call without the real production counter gate.
-  // see also: apps/bench-runner/src/harness/co-recall-warmup.ts
-  const accrueSessionCoRecall =
-    overrides.accrueSessionCoRecall ??
-    vi.fn(async () => ({
-      pairsObserved: 1,
-      minted: 1,
-      belowThreshold: 0
-    }));
   // Stubbed event-sourced fold: a non-zero full-turn baseline so the harness
   // token-economy contract passes and the kpi carries a real token_economy.
   // see also: apps/bench-runner/src/harness/token/token-economy.ts deriveBenchTokenMetrics
@@ -193,7 +181,6 @@ export function buildMockDaemon(overrides: {
     warmQueryEmbeddingCache,
     runEdgePlanePassIfConfigured,
     recall,
-    accrueSessionCoRecall,
     queryTokenMetrics,
     attachWorkspace: vi.fn(async (input: { workspaceId: string; runId: string }) => ({
       workspaceId: input.workspaceId,
@@ -204,7 +191,6 @@ export function buildMockDaemon(overrides: {
       warmEmbeddingCache,
       warmQueryEmbeddingCache,
       recall,
-      accrueSessionCoRecall,
       queryTokenMetrics,
       detach: vi.fn(async () => undefined)
     })),

@@ -40,6 +40,17 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
     expect(buildEvidenceInput(noTurn, undefined, { fullTurnExcerpt: true }).excerpt).toBe("narrow only");
   });
 
+  it("preserves an exact gist when the ordinary evidence excerpt is null", () => {
+    const gist = "  用户在上海确认了发布 🚀  ";
+    const evidence = buildEvidenceInput(createSignal({
+      raw_payload: { excerpt: null, gist }
+    }), undefined, { fullTurnExcerpt: true });
+
+    expect(evidence.gist).toBe(gist);
+    expect(evidence.excerpt).toBe(gist);
+    expect(evidence.semantic_anchor.summary).toBe(gist);
+  });
+
   it("never substitutes signal creation time for a source observation", () => {
     const evidence = buildEvidenceInput(createSignal({
       created_at: "2020-01-01T00:00:00.000Z"

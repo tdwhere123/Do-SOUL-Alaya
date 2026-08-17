@@ -62,13 +62,18 @@ describe("field generation protocol events", () => {
       operator_id: "source_span_identity_v1",
       source_bytes: "plaintext"
     })).toThrow();
-    expect(() => SoulFieldEraseBarrierPayloadSchema.parse({
+    const erasePayload = {
       workspace_id: "workspace-1",
+      receipt_identity: digest,
       barrier_id: "barrier-1",
       generation_id: null,
       subject_kind: "source_record",
       subject_id: digest,
-      erased_at: occurredAt,
+      erased_at: occurredAt
+    } as const;
+    expect(SoulFieldEraseBarrierPayloadSchema.parse(erasePayload).receipt_identity).toBe(digest);
+    expect(() => SoulFieldEraseBarrierPayloadSchema.parse({
+      ...erasePayload,
       excerpt: "no"
     })).toThrow();
     expect(SoulFieldGenerationRebuildStartedPayloadSchema.parse({

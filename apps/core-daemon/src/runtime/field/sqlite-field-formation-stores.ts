@@ -16,20 +16,31 @@ import {
   type FieldFactorDescriptorRow,
   type FieldFactorIncidenceRow,
   type FieldSourceRecordRow,
-  type FieldSourceSpanRow
+  type FieldSourceSpanRow,
+  type StorageDatabase
 } from "@do-soul/alaya-storage";
 import type { DaemonFieldRepos } from "./field-repos.js";
 
 export function createSqliteFieldFormationStores(input: Readonly<{
   readonly repos: DaemonFieldRepos;
+  readonly database: StorageDatabase;
 }>): FieldFormationStores {
   const { repos } = input;
   return {
+    runAtomic: (work) => input.database.connection.transaction(work)(),
     getRecord: (workspaceId, recordId) => {
       const row = repos.records.findById(workspaceId, recordId);
       return row === null ? null : sourceRecordFromRow(row);
     },
-    putRecord: (record) => sourceRecordFromRow(repos.records.insert(recordToRow(record))),
+    getStoredRecord: (workspaceId, recordId) => {
+      const row = repos.records.findById(workspaceId, recordId);
+      return row?.source_body == null ? null : Object.freeze({
+        record: sourceRecordFromRow(row),
+        content_bytes: row.source_body
+      });
+    },
+    putRecord: (record, contentBytes) =>
+      sourceRecordFromRow(repos.records.insert(recordToRow(record, contentBytes))),
     getSpan: (workspaceId, spanId) => {
       const row = repos.spans.findById(workspaceId, spanId);
       return row === null ? null : sourceSpanFromRow(row);
@@ -54,16 +65,29 @@ export function createSqliteFieldFormationStores(input: Readonly<{
     putJob: (job) => jobFromRow(repos.jobs.insert(jobToRow(job))),
     listRecords: (workspaceId) =>
       Object.freeze(repos.records.listByWorkspace(workspaceId).map(sourceRecordFromRow)),
+    listStoredRecords: (workspaceId) => Object.freeze(
+      repos.records.listByWorkspace(workspaceId).flatMap((row) =>
+        row.source_body === null ? [] : [Object.freeze({
+          record: sourceRecordFromRow(row),
+          content_bytes: row.source_body
+        })]
+      )
+    ),
     listSpans: (workspaceId) =>
       Object.freeze(repos.spans.listByWorkspace(workspaceId).map(sourceSpanFromRow)),
     listFactors: (workspaceId) =>
       Object.freeze(repos.factors.listDescriptors(workspaceId).map(factorFromRow)),
     listIncidences: (workspaceId) =>
-      Object.freeze(repos.factors.listIncidences(workspaceId).map(incidenceFromRow))
+      Object.freeze(repos.factors.listIncidences(workspaceId).map(incidenceFromRow)),
+    listRecordEvidenceBindings: (workspaceId) =>
+      Object.freeze(repos.records.listEvidenceBindings(workspaceId))
   };
 }
 
-function recordToRow(record: SourceRecordIdentity): FieldSourceRecordRow {
+function recordToRow(
+  record: SourceRecordIdentity,
+  contentBytes: string
+): FieldSourceRecordRow {
   return {
     record_id: record.identity,
     workspace_id: record.workspace_id,
@@ -76,7 +100,7 @@ function recordToRow(record: SourceRecordIdentity): FieldSourceRecordRow {
     valid_from: record.valid_from,
     valid_to: record.valid_to,
     operator_id: record.operator_id,
-    source_body: null
+    source_body: contentBytes
   };
 }
 

@@ -164,11 +164,11 @@ describe("mcp memory tool handler", () => {
         per_anchor_usage: [{ object_id: "mem1", anchor_role: "target" }],
         reason: "cited"
       }),
-      // The handler passes the call-context workspace as an
-      // expected-workspace guard so cross-workspace report_context_usage
-      // is rejected at the trust-state layer before any
-      // MEMORY_USAGE_REPORTED row is appended.
-      { expectedWorkspaceId: context.workspaceId }
+      {
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId
+      }
     );
   });
 
@@ -269,21 +269,15 @@ describe("mcp memory tool handler", () => {
         used_object_ids: ["mem1"],
         reason: "cited from delivered object status"
       }),
-      { expectedWorkspaceId: context.workspaceId }
+      {
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId
+      }
     );
     expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(["mem1"], "ws1");
     expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalledWith("mem2", "ws1");
-    expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
-    expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
-      "mem1",
-      "ws1",
-      expect.objectContaining({
-        storage_tier: "hot",
-        last_used_at: "2026-04-30T00:00:00.000Z",
-        last_hit_at: "2026-04-30T00:00:00.000Z"
-      }),
-      "recall_usage_reported"
-    );
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
   });
 
   it("records used synthesis capsules without memory side effects", async () => {
@@ -317,7 +311,11 @@ describe("mcp memory tool handler", () => {
           { object_id: "mem1", object_kind: "synthesis_capsule" }
         ]
       }),
-      { expectedWorkspaceId: context.workspaceId }
+      {
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId
+      }
     );
     expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
     expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();

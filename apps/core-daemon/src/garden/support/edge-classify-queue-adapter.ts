@@ -36,10 +36,9 @@ const EDGE_CLASSIFY_CONTENT_MAX_CHARS = 4000;
 
 export function createEdgeClassifyQueueAdapter(deps: {
   readonly gardenTaskRepo: EdgeClassifyQueueRepoPort;
-  readonly now?: () => string;
+  readonly now: () => string;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): EdgeClassifyQueuePort {
-  const now = deps.now ?? (() => new Date().toISOString());
   return {
     async enqueueEdgeClassify(input): Promise<void> {
       const taskId = buildEdgeClassifyTaskId(
@@ -50,7 +49,7 @@ export function createEdgeClassifyQueueAdapter(deps: {
       if (deps.gardenTaskRepo.findById(taskId) !== null) {
         return;
       }
-      await enqueueEdgeClassifyTask(deps.gardenTaskRepo, input, taskId, now());
+      await enqueueEdgeClassifyTask(deps.gardenTaskRepo, input, taskId, deps.now());
     }
   };
 }

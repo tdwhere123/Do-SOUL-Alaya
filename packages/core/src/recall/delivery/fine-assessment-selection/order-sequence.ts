@@ -7,20 +7,14 @@ export type FineAssessmentOrderOwner =
   | "coarse"
   | "fusion"
   | "deep_head"
-  | "coverage"
-  | "direct_evidence_promotion"
-  | "semantic_memory_refinement"
-  | "behavior_authority_promotion"
-  | "verified_temporal_head"
-  | "consensus"
+  | "select_gamma"
   | "final_budget";
 
 export type FineAssessmentOrderRanks = Readonly<{
   readonly coarse: ReadonlyMap<string, number | null>;
   readonly fusion: ReadonlyMap<string, number>;
   readonly deepHead: ReadonlyMap<string, number>;
-  readonly coverage: ReadonlyMap<string, number>;
-  readonly consensus: ReadonlyMap<string, number>;
+  readonly selectGamma: ReadonlyMap<string, number>;
   readonly final: ReadonlyMap<string, number>;
 }>;
 
@@ -46,7 +40,6 @@ export type FineAssessmentOrderState = Readonly<{
 export function birthFineAssessmentOrderState(
   members: readonly FineAssessmentCandidate[],
   deepHeadRanks: ReadonlyMap<string, number>,
-  membership: (candidates: readonly FineAssessmentCandidate[]) => readonly string[],
   packetMembers?: readonly FineAssessmentCandidate[] | null
 ): FineAssessmentOrderState {
   const birthOrder = freezeKeys(members);
@@ -56,18 +49,15 @@ export function birthFineAssessmentOrderState(
     birthOrder,
     currentOrder: birthOrder,
     transitions: Object.freeze([
-      transition("coarse", packetOrder ?? birthOrder, packetOrder === null ? [] : membership(
-        packetMembers ?? members
-      )),
-      transition("fusion", freezeKeys(fusionCandidates), membership(fusionCandidates)),
-      transition("deep_head", birthOrder, membership(members))
+      transition("coarse", packetOrder ?? birthOrder, packetOrder ?? birthOrder),
+      transition("fusion", freezeKeys(fusionCandidates), birthOrder),
+      transition("deep_head", birthOrder, birthOrder)
     ]),
     ranks: Object.freeze({
       coarse: packetOrder === null ? unavailableRanks(birthOrder) : ranksFromOrder(packetOrder),
       fusion: ranksFromFusionReceipts(members),
       deepHead: new Map(deepHeadRanks),
-      coverage: ranksFromOrder(birthOrder),
-      consensus: ranksFromOrder(birthOrder),
+      selectGamma: ranksFromOrder(birthOrder),
       final: ranksFromOrder(birthOrder)
     })
   });
@@ -80,26 +70,27 @@ export function birthFineAssessmentOrderState(
   });
 }
 
-export function advanceFineAssessmentOrderState(
+export function recordSelectGammaOrder(
   state: FineAssessmentOrderState,
   nextCandidates: readonly FineAssessmentCandidate[],
-  stage: "coverage" | "consensus",
   memberKeys: readonly string[]
 ): FineAssessmentOrderState {
-  const advanced = carryFineAssessmentOrderState(state, nextCandidates, stage, memberKeys);
+  const advanced = carryFineAssessmentOrderState(
+    state, nextCandidates, "select_gamma", memberKeys
+  );
   return Object.freeze({
     ...advanced,
     sequence: Object.freeze({
       ...advanced.sequence,
       ranks: Object.freeze({
         ...advanced.sequence.ranks,
-        [stage]: ranksFromOrder(advanced.sequence.currentOrder)
+        selectGamma: ranksFromOrder(advanced.sequence.currentOrder)
       })
     })
   });
 }
 
-export function carryFineAssessmentOrderState(
+function carryFineAssessmentOrderState(
   state: FineAssessmentOrderState,
   nextCandidates: readonly FineAssessmentCandidate[],
   owner: FineAssessmentOrderOwner,

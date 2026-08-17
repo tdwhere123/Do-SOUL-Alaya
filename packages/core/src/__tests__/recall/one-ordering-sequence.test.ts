@@ -96,8 +96,7 @@ describe("one ordering sequence", () => {
       "coarse",
       "fusion",
       "deep_head",
-      "coverage",
-      "consensus",
+      "select_gamma",
       "final_budget"
     ]);
     expect(ledger.coarse_identity).toBe("captured");
@@ -107,7 +106,7 @@ describe("one ordering sequence", () => {
     )?.ranks.coarse).toBe(1);
   });
 
-  it("keeps the existing coverage walk without a post-coverage reorder param", () => {
+  it("records the Select_Gamma walk as the sole delivery rank owner", () => {
     const dupA = createRankedCandidate("dup-a", 1, 0.99);
     const dupB = createRankedCandidate("dup-b", 2, 0.98);
     const novel = createRankedCandidate("novel", 3, 0.4);
@@ -144,7 +143,9 @@ describe("one ordering sequence", () => {
       "novel",
       "dup-a"
     ]);
-    expect(readOrderSequence(result).ranks.coverage.get(novel.fusion.candidate_key))
+    expect(readOrderSequence(result).ranks.selectGamma.get(
+      novel.fusion.candidate_key
+    ))
       .toBe(1);
   });
 
@@ -173,7 +174,7 @@ describe("one ordering sequence", () => {
     }
   });
 
-  it("attributes membership from explicit receipts instead of rank prefixes", () => {
+  it("rejects a membership receipt attributed before Select_Gamma", () => {
     const first = createRankedCandidate("membership-first", 1, 0.9);
     const second = createRankedCandidate("membership-second", 2, 0.8);
     const third = createRankedCandidate("membership-third", 3, 0.7);
@@ -196,29 +197,12 @@ describe("one ordering sequence", () => {
           ? [keys[0]!, keys[1]!]
           : [keys[0]!, keys[2]!]
     }));
-    const ledger = buildFineAssessmentOrderLedger(
-      { ...sequence, transitions },
-      2
-    );
-    const secondRow = ledger.candidates.find(
-      (candidate) => candidate.candidate_key === keys[1]
-    );
-    const thirdRow = ledger.candidates.find(
-      (candidate) => candidate.candidate_key === keys[2]
-    );
-
-    expect(secondRow?.ranks.coarse).toBe(2);
-    expect(secondRow?.first_membership_changing_owner).toBe("fusion");
-    expect(secondRow?.membership_changing_owners).toEqual([
-      "fusion", "deep_head"
-    ]);
-    expect(thirdRow?.first_membership_changing_owner).toBe("fusion");
-    expect(thirdRow?.membership_changing_owners).toEqual([
-      "fusion", "deep_head"
-    ]);
+    expect(() => buildFineAssessmentOrderLedger(
+      { ...sequence, transitions }, 2
+    )).toThrow(/non-Gamma membership owner/u);
   });
 
-  it("records sequential membership-changing owners with a unique first owner", () => {
+  it("records Select_Gamma as the sole membership-changing owner", () => {
     const first = createRankedCandidate("multi-owner-first", 1, 0.9);
     const second = createRankedCandidate("multi-owner-second", 2, 0.8);
     const result = selectFineAssessmentCandidates({
@@ -234,8 +218,8 @@ describe("one ordering sequence", () => {
     const key = sequence.birthOrder[1]!;
     const transitions = sequence.transitions.map((transition, index) => ({
       ...transition,
-      memberKeys: index === 1 || index === 3
-        ? [sequence.birthOrder[0]!, key]
+      memberKeys: index < 3
+        ? sequence.birthOrder
         : [sequence.birthOrder[0]!]
     }));
     const row = buildFineAssessmentOrderLedger(
@@ -243,10 +227,8 @@ describe("one ordering sequence", () => {
       1
     ).candidates.find((candidate) => candidate.candidate_key === key);
 
-    expect(row?.first_membership_changing_owner).toBe("fusion");
-    expect(row?.membership_changing_owners).toEqual([
-      "fusion", "deep_head", "coverage", "consensus"
-    ]);
+    expect(row?.first_membership_changing_owner).toBe("select_gamma");
+    expect(row?.membership_changing_owners).toEqual(["select_gamma"]);
   });
 
   it("does not require dead post-coverage params to keep delivered membership", () => {
@@ -393,8 +375,7 @@ function rankMaps(
     sequence.ranks.coarse,
     sequence.ranks.fusion,
     sequence.ranks.deepHead,
-    sequence.ranks.coverage,
-    sequence.ranks.consensus,
+    sequence.ranks.selectGamma,
     sequence.ranks.final
   ];
 }

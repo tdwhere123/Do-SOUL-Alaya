@@ -1,4 +1,5 @@
 import {
+  compareCodeUnits,
   ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID,
   mergeFtsLaneIds,
   type AssociativeFactSlotRole,
@@ -231,7 +232,10 @@ function prefersObservation(
   current: CandidateCoverageAtom
 ): boolean {
   if (strength !== current.strength) return strength > current.strength;
-  return compareText(observation.documentIdentity, current.document_identity ?? "") < 0;
+  return compareCodeUnits(
+    observation.documentIdentity,
+    current.document_identity ?? ""
+  ) < 0;
 }
 
 function coverageAtomObservations(
@@ -315,7 +319,7 @@ function mergeObservationChannels(
   current: readonly CoverageObservationChannel[],
   channel: CoverageObservationChannel
 ): readonly CoverageObservationChannel[] {
-  return Object.freeze([...new Set([...current, channel])].sort(compareText));
+  return Object.freeze([...new Set([...current, channel])].sort(compareCodeUnits));
 }
 
 function mergeDemandRoles(
@@ -347,7 +351,7 @@ function mergeFactProjection(
     projection_id: current.projection_id,
     projection_kind: current.projection_kind,
     matched_fact_key_forms: Object.freeze([...forms]
-      .sort(([left], [right]) => compareText(left, right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([, form]) => form)),
     ...(factSlots === undefined ? {} : { fact_slots: factSlots })
   });
@@ -371,11 +375,7 @@ function compareDemandRoles(left: CoverageDemandRole, right: CoverageDemandRole)
 }
 
 function compareAtoms(left: CandidateCoverageAtom, right: CandidateCoverageAtom): number {
-  return compareText(left.atom_id, right.atom_id);
-}
-
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
+  return compareCodeUnits(left.atom_id, right.atom_id);
 }
 
 function freezeAtom(atom: CandidateCoverageAtom): CandidateCoverageAtom {

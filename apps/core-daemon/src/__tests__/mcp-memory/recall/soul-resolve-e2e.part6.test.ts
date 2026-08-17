@@ -24,6 +24,7 @@ import {
 } from "../../../mcp-memory/tool/tool-handler.js";
 
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
+import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
 // invariant: end-to-end coverage for soul.recall -> staged_warning ->
 // soul.resolve -> apply. The confirm path activates a draft
@@ -191,6 +192,7 @@ function createHarness(): E2EHarness {
     claimService,
     memoryService,
     deferredObligationService,
+    ...createSoulResolveEffectFixture({ claims, deliveries }),
     now: () => FIXED_NOW
   });
 

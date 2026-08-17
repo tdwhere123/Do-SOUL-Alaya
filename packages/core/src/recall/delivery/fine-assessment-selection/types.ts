@@ -8,13 +8,12 @@ import { materializeFinalPacket } from "../final-order/final-packet-order.js";
 import type { RecallPacketPlanObservation } from "../packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "../selection-boundary/selection-boundary-capture.js";
 import type { CoverageSelectionObjectiveReceipt } from "../coverage-selection.js";
-import type { CoverageSelectionOperatorConfig } from
-  "../../field/facility/selection-objective.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../../field/refinement/field-refinement-stop-certificate.js";
 import type { RecallRelevanceUpperBoundReceipt } from
   "../../rerank/relevance-upper-bound-receipt.js";
 import type { FineAssessmentOrderSequence } from "./order-sequence.js";
+import type { SelectGammaDecisionReceipt } from "../select-gamma/types.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -37,34 +36,7 @@ export interface FineAssessmentAdmissionState {
   totalTokens: number;
 }
 
-export type FineAssessmentAdmissionReceipt =
-  | Readonly<{
-      readonly kind: "retained";
-      readonly selected_count_before: number;
-      readonly token_total_before: number;
-      readonly token_estimate: number;
-    }>
-  | Readonly<{
-      readonly kind: "duplicate";
-      readonly retained_candidate_key: string;
-    }>
-  | Readonly<{
-      readonly kind: "dimension_limit";
-      readonly dimension: string;
-      readonly accepted_before: number;
-      readonly limit: number;
-    }>
-  | Readonly<{
-      readonly kind: "max_entries";
-      readonly accepted_before: number;
-      readonly limit: number;
-    }>
-  | Readonly<{
-      readonly kind: "max_total_tokens";
-      readonly token_total_before: number;
-      readonly token_estimate: number;
-      readonly limit: number;
-    }>;
+export type FineAssessmentAdmissionReceipt = SelectGammaDecisionReceipt;
 
 export interface FineAssessmentSelectionContext {
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
@@ -90,7 +62,6 @@ export interface FineAssessmentSelectionContext {
   readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly coverageMarginalGainByCandidateKey: Map<string, number>;
   readonly tokenEstimateByCandidateKey: Map<string, number>;
-  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
 }
 
 export interface FineAssessmentAdmission {
@@ -100,6 +71,7 @@ export interface FineAssessmentAdmission {
 }
 
 export type FineAssessmentSelectionParams = Readonly<{
+  readonly workspace_id: string;
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
   /** Null means a prior boundary did not capture the pre-delivery packet order. */
   readonly packetCandidates?: readonly FineAssessmentCandidate[] | null;
@@ -114,7 +86,6 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   readonly coverageRelevanceUpperBound?:
     Readonly<RecallRelevanceUpperBoundReceipt> | null;
-  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;

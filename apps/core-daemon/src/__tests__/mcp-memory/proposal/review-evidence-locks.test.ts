@@ -118,10 +118,17 @@ describe("P5 final-review status", () => {
     expect(definitions.map((definition) => definition.name)).toEqual([...expectedMemoryTools]);
     for (const definition of definitions) {
       expect(soulToolJsonSchemas[definition.name]).toBe(definition.inputSchema);
-      expect((definition.inputSchema as { type?: string }).type).toBe("object");
+      expect(isObjectInputSchema(definition.inputSchema)).toBe(true);
     }
   });
 });
+
+function isObjectInputSchema(schema: unknown): boolean {
+  if (typeof schema !== "object" || schema === null) return false;
+  const candidate = schema as { readonly type?: string; readonly anyOf?: readonly unknown[] };
+  if (candidate.type === "object") return true;
+  return candidate.anyOf?.every((branch) => isObjectInputSchema(branch)) === true;
+}
 
 function readRepoFile(relativePath: string): string {
   return readFileSync(resolveRepoPath(relativePath), "utf8");

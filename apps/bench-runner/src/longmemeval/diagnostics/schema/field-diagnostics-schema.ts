@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { EvidenceCandidateScoringSelectionReceiptSchema } from
   "../../../harness/recall/evidence/evidence-scoring-schema.js";
+import { RecallQueryConditionParitySchema } from
+  "../../../harness/recall/field/field-projection-diagnostics-schema.js";
 import {
   RecallFieldRefinementStopCertificateSchema,
   RecallFiniteFieldChannelCaptureSchema,
@@ -24,6 +26,7 @@ export const LongMemEvalFieldDiagnosticSchemaShape = {
     z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly().nullable().optional(),
   field_refinement_stop_certificate:
     RecallFieldRefinementStopCertificateSchema.nullable().optional(),
+  query_condition: RecallQueryConditionParitySchema.nullable().optional(),
   query_entity_extraction:
     RecallQueryEntityExtractionCaptureSchema.nullable().optional(),
   query_fact_frame_extraction:

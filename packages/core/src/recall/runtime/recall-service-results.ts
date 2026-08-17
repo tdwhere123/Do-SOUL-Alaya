@@ -15,6 +15,8 @@ import type { AttributedKeyActivationV1 } from "../flood/attributed-key-activati
 import type { RecallFiniteFieldSeal } from "../field/finite-field-seal.js";
 import type { RecallQueryFieldAttributionReceipt } from
   "../field/query-attribution/query-field-attribution.js";
+import type { SelectGammaSynthesisStatus } from
+  "../delivery/select-gamma/synthesis-adapter.js";
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
@@ -95,6 +97,7 @@ export interface RecallEvidenceSemanticActivationReceipt {
 
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
+  readonly synthesis: SelectGammaSynthesisStatus;
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
   readonly active_constraints_count: number;
   readonly total_scanned: number;

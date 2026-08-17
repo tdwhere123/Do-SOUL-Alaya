@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import type {
   FineAssessmentSelectionParams,
   FineAssessmentSelectionResult
@@ -32,7 +33,7 @@ export type FineAssessmentSelectionBoundaryPendingCapture = Readonly<{
   readonly packetConsensus: Readonly<RecallPacketPlanObservation>;
   readonly tokenEstimatesByContent: ReadonlyMap<string, number>;
   readonly packetPlanVisible: boolean;
-  readonly preProjection?: FineAssessmentPreProjectionCapture;
+  readonly preProjection: FineAssessmentPreProjectionCapture;
 }>;
 
 export function createSelectionBoundaryCapture(
@@ -63,8 +64,8 @@ export function captureFineAssessmentSelectionBoundaryPending(
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   tokenEstimatesByContent: ReadonlyMap<string, number>,
-  packetPlanVisible = result.packetPlanObservation !== undefined,
-  preProjection?: FineAssessmentPreProjectionCapture
+  packetPlanVisible: boolean,
+  preProjection: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionBoundaryPendingCapture {
   return Object.freeze({
     params,
@@ -72,7 +73,7 @@ export function captureFineAssessmentSelectionBoundaryPending(
     packetConsensus,
     tokenEstimatesByContent,
     packetPlanVisible,
-    ...(preProjection === undefined ? {} : { preProjection })
+    preProjection
   });
 }
 
@@ -96,28 +97,12 @@ export function materializeFineAssessmentSelectionBoundary(
   return boundary;
 }
 
-export function captureFineAssessmentSelectionBoundary(
-  params: FineAssessmentSelectionParams,
-  result: FineAssessmentSelectionResult,
-  packetConsensus: Readonly<RecallPacketPlanObservation>,
-  tokenEstimatesByContent: ReadonlyMap<string, number>
-): FineAssessmentSelectionBoundaryCase {
-  return materializeFineAssessmentSelectionBoundary(
-    captureFineAssessmentSelectionBoundaryPending(
-      params,
-      result,
-      packetConsensus,
-      tokenEstimatesByContent
-    )
-  );
-}
-
 export function notifySelectionBoundaryObserver(
   params: FineAssessmentSelectionParams,
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   tokenEstimatesByContent: ReadonlyMap<string, number>,
-  preProjection?: FineAssessmentPreProjectionCapture
+  preProjection: FineAssessmentPreProjectionCapture
 ): void {
   const pending = captureFineAssessmentSelectionBoundaryPending(
     params,
@@ -138,6 +123,7 @@ function buildSelectionBoundaryInput(
   tokenEstimatesByContent: ReadonlyMap<string, number>
 ): FineAssessmentSelectionBoundaryInput {
   return Object.freeze({
+    workspace_id: params.workspace_id,
     ordered_candidates: cloneSelectionBoundaryJson(params.orderedCandidates),
     ...(params.packetCandidates === undefined || params.packetCandidates === null
       ? {}
@@ -171,11 +157,6 @@ function serializeOptionalSelectionInputs(
         params.coverageRelevanceUpperBound
       )
     }),
-    ...(params.coverageObjectiveConfig === undefined ? {} : {
-      coverage_objective_config: cloneSelectionBoundaryJson(
-        params.coverageObjectiveConfig
-      )
-    }),
     ...(params.answerRelevanceRankByCandidateKey === undefined ? {} : {
       answer_relevance_rank_by_candidate_key:
         stableNumberEntries(params.answerRelevanceRankByCandidateKey)
@@ -203,14 +184,11 @@ function serializeOptionalSelectionInputs(
 export function buildSelectionBoundaryExpected(
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
-  packetPlanVisible = result.packetPlanObservation !== undefined,
-  preProjection?: FineAssessmentPreProjectionCapture,
-  includeCoverageObjective = true
+  packetPlanVisible: boolean,
+  preProjection: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionBoundaryExpected {
   return Object.freeze({
-    ...(includeCoverageObjective ? {
-      coverage_objective: result.coverageSelectionObjective
-    } : {}),
+    coverage_objective: result.coverageSelectionObjective,
     ...(result.fieldRefinementStopCertificate === undefined ? {} : {
       field_refinement_stop_certificate: result.fieldRefinementStopCertificate
     }),
@@ -233,14 +211,12 @@ export function buildSelectionBoundaryExpected(
       diagnostics: result.diagnostics,
       ...(packetPlanVisible ? { packetPlanObservation: packetConsensus } : {})
     }),
-    ...(preProjection === undefined ? {} : {
-      pre_projection: cloneSelectionBoundaryJson(
-        completeFineAssessmentPreProjection(
-          preProjection,
-          packetConsensus.actual_candidate_keys
-        )
+    pre_projection: cloneSelectionBoundaryJson(
+      completeFineAssessmentPreProjection(
+        preProjection,
+        packetConsensus.actual_candidate_keys
       )
-    })
+    )
   });
 }
 
@@ -290,7 +266,7 @@ function stableEntries<T>(
 ): readonly (readonly [string, T])[] {
   return Object.freeze(
     [...map.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([key, value]) =>
         Object.freeze([key, cloneSelectionBoundaryJson(value)] as const)
       )

@@ -351,7 +351,8 @@ async function resolveStagedWarning(
   return await handler.resolve(rawArguments, {
     workspaceId: context.workspaceId,
     runId: context.runId,
-    agentTarget: context.agentTarget
+    agentTarget: context.agentTarget,
+    sessionId: context.sessionId
   });
 }
 

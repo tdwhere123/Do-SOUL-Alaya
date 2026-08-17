@@ -355,6 +355,8 @@ export interface NarrowRecallDiagnostics {
     NonNullable<BenchRecallDiagnostics["retrieval_field_refinement_receipts"]> | null;
   readonly fieldRefinementStopCertificate:
     NonNullable<BenchRecallDiagnostics["field_refinement_stop_certificate"]> | null;
+  readonly queryCondition:
+    NonNullable<BenchRecallDiagnostics["query_condition"]> | null;
   readonly queryEntityExtraction:
     NonNullable<BenchRecallDiagnostics["query_entity_extraction"]> | null;
   readonly queryFactFrameExtraction:

@@ -239,7 +239,7 @@ describe("selection order ledger artifact", () => {
     await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("publishes sequential membership flips with a unique first owner", async () => {
+  it("publishes one Gamma membership owner per changed candidate", async () => {
     const root = await temporaryRoot();
     const sourcePath = join(root, "sequential-selection-boundaries.ndjson.gz");
     const outputPath = join(root, "sequential-ledger.ndjson.gz");
@@ -270,27 +270,28 @@ describe("selection order ledger artifact", () => {
         };
       });
     const candidates = rows[1]?.ledger?.candidates ?? [];
-    const sequential = candidates.filter(
-      (candidate) => candidate.membership_changing_owners.length > 1
+    const changed = candidates.filter(
+      (candidate) => candidate.membership_changing_owners.length > 0
     );
 
     expect(identity.question_count).toBe(1);
     expect(
-      sequential.length,
+      changed.length,
       JSON.stringify(candidates.map((candidate) => ({
         first: candidate.first_membership_changing_owner,
         owners: candidate.membership_changing_owners
       })))
     ).toBeGreaterThan(0);
-    expect(sequential.every((candidate) =>
-      candidate.first_membership_changing_owner ===
-        candidate.membership_changing_owners[0]
+    expect(changed.every((candidate) =>
+      candidate.first_membership_changing_owner === "select_gamma" &&
+        candidate.membership_changing_owners.length === 1 &&
+        candidate.membership_changing_owners[0] === "select_gamma"
     )).toBe(true);
   });
 
-  it("still refuses a candidate with simultaneous membership owners", () => {
+  it("still refuses duplicate Gamma membership ownership", () => {
     expect(() => assertFineAssessmentOrderLedgerAttribution({
-      schema_version: 1,
+      schema_version: 2,
       candidate_count: 1,
       delivered_count: 1,
       coarse_identity: "captured",
@@ -300,12 +301,11 @@ describe("selection order ledger artifact", () => {
           coarse: 1,
           fusion: 2,
           deep_head: 1,
-          coverage: 1,
-          consensus: 1,
+          select_gamma: 1,
           final: 1
         },
-        first_membership_changing_owner: null,
-        membership_changing_owners: ["fusion", "deep_head"]
+        first_membership_changing_owner: "select_gamma",
+        membership_changing_owners: ["select_gamma", "select_gamma"]
       }]
     })).toThrow(
       /selection order ledger has multiple simultaneous membership-changing owners/u

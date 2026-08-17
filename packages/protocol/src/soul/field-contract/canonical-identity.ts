@@ -240,15 +240,18 @@ export function hashConditionDigest(
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("condition", [
-    condition.principal,
+    "principal", condition.principal,
+    "authorized_scopes", condition.authorized_scopes.length,
     ...condition.authorized_scopes,
+    "explicit_bridges", condition.explicit_bridges.length,
     ...condition.explicit_bridges,
-    condition.workspace_project,
-    condition.effective_as_of,
+    "workspace_project", condition.workspace_project,
+    "effective_as_of", condition.effective_as_of,
+    "query_task_factors", condition.query_task_factors.length,
     ...condition.query_task_factors,
-    condition.governance_state,
-    condition.activation_budget,
-    condition.token_budget
+    "governance_state", condition.governance_state,
+    "activation_budget", condition.activation_budget,
+    "token_budget", condition.token_budget
   ], sha256);
 }
 
@@ -269,21 +272,159 @@ export function hashQueryCacheKey(
 
 export function hashEffectRequestDigest(
   request: Readonly<{
+    readonly schema_version: 2;
+    readonly workspace_id: string;
+    readonly actor_id: string;
+    readonly run_id: string;
+    readonly delivery_id: string;
     readonly action: string;
     readonly target: string;
     readonly scope: string;
     readonly effective_as_of: string;
     readonly supporting_receipt_ids: readonly string[];
+    readonly supporting_proof_witnesses: readonly EffectProofWitnessIdentity[];
+    readonly governance_frontier: string;
+    readonly policy_operator_id: string;
+    readonly policy_operator_version: string;
   }>,
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("effect_request", [
+    request.schema_version,
+    request.workspace_id,
+    request.actor_id,
+    request.run_id,
+    request.delivery_id,
     request.action,
     request.target,
     request.scope,
     request.effective_as_of,
+    request.governance_frontier,
+    request.policy_operator_id,
+    request.policy_operator_version,
+    ...sortedText(request.supporting_proof_witnesses.map(canonicalProofWitness)),
     ...sortedText(request.supporting_receipt_ids)
   ], sha256);
+}
+
+type EffectProofWitnessIdentity = Readonly<{
+  readonly receipt_id: string;
+  readonly kind: string;
+  readonly authority_event_id: string | null;
+  readonly source_record_id: string | null;
+  readonly source_content_digest: string | null;
+}>;
+
+export function hashEffectGovernanceFrontier(
+  witnesses: readonly EffectProofWitnessIdentity[],
+  sha256: FieldContractSha256
+): string {
+  return hashLabeledIdentity(
+    "effect_governance_frontier",
+    sortedText(witnesses.map(canonicalProofWitness)),
+    sha256
+  );
+}
+
+export function hashEffectDecisionFactSnapshot(
+  input: Readonly<{
+    readonly target_fact: string;
+    readonly competing_facts: readonly string[];
+    readonly erased: boolean;
+    readonly bridge_revoked: boolean;
+    readonly delivery_authority_event_id: string;
+  }>,
+  sha256: FieldContractSha256
+): string {
+  return hashLabeledIdentity("effect_decision_facts", [
+    input.target_fact,
+    ...sortedText(input.competing_facts),
+    input.erased ? "erased" : "not_erased",
+    input.bridge_revoked ? "bridge_revoked" : "bridge_live",
+    input.delivery_authority_event_id
+  ], sha256);
+}
+
+export function canonicalEffectClaimFact(input: Readonly<{
+  readonly object_id: string;
+  readonly claim_status: string;
+  readonly canonical_key: string;
+  readonly scope_class: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly has_evidence: boolean;
+  readonly scope_compatible: boolean;
+}>): string {
+  return JSON.stringify([
+    input.object_id,
+    input.claim_status,
+    input.canonical_key,
+    input.scope_class,
+    input.created_at,
+    input.updated_at,
+    input.has_evidence,
+    input.scope_compatible
+  ]);
+}
+
+export function canonicalEffectMemoryFact(input: Readonly<{
+  readonly object_id: string;
+  readonly lifecycle_state: string;
+  readonly scope_class: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly content_digest: string;
+  readonly evidence_refs: readonly string[];
+}>): string {
+  return JSON.stringify([
+    input.object_id,
+    input.lifecycle_state,
+    input.scope_class,
+    input.created_at,
+    input.updated_at,
+    input.content_digest,
+    ...sortedText(input.evidence_refs)
+  ]);
+}
+
+export function hashCorrectionPredecessorId(
+  input: Readonly<{
+    readonly workspace_id: string;
+    readonly target: string;
+    readonly target_fact: string;
+  }>,
+  sha256: FieldContractSha256
+): string {
+  return hashLabeledIdentity("correction_predecessor", [
+    input.workspace_id,
+    input.target,
+    input.target_fact
+  ], sha256);
+}
+
+export function hashCorrectionSuccessorId(
+  input: Readonly<{
+    readonly workspace_id: string;
+    readonly target: string;
+    readonly correction: string;
+  }>,
+  sha256: FieldContractSha256
+): string {
+  return hashLabeledIdentity("correction_successor", [
+    input.workspace_id,
+    input.target,
+    input.correction
+  ], sha256);
+}
+
+function canonicalProofWitness(witness: EffectProofWitnessIdentity): string {
+  return JSON.stringify([
+    witness.receipt_id,
+    witness.kind,
+    witness.authority_event_id,
+    witness.source_record_id,
+    witness.source_content_digest
+  ]);
 }
 
 export function hashCausalUsageId(

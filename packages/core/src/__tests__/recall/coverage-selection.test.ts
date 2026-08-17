@@ -847,8 +847,8 @@ describe("coverage-aware delivery", () => {
       droppedReason: row.dropped_reason
     }))).toEqual([
       { candidateKey: local.fusion.candidate_key, droppedReason: null },
-      { candidateKey: next.fusion.candidate_key, droppedReason: null },
-      { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" }
+      { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" },
+      { candidateKey: next.fusion.candidate_key, droppedReason: null }
     ]);
   });
 });

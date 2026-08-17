@@ -203,6 +203,26 @@ describe("trust state recorder", () => {
     });
   });
 
+  it.each([
+    { field: "agent", options: { expectedAgentTarget: "claude" } },
+    { field: "run/session", options: { expectedRunId: "run-attacker" } }
+  ])("recordUsage rejects a mismatched caller $field binding", async ({ options }) => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(buildDeliveryInput("delivery-bound"));
+    appendManyWithMutation.mockClear();
+
+    await expect(recorder.recordUsage(
+      buildUsageInput("delivery-bound", "used"),
+      {
+        expectedWorkspaceId: "workspace-1",
+        expectedAgentTarget: "codex",
+        expectedRunId: "run-1",
+        ...options
+      }
+    )).rejects.toBeInstanceOf(TrustStateUnknownDeliveryError);
+    expect(appendManyWithMutation).not.toHaveBeenCalled();
+  });
+
   it("records per-anchor usage in the MEMORY_USAGE_REPORTED audit payload", async () => {
     const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
     await recorder.recordDelivery(buildDeliveryInput("delivery-directional"));

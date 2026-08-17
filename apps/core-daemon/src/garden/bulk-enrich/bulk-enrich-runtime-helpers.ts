@@ -53,6 +53,7 @@ type BulkEnrichSchedulerPort = Readonly<{
 }>;
 
 export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
+  readonly now: () => string;
   readonly enrichPendingRepo?: {
     claimBatch(
       workspaceId: string,
@@ -153,6 +154,7 @@ export function resolveBulkEnrichAvailability(
 }
 
 export function createBulkEnrichWorkspaceQueue(input: Readonly<{
+  readonly now: () => string;
   readonly availability: BulkEnrichAvailability;
   readonly gardenScheduler: BulkEnrichSchedulerPort;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
@@ -181,6 +183,7 @@ export function createBulkEnrichWorkspaceQueue(input: Readonly<{
 
 async function enqueueMatchingBulkEnrichWorkspaces(
   input: Readonly<{
+    readonly now: () => string;
     readonly availability: BulkEnrichAvailability;
     readonly gardenScheduler: BulkEnrichSchedulerPort;
     readonly gardenTaskRepo?: SqliteGardenTaskRepo;
@@ -194,7 +197,7 @@ async function enqueueMatchingBulkEnrichWorkspaces(
     return;
   }
   const workspaces = await input.workspaceRepo.list();
-  const nowIso = new Date().toISOString();
+  const nowIso = input.now();
   for (const workspace of workspaces) {
     const pendingCount = input.availability.ports.enrichPendingRepo.countPending(workspace.workspace_id);
     if (!shouldEnqueue(workspace.workspace_id, pendingCount)) {

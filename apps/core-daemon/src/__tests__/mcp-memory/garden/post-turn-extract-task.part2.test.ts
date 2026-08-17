@@ -98,10 +98,12 @@ describe("post-turn extract Garden task", () => {
   });
 
   it("host_worker routing falls back to the zero-cloud local heuristic after the wait window with no claim", async () => {
+    const now = "2026-05-07T00:10:00.000Z";
     const officialCompile = vi.fn(async () => [createSignal()]);
     const localCompile = vi.fn(async () => [createSignal({ signal_id: "signal-fallback" })]);
     const harness = await createRoutingHarness({
       provider_kind: "host_worker",
+      now: () => now,
       officialCompile,
       localCompile
     });
@@ -110,7 +112,7 @@ describe("post-turn extract Garden task", () => {
     // deterministic localHeuristicsProvider so the extract never stalls — and
     // must NOT touch the official (cloud) provider.
     harness.enqueuePostTurnTask({
-      created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      created_at: new Date(Date.parse(now) - 60 * 60 * 1000).toISOString()
     });
 
     await harness.runScheduler();
@@ -335,14 +337,18 @@ describe("post-turn extract Garden task", () => {
   });
 
   it("scheduler reclaims abandoned claims (status=claimed older than stale TTL) back to pending", async () => {
-    const harness = await createRoutingHarness({ provider_kind: "host_worker" });
+    const now = "2026-05-07T00:10:00.000Z";
+    const harness = await createRoutingHarness({
+      provider_kind: "host_worker",
+      now: () => now
+    });
     harness.enqueuePostTurnTask();
     // Simulate an attached agent that claimed but never completed — row sits
     // in claimed state with a claimed_at timestamp older than the runtime's
     // GARDEN_CLAIM_STALE_AFTER_MS (10 min) ceiling. The scheduler tick must
     // reclaim it back to pending so another agent (or the same agent after
     // reconnect) can pick it up.
-    const staleClaimedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const staleClaimedAt = new Date(Date.parse(now) - 30 * 60 * 1000).toISOString();
     await harness.gardenTaskRepo.claimAtomic(
       "post-turn-task-1",
       "abandoned-agent",

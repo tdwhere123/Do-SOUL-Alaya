@@ -1,6 +1,7 @@
 import type { RecallCandidateDropReason } from "@do-soul/alaya-core";
 
 const DROP_REASON_VALUES = [
+  "ineligible",
   "duplicate",
   "dimension_limit",
   "max_entries",

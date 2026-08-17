@@ -41,9 +41,7 @@ import {
 import { persistBenchAnswerHq } from "./daemon-seed-answer-hq.js";
 
 export {
-  accrueAnswersWithCoRelevance,
-  accrueCoherenceCoRecall,
-  accrueSessionCoRecall
+  accrueAnswersWithCoRelevance
 } from "../runtime/daemon-edge-accrual.js";
 
 type AcceptedSeedMemory = { readonly proposalId: string };

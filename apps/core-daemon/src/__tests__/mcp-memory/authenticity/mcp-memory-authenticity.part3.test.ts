@@ -50,6 +50,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createAlayaDaemonRuntime } from "../../../index.js";
+import { seedSourceBoundRecall } from "../../support/seed-source-bound-recall.js";
 import type { AlayaDaemonRuntime } from "../../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
@@ -57,6 +58,7 @@ import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
 const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
 
 const DRAFT_CLAIM_ID = "3e87241d-1c7d-4ef6-b033-35e8920f95fe";
+const AUTHENTICITY_EVIDENCE_ID = "11111111-1111-4111-8111-111111111104";
 
 const PROPOSED_CONTENT = "Use pnpm for workspace commands and record recall usage receipts.";
 
@@ -188,7 +190,17 @@ async function seedFixture(
       run_state: RunState.IDLE,
       current_surface_id: null
     });
-    await repos.memoryRepo.create(createMemoryEntry());
+    const memory = createMemoryEntry();
+    await repos.memoryRepo.create(memory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      evidenceId: memory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: memory.content,
+      recordedAt: memory.created_at
+    });
 
     if (extraSeed !== undefined) {
       await extraSeed(repos);
@@ -234,7 +246,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     scope_class: ScopeClass.PROJECT,
     content: "Use pnpm for workspace commands.",
     domain_tags: ["tooling", "workflow"],
-    evidence_refs: ["lane-f-authenticity"],
+    evidence_refs: [AUTHENTICITY_EVIDENCE_ID],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
@@ -270,7 +282,7 @@ function createDraftClaim(overrides: Partial<ClaimForm> = {}): ClaimForm {
     origin_tier: "user_explicit",
     precedence_basis: "evidence_strength",
     proposition_digest: "Use pnpm for workspace commands.",
-    evidence_refs: [],
+    evidence_refs: [AUTHENTICITY_EVIDENCE_ID],
     source_object_refs: [PRIMARY_MEMORY_ID],
     workspace_id: "workspace-1",
     claim_status: ClaimLifecycleState.DRAFT,

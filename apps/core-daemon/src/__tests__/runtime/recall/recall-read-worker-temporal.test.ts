@@ -123,24 +123,6 @@ describe("selected temporal recall read worker", () => {
       ])).resolves.toEqual([softAssociation]);
       database.close();
 
-      const legacyClient = createRecallReadWorkerClient({
-        databaseFilename: databasePath,
-        pathReadBind: "legacy",
-        workerUrl: builtWorkerUrl
-      });
-      expect(legacyClient).not.toBeNull();
-      if (legacyClient === null) return;
-      try {
-        await expect(legacyClient.pathExpansionPort.findByAnchors(workspaceId, [
-          { kind: "object", object_id: sourceMemoryId }
-        ])).resolves.toMatchObject([
-          { path_id: "legacy-path-temporal" },
-          { path_id: softAssociation.path_id }
-        ]);
-      } finally {
-        await legacyClient.close();
-      }
-
       expect(() => createRecallReadWorkerClient({
         databaseFilename: databasePath,
         pathReadBind: "temporal",

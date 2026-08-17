@@ -38,6 +38,7 @@ import {
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../cli/register.js";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
 import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
 const tempDirs: string[] = [];
@@ -365,7 +366,17 @@ async function seedRecallFixture(dataDir: string): Promise<void> {
       run_state: RunState.IDLE,
       current_surface_id: null
     });
-    await memoryRepo.create(createMemoryEntry());
+    const memory = createMemoryEntry();
+    await memoryRepo.create(memory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      evidenceId: memory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: memory.content,
+      recordedAt: memory.created_at
+    });
   } finally {
     database.close();
   }
@@ -415,7 +426,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     scope_class: ScopeClass.PROJECT,
     content: "Use pnpm for all workspace commands.",
     domain_tags: ["tooling", "workflow"],
-    evidence_refs: ["gate4-proof"],
+    evidence_refs: ["11111111-1111-4111-8111-111111111102"],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,

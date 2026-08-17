@@ -79,12 +79,10 @@ export function reconstructFineAssessmentComposition(
   let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const selected = selectFineAssessmentCandidates({
     ...prepared.selectionParams,
-    ...(boundary.expected.pre_projection === undefined ? {} : {
-      selectionBoundaryObserver: (capture) => {
-        pending = capture;
-        return undefined;
-      }
-    })
+    selectionBoundaryObserver: (capture) => {
+      pending = capture;
+      return undefined;
+    }
   });
   assertCapturedVsLive(capturedScoreFidelity, "expected_membership", () => {
     assertCompositionExpected(boundary, selected, pending?.preProjection);
@@ -156,6 +154,7 @@ export function buildCompositionSelectionParams(
     restoreCapturedPacketCandidates(input)
 ): FineAssessmentSelectionParams {
   return {
+    workspace_id: input.workspace_id,
     orderedCandidates: delivery.orderedCandidates,
     packetCandidates,
     config: input.config,
@@ -165,9 +164,6 @@ export function buildCompositionSelectionParams(
     finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
     coverageRelevanceByCandidateKey: deepHead.scores,
     coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
-    ...(input.coverage_objective_config === undefined ? {} : {
-      coverageObjectiveConfig: input.coverage_objective_config
-    }),
     answerRelevanceRankByCandidateKey:
       delivery.answerRelevanceRankByCandidateKey,
     ...(input.capture_answer_features === undefined ? {} : {
@@ -267,11 +263,14 @@ function assertCompositionDeepHeadInputs(
 function assertCompositionExpected(
   boundary: FineAssessmentSelectionBoundaryCase,
   selected: FineAssessmentSelectionResult,
-  preProjection?: FineAssessmentPreProjectionCapture
+  preProjection: FineAssessmentPreProjectionCapture | undefined
 ): void {
   const packetConsensus = selected.packetPlanObservation;
   if (packetConsensus === undefined) {
     throwCompositionMismatch("packet_plan_observation");
+  }
+  if (preProjection === undefined) {
+    throwCompositionMismatch("pre_projection");
   }
   const actual = buildSelectionBoundaryExpected(
     selected,

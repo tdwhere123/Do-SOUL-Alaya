@@ -16,46 +16,6 @@ import {
   overridePolicy
 } from "./recall-service-test-fixtures.js";
 
-vi.mock(
-  "../../recall/delivery/final-order/final-packet-consensus.js",
-  async () => {
-  const actual = await vi.importActual<
-    typeof import(
-      "../../recall/delivery/final-order/final-packet-consensus.js"
-    )
-  >("../../recall/delivery/final-order/final-packet-consensus.js");
-  return {
-    ...actual,
-    resolveFinalPacketConsensusPlan: (
-      params: Parameters<typeof actual.resolveFinalPacketConsensusPlan>[0]
-    ) => {
-      const hasEmbeddingRank = params.sourceCandidates.some((candidate) =>
-        Number.isFinite(
-          candidate.fusion.per_stream_rank.embedding_similarity
-        )
-      );
-      if (!hasEmbeddingRank) {
-        return actual.resolveFinalPacketConsensusPlan(params);
-      }
-      return actual.resolveFinalPacketConsensusPlan({
-        ...params,
-        sourceCandidates: params.sourceCandidates.map((candidate) => ({
-          ...candidate,
-          fusion: {
-            ...candidate.fusion,
-            per_stream_rank: {
-              ...candidate.fusion.per_stream_rank,
-              embedding_similarity:
-                candidate.entry.object_id === "packet-tail" ? 1 : null
-            }
-          }
-        }))
-      });
-    }
-  };
-  }
-);
-
 type EmbeddingPath = "legacy" | "snapshot";
 type DiagnosticCapture = "answer_features" | "packet_trace";
 type InvocationSpy = ReturnType<typeof vi.fn>;
@@ -81,10 +41,7 @@ describe("RecallService packet trace integration", () => {
         schema_version: 3,
         assessment_path: path,
         actual_candidate_keys: packetCandidateKeys(traced.result.candidates),
-        decision: {
-          status: "rejected",
-          reason: "coverage_order_retained"
-        }
+        decision: { status: "no_op", reason: "select_gamma_identity" }
       });
       expect(trace.added_candidate_keys).toEqual(
         trace.actual_candidate_keys.filter((key) => !baselineKeys.has(key))
@@ -118,7 +75,7 @@ describe("RecallService packet trace integration", () => {
       expect(control.result.diagnostics?.packet_plan_trace).toBeUndefined();
       expect(trace?.decision).toEqual({
         status: "no_op",
-        reason: "no_finite_embedding_head"
+        reason: "select_gamma_identity"
       });
       expect(trace?.baseline_candidate_keys).toEqual(trace?.planned_candidate_keys);
       expect(trace?.baseline_candidate_keys).toEqual(trace?.actual_candidate_keys);
@@ -154,8 +111,10 @@ async function runRecall(
   });
   const fixture = createEmbeddingPort(path, embeddingService, embedTexts);
   const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
-    embeddingRecallService: fixture.port
+    embeddingRecallService: fixture.port,
+    testOnlyAllowInMemoryFieldQuerySession: true
   });
   const taskSurface = {
     ...createTaskSurface(),

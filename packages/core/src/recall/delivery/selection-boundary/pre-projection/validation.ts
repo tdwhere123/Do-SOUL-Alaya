@@ -137,7 +137,9 @@ function assertRetainedWitness(
   if (!isRecord(witness) || witness.kind !== "retained" ||
       witness.selected_count_before !== selectedCountBefore ||
       witness.token_total_before !== tokenTotalBefore ||
-      !isNonNegativeFinite(witness.token_estimate)) {
+      !isNonNegativeFinite(witness.token_estimate) ||
+      !isIdentityChannel(witness.source) ||
+      !isIdentityChannel(witness.lineage)) {
     throwSelectionBoundaryFidelityMismatch(
       `expected retained witness selected_count_before=${selectedCountBefore} ` +
       `token_total_before=${tokenTotalBefore}, actual invalid`
@@ -146,10 +148,27 @@ function assertRetainedWitness(
   return tokenTotalBefore + witness.token_estimate;
 }
 
+function isIdentityChannel(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return value.status === "unavailable"
+    ? keys.length === 1
+    : value.status === "available" && isNonEmptyString(value.key) &&
+      keys.length === 2;
+}
+
 function witnessMatchesExclusion(witness: unknown, reason: string): boolean {
   if (!isRecord(witness) || witness.kind !== reason) return false;
+  if (reason === "ineligible") {
+    return isEligibilityState(witness.risk) &&
+      isEligibilityState(witness.authority) &&
+      (witness.risk === "blocked" || witness.authority === "blocked");
+  }
   if (reason === "duplicate") {
-    return isNonEmptyString(witness.retained_candidate_key);
+    return (witness.identity_channel === "object" ||
+      witness.identity_channel === "source" ||
+      witness.identity_channel === "lineage") &&
+      isNonEmptyString(witness.retained_candidate_key);
   }
   if (reason === "dimension_limit") {
     return isNonEmptyString(witness.dimension) &&
@@ -166,6 +185,10 @@ function witnessMatchesExclusion(witness: unknown, reason: string): boolean {
       isNonNegativeFinite(witness.limit);
   }
   return false;
+}
+
+function isEligibilityState(value: unknown): value is "clear" | "blocked" {
+  return value === "clear" || value === "blocked";
 }
 
 function assertUniqueKeys(keys: readonly string[]): void {

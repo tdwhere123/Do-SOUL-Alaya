@@ -9,36 +9,19 @@ import { captureSupportSetPacketPlanTrace } from
 import {
   applyManifestationBiasSidecar,
   appendWeightTransferTelemetry,
-  loadActiveConstraints,
-  recordGlobalRecallClassificationsSafely,
-  resolvePolicy
+  recordGlobalRecallClassificationsSafely
 } from "./orchestration.js";
-import { compileRecallQueryProbes } from "../query/recall-query-probes.js";
-import { extendQueryProbesWithOpenSemanticFactors } from
-  "../query/query-factor-expanded-terms.js";
-import { resolvePreparedAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import {
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
   resolveEmbeddingProviderStatus
 } from "./diagnostics.js";
-import {
-  errorNameOf,
-  normalizeQueryText,
-  toErrorMessage
-} from "./recall-service-helpers.js";
-import { captureRecallQueryEntities } from
-  "../field/query-entity-attribution-producer.js";
-import { createRecallRetrievalFieldBundle } from
-  "../field/retrieval/retrieval-field-bundle.js";
 import type {
   CoarseRecallCandidate,
   RecallDegradationReason,
   RecallEmbeddingProviderStatus,
-  RecallResult,
-  RecallServiceDependencies
+  RecallResult
 } from "./recall-service-types.js";
-import { makeTokenEstimator } from "./recall-service-types.js";
 import {
   collectCoarseStage,
   type CoarseStageResult,
@@ -61,10 +44,10 @@ import {
   measureAsync,
   measureSync
 } from "./orchestration/recall-phase-latency.js";
-import { fieldContractSha256 } from "../../shared/field-hash.js";
-import { createInMemoryFieldQuerySession } from "./query/field-query-session.js";
-import { capturePreparedRequestCondition } from
-  "./query/prepare-recall-query-condition.js";
+import { prepareRecallRequest } from "./query/prepare-recall-request.js";
+import { captureRecallRequestTime } from "./query/recall-request-time.js";
+import { applySelectGammaSynthesis } from
+  "../delivery/select-gamma/synthesis-adapter.js";
 import {
   type FineAssessmentResult,
   type FineAssessmentPreparation,
@@ -93,114 +76,56 @@ export async function executeRecall(
 ): Promise<RecallResult> {
   const degradationReasons = new Set<RecallDegradationReason>();
   const executionContext = Object.freeze({ ...context, degradationReasons });
-  const prepared = await prepareRecallRequest(executionContext, params);
-  const coarse = await collectCoarseStage(executionContext, params, prepared);
-  const assessment = await assessCandidateStage(executionContext, params, prepared, coarse);
-  const manifested = await manifestCandidateStage(executionContext, params, assessment.finalAssessment);
-  await recordRecallSideEffects(executionContext, params, prepared, coarse, assessment, manifested);
-  return buildRecallResult(prepared, coarse, assessment, manifested, degradationReasons);
-}
-
-async function prepareRecallRequest(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams
-): Promise<PreparedRecallRequest> {
-  const policy = resolvePolicy({
-    strategy: params.strategy,
-    taskSurfaceRef: params.taskSurface.runtime_id,
-    policyOverride: params.policyOverride,
-    buildDefaultPolicy: context.buildDefaultPolicy,
-    defaultPolicyDecorator: context.dependencies.defaultPolicyDecorator
-  });
-  const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
-  const queryText = normalizeQueryText(params.taskSurface.display_name);
-  const queryProbes = extendQueryProbesWithOpenSemanticFactors(
-    compileRecallQueryProbes(queryText),
-    params.querySemanticFactorFormationCapture
-  );
-  const answerShapePlan = resolvePreparedAnswerShapePlan(queryProbes);
-  const capturedCondition = capturePreparedRequestCondition({
-    workspaceId: params.workspaceId,
+  const time = captureRecallRequestTime({
     explicitAsOf: params.referenceTime,
-    queryText,
-    tokenBudget: policy.fine_assessment.budgets.max_total_tokens,
-    activationBudget: policy.fine_assessment.budgets.max_entries,
-    sha256: context.sha256 ?? fieldContractSha256,
-    now: context.now,
-    session: context.fieldQuerySession ??
-      createInMemoryFieldQuerySession(context.sha256 ?? fieldContractSha256)
+    now: executionContext.now
   });
-  const queryCondition = capturedCondition.receipt;
-  const referenceTime = capturedCondition.referenceTime;
-  const retrievalFieldBundle = createRecallRetrievalFieldBundle({
-    workspaceId: params.workspaceId,
-    queryText,
-    memoryRepo: context.dependencies.memoryRepo,
-    evidenceSearchPort: context.dependencies.evidenceSearchPort,
-    synthesisSearchPort: context.dependencies.synthesisSearchPort,
-    refinementMaxDepth:
-      policy.coarse_filter.semantic_supplement.field_observation_max_depth,
-    onFailure: (operation, error) => context.warn("retrieval field query failed", {
+  const prepared = await prepareRecallRequest(executionContext, params, time);
+  try {
+    const coarse = await collectCoarseStage(executionContext, params, prepared);
+    prepared.projectionPinLease.assertHealthy();
+    const assessment = await assessCandidateStage(executionContext, params, prepared, coarse);
+    prepared.projectionPinLease.assertHealthy();
+    const synthesis = await applySelectGammaSynthesis({
       workspace_id: params.workspaceId,
-      operation,
-      error: toErrorMessage(error)
-    }),
-    onBatchFailure: (operation, failure) => context.warn(
-      "retrieval field batch query failed; using scalar field queries",
-      {
-        workspace_id: params.workspaceId,
-        operation,
-        ...failure
-      }
-    )
-  });
-  const [slots, activeConstraints, queryEntityExtraction] = await Promise.all([
-    context.dependencies.slotRepo.findByWorkspace(params.workspaceId),
-    loadActiveConstraints({
-      activeConstraintsPort: context.dependencies.activeConstraintsPort,
-      warn: context.warn,
-      workspaceId: params.workspaceId,
-      cap: params.activeConstraintsCap ?? null,
-      asOf: referenceTime
-    }),
-    captureRecallQueryEntities({
-      query_text: queryText,
-      port: context.dependencies.entityExtractionPort,
-      on_failure: (error) => context.warn("entity extraction failed", {
-        workspace_id: params.workspaceId,
-        operation: "entity_extraction",
-        errorName: errorNameOf(error),
-        error: toErrorMessage(error)
-      })
-    })
-  ]);
-  return Object.freeze({
-    policy,
-    tokenEstimator,
-    queryText,
-    queryProbes,
-    queryEntityExtraction,
-    retrievalFieldBundle,
-    answerShapePlan,
-    referenceTime,
-    temporalProjectionAsOf: referenceTime,
-    activeConstraints,
-    winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots),
-    queryCondition
-  });
-}
-
-async function resolveWinnerMemoryIds(
-  context: RecallExecutionContext,
-  workspaceId: string,
-  slots: Awaited<ReturnType<RecallServiceDependencies["slotRepo"]["findByWorkspace"]>>
-): Promise<ReadonlySet<string>> {
-  const winnerClaimIds = new Set(slots.flatMap((slot) => (slot.winner_claim_id === null ? [] : [slot.winner_claim_id])));
-  if (winnerClaimIds.size === 0 || context.dependencies.claimResolverPort === undefined) {
-    return new Set();
+      run_id: params.runId ?? null,
+      query_text: prepared.queryText,
+      selected_evidence: assessment.finalAssessment.candidates,
+      port: executionContext.dependencies.selectGammaSynthesisPort
+    });
+    prepared.projectionPinLease.assertHealthy();
+    const manifested = await manifestCandidateStage(
+      executionContext,
+      params,
+      synthesis.selected_evidence,
+      assessment.finalAssessment.diagnostics
+    );
+    prepared.projectionPinLease.assertHealthy();
+    const completedAt = time.captureOperationalTime();
+    await recordRecallSideEffects(
+      executionContext,
+      params,
+      prepared,
+      coarse,
+      assessment,
+      manifested,
+      completedAt
+    );
+    return buildRecallResult(
+      prepared,
+      coarse,
+      assessment,
+      manifested,
+      degradationReasons,
+      synthesis.synthesis
+    );
+  } finally {
+    try {
+      prepared.projectionPinLease.stop();
+    } finally {
+      prepared.releaseProjectionPin();
+    }
   }
-  const claims = await context.dependencies.claimResolverPort.findByIds(workspaceId, [...winnerClaimIds]);
-  return new Set(claims.flatMap((claim) => claim.source_object_refs).filter((ref): ref is string => ref !== undefined));
 }
 
 async function assessCandidateStage(
@@ -403,7 +328,8 @@ function resolveEmbeddingProvider(
 async function manifestCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  finalAssessment: FineAssessmentResult
+  selectedCandidates: FineAssessmentResult["candidates"],
+  selectedDiagnostics: FineAssessmentResult["diagnostics"]
 ): Promise<ManifestedRecallResult> {
   const manifested = await measureAsync(async () => {
     const candidates = await applyManifestationBiasSidecar({
@@ -412,12 +338,12 @@ async function manifestCandidateStage(
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       taskSurfaceRef: params.taskSurface,
-      candidates: finalAssessment.candidates
+      candidates: selectedCandidates
     });
     return Object.freeze({
       candidates,
       candidateDiagnostics: finalizeRecallCandidateDiagnostics(
-        finalAssessment.diagnostics, candidates
+        selectedDiagnostics, candidates
       )
     });
   });
@@ -433,14 +359,15 @@ async function recordRecallSideEffects(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   assessment: AssessmentStageResult,
-  manifested: ManifestedRecallResult
+  manifested: ManifestedRecallResult,
+  completedAt: string
 ): Promise<void> {
-  await appendRecallCompletedEvent(context, params, prepared, coarse, manifested);
+  await appendRecallCompletedEvent(params, coarse, manifested, completedAt, context);
   await Promise.all([
     appendWeightTransferTelemetry({
       eventLogRepo: context.dependencies.eventLogRepo,
       warn: context.warn,
-      now: context.now,
+      now: () => completedAt,
       recallsEdgeColdThreshold: RECALLS_EDGE_COLD_THRESHOLD,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
@@ -457,11 +384,11 @@ async function recordRecallSideEffects(
 }
 
 async function appendRecallCompletedEvent(
-  context: RecallExecutionContext,
   params: RecallExecutionParams,
-  _prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  manifested: ManifestedRecallResult
+  manifested: ManifestedRecallResult,
+  completedAt: string,
+  context: RecallExecutionContext
 ): Promise<void> {
   await context.dependencies.eventLogRepo.append({
     event_type: RecallContextEventType.SOUL_RECALL_COMPLETED,
@@ -477,7 +404,7 @@ async function appendRecallCompletedEvent(
       coarse_filter_count: coarse.combinedCoarseCandidates.length,
       fine_assessment_count: manifested.candidates.length,
       workspace_id: params.workspaceId,
-      occurred_at: context.now()
+      occurred_at: completedAt
     })
   });
 }

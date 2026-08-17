@@ -163,14 +163,18 @@ describe("recall usage evidence proof", () => {
           { object_id: EVIDENCE_ID, object_kind: "evidence_capsule" }
         ]
       }),
-      { expectedWorkspaceId: context.workspaceId }
+      expect.objectContaining({
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId
+      })
     );
     expect(deps.memoryService.findByIdsScoped).not.toHaveBeenCalled();
     expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
     expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
   });
 
-  it("keeps mixed-report promotion and co-usage memory-only", async () => {
+  it("keeps mixed self-report telemetry free of memory and co-usage mutation", async () => {
     const deps = createDeps();
     const onCoUsage = vi.fn(async () => undefined);
     const onCoRecall = vi.fn(async () => undefined);
@@ -215,13 +219,13 @@ describe("recall usage evidence proof", () => {
           { object_id: "mem2", object_kind: "memory_entry" }
         ]
       }),
-      { expectedWorkspaceId: context.workspaceId }
+      expect.objectContaining({
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId
+      })
     );
-    expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(
-      ["mem1", "mem2"],
-      context.workspaceId
-    );
-    expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(2);
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
     expect(onCoUsage).not.toHaveBeenCalled();
   });
 

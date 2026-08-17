@@ -106,8 +106,9 @@ export const RecallFieldRefinementStopCertificateSchema = z.object({
   refinement_receipt_digests: z.array(RecallFieldDigestSchema).readonly(),
   objective: RecallCoverageSelectionObjectiveReceiptSchema,
   relevance_upper_bound: RecallRelevanceUpperBoundReceiptSchema.nullable(),
-  selected_candidate_keys: z.array(z.string().min(1)).max(5).readonly(),
-  exchange_bounds: z.array(RecallFieldExchangeBoundSchema).max(5).readonly(),
+  selection_capacity: z.number().int().nonnegative(),
+  selected_candidate_keys: z.array(z.string().min(1)).readonly(),
+  exchange_bounds: z.array(RecallFieldExchangeBoundSchema).readonly(),
   maximum_exchange_improvement_upper_bound: z.number().nullable(),
   status: z.enum(["certified", "uncertified"]),
   reason: z.enum([
@@ -120,7 +121,22 @@ export const RecallFieldRefinementStopCertificateSchema = z.object({
   ]),
   candidate_membership_changed: z.literal(false),
   receipt_digest: RecallFieldDigestSchema
-}).strict().readonly();
+}).strict().superRefine((certificate, context) => {
+  if (!Number.isSafeInteger(certificate.selection_capacity) ||
+      certificate.selection_capacity < certificate.selected_candidate_keys.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "selection capacity must cover selected candidates"
+    });
+  }
+  if (new Set(certificate.selected_candidate_keys).size !==
+      certificate.selected_candidate_keys.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "selected candidate keys must be unique"
+    });
+  }
+}).readonly();
 
 const RecallEntityCandidateSchema = z.object({
   surface: z.string().min(1),

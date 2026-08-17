@@ -44,6 +44,9 @@ export function testPin(overrides: Partial<ProjectionPin> = {}): ProjectionPin {
     workspace_id: "workspace-1",
     generation_id: GENERATION_ID,
     pinned_at: CLOCK_AS_OF,
+    reader_id: "reader-1",
+    expires_at: "2026-08-16T12:05:00.000Z",
+    released_at: null,
     ...overrides
   };
 }

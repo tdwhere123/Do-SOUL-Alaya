@@ -103,6 +103,7 @@ function createDependencies(
 
   return {
     dependencies: {
+      testOnlyAllowInMemoryFieldQuerySession: true,
       now: () => "2026-03-29T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {

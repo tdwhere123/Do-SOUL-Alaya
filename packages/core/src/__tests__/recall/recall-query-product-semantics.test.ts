@@ -68,6 +68,7 @@ describe("recall embedding query contract", () => {
       scorePoolCandidates
     } satisfies RecallServiceEmbeddingRecallPort;
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds: vi.fn(async () => []) },
       embeddingRecallService

@@ -56,7 +56,7 @@ describe("recall supplementary logical identity", () => {
         pathExpansionPort: { findByAnchors }
       },
       warn: vi.fn(),
-      now: () => NOW,
+      referenceTime: NOW,
       coarseFilter: coarseFilter(candidates),
       workspaceId: WORKSPACE_ID,
       runId: null,

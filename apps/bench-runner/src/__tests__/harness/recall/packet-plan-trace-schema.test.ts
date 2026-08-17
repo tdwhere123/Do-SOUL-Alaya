@@ -202,6 +202,26 @@ describe("packet plan trace diagnostics schemas", () => {
     expect(parsed.packet_plan_trace).toEqual(packetPlanTraceV3);
   });
 
+  it("accepts the Core query-condition parity view and rejects malformed identity", () => {
+    const queryCondition = {
+      effective_as_of: "2026-08-17T12:00:00.000Z",
+      condition_digest: `sha256:${"a".repeat(64)}`,
+      query_cache_key: `sha256:${"b".repeat(64)}`,
+      generation_id: `sha256:${"c".repeat(64)}`
+    };
+    expect(BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      query_condition: queryCondition
+    }).query_condition).toEqual(queryCondition);
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      query_condition: {
+        ...queryCondition,
+        condition_digest: "not-a-canonical-digest"
+      }
+    })).toThrow();
+  });
+
   it("accepts membership consensus without an embedding head", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
       ...benchDiagnostics(),

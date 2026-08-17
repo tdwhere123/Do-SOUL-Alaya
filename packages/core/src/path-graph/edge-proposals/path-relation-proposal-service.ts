@@ -66,10 +66,8 @@ export type {
 // recall_allowed — strictly_governed is reserved for user/operator action
 // and submitCandidate clamps any caller that asks for it down to
 // recall_allowed. A counter-seeded path is born at attention_only and
-// reaches recall_allowed only by accruing support_events_count >= 8
-// through the legitimate path-manifestation-policy ladder, which
-// PathPlasticityService drives from anchor-matched usage receipts
-// independently of this service's counters.
+// remains non-recallable until an explicit governed promotion. Causal
+// usage receipts affect only the bounded temporal soft-strength projection.
 // invariant: positive and negative relation families share one plasticity
 // model. The family is expressed only by the sign of effect_vector
 // .recall_bias (supports +, contradicts/supersedes -). Negative families
@@ -83,11 +81,10 @@ export type {
 // double-propose protection comes from findByAnchorMemoryId against
 // persisted PathRelations.
 // invariant: row insert and `path.relation_created` EventLog row are
-// emitted in one SQLite transaction via EventPublisher.appendManyWithMutation,
-// matching the PathPlasticityService pattern. Crash-mid-write cannot leave
+// emitted in one SQLite transaction via EventPublisher.appendManyWithMutation.
+// Crash-mid-write cannot leave
 // a path_relations row without its audit event or vice versa.
 // see also: crossLinkRecalledMemories — co-usage caller hook
-// see also: PathPlasticityService — strength evolution
 // see also: PathRelationRepo — durable write side
 // see also: SqliteCoUsageCounterRepo — durable counter backing
 // see also: spine-activation-design.md §E2 — seed-profile table source

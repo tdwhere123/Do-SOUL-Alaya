@@ -247,7 +247,7 @@ async function reportUsage(
     context: {
       workspaceId: "workspace-1",
       runId: "run-1",
-      agentTarget: "cli",
+      agentTarget: "codex",
       sessionId: "recall-cross-link-session"
     }
   });
@@ -322,15 +322,15 @@ describe("recall usage: report_context_usage(used) does not mint ungoverned RECA
   });
 });
 
-describe("recall usage: used-report failures stay non-fatal", () => {
+describe("recall usage: legacy graph edge behavior stays disconnected", () => {
 
-  it("never fails the report when the graph edge port throws", async () => {
+  it("records the report without invoking a throwing graph edge port", async () => {
     const harness = await createHarness([MEM_A, MEM_B]);
     harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
 
-    // Must still resolve OK — graph proposals are supplementary, not load-bearing.
     const result = await reportUsed(harness, [MEM_A, MEM_B]);
 
     expect(result).toMatchObject({ ok: true });
+    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
   });
 });

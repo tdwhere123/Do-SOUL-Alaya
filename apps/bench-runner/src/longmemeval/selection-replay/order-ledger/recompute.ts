@@ -18,15 +18,7 @@ import type { SelectionReplayGoldQuestion } from
   "./gold-map.js";
 
 const PROTECTION_OWNERS: readonly FineAssessmentMembershipOwner[] = [
-  "fusion",
-  "deep_head",
-  "coverage",
-  "direct_evidence_promotion",
-  "semantic_memory_refinement",
-  "behavior_authority_promotion",
-  "verified_temporal_head",
-  "consensus",
-  "final_budget",
+  "select_gamma",
   "unavailable"
 ];
 

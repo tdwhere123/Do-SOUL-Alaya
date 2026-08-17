@@ -4,6 +4,7 @@ export type {
   FieldDerivationJobRepo,
   FieldDerivationJobRow,
   FieldEraseBarrierRepo,
+  FieldEraseBarrierInput,
   FieldEraseBarrierRow,
   FieldFactorDescriptorRow,
   FieldFactorIncidenceRow,
@@ -16,6 +17,7 @@ export type {
   FieldProofEffectRow,
   FieldSourceRecordRepo,
   FieldSourceRecordRow,
+  FieldSourceEvidenceBindingRow,
   FieldSourceSpanRepo,
   FieldSourceSpanRow
 } from "./ports.js";

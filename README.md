@@ -272,10 +272,13 @@ output is `claim_status = draft` either way.
 - **Out-of-band Proposal** via `soul.propose_memory_update` plus
   `soul.review_memory_proposal`. Triaged signals become `Proposal`s
   with `resolution_state: PENDING`; a reviewer accepts or rejects
-  with explicit `reviewer_identity`. Acceptance applies the accepted
-  `proposed_changes` through the controlled durable memory service
-  and leaves a proposal audit trail. Reject leaves durable memory
-  untouched.
+  with explicit `reviewer_identity`. Accepted `memory_update` proposals
+  apply `proposed_changes` through the controlled durable memory service.
+  Accepted `privacy_erase` proposals atomically erase the source closure,
+  including linked evidence, memory search data, embeddings, and synthesis,
+  only after the proof-carrying hard-effect authority records an `erase=allow`
+  decision in the same transaction.
+  Both operations leave a proposal audit trail; rejection never erases.
 
 The Memory Inspector is the **origination surface** for human
 review actions, never a persistence surface — the "Promote to

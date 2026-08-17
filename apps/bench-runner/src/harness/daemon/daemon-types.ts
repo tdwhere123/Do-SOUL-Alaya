@@ -11,7 +11,6 @@ import type {
   RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
-import type { CoRecallWarmupSummary } from "../embedding/co-recall-warmup.js";
 import type { BenchRecallWeightOverrides } from "../recall/recall-weight-overrides.js";
 import type { SeedObjectKind } from "../seeding/seed-rotation.js";
 import type {
@@ -247,63 +246,6 @@ export interface BenchDaemonHandle {
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**
-   * @anchor accrueSessionCoRecall — same-session EARNED co-recall accrual
-   *
-   * EARNS recalls-tier co_recalled PathRelations among ONE session's member
-   * memory ids by driving the PRODUCTION counter gate
-   * (PathRelationProposalService.onCoUsage -> accrueCoOccurrence ->
-   * co_usage_threshold -> proposeCoRecalled with CO_RECALLED_SEED_PROFILE). A
-   * bounded, gold-blind set of adjacent member pairs (planSessionCoRecallWarmup)
-   * is replayed `threshold` times so each pair clears the production threshold
-   * and mints exactly one co_recalled edge — earned, not minted on sight. The
-   * resulting topology is SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP edges
-   * per session. Faithfully approximates B-1 cross-link's live
-   * report_context_usage co-usage, which the bench cannot grow (no attached
-   * agent reports usage). The earned edges are ACCEPTED/materialized and
-   * recall-eligible at the born band (recall_bias +0.5, active lifecycle).
-   *
-   * Pair selection uses ONLY session membership in seed order — never
-   * gold/answer knowledge.
-   *
-   * see also: apps/bench-runner/src/harness/embedding/co-recall-warmup.ts planSessionCoRecallWarmup
-   * see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage
-   */
-  accrueSessionCoRecall(
-    memberMemoryIds: readonly string[]
-  ): Promise<CoRecallWarmupSummary>;
-  /**
-   * @anchor accrueCoherenceCoRecall — EXPERIMENT (design S): ingestion-time
-   * coheres_with crystallization (ALAYA_EXP_COHERENCE_EDGES).
-   *
-   * After embedding vectors are warm, crystallizes a SPARSE set of
-   * embedding-coherent edges among the question's seeded memory_entry ids by
-   * driving the SAME production counter gate as accrueSessionCoRecall
-   * (onCoUsage -> co_recalled carrier). Unlike session co-recall, pairs are
-   * selected by OBJECT-vs-OBJECT cosine (>= floor) — the gold-blind coherence
-   * signal — and (by default) restricted to CROSS-SESSION pairs, so
-   * path_expansion can bridge paraphrased cross-session gold the lexical/
-   * adjacency topology cannot reach. Sparsified by a per-node cap so the
-   * topology stays few-and-high-quality, not a dense vector graph.
-   *
-   * This is the prototype carrier for a future first-class coheres_with edge
-   * kind; recall-side behavior (attention_only, recall_bias +0.5, born-weak)
-   * is identical, so the KPI faithfully measures the mechanism.
-   *
-   * see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys
-   */
-  accrueCoherenceCoRecall(
-    members: readonly BenchEdgeFormationMember[],
-    options: {
-      readonly floor: number;
-      readonly capPerNode: number;
-      readonly crossSessionOnly: boolean;
-    }
-  ): Promise<{
-    readonly coherentPairs: number;
-    readonly keptPairs: number;
-    readonly minted: number;
-  }>;
-  /**
    * Admits sparse answer-relation assertions among seeded memory_entry ids whose
    * pooled HQ content-token sets overlap. Requires memory_hq to be pre-filled.
    *
@@ -380,8 +322,6 @@ export interface BenchWorkspaceHandle {
   proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
   proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
   proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
-  accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
-  accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
   accrueAnswersWithCoRelevance: BenchDaemonHandle["accrueAnswersWithCoRelevance"];
   queryTokenMetrics: BenchDaemonHandle["queryTokenMetrics"];
   queryEdgeProposalKpiRows: BenchDaemonHandle["queryEdgeProposalKpiRows"];

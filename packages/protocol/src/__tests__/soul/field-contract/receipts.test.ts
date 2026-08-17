@@ -25,8 +25,10 @@ import {
   hashConditionDigest,
   hashContentDigest,
   hashEffectRequestDigest,
+  hashEffectGovernanceFrontier,
   hashFactorId,
   hashGenerationId,
+  hashOperatorManifestDigest,
   hashQueryCacheKey,
   hashSourceRecordId,
   verifyAddressableSourceSpan,
@@ -225,17 +227,56 @@ describe("field-contract receipts", () => {
     expect(usage.identity).toBe(hashCausalUsageId(usage, sha256));
   });
 
+  it("rejects a self-certified noncanonical generation manifest", () => {
+    const canonical = generationReceipt();
+    const operators = canonical.operator_versions.map(([id, version], index) =>
+      [id, index === 0 ? "99" : version] as const
+    );
+    const entries = operators.map(([id, version]) => ({ id, version }));
+    const digest = hashOperatorManifestDigest(entries, sha256);
+    const generationId = hashGenerationId({
+      operators: entries,
+      operator_manifest_digest: digest,
+      field_schema_version: canonical.field_schema_version,
+      input_event_frontier: canonical.input_event_frontier,
+      governance_frontier: canonical.governance_frontier
+    }, sha256);
+    expect(() => verifyFieldProjectionGeneration({
+      ...canonical,
+      identity: generationId,
+      generation_id: generationId,
+      operator_manifest_digest: digest,
+      operator_versions: operators
+    }, sha256)).toThrow(/canonical operator manifest/u);
+  });
+
   it("keeps proof-carrying effect decisions in the closed action set", () => {
+    const witnesses = [
+      { receipt_id: "receipt-2", kind: "actor_authority",
+        authority_event_id: "delivery-event-1", source_record_id: null,
+        source_content_digest: null },
+      { receipt_id: "receipt-1", kind: "source_grounding", authority_event_id: null,
+        source_record_id: "source-1",
+        source_content_digest: DIGEST_A }
+    ];
     const request = EffectRequestSchema.parse({
+      schema_version: 2,
       workspace_id: "workspace-1",
+      actor_id: "actor-1",
+      run_id: "run-1",
+      delivery_id: "delivery-1",
       action: "seal",
       target: "claim-1",
       scope: "workspace-1",
       effective_as_of: RECORDED_AT,
-      supporting_receipt_ids: ["receipt-2", "receipt-1"]
+      supporting_receipt_ids: ["receipt-2", "receipt-1"],
+      supporting_proof_witnesses: witnesses,
+      governance_frontier: hashEffectGovernanceFrontier(witnesses, sha256),
+      policy_operator_id: "proof_effect_v1",
+      policy_operator_version: "1"
     });
     const decision = EffectDecisionReceiptSchema.parse({
-      schema_version: 1,
+      schema_version: 2,
       producer: "proof_effect_v1",
       consumer: "governance",
       identity: hashEffectRequestDigest(request, sha256),
@@ -244,6 +285,9 @@ describe("field-contract receipts", () => {
       governance_effect: "policy_decision",
       deletion_behavior: "retain_identity",
       workspace_id: request.workspace_id,
+      actor_id: request.actor_id,
+      run_id: request.run_id,
+      delivery_id: request.delivery_id,
       request_digest: hashEffectRequestDigest(request, sha256),
       action: request.action,
       target: request.target,
@@ -251,9 +295,17 @@ describe("field-contract receipts", () => {
       effective_as_of: request.effective_as_of,
       decision: "require_confirmation",
       supporting_receipt_ids: request.supporting_receipt_ids,
+      supporting_proof_witnesses: request.supporting_proof_witnesses,
+      governance_frontier: request.governance_frontier,
+      policy_operator_id: request.policy_operator_id,
+      policy_operator_version: request.policy_operator_version,
       recorded_at: RECORDED_AT
     });
     expect(decision.decision).toBe("require_confirmation");
+    for (const field of ["workspace_id", "actor_id", "run_id", "delivery_id"] as const) {
+      expect(hashEffectRequestDigest({ ...request, [field]: `other-${field}` }, sha256))
+        .not.toBe(decision.request_digest);
+    }
     expect(() => EffectDecisionReceiptSchema.parse({
       ...decision,
       decision: "maybe"

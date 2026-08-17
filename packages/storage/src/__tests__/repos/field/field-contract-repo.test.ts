@@ -5,12 +5,14 @@ import {
   SqliteFieldDerivationJobRepo,
   SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
+  SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo
 } from "../../../repos/field/index.js";
 import {
   fieldSha256,
   hashedFactor,
+  hashedEffect,
   hashedGeneration,
   hashedIncidence,
   hashedJob,
@@ -123,13 +125,50 @@ describe("field contract repos", () => {
   it("rejects delivery learning and keeps causal usage workspace-local", () => {
     const { usage } = createRepos();
     const causal = usage.insert(hashedUsage("workspace-1", "use-1"));
-    expect(usage.findById("workspace-1", causal.identity)?.usage_kind).toBe("causal");
-    expect(usage.findById("workspace-2", causal.identity)).toBeNull();
+    expect(causal.inserted).toBe(true);
+    expect(usage.findById("workspace-1", causal.row.identity)?.usage_kind).toBe("causal");
+    expect(usage.findById("workspace-2", causal.row.identity)).toBeNull();
     expect(() => usage.insert({
       ...hashedUsage("workspace-1", "use-2"),
       usage_kind: "delivery",
       weight: 0.2
     })).toThrow(/check failed|CHECK constraint failed|weight/u);
+  });
+
+  it("records one confirm event against each distinct downstream object", () => {
+    const { usage } = createRepos();
+    const first = usage.insert(hashedUsage("workspace-1", "confirm-1", "memory-1"));
+    const second = usage.insert(hashedUsage("workspace-1", "confirm-1", "memory-2"));
+
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(true);
+    expect(first.row.identity).not.toBe(second.row.identity);
+    expect(usage.findById("workspace-1", first.row.identity)?.downstream_ref).toBe("memory-1");
+    expect(usage.findById("workspace-1", second.row.identity)?.downstream_ref).toBe("memory-2");
+  });
+
+  it("lists only causally usable rows visible at both event and record as-of", () => {
+    const { usage } = createRepos();
+    usage.insert({
+      ...hashedUsage("workspace-1", "visible"),
+      occurred_at: "2026-08-16T00:00:00.000Z",
+      recorded_at: "2026-08-16T01:00:00.000Z"
+    });
+    usage.insert({
+      ...hashedUsage("workspace-1", "late-record"),
+      occurred_at: "2026-08-16T00:00:00.000Z",
+      recorded_at: "2026-08-18T00:00:00.000Z"
+    });
+    usage.insert({
+      ...hashedUsage("workspace-1", "future-event"),
+      occurred_at: "2026-08-18T00:00:00.000Z",
+      recorded_at: "2026-08-16T00:00:00.000Z"
+    });
+
+    expect(usage.listByWorkspaceAtAsOf(
+      "workspace-1",
+      "2026-08-17T00:00:00.000Z"
+    ).map((row) => row.causal_key)).toEqual(["visible"]);
   });
 
   it("lists workspace rows through parsers and refuses a null-payload factor wildcard", () => {
@@ -144,6 +183,30 @@ describe("field contract repos", () => {
       canonical_payload: null
     })).toThrow(/factor|payload|VALIDATION/u);
   });
+
+  it("revalidates durable source witnesses at the effect commit boundary", () => {
+    const { database, records, effects } = createRepos();
+    const record = records.insert(hashedRecord("workspace-1", "governed source"));
+    const receipt = hashedEffect("workspace-1", record);
+
+    expect(effects.insert(receipt)).toEqual(receipt);
+    expect(effects.insert(receipt)).toEqual(receipt);
+    expect(effects.findById("workspace-1", receipt.request_digest)).toEqual(receipt);
+
+    const raced = records.insert(hashedRecord("workspace-1", "raced source", "src-race"));
+    const racedReceipt = hashedEffect("workspace-1", raced);
+    database.connection.prepare(`
+      INSERT INTO projection_erase_barriers (
+        workspace_id, barrier_id, receipt_identity, generation_id,
+        subject_kind, subject_id, erased_at
+      ) VALUES (?, ?, ?, NULL, 'source_record', ?, ?)
+    `).run(
+      "workspace-1", "barrier-race", `sha256:${"b".repeat(64)}`,
+      raced.record_id, raced.recorded_at
+    );
+    expect(() => effects.insert(racedReceipt)).toThrow(/stale|witness/u);
+    expect(effects.findById("workspace-1", racedReceipt.request_digest)).toBeNull();
+  });
 });
 
 function createRepos() {
@@ -156,6 +219,7 @@ function createRepos() {
     factors: new SqliteFieldFactorRepo(database, fieldSha256),
     jobs: new SqliteFieldDerivationJobRepo(database, fieldSha256),
     generations: new SqliteFieldProjectionGenerationRepo(database, fieldSha256),
-    usage: new SqliteFieldCausalUsageRepo(database, fieldSha256)
+    usage: new SqliteFieldCausalUsageRepo(database, fieldSha256),
+    effects: new SqliteFieldProofEffectRepo(database, fieldSha256)
   };
 }

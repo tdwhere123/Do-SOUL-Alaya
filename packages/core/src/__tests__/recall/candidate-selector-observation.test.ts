@@ -66,7 +66,7 @@ describe("candidate selector observation", () => {
       demand: { atoms: [], matches: [], unmatched: [] },
       evidence: expectedReferencedEvidence(),
       temporal: expectedTemporalObservation(),
-      coverage: { marginal_gain: 0.7 },
+      coverage: { marginal_gain: 1.7 },
       path: {
         status: "partial",
         receipts: [expectedCompleteReceipt(), expectedPartialReceipt()]

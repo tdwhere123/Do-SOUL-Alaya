@@ -54,6 +54,7 @@ it("ranks a high-plasticity candidate above an equivalent low-plasticity candida
       )
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathPlasticityPort: plasticityPort
     });
@@ -186,6 +187,7 @@ it("does not let plasticity alone override a base lexical/activation rank invers
       )
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathPlasticityPort: plasticityPort
     });
@@ -230,6 +232,7 @@ it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIG
       )
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathPlasticityPort: plasticityPort
     });
@@ -264,6 +267,7 @@ it("falls back to no plasticity boost when the path plasticity port throws — r
       })
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathPlasticityPort: plasticityPort
     });
@@ -315,6 +319,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     ]);
     const synthesisFindByIds = vi.fn(async () => [synthesis]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -400,6 +405,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -502,6 +508,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -583,6 +590,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -664,6 +672,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -738,6 +747,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,

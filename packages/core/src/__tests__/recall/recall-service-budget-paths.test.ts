@@ -63,6 +63,7 @@ it("uses the unified path plane for direct (path_expansion) and multi-hop (graph
     });
     const pathExpansionPort: RecallServicePathExpansionPort = { findByAnchors };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort
     });
@@ -177,6 +178,7 @@ it("excludes negative-bias paths from path_expansion positive candidates", async
       findByAnchors: vi.fn(async () => [negativePathRelation])
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort
     });
@@ -283,6 +285,7 @@ it("excludes recall-neutral exception_to paths (recall_bias == 0) from path_expa
       findByAnchors: vi.fn(async () => [neutralPathRelation])
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort
     });
@@ -360,6 +363,7 @@ it("actively suppresses a target via a reinforced (high-strength) negative path"
       return ids.has("seed-memory") ? [negativePath] : [];
     });
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort: { findByAnchors }
     });
@@ -438,6 +442,7 @@ it("does not let an attention_only negative path suppress even at high strength"
         return wirePath && ids.has("seed-memory") ? [weaponizedNegativePath] : [];
       });
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         pathExpansionPort: { findByAnchors }
       });

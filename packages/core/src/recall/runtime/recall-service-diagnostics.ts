@@ -6,6 +6,8 @@ import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
+import type { PinnedProjectionCandidateSelection } from
+  "../field/retrieval/projection/pinned-projection-selection.js";
 import type {
   RecallAnswerRerankFailureClass,
   RecallAnswerRerankStatus,
@@ -140,6 +142,12 @@ export interface RecallDiagnostics {
     Readonly<RecallFieldRefinementStopCertificate>;
   readonly query_condition?: Readonly<
     import("./query-condition-parity.js").QueryConditionParityView
+  >;
+  readonly field_projection_trace?: Readonly<
+    PinnedProjectionCandidateSelection & {
+      readonly generation_id: string;
+      readonly condition_digest: string;
+    }
   >;
   readonly query_entity_extraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly query_fact_frame_extraction?: Readonly<

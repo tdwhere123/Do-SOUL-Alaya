@@ -27,16 +27,20 @@ import {
 } from "./claim-service-helpers.js";
 import type {
   ClaimFormInput,
+  ClaimLifecycleTransitionOptions,
   ClaimServiceDependencies
 } from "./claim-service-types.js";
+import type { EffectDecisionReceipt } from "@do-soul/alaya-protocol";
 
 export type {
   ClaimFormInput,
+  ClaimLifecycleTransitionOptions,
   ClaimRuntimeNotifierPort,
   ClaimServiceClaimFormRepoPort,
   ClaimServiceDependencies,
   ClaimServiceEventLogRepoPort,
   ClaimServiceSlotServicePort,
+  EffectDecisionStore,
   PrecedenceBasisDecisionInput
 } from "./claim-service-types.js";
 export { derivePrecedenceBasis } from "./claim-service-helpers.js";
@@ -62,6 +66,7 @@ interface ClaimLifecycleTransitionInput {
 interface LifecycleAuditComposition {
   readonly additionalEventInputs?: readonly EventPublisherInput[];
   readonly additionalEventsSink?: EventLogEntry[];
+  readonly effectDecisionReceipt?: ClaimLifecycleTransitionOptions["effectDecisionReceipt"];
 }
 
 export class ClaimService {
@@ -89,12 +94,7 @@ export class ClaimService {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedByType,
-    options: {
-      readonly skipSlotElection?: boolean;
-      readonly deferredNotificationEvents?: EventLogEntry[];
-      readonly additionalEventInputs?: readonly EventPublisherInput[];
-      readonly additionalEventsSink?: EventLogEntry[];
-    } = {}
+    options: ClaimLifecycleTransitionOptions = {}
   ): Promise<Readonly<ClaimForm>> {
     const transition = this.parseLifecycleTransition(objectId, newState, reason, causedBy);
     this.assertAdditionalAuditEventsAreAtomic(options);
@@ -117,7 +117,8 @@ export class ClaimService {
       options.deferredNotificationEvents,
       {
         additionalEventInputs: options.additionalEventInputs,
-        additionalEventsSink: options.additionalEventsSink
+        additionalEventsSink: options.additionalEventsSink,
+        effectDecisionReceipt: options.effectDecisionReceipt
       }
     );
 
@@ -151,6 +152,24 @@ export class ClaimService {
     return this.dependencies.claimFormRepo.findByWorkspaceId(workspaceId);
   }
 
+  public async recordEffectDecision(
+    receipt: EffectDecisionReceipt,
+    eventInput: EventPublisherInput
+  ): Promise<Readonly<EventLogEntry>> {
+    const entries = await this.requireEventPublisher().appendManyWithMutation(
+      [eventInput],
+      (persistedEntries) => {
+        this.requireEffectDecisionStore().insert(receipt);
+        return persistedEntries;
+      }
+    );
+    const entry = entries[0];
+    if (entry === undefined) {
+      throw new CoreError("CONFLICT", "Effect decision audit was not appended atomically");
+    }
+    return entry;
+  }
+
   private async applyLifecycleTransition(
     existing: Readonly<ClaimForm>,
     newState: ClaimLifecycleStateType,
@@ -178,6 +197,7 @@ export class ClaimService {
         eventInput,
         additionalEventInputs,
         auditComposition.additionalEventsSink,
+        auditComposition.effectDecisionReceipt,
         syncStatusUpdate!
       );
     }
@@ -320,15 +340,18 @@ export class ClaimService {
   private assertAdditionalAuditEventsAreAtomic(options: {
     readonly additionalEventInputs?: readonly EventPublisherInput[];
     readonly deferredNotificationEvents?: EventLogEntry[];
+    readonly effectDecisionReceipt?: ClaimLifecycleTransitionOptions["effectDecisionReceipt"];
   }): void {
     const additionalEventInputs = options.additionalEventInputs ?? [];
-    if (additionalEventInputs.length === 0) {
+    if (additionalEventInputs.length === 0 && options.effectDecisionReceipt === undefined) {
       return;
     }
 
     const atomicTransitionAvailable =
       this.dependencies.eventPublisher !== undefined &&
       this.dependencies.claimFormRepo.updateStatusSync !== undefined &&
+      (options.effectDecisionReceipt === undefined ||
+        this.dependencies.effectDecisionStore !== undefined) &&
       options.deferredNotificationEvents === undefined;
     if (!atomicTransitionAvailable) {
       throw new CoreError(
@@ -393,12 +416,16 @@ export class ClaimService {
     eventInput: EventPublisherInput,
     additionalEventInputs: readonly EventPublisherInput[],
     additionalEventsSink: EventLogEntry[] | undefined,
+    effectDecisionReceipt: ClaimLifecycleTransitionOptions["effectDecisionReceipt"],
     syncStatusUpdate: NonNullable<ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"]>
   ): Promise<Readonly<ClaimForm>> {
     return await this.requireEventPublisher().appendManyWithMutation(
       [eventInput, ...additionalEventInputs],
       (persistedEntries) => {
         collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
+        if (effectDecisionReceipt !== undefined) {
+          this.requireEffectDecisionStore().insert(effectDecisionReceipt);
+        }
         return syncStatusUpdate.call(
           this.dependencies.claimFormRepo,
           existing.object_id,
@@ -415,6 +442,13 @@ export class ClaimService {
       throw new CoreError("CONFLICT", "Event publisher is required for atomic claim operations");
     }
     return this.dependencies.eventPublisher;
+  }
+
+  private requireEffectDecisionStore(): NonNullable<ClaimServiceDependencies["effectDecisionStore"]> {
+    if (this.dependencies.effectDecisionStore === undefined) {
+      throw new CoreError("CONFLICT", "Effect decision store is required for governed claim transitions");
+    }
+    return this.dependencies.effectDecisionStore;
   }
 
   private requireCanonicalizationPlan(

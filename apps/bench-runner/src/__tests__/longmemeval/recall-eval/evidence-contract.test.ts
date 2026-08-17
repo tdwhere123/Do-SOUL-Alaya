@@ -363,7 +363,7 @@ describe("LongMemEval evidence contract", () => {
             path_suppression_score: 0.25,
             answer_features: answerFeatures,
             deep_head_trace: deepHeadTrace,
-            coverage_marginal_gain: 0.485,
+            coverage_marginal_gain: 2,
             per_stream_rank: { lexical_fts: 7 },
             fused_rank_contribution_per_stream: { lexical_fts: 0.2 },
             score_factors: { activation: 0.5 }
@@ -389,7 +389,7 @@ describe("LongMemEval evidence contract", () => {
       path_suppression_score: 0.25,
       answer_features: answerFeatures,
       deep_head_trace: deepHeadTrace,
-      coverage_marginal_gain: 0.485
+      coverage_marginal_gain: 2
     });
     expect(row.candidates[0]?.answer_features?.evidence_gist_truncated).toBe(true);
     expect(row.candidate_pool_complete).toBe(true);
@@ -400,7 +400,7 @@ describe("LongMemEval evidence contract", () => {
       candidates: [{
         answer_features: answerFeatures,
         deep_head_trace: deepHeadTrace,
-        coverage_marginal_gain: 0.485,
+        coverage_marginal_gain: 2,
         path_suppression_score: 0.25
       }]
     });

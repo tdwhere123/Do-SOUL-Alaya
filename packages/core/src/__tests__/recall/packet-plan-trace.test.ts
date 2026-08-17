@@ -56,6 +56,37 @@ describe("support-set packet plan trace", () => {
     expect(trace.decision).toEqual(observation.decision);
   });
 
+  it.each([
+    ["non-no-op status", {
+      decision: { status: "accepted", reason: "select_gamma_identity" }
+    }],
+    ["protected candidate", {
+      protected_candidates: [{ candidate_key: "candidate-1", rank_limit: 1 }]
+    }],
+    ["consensus rank basis", {
+      embedding_rank_basis: "source_semantic_rrf",
+      source_semantic_intermediate_candidate_keys: ["candidate-1"]
+    }]
+  ])("rejects Select_Gamma identity with %s", (_name, patch) => {
+    const baseline = ["candidate-1"];
+    const observation = {
+      baseline_candidate_keys: baseline,
+      planned_candidate_keys: baseline,
+      actual_candidate_keys: baseline,
+      head_width: 1,
+      baseline_head_candidate_keys: baseline,
+      embedding_head: [],
+      consensus_head_candidate_keys: baseline,
+      immutable_tail_candidate_keys: [],
+      membership_authorizations: [],
+      protected_candidates: [],
+      decision: { status: "no_op", reason: "select_gamma_identity" },
+      ...patch
+    } as unknown as RecallPacketPlanObservation;
+
+    expect(() => assertRecallPacketPlanObservation(observation)).toThrow();
+  });
+
   it("accepts membership consensus without an embedding head", () => {
     const accepted = acceptedObservation();
     const planned = [

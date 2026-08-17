@@ -10,7 +10,11 @@ export type SourceSpanDraft = Readonly<{
 export function deriveAddressableSpanViews(content: string): readonly SourceSpanDraft[] {
   if (content.length === 0) return Object.freeze([]);
   return Object.freeze([
-    { start_offset: 0, end_offset: content.length, purpose: "native_structure" },
+    {
+      start_offset: 0,
+      end_offset: Buffer.byteLength(content, "utf8"),
+      purpose: "native_structure"
+    },
     ...lineSpanDrafts(content),
     ...sentenceSpanDrafts(content)
   ]);
@@ -23,10 +27,36 @@ export function assertSpanInContent(
   if (span.end_offset <= span.start_offset) {
     throw rangeError("addressable source span must be half-open and non-empty");
   }
-  if (span.start_offset < 0 || span.end_offset > content.length) {
+  const byteLength = Buffer.byteLength(content, "utf8");
+  if (span.start_offset < 0 || span.end_offset > byteLength) {
     throw rangeError("addressable source span is outside the source bytes");
   }
+  const bytes = Buffer.from(content, "utf8");
+  if (!isUtf8Boundary(bytes, span.start_offset) || !isUtf8Boundary(bytes, span.end_offset)) {
+    throw rangeError("addressable source span must align to UTF-8 boundaries");
+  }
   return span;
+}
+
+export function sourceSpanFromCodeUnitOffsets(
+  content: string,
+  span: SourceSpanDraft
+): SourceSpanDraft {
+  if (span.start_offset < 0 || span.end_offset > content.length) {
+    throw rangeError("source character span is outside the source text");
+  }
+  return assertSpanInContent(content, {
+    ...span,
+    start_offset: Buffer.byteLength(content.slice(0, span.start_offset), "utf8"),
+    end_offset: Buffer.byteLength(content.slice(0, span.end_offset), "utf8")
+  });
+}
+
+export function sliceUtf8Span(content: string, span: SourceSpanDraft): string {
+  const checked = assertSpanInContent(content, span);
+  return Buffer.from(content, "utf8")
+    .subarray(checked.start_offset, checked.end_offset)
+    .toString("utf8");
 }
 
 function lineSpanDrafts(content: string): readonly SourceSpanDraft[] {
@@ -36,7 +66,11 @@ function lineSpanDrafts(content: string): readonly SourceSpanDraft[] {
     const newline = content.indexOf("\n", start);
     const end = newline === -1 ? content.length : newline;
     if (end > start) {
-      drafts.push({ start_offset: start, end_offset: end, purpose: "line" });
+      drafts.push(sourceSpanFromCodeUnitOffsets(content, {
+        start_offset: start,
+        end_offset: end,
+        purpose: "line"
+      }));
     }
     if (newline === -1) break;
     start = end + 1;
@@ -52,7 +86,10 @@ function sentenceSpanDrafts(content: string): readonly SourceSpanDraft[] {
     const start = match.index ?? 0;
     const trimmed = trimSpan(content, start, start + raw.length);
     if (trimmed !== null) {
-      drafts.push({ ...trimmed, purpose: "sentence" });
+      drafts.push(sourceSpanFromCodeUnitOffsets(content, {
+        ...trimmed,
+        purpose: "sentence"
+      }));
     }
   }
   return drafts;
@@ -72,4 +109,8 @@ function trimSpan(
 
 function rangeError(message: string): CoreError {
   return new CoreError("VALIDATION", message);
+}
+
+function isUtf8Boundary(bytes: Buffer, offset: number): boolean {
+  return offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80;
 }

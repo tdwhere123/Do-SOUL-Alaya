@@ -155,7 +155,9 @@ async function collectLexicalCoarseWithWarm(
   const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(
     coarseFilter,
     global.filteredCandidates,
-    synthesisCoarseFilter
+    synthesisCoarseFilter,
+    prepared.fieldProjectionMemories,
+    prepared.fieldProjectionSelection
   );
   return freezeLexicalCoarseWithWarm<LexicalCoarseWithWarm>({
     recallPhaseStart,
@@ -316,13 +318,46 @@ async function collectEmbeddingInjection(
 function mergeLexicalCoarseCandidates(
   coarseFilter: CoarseFilterResult,
   globalCandidates: readonly Readonly<CoarseRecallCandidate>[],
-  synthesisCoarseFilter: SynthesisCoarseResult
+  synthesisCoarseFilter: SynthesisCoarseResult,
+  fieldProjectionMemories: PreparedRecallRequest["fieldProjectionMemories"] | undefined,
+  fieldSelection: PreparedRecallRequest["fieldProjectionSelection"] | undefined
 ): readonly Readonly<CoarseRecallCandidate>[] {
   return mergeCoarseCandidateMetadata([
     ...coarseFilter.candidates,
     ...globalCandidates,
-    ...synthesisCoarseFilter.candidates
+    ...synthesisCoarseFilter.candidates,
+    ...(fieldProjectionMemories ?? []).flatMap((entry) => {
+      const score = fieldProjectionActivation(entry, fieldSelection);
+      return score === undefined ? [] : [buildFieldProjectionCandidate(entry, score)];
+    })
   ]);
+}
+
+function fieldProjectionActivation(
+  entry: PreparedRecallRequest["fieldProjectionMemories"][number],
+  selection: PreparedRecallRequest["fieldProjectionSelection"] | undefined
+): number | undefined {
+  if (selection === undefined) return undefined;
+  const scores = entry.evidence_refs.flatMap((evidenceId) => {
+    const score = selection.candidate_activation[evidenceId];
+    return score === undefined ? [] : [score];
+  });
+  return scores.length === 0 ? undefined : Math.max(...scores);
+}
+
+function buildFieldProjectionCandidate(
+  entry: PreparedRecallRequest["fieldProjectionMemories"][number],
+  activationScore: number
+): Readonly<CoarseRecallCandidate> {
+  return Object.freeze({
+    entry,
+    originPlane: "workspace_local",
+    sourceChannel: "field_projection",
+    sourceChannels: Object.freeze(["field_projection"] as const),
+    admissionPlanes: Object.freeze(["activation"] as const),
+    firstAdmissionPlane: "activation",
+    structuralScore: activationScore
+  });
 }
 
 function mergeCoarseCandidateMetadata(

@@ -16,6 +16,7 @@ export interface HostWorkerTaskRuntimeSupport {
 }
 
 export function createHostWorkerTaskRuntimeSupport(input: Readonly<{
+  readonly now: () => string;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
   readonly configService?: {
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;

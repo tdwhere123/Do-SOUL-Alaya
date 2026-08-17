@@ -20,6 +20,7 @@ export type QueryConditionDraft = Omit<QueryCondition, "effective_as_of"> & {
 export type QueryConditionCaptureDeps = Readonly<{
   readonly sha256: FieldContractSha256;
   readonly now: () => string;
+  readonly recordedAt?: string;
   readonly pin: Readonly<Pick<ProjectionPin, "workspace_id" | "generation_id">>;
 }>;
 
@@ -87,8 +88,7 @@ function captureResolvedCondition(
       condition_digest: identity,
       query_operator_id: QUERY_CONDITION_OPERATOR_ID
     }, deps.sha256),
-    // Same captured instant as C_q; a second clock read would fork as-of from the receipt.
-    recorded_at: condition.effective_as_of
+    recorded_at: deps.recordedAt ?? condition.effective_as_of
   });
   return verifyQueryConditionReceipt(receipt, deps.sha256);
 }

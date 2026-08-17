@@ -19,6 +19,7 @@ describe("RecallService historical as-of generation miss", () => {
     ];
     const { dependencies } = createDependencies(memories);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort: {
         findByAnchors: vi.fn(async (_workspaceId, _anchors, options) => {

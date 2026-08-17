@@ -20,6 +20,7 @@ export type RecallAdmissionPlane =
   | "entity_seed";
 
 export type RecallCandidateDropReason =
+  | "ineligible"
   | "duplicate"
   | "dimension_limit"
   | "max_entries"

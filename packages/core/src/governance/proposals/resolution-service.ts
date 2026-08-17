@@ -7,90 +7,37 @@ import {
   TransitionCausedBy,
   type ClaimForm,
   type EventLogEntry,
-  type GovernanceResolutionPolicyClassification,
+  type EffectDecisionReceipt,
   type MemoryEntry,
-  type SoulResolutionKind as SoulResolutionKindType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import type { EventPublisher, EventPublisherInput } from "../../runtime/event-publisher.js";
-import type { DeferredObligationService } from "../policy/deferred-obligation-service.js";
-
-// invariant: producer-side input shape. workspace_id / run_id /
-// agent_target / delivery_id are bound from the trusted MCP call
-// context before calling resolve.
-// see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
-//   (binding site)
-export interface ResolveInput {
-  readonly targetObjectId: string;
-  readonly resolution: SoulResolutionKindType;
-  readonly workspaceId: string;
-  readonly runId: string | null;
-  readonly agentTarget: string;
-  readonly deliveryId: string;
-  readonly policy?: string;
-  readonly policyClassification?: GovernanceResolutionPolicyClassification;
-  readonly correction?: string;
-  readonly reason?: string;
-  readonly deferUntil?: string;
-}
-
-export interface ResolveOutcome {
-  readonly resolution: SoulResolutionKindType;
-  readonly status: "applied" | "deferred" | "noop";
-  readonly auditEventType: string;
-  readonly auditEventId: string;
-  readonly obligationId?: string;
-  readonly activatedClaimId?: string;
-}
-
-// invariant: claim-form repository slice the dispatcher needs to look
-// up a draft claim for `confirm` and to detect whether a target is a
-// claim_form at all.
-export interface ResolutionServiceClaimRepoPort {
-  findById(objectId: string): Promise<Readonly<ClaimForm> | null>;
-}
-
-export interface ResolutionServiceMemoryRepoPort {
-  findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
-}
-
-export interface ResolutionServiceClaimServicePort {
-  transitionLifecycle(
-    objectId: string,
-    newState: ClaimForm["claim_status"],
-    reason: string,
-    causedBy: typeof TransitionCausedBy[keyof typeof TransitionCausedBy],
-    // invariant: confirm/reject thread the resolution audit event through
-    // `additionalEventInputs` so the claim_status mutation and the
-    // governance-resolution audit row are appended in one SQLite
-    // transaction. The persisted audit row is read back via
-    // `additionalEventsSink`. A crash can no longer leave an activated /
-    // archived claim without its resolution audit (CLAUDE.md invariants §13).
-    options?: {
-      readonly additionalEventInputs?: readonly EventPublisherInput[];
-      readonly additionalEventsSink?: EventLogEntry[];
-    }
-  ): Promise<Readonly<ClaimForm>>;
-}
-
-export interface ResolutionServiceMemoryServicePort {
-  transitionLifecycle(
-    objectId: string,
-    nextState: MemoryEntry["lifecycle_state"],
-    reason: string,
-    causedBy: typeof TransitionCausedBy[keyof typeof TransitionCausedBy]
-  ): Promise<Readonly<MemoryEntry>>;
-}
-
-export interface ResolutionServiceDependencies {
-  readonly eventPublisher: EventPublisher;
-  readonly claimRepo: ResolutionServiceClaimRepoPort;
-  readonly memoryRepo: ResolutionServiceMemoryRepoPort;
-  readonly claimService: ResolutionServiceClaimServicePort;
-  readonly memoryService: ResolutionServiceMemoryServicePort;
-  readonly deferredObligationService: Pick<DeferredObligationService, "create">;
-  readonly now?: () => string;
-}
+import type { EventPublisherInput } from "../../runtime/event-publisher.js";
+import { GovernedEffectAction } from "../effects/proof-effect-policy.js";
+import {
+  buildEffectAuditEventInput,
+  decideClaimEffect,
+  requireDeliveryAuthority,
+  type ResolutionDeliveryAuthorityPort,
+  type ResolutionEffectAuthorityPort
+} from "./resolution-service-effects.js";
+export type {
+  ResolutionDeliveryAuthorityPort,
+  ResolutionEffectAuthorityPort
+} from "./resolution-service-effects.js";
+import type {
+  ResolveInput,
+  ResolveOutcome,
+  ResolutionServiceDependencies
+} from "./resolution-service-types.js";
+export type {
+  ResolveInput,
+  ResolveOutcome,
+  ResolutionServiceClaimRepoPort,
+  ResolutionServiceClaimServicePort,
+  ResolutionServiceDependencies,
+  ResolutionServiceMemoryRepoPort,
+  ResolutionServiceMemoryServicePort
+} from "./resolution-service-types.js";
 
 export class ResolutionService {
   private readonly now: () => string;
@@ -101,19 +48,21 @@ export class ResolutionService {
 
   public async resolve(input: ResolveInput): Promise<ResolveOutcome> {
     this.validateInput(input);
+    await requireDeliveryAuthority(this.deps.deliveryAuthority, input);
+    const resolvedAt = this.now();
     switch (input.resolution) {
       case SoulResolutionKind.CONFIRM:
-        return await this.applyConfirm(input);
+        return await this.applyConfirm(input, resolvedAt);
       case SoulResolutionKind.REJECT:
-        return await this.applyReject(input);
+        return await this.applyReject(input, resolvedAt);
       case SoulResolutionKind.CORRECT:
-        return await this.applyCorrect(input);
+        return await this.applyCorrect(input, resolvedAt);
       case SoulResolutionKind.STALE:
-        return await this.applyStale(input);
+        return await this.applyStale(input, resolvedAt);
       case SoulResolutionKind.DEFER:
-        return await this.applyDefer(input);
+        return await this.applyDefer(input, resolvedAt);
       case SoulResolutionKind.NOT_RELEVANT:
-        return await this.applyNotRelevant(input);
+        return await this.applyNotRelevant(input, resolvedAt);
     }
   }
 
@@ -126,7 +75,39 @@ export class ResolutionService {
   // claimService.transitionLifecycle additionalEventInputs). A crash can
   // no longer leave an ACTIVE claim with no resolution audit row.
   // see also: ClaimService.transitionLifecycle (lifecycle gate)
-  private async applyConfirm(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyConfirm(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
+    const claim = await this.requireDraftClaim(input);
+    const decision = await this.decideEffect(input, GovernedEffectAction.ACTIVATE, effectiveAsOf);
+    if (decision.decision !== "allow") {
+      return await this.persistNonAllowDecision(input, decision);
+    }
+    const auditEventInput = this.buildAuditEventInput(input, effectiveAsOf, {
+      activatedClaimId: claim.object_id
+    });
+    const auditEventsSink: EventLogEntry[] = [];
+    const activated = await this.deps.claimService.transitionLifecycle(
+      claim.object_id,
+      ClaimLifecycleState.ACTIVE,
+      input.reason ?? "soul_resolve_confirm",
+      TransitionCausedBy.USER,
+      {
+        additionalEventInputs: [auditEventInput, buildEffectAuditEventInput(decision)],
+        additionalEventsSink: auditEventsSink,
+        effectDecisionReceipt: decision
+      }
+    );
+    const entry = requireAuditEntry(auditEventsSink);
+    return {
+      resolution: input.resolution,
+      status: "applied",
+      auditEventType: entry.event_type,
+      auditEventId: entry.event_id,
+      activatedClaimId: activated.object_id,
+      effectDecision: decision.decision
+    };
+  }
+
+  private async requireDraftClaim(input: ResolveInput): Promise<Readonly<ClaimForm>> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
     if (claim === null) {
       throw new CoreError(
@@ -146,25 +127,7 @@ export class ResolutionService {
         `Claim form ${input.targetObjectId} is not in draft (current: ${claim.claim_status})`
       );
     }
-    const auditEventInput = this.buildAuditEventInput(input, {
-      activatedClaimId: claim.object_id
-    });
-    const auditEventsSink: EventLogEntry[] = [];
-    const activated = await this.deps.claimService.transitionLifecycle(
-      claim.object_id,
-      ClaimLifecycleState.ACTIVE,
-      input.reason ?? "soul_resolve_confirm",
-      TransitionCausedBy.USER,
-      { additionalEventInputs: [auditEventInput], additionalEventsSink: auditEventsSink }
-    );
-    const entry = requireAuditEntry(auditEventsSink);
-    return {
-      resolution: input.resolution,
-      status: "applied",
-      auditEventType: entry.event_type,
-      auditEventId: entry.event_id,
-      activatedClaimId: activated.object_id
-    };
+    return claim;
   }
 
   // invariant: reject archives the claim_form regardless of starting
@@ -179,7 +142,7 @@ export class ResolutionService {
   // memory_entry target) publish the audit event standalone — no
   // governance mutation to pair it with.
   // see also: packages/protocol/src/soul/claim-form.ts claimTransitions
-  private async applyReject(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyReject(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
     if (claim !== null && claim.workspace_id !== input.workspaceId) {
       throw new CoreError(
@@ -188,24 +151,9 @@ export class ResolutionService {
       );
     }
     if (claim !== null && claim.claim_status !== ClaimLifecycleState.ARCHIVED) {
-      const auditEventInput = this.buildAuditEventInput(input, {});
-      const auditEventsSink: EventLogEntry[] = [];
-      await this.deps.claimService.transitionLifecycle(
-        claim.object_id,
-        ClaimLifecycleState.ARCHIVED,
-        input.reason ?? "soul_resolve_reject",
-        TransitionCausedBy.USER,
-        { additionalEventInputs: [auditEventInput], additionalEventsSink: auditEventsSink }
-      );
-      const entry = requireAuditEntry(auditEventsSink);
-      return {
-        resolution: input.resolution,
-        status: "applied",
-        auditEventType: entry.event_type,
-        auditEventId: entry.event_id
-      };
+      return await this.applyClaimReject(input, claim, effectiveAsOf);
     }
-    const entry = await this.emitAuditEvent(input, {});
+    const entry = await this.emitAuditEvent(input, effectiveAsOf, {});
     return {
       resolution: input.resolution,
       status: "applied",
@@ -214,12 +162,45 @@ export class ResolutionService {
     };
   }
 
-  // invariant: correct emits the audit event with the agent-supplied
-  // correction prose. Downstream consumers (Inspector, materialization)
-  // pick the corrected proposition up via the audit row; the resolve
-  // surface itself does not create a new claim_form (that path goes
-  // through soul.emit_candidate_signal + soul.propose_memory_update).
-  private async applyCorrect(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyClaimReject(
+    input: ResolveInput,
+    claim: Readonly<ClaimForm>,
+    effectiveAsOf: string
+  ): Promise<ResolveOutcome> {
+    const decision = isHardActiveClaim(claim)
+      ? await this.decideEffect(input, GovernedEffectAction.REVOKE, effectiveAsOf)
+      : undefined;
+    if (decision !== undefined && decision.decision !== "allow") {
+      return await this.persistNonAllowDecision(input, decision);
+    }
+    const auditEventInput = this.buildAuditEventInput(input, effectiveAsOf, {});
+    const additionalEventInputs = decision === undefined
+      ? [auditEventInput]
+      : [auditEventInput, buildEffectAuditEventInput(decision)];
+    const auditEventsSink: EventLogEntry[] = [];
+    await this.deps.claimService.transitionLifecycle(
+      claim.object_id,
+      ClaimLifecycleState.ARCHIVED,
+      input.reason ?? "soul_resolve_reject",
+      TransitionCausedBy.USER,
+      {
+        additionalEventInputs,
+        additionalEventsSink: auditEventsSink,
+        effectDecisionReceipt: decision
+      }
+    );
+    const entry = requireAuditEntry(auditEventsSink);
+    return {
+      resolution: input.resolution,
+      status: "applied",
+      auditEventType: entry.event_type,
+      auditEventId: entry.event_id,
+      effectDecision: decision?.decision
+    };
+  }
+
+  // invariant: correction receipts and their payload commit through the proof-effect owner.
+  private async applyCorrect(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
     if (input.correction === undefined || input.correction.trim().length === 0) {
       throw new CoreError(
         "VALIDATION",
@@ -227,18 +208,44 @@ export class ResolutionService {
       );
     }
     await this.requireTargetExists(input);
-    const entry = await this.emitAuditEvent(input, {});
+    const decision = await this.decideEffect(
+      input,
+      GovernedEffectAction.CORRECT,
+      effectiveAsOf,
+      input.correction
+    );
+    if (decision.decision !== "allow") {
+      return await this.persistNonAllowDecision(input, decision);
+    }
+    const predecessor = decision.supporting_proof_witnesses.find(
+      (witness) => witness.kind === "predecessor"
+    );
+    const successor = decision.supporting_proof_witnesses.find(
+      (witness) => witness.kind === "successor"
+    );
+    if (predecessor === undefined || successor === undefined) {
+      throw new CoreError("CONFLICT", "Correction effect lacks predecessor/successor receipts");
+    }
+    const entry = await this.deps.claimService.recordEffectDecision(
+      decision,
+      this.buildAuditEventInput(input, effectiveAsOf, {
+        correction: input.correction,
+        predecessorReceiptId: predecessor.receipt_id,
+        successorReceiptId: successor.receipt_id
+      })
+    );
     return {
       resolution: input.resolution,
       status: "applied",
       auditEventType: entry.event_type,
-      auditEventId: entry.event_id
+      auditEventId: entry.event_id,
+      effectDecision: decision.decision
     };
   }
 
   // invariant: stale transitions a memory_entry active → dormant.
   // see also: MemoryService.transitionLifecycle (lifecycle gate)
-  private async applyStale(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyStale(input: ResolveInput, resolvedAt: string): Promise<ResolveOutcome> {
     const memory = await this.deps.memoryRepo.findById(input.targetObjectId);
     if (memory === null) {
       throw new CoreError(
@@ -260,7 +267,7 @@ export class ResolutionService {
         TransitionCausedBy.USER
       );
     }
-    const entry = await this.emitAuditEvent(input, {});
+    const entry = await this.emitAuditEvent(input, resolvedAt, {});
     return {
       resolution: input.resolution,
       status: "applied",
@@ -272,7 +279,7 @@ export class ResolutionService {
   // invariant: defer creates a DeferredObligation kind=evidence_refresh
   // bound to the target entity. The obligation_id is echoed back so
   // the caller can fulfil / expire it through DeferredObligationService.
-  private async applyDefer(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyDefer(input: ResolveInput, resolvedAt: string): Promise<ResolveOutcome> {
     if (input.deferUntil === undefined || input.deferUntil.trim().length === 0) {
       throw new CoreError(
         "VALIDATION",
@@ -286,6 +293,7 @@ export class ResolutionService {
       );
     }
     await this.requireTargetExists(input);
+    const auditEventsSink: EventLogEntry[] = [];
     const obligation = await this.deps.deferredObligationService.create({
       kind: "evidence_refresh",
       description: input.reason ?? "soul_resolve_defer",
@@ -293,10 +301,13 @@ export class ResolutionService {
       workspaceId: input.workspaceId,
       targetEntityId: input.targetObjectId,
       expiresAt: input.deferUntil
+    }, {
+      buildAdditionalEventInputs: (created) => [this.buildAuditEventInput(input, resolvedAt, {
+        obligationId: created.obligation_id
+      })],
+      additionalEventsSink: auditEventsSink
     });
-    const entry = await this.emitAuditEvent(input, {
-      obligationId: obligation.obligation_id
-    });
+    const entry = requireAuditEntry(auditEventsSink);
     return {
       resolution: input.resolution,
       status: "deferred",
@@ -309,9 +320,9 @@ export class ResolutionService {
   // invariant: not_relevant is the dismissal path. Audit event records
   // the dismissal so trust-state consumers see the agent's decision,
   // but the target object lifecycle is unchanged.
-  private async applyNotRelevant(input: ResolveInput): Promise<ResolveOutcome> {
+  private async applyNotRelevant(input: ResolveInput, resolvedAt: string): Promise<ResolveOutcome> {
     await this.requireTargetExists(input);
-    const entry = await this.emitAuditEvent(input, {});
+    const entry = await this.emitAuditEvent(input, resolvedAt, {});
     return {
       resolution: input.resolution,
       status: "noop",
@@ -331,7 +342,7 @@ export class ResolutionService {
       throw new CoreError("VALIDATION", "workspace_id is required");
     }
     if (input.agentTarget.trim().length === 0) {
-      throw new CoreError("VALIDATION", "agent_target is required");
+      throw new CoreError("VALIDATION", "actor_id is required");
     }
   }
 
@@ -367,13 +378,16 @@ export class ResolutionService {
   // correct/stale/defer/not_relevant publish it directly.
   private buildAuditEventInput(
     input: ResolveInput,
+    occurredAt: string,
     extras: Readonly<{
       readonly obligationId?: string;
       readonly activatedClaimId?: string;
+      readonly correction?: string;
+      readonly predecessorReceiptId?: string;
+      readonly successorReceiptId?: string;
     }>
   ): EventPublisherInput {
     const eventType = RESOLUTION_KIND_TO_EVENT_TYPE[input.resolution];
-    const occurredAt = this.now();
     const payload = GovernanceResolutionPayloadSchema.parse({
       target_object_id: input.targetObjectId,
       resolution: input.resolution,
@@ -384,8 +398,11 @@ export class ResolutionService {
       policy: input.policy ?? null,
       policy_classification: input.policyClassification ?? null,
       reason: input.reason ?? null,
+      correction: extras.correction ?? null,
       obligation_id: extras.obligationId ?? null,
       activated_claim_id: extras.activatedClaimId ?? null,
+      predecessor_receipt_id: extras.predecessorReceiptId ?? null,
+      successor_receipt_id: extras.successorReceiptId ?? null,
       occurred_at: occurredAt
     });
     return {
@@ -401,15 +418,54 @@ export class ResolutionService {
 
   private async emitAuditEvent(
     input: ResolveInput,
+    occurredAt: string,
     extras: Readonly<{
       readonly obligationId?: string;
       readonly activatedClaimId?: string;
     }>
   ): Promise<Readonly<EventLogEntry>> {
     return await this.deps.eventPublisher.publish(
-      this.buildAuditEventInput(input, extras)
+      this.buildAuditEventInput(input, occurredAt, extras)
     );
   }
+
+  private async decideEffect(
+    input: ResolveInput,
+    action: "activate" | "revoke" | "correct",
+    effectiveAsOf: string,
+    correction?: string
+  ): Promise<EffectDecisionReceipt> {
+    return await decideClaimEffect(
+      { effectAuthority: this.deps.effectAuthority },
+      input,
+      action,
+      effectiveAsOf,
+      correction
+    );
+  }
+
+  private async persistNonAllowDecision(
+    input: ResolveInput,
+    decision: EffectDecisionReceipt
+  ): Promise<ResolveOutcome> {
+    const entry = await this.deps.claimService.recordEffectDecision(
+      decision,
+      buildEffectAuditEventInput(decision)
+    );
+    return {
+      resolution: input.resolution,
+      status: "noop",
+      auditEventType: entry.event_type,
+      auditEventId: entry.event_id,
+      effectDecision: decision.decision
+    };
+  }
+}
+
+function isHardActiveClaim(claim: Readonly<ClaimForm>): boolean {
+  return claim.claim_status === ClaimLifecycleState.ACTIVE ||
+    claim.claim_status === ClaimLifecycleState.CONTESTED ||
+    claim.claim_status === ClaimLifecycleState.WINNER;
 }
 
 // invariant: a composed claim transition must yield exactly its one

@@ -9,8 +9,10 @@ import {
 import { CoreError } from "../../shared/errors.js";
 
 export interface FieldFormationStores {
+  runAtomic<T>(work: () => T): T;
   getRecord(workspaceId: string, recordId: string): SourceRecordIdentity | null;
-  putRecord(record: SourceRecordIdentity): SourceRecordIdentity;
+  getStoredRecord(workspaceId: string, recordId: string): StoredSourceRecord | null;
+  putRecord(record: SourceRecordIdentity, contentBytes: string): SourceRecordIdentity;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
   putSpan(span: AddressableSourceSpan): AddressableSourceSpan;
   getDescriptor(workspaceId: string, factorId: string): FactorDescriptor | null;
@@ -20,37 +22,50 @@ export interface FieldFormationStores {
   getJob(workspaceId: string, jobId: string): DerivationJobReceipt | null;
   putJob(job: DerivationJobReceipt): DerivationJobReceipt;
   listRecords(workspaceId: string): readonly SourceRecordIdentity[];
+  listStoredRecords(workspaceId: string): readonly StoredSourceRecord[];
   listSpans(workspaceId: string): readonly AddressableSourceSpan[];
   listFactors(workspaceId: string): readonly FactorDescriptor[];
   listIncidences(workspaceId: string): readonly FactorIncidence[];
+  listRecordEvidenceBindings(workspaceId: string): readonly SourceRecordEvidenceBinding[];
 }
+
+export type StoredSourceRecord = Readonly<{
+  readonly record: SourceRecordIdentity;
+  readonly content_bytes: string;
+}>;
+
+export type SourceRecordEvidenceBinding = Readonly<{
+  readonly workspace_id: string;
+  readonly record_id: string;
+  readonly evidence_object_id: string;
+}>;
 
 export function createInMemoryFieldStores(): FieldFormationStores {
   return bindFieldStores({
     records: new Map<string, SourceRecordIdentity>(),
+    recordBodies: new Map<string, string>(),
     spans: new Map<string, AddressableSourceSpan>(),
     factors: new Map<string, FactorDescriptor>(),
     incidences: new Map<string, FactorIncidence>(),
-    jobs: new Map<string, DerivationJobReceipt>()
+    jobs: new Map<string, DerivationJobReceipt>(),
+    evidenceBindings: new Map<string, SourceRecordEvidenceBinding>()
   });
 }
 
 function bindFieldStores(maps: Readonly<{
   readonly records: Map<string, SourceRecordIdentity>;
+  readonly recordBodies: Map<string, string>;
   readonly spans: Map<string, AddressableSourceSpan>;
   readonly factors: Map<string, FactorDescriptor>;
   readonly incidences: Map<string, FactorIncidence>;
   readonly jobs: Map<string, DerivationJobReceipt>;
+  readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
 }>): FieldFormationStores {
   return {
+    runAtomic: (work) => runInMemoryAtomic(maps, work),
     getRecord: (workspaceId, recordId) => maps.records.get(key(workspaceId, recordId)) ?? null,
-    putRecord: (record) => putSame(
-      maps.records,
-      key(record.workspace_id, record.identity),
-      record,
-      sameRecord,
-      "source record"
-    ),
+    getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
+    putRecord: (record, contentBytes) => putRecordWithBinding(maps, record, contentBytes),
     getSpan: (workspaceId, spanId) => maps.spans.get(key(workspaceId, spanId)) ?? null,
     putSpan: (span) => putSame(
       maps.spans,
@@ -61,10 +76,96 @@ function bindFieldStores(maps: Readonly<{
     ),
     ...bindFactorStores(maps),
     listRecords: (workspaceId) => listFor(maps.records, workspaceId),
+    listStoredRecords: (workspaceId) => listFor(maps.records, workspaceId).map((record) => {
+      const stored = storedRecord(maps, workspaceId, record.identity);
+      if (stored === null) {
+        throw new CoreError("OBLIGATION_VIOLATION", "source body is unavailable");
+      }
+      return stored;
+    }),
     listSpans: (workspaceId) => listFor(maps.spans, workspaceId),
     listFactors: (workspaceId) => listFor(maps.factors, workspaceId),
-    listIncidences: (workspaceId) => listFor(maps.incidences, workspaceId)
+    listIncidences: (workspaceId) => listFor(maps.incidences, workspaceId),
+    listRecordEvidenceBindings: (workspaceId) =>
+      listFor(maps.evidenceBindings, workspaceId)
   };
+}
+
+function putRecordWithBinding(
+  maps: Readonly<{
+    readonly records: Map<string, SourceRecordIdentity>;
+    readonly recordBodies: Map<string, string>;
+    readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
+  }>,
+  record: SourceRecordIdentity,
+  contentBytes: string
+): SourceRecordIdentity {
+  const persisted = putSame(
+    maps.records,
+    key(record.workspace_id, record.identity),
+    record,
+    sameRecord,
+    "source record"
+  );
+  putSame(
+    maps.recordBodies,
+    key(record.workspace_id, record.identity),
+    contentBytes,
+    (existing, incoming) => existing === incoming,
+    "source body"
+  );
+  if (record.evidence_object_id !== null) {
+    const binding = Object.freeze({
+      workspace_id: record.workspace_id,
+      record_id: record.identity,
+      evidence_object_id: record.evidence_object_id
+    });
+    maps.evidenceBindings.set(
+      key(record.workspace_id, `${record.identity}\u0000${record.evidence_object_id}`),
+      binding
+    );
+  }
+  return persisted;
+}
+
+function storedRecord(
+  maps: Readonly<{
+    readonly records: Map<string, SourceRecordIdentity>;
+    readonly recordBodies: Map<string, string>;
+  }>,
+  workspaceId: string,
+  recordId: string
+): StoredSourceRecord | null {
+  const record = maps.records.get(key(workspaceId, recordId));
+  const content = maps.recordBodies.get(key(workspaceId, recordId));
+  return record === undefined || content === undefined
+    ? null
+    : Object.freeze({ record, content_bytes: content });
+}
+
+function runInMemoryAtomic<T>(
+  maps: Readonly<{
+    readonly records: Map<string, SourceRecordIdentity>;
+    readonly recordBodies: Map<string, string>;
+    readonly spans: Map<string, AddressableSourceSpan>;
+    readonly factors: Map<string, FactorDescriptor>;
+    readonly incidences: Map<string, FactorIncidence>;
+    readonly jobs: Map<string, DerivationJobReceipt>;
+    readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
+  }>,
+  work: () => T
+): T {
+  const stores = Object.values(maps) as Map<string, unknown>[];
+  const snapshots = stores.map((store) => new Map(store));
+  try {
+    return work();
+  } catch (error) {
+    stores.forEach((store, index) => {
+      store.clear();
+      for (const [key, value] of snapshots[index] ?? []) store.set(key, value);
+    });
+    throw error;
+  }
 }
 
 function bindFactorStores(maps: Readonly<{

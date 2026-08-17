@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 import { captureQueryCondition } from "../../recall/query/condition/query-condition-capture.js";
-import { createInMemoryFieldQuerySession } from
+import { createTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
@@ -112,16 +112,17 @@ export function withCapturedOrderAlignedExpected(
   const replayed = selectFineAssessmentCandidates({
     ...params,
     capturePacketPlanTrace: true,
-    ...(boundary.expected.pre_projection === undefined ? {} : {
-      selectionBoundaryObserver: (capture) => {
-        pending = capture;
-        return undefined;
-      }
-    })
+    selectionBoundaryObserver: (capture) => {
+      pending = capture;
+      return undefined;
+    }
   });
   const packetConsensus = replayed.packetPlanObservation;
   if (packetConsensus === undefined) {
     throw new Error("expected packetPlanObservation, actual absent");
+  }
+  if (pending === undefined) {
+    throw new Error("expected preProjection capture, actual absent");
   }
   return {
     ...boundary,
@@ -129,8 +130,7 @@ export function withCapturedOrderAlignedExpected(
       replayed,
       packetConsensus,
       boundary.input.capture_packet_plan_trace === true,
-      pending?.preProjection,
-      boundary.expected.coverage_objective !== undefined
+      pending.preProjection
     )
   };
 }
@@ -138,10 +138,11 @@ export function withCapturedOrderAlignedExpected(
 const LIVE_CAPTURE_AS_OF = "2026-07-29T00:00:00.000Z";
 
 export function liveFieldPins(): Readonly<{
+  readonly workspace_id: string;
   readonly generation_id: string;
   readonly condition_digest: string;
 }> {
-  const pin = createInMemoryFieldQuerySession(fieldContractSha256)
+  const pin = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256)
     .pinActiveGeneration("workspace-1", LIVE_CAPTURE_AS_OF);
   const receipt = captureQueryCondition({
     principal: "workspace-1",
@@ -160,6 +161,7 @@ export function liveFieldPins(): Readonly<{
     pin
   });
   return Object.freeze({
+    workspace_id: receipt.condition.workspace_id,
     generation_id: receipt.generation_id,
     condition_digest: receipt.identity
   });

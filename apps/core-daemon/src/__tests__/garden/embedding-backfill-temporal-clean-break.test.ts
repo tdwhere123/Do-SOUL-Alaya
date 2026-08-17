@@ -10,6 +10,8 @@ import { createEmbeddingBackfillRuntimeSupport } from "../../garden/scheduler/sc
 import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler/scheduler-runtime-types.js";
 import { createGardenLegacyPathCandidateRejectionPort } from "../../runtime/garden-wiring/garden-legacy-path-admission.js";
 
+const FIXED_ISO = "2026-07-17T00:00:00.000Z";
+
 const BACKFILL_TASK: GardenTaskDescriptor = {
   task_id: "embedding-backfill-s4",
   task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
@@ -49,6 +51,7 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
   });
   const completions: unknown[] = [];
   const support = createEmbeddingBackfillRuntimeSupport({
+    now: () => FIXED_ISO,
     embeddingBackfillHandler: {
       handle: vi.fn(async () => ({
         objectsAffected: ["memory-1", "memory-2"],
@@ -127,7 +130,8 @@ describe("Garden EMBEDDING_BACKFILL temporal clean break", () => {
         "embedding_backfill_coherence_follow_up_deferred:formation_receipt_required"
       ]);
       expect(harness.completions).toContainEqual(expect.objectContaining({
-        audit_entries: outcome.auditEntries
+        audit_entries: outcome.auditEntries,
+        completed_at: FIXED_ISO
       }));
     } finally {
       database.close();

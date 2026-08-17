@@ -16,6 +16,7 @@ const HOST_WORKER_TASK_EXPIRY_CAP_PER_PASS = 128;
 const HOST_WORKER_TTL_TASK_KINDS = ["edge_classify", "post_turn_extract"] as const;
 
 export function createGardenClaimReclaimer(input: Readonly<{
+  readonly now: () => string;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
 }>): () => Promise<void> {
   return async (): Promise<void> => {
@@ -23,7 +24,7 @@ export function createGardenClaimReclaimer(input: Readonly<{
     if (gardenTaskRepo === undefined) {
       return;
     }
-    const occurredAt = new Date().toISOString();
+    const occurredAt = input.now();
     const abandonedClaims = gardenTaskRepo.peekAbandonedClaims(
       occurredAt,
       GARDEN_CLAIM_STALE_AFTER_MS
@@ -72,6 +73,7 @@ function buildGardenClaimReclaim(
 }
 
 export function createHostWorkerTaskExpirer(input: Readonly<{
+  readonly now: () => string;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>): () => Promise<void> {
@@ -80,8 +82,10 @@ export function createHostWorkerTaskExpirer(input: Readonly<{
     if (gardenTaskRepo === undefined) {
       return;
     }
-    const occurredAt = new Date().toISOString();
-    const expiredBeforeIso = new Date(Date.now() - HOST_WORKER_TASK_TTL_MS).toISOString();
+    const occurredAt = input.now();
+    const expiredBeforeIso = new Date(
+      Date.parse(occurredAt) - HOST_WORKER_TASK_TTL_MS
+    ).toISOString();
     for (const kind of HOST_WORKER_TTL_TASK_KINDS) {
       await expireUnclaimedHostWorkerTasksByKind(
         gardenTaskRepo,

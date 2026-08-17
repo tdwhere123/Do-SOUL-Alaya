@@ -24,7 +24,6 @@ import {
   SqliteHealthIssueGroupRepo,
   type SqliteEngineBindingRepo,
   type SqliteEventLogRepo,
-  type SqlitePathRelationRepo,
   type SqliteRunRepo,
   type SqliteTrustStateRepo,
   type SqliteWorkspaceRepo
@@ -34,7 +33,6 @@ import {
   LocalHeuristics,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
-import { createPathPlasticityService } from "../../../garden/path-plasticity/path-plasticity-runtime.js";
 import { GardenComputeProviderResolver } from "../../../services/support/garden-compute-provider-resolver.js";
 import type { AppConfigService } from "../../../services/config/config-service.js";
 import { createSoulApprovalService } from "../../../services/soul/soul-approval-service.js";
@@ -121,7 +119,6 @@ export async function createDaemonCoreServices(
     readonly bindingRepo: SqliteEngineBindingRepo;
     readonly eventPublisher: EventPublisher;
     readonly trustStateRepo: SqliteTrustStateRepo;
-    readonly pathRelationRepo: SqlitePathRelationRepo;
     readonly signalService: SignalService;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
@@ -152,8 +149,7 @@ export async function createDaemonCoreServices(
     engineBindingService,
     soulApprovalService: supportServices.soulApprovalService,
     topologyAuditService: supportServices.topologyAuditService,
-    gardenBacklogThresholds,
-    pathPlasticityService: supportServices.pathPlasticityService
+    gardenBacklogThresholds
   };
 }
 
@@ -286,9 +282,6 @@ function createDaemonCoreSupportServices(
   input: {
     readonly eventLogRepo: SqliteEventLogRepo;
     readonly runtimeNotifier: AlayaRuntimeNotifier;
-    readonly trustStateRepo: SqliteTrustStateRepo;
-    readonly pathRelationRepo: SqlitePathRelationRepo;
-    readonly eventPublisher: EventPublisher;
   },
   runService: RunService
 ) {
@@ -300,12 +293,6 @@ function createDaemonCoreSupportServices(
     }),
     topologyAuditService: new SoulTopologyAuditService({
       eventLogRepo: input.eventLogRepo
-    }),
-    pathPlasticityService: createPathPlasticityService({
-      eventLogRepo: input.eventLogRepo,
-      trustStateRepo: input.trustStateRepo,
-      pathRelationRepo: input.pathRelationRepo,
-      eventPublisher: input.eventPublisher
     })
   };
 }

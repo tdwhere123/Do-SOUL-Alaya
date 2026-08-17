@@ -54,7 +54,7 @@ function persistRecord(
     source_version: request.source_version,
     content_digest: contentDigest
   }, sha256);
-  return stores.putRecord(verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
+  const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
     ...receiptFields(identity),
     schema_version: 1,
     workspace_id: request.workspace_id,
@@ -67,7 +67,8 @@ function persistRecord(
     valid_from: request.valid_from,
     valid_to: request.valid_to,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
-  }), sha256));
+  }), sha256);
+  return stores.putRecord(record, request.content_bytes);
 }
 
 function persistSpan(

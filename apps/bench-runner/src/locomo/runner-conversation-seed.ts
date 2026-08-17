@@ -73,7 +73,6 @@ async function seedLocomoSession(input: {
   const sessionSurfaceId = benchSessionSurfacesEnabled()
     ? `${input.conversation.sample_id}-s${input.sessionOrdinal}`
     : undefined;
-  const sessionMemberMemoryIds: string[] = [];
   let previousTurnSeedMemoryIds: readonly string[] = [];
   let seedIndex = input.seedIndex;
   for (let turnOrdinal = 0; turnOrdinal < input.session.turns.length; turnOrdinal += 1) {
@@ -89,9 +88,8 @@ async function seedLocomoSession(input: {
     });
     seedIndex += 1;
     previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
-    recordLocomoSeedResult(input, turn, seedResult, sessionMemberMemoryIds);
+    recordLocomoSeedResult(input, turn, seedResult);
   }
-  await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
   return seedIndex;
 }
 
@@ -130,8 +128,7 @@ function recordLocomoSeedResult(
     readonly sessionOrdinal: number;
   },
   turn: LocomoTurn,
-  seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>,
-  sessionMemberMemoryIds: string[]
+  seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
   const seedContent = buildLocomoSeedContent(turn);
   for (const seed of seedResult.seeds) {
@@ -146,7 +143,6 @@ function recordLocomoSeedResult(
       seed.memoryId,
       `${input.conversation.sample_id}-s${input.sessionOrdinal}`
     );
-    sessionMemberMemoryIds.push(seed.memoryId);
   }
 }
 

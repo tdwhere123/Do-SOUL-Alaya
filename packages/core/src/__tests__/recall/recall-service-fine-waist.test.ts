@@ -38,6 +38,7 @@ describe("RecallService complete fine-assessment field", () => {
         : null;
       const { dependencies } = createDependencies(memories);
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         graphSupportPort: spies.graphSupportPort,
         pathPlasticityPort: { getStrengthByMemoryId: spies.getStrengthByMemoryId },
@@ -255,6 +256,7 @@ function createLegacyReassessmentFixture() {
     [first, late], slots, { "claim-a": [first.object_id], "claim-z": [late.object_id] }
   );
   const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     graphSupportPort: spies.graphSupportPort,
     pathPlasticityPort: { getStrengthByMemoryId: spies.getStrengthByMemoryId },

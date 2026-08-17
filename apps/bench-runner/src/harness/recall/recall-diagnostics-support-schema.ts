@@ -20,7 +20,11 @@ const RecallPacketPlanDecisionSchema = z.discriminatedUnion("status", [
   }).strict().readonly(),
   z.object({
     status: z.literal("no_op"),
-    reason: z.enum(["no_finite_embedding_head", "unchanged_consensus"])
+    reason: z.enum([
+      "no_finite_embedding_head",
+      "unchanged_consensus",
+      "select_gamma_identity"
+    ])
   }).strict().readonly(),
   z.object({
     status: z.literal("rejected"),
@@ -399,6 +403,9 @@ function validatePacketPlanDecisionReason(
   if (reason === "no_finite_embedding_head" && hasEmbeddingHead) {
     addPacketPlanIssue(context, ["decision"], "Absent embedding head contains ranks");
   }
+  if (reason === "select_gamma_identity" && !isSelectGammaIdentityTrace(trace)) {
+    addPacketPlanIssue(context, ["decision"], "Select_Gamma identity is inconsistent");
+  }
   if (reason === "unchanged_consensus" && (!hasEmbeddingHead || changed)) {
     addPacketPlanIssue(context, ["decision"], "Unchanged consensus is inconsistent");
   }
@@ -422,6 +429,20 @@ function validatePacketPlanDecisionReason(
     addPacketPlanIssue(context, ["decision"], "Cardinality rejection has a full head");
   }
   validateProtectionDecision(trace, context);
+}
+
+function isSelectGammaIdentityTrace(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>
+): boolean {
+  return trace.decision.status === "no_op" &&
+    trace.embedding_head.length === 0 &&
+    trace.membership_authorizations.length === 0 &&
+    trace.protected_candidates.length === 0 &&
+    trace.tail_policy === undefined &&
+    sameOrderedKeys(
+      trace.baseline_head_candidate_keys,
+      trace.consensus_head_candidate_keys
+    );
 }
 
 function validateProtectionDecision(

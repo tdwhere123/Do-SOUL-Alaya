@@ -34,14 +34,15 @@ describe("seedLongMemEvalQuestion formation order", () => {
       turnTruncated: false,
       charsClipped: 0
     }));
+    const accrueSessionCoRecall = vi.fn(async () => ({
+      pairsObserved: 0,
+      minted: 0,
+      belowThreshold: 0
+    }));
     const workspace = {
       workspaceId: "workspace-formation-order",
       runId: "run-formation-order",
-      accrueSessionCoRecall: vi.fn(async () => ({
-        pairsObserved: 0,
-        minted: 0,
-        belowThreshold: 0
-      })),
+      accrueSessionCoRecall,
       proposeSynthesis: vi.fn(async () => ({ synthesisId: null }))
     } as unknown as BenchWorkspaceHandle;
 
@@ -64,16 +65,17 @@ describe("seedLongMemEvalQuestion formation order", () => {
         sourceObservedAt: "2025-12-01T00:00:00.000Z"
       })
     );
-    expect(workspace.accrueSessionCoRecall).toHaveBeenCalledTimes(2);
+    expect(accrueSessionCoRecall).not.toHaveBeenCalled();
   });
 
   it("keeps snapshot seeding free of session co-recall formation", async () => {
+    const accrueSessionCoRecall = vi.fn(async () => ({
+      pairsObserved: 0, minted: 0, belowThreshold: 0
+    }));
     const workspace = {
       workspaceId: "workspace-neutral-formation",
       runId: "run-neutral-formation",
-      accrueSessionCoRecall: vi.fn(async () => ({
-        pairsObserved: 0, minted: 0, belowThreshold: 0
-      })),
+      accrueSessionCoRecall,
       proposeSynthesis: vi.fn(async () => ({ synthesisId: null }))
     } as unknown as BenchWorkspaceHandle;
 
@@ -89,7 +91,7 @@ describe("seedLongMemEvalQuestion formation order", () => {
       seedFormationMode: "treatment_neutral"
     });
 
-    expect(workspace.accrueSessionCoRecall).not.toHaveBeenCalled();
+    expect(accrueSessionCoRecall).not.toHaveBeenCalled();
   });
 
   it("records a cache-bound outcome for every round, including zero-signal rounds", async () => {

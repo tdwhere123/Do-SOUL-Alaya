@@ -1,50 +1,56 @@
-import { describe, expect, it } from "vitest";
-import { applySelectGammaSynthesis } from
-  "../../../recall/delivery/select-gamma/synthesis-adapter.js";
+import type { RecallCandidate } from "@do-soul/alaya-protocol";
+import { describe, expect, it, vi } from "vitest";
+import {
+  applySelectGammaSynthesis,
+  type SelectGammaSynthesisPort
+} from "../../../recall/delivery/select-gamma/synthesis-adapter.js";
 
-const SELECTED = Object.freeze(["alpha", "beta", "gamma"]);
+const SELECTED = Object.freeze([
+  Object.freeze({ object_id: "alpha" }) as Readonly<RecallCandidate>,
+  Object.freeze({ object_id: "beta" }) as Readonly<RecallCandidate>
+]);
 
 describe("Select_Gamma synthesis adapter", () => {
-  it("returns selected evidence unchanged when synthesis is absent", () => {
-    const result = applySelectGammaSynthesis({
-      selected_candidate_keys: SELECTED
-    });
-    expect(result.selected_candidate_keys).toEqual(SELECTED);
+  it("reports absence without changing selected membership", async () => {
+    const result = await applySelectGammaSynthesis(input());
+
+    expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
     expect(result.synthesis).toEqual({ status: "absent" });
   });
 
-  it("keeps membership when synthesis succeeds", () => {
-    const result = applySelectGammaSynthesis({
-      selected_candidate_keys: SELECTED,
-      synthesize: () => ({ text: "one-shot summary" })
-    });
-    expect(result.selected_candidate_keys).toEqual(SELECTED);
-    expect(result.synthesis).toEqual({
-      status: "ok",
-      text: "one-shot summary"
-    });
+  it("runs one shot over selected evidence and ignores attempted membership output", async () => {
+    const synthesize = vi.fn(async () => ({
+      text: "one-shot summary",
+      selected_candidate_keys: ["injected"]
+    }));
+    const result = await applySelectGammaSynthesis(input({ synthesize }));
+
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect(ids(synthesize.mock.calls[0]![0].selected_evidence)).toEqual([
+      "alpha", "beta"
+    ]);
+    expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
+    expect(result.synthesis).toEqual({ status: "ok", text: "one-shot summary" });
   });
 
-  it("returns evidence plus failure metadata for malformed synthesis", () => {
-    const result = applySelectGammaSynthesis({
-      selected_candidate_keys: SELECTED,
-      synthesize: () => {
-        throw new Error("provider truncated");
-      }
-    });
-    expect(result.selected_candidate_keys).toEqual(SELECTED);
+  it("keeps membership with malformed output", async () => {
+    const result = await applySelectGammaSynthesis(input({
+      synthesize: async () => ({ text: "   " })
+    }));
+
+    expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
     expect(result.synthesis).toEqual({
       status: "malformed",
-      failure: "provider truncated"
+      failure: "synthesis output text must be non-empty"
     });
   });
 
-  it("returns evidence plus failure metadata for truncated synthesis", () => {
-    const result = applySelectGammaSynthesis({
-      selected_candidate_keys: SELECTED,
-      synthesize: () => ({ text: "cut off", truncated: true })
-    });
-    expect(result.selected_candidate_keys).toEqual(SELECTED);
+  it("keeps membership with truncated output", async () => {
+    const result = await applySelectGammaSynthesis(input({
+      synthesize: async () => ({ text: "cut off", truncated: true })
+    }));
+
+    expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
     expect(result.synthesis).toEqual({
       status: "truncated",
       failure: "synthesis output truncated",
@@ -52,15 +58,31 @@ describe("Select_Gamma synthesis adapter", () => {
     });
   });
 
-  it("cannot mutate the selected set", () => {
-    const result = applySelectGammaSynthesis({
-      selected_candidate_keys: SELECTED,
-      synthesize: () => ({
-        text: "inject",
-        selected_candidate_keys: ["injected"]
-      })
+  it("keeps membership and distinguishes a thrown failure", async () => {
+    const result = await applySelectGammaSynthesis(input({
+      synthesize: async () => {
+        throw new Error("provider unavailable");
+      }
+    }));
+
+    expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
+    expect(result.synthesis).toEqual({
+      status: "failed",
+      failure: "provider unavailable"
     });
-    expect(result.selected_candidate_keys).toEqual(SELECTED);
-    expect(result.selected_candidate_keys).not.toContain("injected");
   });
 });
+
+function input(port?: SelectGammaSynthesisPort) {
+  return {
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    query_text: "What matters?",
+    selected_evidence: SELECTED,
+    ...(port === undefined ? {} : { port })
+  } as const;
+}
+
+function ids(candidates: readonly Readonly<RecallCandidate>[]): string[] {
+  return candidates.map(({ object_id }) => object_id);
+}

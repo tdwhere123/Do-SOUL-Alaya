@@ -16,5 +16,6 @@ export type {
   ProposalReviewerAssignment,
   ProposalReviewerAssignmentInput,
   ScopedProposal,
+  TransactionBoundProposalMutation,
   UpdatePendingResolutionOptions
 } from "./types.js";

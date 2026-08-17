@@ -35,6 +35,7 @@ import type { BulkEnrichRuntimeSupport } from "../bulk-enrich/bulk-enrich-runtim
 import type { HostWorkerTaskRuntimeSupport } from "../host-worker/host-worker-runtime.js";
 import type { GardenSchedulerRuntimeSupport } from "../scheduler/scheduler-runtime-types.js";
 import type {
+  ClockBoundGardenRuntimeInput,
   CreateGardenRuntimeInput,
   GardenBacklogTelemetryObserver,
   GardenBacklogTelemetrySource,
@@ -54,9 +55,10 @@ export type GardenRuntimeCore = Readonly<{
 }>;
 
 export function createGardenRuntimeCore(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   warn: (message: string, meta: Record<string, unknown>) => void,
   createHostWorkerTaskRuntimeSupport: (input: Readonly<{
+    readonly now: () => string;
     readonly gardenTaskRepo?: SqliteGardenTaskRepo;
     readonly configService?: CreateGardenRuntimeInput["configService"];
     readonly eventPublisher: CreateGardenRuntimeInput["eventPublisher"];
@@ -66,10 +68,12 @@ export function createGardenRuntimeCore(
     readonly warn: (message: string, meta: Record<string, unknown>) => void;
   }>) => HostWorkerTaskRuntimeSupport
 ): GardenRuntimeCore {
+  const now = input.now;
   const schedulerEventLogPort = createGardenSchedulerEventLogPort(input.eventPublisher);
   const healthJournalPort = createHealthJournalPort(input.healthJournalRepo);
   const gardenTaskRepo = createGardenTaskRepo(input);
   const hostWorkerTaskRuntime = createHostWorkerTaskRuntimeSupport({
+    now,
     gardenTaskRepo,
     configService: input.configService,
     eventPublisher: input.eventPublisher,
@@ -80,6 +84,7 @@ export function createGardenRuntimeCore(
   });
   const gardenScheduler = createGardenScheduler(
     input,
+    now,
     schedulerEventLogPort,
     healthJournalPort,
     gardenTaskRepo,
@@ -98,7 +103,7 @@ export function createGardenRuntimeCore(
   };
 }
 
-export function createGardenBackgroundPassTracker(): Readonly<{
+export function createGardenBackgroundPassTracker(now: () => string): Readonly<{
   getLastBackgroundPassAt(): string | null;
   markBackgroundPassCompleted(): void;
 }> {
@@ -106,7 +111,7 @@ export function createGardenBackgroundPassTracker(): Readonly<{
   return {
     getLastBackgroundPassAt: () => lastBackgroundPassAt,
     markBackgroundPassCompleted: () => {
-      lastBackgroundPassAt = new Date().toISOString();
+      lastBackgroundPassAt = now();
     }
   };
 }
@@ -150,7 +155,7 @@ export function createBacklogTelemetryController(input: Readonly<{
 }
 
 export function createGardenRuntimeJanitor(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   gardenScheduler: GardenScheduler,
   healthJournalPort: HealthJournalRecordPort,
   createAuditorEventLogPort: (eventPublisher: CreateGardenRuntimeInput["eventPublisher"]) => AuditorEventLogPort
@@ -170,6 +175,7 @@ export function createGardenRuntimeJanitor(
   const janitorEventLogPort = createAuditorEventLogPort(input.eventPublisher);
 
   return new Janitor({
+    now: input.now,
     cleanupPort,
     tieringPort: input.gardenDataPorts.tieringPort,
     dormantDemotionPort: input.gardenDataPorts.dormantDemotionPort,
@@ -198,6 +204,7 @@ export function createGardenRuntimeJanitor(
 }
 
 export function createGardenRuntimeAuditor(input: Readonly<{
+  readonly now: () => string;
   readonly gardenScheduler: GardenScheduler;
   readonly gardenSchedulerRuntime: GardenSchedulerRuntimeSupport;
   readonly healthJournalPort: HealthJournalRecordPort;
@@ -221,6 +228,7 @@ export function createGardenRuntimeAuditor(input: Readonly<{
   const evidenceCheckPort = createAuditorEvidenceCheckPort(input);
 
   const auditor = new Auditor({
+    now: input.now,
     evidenceCheckPort,
     pointerHealthPort: input.gardenDataPorts.pointerHealthPort,
     greenMaintenancePort: input.gardenDataPorts.greenMaintenancePort,
@@ -321,31 +329,22 @@ async function findPrioritizedStaleEvidenceEntries(
 }
 
 export function createGardenRuntimeLibrarian(input: Readonly<{
+  readonly now: () => string;
   readonly gardenDataPorts: CreateGardenRuntimeInput["gardenDataPorts"];
   readonly gardenScheduler: GardenScheduler;
   readonly gardenSchedulerRuntime: GardenSchedulerRuntimeSupport;
   readonly healthJournalPort: HealthJournalRecordPort;
-  readonly pathPlasticityService: CreateGardenRuntimeInput["pathPlasticityService"];
 }>): Librarian {
   const librarianSchedulerPort: LibrarianSchedulerPort = {
     reportCompletion: (result) => input.gardenScheduler.reportCompletion(result)
   };
-  const pathPlasticityPort =
-    input.pathPlasticityService === undefined
-      ? undefined
-      : {
-          computeAndApplyPlasticity: input.pathPlasticityService.computeAndApplyPlasticity.bind(
-            input.pathPlasticityService
-          ),
-          markProcessed: input.gardenSchedulerRuntime.markPathPlasticityProcessed
-        };
 
   return new Librarian({
+    now: input.now,
     mergePort: input.gardenDataPorts.mergePort,
     neighborPort: input.gardenDataPorts.neighborPort,
     compressionPort: input.gardenDataPorts.compressionPort,
     synthesisPort: input.gardenDataPorts.synthesisPort,
-    ...(pathPlasticityPort === undefined ? {} : { pathPlasticityPort }),
     pathPlasticityPendingPort: input.gardenSchedulerRuntime.pathPlasticityPendingPort,
     scheduler: librarianSchedulerPort,
     healthJournal: input.healthJournalPort

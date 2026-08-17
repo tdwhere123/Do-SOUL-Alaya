@@ -1,9 +1,13 @@
 import {
   FIELD_OPERATOR_MANIFEST,
+  PROOF_EFFECT_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_VERSION,
   hashAddressableSourceSpanId,
   hashCausalUsageId,
+  hashContentDigest,
   hashDerivationJobId,
   hashEffectRequestDigest,
+  hashEffectGovernanceFrontier,
   hashFactorId,
   hashGenerationId,
   hashIncidenceId,
@@ -45,6 +49,10 @@ export function verifyPersistedSourceRecord(
   sha256: FieldContractSha256
 ): void {
   assertHashed("source record", row.record_id, () => hashSourceRecordId(row, sha256));
+  if (row.source_body !== null && hashContentDigest(row.source_body, sha256) !==
+      row.content_digest) {
+    throw new StorageError("VALIDATION_FAILED", "source record body digest mismatch");
+  }
 }
 
 export function verifyPersistedSourceSpan(
@@ -58,12 +66,13 @@ export function verifyPersistedFactor(
   row: FieldFactorDescriptorRow,
   sha256: FieldContractSha256
 ): void {
-  if (row.canonical_payload === null) {
+  const canonicalPayload = row.canonical_payload;
+  if (canonicalPayload === null) {
     throw new StorageError("VALIDATION_FAILED", "factor payload is required");
   }
   assertHashed("factor", row.factor_id, () => hashFactorId({
     family: row.family,
-    canonical_payload: row.canonical_payload,
+    canonical_payload: canonicalPayload,
     operator_id: row.operator_id
   }, sha256));
 }
@@ -135,12 +144,34 @@ export function verifyPersistedEffect(
   sha256: FieldContractSha256
 ): void {
   const supporting_receipt_ids = JSON.parse(row.supporting_receipt_ids_json) as string[];
+  const supporting_proof_witnesses = JSON.parse(row.supporting_proof_witnesses_json) as Array<{
+    receipt_id: string;
+    kind: string;
+    authority_event_id: string | null;
+    source_record_id: string | null;
+    source_content_digest: string | null;
+  }>;
+  if (row.policy_operator_id !== PROOF_EFFECT_OPERATOR_ID ||
+      row.policy_operator_version !== PROOF_EFFECT_OPERATOR_VERSION) {
+    throw new StorageError("VALIDATION_FAILED", "proof effect policy operator drift");
+  }
+  assertHashed("proof effect governance frontier", row.governance_frontier, () =>
+    hashEffectGovernanceFrontier(supporting_proof_witnesses, sha256));
   assertHashed("proof effect", row.request_digest, () => hashEffectRequestDigest({
+    schema_version: row.schema_version,
+    workspace_id: row.workspace_id,
+    actor_id: row.actor_id,
+    run_id: row.run_id,
+    delivery_id: row.delivery_id,
     action: row.action,
     target: row.target,
     scope: row.scope,
     effective_as_of: row.effective_as_of,
-    supporting_receipt_ids
+    supporting_receipt_ids,
+    supporting_proof_witnesses,
+    governance_frontier: row.governance_frontier,
+    policy_operator_id: row.policy_operator_id,
+    policy_operator_version: row.policy_operator_version
   }, sha256));
 }
 

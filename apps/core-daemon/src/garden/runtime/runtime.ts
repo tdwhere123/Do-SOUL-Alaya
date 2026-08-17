@@ -19,6 +19,7 @@ import { createGardenRuntimeBackgroundServices, BULK_ENRICH_DRAIN_CAP_PER_PASS }
 import { createHostWorkerTaskRuntimeSupport } from "../host-worker/host-worker-runtime.js";
 import { createGardenSchedulerRuntimeSupport } from "../scheduler/scheduler-runtime-support.js";
 import type {
+  ClockBoundGardenRuntimeInput,
   CreateGardenRuntimeInput,
   GardenRuntime
 } from "./runtime-types.js";
@@ -41,9 +42,10 @@ export type {
 } from "./runtime-types.js";
 
 export function createGardenRuntime(input: CreateGardenRuntimeInput): GardenRuntime {
-  const warn = input.warn ?? defaultGardenRuntimeWarn;
+  const runtimeInput = bindGardenRuntimeClock(input);
+  const warn = runtimeInput.warn ?? defaultGardenRuntimeWarn;
   const core = createGardenRuntimeCore(
-    input,
+    runtimeInput,
     warn,
     createHostWorkerTaskRuntimeSupport
   );
@@ -52,23 +54,23 @@ export function createGardenRuntime(input: CreateGardenRuntimeInput): GardenRunt
     warn
   });
   const runtimeSupportContext = createRuntimeSupportContext(
-    input,
+    runtimeInput,
     core.gardenScheduler,
     telemetry.requestBacklogTelemetryCapture
   );
   const gardenSchedulerRuntime = createGardenSchedulerRuntime(
-    input,
+    runtimeInput,
     core,
     telemetry,
     runtimeSupportContext,
     warn
   );
-  const roleServices = createGardenRoleServices(input, core, gardenSchedulerRuntime);
+  const roleServices = createGardenRoleServices(runtimeInput, core, gardenSchedulerRuntime);
   runtimeSupportContext.bindAuditorTask(roleServices.auditorRuntime.runAuditorTask);
-  const bulkEnrichRuntime = createGardenBulkEnrichRuntime(input, core, telemetry, warn);
-  const backgroundPassTracker = createGardenBackgroundPassTracker();
+  const bulkEnrichRuntime = createGardenBulkEnrichRuntime(runtimeInput, core, telemetry, warn);
+  const backgroundPassTracker = createGardenBackgroundPassTracker(runtimeInput.now);
   const backgroundServices = createGardenBackgroundRuntimeServices(
-    input,
+    runtimeInput,
     core,
     telemetry,
     runtimeSupportContext,
@@ -79,7 +81,7 @@ export function createGardenRuntime(input: CreateGardenRuntimeInput): GardenRunt
   );
   return createGardenRuntimeFacade(
     createGardenRuntimeFacadeInput(
-      input,
+      runtimeInput,
       core,
       telemetry,
       gardenSchedulerRuntime,
@@ -91,18 +93,30 @@ export function createGardenRuntime(input: CreateGardenRuntimeInput): GardenRunt
   );
 }
 
+function bindGardenRuntimeClock(input: CreateGardenRuntimeInput): ClockBoundGardenRuntimeInput {
+  return Object.freeze({
+    ...input,
+    now: input.now ?? systemNowIso
+  });
+}
+
+function systemNowIso(): string {
+  return new Date().toISOString();
+}
+
 function defaultGardenRuntimeWarn(message: string, meta: Record<string, unknown>): void {
   console.warn(message, meta);
 }
 
 function createGardenSchedulerRuntime(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   core: ReturnType<typeof createGardenRuntimeCore>,
   telemetry: ReturnType<typeof createBacklogTelemetryController>,
   runtimeSupportContext: ReturnType<typeof createRuntimeSupportContext>,
   warn: (message: string, meta: Record<string, unknown>) => void
 ): ReturnType<typeof createGardenSchedulerRuntimeSupport> {
   return createGardenSchedulerRuntimeSupport({
+    now: input.now,
     coherenceEdgeProducerPort: input.coherenceEdgeProducerPort,
     answersWithEdgeProducerPort: input.answersWithEdgeProducerPort,
     configService: input.configService,
@@ -126,7 +140,7 @@ function createGardenSchedulerRuntime(
 }
 
 function createGardenBackgroundRuntimeServices(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   core: ReturnType<typeof createGardenRuntimeCore>,
   telemetry: ReturnType<typeof createBacklogTelemetryController>,
   runtimeSupportContext: ReturnType<typeof createRuntimeSupportContext>,
@@ -154,7 +168,7 @@ function createGardenBackgroundRuntimeServices(
 }
 
 function createGardenRuntimeFacadeInput(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   core: ReturnType<typeof createGardenRuntimeCore>,
   telemetry: ReturnType<typeof createBacklogTelemetryController>,
   gardenSchedulerRuntime: ReturnType<typeof createGardenSchedulerRuntimeSupport>,
@@ -179,7 +193,7 @@ function createGardenRuntimeFacadeInput(
 }
 
 function createRuntimeSupportContext(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   gardenScheduler: {
     enqueue(task: {
       readonly task_id: string;
@@ -226,7 +240,7 @@ function createRuntimeSupportContext(
 }
 
 async function enqueueGardenTaskForAllWorkspaces(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   gardenScheduler: {
     enqueue(task: {
       readonly task_id: string;
@@ -245,7 +259,7 @@ async function enqueueGardenTaskForAllWorkspaces(
   resolveTargetObjectRefs: (workspaceId: string, nowIso: string) => readonly string[]
 ): Promise<void> {
   const workspaces = await input.workspaceRepo.list();
-  const nowIso = new Date().toISOString();
+  const nowIso = input.now();
   for (const workspace of workspaces) {
     gardenScheduler.enqueue({
       task_id: randomUUID(),
@@ -264,7 +278,7 @@ async function enqueueGardenTaskForAllWorkspaces(
 }
 
 function createGardenRoleServices(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   core: ReturnType<typeof createGardenRuntimeCore>,
   gardenSchedulerRuntime: ReturnType<typeof createGardenSchedulerRuntimeSupport>
 ): Readonly<{
@@ -279,6 +293,7 @@ function createGardenRoleServices(
     createGardenRuntimeEventLogPort
   );
   const auditorRuntime = createGardenRuntimeAuditor({
+    now: input.now,
     gardenScheduler: core.gardenScheduler,
     gardenSchedulerRuntime,
     healthJournalPort: core.healthJournalPort,
@@ -291,22 +306,23 @@ function createGardenRoleServices(
     createAuditorEventLogPort: createGardenRuntimeEventLogPort
   });
   const librarian = createGardenRuntimeLibrarian({
+    now: input.now,
     gardenDataPorts: input.gardenDataPorts,
     gardenScheduler: core.gardenScheduler,
     gardenSchedulerRuntime,
-    healthJournalPort: core.healthJournalPort,
-    pathPlasticityService: input.pathPlasticityService
+    healthJournalPort: core.healthJournalPort
   });
   return { janitor, auditorRuntime, librarian };
 }
 
 function createGardenBulkEnrichRuntime(
-  input: CreateGardenRuntimeInput,
+  input: ClockBoundGardenRuntimeInput,
   core: ReturnType<typeof createGardenRuntimeCore>,
   telemetry: ReturnType<typeof createBacklogTelemetryController>,
   warn: (message: string, meta: Record<string, unknown>) => void
 ): ReturnType<typeof createBulkEnrichRuntimeSupport> {
   return createBulkEnrichRuntimeSupport({
+    now: input.now,
     enrichPendingRepo: input.enrichPendingRepo,
     enrichMemoryLookup: input.enrichMemoryLookup,
     enrichConflictDetectionPort: input.enrichConflictDetectionPort,

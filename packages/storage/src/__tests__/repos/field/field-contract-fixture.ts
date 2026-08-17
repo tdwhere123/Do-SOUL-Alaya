@@ -5,11 +5,15 @@ import {
   FIELD_CONTRACT_SCHEMA_VERSION,
   FIELD_OPERATOR_MANIFEST,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_ID,
+  PROOF_EFFECT_OPERATOR_VERSION,
   fieldOperatorManifestDigest,
   hashAddressableSourceSpanId,
   hashCausalUsageId,
   hashContentDigest,
   hashDerivationJobId,
+  hashEffectGovernanceFrontier,
+  hashEffectRequestDigest,
   hashFactorId,
   hashGenerationId,
   hashIncidenceId,
@@ -191,8 +195,12 @@ export function hashedJob(
   };
 }
 
-export function hashedUsage(workspaceId: string, causalKey: string) {
-  const downstream_ref = "path-1";
+export function hashedUsage(
+  workspaceId: string,
+  causalKey: string,
+  downstreamRef = "path-1"
+) {
+  const downstream_ref = downstreamRef;
   const scope = workspaceId;
   const operator_id = CAUSAL_USAGE_OPERATOR_ID;
   return {
@@ -210,6 +218,54 @@ export function hashedUsage(workspaceId: string, causalKey: string) {
     scope,
     usage_kind: "causal" as const,
     operator_id,
+    recorded_at: CLOCK
+  };
+}
+
+export function hashedEffect(workspaceId: string, record: ReturnType<typeof hashedRecord>) {
+  const supporting_proof_witnesses = [
+    { receipt_id: "actor-proof-1", kind: "actor_authority",
+      authority_event_id: "delivery-event-1", source_record_id: null,
+      source_content_digest: null },
+    { receipt_id: "source-proof-1", kind: "source_grounding", authority_event_id: null,
+      source_record_id: record.record_id, source_content_digest: record.content_digest }
+  ];
+  const request = {
+    schema_version: 2 as const,
+    workspace_id: workspaceId,
+    actor_id: "actor-1",
+    run_id: "run-1",
+    delivery_id: "delivery-1",
+    action: "activate",
+    target: "claim-1",
+    scope: workspaceId,
+    effective_as_of: CLOCK,
+    supporting_receipt_ids: supporting_proof_witnesses.map((item) => item.receipt_id),
+    supporting_proof_witnesses,
+    governance_frontier: hashEffectGovernanceFrontier(
+      supporting_proof_witnesses,
+      fieldSha256
+    ),
+    policy_operator_id: PROOF_EFFECT_OPERATOR_ID,
+    policy_operator_version: PROOF_EFFECT_OPERATOR_VERSION
+  };
+  return {
+    schema_version: request.schema_version,
+    request_digest: hashEffectRequestDigest(request, fieldSha256),
+    workspace_id: request.workspace_id,
+    actor_id: request.actor_id,
+    run_id: request.run_id,
+    delivery_id: request.delivery_id,
+    action: request.action,
+    target: request.target,
+    scope: request.scope,
+    effective_as_of: request.effective_as_of,
+    decision: "allow" as const,
+    supporting_receipt_ids_json: JSON.stringify(request.supporting_receipt_ids),
+    supporting_proof_witnesses_json: JSON.stringify(supporting_proof_witnesses),
+    governance_frontier: request.governance_frontier,
+    policy_operator_id: request.policy_operator_id,
+    policy_operator_version: request.policy_operator_version,
     recorded_at: CLOCK
   };
 }

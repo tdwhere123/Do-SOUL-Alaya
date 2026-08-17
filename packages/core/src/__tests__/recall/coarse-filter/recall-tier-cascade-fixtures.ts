@@ -118,6 +118,7 @@ function createDependencies(params: TierCascadeFixtureParams = {}): {
   const warnSpy = vi.fn(params.warn ?? (() => undefined));
   return {
     dependencies: {
+      testOnlyAllowInMemoryFieldQuerySession: true,
       now: () => "2026-05-07T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: createMemoryRepo(params, findByWorkspaceIdSpy),

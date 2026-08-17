@@ -4,6 +4,10 @@ import {
   type SoulResolveResponse
 } from "@do-soul/alaya-protocol";
 import type { ResolutionService } from "@do-soul/alaya-core";
+import {
+  matchesDeliveryContext,
+  resolveDeliveredTargetSources
+} from "./resolution-delivery-scope.js";
 
 // invariant: trusted MCP call context fields the handler binds onto
 // the protocol-stripped agent-facing request before calling
@@ -15,10 +19,11 @@ export interface SoulResolveCallContext {
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly agentTarget: string;
+  readonly sessionId: string;
 }
 
 export interface SoulResolveHandlerDependencies {
-  readonly resolutionService: ResolutionService;
+  readonly resolutionService: Pick<ResolutionService, "resolve">;
   // invariant: delivered object identities gate which objects the agent may
   // resolve against this delivery. Bare object_id is insufficient now that
   // memory_entry and synthesis_capsule can share an id in recall competition.
@@ -49,6 +54,18 @@ export interface SoulResolveHandlerDependencies {
   readonly claimSourceReader?: {
     findSourceObjectRefs(targetObjectId: string): Promise<readonly string[] | null>;
   };
+  readonly causalUsageRecorder?: {
+    record(input: Readonly<{
+      readonly workspaceId: string;
+      readonly causalKey: string;
+      readonly usedObjectIds: readonly string[];
+      readonly occurredAt: string;
+      readonly scope: string;
+      readonly runId: string | null;
+      readonly causedBy: string;
+    }>): Promise<void>;
+  };
+  readonly now?: () => string;
 }
 
 export class SoulResolveScopeError extends Error {
@@ -67,7 +84,7 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
       context: SoulResolveCallContext
     ): Promise<SoulResolveResponse> {
       const request = SoulResolveRequestSchema.parse(rawArguments);
-      await assertDeliveryInScope(
+      const usedObjectIds = await resolveCausalUsageSourcesInScope(
         deps.trustStateRecorder,
         deps.claimSourceReader,
         request.delivery_id,
@@ -89,6 +106,9 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
           ? {}
           : { policyClassification: request.policy_classification })
       });
+      if (isPositiveGovernedAdoption(outcome)) {
+        await recordResolvedCausalUsage(deps, context, outcome.auditEventId, usedObjectIds);
+      }
       return SoulResolveResponseSchema.parse({
         target_object_id: request.target_object_id,
         resolution: outcome.resolution,
@@ -104,30 +124,22 @@ export function createSoulResolveHandler(deps: SoulResolveHandlerDependencies) {
   };
 }
 
-async function assertDeliveryInScope(
+function isPositiveGovernedAdoption(
+  outcome: Awaited<ReturnType<ResolutionService["resolve"]>>
+): boolean {
+  return outcome.resolution === "confirm" &&
+    outcome.status === "applied" &&
+    outcome.effectDecision === "allow";
+}
+
+async function resolveCausalUsageSourcesInScope(
   trustStateRecorder: SoulResolveHandlerDependencies["trustStateRecorder"],
   claimSourceReader: SoulResolveHandlerDependencies["claimSourceReader"],
   deliveryId: string,
   targetObjectId: string,
   context: SoulResolveCallContext
-): Promise<void> {
-  const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
-  if (delivery === null) {
-    throw new SoulResolveScopeError(
-      "VALIDATION",
-      `delivery_id ${deliveryId} is not a recorded recall delivery in this context`
-    );
-  }
-  if (
-    delivery.agent_target !== context.agentTarget ||
-    delivery.workspace_id !== context.workspaceId ||
-    delivery.run_id !== context.runId
-  ) {
-    throw new SoulResolveScopeError(
-      "NEEDS_CONTEXT",
-      `delivery_id ${deliveryId} is not in the calling agent's recall scope`
-    );
-  }
+): Promise<readonly string[]> {
+  const delivery = await requireScopedDelivery(trustStateRecorder, deliveryId, context);
   // invariant: agent may only resolve objects the cited delivery
   // actually delivered. Anything else is scope-confusion: a valid
   // delivery_id paired with an arbitrary target_object_id would let
@@ -138,18 +150,12 @@ async function assertDeliveryInScope(
       : await claimSourceReader.findSourceObjectRefs(targetObjectId);
   const targetObjectKind = sourceRefs === null ? "memory_entry" : "claim_form";
 
-  if (isDeliveredObjectInScope(delivery, targetObjectId, targetObjectKind)) {
-    return;
-  }
-  // invariant: indirect scope path — recall delivers MemoryEntry rows,
-  // but a draft claim_form is reachable through its source_object_refs.
-  // If the target is a claim whose source memories intersect what was
-  // delivered, the agent has legitimate context to resolve it.
-  if (sourceRefs !== null) {
-    if (sourceRefs.some((ref) => isDeliveredObjectInScope(delivery, ref, "memory_entry"))) {
-      return;
-    }
-  }
+  const deliveredSources = resolveDeliveredTargetSources(
+    delivery,
+    targetObjectId,
+    sourceRefs
+  );
+  if (deliveredSources !== null) return deliveredSources;
   // The kind is named so an operator sees WHICH (object_id, object_kind)
   // tuple was checked: a same-id synthesis_capsule can be in the delivery
   // yet still fail here because only memory_entry / claim_form targets are
@@ -160,23 +166,41 @@ async function assertDeliveryInScope(
   );
 }
 
-function isDeliveredObjectInScope(
-  delivery: Readonly<{
-    readonly delivered_object_ids: readonly string[];
-    readonly delivered_objects?: readonly {
-      readonly object_id: string;
-      readonly object_kind: string;
-    }[];
-  }>,
-  objectId: string,
-  objectKind: string
-): boolean {
-  if (delivery.delivered_objects === undefined) {
-    return delivery.delivered_object_ids.includes(objectId);
+async function requireScopedDelivery(
+  trustStateRecorder: SoulResolveHandlerDependencies["trustStateRecorder"],
+  deliveryId: string,
+  context: SoulResolveCallContext
+) {
+  const delivery = await trustStateRecorder.findDeliveryById(deliveryId);
+  if (delivery === null) {
+    throw new SoulResolveScopeError(
+      "VALIDATION",
+      `delivery_id ${deliveryId} is not a recorded recall delivery in this context`
+    );
   }
-  return delivery.delivered_objects.some(
-    (object) =>
-      object.object_id === objectId &&
-      object.object_kind === objectKind
-  );
+  if (!matchesDeliveryContext(delivery, context)) {
+    throw new SoulResolveScopeError(
+      "NEEDS_CONTEXT",
+      `delivery_id ${deliveryId} is not in the calling agent's recall scope`
+    );
+  }
+  return delivery;
+}
+
+async function recordResolvedCausalUsage(
+  deps: SoulResolveHandlerDependencies,
+  context: SoulResolveCallContext,
+  causalKey: string,
+  usedObjectIds: readonly string[]
+): Promise<void> {
+  if (deps.causalUsageRecorder === undefined || usedObjectIds.length === 0) return;
+  await deps.causalUsageRecorder.record({
+    workspaceId: context.workspaceId,
+    causalKey,
+    usedObjectIds,
+    occurredAt: deps.now?.() ?? new Date().toISOString(),
+    scope: context.workspaceId,
+    runId: context.runId,
+    causedBy: context.agentTarget
+  });
 }

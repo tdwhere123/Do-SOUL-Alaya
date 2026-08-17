@@ -1,6 +1,7 @@
 import {
   type AsyncSideEffectAuditEventLogPort,
-  type AsyncSideEffectAuditNotifierPort
+  type AsyncSideEffectAuditNotifierPort,
+  type EventPublisher
 } from "@do-soul/alaya-core";
 import {
   ControlPlaneObjectKind,
@@ -10,13 +11,9 @@ import {
   RetentionPolicy,
   SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
-  StorageTier,
   TaskObjectSurfaceSchema,
-  type CausalUsagePort,
   type ContextDeliveryRecord,
-  type EventLogEntry,
   type MemoryEntry,
-  type MemoryEntryMutableFields,
   type RecallCandidate,
   type RecallPolicy,
   type SoulActiveConstraint,
@@ -27,7 +24,6 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
-import type { GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { enqueuePostTurnExtractTask, enqueueRecallExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
   buildMemorySearchResult,
@@ -42,22 +38,12 @@ import {
   emitRecallDeliveredTelemetry
 } from "./recall-usage-telemetry.js";
 import {
-  promoteRecallHitMemories,
   resolveUsageState,
-  resolveUsedMemoryObjectIds,
   resolveUsedObjectIdentities,
   resolveUsedObjectIds,
   validateReportedRecallHits,
   validateUsageStateConsistency
 } from "./recall-usage-support.js";
-import {
-  recordCausalUsedReceipts
-} from "../usage/causal-usage-recorder.js";
-
-type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
-  readonly last_used_at?: string;
-  readonly last_hit_at?: string;
-};
 
 export interface RecallUsageToolCallContext {
   readonly workspaceId: string;
@@ -68,6 +54,7 @@ export interface RecallUsageToolCallContext {
 }
 
 export interface RecallUsageHandlerDependencies {
+  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
   readonly recallService: {
     recall(params: {
       readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;
@@ -97,26 +84,13 @@ export interface RecallUsageHandlerDependencies {
     recordDelivery(input: Omit<ContextDeliveryRecord, "audit_event_id">): Promise<ContextDeliveryRecord>;
     recordUsage(
       input: Omit<UsageProofRecord, "audit_event_id">,
-      options?: { readonly expectedWorkspaceId?: string }
+      options?: Readonly<{
+        readonly expectedWorkspaceId?: string;
+        readonly expectedAgentTarget?: string;
+        readonly expectedRunId?: string;
+      }>
     ): Promise<UsageProofRecord>;
     findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
-  };
-  readonly pathRelationProposalService?: {
-    onCoUsage(
-      usedObjectIds: readonly string[],
-      workspaceId: string
-    ): Promise<void>;
-    onCoRecall(
-      recalledObjectIds: readonly string[],
-      workspaceId: string,
-      allowedPairKeys?: ReadonlySet<string>
-    ): Promise<void>;
-  };
-  readonly coRecallCoherenceGate?: {
-    coherentPairKeys(
-      workspaceId: string,
-      deliveredObjectIds: readonly string[]
-    ): Promise<ReadonlySet<string>>;
   };
   readonly memoryService: {
     findByIdScoped(
@@ -127,12 +101,6 @@ export interface RecallUsageHandlerDependencies {
       objectIds: readonly string[],
       workspaceId: string
     ): Promise<readonly Readonly<MemoryEntry>[]>;
-    updateScoped?(
-      objectId: string,
-      workspaceId: string,
-      fields: MemoryUsageRefreshFields,
-      reason: string
-    ): Promise<Readonly<MemoryEntry>>;
   };
   readonly evidenceService?: {
     findByIdScoped?(
@@ -146,39 +114,10 @@ export interface RecallUsageHandlerDependencies {
       readonly evidence_health_state: string;
     }> | null>;
   };
-  readonly eventPublisher?: {
-    appendManyWithMutation<T>(
-      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-      mutate: (entries: readonly EventLogEntry[]) => T
-    ): Promise<T>;
-  };
   readonly asyncSideEffectAudit?: {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;
   };
-  readonly memoryEntryRepo?: {
-    updateTier(input: {
-      readonly objectId: string;
-      readonly workspaceId: string;
-      readonly fromTier: StorageTier;
-      readonly toTier: StorageTier;
-      readonly updatedAt: string;
-      readonly expectedUpdatedAt: string;
-      readonly activationBump?: number;
-      readonly lastUsedAt?: string;
-      readonly lastHitAt?: string;
-    }): Readonly<MemoryEntry> | null;
-  };
-  readonly dynamicsService?: {
-    emitKarmaEvent(input: {
-      readonly kind: "reuse_gain";
-      readonly objectId: string;
-      readonly workspaceId: string;
-      readonly runId?: string | null;
-    }): Promise<void>;
-  };
-  readonly graphEdgePort?: GraphEdgeCreationPort;
-  readonly causalUsagePort?: CausalUsagePort;
   readonly gardenTaskRepo?: {
     enqueue(input: GardenTaskEnqueueInput): { readonly task_id: string };
     findById(taskId: string): GardenTaskRow | null;
@@ -332,10 +271,6 @@ export function createReportContextUsageHandler(params: Readonly<{
   readonly warn: WarnPort;
 }>) {
   const { deps } = params;
-  if (deps.causalUsagePort === undefined) {
-    throw new Error("causal usage port must be constructed at the composition root");
-  }
-  const causalUsagePort = deps.causalUsagePort;
 
   return async function reportContextUsage(
     request: SoulReportContextUsageRequest,
@@ -348,7 +283,6 @@ export function createReportContextUsageHandler(params: Readonly<{
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
     const usedObjects = resolveUsedObjectIdentities(request);
-    const usedMemoryObjectIds = resolveUsedMemoryObjectIds(request);
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
@@ -364,16 +298,11 @@ export function createReportContextUsageHandler(params: Readonly<{
         reason: request.reason ?? null,
         reported_at: reportedAt
       },
-      { expectedWorkspaceId: context.workspaceId }
-    );
-    await promoteRecallHitMemories(params, request, context, linkedDelivery, reportedAt);
-    await maybeEmitCoUsage(
-      params,
-      linkedDelivery,
-      usedMemoryObjectIds,
-      request,
-      context,
-      causalUsagePort
+      {
+        expectedWorkspaceId: context.workspaceId,
+        expectedAgentTarget: context.agentTarget,
+        expectedRunId: context.runId ?? context.sessionId
+      }
     );
     enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
@@ -414,34 +343,6 @@ function candidateHasPartialExplainability(candidate: Readonly<RecallCandidate>)
     candidate.score_factors === undefined ||
     candidate.budget_state === undefined
   );
-}
-
-async function maybeEmitCoUsage(
-  params: Readonly<{
-    readonly deps: RecallUsageHandlerDependencies;
-    readonly now: () => string;
-    readonly warn: WarnPort;
-  }>,
-  linkedDelivery: Readonly<ContextDeliveryRecord> | null,
-  usedObjectIds: readonly string[],
-  request: SoulReportContextUsageRequest,
-  context: RecallUsageToolCallContext,
-  causalUsagePort: CausalUsagePort
-): Promise<void> {
-  if (linkedDelivery === null) {
-    return;
-  }
-  const workspaceId = linkedDelivery.workspace_id ?? context.workspaceId;
-  recordCausalUsedReceipts(causalUsagePort, {
-    workspaceId,
-    deliveryId: request.delivery_id,
-    usedObjectIds,
-    occurredAt: params.now(),
-    scope: workspaceId,
-    ...(params.deps.asyncSideEffectAudit === undefined ? {} : {
-      eventLog: params.deps.asyncSideEffectAudit.eventLogRepo
-    })
-  });
 }
 
 export function createGardenTaskPayloadFingerprint(

@@ -48,9 +48,9 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
   "soul.emit_candidate_signal":
     "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. Use first-class source_memory_refs, supersedes_refs, exception_to_refs, contradicts_refs, and incompatible_with_refs when the signal should propose graph edges; do not put those graph hints only in raw_payload. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
   "soul.propose_memory_update":
-    "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
+    "WHEN: a durable memory update or source privacy deletion needs governance review. Submit a pending memory update or privacy_erase proposal; this does not directly mutate storage. An accepted privacy_erase irreversibly removes the source closure. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
   "soul.review_memory_proposal":
-    "WHEN: a human reviewer has explicitly approved or rejected a pending proposal and you need to record their decision. Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
+    "WHEN: a human reviewer has explicitly approved or rejected a pending memory update or privacy erase proposal. Record the decision with an explicit governance trace; accepting privacy_erase irreversibly removes the source closure, while rejecting it does not erase. Requires reviewer_identity so the review record names who approved or rejected the change.",
   "soul.list_pending_proposals":
     "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
   "soul.propose_edge":

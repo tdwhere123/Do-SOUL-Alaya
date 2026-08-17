@@ -177,7 +177,6 @@ vi.mock("@do-soul/alaya-core", async (importOriginal) => {
     ...buildToolRuntimeWiringCoreMocks({ hoisted }),
     fieldContractSha256: actual.fieldContractSha256,
     activateEmptyGeneration: actual.activateEmptyGeneration,
-    createPortBackedGenerationStore: actual.createPortBackedGenerationStore,
     createInMemoryFieldQuerySession: actual.createInMemoryFieldQuerySession,
     createInMemoryFieldStores: actual.createInMemoryFieldStores,
     createProjectionGenerationReceipt: actual.createProjectionGenerationReceipt,

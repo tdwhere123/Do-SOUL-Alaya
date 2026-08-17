@@ -64,6 +64,39 @@ describe("DeferredObligationService", () => {
     });
   });
 
+  it("commits an additional resolution audit with the obligation mutation", async () => {
+    const harness = createHarness();
+    const sink: EventLogEntry[] = [];
+
+    await harness.service.create({
+      kind: "evidence_refresh",
+      description: "Need more evidence.",
+      sourceRunId: "run-1",
+      workspaceId: "workspace-1",
+      targetEntityId: "claim-1",
+      expiresAt: "2026-04-16T12:00:00.000Z"
+    }, {
+      buildAdditionalEventInputs: (obligation) => [{
+        event_type: "soul.resolution.defer_applied",
+        entity_type: "soul_resolution",
+        entity_id: "claim-1",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        caused_by: "agent-1",
+        payload_json: { obligation_id: obligation.obligation_id }
+      }],
+      additionalEventsSink: sink
+    });
+
+    expect(harness.appendManyWithMutation).toHaveBeenCalledOnce();
+    expect(harness.events.map((event) => event.event_type)).toEqual([
+      ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
+      "soul.resolution.defer_applied"
+    ]);
+    expect(sink).toHaveLength(1);
+    expect(harness.getById("obligation-1")?.state).toBe("pending");
+  });
+
   it("fulfills a pending obligation and emits obligation.fulfilled", async () => {
     const harness = createHarness([
       createObligation({

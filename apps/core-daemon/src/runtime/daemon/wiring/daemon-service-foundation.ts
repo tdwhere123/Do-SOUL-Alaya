@@ -246,6 +246,7 @@ function createSlotClaimRuntime(
     slotService,
     runtimeNotifier: input.runtimeNotifier,
     eventPublisher,
+    effectDecisionStore: input.fieldComposition.effectDecisionStore,
     canonicalAliasService
   });
   claimServiceRef.current = claimService;

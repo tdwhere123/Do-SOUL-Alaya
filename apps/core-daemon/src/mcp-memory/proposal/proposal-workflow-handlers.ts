@@ -1,15 +1,5 @@
 import {
-  ControlPlaneObjectKind,
-  MemoryGovernanceEventType,
-  ProposalOptionKind,
   ProposalResolutionState,
-  ProposalSchema,
-  RetentionPolicy,
-  SoulProposalCreatedPayloadSchema,
-  SoulProposalResolvedPayloadSchema,
-  SoulReviewCompletedPayloadSchema,
-  SoulReviewCreatedPayloadSchema,
-  TransitionCausedBy,
   type EventLogEntry,
   type Proposal,
   type SoulListPendingProposalsRequest,
@@ -19,31 +9,29 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler-types.js";
 import {
-  acceptProposalWithDurableMemoryUpdate,
-  acceptProposalWithDurablePathRelationGovernance,
-  acceptProposalWithDurableSynthesisCreate,
-  prepareAcceptedProposalApply
-} from "./proposal-acceptance.js";
-import {
   assertProposalContext,
   assertReviewCallerIsAllowed,
   assertReviewerAssignment,
   createWorkflowError,
-  normalizeResolutionError,
   resolveReviewerIdentity
 } from "./proposal-workflow-reviewer.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
 import { buildProposalReviewKarmaMutation } from "./proposal-review-karma.js";
+import { prepareMemoryProposalOperation } from "./phases/request-operation.js";
+import { buildMemoryProposal } from "./phases/proposal-construction.js";
+import { combineResolutionMutations } from "./phases/resolution-mutation.js";
 import {
-  SourceDeliveryAnchorValidationError,
-  type ProposalCreationEventInput,
-  type ProposalResolutionEventInput
+  buildProposalCreationEvents,
+  buildProposalResolutionEvents
+} from "./phases/proposal-events.js";
+import {
+  applyProposalReviewResolution,
+  buildProposalReviewResolutionOptions,
+  prepareAcceptedReviewApply
+} from "./phases/review-resolution.js";
+import {
+  SourceDeliveryAnchorValidationError
 } from "./proposal-workflow-types.js";
-
-type ProposalReviewResolutionOptions = Readonly<{
-  readonly reviewerIdentity: string;
-  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
-}>;
 
 export function createProposalWorkflowHandlers(input: Readonly<{
   readonly deps: McpMemoryProposalWorkflowDependencies;
@@ -89,33 +77,21 @@ async function proposeMemoryUpdate(
   const proposalId = input.generateObjectId();
   const sourceDeliveryIds = request.source_delivery_ids ?? null;
   await validateSourceDeliveryIds(input.deps, sourceDeliveryIds, context);
-  const targetBaselineUpdatedAt = await readProposalTargetBaseline(
-    input.deps,
-    request.target_object_id,
-    context.workspaceId
+  const proposalMutation = await prepareMemoryProposalOperation(
+    request,
+    async () => await readProposalTargetBaseline(
+      input.deps,
+      request.target_object_id,
+      context.workspaceId
+    ),
+    (message) => createWorkflowError("VALIDATION", message)
   );
-  const proposal = ProposalSchema.parse({
-    runtime_id: proposalId,
-    object_kind: ControlPlaneObjectKind.PROPOSAL,
-    task_surface_ref: context.surfaceId ?? null,
-    expires_at: null,
-    derived_from: request.target_object_id,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    proposal_id: proposalId,
-    dossier_ref: null,
-    recommended_option_id: null,
-    proposal_options: [
-      {
-        option_id: `memory_update_${proposalId}`,
-        option_kind: ProposalOptionKind.REQUEST_CONFIRMATION,
-        preserves_protected_constraints: true,
-        dropped_candidates: [],
-        unresolved_after_apply: [],
-        requires_confirmation: true
-      }
-    ],
-    resolution_state: ProposalResolutionState.PENDING,
-    last_updated_at: timestamp
+  const proposal = buildMemoryProposal({
+    proposalId,
+    timestamp,
+    request,
+    context,
+    mutation: proposalMutation
   });
 
   const created = await input.deps.proposalRepo.createProposalWithEvents(
@@ -123,11 +99,12 @@ async function proposeMemoryUpdate(
       proposal,
       workspace_id: context.workspaceId,
       run_id: context.runId,
-      target_object_kind: "memory_entry",
-      proposed_changes: request.proposed_changes,
+      proposal_operation: proposalMutation.operation,
+      target_object_kind: proposalMutation.targetObjectKind,
+      proposed_changes: proposalMutation.proposedChanges,
       proposed_change_summary: request.reason,
       created_at: timestamp,
-      target_baseline_updated_at: targetBaselineUpdatedAt,
+      target_baseline_updated_at: proposalMutation.targetBaselineUpdatedAt,
       source_delivery_ids: sourceDeliveryIds
     },
     buildProposalCreationEvents(proposal, context, sourceDeliveryIds),
@@ -149,41 +126,78 @@ async function reviewMemoryProposal(
   const scopedProposal = await loadPendingScopedProposal(input.deps, request.proposal_id, context);
   const reviewerIdentity = resolveProposalReviewer(input.deps, scopedProposal, request, context);
   const reviewedAt = input.now();
-  const toState =
-    request.verdict === "accept"
-      ? ProposalResolutionState.ACCEPTED
-      : ProposalResolutionState.REJECTED;
-  const acceptedMemoryUpdate =
-    request.verdict === "accept"
-      ? await prepareAcceptedProposalApply(
-          input.deps,
-          scopedProposal,
-          context,
-          input.now,
-          input.generateObjectId
-        )
-      : undefined;
+  const resolved = await resolveProposalReview(
+    input, scopedProposal, request, context, reviewerIdentity, reviewedAt
+  );
+  return await completeProposalReview(input.deps, resolved.result, resolved.afterCommit);
+}
+
+async function resolveProposalReview(
+  input: Readonly<{
+    readonly deps: McpMemoryProposalWorkflowDependencies;
+    readonly now: () => string;
+    readonly generateObjectId: () => string;
+  }>,
+  scopedProposal: Awaited<ReturnType<typeof loadPendingScopedProposal>>,
+  request: SoulReviewMemoryProposalRequest,
+  context: McpMemoryToolCallContext,
+  reviewerIdentity: string,
+  reviewedAt: string
+) {
+  const toState = reviewResolutionState(request);
+  const acceptedMemoryUpdate = await prepareAcceptedReviewApply({
+    deps: input.deps,
+    scopedProposal,
+    request,
+    context,
+    now: input.now,
+    generateObjectId: input.generateObjectId
+  });
   const karmaMutation = buildProposalReviewKarmaMutation(
     input.deps,
     scopedProposal,
     request.verdict === "accept" ? "accept" : "reject",
     context
   );
-  const resolved = await applyProposalReviewResolution(
-    input.deps,
+  const result = await applyProposalReviewResolution({
+    deps: input.deps,
     scopedProposal,
-    reviewerIdentity,
     reviewedAt,
     toState,
-    buildProposalResolutionEvents(scopedProposal, context, reviewerIdentity, request, reviewedAt, toState),
-    acceptedMemoryUpdate,
-    buildProposalReviewResolutionOptions(
+    reviewEvents: buildProposalResolutionEvents({
+      scopedProposal,
+      context,
       reviewerIdentity,
-      karmaMutation?.applySynchronousResolutionMutation
+      request,
+      reviewedAt,
+      toState
+    }),
+    acceptedApply: acceptedMemoryUpdate,
+    options: buildProposalReviewResolutionOptions(
+      reviewerIdentity,
+      combineResolutionMutations(
+        karmaMutation?.applySynchronousResolutionMutation
+      )
     )
-  );
-  karmaMutation?.afterCommit();
-  await notifyResolvedEvents(input.deps, resolved.events);
+  });
+  return { result, afterCommit: karmaMutation?.afterCommit };
+}
+
+function reviewResolutionState(
+  request: SoulReviewMemoryProposalRequest
+): Proposal["resolution_state"] {
+  return request.verdict === "accept"
+    ? ProposalResolutionState.ACCEPTED
+    : ProposalResolutionState.REJECTED;
+}
+
+async function completeProposalReview(
+  deps: McpMemoryProposalWorkflowDependencies,
+  resolved: Readonly<{ readonly proposal: Readonly<Proposal>; readonly events: readonly EventLogEntry[] }>,
+  afterCommit: (() => void) | undefined
+): Promise<Readonly<{ proposal_id: string; resolution_state: Proposal["resolution_state"] }>> {
+  afterCommit?.();
+  await notifyResolvedEvents(deps, resolved.events);
   return {
     proposal_id: resolved.proposal.proposal_id,
     resolution_state: resolved.proposal.resolution_state
@@ -243,98 +257,6 @@ function resolveProposalReviewer(
   return reviewerIdentity;
 }
 
-async function applyProposalReviewResolution(
-  deps: McpMemoryProposalWorkflowDependencies,
-  scopedProposal: NonNullable<Awaited<ReturnType<McpMemoryProposalWorkflowDependencies["proposalRepo"]["findScopedById"]>>>,
-  reviewerIdentity: string,
-  reviewedAt: string,
-  toState: Proposal["resolution_state"],
-  reviewEvents: readonly ProposalResolutionEventInput[],
-  acceptedMemoryUpdate: Awaited<ReturnType<typeof prepareAcceptedProposalApply>> | undefined,
-  options: ProposalReviewResolutionOptions
-): Promise<Readonly<{
-  readonly proposal: Readonly<Proposal>;
-  readonly events: readonly EventLogEntry[];
-}>> {
-  try {
-    if (acceptedMemoryUpdate === undefined) {
-      return await deps.proposalRepo.updatePendingResolutionWithEvents(
-        scopedProposal.proposal.proposal_id,
-        toState,
-        reviewedAt,
-        reviewEvents,
-        options
-      );
-    }
-    if (acceptedMemoryUpdate.kind === "memory_update") {
-      return await acceptProposalWithDurableMemoryUpdate(
-        deps,
-        scopedProposal.proposal.proposal_id,
-        reviewedAt,
-        reviewEvents,
-        acceptedMemoryUpdate.memoryUpdate,
-        options
-      );
-    }
-    if (acceptedMemoryUpdate.kind === "path_relation_governance") {
-      return await acceptProposalWithDurablePathRelationGovernance(
-        deps,
-        scopedProposal.proposal.proposal_id,
-        reviewedAt,
-        reviewEvents,
-        acceptedMemoryUpdate.pathRelationGovernance,
-        options
-      );
-    }
-    return await acceptProposalWithDurableSynthesisCreate(
-      deps,
-      scopedProposal.proposal.proposal_id,
-      reviewedAt,
-      reviewEvents,
-      acceptedMemoryUpdate.synthesisCreate,
-      options
-    );
-  } catch (error) {
-    throw normalizeResolutionError(error);
-  }
-}
-
-function buildProposalReviewResolutionOptions(
-  reviewerIdentity: string,
-  applySynchronousResolutionMutation: (() => readonly ProposalResolutionEventInput[]) | undefined
-): ProposalReviewResolutionOptions {
-  return {
-    reviewerIdentity,
-    ...(applySynchronousResolutionMutation === undefined
-      ? {}
-      : { applySynchronousResolutionMutation })
-  };
-}
-
-function buildProposalCreationEvents(
-  proposal: Proposal,
-  context: McpMemoryToolCallContext,
-  sourceDeliveryIds: readonly string[] | null
-): readonly ProposalCreationEventInput[] {
-  return [
-    {
-      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-      entity_type: "proposal",
-      entity_id: proposal.proposal_id,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      caused_by: context.agentTarget,
-      payload_json: SoulProposalCreatedPayloadSchema.parse({
-        object_id: proposal.runtime_id,
-        object_kind: proposal.object_kind,
-        workspace_id: context.workspaceId,
-        run_id: context.runId,
-        ...(sourceDeliveryIds === null ? {} : { source_delivery_ids: sourceDeliveryIds })
-      })
-    }
-  ];
-}
-
 function buildReviewerAssignment(
   deps: McpMemoryProposalWorkflowDependencies,
   proposalId: string,
@@ -359,77 +281,6 @@ function buildReviewerAssignment(
       escalation_after_ms: null
     }
   };
-}
-
-function buildProposalResolutionEvents(
-  scopedProposal: NonNullable<Awaited<ReturnType<McpMemoryProposalWorkflowDependencies["proposalRepo"]["findScopedById"]>>>,
-  context: McpMemoryToolCallContext,
-  reviewerIdentity: string,
-  request: SoulReviewMemoryProposalRequest,
-  reviewedAt: string,
-  toState: Proposal["resolution_state"]
-): readonly ProposalResolutionEventInput[] {
-  const proposal = scopedProposal.proposal;
-  return [
-    {
-      event_type: MemoryGovernanceEventType.SOUL_REVIEW_CREATED,
-      entity_type: "proposal",
-      entity_id: proposal.proposal_id,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      caused_by: reviewerIdentity,
-      payload_json: SoulReviewCreatedPayloadSchema.parse({
-        object_id: proposal.runtime_id,
-        object_kind: proposal.object_kind,
-        workspace_id: context.workspaceId,
-        run_id: context.runId
-      })
-    },
-    {
-      event_type: MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
-      entity_type: "proposal",
-      entity_id: proposal.proposal_id,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      caused_by: reviewerIdentity,
-      payload_json: SoulReviewCompletedPayloadSchema.parse({
-        object_id: proposal.runtime_id,
-        object_kind: proposal.object_kind,
-        workspace_id: context.workspaceId,
-        run_id: context.runId,
-        from_state: proposal.resolution_state,
-        to_state: toState,
-        reason_code: request.reason ?? request.verdict,
-        caused_by: TransitionCausedBy.REVIEW,
-        evidence_refs: null,
-        occurred_at: reviewedAt
-      })
-    },
-    {
-      event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED,
-      entity_type: "proposal",
-      entity_id: proposal.proposal_id,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      caused_by: reviewerIdentity,
-      payload_json: SoulProposalResolvedPayloadSchema.parse({
-        object_id: proposal.runtime_id,
-        object_kind: proposal.object_kind,
-        workspace_id: context.workspaceId,
-        run_id: context.runId,
-        from_state: proposal.resolution_state,
-        to_state: toState,
-        reason_code: request.reason ?? request.verdict,
-        caused_by: TransitionCausedBy.REVIEW,
-        evidence_refs: null,
-        occurred_at: reviewedAt,
-        ...(scopedProposal.source_delivery_ids === null ||
-        scopedProposal.source_delivery_ids === undefined
-          ? {}
-          : { source_delivery_ids: scopedProposal.source_delivery_ids })
-      })
-    }
-  ];
 }
 
 async function notifyResolvedEvents(

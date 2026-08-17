@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  buildSelectGammaPacketObservation,
+  captureSupportSetPacketPlanTrace
+} from "@do-soul/alaya-core";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
 
@@ -31,6 +35,25 @@ const graphAuthorization = Object.freeze({
 });
 
 describe("packet-plan trace v3 schema", () => {
+  it("accepts the packet identity trace emitted by the Core Gamma owner", () => {
+    const observation = buildSelectGammaPacketObservation(
+      [{ entry: { object_id: "source-a" }, originPlane: "workspace_local" }] as never,
+      [{
+        object_id: "source-a",
+        object_kind: "memory_entry",
+        origin_plane: "workspace_local"
+      }] as never
+    );
+    const captured = captureSupportSetPacketPlanTrace("snapshot", observation);
+
+    expect(captured.status).toBe("captured");
+    if (captured.status !== "captured") throw new Error("packet trace capture failed");
+    expect(RecallPacketPlanTraceSchema.parse(captured.trace).decision).toEqual({
+      status: "no_op",
+      reason: "select_gamma_identity"
+    });
+  });
+
   it("accepts all typed membership authorization witnesses", () => {
     const authorizations = [
       {

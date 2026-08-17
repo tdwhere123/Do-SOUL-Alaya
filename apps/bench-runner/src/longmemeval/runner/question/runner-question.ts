@@ -208,7 +208,6 @@ async function prepareLongMemEvalQuestionInWorkspace(
   await runQuestionPhase(phase, "edge_plane", () =>
     input.daemon.runEdgePlanePassIfConfigured()
   );
-  await runCoherenceEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
   seedState.answersWithFormation = await runAnswersWithEdges(
     input.question.question_id,
     workspace,
@@ -217,36 +216,54 @@ async function prepareLongMemEvalQuestionInWorkspace(
   await runQuestionPhase(phase, "relation_projection_checkpoint", () =>
     input.daemon.checkpointRelationProjection()
   );
+  return buildPreparedQuestion({
+    input,
+    workspace,
+    phase,
+    seedState,
+    embeddingWarmup,
+    queryEmbeddingWarmup
+  });
+}
+
+function buildPreparedQuestion(input: {
+  readonly input: LongMemEvalQuestionRunInput;
+  readonly workspace: BenchWorkspaceHandle;
+  readonly phase: ReturnType<typeof createPhaseTimer>;
+  readonly seedState: LongMemEvalQuestionSeedState;
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+}): LongMemEvalPreparedQuestion {
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
-    seedState.sidecar,
-    seedState.answerSessionSet
+    input.seedState.sidecar,
+    input.seedState.answerSessionSet
   );
   const goldEvidenceIds = deriveLongMemEvalGoldEvidenceIds(
-    seedState.sidecar,
-    seedState.answerSessionSet
+    input.seedState.sidecar,
+    input.seedState.answerSessionSet
   );
   const goldObjectIds = deriveLongMemEvalGoldObjectIds(
-    seedState.sidecar,
-    seedState.answerSessionSet
+    input.seedState.sidecar,
+    input.seedState.answerSessionSet
   );
   const goldObjectIdentities = buildGoldObjectIdentities({
     goldMemoryIds,
     goldEvidenceIds
   });
   return {
-    questionId: input.question.question_id,
-    phase,
-    seedState,
+    questionId: input.input.question.question_id,
+    phase: input.phase,
+    seedState: input.seedState,
     goldMemoryIds,
     goldEvidenceIds,
     goldObjectIds,
     goldObjectIdentities,
-    embeddingWarmup,
-    queryEmbeddingWarmup,
+    embeddingWarmup: input.embeddingWarmup,
+    queryEmbeddingWarmup: input.queryEmbeddingWarmup,
     snapshotQuestion: buildLongMemEvalSnapshotQuestion({
-      question: input.question,
-      workspace,
-      seedState
+      question: input.input.question,
+      workspace: input.workspace,
+      seedState: input.seedState
     })
   };
 }
@@ -316,30 +333,6 @@ function writeQuestionProfile(
 ): void {
   if (!isBenchProfileEnabled()) return;
   process.stderr.write(`[bench_profile] question=${questionId} ${phase.format()}\n`);
-}
-
-async function runCoherenceEdgesIfEnabled(
-  input: LongMemEvalQuestionRunInput,
-  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
-  members: readonly BenchEdgeFormationMember[]
-): Promise<void> {
-  const config = resolveLongMemEvalEdgeFormationConfig(process.env).coherence;
-  if (
-    input.embeddingMode !== "env" ||
-    !config.enabled
-  ) {
-    return;
-  }
-  const summary = await workspace.accrueCoherenceCoRecall(members, {
-    floor: config.floor,
-    capPerNode: config.capPerNode,
-    crossSessionOnly: config.crossSessionOnly
-  });
-  console.error(
-    `[coherence-edges] q=${input.question.question_id} ` +
-      `coherent=${summary.coherentPairs} kept=${summary.keptPairs} ` +
-      `minted=${summary.minted}`
-  );
 }
 
 export async function runAnswersWithEdges(

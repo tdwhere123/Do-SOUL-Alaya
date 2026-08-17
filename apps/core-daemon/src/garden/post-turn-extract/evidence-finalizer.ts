@@ -38,7 +38,8 @@ async function receiveCandidateSignals(
 ): Promise<{ signalIds: string[]; createdEvidence: boolean }> {
   const signalIds: string[] = [];
   let createdEvidence = false;
-  for (const signal of input.candidates) {
+  for (const candidate of input.candidates) {
+    const signal = bindSourceObservation(candidate, input.sourceObservation);
     await input.beforeReceive?.();
     const received = await input.signalReceiver.receiveSignal(signal);
     signalIds.push(received.signal.signal_id);
@@ -46,6 +47,15 @@ async function receiveCandidateSignals(
       await input.signalReceiver.hasCreatedEvidence(received);
   }
   return { signalIds, createdEvidence };
+}
+
+function bindSourceObservation(
+  signal: CandidateMemorySignal,
+  sourceObservation: CandidateMemorySignal["source_observation"]
+): CandidateMemorySignal {
+  return sourceObservation === null
+    ? signal
+    : { ...signal, source_observation: sourceObservation };
 }
 
 async function receiveEvidenceFallback(

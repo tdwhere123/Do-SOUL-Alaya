@@ -35,6 +35,7 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
       synthesis_status: SynthesisStatus.WORKING
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -141,6 +142,7 @@ it("does not reserve tail delivery slots for source-less synthesis capsules", as
     });
     const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildSynthesis);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,

@@ -3,7 +3,9 @@ import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import {
   cleanupPostTurnExtractHarnesses,
   createPostTurnPayload,
-  createRoutingHarness
+  createRoutingHarness,
+  createSignal,
+  gardenTaskSignalId
 } from "../mcp-memory/garden/post-turn-extract-task-fixture.js";
 
 afterEach(() => {
@@ -11,12 +13,40 @@ afterEach(() => {
 });
 
 describe("post-turn Garden source observation", () => {
-  it("passes the verified delivery observation time to the provider", async () => {
-    const compile = vi.fn(async () => []);
-    const createdAt = new Date(Date.now() - 60_000).toISOString();
-    const observedAt = new Date(Date.now() - 120_000).toISOString();
+  const processTime = "2026-07-27T12:10:00.000Z";
+
+  it("persists the complete delivery receipt and exact candidate source", async () => {
+    const gist = "  用户确认了发布 🚀  ";
+    const sourceObservation = {
+      observed_at: "2026-07-27T12:00:00.000Z",
+      authority: "verified_delivery_observation" as const,
+      source_event_id: "delivery-event-一-🚀"
+    };
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
+      localCompile: async () => [createSignal({
+        raw_payload: { excerpt: null, gist },
+        source_observation: null
+      })]
+    });
+    harness.enqueuePostTurnTask({
+      payload: createPostTurnPayload({ source_observation: sourceObservation })
+    });
+
+    await harness.runScheduler();
+
+    const stored = await harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0));
+    expect(stored?.source_observation).toEqual(sourceObservation);
+    expect(stored?.raw_payload.gist).toBe(gist);
+  });
+
+  it("passes the verified delivery observation time to the provider", async () => {
+    const compile = vi.fn(async () => []);
+    const createdAt = "2026-07-27T12:09:00.000Z";
+    const observedAt = "2026-07-27T12:08:00.000Z";
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      now: () => processTime,
       localCompile: compile
     });
     harness.enqueuePostTurnTask({
@@ -43,9 +73,10 @@ describe("post-turn Garden source observation", () => {
 
   it("omits source_observed_at when no verified delivery observation exists", async () => {
     const compile = vi.fn(async () => []);
-    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    const createdAt = "2026-07-27T12:09:00.000Z";
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
+      now: () => processTime,
       localCompile: compile
     });
     harness.enqueuePostTurnTask({
@@ -65,9 +96,10 @@ describe("post-turn Garden source observation", () => {
     const compile = vi.fn<GardenComputeProvider["compile"]>(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
+      now: () => processTime,
       localCompile: compile
     });
-    const enqueuedAt = new Date(Date.now() - 60_000).toISOString();
+    const enqueuedAt = "2026-07-27T12:09:00.000Z";
     harness.enqueuePostTurnTask({
       created_at: enqueuedAt,
       payload: createPostTurnPayload({
@@ -80,7 +112,6 @@ describe("post-turn Garden source observation", () => {
       })
     });
 
-    const processStartedAt = new Date().toISOString();
     await harness.runScheduler();
 
     expect(compile).toHaveBeenCalledTimes(1);
@@ -92,7 +123,7 @@ describe("post-turn Garden source observation", () => {
     );
     const observedAt = (compile.mock.calls[0]?.[1] as { source_observed_at: string }).source_observed_at;
     expect(observedAt).toBe(enqueuedAt);
-    expect(observedAt).not.toBe(processStartedAt);
-    expect(Date.parse(observedAt)).toBeLessThan(Date.parse(processStartedAt));
+    expect(observedAt).not.toBe(processTime);
+    expect(Date.parse(observedAt)).toBeLessThan(Date.parse(processTime));
   });
 });

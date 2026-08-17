@@ -1,4 +1,6 @@
 import {
+  CAUSAL_USAGE_OPERATOR_ID,
+  CausalUsageReceiptSchema,
   verifyCausalUsageReceipt,
   type CausalUsagePort,
   type CausalUsageReceipt,
@@ -13,8 +15,11 @@ export function createSqliteCausalUsagePort(input: Readonly<{
   return {
     recordUsage(receipt) {
       const verified = verifyCausalUsageReceipt(receipt, input.sha256);
-      const row = input.repo.insert(usageToRow(verified));
-      return usageFromRow(row, verified);
+      const result = input.repo.insert(usageToRow(verified));
+      return Object.freeze({
+        receipt: causalUsageReceiptFromRow(result.row, input.sha256),
+        inserted: result.inserted
+      });
     }
   };
 }
@@ -34,12 +39,18 @@ function usageToRow(receipt: CausalUsageReceipt): FieldCausalUsageRow {
   };
 }
 
-function usageFromRow(
+export function causalUsageReceiptFromRow(
   row: FieldCausalUsageRow,
-  receipt: CausalUsageReceipt
+  sha256: FieldContractSha256
 ): CausalUsageReceipt {
-  return {
-    ...receipt,
+  return verifyCausalUsageReceipt(CausalUsageReceiptSchema.parse({
+    schema_version: 1,
+    producer: CAUSAL_USAGE_OPERATOR_ID,
+    consumer: "path_projection",
+    replay_rule: "idempotent_same_identity",
+    failure_disposition: "fail_closed",
+    governance_effect: "none",
+    deletion_behavior: "retain_identity",
     identity: row.identity,
     workspace_id: row.workspace_id,
     causal_key: row.causal_key,
@@ -50,5 +61,5 @@ function usageFromRow(
     usage_kind: row.usage_kind,
     operator_id: row.operator_id,
     recorded_at: row.recorded_at
-  };
+  }), sha256);
 }

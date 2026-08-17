@@ -53,6 +53,18 @@ describe("field refinement stop certificate", () => {
       .toBeCloseTo(0.1, 12);
   });
 
+  it("witnesses the complete selected packet beyond five entries", () => {
+    const receipt = createRecallFieldRefinementStopCertificate(
+      createFixture([1, 1, 1, 1, 1, 1, 1])
+    );
+
+    expect(receipt.selection_capacity).toBe(7);
+    expect(receipt.selected_candidate_keys).toHaveLength(7);
+    expect(receipt.exchange_bounds).toHaveLength(7);
+    expect(() => verifyRecallFieldRefinementStopCertificate(receipt))
+      .not.toThrow();
+  });
+
   it("fails closed when the configured objective has no admissible bound", () => {
     const fixture = createFixture([1, 1, 1, 1, 1], false);
     const receipt = createRecallFieldRefinementStopCertificate(fixture);
@@ -124,6 +136,7 @@ function createFixture(
     fieldSeal: createTruncatedFieldSeal(),
     refinementReceipts: [refinementReceipt],
     preparedSelection,
+    selectionCapacity: candidates.length,
     selectedCandidateKeys: candidates.map(({ fusion }) => fusion.candidate_key),
     supplementaryData,
     relevanceUpperBound: createRecallRelevanceUpperBoundReceipt(

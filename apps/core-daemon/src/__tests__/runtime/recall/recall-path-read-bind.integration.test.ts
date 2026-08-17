@@ -141,31 +141,12 @@ describe("typed path transfer bind seam", () => {
     expect(flood.diagnostics.A_path).toBeCloseTo(0.75);
   });
 
-  it("seals a forced legacy bind as index_unavailable instead of pass-through identity", async () => {
+  it("keeps the explicit production bind on temporal authority", () => {
     const database = openFixtureReadonly();
-    const ports = createBoundRecallPathReadPorts({
+    expect(resolveRecallPathReadBind({
       database,
-      pathReadBind: "legacy"
-    });
-    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
-    const derivations = await collectGovernancePathDerivations({
-      dependencies: { pathExpansionPort: ports.pathExpansionPort },
-      warn: () => undefined,
-      workspaceId: WORKSPACE_ID,
-      candidates
-    });
-    const flood = computeIntegratedFloodScore({
-      entry: candidates[1]!,
-      // This assertion isolates status mapping from edge-transfer arithmetic.
-      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
-      supplementaryData: supplementary({
-        pathInflowByTarget: derivations.pathInflowByTarget,
-        pathInflowAvailability: derivations.pathInflowAvailability
-      })
-    });
-    expect(derivations.pathInflowAvailability).toBe("unavailable");
-    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
-    expect(flood.diagnostics.A_path).not.toBe(1);
+      pathReadBind: "temporal"
+    })).toBe("temporal");
   });
 
   it("seals a historical as-of miss instead of aborting recall", async () => {
@@ -228,7 +209,7 @@ describe("refresh-required path index", () => {
       SET projection_refresh_required = 1, projection_count = 1
       WHERE state_id = 1
     `).run();
-    expect(resolveRecallPathReadBind({ database })).toBe("legacy");
+    expect(resolveRecallPathReadBind({ database })).toBe("temporal");
 
     const ports = createBoundRecallPathReadPorts({ database });
     const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
@@ -247,12 +228,12 @@ describe("refresh-required path index", () => {
         pathInflowAvailability: derivations.pathInflowAvailability
       })
     });
-    expect(derivations.pathInflowAvailability).toBe("unavailable");
-    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
+    expect(derivations.pathInflowAvailability).toBe("storage_error");
+    expect(flood.diagnostics.path_status).toBe("inactive:storage_error");
     expect(flood.diagnostics.A_path).not.toBe(1);
   });
 
-  it("fails closed when a ready state points at a missing active generation", () => {
+  it("fails closed when a ready state points at a missing active generation", async () => {
     const database = initDatabase({ filename: ":memory:" });
     openDatabases.push(database);
     database.connection.prepare(`
@@ -261,7 +242,8 @@ describe("refresh-required path index", () => {
       WHERE state_id = 1
     `).run();
 
-    expect(() => resolveRecallPathReadBind({ database })).toThrow(
+    const ports = createBoundRecallPathReadPorts({ database });
+    await expect(ports.findActiveByWorkspace(WORKSPACE_ID)).rejects.toThrow(
       "active generation is missing or inconsistent"
     );
   });

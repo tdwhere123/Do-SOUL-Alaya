@@ -43,6 +43,7 @@ describe("Assistant observation direct evidence", () => {
     const findRecallQualifiedByIds = vi.fn(async () => [qualifiedAssistantObservation]);
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -106,6 +107,7 @@ describe("Assistant observation direct evidence", () => {
     });
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -301,6 +303,7 @@ function createEvidenceService(
 ): RecallService {
   const { dependencies } = createDependencies([]);
   return new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     memoryRepo: {
       ...dependencies.memoryRepo,

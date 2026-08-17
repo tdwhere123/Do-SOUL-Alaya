@@ -1,15 +1,7 @@
 import type { FineAssessmentOrderSequence } from "./order-sequence.js";
 
 export type FineAssessmentMembershipOwner =
-  | "fusion"
-  | "deep_head"
-  | "coverage"
-  | "direct_evidence_promotion"
-  | "semantic_memory_refinement"
-  | "behavior_authority_promotion"
-  | "verified_temporal_head"
-  | "consensus"
-  | "final_budget"
+  | "select_gamma"
   | "unavailable";
 
 type FineAssessmentOrderLedgerCandidate = Readonly<{
@@ -18,8 +10,7 @@ type FineAssessmentOrderLedgerCandidate = Readonly<{
     readonly coarse: number | null;
     readonly fusion: number;
     readonly deep_head: number;
-    readonly coverage: number;
-    readonly consensus: number;
+    readonly select_gamma: number;
     readonly final: number;
   }>;
   readonly first_membership_changing_owner:
@@ -29,24 +20,12 @@ type FineAssessmentOrderLedgerCandidate = Readonly<{
 }>;
 
 export type FineAssessmentOrderLedger = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly candidate_count: number;
   readonly delivered_count: number;
   readonly coarse_identity: "captured" | "unavailable";
   readonly candidates: readonly FineAssessmentOrderLedgerCandidate[];
 }>;
-
-const CANONICAL_MEMBERSHIP_OWNERS: readonly FineAssessmentMembershipOwner[] = [
-  "fusion",
-  "deep_head",
-  "coverage",
-  "direct_evidence_promotion",
-  "semantic_memory_refinement",
-  "behavior_authority_promotion",
-  "verified_temporal_head",
-  "consensus",
-  "final_budget"
-];
 
 const SIMULTANEOUS_MEMBERSHIP_OWNERS =
   "selection order ledger has multiple simultaneous membership-changing owners";
@@ -61,7 +40,7 @@ export function buildFineAssessmentOrderLedger(
     (rank) => rank !== null
   );
   const ledger = Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     candidate_count: sequence.birthOrder.length,
     delivered_count: deliveredCount,
     coarse_identity: coarseAvailable ? "captured" as const : "unavailable" as const,
@@ -125,14 +104,8 @@ function throwSimultaneousMembershipOwners(detail: string): never {
 function isCanonicalOwnerSequence(
   owners: readonly FineAssessmentMembershipOwner[]
 ): boolean {
-  if (owners.length === 1 && owners[0] === "unavailable") return true;
-  let previous = -1;
-  for (const owner of owners) {
-    const index = CANONICAL_MEMBERSHIP_OWNERS.indexOf(owner);
-    if (index <= previous) return false;
-    previous = index;
-  }
-  return true;
+  return owners.length === 1 &&
+    (owners[0] === "select_gamma" || owners[0] === "unavailable");
 }
 
 function ranksForCandidate(
@@ -143,8 +116,7 @@ function ranksForCandidate(
     coarse: requiredRank(sequence.ranks.coarse, candidateKey),
     fusion: requiredNumericRank(sequence.ranks.fusion, candidateKey),
     deep_head: requiredNumericRank(sequence.ranks.deepHead, candidateKey),
-    coverage: requiredNumericRank(sequence.ranks.coverage, candidateKey),
-    consensus: requiredNumericRank(sequence.ranks.consensus, candidateKey),
+    select_gamma: requiredNumericRank(sequence.ranks.selectGamma, candidateKey),
     final: requiredNumericRank(sequence.ranks.final, candidateKey)
   });
 }
@@ -161,10 +133,10 @@ function membershipChangingOwners(
   for (const stage of stages.slice(1)) {
     const nextIncluded = stage.memberKeys.includes(candidateKey);
     if (nextIncluded !== included) {
-      if (stage.owner === "coarse") {
-        throw new Error("fine-assessment order ledger transition order is invalid");
+      if (stage.owner !== "select_gamma") {
+        throw new Error("selection order ledger has a non-Gamma membership owner");
       }
-      owners.push(stage.owner);
+      owners.push("select_gamma");
     }
     included = nextIncluded;
   }
@@ -210,8 +182,7 @@ function assertOrderSequenceRanks(sequence: FineAssessmentOrderSequence): void {
   const expectedKeys = new Set(sequence.birthOrder);
   assertRankPermutation(sequence.ranks.fusion, expectedKeys);
   assertRankPermutation(sequence.ranks.deepHead, expectedKeys);
-  assertRankPermutation(sequence.ranks.coverage, expectedKeys);
-  assertRankPermutation(sequence.ranks.consensus, expectedKeys);
+  assertRankPermutation(sequence.ranks.selectGamma, expectedKeys);
   assertRankPermutation(sequence.ranks.final, expectedKeys);
   const coarse = sequence.ranks.coarse;
   const coarseValues = [...coarse.values()];
@@ -232,8 +203,7 @@ function assertTransitionOwners(
   transitions: FineAssessmentOrderSequence["transitions"]
 ): void {
   const expected = [
-    "coarse", "fusion", "deep_head", "coverage",
-    "consensus", "final_budget"
+    "coarse", "fusion", "deep_head", "select_gamma", "final_budget"
   ];
   if (transitions.length !== expected.length ||
       transitions.some((transition, index) => transition.owner !== expected[index])) {

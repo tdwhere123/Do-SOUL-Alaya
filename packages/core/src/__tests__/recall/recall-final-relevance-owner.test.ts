@@ -287,6 +287,7 @@ describe("final recall relevance ownership", () => {
     });
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: () => NOW
     });
@@ -466,6 +467,7 @@ function createSupplementaryData(
 function createRecallResult(candidates: RecallResult["candidates"]): RecallResult {
   return {
     candidates,
+    synthesis: { status: "absent" },
     active_constraints: [],
     active_constraints_count: 0,
     total_scanned: candidates.length,

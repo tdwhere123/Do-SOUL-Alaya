@@ -24,15 +24,15 @@ import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import { emitDeterministicIncidences } from "./factor-emit.js";
 import {
-  nominateSemanticDerivationJob,
+  persistSemanticFormationReceipt,
   persistDescriptors,
   persistIncidences
 } from "./factor-incidence.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import { resolveSourceLineageId } from "./source-admission.js";
 import {
-  assertSpanInContent,
   deriveAddressableSpanViews,
+  sourceSpanFromCodeUnitOffsets,
   type SourceSpanDraft
 } from "./source-span-views.js";
 
@@ -79,12 +79,7 @@ function planFormationViews(input: Readonly<{
   const supplied = input.searchProjections.map((projection) =>
     EvidenceSearchProjectionSchema.parse(projection)
   );
-  if (supplied.some(({ projection_kind: kind }) => kind === "fact_key")) {
-    throw new CoreError(
-      "VALIDATION",
-      "Fact-key projections must come from canonical fact-frame formation"
-    );
-  }
+  assertCallerSearchProjectionAuthority(supplied);
   const factFrame = materializeEvidenceFactFrameFormation({
     sourceAssertion: input.evidence.excerpt,
     sourceHash: input.evidence.source_hash,
@@ -106,6 +101,17 @@ function planFormationViews(input: Readonly<{
   };
 }
 
+function assertCallerSearchProjectionAuthority(
+  projections: readonly Readonly<EvidenceSearchProjection>[]
+): void {
+  if (projections.some(({ projection_kind: kind }) => kind === "fact_key")) {
+    throw new CoreError(
+      "VALIDATION",
+      "Fact-key projections must come from canonical fact-frame formation"
+    );
+  }
+}
+
 function tryPlanFieldFormation(
   input: Readonly<{
     readonly evidence: Readonly<EvidenceCapsule>;
@@ -124,19 +130,14 @@ function tryPlanFieldFormation(
   ) {
     return null;
   }
-  try {
-    return applyFieldFormation({
-      evidence: input.evidence,
-      views,
-      sha256,
-      sourceAdmission,
-      factorIncidence,
-      fieldStores,
-      semanticExtractor: input.semanticExtractor
-    });
-  } catch {
-    return null;
-  }
+  return applyFieldFormation({
+    evidence: input.evidence,
+    views,
+    sha256,
+    sourceAdmission,
+    factorIncidence,
+    fieldStores
+  });
 }
 
 function applyFieldFormation(input: Readonly<{
@@ -146,10 +147,31 @@ function applyFieldFormation(input: Readonly<{
   readonly sourceAdmission: SourceAdmissionPort;
   readonly factorIncidence: FactorIncidencePort;
   readonly fieldStores: FieldFormationStores;
-  readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
 }>): SourceRecordIdentity {
+  const source = input.fieldStores.runAtomic(() => persistMinimumSource(input));
+  input.fieldStores.runAtomic(() => persistFactorFormation(input, source));
+  return source.record;
+}
+
+type MinimumSourceFormation = Readonly<{
+  readonly request: SourceAdmissionRequest;
+  readonly record: SourceRecordIdentity;
+  readonly spans: ReturnType<SourceAdmissionPort["admit"]>["spans"];
+}>;
+
+function persistMinimumSource(
+  input: Parameters<typeof applyFieldFormation>[0]
+): MinimumSourceFormation {
   const request = sourceRequestFromEvidence(input.evidence, input.views);
   const admitted = input.sourceAdmission.admit(request);
+  return Object.freeze({ request, record: admitted.record, spans: admitted.spans });
+}
+
+function persistFactorFormation(
+  input: Parameters<typeof applyFieldFormation>[0],
+  source: MinimumSourceFormation
+): void {
+  const request = source.request;
   const emitted = emitDeterministicIncidences({
     sha256: input.sha256,
     recorded_at: input.evidence.created_at,
@@ -162,41 +184,27 @@ function applyFieldFormation(input: Readonly<{
     event_time: request.event_time,
     valid_from: request.valid_from,
     valid_to: request.valid_to,
-    spans: admitted.spans,
+    spans: source.spans,
     factFrameSlots: input.views.factFrameCapture.fact_frame?.slots ?? [],
     semanticSurfaces: semanticSurfacesOf(input.views.semanticFormation)
   });
   persistDescriptors(input.fieldStores, emitted.factors);
   persistIncidences(input.factorIncidence, emitted.incidences);
-  tryNominateF3(input);
-  return admitted.record;
-}
-
-function tryNominateF3(input: Readonly<{
-  readonly evidence: Readonly<EvidenceCapsule>;
-  readonly sha256: FieldContractSha256;
-  readonly factorIncidence: FactorIncidencePort;
-  readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
-}>): void {
-  try {
-    nominateSemanticDerivationJob({
-      sha256: input.sha256,
-      incidence: input.factorIncidence,
-      workspace_id: input.evidence.workspace_id,
-      evidence_object_id: input.evidence.object_id,
-      recorded_at: input.evidence.created_at,
-      ...(input.semanticExtractor === undefined ? {} : { extractor: input.semanticExtractor })
-    });
-  } catch {
-    return;
-  }
+  persistSemanticFormationReceipt({
+    sha256: input.sha256,
+    incidence: input.factorIncidence,
+    workspace_id: input.evidence.workspace_id,
+    evidence_object_id: input.evidence.object_id,
+    recorded_at: input.evidence.created_at,
+    capture: input.views.semanticFormation
+  });
 }
 
 function sourceRequestFromEvidence(
   evidence: Readonly<EvidenceCapsule>,
   views: EvidenceFormationPlan
 ): SourceAdmissionRequest {
-  const content = evidence.excerpt ?? "";
+  const content = evidence.excerpt ?? evidence.gist;
   return {
     workspace_id: evidence.workspace_id,
     source_id: resolveSourceLineageId({
@@ -235,7 +243,7 @@ function proposedSemanticSpans(
   for (const factor of graph.factors) {
     const [start, end] = factor.source_span;
     try {
-      drafts.push(assertSpanInContent(content, {
+      drafts.push(sourceSpanFromCodeUnitOffsets(content, {
         start_offset: start,
         end_offset: end,
         purpose: "proposed_subspan"
@@ -252,8 +260,5 @@ function semanticSurfacesOf(
 ): readonly string[] {
   const graph = semantic.graph;
   if (graph === null) return Object.freeze([]);
-  return Object.freeze(graph.factors.flatMap((factor) => [
-    factor.surface,
-    factor.semantic_identity
-  ]));
+  return Object.freeze(graph.factors.map((factor) => factor.surface));
 }

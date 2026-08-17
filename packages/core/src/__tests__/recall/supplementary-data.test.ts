@@ -20,7 +20,8 @@ describe("collectSupplementaryData", () => {
     const supplementary = await collectWith({
       candidates: [],
       graphSupportPort: emptyGraphSupportPort(),
-      queryText: "what happened in the last four months"
+      queryText: "what happened in the last four months",
+      referenceTime: "2026-03-18T00:00:00.000Z"
     });
 
     expect(supplementary.queryTimeWindow).toEqual({

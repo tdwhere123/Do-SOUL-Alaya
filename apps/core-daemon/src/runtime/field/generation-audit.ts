@@ -14,8 +14,8 @@ export type FieldEventLogPort = {
 export function appendGenerationRebuildStarted(
   eventLog: FieldEventLogPort,
   generation: FieldProjectionGeneration
-): void {
-  void eventLog.append({
+): EventLogEntry | Promise<EventLogEntry> {
+  return eventLog.append({
     event_type: FieldGenerationEventType.SOUL_FIELD_GENERATION_REBUILD_STARTED,
     entity_type: "projection_generation",
     entity_id: generation.generation_id,
@@ -37,9 +37,10 @@ export function appendGenerationRebuildStarted(
 export function appendGenerationActivated(
   eventLog: FieldEventLogPort,
   generation: FieldProjectionGeneration,
-  previousGenerationId: string | null
-): void {
-  void eventLog.append({
+  previousGenerationId: string | null,
+  activatedAt: string
+): EventLogEntry | Promise<EventLogEntry> {
+  return eventLog.append({
     event_type: FieldGenerationEventType.SOUL_FIELD_GENERATION_ACTIVATED,
     entity_type: "projection_generation",
     entity_id: generation.generation_id,
@@ -50,7 +51,7 @@ export function appendGenerationActivated(
       workspace_id: generation.workspace_id,
       generation_id: generation.generation_id,
       previous_generation_id: previousGenerationId,
-      activated_at: generation.recorded_at
+      activated_at: activatedAt
     })
   });
 }

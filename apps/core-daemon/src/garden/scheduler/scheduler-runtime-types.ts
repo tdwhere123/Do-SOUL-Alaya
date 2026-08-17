@@ -61,6 +61,7 @@ export interface GardenSchedulerRuntimeSupport {
 }
 
 export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
+  readonly now: () => string;
   readonly coherenceEdgeProducerPort?: {
     crystallizeForBackfill(input: {
       readonly workspaceId: string;

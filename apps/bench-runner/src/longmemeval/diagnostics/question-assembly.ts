@@ -89,6 +89,7 @@ export function assembleQuestionDiagnostic(
       parts.diagnostics?.retrievalFieldRefinementReceipts ?? null,
     field_refinement_stop_certificate:
       parts.diagnostics?.fieldRefinementStopCertificate ?? null,
+    query_condition: parts.diagnostics?.queryCondition ?? null,
     query_entity_extraction: parts.diagnostics?.queryEntityExtraction ?? null,
     query_fact_frame_extraction:
       parts.diagnostics?.queryFactFrameExtraction ?? null,

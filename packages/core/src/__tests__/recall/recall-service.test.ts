@@ -52,6 +52,7 @@ it("merges adopted global-source candidates through optional recall ports and ex
     ]);
     const { dependencies } = createDependencies(memories);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -169,6 +170,7 @@ it("delivers one object for matching local and global ids while preserving prove
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -295,6 +297,7 @@ it("applies embedding hits to the local candidate when a global candidate shares
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -385,6 +388,7 @@ it("does not record global recall classifications when recall completion fails",
     const { dependencies, appendSpy } = createDependencies([]);
     appendSpy.mockRejectedValueOnce(new Error("completion append failed"));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -433,6 +437,7 @@ it("does not fail recall when optional global recall cache recording throws and 
     ]);
     const { dependencies, warnSpy } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),

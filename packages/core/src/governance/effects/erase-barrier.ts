@@ -122,17 +122,22 @@ export class InMemoryGovernanceEventLog implements GovernanceEventLogPort {
 }
 
 export function buildEraseBarrierEventInput(
-  barrier: ProjectionEraseBarrier
+  barrier: Pick<
+    ProjectionEraseBarrier,
+    "identity" | "workspace_id" | "barrier_id" | "generation_id" |
+      "subject_kind" | "subject_id" | "erased_at"
+  >
 ): EventPublisherInput {
   return {
     event_type: FieldGenerationEventType.SOUL_FIELD_ERASE_BARRIER,
     entity_type: "projection_erase_barrier",
-    entity_id: barrier.barrier_id,
+    entity_id: barrier.identity,
     workspace_id: barrier.workspace_id,
     run_id: null,
     caused_by: SYSTEM_ACTOR,
     payload_json: SoulFieldEraseBarrierPayloadSchema.parse({
       workspace_id: barrier.workspace_id,
+      receipt_identity: barrier.identity,
       barrier_id: barrier.barrier_id,
       generation_id: barrier.generation_id,
       subject_kind: barrier.subject_kind,

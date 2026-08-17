@@ -14,6 +14,7 @@ import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
 export const FIELD_PINS = {
+  workspace_id: "workspace-1",
   generation_id: `sha256:${"c".repeat(64)}`,
   condition_digest: `sha256:${"d".repeat(64)}`
 } as const;

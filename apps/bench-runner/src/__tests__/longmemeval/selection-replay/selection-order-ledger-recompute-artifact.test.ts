@@ -170,7 +170,7 @@ describe("selection order ledger recompute_live", () => {
     expect(summary.any_at_10).toBe(1);
     expect(question.gold.any_at_5).toBe(true);
     expect(summary.coverage_at_5).toBe(1);
-    expect(summary.feasibility_protection_deltas.final_budget).toMatchObject({
+    expect(summary.feasibility_protection_deltas.select_gamma).toMatchObject({
       gained: expect.any(Number),
       lost: expect.any(Number)
     });

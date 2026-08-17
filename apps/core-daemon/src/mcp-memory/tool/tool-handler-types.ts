@@ -32,7 +32,6 @@ import type {
   GardenTaskEventInput,
   GardenTaskRow
 } from "@do-soul/alaya-storage";
-import type { GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-handlers.js";
 import type { createSoulResolveHandler } from "./resolve-handler.js";
 import type { ReviewerIdentityBinding } from "../proposal/proposal-workflow.js";
@@ -46,11 +45,6 @@ type MemoryUsageRefreshFields = MemoryEntryMutableFields & {
   readonly last_used_at?: string;
   readonly last_hit_at?: string;
 };
-// invariant: delivered pairs accrue co-recall only when the embedding-side
-// coherence gate returns their canonical unordered pair key.
-// see also: packages/core/src/path-graph/path-relation-proposal-service.ts:onCoRecall allowedPairKeys.
-// see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
-
 export interface McpMemoryToolCallContext {
   readonly workspaceId: string;
   readonly runId: string | null;
@@ -142,37 +136,6 @@ export interface McpMemoryToolHandlerDependencies {
       readonly excerpt: string | null;
     }> | null>;
   };
-  // PathRelation propose hook. When report_context_usage produces
-  // RECALLS edges between used memories, the service tracks co-usage
-  // counts; on the Nth co-usage of a pair, it writes a new PathRelation
-  // entry so PathPlasticityService has a relation to evolve.
-  readonly pathRelationProposalService?: {
-    onCoUsage(
-      usedObjectIds: readonly string[],
-      workspaceId: string
-    ): Promise<void>;
-    // invariant: co-recall plasticity primitive. Called fire-and-forget at
-    // recall delivery with the delivered top-K ids. `allowedPairKeys` carries
-    // the semantic-coherence gate (canonical `${low}|${high}` pair keys) so
-    // only related endpoints strengthen a path; an absent gate accrues every
-    // pair. see also: path-relation-proposal-service.ts onCoRecall.
-    onCoRecall(
-      recalledObjectIds: readonly string[],
-      workspaceId: string,
-      allowedPairKeys?: ReadonlySet<string>
-    ): Promise<void>;
-  };
-  // invariant: embedding coherence is checked outside the truth-boundary path
-  // service; this gate returns only canonical `${low}|${high}` delivered-pair keys.
-  // see also:
-  // apps/core-daemon/src/ai/daemon-embedding-runtime.ts:createDaemonEmbeddingRuntime,
-  // packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys.
-  readonly coRecallCoherenceGate?: {
-    coherentPairKeys(
-      workspaceId: string,
-      deliveredObjectIds: readonly string[]
-    ): Promise<ReadonlySet<string>>;
-  };
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
       readonly signal: Readonly<CandidateMemorySignal>;
@@ -213,11 +176,6 @@ export interface McpMemoryToolHandlerDependencies {
     }): Promise<ReturnType<typeof SoulBatchReviewEdgeProposalsResponseSchema.parse>>;
   };
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
-  // Optional write port for RECALLS-edge cross-linking on used reports.
-  // Single canonical declaration lives next to MaterializationRouter — re-using
-  // the same port keeps the daemon-side wiring and the materializer in lockstep.
-  readonly graphEdgePort?: GraphEdgeCreationPort;
-  readonly causalUsagePort?: import("@do-soul/alaya-protocol").CausalUsagePort;
   readonly sessionOverrideService: {
     apply(params: {
       readonly runId: string;
@@ -231,7 +189,11 @@ export interface McpMemoryToolHandlerDependencies {
     recordDelivery(input: Omit<ContextDeliveryRecord, "audit_event_id">): Promise<ContextDeliveryRecord>;
     recordUsage(
       input: Omit<UsageProofRecord, "audit_event_id">,
-      options?: { readonly expectedWorkspaceId?: string }
+      options?: Readonly<{
+        readonly expectedWorkspaceId?: string;
+        readonly expectedAgentTarget?: string;
+        readonly expectedRunId?: string;
+      }>
     ): Promise<UsageProofRecord>;
     findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
   };

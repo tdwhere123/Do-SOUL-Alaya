@@ -2,11 +2,12 @@ import type {
   ClaimForm,
   ClaimLifecycleState as ClaimLifecycleStateType,
   EnforcementLevel as EnforcementLevelType,
+  EffectDecisionReceipt,
   EventLogEntry,
   PrecedenceBasis as PrecedenceBasisType,
   TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
-import type { EventPublisher } from "../../runtime/event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "../../runtime/event-publisher.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 import type { CanonicalAliasService } from "./canonical-alias-service.js";
 
@@ -61,6 +62,18 @@ export interface ClaimServiceSlotServicePort {
   onClaimActivated(claim: Readonly<ClaimForm>, deferredNotificationEvents?: EventLogEntry[]): Promise<SlotElectionResult>;
 }
 
+export interface EffectDecisionStore {
+  insert(receipt: EffectDecisionReceipt): EffectDecisionReceipt;
+}
+
+export interface ClaimLifecycleTransitionOptions {
+  readonly skipSlotElection?: boolean;
+  readonly deferredNotificationEvents?: EventLogEntry[];
+  readonly additionalEventInputs?: readonly EventPublisherInput[];
+  readonly additionalEventsSink?: EventLogEntry[];
+  readonly effectDecisionReceipt?: EffectDecisionReceipt;
+}
+
 export interface ClaimRuntimeNotifierPort {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }
@@ -72,6 +85,7 @@ export interface ClaimServiceDependencies {
   readonly canonicalAliasService?: Pick<CanonicalAliasService, "planGovernanceSubjectCanonicalization">;
   readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
   readonly slotService?: ClaimServiceSlotServicePort;
+  readonly effectDecisionStore?: EffectDecisionStore;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }

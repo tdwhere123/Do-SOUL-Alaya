@@ -71,6 +71,7 @@ it("excludes a weak entity-only draft from graph_expansion fan-in (Fix-5b path 1
       );
 
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
@@ -179,6 +180,7 @@ it("admits a weak entity into graph_expansion when a co-admitting plane carries 
       });
 
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
@@ -296,6 +298,7 @@ it("does not let a weak entity-only draft leak into content_expansion (evidence_
       );
 
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,

@@ -26,8 +26,6 @@ import { verifyRecallQueryFieldAttributionReceipt } from
   "../../field/query-attribution/query-field-attribution.js";
 import { verifyRecallQueryFactFrameExtractionCapture } from
   "../../field/query-attribution/query-fact-frame-attribution-producer.js";
-import { verifyCoverageSelectionOperatorConfig } from
-  "../../field/facility/selection-objective.js";
 import { verifyRecallFieldRefinementStopCertificate } from
   "../../field/refinement/field-refinement-stop-certificate.js";
 import { verifyRecallRelevanceUpperBoundReceipt } from
@@ -56,12 +54,10 @@ export function validateSelectionBoundary(
   assertSelectionBoundaryInputs(boundary);
   assertSelectionBoundaryReceipts(boundary);
   assertFinalCandidateIdentity(boundary);
-  if (boundary.expected.pre_projection !== undefined) {
-    assertPreProjection(
-      boundary.expected.pre_projection,
-      boundary.expected.candidate_keys
-    );
-  }
+  assertPreProjection(
+    boundary.expected.pre_projection,
+    boundary.expected.candidate_keys
+  );
 }
 
 function assertSelectionBoundaryEnvelope(
@@ -73,6 +69,7 @@ function assertSelectionBoundaryEnvelope(
     );
   }
   assertSelectionBoundaryJsonValue(boundary);
+  assertCoverageObjective(boundary.expected.coverage_objective);
   if (!/^sha256:[0-9a-f]{64}$/u.test(
     boundary.expected.visible_result_sha256
   )) {
@@ -80,6 +77,26 @@ function assertSelectionBoundaryEnvelope(
     throwSelectionBoundaryFidelityMismatch(
       "expected visible_result_sha256 matching sha256:<64 hex>, actual " +
       (typeof digest === "string" ? `chars=${digest.length}` : typeof digest)
+    );
+  }
+}
+
+function assertCoverageObjective(value: unknown): void {
+  if (typeof value !== "object" || value === null) {
+    throwSelectionBoundaryFidelityMismatch(
+      "expected canonical coverage_objective, actual absent"
+    );
+  }
+  const receipt = value as Record<string, unknown>;
+  if (receipt.schema_version !== 1 ||
+      typeof receipt.operator_id !== "string" ||
+      receipt.operator_id.length === 0 ||
+      (receipt.mathematical_class !== null &&
+        receipt.mathematical_class !== "monotone_submodular") ||
+      (receipt.configuration_digest !== null &&
+        typeof receipt.configuration_digest !== "string")) {
+    throwSelectionBoundaryFidelityMismatch(
+      "expected canonical coverage_objective, actual invalid"
     );
   }
 }
@@ -114,7 +131,6 @@ function assertSelectionBoundaryReceipts(
   assertRetrievalFieldRefinements(boundary.input.supplementary_data);
   assertQueryFactFrameExtraction(boundary.input.supplementary_data);
   assertQueryFieldAttribution(boundary.input.supplementary_data);
-  assertCoverageObjectiveConfig(boundary.input);
   assertCoverageRelevanceUpperBound(boundary.input);
   assertFieldRefinementStopCertificate(boundary);
 }
@@ -146,15 +162,6 @@ function assertFieldRefinementStopCertificate(
   requireValidReceipt(
     "expected valid field_refinement_stop_certificate, actual invalid",
     () => verifyRecallFieldRefinementStopCertificate(receipt)
-  );
-}
-
-function assertCoverageObjectiveConfig(input: FineAssessmentSelectionBoundaryInput): void {
-  const config = input.coverage_objective_config;
-  if (config === undefined) return;
-  requireValidReceipt(
-    "expected valid coverage_objective_config, actual invalid",
-    () => verifyCoverageSelectionOperatorConfig(config)
   );
 }
 

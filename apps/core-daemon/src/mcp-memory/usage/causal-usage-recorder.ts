@@ -1,21 +1,21 @@
 import {
   verifyCausalUsageReceipt,
   type CausalUsagePort,
-  type CausalUsageReceipt,
-  type EventLogEntry
+  type CausalUsageReceipt
 } from "@do-soul/alaya-protocol";
-import { appendCausalUsageRecorded } from "../../runtime/field/usage-audit.js";
+import type { EventPublisher } from "@do-soul/alaya-core";
+import { buildCausalUsageRecordedEvent } from "../../runtime/field/usage-audit.js";
 import { buildCausalUsageReceipt, usageIdentitySha256 } from "./causal-usage-identity.js";
 
 export class InMemoryCausalUsageRecorder implements CausalUsagePort {
   private readonly byIdentity = new Map<string, CausalUsageReceipt>();
 
-  public recordUsage(input: CausalUsageReceipt): CausalUsageReceipt {
+  public recordUsage(input: CausalUsageReceipt) {
     const receipt = verifyCausalUsageReceipt(input, usageIdentitySha256);
     const existing = this.byIdentity.get(receipt.identity);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) return Object.freeze({ receipt: existing, inserted: false });
     this.byIdentity.set(receipt.identity, receipt);
-    return receipt;
+    return Object.freeze({ receipt, inserted: true });
   }
 
   public list(): readonly CausalUsageReceipt[] {
@@ -23,32 +23,39 @@ export class InMemoryCausalUsageRecorder implements CausalUsagePort {
   }
 }
 
-export function recordCausalUsedReceipts(
+export async function recordCausalUsedReceipts(
   port: CausalUsagePort,
   input: Readonly<{
     readonly workspaceId: string;
-    readonly deliveryId: string;
+    readonly causalKey: string;
     readonly usedObjectIds: readonly string[];
     readonly occurredAt: string;
     readonly scope: string;
-    readonly eventLog?: {
-      append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
-        EventLogEntry | Promise<EventLogEntry>;
-    };
+    readonly eventPublisher: Pick<EventPublisher, "mutateThenAppendMany">;
+    readonly runId?: string | null;
+    readonly causedBy?: string | null;
   }>
-): readonly CausalUsageReceipt[] {
-  return Object.freeze(input.usedObjectIds.map((objectId) => {
-    const receipt = port.recordUsage(buildCausalUsageReceipt({
+): Promise<readonly CausalUsageReceipt[]> {
+  const receipts: CausalUsageReceipt[] = [];
+  for (const objectId of input.usedObjectIds) {
+    const candidate = buildCausalUsageReceipt({
       workspaceId: input.workspaceId,
-      causalKey: `${input.deliveryId}:${objectId}`,
+      causalKey: input.causalKey,
       downstreamRef: objectId,
       occurredAt: input.occurredAt,
       scope: input.scope,
       usageKind: "causal"
-    }));
-    if (input.eventLog !== undefined) {
-      appendCausalUsageRecorded(input.eventLog, receipt);
-    }
-    return receipt;
-  }));
+    });
+    const persisted = await input.eventPublisher.mutateThenAppendMany(() => {
+      const result = port.recordUsage(candidate);
+      return {
+        events: result.inserted
+          ? [buildCausalUsageRecordedEvent(result.receipt, input)]
+          : [],
+        result: result.receipt
+      };
+    });
+    receipts.push(persisted.result);
+  }
+  return Object.freeze(receipts);
 }

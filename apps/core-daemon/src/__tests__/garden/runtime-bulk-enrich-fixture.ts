@@ -6,6 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
+export const BULK_ENRICH_TEST_NOW = "2026-05-30T12:00:00.000Z";
+
 export type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 export type ProduceFn = NonNullable<
   GardenRuntimeInput["enrichEdgeProducerPort"]
@@ -227,6 +229,7 @@ export function bulkEnrichTask(): GardenTaskDescriptor {
 }
 
 export function createRuntimeInput(options: {
+  readonly now?: () => string;
   readonly enrichPendingRepo: FakeEnrichPendingRepo;
   readonly findById: (memoryId: string) => Promise<ReturnType<typeof buildMemory> | null>;
   readonly produceForNewMemory?: ProduceFn;
@@ -248,6 +251,7 @@ export function createRuntimeInput(options: {
   const workspaceIds = options.workspaceIds ?? ["workspace-1"];
 
   return {
+    now: options.now ?? (() => BULK_ENRICH_TEST_NOW),
     databaseConnection: {} as GardenRuntimeInput["databaseConnection"],
     backlogThresholds: {
       warning_queue_depth: 100,

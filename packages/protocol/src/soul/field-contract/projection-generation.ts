@@ -13,6 +13,7 @@ import {
   type FieldContractSha256,
   type FieldOperatorVersionEntry
 } from "./canonical-identity.js";
+import { assertCanonicalFieldOperatorManifest } from "./operator-manifest.js";
 
 export const ProjectionGenerationStatusSchema = z.enum([
   "shadow",
@@ -53,7 +54,17 @@ export const ProjectionGenerationPointerSchema = z.object({
 export const ProjectionPinSchema = z.object({
   workspace_id: BoundedIdSchema,
   generation_id: FieldContractDigestSchema,
-  pinned_at: IsoDatetimeStringSchema
+  reader_id: BoundedIdSchema,
+  pinned_at: IsoDatetimeStringSchema,
+  expires_at: IsoDatetimeStringSchema,
+  released_at: IsoDatetimeStringSchema.nullable()
+}).strict().readonly();
+
+export const ProjectionPinReleaseSchema = z.object({
+  workspace_id: BoundedIdSchema,
+  generation_id: FieldContractDigestSchema,
+  reader_id: BoundedIdSchema,
+  released_at: IsoDatetimeStringSchema
 }).strict().readonly();
 
 export const ProjectionEraseBarrierSchema = FieldReceiptContractFieldsSchema.extend({
@@ -71,6 +82,7 @@ export type ProjectionEraseSubjectKind = z.infer<typeof ProjectionEraseSubjectKi
 export type FieldProjectionGeneration = z.infer<typeof FieldProjectionGenerationSchema>;
 export type ProjectionGenerationPointer = z.infer<typeof ProjectionGenerationPointerSchema>;
 export type ProjectionPin = z.infer<typeof ProjectionPinSchema>;
+export type ProjectionPinRelease = z.infer<typeof ProjectionPinReleaseSchema>;
 export type ProjectionEraseBarrier = z.infer<typeof ProjectionEraseBarrierSchema>;
 
 export function sameEraseBarrier(
@@ -87,6 +99,11 @@ export function verifyFieldProjectionGeneration(
   sha256: FieldContractSha256
 ): FieldProjectionGeneration {
   const operators = toOperatorEntries(receipt.operator_versions);
+  assertCanonicalFieldOperatorManifest(
+    operators,
+    receipt.operator_manifest_digest,
+    sha256
+  );
   const generationId = hashGenerationId({
     operators,
     operator_manifest_digest: receipt.operator_manifest_digest,

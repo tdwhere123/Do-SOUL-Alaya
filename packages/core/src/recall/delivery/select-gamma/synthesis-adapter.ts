@@ -1,67 +1,90 @@
-export type SelectGammaSynthesisInput = Readonly<{
-  readonly selected_candidate_keys: readonly string[];
-  readonly synthesize?: () => SelectGammaSynthesisOutput;
-}>;
+import type { RecallCandidate } from "@do-soul/alaya-protocol";
 
-export type SelectGammaSynthesisOutput = Readonly<{
-  readonly text: string;
-  readonly truncated?: boolean;
-  readonly selected_candidate_keys?: readonly string[];
-}>;
+export interface SelectGammaSynthesisPort {
+  synthesize(
+    input: Readonly<{
+      readonly workspace_id: string;
+      readonly run_id: string | null;
+      readonly query_text: string | null;
+      readonly selected_evidence: readonly Readonly<RecallCandidate>[];
+    }>
+  ): Promise<unknown>;
+}
 
-export type SelectGammaSynthesisResult = Readonly<{
-  readonly selected_candidate_keys: readonly string[];
-  readonly synthesis: SelectGammaSynthesisStatus;
+export type SelectGammaSynthesisDependencies = Readonly<{
+  readonly selectGammaSynthesisPort?: SelectGammaSynthesisPort;
 }>;
 
 export type SelectGammaSynthesisStatus =
   | Readonly<{ readonly status: "absent" }>
   | Readonly<{ readonly status: "ok"; readonly text: string }>
   | Readonly<{
-      readonly status: "malformed" | "truncated";
+      readonly status: "malformed" | "truncated" | "failed";
       readonly failure: string;
       readonly text?: string;
     }>;
 
-export function applySelectGammaSynthesis(
-  input: SelectGammaSynthesisInput
-): SelectGammaSynthesisResult {
-  const selected = Object.freeze([...input.selected_candidate_keys]);
-  if (input.synthesize === undefined) {
-    return Object.freeze({
-      selected_candidate_keys: selected,
-      synthesis: Object.freeze({ status: "absent" as const })
-    });
+export type SelectGammaSynthesisResult = Readonly<{
+  readonly selected_evidence: readonly Readonly<RecallCandidate>[];
+  readonly synthesis: SelectGammaSynthesisStatus;
+}>;
+
+export async function applySelectGammaSynthesis(input: Readonly<{
+  readonly workspace_id: string;
+  readonly run_id: string | null;
+  readonly query_text: string | null;
+  readonly selected_evidence: readonly Readonly<RecallCandidate>[];
+  readonly port?: SelectGammaSynthesisPort;
+}>): Promise<SelectGammaSynthesisResult> {
+  const selectedEvidence = Object.freeze([...input.selected_evidence]);
+  if (input.port === undefined) {
+    return result(selectedEvidence, Object.freeze({ status: "absent" as const }));
   }
-  return Object.freeze({
-    selected_candidate_keys: selected,
-    synthesis: readSynthesis(input.synthesize)
-  });
+  try {
+    const output = await input.port.synthesize(Object.freeze({
+      workspace_id: input.workspace_id,
+      run_id: input.run_id,
+      query_text: input.query_text,
+      selected_evidence: selectedEvidence
+    }));
+    return result(selectedEvidence, parseSynthesisOutput(output));
+  } catch (error) {
+    return result(selectedEvidence, Object.freeze({
+      status: "failed" as const,
+      failure: error instanceof Error ? error.message : "synthesis failed"
+    }));
+  }
 }
 
-function readSynthesis(
-  synthesize: () => SelectGammaSynthesisOutput
-): SelectGammaSynthesisStatus {
-  try {
-    const output = synthesize();
-    if (output.truncated === true) {
-      return Object.freeze({
-        status: "truncated" as const,
-        failure: "synthesis output truncated",
-        text: output.text
-      });
-    }
-    if (typeof output.text !== "string" || output.text.trim().length === 0) {
-      return Object.freeze({
-        status: "malformed" as const,
-        failure: "synthesis output is empty"
-      });
-    }
-    return Object.freeze({ status: "ok" as const, text: output.text });
-  } catch (error) {
+function parseSynthesisOutput(output: unknown): SelectGammaSynthesisStatus {
+  if (!isRecord(output)) return malformed("synthesis output must be an object");
+  if (output.truncated !== undefined && typeof output.truncated !== "boolean") {
+    return malformed("synthesis truncated marker must be boolean");
+  }
+  if (output.truncated === true) {
     return Object.freeze({
-      status: "malformed" as const,
-      failure: error instanceof Error ? error.message : "synthesis failed"
+      status: "truncated" as const,
+      failure: "synthesis output truncated",
+      ...(typeof output.text === "string" ? { text: output.text } : {})
     });
   }
+  if (typeof output.text !== "string" || output.text.trim().length === 0) {
+    return malformed("synthesis output text must be non-empty");
+  }
+  return Object.freeze({ status: "ok" as const, text: output.text });
+}
+
+function malformed(failure: string): SelectGammaSynthesisStatus {
+  return Object.freeze({ status: "malformed" as const, failure });
+}
+
+function result(
+  selectedEvidence: readonly Readonly<RecallCandidate>[],
+  synthesis: SelectGammaSynthesisStatus
+): SelectGammaSynthesisResult {
+  return Object.freeze({ selected_evidence: selectedEvidence, synthesis });
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

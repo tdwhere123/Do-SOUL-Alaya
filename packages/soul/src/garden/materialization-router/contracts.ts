@@ -161,7 +161,6 @@ export interface EvidenceMaterializationPort {
     factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
     semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
   ): Promise<MaterializationCreatedObject>;
-  deleteCreatedEvidence(objectId: string): Promise<void>;
 }
 
 // invariant: the memory-create port reports whether the enrich_pending no-drop

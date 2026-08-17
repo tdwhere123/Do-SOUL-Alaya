@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  FieldGenerationEventType,
+  MemoryGovernanceEventType,
   formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from
@@ -88,19 +90,30 @@ describe("EvidenceService creation", () => {
     });
   });
 
-  it("rejects caller-authored fact keys before EventLog append", async () => {
-    const { service, create, append } = createCreationHarness();
+  it("drops caller-authored fact keys without losing the root evidence", async () => {
+    const warn = vi.fn();
+    const { service, create, append } = createCreationHarness({ warn });
 
-    await expect(service.create(createEvidenceInput(), [{
+    const created = await service.create(createEvidenceInput(), [{
       projection_id: 1,
       projection_kind: "fact_key",
       content: "unsealed key"
-    }])).rejects.toMatchObject({
-      name: "CoreError",
-      code: "VALIDATION"
-    });
-    expect(append).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
+    }]);
+
+    expect(append.mock.calls.map(([event]) => event.event_type)).toEqual([
+      MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
+      FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED
+    ]);
+    expect(create).toHaveBeenCalledWith(
+      created,
+      [],
+      expect.anything(),
+      expect.anything()
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "optional evidence formation failed",
+      expect.objectContaining({ evidence_object_id: created.object_id })
+    );
   });
 });
 

@@ -59,6 +59,7 @@ function buildSynthesisService(params: {
 }): RecallService {
   const { dependencies } = createDependencies(params.memories);
   return new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     memoryRepo: {
       ...dependencies.memoryRepo,

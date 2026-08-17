@@ -194,10 +194,10 @@ export function buildEvidenceInput(
 ): EvidenceMaterializationInput {
   // Keep the receipt corpus intact in gist, but do not collapse every grounded
   // assertion from one turn onto the same searchable/displayed projection.
-  const sourceCorpus =
+  const sourceCorpus = resolveEvidenceSourceCorpus(
+    signal,
     opts?.fullTurnExcerpt === true
-      ? readFullTurnEvidenceExcerpt(signal)
-      : buildSignalSummary(signal);
+  );
   const projection = resolveEvidenceTextProjection(
     signal,
     sourceCorpus,
@@ -231,18 +231,30 @@ export function buildEvidenceInput(
   };
 }
 
-function readFullTurnEvidenceExcerpt(signal: CandidateMemorySignal): string {
-  const exact = signal.raw_payload.full_turn_content;
-  if (
-    typeof exact === "string" &&
-    exact.trim().length > 0 &&
-    (resolveVerifiedGardenTurnEvidenceProjection(signal, exact) !== null ||
-      readGardenVerifiedUserAssertionReceipt(signal) !== null)
-  ) {
-    return exact;
+function resolveEvidenceSourceCorpus(
+  signal: CandidateMemorySignal,
+  fullTurnExcerpt: boolean
+): string {
+  if (!fullTurnExcerpt) return buildSignalSummary(signal);
+  const fullTurn = readExactPayloadSource(signal, "full_turn_content");
+  if (fullTurn !== null) {
+    const receiptBound =
+      resolveVerifiedGardenTurnEvidenceProjection(signal, fullTurn) !== null ||
+      readGardenVerifiedUserAssertionReceipt(signal) !== null;
+    return receiptBound ? fullTurn : fullTurn.trim();
   }
-  return readStringPayload(signal.raw_payload, "full_turn_content") ??
+  return readExactPayloadSource(signal, "excerpt") ??
+    readExactPayloadSource(signal, "gist") ??
+    readExactPayloadSource(signal, "matched_text") ??
     buildSignalSummary(signal);
+}
+
+function readExactPayloadSource(
+  signal: CandidateMemorySignal,
+  key: string
+): string | null {
+  const value = signal.raw_payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function resolveEvidenceTextProjection(

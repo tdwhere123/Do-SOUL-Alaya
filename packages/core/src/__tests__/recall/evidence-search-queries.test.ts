@@ -262,6 +262,7 @@ function createReferenceQuerySetFixture() {
   const evidenceSearch = createReferenceEvidenceSearch();
   const rawQuery = "What was the deployment configuration for the database that we used and why?";
   const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     memoryRepo: {
       ...dependencies.memoryRepo,
@@ -317,6 +318,7 @@ async function runEvidenceBatchFixture(state: EvidenceBatchState, options: Evide
   const { scalarSearch, batchSearch } = createEvidenceSearchSpies(state, options);
   const warn = vi.fn();
   const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     warn,
     memoryRepo: {

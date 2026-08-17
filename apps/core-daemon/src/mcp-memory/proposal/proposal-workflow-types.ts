@@ -1,6 +1,7 @@
 import type {
   EventLogEntry,
   MemoryEntryMutableFields,
+  MemoryProposalOperation,
   PathAnchorRef,
   Proposal,
   SoulPendingProposalSummary,
@@ -20,11 +21,13 @@ export type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "cre
 export type ProposalCreationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface McpMemoryProposalWorkflowProposalRepo {
+  readonly transactionScope?: object;
   create(input: {
     readonly proposal: Proposal;
     readonly workspace_id: string;
     readonly run_id: string | null;
     readonly target_object_kind?: string;
+    readonly proposal_operation?: MemoryProposalOperation | null;
     readonly proposed_changes?: MemoryEntryMutableFields | null;
     readonly proposed_change_summary?: string;
     readonly created_at?: string;
@@ -37,6 +40,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly workspace_id: string;
       readonly run_id: string | null;
       readonly target_object_kind?: string;
+      readonly proposal_operation?: MemoryProposalOperation | null;
       readonly proposed_changes?: MemoryEntryMutableFields | null;
       readonly proposed_change_summary?: string;
       readonly created_at?: string;
@@ -66,6 +70,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     readonly reviewer_assignment?: Readonly<{ readonly reviewer_identity: string }> | null;
     readonly target_object_id?: string | null;
     readonly target_object_kind?: string | null;
+    readonly proposal_operation?: MemoryProposalOperation | null;
     readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
     readonly proposed_path_relation?: Readonly<{
       readonly target_anchor: PathAnchorRef;
@@ -134,6 +139,22 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     state: Proposal["resolution_state"],
     updatedAt: string,
     events: readonly ProposalResolutionEventInput[],
+    options?: {
+      readonly reviewerIdentity?: string;
+      readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
+    }
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
+  acceptPendingPrivacyEraseWithEvents?(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    mutation: Readonly<{
+      readonly transactionScope: object;
+      apply(storedReviewEvents: readonly EventLogEntry[]): readonly ProposalResolutionEventInput[];
+    }>,
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;

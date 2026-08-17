@@ -5,19 +5,25 @@ import {
   SynthesisType,
   type EventLogEntry,
   type MemoryEntryMutableFields,
+  type MemoryProposalOperation,
   type PathAnchorRef,
   type Proposal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
-
+import {
+  prepareAcceptedPrivacyErase,
+  type AcceptedPrivacyEraseApply
+} from "./phases/privacy-erase.js";
+import { prepareAcceptedMemoryUpdate } from "./phases/memory-update-acceptance.js";
 type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 type ProposalReviewResolutionOptions = Readonly<{
   readonly reviewerIdentity: string;
   readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
 }>;
 type AcceptedProposalApply =
+  | AcceptedPrivacyEraseApply
   | Readonly<{
       readonly kind: "memory_update";
       readonly memoryUpdate: Readonly<{
@@ -45,7 +51,19 @@ type AcceptedProposalApply =
         readonly caused_by: string;
       }>;
     }>;
-
+type AcceptedProposalScope = Readonly<{
+  readonly proposal: Readonly<Proposal>;
+  readonly workspace_id: string;
+  readonly target_object_kind?: string | null;
+  readonly proposal_operation?: MemoryProposalOperation | null;
+  readonly target_object_id?: string | null;
+  readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
+  readonly proposed_path_relation?: Readonly<{
+    readonly target_anchor: PathAnchorRef;
+    readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
+  }> | null;
+  readonly target_baseline_updated_at?: string | null;
+}>;
 const SYNTHESIS_CREATE_DOSSIER_REFS: ReadonlySet<string> = new Set([
   "librarian.synthesis",
   "bootstrapping.synthesis_candidate"
@@ -55,18 +73,43 @@ const SYNTHESIS_SUMMARY_MAX_LENGTH = 600;
 
 export async function prepareAcceptedProposalApply(
   deps: McpMemoryProposalWorkflowDependencies,
-  scopedProposal: Readonly<{
-    readonly proposal: Readonly<Proposal>;
-    readonly workspace_id: string;
-    readonly target_object_kind?: string | null;
-    readonly target_object_id?: string | null;
-    readonly proposed_changes?: Readonly<MemoryEntryMutableFields> | null;
-    readonly proposed_path_relation?: Readonly<{
-      readonly target_anchor: PathAnchorRef;
-      readonly constitution?: Readonly<{ readonly relation_kind?: string | null }> | null;
-    }> | null;
-    readonly target_baseline_updated_at?: string | null;
-  }>,
+  scopedProposal: AcceptedProposalScope,
+  context: McpMemoryToolCallContext,
+  now: () => string,
+  generateObjectId: () => string
+): Promise<AcceptedProposalApply> {
+  if (scopedProposal.proposal_operation === "privacy_erase") {
+    return prepareAcceptedPrivacyProposal(deps, scopedProposal, context, now, generateObjectId);
+  }
+  return await prepareAcceptedNonPrivacyProposal(
+    deps, scopedProposal, context, now, generateObjectId
+  );
+}
+
+function prepareAcceptedPrivacyProposal(
+  deps: McpMemoryProposalWorkflowDependencies,
+  scopedProposal: AcceptedProposalScope,
+  context: McpMemoryToolCallContext,
+  now: () => string,
+  generateObjectId: () => string
+): AcceptedPrivacyEraseApply {
+  const proposalId = scopedProposal.proposal.proposal_id;
+  return prepareAcceptedPrivacyErase({
+    deps,
+    proposalId,
+    targetObjectKind: scopedProposal.target_object_kind,
+    targetObjectId: resolveProposalTargetObjectId(scopedProposal, proposalId),
+    proposedChanges: scopedProposal.proposed_changes,
+    context,
+    now,
+    generateObjectId,
+    createError: createAcceptanceError
+  });
+}
+
+async function prepareAcceptedNonPrivacyProposal(
+  deps: McpMemoryProposalWorkflowDependencies,
+  scopedProposal: AcceptedProposalScope,
   context: McpMemoryToolCallContext,
   now: () => string,
   generateObjectId: () => string
@@ -87,42 +130,15 @@ export async function prepareAcceptedProposalApply(
     );
   }
 
-  const memoryService = deps.memoryService;
-  if (memoryService === undefined) {
-    throw createAcceptanceError(
-      "NEEDS_CONTEXT",
-      "Memory apply port is unavailable; wire memoryService into MCP proposal workflow."
-    );
-  }
-
   const proposalId = scopedProposal.proposal.proposal_id;
-  const targetObjectId = resolveProposalTargetObjectId(scopedProposal, proposalId);
-  const proposedChanges = resolveProposalChanges(scopedProposal, proposalId);
-  const scopedTarget = await memoryService.findByIdScoped(targetObjectId, context.workspaceId);
-  if (scopedTarget === null) {
-    throw createAcceptanceError(
-      "NOT_FOUND",
-      `Target memory object not found in workspace: ${targetObjectId}`
-    );
-  }
-  if (memoryService.validateUpdate === undefined) {
-    throw createAcceptanceError(
-      "NEEDS_CONTEXT",
-      "Memory update validation port is unavailable; wire MemoryService.validateUpdate into MCP proposal workflow."
-    );
-  }
-  await memoryService.validateUpdate(targetObjectId, proposedChanges);
-
-  return {
-    kind: "memory_update",
-    memoryUpdate: {
-      target_object_id: targetObjectId,
-      workspace_id: context.workspaceId,
-      proposed_changes: proposedChanges,
-      caused_by: `proposal_accept:${proposalId}`,
-      expected_baseline_updated_at: scopedProposal.target_baseline_updated_at ?? null
-    }
-  };
+  return await prepareAcceptedMemoryUpdate({
+    deps,
+    scopedProposal,
+    context,
+    resolveTarget: () => resolveProposalTargetObjectId(scopedProposal, proposalId),
+    resolveChanges: () => resolveProposalChanges(scopedProposal, proposalId),
+    createError: createAcceptanceError
+  });
 }
 
 export async function acceptProposalWithDurableMemoryUpdate(

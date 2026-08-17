@@ -50,6 +50,7 @@ const EMPTY_EVIDENCE_MEMORY_ID = "44444444-4444-4444-8444-444444444444";
 const AMBIGUOUS_EVIDENCE_MEMORY_ID = "55555555-5555-4555-8555-555555555555";
 const SECOND_EVIDENCE_ID = "66666666-6666-4666-8666-666666666666";
 const OBSERVED_AT = "2026-07-16T12:34:56.000Z";
+const FIXED_ISO = "2026-07-16T12:35:00.000Z";
 
 // anti-patterns-lint-allow: exercises the durable bulk-enrich handoff through real SQLite assertion storage.
 describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
@@ -88,7 +89,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         eventLogRepo,
         runtimeNotifier,
         generateObjectId: () => EVIDENCE_ID,
-        now: () => "2026-07-16T12:35:00.000Z"
+        now: () => FIXED_ISO
       });
       await evidenceService.create({
         created_by: "garden_compile",
@@ -117,7 +118,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         eventLogRepo,
         runtimeNotifier,
         generateObjectId: () => SECOND_EVIDENCE_ID,
-        now: () => "2026-07-16T12:35:00.000Z"
+        now: () => FIXED_ISO
       }).create({
         created_by: "garden_compile",
         evidence_kind: "inferred",
@@ -175,6 +176,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       const completions: unknown[] = [];
 
       await runBulkEnrichTask({
+        now: () => FIXED_ISO,
         task: {
           task_id: "bulk-enrich-signal-ref",
           task_kind: GardenTaskKind.BULK_ENRICH,
@@ -203,8 +205,8 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         },
         reporter: {
           emitEnrichAbandoned: async () => undefined,
-          reportCompletion: async (_task, _completedAt, success, auditEntries) => {
-            completions.push({ success, audit_entries: auditEntries });
+          reportCompletion: async (_task, completedAt, success, auditEntries) => {
+            completions.push({ success, completed_at: completedAt, audit_entries: auditEntries });
           },
           warn: vi.fn()
         }
@@ -214,6 +216,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       expect(completions).toEqual([
         expect.objectContaining({
           success: true,
+          completed_at: FIXED_ISO,
           audit_entries: expect.arrayContaining(["bulk_enrich:processed_1", "bulk_enrich:failed_2"])
         })
       ]);

@@ -427,8 +427,8 @@ function readPathReadBind(value: unknown): RecallPathReadBind | undefined {
   if (bind === undefined) {
     return undefined;
   }
-  if (bind !== "temporal" && bind !== "legacy") {
-    throw new Error("worker payload pathReadBind must be temporal or legacy");
+  if (bind !== "temporal") {
+    throw new Error("worker payload pathReadBind must be temporal");
   }
   return bind;
 }

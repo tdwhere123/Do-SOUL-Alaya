@@ -2,11 +2,9 @@ import {
   createSelectionBoundaryCapture,
   notifySelectionBoundaryObserver
 } from "../selection-boundary/selection-boundary-capture.js";
-import {
-  buildFinalPacketConsensusObservation,
-  resolveFinalPacketConsensusPlan
-} from "../final-order/final-packet-consensus.js";
 import { materializeFinalPacket } from "../final-order/final-packet-order.js";
+import type { RecallPacketPlanObservation } from
+  "../packet-plan/packet-plan-observation.js";
 import type {
   FineAssessmentAccumulator,
   FineAssessmentSelectionContext,
@@ -22,7 +20,7 @@ import type { RecallFieldRefinementStopCertificate } from
 
 export function buildSelectionResult(
   params: FineAssessmentSelectionParams,
-  consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
+  packetObservation: RecallPacketPlanObservation,
   packet: ReturnType<typeof materializeFinalPacket>,
   coverageSelectionObjective: CoverageSelectionObjectiveReceipt,
   orderSequence: FineAssessmentOrderSequence,
@@ -31,10 +29,6 @@ export function buildSelectionResult(
   preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionResult {
   const observesBoundary = params.selectionBoundaryObserver !== undefined;
-  const packetConsensus = buildFinalPacketConsensusObservation(
-    consensus,
-    packet.candidates
-  );
   const selectionResult = Object.freeze({
     candidates: packet.candidates,
     diagnostics: packet.diagnostics,
@@ -44,14 +38,17 @@ export function buildSelectionResult(
       fieldRefinementStopCertificate
     }),
     ...(params.capturePacketPlanTrace === true
-      ? { packetPlanObservation: packetConsensus }
+      ? { packetPlanObservation: packetObservation }
       : {})
   });
   if (observesBoundary && tokenEstimatesByContent !== undefined) {
+    if (preProjection === undefined) {
+      throw new Error("selection boundary requires a pre-projection witness");
+    }
     notifySelectionBoundaryObserver(
       params,
       selectionResult,
-      packetConsensus,
+      packetObservation,
       tokenEstimatesByContent,
       preProjection
     );

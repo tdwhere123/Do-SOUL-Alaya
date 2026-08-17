@@ -472,14 +472,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     }),
     WorkerRunLifecycleService: makeClass(),
     ZeroDaySecurityLayer: makeClass(),
-    PathPlasticityService: makeClass({
-      computeAndApplyPlasticity: vi.fn(async () => ({
-        reinforced: 0,
-        weakened: 0,
-        retired: 0,
-        affectedPathIds: []
-      }))
-    }),
     createVerificationBiasReaderFromPathLookup: vi.fn(() => ({
       getMaxVerificationBias: vi.fn(async () => 0)
     })),

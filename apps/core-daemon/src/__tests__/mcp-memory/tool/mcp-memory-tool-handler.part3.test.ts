@@ -21,7 +21,7 @@ import {
 
 describe("mcp memory tool handler", () => {
 
-  it("recall-hit-tier-promotion refreshes used memory access while promoting to hot", async () => {
+  it("validates used memories without mutating tier or access state", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -40,17 +40,7 @@ describe("mcp memory tool handler", () => {
     expect(result.ok).toBe(true);
     expect(deps.memoryService.findByIdsScoped).toHaveBeenCalledWith(["mem1"], "ws1");
     expect(deps.memoryService.findByIdScoped).not.toHaveBeenCalled();
-    expect(deps.memoryService.updateScoped).toHaveBeenCalledTimes(1);
-    expect(deps.memoryService.updateScoped).toHaveBeenCalledWith(
-      "mem1",
-      "ws1",
-      {
-        storage_tier: "hot",
-        last_used_at: "2026-04-30T00:00:00.000Z",
-        last_hit_at: "2026-04-30T00:00:00.000Z"
-      },
-      "recall_usage_reported"
-    );
+    expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
   });
 
   it("rejects report_context_usage when scoped batch lookup cannot resolve a used memory", async () => {

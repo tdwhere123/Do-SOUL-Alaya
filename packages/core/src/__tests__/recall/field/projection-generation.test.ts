@@ -17,7 +17,8 @@ import { createProjectionGenerationReceipt } from
   "../../../recall/field/retrieval/projection/generation-identity.js";
 import {
   InMemoryProjectionGenerationStore,
-  ProjectionPointerCrash
+  ProjectionPointerCrash,
+  type ProjectionGenerationLifecycleStore
 } from "../../../recall/field/retrieval/projection/generation-store.js";
 import { createProjectionEraseBarrier } from
   "../../../recall/field/retrieval/projection/generation-erase.js";
@@ -69,6 +70,27 @@ describe("immutable projection generations", () => {
     ])).toThrow(/mixed generation/u);
   });
 
+  it("rejects artifact membership changes hidden behind stable ids", () => {
+    const store = new InMemoryProjectionGenerationStore(sha256);
+    const built = buildWorkspaceGeneration(store, "event-1", [entityKey("memory-1")]);
+    const artifacts = store.readArtifacts(
+      "workspace-1",
+      built.generation.generation_id
+    )!;
+    const corrupted = Object.freeze({
+      ...artifacts,
+      postings: Object.freeze(artifacts.postings.map((posting) => Object.freeze({
+        ...posting,
+        member_ref: "memory-other"
+      })))
+    });
+    const corruptStore = Object.create(store) as ProjectionGenerationLifecycleStore;
+    corruptStore.readArtifacts = () => corrupted;
+
+    expect(() => verifyProjectionGeneration(corruptStore, built.generation, sha256))
+      .toThrow(/artifact digest/u);
+  });
+
   it("activates only by pointer swap and preserves a pinned reader across cutover", () => {
     const store = new InMemoryProjectionGenerationStore(sha256);
     const first = buildAndVerify(store, "event-1", [entityKey("memory-1")]);
@@ -77,11 +99,15 @@ describe("immutable projection generations", () => {
       active_generation_id: first.generation.generation_id,
       activated_at: CLOCK
     });
-    const pinned = pinProjectionReader(store, {
+    const firstPin = {
       workspace_id: "workspace-1",
       generation_id: first.generation.generation_id,
-      pinned_at: CLOCK
-    });
+      reader_id: "reader-1",
+      pinned_at: CLOCK,
+      expires_at: "2026-08-16T00:05:00.000Z",
+      released_at: null
+    } as const;
+    const pinned = pinProjectionReader(store, firstPin);
     const next = catchUpProjectionGeneration({
       store,
       sha256,
@@ -110,14 +136,96 @@ describe("immutable projection generations", () => {
       .toBe("retired");
     expect(pinned.readGeneration().generation_id).toBe(first.generation.generation_id);
     expect(pinned.readPostings().map((posting) => posting.member_ref)).toEqual(["memory-1"]);
+    expect(store.release({
+      workspace_id: firstPin.workspace_id,
+      generation_id: firstPin.generation_id,
+      reader_id: firstPin.reader_id,
+      released_at: "2026-08-16T01:01:00.000Z"
+    }).released_at).toBe("2026-08-16T01:01:00.000Z");
     expect(pinProjectionReader(store, {
       workspace_id: "workspace-1",
       generation_id: next.generation.generation_id,
-      pinned_at: "2026-08-16T01:00:00.000Z"
-    }).readPostings().map((posting) => posting.member_ref)).toEqual([
+      reader_id: "reader-2",
+      pinned_at: "2026-08-16T01:00:00.000Z",
+      expires_at: "2026-08-16T01:05:00.000Z",
+      released_at: null
+    }).readPostings().map((posting) => posting.member_ref).sort()).toEqual([
       "memory-1",
       "memory-2"
     ]);
+  });
+
+  it("rejects released and expired reader leases", () => {
+    const store = new InMemoryProjectionGenerationStore(sha256);
+    const built = buildAndVerify(store, "event-1", [entityKey("memory-1")]);
+    activateProjectionGeneration(store, {
+      workspace_id: "workspace-1",
+      active_generation_id: built.generation.generation_id,
+      activated_at: CLOCK
+    });
+    const pin = store.pin({
+      workspace_id: "workspace-1",
+      generation_id: built.generation.generation_id,
+      reader_id: "reader-live",
+      pinned_at: CLOCK,
+      expires_at: "2026-08-16T00:05:00.000Z",
+      released_at: null
+    });
+
+    expect(store.requireActivePin(pin, "2026-08-16T00:01:00.000Z")).toEqual(pin);
+    store.release({
+      workspace_id: pin.workspace_id,
+      generation_id: pin.generation_id,
+      reader_id: pin.reader_id,
+      released_at: "2026-08-16T00:02:00.000Z"
+    });
+    expect(() => store.requireActivePin(pin, "2026-08-16T00:03:00.000Z"))
+      .toThrow(/released/u);
+
+    const expired = store.pin({
+      ...pin,
+      reader_id: "reader-expired",
+      expires_at: "2026-08-16T00:04:00.000Z"
+    });
+    expect(() => store.requireActivePin(expired, "2026-08-16T00:04:00.000Z"))
+      .toThrow(/not live/u);
+  });
+
+  it("collects retired generations only after reader leases release or expire", () => {
+    const store = new InMemoryProjectionGenerationStore(sha256);
+    const first = buildAndVerify(store, "event-1", [entityKey("memory-1")]);
+    const second = buildAndVerify(store, "event-2", [entityKey("memory-2")]);
+    activateProjectionGeneration(store, {
+      workspace_id: "workspace-1",
+      active_generation_id: first.generation.generation_id,
+      activated_at: CLOCK
+    });
+    const pin = store.pin({
+      workspace_id: "workspace-1",
+      generation_id: first.generation.generation_id,
+      reader_id: "reader-retained",
+      pinned_at: CLOCK,
+      expires_at: "2026-08-16T00:05:00.000Z",
+      released_at: null
+    });
+    activateProjectionGeneration(store, {
+      workspace_id: "workspace-1",
+      active_generation_id: second.generation.generation_id,
+      activated_at: "2026-08-16T00:01:00.000Z"
+    });
+
+    expect(store.collectRetired("workspace-1", "2026-08-16T00:02:00.000Z")).toEqual([]);
+    expect(store.readArtifacts("workspace-1", first.generation.generation_id)).not.toBeNull();
+    store.release({
+      workspace_id: pin.workspace_id,
+      generation_id: pin.generation_id,
+      reader_id: pin.reader_id,
+      released_at: "2026-08-16T00:03:00.000Z"
+    });
+    expect(store.collectRetired("workspace-1", "2026-08-16T00:03:00.000Z"))
+      .toEqual([first.generation.generation_id]);
+    expect(store.readPinned("workspace-1", first.generation.generation_id)).toBeNull();
+    expect(store.readArtifacts("workspace-1", first.generation.generation_id)).toBeNull();
   });
 
   it("injects crash points around the pointer swap without sleeping", () => {

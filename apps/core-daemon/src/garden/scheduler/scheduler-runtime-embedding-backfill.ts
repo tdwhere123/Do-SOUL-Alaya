@@ -71,7 +71,7 @@ async function enqueueEmbeddingBackfillForAllWorkspaces(
   pendingWorkspaces: Set<string>
 ): Promise<void> {
   const workspaces = await input.workspaceRepo.list();
-  const nowIso = new Date().toISOString();
+  const nowIso = input.now();
   let enqueuedCount = 0;
 
   for (const workspace of workspaces) {
@@ -118,7 +118,7 @@ async function runEmbeddingBackfillTask(
   task: Readonly<GardenTaskDescriptor>,
   mode: EmbeddingBackfillMode = "production"
 ): Promise<EmbeddingBackfillTaskOutcome> {
-  const completedAt = new Date().toISOString();
+  const completedAt = input.now();
   let outcome: EmbeddingBackfillTaskOutcome;
   try {
     const result = await resolveEmbeddingBackfillResult(input, task);
@@ -403,7 +403,7 @@ async function runQueuedTargetedEmbeddingBackfill(
     input,
     pendingWorkspaces,
     workspaceId,
-    new Date().toISOString()
+    input.now()
   );
   if (!enqueued) {
     return { dispatchedCount: 0, lastTargetedReason: null };

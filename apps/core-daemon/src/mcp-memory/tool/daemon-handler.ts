@@ -15,6 +15,9 @@ import {
   createSoulResolveHandler,
   type SoulResolveHandlerDependencies
 } from "./resolve-handler.js";
+import type { CausalUsagePort } from "@do-soul/alaya-protocol";
+import type { EventPublisher } from "@do-soul/alaya-core";
+import { recordCausalUsedReceipts } from "../usage/causal-usage-recorder.js";
 
 export interface DaemonMcpMemoryToolHandlerInput {
   readonly zeroDayToolAccess: NonNullable<McpMemoryToolHandlerDependencies["zeroDayToolAccess"]>;
@@ -23,10 +26,6 @@ export interface DaemonMcpMemoryToolHandlerInput {
   readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
-  readonly pathRelationProposalService?: McpMemoryToolHandlerDependencies["pathRelationProposalService"];
-  // invariant: co-recall accrues only for semantically coherent delivered pairs.
-  // see also: mcp-memory/tool-handler.ts coRecallCoherenceGate.
-  readonly coRecallCoherenceGate?: McpMemoryToolHandlerDependencies["coRecallCoherenceGate"];
   // invariant: path-relation proposal accept must validate object anchors before the storage insert.
   // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts objectAnchorGate
   readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
@@ -44,10 +43,10 @@ export interface DaemonMcpMemoryToolHandlerInput {
   readonly postTurnSignalReceiver?: McpMemoryToolHandlerDependencies["postTurnSignalReceiver"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
-  readonly graphEdgePort?: McpMemoryToolHandlerDependencies["graphEdgePort"];
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
   readonly trustStateRecorder: McpMemoryToolHandlerDependencies["trustStateRecorder"];
-  readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]>;
+  readonly eventPublisher: NonNullable<McpMemoryToolHandlerDependencies["eventPublisher"]> &
+    Pick<EventPublisher, "mutateThenAppendMany">;
   readonly asyncSideEffectAudit?: McpMemoryToolHandlerDependencies["asyncSideEffectAudit"];
   readonly gardenTaskRepo?: McpMemoryToolHandlerDependencies["gardenTaskRepo"];
   // invariant: applies a host-worker EDGE_CLASSIFY verdict to the existing
@@ -55,6 +54,8 @@ export interface DaemonMcpMemoryToolHandlerInput {
   readonly edgeVerdictApplier?: McpMemoryToolHandlerDependencies["edgeVerdictApplier"];
   readonly eventLogRepo: McpMemoryProposalWorkflowEventLogRepo;
   readonly proposalRepo: McpMemoryProposalWorkflowProposalRepo;
+  readonly privacyErasePort?: McpMemoryProposalWorkflowDependencies["privacyErasePort"];
+  readonly privacyEffectDecisionStore?: McpMemoryProposalWorkflowDependencies["privacyEffectDecisionStore"];
   readonly runtimeNotifier: McpMemoryProposalWorkflowRuntimeNotifier;
   readonly reviewerIdentityBinding?: ReviewerIdentityBinding;
   readonly attachSurfaceRegistrar?: McpMemoryToolHandlerDependencies["attachSurfaceRegistrar"];
@@ -70,13 +71,17 @@ export interface DaemonMcpMemoryToolHandlerInput {
   // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
   //   assertDeliveryInScope
   readonly claimSourceReader?: SoulResolveHandlerDependencies["claimSourceReader"];
-  readonly causalUsagePort?: McpMemoryToolHandlerDependencies["causalUsagePort"];
+  readonly causalUsagePort: CausalUsagePort;
 }
 
 function buildSoulResolveHandler(
   input: Pick<
     DaemonMcpMemoryToolHandlerInput,
-    "resolutionService" | "trustStateRecorder" | "claimSourceReader"
+    | "resolutionService"
+    | "trustStateRecorder"
+    | "claimSourceReader"
+    | "causalUsagePort"
+    | "eventPublisher"
   >
 ) {
   return createSoulResolveHandler({
@@ -101,7 +106,15 @@ function buildSoulResolveHandler(
     },
     ...(input.claimSourceReader === undefined
       ? {}
-      : { claimSourceReader: input.claimSourceReader })
+      : { claimSourceReader: input.claimSourceReader }),
+    causalUsageRecorder: {
+      record: async (recordInput) => {
+        await recordCausalUsedReceipts(input.causalUsagePort, {
+          ...recordInput,
+          eventPublisher: input.eventPublisher
+        });
+      }
+    }
   });
 }
 
@@ -110,6 +123,8 @@ function buildDaemonMcpMemoryProposalWorkflow(
     DaemonMcpMemoryToolHandlerInput,
     | "eventLogRepo"
     | "proposalRepo"
+    | "privacyErasePort"
+    | "privacyEffectDecisionStore"
     | "runtimeNotifier"
     | "memoryService"
     | "trustStateRecorder"
@@ -123,6 +138,10 @@ function buildDaemonMcpMemoryProposalWorkflow(
   return createMcpMemoryProposalWorkflow({
     eventLogRepo: input.eventLogRepo,
     proposalRepo: input.proposalRepo,
+    ...(input.privacyErasePort === undefined ? {} : { privacyErasePort: input.privacyErasePort }),
+    ...(input.privacyEffectDecisionStore === undefined
+      ? {}
+      : { privacyEffectDecisionStore: input.privacyEffectDecisionStore }),
     runtimeNotifier: input.runtimeNotifier,
     memoryService: input.memoryService,
     sourceDeliveryAnchorValidator: {
@@ -165,12 +184,6 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     memoryEntryRepo: input.memoryEntryRepo,
     ...(input.evidenceService === undefined ? {} : { evidenceService: input.evidenceService }),
-    ...(input.pathRelationProposalService === undefined
-      ? {}
-      : { pathRelationProposalService: input.pathRelationProposalService }),
-    ...(input.coRecallCoherenceGate === undefined
-      ? {}
-      : { coRecallCoherenceGate: input.coRecallCoherenceGate }),
     signalService: input.signalService,
     ...(input.postTurnSignalReceiver === undefined
       ? {}
@@ -178,7 +191,6 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
     graphExploreService: input.graphExploreService,
     ...(input.edgeProposalService === undefined ? {} : { edgeProposalService: input.edgeProposalService }),
     ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding }),
-    ...(input.graphEdgePort === undefined ? {} : { graphEdgePort: input.graphEdgePort }),
     sessionOverrideService: input.sessionOverrideService,
     trustStateRecorder: input.trustStateRecorder,
     eventPublisher: input.eventPublisher,
@@ -189,8 +201,7 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
       ? {}
       : { attachSurfaceRegistrar: input.attachSurfaceRegistrar }),
     soulResolveHandler,
-    proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding),
-    ...(input.causalUsagePort === undefined ? {} : { causalUsagePort: input.causalUsagePort })
+    proposalWorkflow: buildDaemonMcpMemoryProposalWorkflow(input, reviewerIdentityBinding)
   });
 }
 

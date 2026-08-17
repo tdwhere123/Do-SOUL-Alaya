@@ -8,7 +8,8 @@ import {
   type FactorDescriptor,
   type FactorIncidence,
   type FactorIncidencePort,
-  type FieldContractSha256
+  type FieldContractSha256,
+  type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
@@ -57,6 +58,39 @@ export function nominateSemanticDerivationJob(input: Readonly<{
     input_evidence_ids: evidenceIds,
     status: "nominated",
     disposition: "pending",
+    recorded_at: input.recorded_at
+  });
+}
+
+export function persistSemanticFormationReceipt(input: Readonly<{
+  readonly sha256: FieldContractSha256;
+  readonly incidence: FactorIncidencePort;
+  readonly workspace_id: string;
+  readonly evidence_object_id: string;
+  readonly recorded_at: string;
+  readonly capture: Readonly<OpenSemanticFactorFormationCapture>;
+}>): DerivationJobReceipt | null {
+  const producer = input.capture.producer_operator_id;
+  if (input.capture.status !== "formed" || producer === null) return null;
+  const evidenceIds = Object.freeze([input.evidence_object_id]);
+  const identityInput = {
+    purpose: "f3_semantic_capture",
+    operator_id: producer,
+    input_evidence_ids: evidenceIds
+  };
+  return input.incidence.nominateJob({
+    schema_version: 1,
+    producer: FACTOR_INCIDENCE_OPERATOR_ID,
+    consumer: "projection_generation",
+    identity: hashDerivationJobId(identityInput, input.sha256),
+    replay_rule: "idempotent_same_identity",
+    failure_disposition: "fail_closed",
+    governance_effect: "none",
+    deletion_behavior: "rebuildable",
+    workspace_id: input.workspace_id,
+    ...identityInput,
+    status: "succeeded",
+    disposition: input.capture.capture_digest,
     recorded_at: input.recorded_at
   });
 }

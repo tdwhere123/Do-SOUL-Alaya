@@ -4,7 +4,8 @@ import type {
   FieldProjectionGeneration,
   ProjectionEraseBarrier,
   ProjectionGenerationPointer,
-  ProjectionPin
+  ProjectionPin,
+  ProjectionPinRelease
 } from "./projection-generation.js";
 import type { QueryCondition, QueryConditionReceipt } from "./query-condition.js";
 import type { CausalUsageReceipt } from "./causal-usage.js";
@@ -47,6 +48,7 @@ export interface ProjectionGenerationPort {
   verify(input: FieldProjectionGeneration): FieldProjectionGeneration;
   activatePointer(input: ProjectionGenerationPointer): ProjectionGenerationPointer;
   pin(input: ProjectionPin): ProjectionPin;
+  release(input: ProjectionPinRelease): ProjectionPin;
 }
 
 export interface QueryConditionPort {
@@ -76,23 +78,10 @@ export interface ProofEffectPort {
 }
 
 export interface CausalUsagePort {
-  recordUsage(input: CausalUsageReceipt): CausalUsageReceipt;
-}
-
-export type SelectGammaRequest = Readonly<{
-  readonly workspace_id: string;
-  readonly generation_id: string;
-  readonly condition_digest: string;
-  readonly eligible_candidate_keys: readonly string[];
-  readonly token_budget: number;
-}>;
-
-export type SelectGammaResult = Readonly<{
-  readonly selected_candidate_keys: readonly string[];
-}>;
-
-export interface SelectGammaPort {
-  select(input: SelectGammaRequest): SelectGammaResult;
+  recordUsage(input: CausalUsageReceipt): Readonly<{
+    readonly receipt: CausalUsageReceipt;
+    readonly inserted: boolean;
+  }>;
 }
 
 export interface EraseBarrierPort {

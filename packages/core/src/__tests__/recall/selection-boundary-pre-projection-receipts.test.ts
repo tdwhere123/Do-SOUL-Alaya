@@ -39,6 +39,7 @@ describe("selection boundary pre-projection decision receipts", () => {
       reason: "duplicate",
       witness: {
         kind: "duplicate",
+        identity_channel: "object",
         retained_candidate_key: "workspace_local:memory_entry:shared"
       }
     },
@@ -104,13 +105,39 @@ describe("selection boundary pre-projection decision receipts", () => {
       .toThrow(/selection boundary fidelity mismatch/u);
   });
 
-  it("captures an embedding consensus order at the single final selector", () => {
+  it.each([
+    ["missing source", { status: "available" }],
+    ["empty source", { status: "available", key: "" }],
+    ["keyed unavailable source", { status: "unavailable", key: "source-1" }]
+  ])("rejects a retained receipt with %s", (_name, source) => {
+    const boundary = captureBoundary({ candidates: rankedCandidates(1) });
+    const preProjection = requirePreProjection(boundary);
+    const retained = preProjection.admission_actions[0]!;
+    const invalid = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: {
+          ...preProjection,
+          admission_actions: [{
+            ...retained,
+            witness: { ...retained.witness, source }
+          }]
+        }
+      }
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(invalid))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("captures Gamma order without an embedding consensus walk", () => {
     const boundary = captureBoundary(consensusFixture());
     const preProjection = requirePreProjection(boundary);
 
     expect(boundary.expected.packet_consensus.decision).toEqual({
-      status: "rejected",
-      reason: "coverage_order_retained"
+      status: "no_op",
+      reason: "select_gamma_identity"
     });
     expect(preProjection.introduced_candidate_keys).toEqual([]);
     const retained = preProjection.projection_actions.filter((action) =>
@@ -133,15 +160,18 @@ describe("selection boundary pre-projection decision receipts", () => {
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
   });
 
-  it("replays a legacy schema-v2 boundary without pre-projection", () => {
+  it("rejects a schema-v2 boundary without pre-projection", () => {
     const current = captureBoundary({ candidates: rankedCandidates(4) });
     const { pre_projection: _preProjection, ...legacyExpected } = current.expected;
     const legacy = {
       ...current,
       expected: legacyExpected
-    } satisfies FineAssessmentSelectionBoundaryCase;
+    } as unknown as FineAssessmentSelectionBoundaryCase;
 
-    expect(() => replayFineAssessmentSelectionBoundary(legacy)).not.toThrow();
+    expect(() => validateSelectionBoundary(legacy))
+      .toThrow(/selection boundary fidelity mismatch/u);
+    expect(() => replayFineAssessmentSelectionBoundary(legacy))
+      .toThrow(/selection boundary fidelity mismatch/u);
   });
 });
 

@@ -33,8 +33,6 @@ import type { RecallPacketPlanObservation } from
   "./packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "./selection-boundary/selection-boundary-capture.js";
-import type { CoverageSelectionOperatorConfig } from
-  "../field/facility/selection-objective.js";
 import type { CoverageSelectionObjectiveReceipt } from
   "./coverage-selection.js";
 import type { RecallFieldRefinementStopCertificate } from
@@ -43,6 +41,7 @@ import type { RecallAnswerShapePlan } from
   "../query/recall-answer-shape-plan.js";
 
 export interface FineAssessParams {
+  readonly workspace_id: string;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
@@ -53,7 +52,6 @@ export interface FineAssessParams {
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
-  readonly coverageObjectiveConfig?: CoverageSelectionOperatorConfig;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
@@ -134,6 +132,7 @@ export function deliverFineAssessment(
     replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates({
+    workspace_id: params.workspace_id,
     orderedCandidates: delivery.orderedCandidates,
     packetCandidates: preparation.candidates,
     generation_id: params.generation_id,
@@ -147,7 +146,6 @@ export function deliverFineAssessment(
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
     coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
-    coverageObjectiveConfig: params.coverageObjectiveConfig,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
     answerShapePlan: params.answerShapePlan,

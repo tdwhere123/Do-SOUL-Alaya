@@ -27,9 +27,9 @@ export function createPathPlasticityRuntimeSupport(
         input,
         pendingPathPlasticityWorkspaces,
         watermark
-      ),
+    ),
     markPathPlasticityProcessed: (params) =>
-      markPathPlasticityProcessed(watermark, params),
+      markPathPlasticityProcessed(watermark, params, input.now),
     pathPlasticityPendingPort: {
       clearPendingWorkspace(workspaceId: string): void {
         pendingPathPlasticityWorkspaces.delete(workspaceId);
@@ -54,13 +54,14 @@ function markPathPlasticityProcessed(
     readonly workspaceId: string;
     readonly processedThroughIso: string;
     readonly processedAuditEventId?: string | null;
-  }
+  },
+  now: () => string
 ): void {
   watermark.markProcessed(
     params.workspaceId,
     params.processedThroughIso,
     params.processedAuditEventId ?? null,
-    new Date().toISOString()
+    now()
   );
 }
 
@@ -70,7 +71,7 @@ async function enqueuePathPlasticityForAllWorkspaces(
   watermark: PathPlasticityWatermarkRegistry
 ): Promise<void> {
   const workspaces = await input.workspaceRepo.list();
-  const nowIso = new Date().toISOString();
+  const nowIso = input.now();
   let enqueuedCount = 0;
 
   for (const workspace of workspaces) {

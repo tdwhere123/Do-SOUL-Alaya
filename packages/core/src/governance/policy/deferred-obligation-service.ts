@@ -8,10 +8,11 @@ import {
   ObligationTrustNarrativeEventType,
   type DeferredObligation,
   type DeferredObligationKind,
-  type DeferredObligationState
+  type DeferredObligationState,
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import type { EventPublisher } from "../../runtime/event-publisher.js";
+import type { EventPublisher, EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 
 export interface DeferredObligationRepoPort {
@@ -46,11 +47,19 @@ export interface CreateDeferredObligationInput {
   readonly expiresAt: string;
 }
 
+export interface CreateDeferredObligationOptions {
+  readonly buildAdditionalEventInputs?: (
+    obligation: Readonly<DeferredObligation>
+  ) => readonly EventPublisherInput[];
+  readonly additionalEventsSink?: EventLogEntry[];
+}
+
 export class DeferredObligationService {
   public constructor(private readonly deps: DeferredObligationServiceDependencies) {}
 
   public async create(
-    params: CreateDeferredObligationInput
+    params: CreateDeferredObligationInput,
+    options: CreateDeferredObligationOptions = {}
   ): Promise<Readonly<DeferredObligation>> {
     const now = this.resolveNow();
     const obligation = DeferredObligationSchema.parse({
@@ -76,19 +85,23 @@ export class DeferredObligationService {
       expires_at: obligation.expires_at
     });
 
+    const obligationEvent = {
+      event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
+      entity_type: "deferred_obligation",
+      entity_id: obligation.obligation_id,
+      workspace_id: obligation.workspace_id,
+      run_id: obligation.source_run_id,
+      caused_by: "deferred_obligation_service",
+      payload_json: payload
+    } as const;
+    const additionalEventInputs = options.buildAdditionalEventInputs?.(obligation) ?? [];
+
     return this.deps.eventPublisher.appendManyWithMutation(
-      [
-        {
-          event_type: ObligationTrustNarrativeEventType.OBLIGATION_CREATED,
-          entity_type: "deferred_obligation",
-          entity_id: obligation.obligation_id,
-          workspace_id: obligation.workspace_id,
-          run_id: obligation.source_run_id,
-          caused_by: "deferred_obligation_service",
-          payload_json: payload
-        }
-      ],
-      () => this.deps.repo.create(obligation)
+      [obligationEvent, ...additionalEventInputs],
+      (entries) => {
+        options.additionalEventsSink?.push(...entries.slice(1));
+        return this.deps.repo.create(obligation);
+      }
     );
   }
 

@@ -134,6 +134,7 @@ function buildFineAssessParams(
   candidates: FineAssessParams["candidates"]
 ): FineAssessParams {
   return {
+    workspace_id: params.workspaceId,
     candidates,
     policy: prepared.policy,
     winnerMemoryIds: prepared.winnerMemoryIds,
@@ -160,7 +161,7 @@ function buildCoarseAssessmentParams(
   return {
     dependencies: context.dependencies,
     warn: context.warn,
-    now: () => prepared.referenceTime,
+    referenceTime: prepared.referenceTime,
     coarseFilter: Object.freeze({ ...coarse.coarseFilter, candidates }),
     workspaceId: params.workspaceId,
     pathProjectionAsOf: prepared.temporalProjectionAsOf,

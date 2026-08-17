@@ -4,6 +4,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export const USAGE_STRENGTH_CAP = 1;
+export const USAGE_MASS_CAP = 32;
 export const DEFAULT_USAGE_DECAY_PER_MS = Math.log(2) / (30 * 24 * 60 * 60 * 1000);
 
 export type PlasticityChannel = "usage" | "inhibitory";
@@ -32,11 +33,13 @@ export function projectUsageMass(
   const asOfMs = Date.parse(asOf);
   let mass = 0;
   for (const credit of uniqueCredits(credits)) {
-    const elapsed = Math.max(0, asOfMs - Date.parse(credit.receipt.occurred_at));
+    const occurredAtMs = Date.parse(credit.receipt.occurred_at);
+    if (occurredAtMs > asOfMs) continue;
+    const elapsed = asOfMs - occurredAtMs;
     const contribution = credit.receipt.weight * Math.exp(-decayPerMs * elapsed);
     mass += credit.channel === "inhibitory" ? -contribution : contribution;
   }
-  return Math.max(0, mass);
+  return Math.min(USAGE_MASS_CAP, Math.max(0, mass));
 }
 
 export function projectUsageStrength(

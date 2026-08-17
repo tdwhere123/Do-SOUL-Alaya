@@ -166,18 +166,21 @@ describe("attributed activation", () => {
     expect(dissipated.effective_as_of).toBe(exhausted.effective_as_of);
   });
 
-  it("does not treat mixed-generation neighbors as reachable work", () => {
-    const trace = runAttributedActivation(capture(), {
+  it("fails closed when any graph node or edge belongs to another generation", () => {
+    expect(() => runAttributedActivation(capture(), {
       sha256: testSha256(),
       graph: graph([
         node("seed", { authorized_anchor: true }),
         node("stale", { generation_id: OTHER_GENERATION_ID })
       ], [edge("seed", "stale")])
-    });
-
-    expect(trace.receipt.opened_candidate_keys).toEqual(["seed"]);
-    expect(trace.receipt.stop_disposition).toBe("certified");
-    expect(trace.receipt.frontier).toBe("closed");
+    })).toThrow(/generation/u);
+    expect(() => runAttributedActivation(capture(), {
+      sha256: testSha256(),
+      graph: graph([
+        node("seed", { authorized_anchor: true }),
+        node("current")
+      ], [edge("seed", "current", { generation_id: OTHER_GENERATION_ID })])
+    })).toThrow(/generation/u);
   });
 
   it("uses the receipt as-of for every stage, not a later clock", () => {

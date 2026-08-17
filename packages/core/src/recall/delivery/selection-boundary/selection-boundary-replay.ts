@@ -28,12 +28,10 @@ export function replayFineAssessmentSelectionBoundary(
   const replayed = selectFineAssessmentCandidates({
     ...params,
     capturePacketPlanTrace: true,
-    ...(boundary.expected.pre_projection === undefined ? {} : {
-      selectionBoundaryObserver: (capture) => {
-        pending = capture;
-        return undefined;
-      }
-    })
+    selectionBoundaryObserver: (capture) => {
+      pending = capture;
+      return undefined;
+    }
   });
   const packetConsensus = replayed.packetPlanObservation;
   if (packetConsensus === undefined) {
@@ -41,12 +39,16 @@ export function replayFineAssessmentSelectionBoundary(
       "expected packetPlanObservation, actual absent"
     );
   }
+  if (pending === undefined) {
+    throwSelectionBoundaryFidelityMismatch(
+      "expected pre_projection capture, actual absent"
+    );
+  }
   const actual = buildSelectionBoundaryExpected(
     replayed,
     packetConsensus,
     boundary.input.capture_packet_plan_trace === true,
-    pending?.preProjection,
-    boundary.expected.coverage_objective !== undefined
+    pending.preProjection
   );
   const expectedDigest = selectionBoundaryJsonSha256(boundary.expected);
   const actualDigest = selectionBoundaryJsonSha256(actual);

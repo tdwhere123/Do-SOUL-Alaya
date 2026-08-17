@@ -65,7 +65,6 @@ describe("MaterializationRouter side effects and projections", () => {
       { object_kind: "evidence_capsule", object_id: "evidence-1" }
     ]);
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    expect(deps.evidenceService.deleteCreatedEvidence).not.toHaveBeenCalled();
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });

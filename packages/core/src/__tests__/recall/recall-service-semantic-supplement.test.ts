@@ -26,6 +26,7 @@ it("does not invoke embedding supplement work under the default policy", async (
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
@@ -135,6 +136,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -210,6 +212,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
     ]);
     const preparedQuery = createPreparedQueryHandle("prepared-query-budget-state");
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -276,7 +279,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       ],
       decision: {
         status: "no_op",
-        reason: "unchanged_consensus"
+        reason: "select_gamma_identity"
       }
     });
     expect(result.candidates[0]?.budget_state).toMatchObject({
@@ -322,6 +325,7 @@ it("allows an embedding-boosted supplement to replace a weaker lexical candidate
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -399,6 +403,7 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
@@ -476,6 +481,7 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,

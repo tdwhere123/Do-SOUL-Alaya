@@ -1,75 +1,40 @@
-import { LegacyPathIndexUnboundError } from "@do-soul/alaya-core";
 import {
-  isLegacyPathIndexUnbound,
-  isRelationProjectionReadable,
-  isTemporalProjectionSelected,
-  SqlitePathRelationRepo,
+  SqliteFieldCausalUsageRepo,
   SqliteRelationAssertionRepo,
   SqliteSoftAssociationPathRepo,
   SqliteTemporalPathProjectionReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { createCausalUsageTemporalPathReader } from "./causal-usage-temporal-path-reader.js";
 import {
   createPreparedTemporalRecallPathReadPorts,
-  createRecallPathReadPorts,
-  type LegacyRecallPathReader,
   type RecallPathReadPorts
 } from "./recall-path-readers.js";
 
-export type RecallPathReadBind = "temporal" | "legacy";
+export type RecallPathReadBind = "temporal";
 
 export function resolveRecallPathReadBind(input: {
   readonly database: StorageDatabase;
   readonly pathReadBind?: RecallPathReadBind;
 }): RecallPathReadBind {
   if (input.pathReadBind !== undefined) return input.pathReadBind;
-  // Ready unselected projections are the live path index; the selected bit is write-side protocol.
-  if (isTemporalProjectionSelected(input.database) || isRelationProjectionReadable(input.database)) {
-    return "temporal";
-  }
-  return "legacy";
+  return "temporal";
 }
 
 export function createBoundRecallPathReadPorts(input: {
   readonly database: StorageDatabase;
   readonly pathReadBind?: RecallPathReadBind;
 }): RecallPathReadPorts {
-  if (resolveRecallPathReadBind(input) === "temporal") {
-    return createPreparedTemporalRecallPathReadPorts(
-      new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(input.database)),
-      new SqliteSoftAssociationPathRepo(input.database)
-    );
-  }
-  return createRecallPathReadPorts({
-    legacyPathReader: wrapLegacyPathReaderForIndexHealth(
-      new SqlitePathRelationRepo(input.database),
-      () => isLegacyPathIndexUnbound(input.database) ? "index_unavailable" : "ready"
-    ),
-    softAssociationPathReader: new SqliteSoftAssociationPathRepo(input.database)
-  });
-}
-
-export function wrapLegacyPathReaderForIndexHealth(
-  reader: LegacyRecallPathReader,
-  inspect: () => "ready" | "index_unavailable"
-): LegacyRecallPathReader {
-  const assertBound = (): void => {
-    if (inspect() === "index_unavailable") {
-      throw new LegacyPathIndexUnboundError();
-    }
-  };
-  return {
-    findByAnchors: async (workspaceId, anchorRefs) => {
-      assertBound();
-      return await reader.findByAnchors(workspaceId, anchorRefs);
-    },
-    findByWorkspaceAll: async (workspaceId) => {
-      assertBound();
-      return await reader.findByWorkspaceAll(workspaceId);
-    },
-    findActiveAll: async (workspaceId) => {
-      assertBound();
-      return await reader.findActiveAll(workspaceId);
-    }
-  };
+  resolveRecallPathReadBind(input);
+  const temporal = new SqliteTemporalPathProjectionReader(
+    new SqliteRelationAssertionRepo(input.database)
+  );
+  return createPreparedTemporalRecallPathReadPorts(
+    createCausalUsageTemporalPathReader({
+      base: temporal,
+      usageRepo: new SqliteFieldCausalUsageRepo(input.database, fieldContractSha256)
+    }),
+    new SqliteSoftAssociationPathRepo(input.database)
+  );
 }

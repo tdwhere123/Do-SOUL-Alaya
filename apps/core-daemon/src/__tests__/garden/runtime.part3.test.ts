@@ -224,12 +224,6 @@ describe("garden runtime consolidation cycle", () => {
 
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         databaseConnection: createConsolidationCapableConnection(),
         legacyTopologyMutationsEnabled: true,
         pathRelationRepo: {
@@ -282,12 +276,6 @@ describe("garden runtime consolidation cycle", () => {
     const runCycleSpy = vi.spyOn(ConsolidationExecutor.prototype, "runCycle");
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         databaseConnection: createConsolidationCapableConnection(),
         ...(enabled === undefined ? {} : { legacyTopologyMutationsEnabled: enabled }),
         pathRelationRepo: {

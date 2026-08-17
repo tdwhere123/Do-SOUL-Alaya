@@ -118,21 +118,9 @@ export interface AlayaDaemonRuntimeServices {
   // potential_synthesis signal route (materializeSynthesis) so no duplicate
   // evidence_capsule rows are minted into the recall store.
   readonly synthesisService: Pick<SynthesisService, "create">;
-  // invariant: the bench harness EARNS same-session co-recall PathRelations
-  // through the SAME production counter gate B-1 cross-link uses (onCoUsage ->
-  // accrueCoOccurrence -> co_usage_threshold -> proposeCoRecalled), so a
-  // bench-earned co_recalled edge is the production recalls-tier edge — not a
-  // bench-only shape. Production grows these from B-1 cross-link over live
-  // report_context_usage; the bench has no attached agent reporting usage, so
-  // it replays a bounded gold-blind pair set through the SAME onCoUsage seam at
-  // seed time. counterSize is read-only diagnostics over the durable counter
-  // (settled-vs-pending), not a write path. submitCandidate remains for
-  // signal-ref / entity producers the bench drives elsewhere.
-  // see also: packages/core/src/path-graph/path-relation-proposal-service.ts onCoUsage / submitCandidate
-  // see also: apps/bench-runner/src/harness/daemon.ts accrueSessionCoRecall
   readonly pathRelationProposalService: Pick<
     PathRelationProposalService,
-    "submitCandidate" | "onCoUsage" | "onCoRecall" | "counterSize"
+    "submitCandidate" | "validateProposedObjectAnchors"
   >;
   readonly relationAssertionService: Pick<RelationAssertionService, "admit">;
   readonly relationAssertionAdmissionPort: RelationAssertionAdmissionPort;

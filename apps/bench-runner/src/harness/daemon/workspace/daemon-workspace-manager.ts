@@ -29,8 +29,6 @@ interface BenchWorkspaceBindings {
   readonly proposeMemoryFromSignal: BenchDaemonHandle["proposeMemoryFromSignal"];
   readonly proposeMemoriesFromCompileSignals: BenchDaemonHandle["proposeMemoriesFromCompileSignals"];
   readonly proposeSynthesis: BenchDaemonHandle["proposeSynthesis"];
-  readonly accrueSessionCoRecall: BenchDaemonHandle["accrueSessionCoRecall"];
-  readonly accrueCoherenceCoRecall: BenchDaemonHandle["accrueCoherenceCoRecall"];
   readonly accrueAnswersWithCoRelevance: BenchDaemonHandle["accrueAnswersWithCoRelevance"];
   readonly queryTokenMetrics: (
     workspaceId: string
@@ -186,8 +184,6 @@ function buildBenchWorkspaceHandle(
     proposeMemoryFromSignal: bindings.proposeMemoryFromSignal,
     proposeMemoriesFromCompileSignals: bindings.proposeMemoriesFromCompileSignals,
     proposeSynthesis: bindings.proposeSynthesis,
-    accrueSessionCoRecall: bindings.accrueSessionCoRecall,
-    accrueCoherenceCoRecall: bindings.accrueCoherenceCoRecall,
     accrueAnswersWithCoRelevance: bindings.accrueAnswersWithCoRelevance,
     queryTokenMetrics: async () =>
       await bindings.queryTokenMetrics(workspace.workspaceId),

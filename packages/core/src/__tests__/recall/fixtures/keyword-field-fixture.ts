@@ -19,6 +19,7 @@ export function withKeywordFieldFixturePorts(
 ): RecallServiceDependencies {
   return {
     ...dependencies,
+    testOnlyAllowInMemoryFieldQuerySession: true,
     memoryRepo: withMemoryFieldFixture(dependencies.memoryRepo),
     evidenceSearchPort: dependencies.evidenceSearchPort === undefined
       ? undefined

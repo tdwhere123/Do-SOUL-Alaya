@@ -125,7 +125,7 @@ const RecallCandidateSelectorObservationV1Schema = z
         .nullable()
     }).strict().readonly(),
     coverage: z.object({
-      marginal_gain: z.number().min(0).max(1).nullable()
+      marginal_gain: z.number().finite().nonnegative().nullable()
     }).strict().readonly(),
     path: z.object({
       status: RecallSelectorPathStatusSchema,
@@ -189,7 +189,7 @@ const RecallCandidateSelectorObservationV2Schema = z
         .nullable()
     }).strict().readonly(),
     coverage: z.object({
-      marginal_gain: z.number().min(0).max(1).nullable()
+      marginal_gain: z.number().finite().nonnegative().nullable()
     }).strict().readonly(),
     path: z.object({
       status: RecallSelectorPathStatusSchema,

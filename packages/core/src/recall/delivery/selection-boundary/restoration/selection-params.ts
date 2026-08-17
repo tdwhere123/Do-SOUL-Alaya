@@ -22,6 +22,7 @@ export function restoreSelectionParams(
   input: FineAssessmentSelectionBoundaryInput
 ): FineAssessmentSelectionParams {
   return {
+    workspace_id: input.workspace_id,
     orderedCandidates: input.ordered_candidates,
     packetCandidates: restoreCapturedPacketCandidates(input),
     config: input.config,
@@ -44,9 +45,6 @@ export function restoreSelectionParams(
     }),
     ...(input.coverage_relevance_upper_bound === undefined ? {} : {
       coverageRelevanceUpperBound: input.coverage_relevance_upper_bound
-    }),
-    ...(input.coverage_objective_config === undefined ? {} : {
-      coverageObjectiveConfig: input.coverage_objective_config
     }),
     ...(input.answer_relevance_rank_by_candidate_key === undefined ? {} : {
       answerRelevanceRankByCandidateKey: new Map(

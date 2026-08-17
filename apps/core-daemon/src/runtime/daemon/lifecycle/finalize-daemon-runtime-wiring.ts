@@ -40,7 +40,6 @@ function createAttachSurfaceRegistrarInput(input: FinalizeDaemonRuntimeWiringInp
 }
 
 function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput) {
-  const coRecallCoherenceGate = createCoRecallCoherenceGate(input);
   return {
     zeroDayToolAccess: input.zeroDaySecurityLayer,
     recallService: input.recallService,
@@ -54,8 +53,6 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     },
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService: input.evidenceService,
-    pathRelationProposalService: input.pathRelationProposalService,
-    ...(coRecallCoherenceGate === undefined ? {} : { coRecallCoherenceGate }),
     objectAnchorGate: input.pathRelationProposalService,
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),
@@ -79,30 +76,15 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     },
     eventLogRepo: input.eventLogRepo,
     proposalRepo: input.proposalRepo,
+    privacyErasePort: input.fieldComposition.fieldRepos.erase,
+    privacyEffectDecisionStore: {
+      transactionScope: input.fieldComposition.fieldRepos.erase.transactionScope,
+      store: input.fieldComposition.effectDecisionStore
+    },
     runtimeNotifier: input.runtimeNotifier,
     resolutionService: input.resolutionService,
     claimSourceReader: createClaimSourceReader(input),
     causalUsagePort: input.fieldComposition.usagePort
-  };
-}
-
-function createCoRecallCoherenceGate(input: FinalizeDaemonRuntimeWiringInput) {
-  const embeddingRecallService = input.embeddingRecallService;
-  if (embeddingRecallService === undefined) {
-    return undefined;
-  }
-
-  return {
-    coherentPairKeys: (
-      workspaceId: string,
-      deliveredObjectIds: readonly string[]
-    ): Promise<ReadonlySet<string>> =>
-      embeddingRecallService.coherentPairKeys({
-        workspaceId,
-        runId: null,
-        objectIds: deliveredObjectIds,
-        floor: 0.5
-      })
   };
 }
 

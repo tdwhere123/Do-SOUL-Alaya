@@ -7,11 +7,14 @@ import {
   verifyPersistedSourceSpan
 } from "./identity.js";
 import {
+  fieldSourceEvidenceBindingParser,
   fieldSourceRecordParser,
   fieldSourceSpanParser,
-  insertIdempotent
+  insertIdempotent,
+  persistFieldTransaction
 } from "./mappers.js";
 import type {
+  FieldSourceEvidenceBindingRow,
   FieldSourceRecordRepo,
   FieldSourceRecordRow,
   FieldSourceSpanRepo,
@@ -35,6 +38,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly insertStatement;
   private readonly selectStatement;
   private readonly listStatement;
+  private readonly insertEvidenceBindingStatement;
+  private readonly listEvidenceBindingsStatement;
 
   public constructor(
     private readonly database: StorageDatabase,
@@ -54,6 +59,18 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     this.listStatement = database.connection.prepare(
       `${RECORD_SELECT} WHERE workspace_id = ? ORDER BY record_id`
     );
+    this.insertEvidenceBindingStatement = database.connection.prepare(`
+      INSERT INTO source_record_evidence_refs (
+        workspace_id, record_id, evidence_object_id
+      ) VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id, record_id, evidence_object_id) DO NOTHING
+    `);
+    this.listEvidenceBindingsStatement = database.connection.prepare(`
+      SELECT workspace_id, record_id, evidence_object_id
+      FROM source_record_evidence_refs
+      WHERE workspace_id = ?
+      ORDER BY record_id, evidence_object_id
+    `);
   }
 
   public insert(row: FieldSourceRecordRow): FieldSourceRecordRow {
@@ -61,25 +78,24 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     if (this.findById(row.workspace_id, row.record_id) === null) {
       assertSubjectNotErased(this.database, row.workspace_id, "source_record", row.record_id);
     }
-    return insertIdempotent(
-      () => this.insertStatement.run(
-        row.record_id,
-        row.workspace_id,
-        row.source_id,
-        row.source_version,
-        row.content_digest,
-        row.evidence_object_id,
-        row.recorded_at,
-        row.event_time,
-        row.valid_from,
-        row.valid_to,
-        row.operator_id,
-        row.source_body
-      ),
-      () => this.findById(row.workspace_id, row.record_id),
-      (existing) => sameRecord(existing, row),
-      "source record"
-    );
+    return persistFieldTransaction(this.database, () => {
+      const persisted = insertIdempotent(
+        () => this.insertStatement.run(
+          row.record_id, row.workspace_id, row.source_id, row.source_version,
+          row.content_digest, row.evidence_object_id, row.recorded_at, row.event_time,
+          row.valid_from, row.valid_to, row.operator_id, row.source_body
+        ),
+        () => this.findById(row.workspace_id, row.record_id),
+        (existing) => sameRecord(existing, row),
+        "source record"
+      );
+      if (row.evidence_object_id !== null) {
+        this.insertEvidenceBindingStatement.run(
+          row.workspace_id, row.record_id, row.evidence_object_id
+        );
+      }
+      return persisted;
+    }, "source record with evidence binding");
   }
 
   public findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null {
@@ -92,6 +108,14 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
 
   public listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[] {
     return parseRows(this.listStatement.all(workspaceId), fieldSourceRecordParser, "source record");
+  }
+
+  public listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[] {
+    return parseRows(
+      this.listEvidenceBindingsStatement.all(workspaceId),
+      fieldSourceEvidenceBindingParser,
+      "source evidence binding"
+    );
   }
 }
 
@@ -155,7 +179,6 @@ function sameRecord(existing: FieldSourceRecordRow, incoming: FieldSourceRecordR
   return existing.source_id === incoming.source_id &&
     existing.source_version === incoming.source_version &&
     existing.content_digest === incoming.content_digest &&
-    existing.evidence_object_id === incoming.evidence_object_id &&
     existing.operator_id === incoming.operator_id &&
     existing.event_time === incoming.event_time &&
     existing.valid_from === incoming.valid_from &&

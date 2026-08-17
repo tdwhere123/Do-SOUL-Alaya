@@ -98,7 +98,7 @@ export function verifyProjectionGeneration(
   _sha256: FieldContractSha256
 ): BuiltProjectionGeneration {
   const artifacts = requireArtifacts(store, generation.workspace_id, generation.generation_id);
-  if (digestProjectionArtifacts(artifacts.postings, artifacts.bundles) !==
+  if (digestProjectionArtifacts(artifacts) !==
       artifacts.artifact_digest) {
     throw new Error("projection generation artifact digest mismatch");
   }

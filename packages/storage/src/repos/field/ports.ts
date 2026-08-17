@@ -34,6 +34,12 @@ export type FieldSourceSpanRow = Readonly<{
   readonly recorded_at: string;
 }>;
 
+export type FieldSourceEvidenceBindingRow = Readonly<{
+  readonly workspace_id: string;
+  readonly record_id: string;
+  readonly evidence_object_id: string;
+}>;
+
 export type FieldFactorDescriptorRow = Readonly<{
   readonly factor_id: string;
   readonly workspace_id: string;
@@ -82,19 +88,35 @@ export type FieldProjectionPointerRow = Readonly<{
   readonly activated_at: string;
 }>;
 
+export type FieldProjectionArtifactsRow = Readonly<{
+  readonly workspace_id: string;
+  readonly generation_id: string;
+  readonly artifact_digest: string;
+  readonly artifacts_json: string;
+  readonly recorded_at: string;
+}>;
+
 export type FieldProjectionPinRow = Readonly<{
   readonly workspace_id: string;
   readonly generation_id: string;
+  readonly reader_id: string;
   readonly pinned_at: string;
+  readonly expires_at: string;
+  readonly released_at: string | null;
 }>;
 
 export type FieldEraseBarrierRow = Readonly<{
+  readonly identity: string;
   readonly barrier_id: string;
   readonly workspace_id: string;
   readonly generation_id: string | null;
   readonly subject_kind: ProjectionEraseSubjectKind;
   readonly subject_id: string;
   readonly erased_at: string;
+}>;
+
+export type FieldEraseBarrierInput = Omit<FieldEraseBarrierRow, "identity"> & Readonly<{
+  readonly identity?: string;
 }>;
 
 export type FieldCausalUsageRow = Readonly<{
@@ -111,14 +133,22 @@ export type FieldCausalUsageRow = Readonly<{
 }>;
 
 export type FieldProofEffectRow = Readonly<{
+  readonly schema_version: 2;
   readonly request_digest: string;
   readonly workspace_id: string;
+  readonly actor_id: string;
+  readonly run_id: string;
+  readonly delivery_id: string;
   readonly action: string;
   readonly target: string;
   readonly scope: string;
   readonly effective_as_of: string;
   readonly decision: EffectDecision;
   readonly supporting_receipt_ids_json: string;
+  readonly supporting_proof_witnesses_json: string;
+  readonly governance_frontier: string;
+  readonly policy_operator_id: string;
+  readonly policy_operator_version: string;
   readonly recorded_at: string;
 }>;
 
@@ -126,6 +156,7 @@ export interface FieldSourceRecordRepo {
   insert(row: FieldSourceRecordRow): FieldSourceRecordRow;
   findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null;
   listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[];
+  listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[];
 }
 
 export interface FieldSourceSpanRepo {
@@ -163,6 +194,28 @@ export interface FieldProjectionGenerationRepo {
   ): FieldProjectionGenerationRow;
   activatePointer(pointer: FieldProjectionPointerRow): FieldProjectionPointerRow;
   pin(pin: FieldProjectionPinRow): FieldProjectionPinRow;
+  renewPin(input: Readonly<{
+    readonly workspace_id: string;
+    readonly generation_id: string;
+    readonly reader_id: string;
+    readonly renewed_at: string;
+    readonly expires_at: string;
+  }>): FieldProjectionPinRow;
+  releasePin(input: Readonly<{
+    readonly workspace_id: string;
+    readonly generation_id: string;
+    readonly reader_id: string;
+    readonly released_at: string;
+  }>): FieldProjectionPinRow;
+  readPin(
+    workspaceId: string,
+    generationId: string,
+    readerId: string
+  ): FieldProjectionPinRow | null;
+  collectRetired(workspaceId: string, asOf: string): readonly string[];
+  putArtifacts(row: FieldProjectionArtifactsRow): FieldProjectionArtifactsRow;
+  readArtifacts(workspaceId: string, generationId: string):
+    FieldProjectionArtifactsRow | null;
   readActive(workspaceId: string): FieldProjectionGenerationRow | null;
   readPinned(workspaceId: string, generationId: string): FieldProjectionGenerationRow | null;
   readByGenerationIds(
@@ -173,13 +226,17 @@ export interface FieldProjectionGenerationRepo {
 }
 
 export interface FieldEraseBarrierRepo {
-  apply(row: FieldEraseBarrierRow): FieldEraseBarrierRow;
+  apply(row: FieldEraseBarrierInput): FieldEraseBarrierRow;
   findById(workspaceId: string, barrierId: string): FieldEraseBarrierRow | null;
 }
 
 export interface FieldCausalUsageRepo {
-  insert(row: FieldCausalUsageRow): FieldCausalUsageRow;
+  insert(row: FieldCausalUsageRow): Readonly<{
+    readonly row: FieldCausalUsageRow;
+    readonly inserted: boolean;
+  }>;
   findById(workspaceId: string, identity: string): FieldCausalUsageRow | null;
+  listByWorkspaceAtAsOf(workspaceId: string, asOf: string): readonly FieldCausalUsageRow[];
 }
 
 export interface FieldProofEffectRepo {

@@ -70,6 +70,7 @@ describe("SqliteProposalRepo", () => {
       proposal,
       workspace_id: "workspace-1",
       run_id: "run-1",
+      proposal_operation: null,
       target_object_kind: "memory_entry",
       reviewer_identity: null,
       reviewer_assignment: null,
@@ -78,6 +79,46 @@ describe("SqliteProposalRepo", () => {
       target_baseline_updated_at: null,
       source_delivery_ids: null
     });
+  });
+
+  it("round-trips an explicit privacy erase operation only on the scoped proposal", async () => {
+    const { repo } = createRepo();
+    const proposal = createProposal();
+
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      proposal_operation: "privacy_erase",
+      target_object_kind: "source_record",
+      proposed_change_summary: "user_requested_deletion"
+    });
+
+    await expect(repo.findById(proposal.proposal_id)).resolves.toEqual(proposal);
+    await expect(repo.findScopedById(proposal.proposal_id)).resolves.toMatchObject({
+      proposal_operation: "privacy_erase",
+      target_object_kind: "source_record",
+      proposed_changes: null
+    });
+  });
+
+  it.each([
+    { target_object_kind: "memory_entry", proposed_change_summary: "user_requested_deletion" },
+    { target_object_kind: "source_record", proposed_change_summary: "delete secret@example.com" },
+    {
+      target_object_kind: "source_record",
+      proposed_change_summary: "legal_erasure",
+      proposed_changes: { content: "sensitive" }
+    }
+  ])("rejects an invalid privacy erase discriminant at create", async (invalid) => {
+    const { repo } = createRepo();
+    await expect(repo.create({
+      proposal: createProposal(),
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      proposal_operation: "privacy_erase",
+      ...invalid
+    })).rejects.toThrow(/Privacy erase proposals require/u);
   });
 
   it("round-trips optional source delivery anchors on scoped proposals", async () => {

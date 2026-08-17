@@ -64,7 +64,7 @@ interface CollectSupplementaryDataParams {
   readonly warn: RecallServiceWarnPort;
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly routingKeyOwnerIds: readonly string[];
-  readonly routingKeyAsOfMs: number;
+  readonly referenceTime: string;
   readonly workspaceId: string;
   readonly pathProjectionAsOf?: string;
   readonly runId: string | null;
@@ -166,7 +166,7 @@ export async function collectSupplementaryData(
         warn: params.warn,
         workspaceId: params.workspaceId,
         ownerIds: params.routingKeyOwnerIds,
-        asOfMs: params.routingKeyAsOfMs,
+        asOfMs: Date.parse(params.referenceTime),
         queryProbes: params.queryProbes,
         queryEntityExtraction
       }),
@@ -281,13 +281,9 @@ function freezeSupplementaryData(
 }
 
 function resolveQueryTimeWindow(
-  params: Pick<CollectSupplementaryDataParams, "queryProbes" | "routingKeyAsOfMs">
+  params: Pick<CollectSupplementaryDataParams, "queryProbes" | "referenceTime">
 ) {
-  if (!Number.isFinite(params.routingKeyAsOfMs)) return null;
-  return parseQueryTimeWindow(
-    params.queryProbes,
-    new Date(params.routingKeyAsOfMs).toISOString()
-  );
+  return parseQueryTimeWindow(params.queryProbes, params.referenceTime);
 }
 
 async function collectGraphMetrics(

@@ -15,6 +15,15 @@ CREATE TABLE source_records (
   CHECK (valid_to IS NULL OR (valid_from IS NOT NULL AND valid_to > valid_from))
 );
 
+CREATE TABLE source_record_evidence_refs (
+  workspace_id       TEXT NOT NULL,
+  record_id          TEXT NOT NULL,
+  evidence_object_id TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, record_id, evidence_object_id),
+  FOREIGN KEY (workspace_id, record_id)
+    REFERENCES source_records(workspace_id, record_id) ON DELETE CASCADE
+);
+
 CREATE TABLE source_spans (
   workspace_id      TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   span_id           TEXT NOT NULL,
@@ -76,6 +85,11 @@ CREATE TABLE derivation_jobs (
   UNIQUE (workspace_id, purpose, operator_id, input_evidence_ids_json)
 );
 
+CREATE TABLE field_projection_rebuild_requests (
+  workspace_id  TEXT PRIMARY KEY REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  requested_at  TEXT NOT NULL
+);
+
 CREATE TABLE projection_generations (
   workspace_id               TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   generation_id              TEXT NOT NULL,
@@ -94,6 +108,17 @@ CREATE TABLE projection_generations (
 CREATE UNIQUE INDEX idx_projection_generations_one_active
   ON projection_generations(workspace_id) WHERE status = 'active';
 
+CREATE TABLE projection_generation_artifacts (
+  workspace_id     TEXT NOT NULL,
+  generation_id    TEXT NOT NULL,
+  artifact_digest  TEXT NOT NULL,
+  artifacts_json   TEXT NOT NULL CHECK (json_type(artifacts_json) = 'object'),
+  recorded_at      TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, generation_id),
+  FOREIGN KEY (workspace_id, generation_id)
+    REFERENCES projection_generations(workspace_id, generation_id) ON DELETE CASCADE
+);
+
 CREATE TABLE projection_generation_pointer (
   workspace_id          TEXT PRIMARY KEY REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   active_generation_id  TEXT NOT NULL,
@@ -105,15 +130,23 @@ CREATE TABLE projection_generation_pointer (
 CREATE TABLE projection_pins (
   workspace_id    TEXT NOT NULL,
   generation_id   TEXT NOT NULL,
+  reader_id       TEXT NOT NULL,
   pinned_at       TEXT NOT NULL,
-  PRIMARY KEY (workspace_id, generation_id),
+  expires_at      TEXT NOT NULL,
+  released_at     TEXT,
+  PRIMARY KEY (workspace_id, generation_id, reader_id),
   FOREIGN KEY (workspace_id, generation_id)
     REFERENCES projection_generations(workspace_id, generation_id) ON DELETE CASCADE
 );
 
+CREATE INDEX idx_projection_pins_active
+  ON projection_pins(workspace_id, generation_id, expires_at)
+  WHERE released_at IS NULL;
+
 CREATE TABLE projection_erase_barriers (
   workspace_id    TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
   barrier_id      TEXT NOT NULL,
+  receipt_identity TEXT NOT NULL,
   generation_id   TEXT,
   subject_kind    TEXT NOT NULL CHECK (
     subject_kind IN ('source_record', 'source_span', 'factor', 'incidence', 'generation')
@@ -167,6 +200,8 @@ CREATE INDEX idx_derivation_jobs_workspace
   ON derivation_jobs(workspace_id, status, job_id);
 CREATE INDEX idx_projection_generations_workspace
   ON projection_generations(workspace_id, status, generation_id);
+CREATE INDEX idx_projection_generation_artifacts_workspace
+  ON projection_generation_artifacts(workspace_id, generation_id);
 CREATE INDEX idx_projection_erase_barriers_workspace
   ON projection_erase_barriers(workspace_id, generation_id, subject_id);
 CREATE INDEX idx_causal_usage_receipts_workspace

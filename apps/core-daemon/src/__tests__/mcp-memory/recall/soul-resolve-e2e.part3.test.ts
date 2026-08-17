@@ -24,6 +24,7 @@ import {
 } from "../../../mcp-memory/tool/tool-handler.js";
 
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
+import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
 // invariant: end-to-end coverage for soul.recall -> staged_warning ->
 // soul.resolve -> apply. The confirm path activates a draft
@@ -167,6 +168,11 @@ function createHarness(): E2EHarness {
       readonly workspaceId: string;
       readonly targetEntityId?: string;
       readonly expiresAt: string;
+    }, options?: {
+      readonly buildAdditionalEventInputs?: (
+        obligation: Readonly<DeferredObligation>
+      ) => readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
+      readonly additionalEventsSink?: EventLogEntry[];
     }): Promise<Readonly<DeferredObligation>> => {
       const obligation: DeferredObligation = {
         obligation_id: `obligation-${obligations.size + 1}`,
@@ -180,6 +186,10 @@ function createHarness(): E2EHarness {
         expires_at: input.expiresAt
       };
       obligations.set(obligation.obligation_id, obligation);
+      for (const eventInput of options?.buildAdditionalEventInputs?.(obligation) ?? []) {
+        const persisted = publish(eventInput);
+        options?.additionalEventsSink?.push(persisted);
+      }
       return obligation;
     })
   };
@@ -191,6 +201,7 @@ function createHarness(): E2EHarness {
     claimService,
     memoryService,
     deferredObligationService,
+    ...createSoulResolveEffectFixture({ claims, deliveries }),
     now: () => FIXED_NOW
   });
 
@@ -398,6 +409,7 @@ describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: ["claim-1"],
+      delivered_objects: [{ object_id: "claim-1", object_kind: "claim_form" }],
       delivered_at: FIXED_NOW,
       audit_event_id: "delivery-evt-4"
     });

@@ -201,6 +201,7 @@ export {
   type FieldDerivationJobRepo,
   type FieldDerivationJobRow,
   type FieldEraseBarrierRepo,
+  type FieldEraseBarrierInput,
   type FieldEraseBarrierRow,
   type FieldFactorDescriptorRow,
   type FieldFactorIncidenceRow,

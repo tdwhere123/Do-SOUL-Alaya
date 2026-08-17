@@ -39,6 +39,12 @@ export const ProposalResolutionState = {
 
 export const ProposalOptionKindSchema = z.enum(proposalOptionKindValues);
 export const ProposalResolutionStateSchema = z.enum(proposalResolutionStateValues);
+export const MemoryProposalOperationSchema = z.enum(["memory_update", "privacy_erase"]);
+export const PrivacyEraseReasonCodeSchema = z.enum([
+  "user_requested_deletion",
+  "retention_expired",
+  "legal_erasure"
+]);
 
 export const ProposalOptionSchema = z
   .object({
@@ -68,5 +74,7 @@ export const ProposalSchema = ControlPlaneEnvelopeSchema.unwrap()
 
 export type ProposalOptionKind = z.infer<typeof ProposalOptionKindSchema>;
 export type ProposalResolutionState = z.infer<typeof ProposalResolutionStateSchema>;
+export type MemoryProposalOperation = z.infer<typeof MemoryProposalOperationSchema>;
+export type PrivacyEraseReasonCode = z.infer<typeof PrivacyEraseReasonCodeSchema>;
 export type ProposalOption = z.infer<typeof ProposalOptionSchema>;
 export type Proposal = z.infer<typeof ProposalSchema>;

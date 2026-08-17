@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createTestOnlyInMemoryFieldQuerySession,
+  fieldContractSha256,
   RecallService,
   resetCoreConfigForTests,
   type RecallServiceDependencies
@@ -125,6 +127,7 @@ describe("LongMemEval edge trace integration", () => {
 
     const strictQuestion = buildStrictQuestion(result);
     expect(strictQuestion).toMatchObject({
+      query_condition: parsed.query_condition,
       query_probes: { normalized_query: taskSurface().display_name },
       query_sought_facets: []
     });
@@ -295,6 +298,8 @@ function createRecallService(
   const dependencies: RecallServiceDependencies = {
     now: () => "2026-07-10T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    sha256: fieldContractSha256,
+    fieldQuerySession: createTestOnlyInMemoryFieldQuerySession(fieldContractSha256),
     memoryRepo: {
       findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),

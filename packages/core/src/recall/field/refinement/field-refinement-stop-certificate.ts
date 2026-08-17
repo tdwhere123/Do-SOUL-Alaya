@@ -31,7 +31,6 @@ import {
 } from "./field-refinement-receipt.js";
 
 export { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID };
-const TOP_FIVE_CARDINALITY = 5;
 const SCORE_EPSILON = 1e-12;
 
 export type RecallFieldStopDecision = Readonly<{
@@ -98,6 +97,7 @@ export type RecallFieldRefinementStopCertificate = Readonly<{
   readonly objective: CoverageSelectionObjectiveReceipt;
   readonly relevance_upper_bound:
     Readonly<RecallRelevanceUpperBoundReceipt> | null;
+  readonly selection_capacity: number;
   readonly selected_candidate_keys: readonly string[];
   readonly exchange_bounds: readonly Readonly<RecallFieldExchangeBound>[];
   readonly maximum_exchange_improvement_upper_bound: number | null;
@@ -121,12 +121,13 @@ export function createRecallFieldRefinementStopCertificate<
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
   readonly preparedSelection: MaterializedConfiguredCoverageSelection<T>;
   readonly selectedCandidateKeys: readonly string[];
+  readonly selectionCapacity: number;
   readonly supplementaryData: CoverageSelectionSupplementary;
   readonly relevanceUpperBound:
     Readonly<RecallRelevanceUpperBoundReceipt> | null;
 }>): RecallFieldRefinementStopCertificate {
   verifyInputs(params);
-  const selected = selectTopFiveStates(
+  const selected = selectSelectedStates(
     params.preparedSelection.candidateStates,
     params.selectedCandidateKeys
   );
@@ -148,6 +149,7 @@ export function createRecallFieldRefinementStopCertificate<
   }
   const bounds = computeExchangeBounds({
     selected,
+    selectionCapacity: params.selectionCapacity,
     objective: params.preparedSelection.objective,
     supplementaryData: params.supplementaryData,
     relevanceUpperBound: params.relevanceUpperBound.upper_bound
@@ -178,7 +180,8 @@ export function verifyRecallFieldRefinementStopCertificate(
       receipt.refinement_receipt_digests.length ||
       new Set(receipt.selected_candidate_keys).size !==
       receipt.selected_candidate_keys.length ||
-      receipt.selected_candidate_keys.length > TOP_FIVE_CARDINALITY) {
+      !Number.isSafeInteger(receipt.selection_capacity) ||
+      receipt.selection_capacity < receipt.selected_candidate_keys.length) {
     throw new Error("field refinement stop certificate identities are invalid");
   }
   if (receipt.relevance_upper_bound !== null) {
@@ -208,6 +211,7 @@ function baseContext<T extends CoverageSelectableCandidate>(
       params.preparedSelection.objective
     ),
     relevance_upper_bound: params.relevanceUpperBound,
+    selection_capacity: params.selectionCapacity,
     selected_candidate_keys: Object.freeze(selected.map(({ candidate }) =>
       candidate.fusion.candidate_key)),
     candidate_membership_changed: false
@@ -236,13 +240,15 @@ function sealCertificate(
 
 function computeExchangeBounds<T extends CoverageSelectableCandidate>(params: {
   readonly selected: readonly CoverageSelectionCandidateState<T>[];
+  readonly selectionCapacity: number;
   readonly objective: MaterializedConfiguredCoverageSelection<T>["objective"];
   readonly supplementaryData: CoverageSelectionSupplementary;
   readonly relevanceUpperBound: number;
 }): readonly RecallFieldExchangeBound[] {
   const baseline = evaluate(params.selected, params);
-  const removals = params.selected.length < TOP_FIVE_CARDINALITY
-    ? [null]
+  const removals: readonly (number | null)[] = params.selected.length <
+    params.selectionCapacity
+    ? [null, ...params.selected.map((_, index) => index)]
     : params.selected.map((_, index) => index);
   return Object.freeze(removals.map((removedIndex) => {
     const remaining = removedIndex === null
@@ -283,7 +289,7 @@ function evaluate<T extends CoverageSelectableCandidate>(
   });
 }
 
-function selectTopFiveStates<T extends CoverageSelectableCandidate>(
+function selectSelectedStates<T extends CoverageSelectableCandidate>(
   states: readonly CoverageSelectionCandidateState<T>[],
   selectedKeys: readonly string[]
 ): readonly CoverageSelectionCandidateState<T>[] {
@@ -291,7 +297,7 @@ function selectTopFiveStates<T extends CoverageSelectableCandidate>(
     state.candidate.fusion.candidate_key,
     state
   ]));
-  const keys = selectedKeys.slice(0, TOP_FIVE_CARDINALITY);
+  const keys = selectedKeys;
   const selected = keys.map((key) => {
     const state = byKey.get(key);
     if (state === undefined) throw new Error("selected refinement candidate is absent");
@@ -310,6 +316,10 @@ function verifyInputs<T extends CoverageSelectableCandidate>(
   params.refinementReceipts.forEach(verifyRecallRetrievalFieldRefinementReceipt);
   if (params.relevanceUpperBound !== null) {
     verifyRecallRelevanceUpperBoundReceipt(params.relevanceUpperBound);
+  }
+  if (!Number.isSafeInteger(params.selectionCapacity) ||
+      params.selectionCapacity < params.selectedCandidateKeys.length) {
+    throw new Error("field refinement selection capacity is invalid");
   }
 }
 

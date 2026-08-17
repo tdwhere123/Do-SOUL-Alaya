@@ -339,16 +339,21 @@ typed payload:
 
 | Resolution | Outcome |
 |---|---|
-| `confirm` | Atomic CAS transition `draft → active` on the target claim via `ClaimService.transitionLifecycle`, then the typed `soul.resolution.confirm_applied` audit row is appended. CAS first, audit second: the race loser observes a zero-row update and returns `QUERY_FAILED` before any audit append. |
+| `confirm` | Atomically appends the lifecycle, resolution, and proof-effect audits, persists the allowed effect decision, and applies the CAS transition `draft → active` through `ClaimService.transitionLifecycle`. |
 | `reject` | Terminates the claim. `applyReject` covers all six starting states including `DRAFT`. |
-| `correct` | Records a corrected payload and emits the typed audit. |
-| `stale` | Marks the claim subject as no longer current. |
-| `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp; replaces the retired `cooldown_until` field on `SynthesisCapsule`. |
+| `correct` | An allowed proof effect persists predecessor and successor receipt identities together with the typed audit carrying the correction payload. The target claim remains immutable; the successor receipt is the durable governed correction effect. |
+| `stale` | Transitions an active memory entry to `dormant`; replay against an already non-active entry is a no-op. |
+| `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp. Its mutation, obligation audit, and typed resolution audit share one EventPublisher transaction. |
 | `not_relevant` | Records that the warning was inspected but did not apply to the current task. |
 
-The handler is at `apps/core-daemon/src/mcp-memory/resolve-handler.ts`;
-the typed dispatcher is `packages/core/src/governance/resolution-service.ts`.
-The `assertDeliveryInScope` check requires the `target_object_id` to
+Only `confirm` with an applied, allowed governed effect records positive
+causal usage for the delivered source objects. Reject, correct, stale, defer,
+not-relevant, deny, and no-op outcomes never reinforce paths.
+
+The handler is at `apps/core-daemon/src/mcp-memory/tool/resolve-handler.ts`;
+the typed dispatcher is
+`packages/core/src/governance/proposals/resolution-service.ts`.
+The delivery-scope check requires the `target_object_id` to
 be a direct member of the agent's delivered_object_ids or to be
 reachable indirectly through the `claimSourceReader` port (so a
 delivered memory's draft claim form is in-scope without delivering
@@ -360,12 +365,16 @@ the target from result array position.
 ### Route 2 — Out-of-band Proposal
 
 The explicit host-assertion path is unchanged from v0.3.8:
-`soul.propose_memory_update` enters a pending Proposal;
+`soul.propose_memory_update` enters a pending `memory_update` or
+`privacy_erase` Proposal;
 `soul.review_memory_proposal` (or the Inspector "Promote to
 strictly_governed" button, which posts a typed `path_relation`
-Proposal) accepts or rejects. Accepted proposals apply through
-`MemoryService.validateUpdate` inside an atomic proposal / storage
-transaction. Rejected proposals leave durable memory untouched.
+Proposal) accepts or rejects. Accepted memory updates apply through
+`MemoryService.validateUpdate`. Accepted privacy erasures pass through the
+proof-carrying hard-effect authority before the storage-owned source-closure
+erase barrier. The effect decision, canonical barrier identity, proposal
+decision, mutation, and EventLog audit share one transaction; rejection leaves
+durable memory untouched and never becomes an erase request.
 
 ### Agent-side classification — `GovernancePolicy`
 

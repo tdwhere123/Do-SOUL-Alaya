@@ -167,6 +167,35 @@ describe("SqliteRelationAssertionRepo", () => {
       .rejects.toThrow("active generation is missing or inconsistent");
   });
 
+  it("keeps the active generation while caching a different historical history", async () => {
+    const { database } = createRepo();
+    const repo = new SqliteRelationAssertionRepo(database);
+    const currentPath = createPathRelationFixture({
+      path_id: "assertion-current",
+      created_at: asOf,
+      updated_at: asOf
+    });
+    insertAssertion(database.connection, "assertion-current", "event-current", "identity-current");
+    repo.writeProjectionGenerationInCurrentTransaction(
+      projectionGeneration("temporal-current", currentHistoryDigest, asOf, [currentPath]),
+      { activate: true }
+    );
+
+    repo.writeProjectionGenerationInCurrentTransaction(
+      projectionGeneration(
+        "temporal-historical",
+        staleHistoryDigest,
+        "2026-07-16T01:30:00.000Z",
+        []
+      ),
+      { activate: false }
+    );
+
+    await expect(repo.findActiveProjectionByWorkspace("workspace-1"))
+      .resolves.toEqual([currentPath]);
+    expect(tableCount(database, "temporal_projection_generations")).toBe(2);
+  });
+
   it("retains current-history as-of caches while pruning unreadable histories", async () => {
     const { database } = createRepo();
     const repo = new SqliteRelationAssertionRepo(database);

@@ -213,12 +213,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -255,12 +249,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -284,16 +272,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
   });
 
   it("is a no-op when no embedding backfill handler is configured", async () => {
-    const runtime = createGardenRuntime(
-      createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        }))
-      })
-    );
+    const runtime = createGardenRuntime(createRuntimeInput());
     const scheduler = currentScheduler();
 
     await runtime.runEmbeddingBackfillPass("workspace-1");
@@ -314,12 +293,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );

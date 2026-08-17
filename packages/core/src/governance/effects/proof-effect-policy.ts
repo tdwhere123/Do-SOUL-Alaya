@@ -33,23 +33,45 @@ export type ProofKind =
   | "confirmation"
   | "predecessor"
   | "successor"
+  | "governance_snapshot"
   | "soft_strength"
   | "similarity"
   | "embedding"
   | "relevance";
 
-export type ProofRecord = Readonly<{
+type ProofRecordBase = Readonly<{
   readonly id: string;
-  readonly kind: ProofKind;
   readonly workspace_id: string;
-  readonly target?: string;
-  readonly scope?: string;
-  readonly valid_from: string | null;
-  readonly valid_to: string | null;
-  readonly event_time: string | null;
   readonly recorded_at: string;
   readonly revoked?: boolean;
 }>;
+
+type ProofTargetBinding = Readonly<{
+  readonly target: string;
+  readonly scope: string;
+  readonly valid_from: string | null;
+  readonly valid_to: string | null;
+  readonly event_time: string | null;
+}>;
+
+type SoftProofKind = "soft_strength" | "similarity" | "embedding" | "relevance";
+type AuthorizingProofKind = Exclude<ProofKind, SoftProofKind | "actor_authority">;
+
+export type ProofRecord =
+  | (ProofRecordBase & ProofTargetBinding & Readonly<{
+      readonly kind: "actor_authority";
+      readonly actor_id: string;
+      readonly run_id: string;
+      readonly delivery_id: string;
+    }>)
+  | (ProofRecordBase & ProofTargetBinding & Readonly<{
+      readonly kind: AuthorizingProofKind;
+    }>)
+  | (ProofRecordBase & Readonly<{
+      readonly kind: SoftProofKind;
+    }>);
+
+type AuthorizingProofRecord = Exclude<ProofRecord, { readonly kind: SoftProofKind }>;
 
 export type CompetingClaim = DualTimeFields & Readonly<{
   readonly id: string;
@@ -58,11 +80,11 @@ export type CompetingClaim = DualTimeFields & Readonly<{
 }>;
 
 export interface ProofEffectLookup {
-  findReceipts(ids: readonly string[]): readonly ProofRecord[];
-  isBridgeRevoked(scope: string, asOf: string): boolean;
-  competingClaims(target: string, scope: string): readonly CompetingClaim[];
-  isErased(target: string): boolean;
-  readTargetTime?(target: string): DualTimeFields | null;
+  findReceipts(workspaceId: string, ids: readonly string[]): readonly ProofRecord[];
+  isBridgeRevoked(workspaceId: string, scope: string, asOf: string): boolean;
+  competingClaims(workspaceId: string, target: string, scope: string): readonly CompetingClaim[];
+  isErased(workspaceId: string, target: string): boolean;
+  readTargetTime?(workspaceId: string, target: string): DualTimeFields | null;
 }
 
 export interface ProofCarryingEffectOwnerDependencies {
@@ -109,16 +131,31 @@ export class ProofCarryingEffectOwner implements ProofEffectPort {
   }
 
   private collectFacts(request: EffectRequest): ProofFacts {
-    const receipts = this.lookup.findReceipts(request.supporting_receipt_ids);
+    const receipts = this.lookup.findReceipts(
+      request.workspace_id,
+      request.supporting_receipt_ids
+    );
+    const authorizing = receipts.filter(isAuthorizingProof);
     return {
       receipts,
       missingIds: missingReceiptIds(request.supporting_receipt_ids, receipts),
-      authorizing: receipts.filter((receipt) => !SOFT_PROOF_KINDS.has(receipt.kind)),
+      authorizing,
+      invalidAuthorizing: authorizing.filter((receipt) =>
+        !isProofApplicable(receipt, request)
+      ),
       kinds: new Set(receipts.map((receipt) => receipt.kind)),
-      targetTime: this.lookup.readTargetTime?.(request.target) ?? null,
-      bridgeRevoked: this.lookup.isBridgeRevoked(request.scope, request.effective_as_of),
-      erased: this.lookup.isErased(request.target),
-      competing: this.lookup.competingClaims(request.target, request.scope)
+      targetTime: this.lookup.readTargetTime?.(request.workspace_id, request.target) ?? null,
+      bridgeRevoked: this.lookup.isBridgeRevoked(
+        request.workspace_id,
+        request.scope,
+        request.effective_as_of
+      ),
+      erased: this.lookup.isErased(request.workspace_id, request.target),
+      competing: this.lookup.competingClaims(
+        request.workspace_id,
+        request.target,
+        request.scope
+      )
     };
   }
 
@@ -129,7 +166,9 @@ export class ProofCarryingEffectOwner implements ProofEffectPort {
     if (request.action === GovernedEffectAction.RESTORE) return "deny";
     if (facts.erased && request.action !== GovernedEffectAction.ERASE) return "deny";
     if (facts.bridgeRevoked) return "deny";
-    if (facts.missingIds.length > 0 || facts.authorizing.length === 0) return "deny";
+    if (facts.missingIds.length > 0 || facts.authorizing.length === 0 ||
+        facts.invalidAuthorizing.length > 0) return "deny";
+    if (!facts.kinds.has("actor_authority")) return "deny";
     if (hasHardDispute(facts.competing, request.effective_as_of)) return "defer";
     return classifyAction(request, facts);
   }
@@ -138,7 +177,8 @@ export class ProofCarryingEffectOwner implements ProofEffectPort {
 type ProofFacts = Readonly<{
   readonly receipts: readonly ProofRecord[];
   readonly missingIds: readonly string[];
-  readonly authorizing: readonly ProofRecord[];
+  readonly authorizing: readonly AuthorizingProofRecord[];
+  readonly invalidAuthorizing: readonly AuthorizingProofRecord[];
   readonly kinds: ReadonlySet<ProofKind>;
   readonly targetTime: DualTimeFields | null;
   readonly bridgeRevoked: boolean;
@@ -169,9 +209,33 @@ function classifyAction(request: EffectRequest, facts: ProofFacts): EffectDecisi
 function classifySuccessorAction(request: EffectRequest, facts: ProofFacts): EffectDecision {
   if (!facts.kinds.has("predecessor") || !facts.kinds.has("successor")) return "deny";
   if (!facts.kinds.has("source_grounding") && !facts.kinds.has("lineage")) return "deny";
-  if (facts.targetTime !== null && facts.targetTime.valid_from === null) return "defer";
+  if (facts.targetTime === null || facts.targetTime.valid_from === null) return "defer";
   if (hasPossibleConflict(facts.competing)) return "defer";
   return request.effective_as_of.length > 0 ? "allow" : "deny";
+}
+
+function isAuthorizingProof(receipt: ProofRecord): receipt is AuthorizingProofRecord {
+  return !SOFT_PROOF_KINDS.has(receipt.kind);
+}
+
+function isProofApplicable(receipt: AuthorizingProofRecord, request: EffectRequest): boolean {
+  if (receipt.revoked === true || receipt.workspace_id !== request.workspace_id) return false;
+  if (receipt.target !== request.target || receipt.scope !== request.scope) return false;
+  if (receipt.kind === "actor_authority" && (
+    receipt.actor_id !== request.actor_id ||
+    receipt.run_id !== request.run_id ||
+    receipt.delivery_id !== request.delivery_id
+  )) return false;
+  if (receipt.event_time === null || receipt.valid_from === null) return false;
+  const asOfMs = Date.parse(request.effective_as_of);
+  const eventMs = Date.parse(receipt.event_time);
+  const validFromMs = Date.parse(receipt.valid_from);
+  const validToMs = receipt.valid_to === null ? Number.POSITIVE_INFINITY : Date.parse(receipt.valid_to);
+  const recordedMs = Date.parse(receipt.recorded_at);
+  return Number.isFinite(asOfMs) && Number.isFinite(eventMs) &&
+    Number.isFinite(validFromMs) && Number.isFinite(recordedMs) &&
+    recordedMs <= asOfMs &&
+    eventMs <= asOfMs && validFromMs <= asOfMs && asOfMs < validToMs;
 }
 
 function missingReceiptIds(
@@ -209,7 +273,7 @@ export function buildEffectDecisionReceipt(
 ): EffectDecisionReceipt {
   const digest = hashEffectRequestDigest(request, sha256);
   return Object.freeze({
-    schema_version: 1,
+    schema_version: 2,
     producer: PROOF_EFFECT_OPERATOR_ID,
     consumer: "governance",
     identity: digest,
@@ -218,6 +282,9 @@ export function buildEffectDecisionReceipt(
     governance_effect: "policy_decision",
     deletion_behavior: "retain_identity",
     workspace_id: request.workspace_id,
+    actor_id: request.actor_id,
+    run_id: request.run_id,
+    delivery_id: request.delivery_id,
     request_digest: digest,
     action: request.action,
     target: request.target,
@@ -225,6 +292,10 @@ export function buildEffectDecisionReceipt(
     effective_as_of: request.effective_as_of,
     decision,
     supporting_receipt_ids: request.supporting_receipt_ids,
+    supporting_proof_witnesses: request.supporting_proof_witnesses,
+    governance_frontier: request.governance_frontier,
+    policy_operator_id: request.policy_operator_id,
+    policy_operator_version: request.policy_operator_version,
     recorded_at: recordedAt
   });
 }

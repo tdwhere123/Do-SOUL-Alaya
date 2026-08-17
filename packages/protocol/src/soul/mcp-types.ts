@@ -35,7 +35,11 @@ export {
   SoulProposeEdgeResponseSchema
 };
 import { PublicMemoryEntryMutableFieldsSchema } from "./memory-entry.js";
-import { ProposalResolutionStateSchema } from "./proposal.js";
+import {
+  MemoryProposalOperationSchema,
+  PrivacyEraseReasonCodeSchema,
+  ProposalResolutionStateSchema
+} from "./proposal.js";
 import { SoulResolveRequestSchema } from "./resolution.js";
 import {
   GardenMcpWorkerRoleSchema,
@@ -166,15 +170,24 @@ export const SoulExploreGraphResponseSchema = z
   .strict()
   .readonly();
 
-export const SoulProposeMemoryUpdateRequestSchema = z
-  .object({
-    target_object_id: BoundedIdSchema,
+const proposalRequestCommonFields = {
+  target_object_id: BoundedIdSchema,
+  source_delivery_ids: z.array(NonEmptyStringSchema).min(1).max(32).readonly().optional()
+} as const;
+
+export const SoulProposeMemoryUpdateRequestSchema = z.union([
+  z.object({
+    ...proposalRequestCommonFields,
+    operation: z.literal(MemoryProposalOperationSchema.enum.privacy_erase),
+    reason: PrivacyEraseReasonCodeSchema
+  }).strict(),
+  z.object({
+    ...proposalRequestCommonFields,
+    operation: z.literal(MemoryProposalOperationSchema.enum.memory_update).optional(),
     proposed_changes: PublicMemoryEntryMutableFieldsSchema,
-    reason: BoundedReasonSchema,
-    source_delivery_ids: z.array(NonEmptyStringSchema).min(1).max(32).readonly().optional()
-  })
-  .strict()
-  .readonly();
+    reason: BoundedReasonSchema
+  }).strict()
+]).readonly();
 
 export const SoulProposeMemoryUpdateResponseSchema = z
   .object({
@@ -218,6 +231,7 @@ export const SoulPendingProposalSummarySchema = z
     proposal_id: NonEmptyStringSchema,
     target_object_id: NonEmptyStringSchema,
     target_object_kind: NonEmptyStringSchema,
+    proposal_operation: MemoryProposalOperationSchema.nullable().optional(),
     created_at: IsoDatetimeStringSchema,
     proposed_change_summary: BoundedReasonSchema,
     proposed_changes: PublicMemoryEntryMutableFieldsSchema.nullable(),

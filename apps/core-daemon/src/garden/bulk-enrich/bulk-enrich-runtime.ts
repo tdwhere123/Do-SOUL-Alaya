@@ -26,6 +26,7 @@ export function createBulkEnrichRuntimeSupport(
 ): BulkEnrichRuntimeSupport {
   const availability = resolveBulkEnrichAvailability(input);
   const workspaceQueue = createBulkEnrichWorkspaceQueue({
+    now: input.now,
     availability,
     gardenScheduler: input.gardenScheduler,
     gardenTaskRepo: input.gardenTaskRepo,
@@ -40,7 +41,7 @@ export function createBulkEnrichRuntimeSupport(
 
   const reclaimStaleClaims = (): void => {
     input.enrichPendingRepo?.reclaimStale(
-      new Date().toISOString(),
+      input.now(),
       DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms
     );
   };
@@ -53,6 +54,7 @@ export function createBulkEnrichRuntimeSupport(
     reclaimStaleClaims,
     runClaimableWorkspacePass: async (workspaceId, maxBatches) =>
       await runClaimableBulkEnrichWorkspacePass({
+        now: input.now,
         availability,
         workspaceId,
         maxBatches,
@@ -60,6 +62,7 @@ export function createBulkEnrichRuntimeSupport(
       }),
     runTask: async (task) =>
       await runBulkEnrichTask({
+        now: input.now,
         task,
         availability,
         reporter

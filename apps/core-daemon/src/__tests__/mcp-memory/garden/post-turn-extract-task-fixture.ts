@@ -138,11 +138,13 @@ export async function createHandlerHarness(options: {
 
 export async function createRoutingHarness(options: {
   readonly provider_kind: RuntimeGardenComputeConfig["provider_kind"];
+  readonly now?: () => string;
   readonly officialCompile?: GardenComputeProvider["compile"];
   readonly localCompile?: GardenComputeProvider["compile"];
   readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
 }): Promise<RoutingHarness> {
   const base = await createSqliteHarnessBase();
+  const now = options.now ?? (() => "2026-05-07T00:10:00.000Z");
   const signalService = new SignalService({
     eventLogRepo: base.eventLogRepo,
     signalRepo: base.signalRepo,
@@ -157,6 +159,7 @@ export async function createRoutingHarness(options: {
     options.localCompile ?? vi.fn(async () => [])
   );
   const runtime = createGardenRuntime({
+    now,
     databaseConnection: base.database.connection,
     backlogThresholds: {
       warning_queue_depth: 100,
@@ -210,7 +213,7 @@ export async function createRoutingHarness(options: {
         // in-process fallback wait window — the host worker gets first claim.
         // The bounded-fallback test below enqueues with an explicitly aged
         // created_at to exercise the zero-cloud heuristic fallback path.
-        created_at: overrides.created_at ?? new Date().toISOString()
+        created_at: overrides.created_at ?? now()
       });
     },
     async runScheduler() {

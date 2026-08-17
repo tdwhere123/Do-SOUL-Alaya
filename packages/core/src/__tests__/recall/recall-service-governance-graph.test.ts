@@ -36,6 +36,7 @@ describe("governance manifestation HARD CEILING — truth boundary", () => {
       ];
       const { dependencies } = createDependencies(memories);
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         pathExpansionPort: { findByAnchors: params.findByAnchors }
       });
@@ -337,6 +338,7 @@ it("expands path-graph candidates across two hops with cycle-safe edge-type deca
       return out;
     });
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort: { findByAnchors }
     });

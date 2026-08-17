@@ -124,7 +124,7 @@ function readCandidateRow(
   if (record.deep_head_trace != null && deepHeadTrace === null) return null;
   const coverageMarginalGain = readNumber(record.coverage_marginal_gain);
   if (record.coverage_marginal_gain != null && (
-    coverageMarginalGain === null || coverageMarginalGain < 0 || coverageMarginalGain > 1
+    coverageMarginalGain === null || coverageMarginalGain < 0
   )) return null;
   const selectorObservation = readCandidateSelectorObservation(record.selector_observation);
   if (record.selector_observation != null && selectorObservation === null) return null;

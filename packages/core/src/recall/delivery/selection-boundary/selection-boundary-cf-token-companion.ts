@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import type { FineAssessmentSelectionParams } from
   "../fine-assessment-selection.js";
 import type {
@@ -133,7 +134,7 @@ export function buildCfTokenCompanionAuxiliaryEstimates(
     waist_candidate_count: boundary.input.ordered_candidates.length,
     auxiliary_estimates: Object.freeze(
       [...auxiliary.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareCodeUnits(left, right))
         .map(([digest, estimate]) =>
           Object.freeze([digest, estimate] as const)
         )

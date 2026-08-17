@@ -7,6 +7,7 @@ import {
   captureEffectiveAsOf,
   captureQueryCondition
 } from "../../query/condition/query-condition-capture.js";
+import type { RecallRequestTimeContext } from "./recall-request-time.js";
 
 export type PrepareRecallQueryConditionInput = Readonly<{
   readonly workspaceId: string;
@@ -15,7 +16,7 @@ export type PrepareRecallQueryConditionInput = Readonly<{
   readonly tokenBudget: number;
   readonly activationBudget: number;
   readonly sha256: FieldContractSha256;
-  readonly now: () => string;
+  readonly time: RecallRequestTimeContext;
   readonly pin: Readonly<Pick<ProjectionPin, "workspace_id" | "generation_id">>;
   readonly principal?: string;
 }>;
@@ -23,16 +24,8 @@ export type PrepareRecallQueryConditionInput = Readonly<{
 export type PreparedQueryConditionCapture = Readonly<{
   readonly receipt: QueryConditionReceipt;
   readonly referenceTime: string;
+  readonly pin: ProjectionPin;
 }>;
-
-export function resolvePreparedAsOf(
-  explicit: string | undefined,
-  now: () => string
-): string {
-  if (explicit === undefined) return now();
-  captureEffectiveAsOf(explicit, now);
-  return explicit;
-}
 
 export function capturePreparedRequestCondition(input: Readonly<{
   readonly workspaceId: string;
@@ -41,30 +34,38 @@ export function capturePreparedRequestCondition(input: Readonly<{
   readonly tokenBudget: number;
   readonly activationBudget: number;
   readonly sha256: FieldContractSha256;
-  readonly now: () => string;
+  readonly time: RecallRequestTimeContext;
   readonly session: {
-    pinActiveGeneration(workspaceId: string, recordedAt: string): Readonly<
-      Pick<ProjectionPin, "workspace_id" | "generation_id">
-    >;
+    pinActiveGeneration(workspaceId: string, recordedAt: string): ProjectionPin;
+    release(pin: ProjectionPin, releasedAt: string): ProjectionPin;
   };
   readonly principal?: string;
 }>): PreparedQueryConditionCapture {
-  const referenceTime = resolvePreparedAsOf(input.explicitAsOf, input.now);
-  const effectiveAsOf = captureEffectiveAsOf(referenceTime, input.now);
-  return {
-    referenceTime,
-    receipt: prepareRecallQueryCondition({
-      ...input,
-      explicitAsOf: effectiveAsOf,
-      pin: input.session.pinActiveGeneration(input.workspaceId, effectiveAsOf)
-    })
-  };
+  const referenceTime = input.time.effectiveAsOf;
+  const pin = input.session.pinActiveGeneration(input.workspaceId, input.time.capturedAt);
+  try {
+    return {
+      referenceTime,
+      pin,
+      receipt: prepareRecallQueryCondition({
+        ...input,
+        explicitAsOf: referenceTime,
+        pin
+      })
+    };
+  } catch (error) {
+    input.session.release(pin, input.time.capturedAt);
+    throw error;
+  }
 }
 
 export function prepareRecallQueryCondition(
   input: PrepareRecallQueryConditionInput
 ): QueryConditionReceipt {
-  const effectiveAsOf = captureEffectiveAsOf(input.explicitAsOf, input.now);
+  const effectiveAsOf = captureEffectiveAsOf(
+    input.explicitAsOf,
+    () => input.time.effectiveAsOf
+  );
   return captureQueryCondition({
     principal: input.principal ?? input.workspaceId,
     workspace_id: input.workspaceId,
@@ -78,7 +79,8 @@ export function prepareRecallQueryCondition(
     token_budget: input.tokenBudget
   }, {
     sha256: input.sha256,
-    now: input.now,
+    now: () => input.time.effectiveAsOf,
+    recordedAt: input.time.capturedAt,
     pin: input.pin
   });
 }
