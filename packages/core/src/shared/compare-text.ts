@@ -1,3 +1,1 @@
-export function compareText(left: string, right: string): number {
-  return left.localeCompare(right);
-}
+export { compareCodeUnits as compareText } from "@do-soul/alaya-protocol";
