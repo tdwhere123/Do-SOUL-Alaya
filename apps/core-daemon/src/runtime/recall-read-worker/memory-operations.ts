@@ -5,7 +5,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { RecallReadWorkerRequest } from "./protocol.js";
 import {
-  findMemoryEntriesByWorkspaceId
+  findMemoryEntriesByWorkspaceId,
+  readRecallTierWindowQuery
 } from "./memory-window.js";
 import { runMemoryFieldOperation } from "./field-operations.js";
 import {
@@ -37,6 +38,10 @@ export async function runMemoryOperation(
     case "memory.searchByAnchorWithinObjectIds":
     case "memory.searchByAnchorWithinTier":
       return await runMemorySearchOperation(runtime, operation, payload);
+    case "memory.findRecallTierWindow":
+      return await memoryEntryRepo.findRecallTierWindow(
+        readRecallTierWindowQuery(payload)
+      );
     case "memory.findByWorkspaceId":
       return await findMemoryEntriesByWorkspaceId(
         memoryEntryRepo,

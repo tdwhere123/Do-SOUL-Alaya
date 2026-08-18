@@ -16,6 +16,10 @@ import {
   resolveTemporalDatabaseMode,
   type TemporalDatabaseMode
 } from "./temporal-cutover-gate.js";
+import {
+  TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION,
+  migrateVerifiedProjectionBindKey
+} from "./temporal-verified-bind-key.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
@@ -282,6 +286,13 @@ function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabas
     if (version === TEMPORAL_OFFLINE_MIGRATION_VERSION && temporalMode === "runtime") {
       continue;
     }
+    // Bind-key uniqueness requires the temporal generation table from offline v7.
+    if (
+      version === TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION &&
+      statements.isAppliedStatement.get(TEMPORAL_OFFLINE_MIGRATION_VERSION) === undefined
+    ) {
+      continue;
+    }
     applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
   }
 }
@@ -382,6 +393,9 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
     migrateLegacyPathRelationsToTemporalCandidate(database, {
       selectionRequired: temporalMode === "candidate"
     });
+  },
+  [TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION]: (database) => {
+    migrateVerifiedProjectionBindKey(database);
   }
 };
 

@@ -1,6 +1,5 @@
 import {
-  FieldContractDigestSchema,
-  FieldStopCertificateReceiptSchema
+  FieldContractDigestSchema
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 
@@ -35,7 +34,7 @@ const FieldProjectionActivationSchema = z.object({
   frontier: z.enum(["closed", "incomplete"])
 }).strict().readonly();
 
-export const FieldProjectionTraceSchema = z.object({
+const FieldProjectionTraceFieldsSchema = z.object({
   generation_id: z.string().min(1),
   condition_digest: z.string().min(1),
   candidate_keys: z.array(z.string().min(1)).readonly(),
@@ -47,24 +46,31 @@ export const FieldProjectionTraceSchema = z.object({
     z.string().min(1),
     z.array(FieldProjectionKeyReceiptSchema).readonly()
   ).readonly(),
-  activation: FieldProjectionActivationSchema,
-  stop: FieldStopCertificateReceiptSchema
+  activation: FieldProjectionActivationSchema
 }).strict().superRefine((trace, context) => {
-  if (trace.activation.generation_id !== trace.generation_id ||
-      trace.stop.generation_id !== trace.generation_id) {
+  if (trace.activation.generation_id !== trace.generation_id) {
     context.addIssue({ code: "custom", message: "Field projection generation is inconsistent" });
   }
-  if (trace.activation.condition_digest !== trace.condition_digest ||
-      trace.stop.condition_digest !== trace.condition_digest) {
+  if (trace.activation.condition_digest !== trace.condition_digest) {
     context.addIssue({ code: "custom", message: "Field projection condition is inconsistent" });
   }
   if (!trace.candidate_keys.every((key) =>
-    trace.activation.opened_candidate_keys.includes(key)) ||
-      !sameOrderedStrings(trace.candidate_keys, trace.stop.selected_candidate_keys)) {
+    trace.activation.opened_candidate_keys.includes(key))) {
     context.addIssue({ code: "custom", message: "Field projection membership is inconsistent" });
   }
 }).readonly();
 
-function sameOrderedStrings(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
+export const FieldProjectionTraceSchema = z.preprocess(
+  stripLegacyTraceStop,
+  FieldProjectionTraceFieldsSchema
+);
+
+function stripLegacyTraceStop(value: unknown): unknown {
+  if (!isPlainRecord(value) || !Object.hasOwn(value, "stop")) return value;
+  const { stop: _stop, ...fields } = value;
+  return fields;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

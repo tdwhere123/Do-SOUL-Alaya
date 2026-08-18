@@ -129,6 +129,20 @@ export function isLegacyPathIndexUnbound(db: StorageDatabase): boolean {
     && isPathRelationsTableEmpty(db);
 }
 
+export function readCurrentHistoryDigest(db: StorageDatabase): string | null {
+  try {
+    const row = db.connection.prepare(`
+      SELECT history_digest
+      FROM temporal_schema_state
+      WHERE state_id = 1
+      LIMIT 1
+    `).get() as Readonly<{ readonly history_digest: string | null }> | undefined;
+    return row?.history_digest ?? null;
+  } catch (error) {
+    throw wrapRelationAssertionStorageError("read current relation history digest", error);
+  }
+}
+
 export function readActiveProjectionGeneration(
   db: StorageDatabase
 ): string | null {
@@ -206,6 +220,7 @@ export async function findProjectionByWorkspaceAtAsOf(
     `).all(generation, workspaceId) as ProjectionRow[];
     return Object.freeze(rows.map(parseProjectionRow));
   } catch (error) {
+    if (error instanceof StorageError) throw error;
     throw wrapRelationAssertionStorageError("read relation projection at as-of", error);
   }
 }
@@ -215,7 +230,7 @@ function findVerifiedGenerationAtAsOf(
   asOf: string
 ): string | null {
   // Exact as_of is the generation key; a later verified cache must not stand in.
-  const row = db.connection.prepare(`
+  const rows = db.connection.prepare(`
     SELECT generation
     FROM temporal_projection_generations
     WHERE as_of = ?
@@ -223,9 +238,15 @@ function findVerifiedGenerationAtAsOf(
         SELECT history_digest FROM temporal_schema_state
         WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
       ) AND status = 'verified'
-    LIMIT 1
-  `).get(asOf) as Readonly<{ readonly generation: string }> | undefined;
-  return row?.generation ?? null;
+  `).all(asOf) as ReadonlyArray<{ readonly generation: string }>;
+  if (rows.length === 0) return null;
+  if (rows.length > 1) {
+    throw new StorageError(
+      "CONFLICT",
+      "Duplicate verified temporal projection bind key."
+    );
+  }
+  return rows[0]?.generation ?? null;
 }
 
 function parseProjectionRow(row: ProjectionRow): Readonly<PathRelation> {

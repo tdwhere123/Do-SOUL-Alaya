@@ -128,18 +128,6 @@ export {
   type EffectRequest,
   type ProofEffectWitness
 } from "./proof-effect.js";
-export {
-  FieldStopCertificateReceiptSchema,
-  FieldStopCertificateStatusSchema,
-  FieldStopExchangeBoundSchema,
-  FieldStopFrontierSchema,
-  FieldStopReasonSchema,
-  type FieldStopCertificateReceipt,
-  type FieldStopCertificateStatus,
-  type FieldStopExchangeBound,
-  type FieldStopFrontier,
-  type FieldStopReason
-} from "./stop-certificate.js";
 export type {
   AttributedActivationPort,
   AttributedActivationReceipt,
@@ -151,6 +139,5 @@ export type {
   QueryConditionPort,
   SourceAdmissionPort,
   SourceAdmissionRequest,
-  SourceAdmissionResult,
-  StopCertificatePort
+  SourceAdmissionResult
 } from "./ports.js";

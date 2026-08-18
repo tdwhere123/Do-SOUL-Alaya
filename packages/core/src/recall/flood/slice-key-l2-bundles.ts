@@ -39,20 +39,12 @@ export type L2MaterializationPolicy = Readonly<{
   readonly minMembers: number;
 }>;
 
-export type PlantedBundleFrontier = Readonly<{
-  readonly bundle_id?: string;
-  readonly anchor_digest: string;
-  readonly unseen_gain_upper_bound: number;
-  readonly opened?: boolean;
-}>;
-
 export function materializeSliceKeyL2Bundles(params: Readonly<{
   readonly generationId: string;
   readonly postings: readonly ProjectionL1Posting[];
   readonly sha256: FieldContractSha256;
   readonly policy: L2MaterializationPolicy;
   readonly scope?: string;
-  readonly plantedFrontiers?: readonly PlantedBundleFrontier[];
 }>): readonly ProjectionL2Bundle[] {
   assertSingleGeneration(params.postings);
   if (!params.policy.materialize) return Object.freeze([]);
@@ -61,11 +53,11 @@ export function materializeSliceKeyL2Bundles(params: Readonly<{
   const higher = params.policy.maxLevel >= 2
     ? materializeLevelTwoBundles(params, scope, levelOne.bundles, levelOne.identityBundleIds)
     : [];
-  return applyPlantedFrontiers(
-    params,
-    scope,
-    Object.freeze([...levelOne.bundles, ...higher])
-  );
+  const bundles = Object.freeze([...levelOne.bundles, ...higher].sort((left, right) =>
+    compareText(left.bundle_id, right.bundle_id)
+  ));
+  assertProjectionBundleLevelDag(bundles);
+  return bundles;
 }
 
 export function assertProjectionBundleLevelDag(
@@ -143,9 +135,7 @@ function createLevelOneBundle(
     level: 1,
     members: uniqueMembers.slice(0, params.policy.maxMembers),
     children: [],
-    summary: [Object.freeze({ dimension, value })],
-    opened: true,
-    unseen: 0
+    summary: [Object.freeze({ dimension, value })]
   });
 }
 
@@ -167,9 +157,7 @@ function materializeLevelTwoBundles(
       level: 2,
       members,
       children: [left.bundle_id, right.bundle_id],
-      summary: Object.freeze([...left.factor_summary, ...right.factor_summary]),
-      opened: true,
-      unseen: 0
+      summary: Object.freeze([...left.factor_summary, ...right.factor_summary])
     }));
   }
   return Object.freeze(pairs.sort((left, right) =>
@@ -208,40 +196,6 @@ function identityCoMemberPairs(
   return pairs;
 }
 
-function applyPlantedFrontiers(
-  params: Parameters<typeof materializeSliceKeyL2Bundles>[0],
-  scope: string,
-  bundles: readonly ProjectionL2Bundle[]
-): readonly ProjectionL2Bundle[] {
-  const planted = params.plantedFrontiers ?? [];
-  const byAnchor = new Map(bundles.map((bundle) => [bundle.anchor_digest, bundle]));
-  const output = bundles.map((bundle) => {
-    const match = planted.find((frontier) => frontier.anchor_digest === bundle.anchor_digest);
-    return match === undefined ? bundle : Object.freeze({
-      ...bundle,
-      unseen_frontier_upper_bound: match.unseen_gain_upper_bound,
-      opened: match.opened ?? bundle.opened
-    });
-  });
-  for (const frontier of planted) {
-    if (byAnchor.has(frontier.anchor_digest)) continue;
-    output.push(createBundle(params, scope, {
-      anchorDigest: frontier.anchor_digest,
-      level: 1,
-      members: [],
-      children: [],
-      summary: [],
-      opened: frontier.opened ?? false,
-      unseen: frontier.unseen_gain_upper_bound,
-      bundleId: frontier.bundle_id
-    }));
-  }
-  assertProjectionBundleLevelDag(output);
-  return Object.freeze(output.sort((left, right) =>
-    compareText(left.bundle_id, right.bundle_id)
-  ));
-}
-
 function createBundle(
   params: Parameters<typeof materializeSliceKeyL2Bundles>[0],
   scope: string,
@@ -251,12 +205,9 @@ function createBundle(
     readonly members: readonly string[];
     readonly children: readonly string[];
     readonly summary: readonly ProjectionFactorSummary[];
-    readonly opened: boolean;
-    readonly unseen: number;
-    readonly bundleId?: string;
   }>
 ): ProjectionL2Bundle {
-  const bundleId = input.bundleId ?? hashBundleId({
+  const bundleId = hashBundleId({
     scope,
     anchor_digest: input.anchorDigest,
     level: input.level,
@@ -273,8 +224,8 @@ function createBundle(
     child_bundle_ids: Object.freeze([...input.children]),
     factor_summary: Object.freeze(input.summary.map((factor) => Object.freeze({ ...factor }))),
     support_lineages: Object.freeze([...input.members]),
-    unseen_frontier_upper_bound: input.unseen,
-    opened: input.opened,
+    unseen_frontier_upper_bound: 0,
+    opened: true,
     operator_id: PROJECTION_GENERATION_OPERATOR_ID
   });
 }

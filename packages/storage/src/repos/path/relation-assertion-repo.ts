@@ -21,7 +21,8 @@ import {
   findActiveProjectionById,
   findActiveProjectionByWorkspace,
   findProjectionByWorkspaceAtAsOf,
-  readActiveProjectionGeneration
+  readActiveProjectionGeneration,
+  readCurrentHistoryDigest
 } from "./relation-assertion/projection-reader.js";
 import type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
 import {
@@ -43,6 +44,7 @@ export type { RelationAssertionProjectionGeneration } from "./relation-assertion
 export interface RelationAssertionRepo {
   getStorageConnectionIdentity(): object;
   readActiveProjectionGenerationInCurrentTransaction(): string | null;
+  readCurrentHistoryDigestInCurrentTransaction(): string | null;
   getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null;
   findByIdentityKeyInCurrentTransaction(identityKey: string): Readonly<RelationAssertion> | null;
   createInCurrentTransaction(input: {
@@ -66,7 +68,7 @@ export interface RelationAssertionRepo {
   writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGeneration,
     options: { readonly activate: boolean }
-  ): void;
+  ): string;
   findActiveProjectionByWorkspace(
     workspaceId: string
   ): Promise<readonly Readonly<PathRelation>[]>;
@@ -121,6 +123,10 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
 
   public readActiveProjectionGenerationInCurrentTransaction(): string | null {
     return readActiveProjectionGeneration(this.db);
+  }
+
+  public readCurrentHistoryDigestInCurrentTransaction(): string | null {
+    return readCurrentHistoryDigest(this.db);
   }
 
   public getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null {
@@ -422,8 +428,8 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   public writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGeneration,
     options: { readonly activate: boolean }
-  ): void {
-    writeProjectionGeneration(this.db, generation, options);
+  ): string {
+    return writeProjectionGeneration(this.db, generation, options);
   }
 
   public async findActiveProjectionByWorkspace(

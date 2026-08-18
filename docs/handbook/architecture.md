@@ -122,8 +122,8 @@ walk. Owner and current closure boundary:
 immutable `RelationAssertion` history (invariant §12). That ontology
 constraint does not by itself prove any query-time path. Connectedness is
 established only by the live producer-to-consumer evidence recorded in
-`recall.md`; F3-only membership and bundle-frontier control remain explicit
-closure questions there. The pre-UGAF wording is archived at
+`recall.md`, including live F3-only membership and full legal `slice_key`
+visibility. The pre-UGAF wording is archived at
 `docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
 
 ## Package Shape
@@ -288,9 +288,7 @@ review finding:
      graph-expansion, path-relation, field-generation, and diagnostics helpers
      live under `packages/core/src/recall/`). Helper presence is not
      connectedness. Current HEAD has live field/path/Slice/flood/Select_Gamma
-     wiring, while F3-only membership and progressive bundle-frontier control
-     still require planted end-to-end closure proof; see
-     [`recall.md`](recall.md).
+     wiring, including live F3-only membership; see [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)

@@ -76,6 +76,6 @@ describe("engine_bindings.api_key encryption", () => {
       .prepare("SELECT MAX(version) AS max_version FROM schema_version")
       .get() as Readonly<{ readonly max_version: number | null }>;
 
-    expect(version.max_version).toBe(7);
+    expect(version.max_version).toBe(8);
   });
 });

@@ -46,6 +46,7 @@ import {
   freezeCoarseStageResult,
   freezeLexicalCoarseWithWarm
 } from "./coarse/freeze-coarse-results.js";
+import { admitFieldProjectionCandidates } from "./coarse/field-projection-admission.js";
 import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallRetrievalFieldBundle } from
@@ -157,7 +158,8 @@ async function collectLexicalCoarseWithWarm(
     global.filteredCandidates,
     synthesisCoarseFilter,
     prepared.fieldProjectionMemories,
-    prepared.fieldProjectionSelection
+    prepared.fieldProjectionSelection,
+    context.warn
   );
   return freezeLexicalCoarseWithWarm<LexicalCoarseWithWarm>({
     recallPhaseStart,
@@ -320,44 +322,15 @@ function mergeLexicalCoarseCandidates(
   globalCandidates: readonly Readonly<CoarseRecallCandidate>[],
   synthesisCoarseFilter: SynthesisCoarseResult,
   fieldProjectionMemories: PreparedRecallRequest["fieldProjectionMemories"] | undefined,
-  fieldSelection: PreparedRecallRequest["fieldProjectionSelection"] | undefined
+  fieldSelection: PreparedRecallRequest["fieldProjectionSelection"] | undefined,
+  warn: RecallExecutionContext["warn"]
 ): readonly Readonly<CoarseRecallCandidate>[] {
   return mergeCoarseCandidateMetadata([
     ...coarseFilter.candidates,
     ...globalCandidates,
     ...synthesisCoarseFilter.candidates,
-    ...(fieldProjectionMemories ?? []).flatMap((entry) => {
-      const score = fieldProjectionActivation(entry, fieldSelection);
-      return score === undefined ? [] : [buildFieldProjectionCandidate(entry, score)];
-    })
+    ...admitFieldProjectionCandidates(fieldProjectionMemories, fieldSelection, warn)
   ]);
-}
-
-function fieldProjectionActivation(
-  entry: PreparedRecallRequest["fieldProjectionMemories"][number],
-  selection: PreparedRecallRequest["fieldProjectionSelection"] | undefined
-): number | undefined {
-  if (selection === undefined) return undefined;
-  const scores = entry.evidence_refs.flatMap((evidenceId) => {
-    const score = selection.candidate_activation[evidenceId];
-    return score === undefined ? [] : [score];
-  });
-  return scores.length === 0 ? undefined : Math.max(...scores);
-}
-
-function buildFieldProjectionCandidate(
-  entry: PreparedRecallRequest["fieldProjectionMemories"][number],
-  activationScore: number
-): Readonly<CoarseRecallCandidate> {
-  return Object.freeze({
-    entry,
-    originPlane: "workspace_local",
-    sourceChannel: "field_projection",
-    sourceChannels: Object.freeze(["field_projection"] as const),
-    admissionPlanes: Object.freeze(["activation"] as const),
-    firstAdmissionPlane: "activation",
-    structuralScore: activationScore
-  });
 }
 
 function mergeCoarseCandidateMetadata(

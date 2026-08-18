@@ -26,6 +26,7 @@ export type RelationAssertionProjectionGenerationInput = Readonly<{
 export interface RelationAssertionAtomicRepoPort {
   getStorageConnectionIdentity?(): object;
   readActiveProjectionGenerationInCurrentTransaction?(): string | null;
+  readCurrentHistoryDigestInCurrentTransaction?(): string | null;
   getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null;
   findByIdentityKeyInCurrentTransaction(identityKey: string): Readonly<RelationAssertion> | null;
   createInCurrentTransaction(input: {
@@ -49,7 +50,7 @@ export interface RelationAssertionAtomicRepoPort {
   writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGenerationInput,
     options: { readonly activate: boolean }
-  ): void;
+  ): string;
 }
 
 export interface RelationAssertionHistoryPort {

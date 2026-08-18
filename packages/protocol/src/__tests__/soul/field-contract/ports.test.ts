@@ -7,8 +7,7 @@ import type {
   ProjectionGenerationPort,
   ProofEffectPort,
   QueryConditionPort,
-  SourceAdmissionPort,
-  StopCertificatePort
+  SourceAdmissionPort
 } from "../../../soul/field-contract/index.js";
 
 describe("field-contract ports", () => {
@@ -75,9 +74,6 @@ describe("field-contract ports", () => {
         frontier: "incomplete"
       })
     };
-    const stop: StopCertificatePort = {
-      certify: (input) => input
-    };
     const proof: ProofEffectPort = {
       decide: (input) => ({
         schema_version: 1,
@@ -112,7 +108,6 @@ describe("field-contract ports", () => {
     expect(generation.pin).toEqual(expect.any(Function));
     expect(condition.captureCondition).toEqual(expect.any(Function));
     expect(activation.attribute).toEqual(expect.any(Function));
-    expect(stop.certify).toEqual(expect.any(Function));
     expect(proof.decide).toEqual(expect.any(Function));
     expect(usage.recordUsage).toEqual(expect.any(Function));
     expect(erase.erase).toEqual(expect.any(Function));

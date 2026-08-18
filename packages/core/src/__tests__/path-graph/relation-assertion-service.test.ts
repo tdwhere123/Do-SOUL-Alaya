@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EMPTY_RELATION_HISTORY_DIGEST,
   RunMode,
   RunState,
   SignalEventType,
@@ -20,6 +21,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import { RelationAssertionService } from "../../path-graph/relation-assertions/relation-assertion-service.js";
 import type { RelationAssertionAtomicRepoPort } from "../../path-graph/relation-assertions/relation-assertion-service-types.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
@@ -234,6 +236,45 @@ describe("RelationAssertionService", () => {
         nextProjectionRefreshAt: null
       });
   });
+
+  it("writes an empty as-of generation witness without activating historical rebuild", async () => {
+    const harness = await createHarness();
+    const asOf = "2026-07-17T01:30:00.000Z";
+    const before = readSchemaOperator(harness.database);
+    expect(before.history_digest).toBe(EMPTY_RELATION_HISTORY_DIGEST);
+
+    await harness.service.verifyAndRebuild(asOf);
+    const first = readVerifiedGenerationAtAsOf(harness.database, asOf);
+    const afterFirst = readSchemaOperator(harness.database);
+    expect(first.history_digest).toBe(afterFirst.history_digest);
+    expect(afterFirst).toEqual(before);
+
+    await harness.service.verifyAndRebuild(asOf);
+    expect(readVerifiedGenerationAtAsOf(harness.database, asOf)).toEqual(first);
+    expect(readSchemaOperator(harness.database)).toEqual(before);
+    expect(countGenerationsAtAsOf(harness.database, asOf)).toBe(1);
+  });
+
+  it("reads [] for non-empty history that has no active projection at an earlier as-of", async () => {
+    const harness = await createHarness();
+    const sourceEvent = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    await harness.service.admit(admissionRequest(sourceEvent));
+    const earlierAsOf = "2026-07-16T12:00:00.000Z";
+
+    const rebuilt = await harness.service.verifyAndRebuild(earlierAsOf);
+    const generation = readVerifiedGenerationAtAsOf(harness.database, earlierAsOf);
+    expect(rebuilt.activeProjectionCount).toBe(0);
+    expect(generation.history_digest).not.toBe(EMPTY_RELATION_HISTORY_DIGEST);
+    expect(generation.history_digest).not.toBe(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST);
+
+    const projectionReader = new SqliteTemporalPathProjectionReader(harness.relationRepo);
+    await expect(projectionReader.findByAnchors(
+      "workspace-1",
+      [{ kind: "object", object_id: "memory-1" }],
+      { asOf: earlierAsOf }
+    )).resolves.toEqual([]);
+  });
 });
 
 async function createHarness(options: {
@@ -375,6 +416,38 @@ function formationReceipt(sourceEvents: readonly Readonly<EventLogEntry>[]) {
 
 function digest(value: unknown): string {
   return createHash("sha256").update(stableStringify(value), "utf8").digest("hex");
+}
+
+function readSchemaOperator(database: StorageDatabase) {
+  return database.connection.prepare(`
+    SELECT active_projection_generation, active_as_of, history_digest
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get() as Readonly<{
+    readonly active_projection_generation: string;
+    readonly active_as_of: string;
+    readonly history_digest: string;
+  }>;
+}
+
+function readVerifiedGenerationAtAsOf(database: StorageDatabase, asOf: string) {
+  return database.connection.prepare(`
+    SELECT generation, history_digest, as_of, status
+    FROM temporal_projection_generations
+    WHERE as_of = ? AND status = 'verified'
+  `).get(asOf) as Readonly<{
+    readonly generation: string;
+    readonly history_digest: string;
+    readonly as_of: string;
+    readonly status: string;
+  }>;
+}
+
+function countGenerationsAtAsOf(database: StorageDatabase, asOf: string): number {
+  const row = database.connection.prepare(
+    "SELECT COUNT(*) AS n FROM temporal_projection_generations WHERE as_of = ?"
+  ).get(asOf) as { readonly n: number };
+  return row.n;
 }
 
 function failingProjectionRepo(repo: SqliteRelationAssertionRepo): RelationAssertionAtomicRepoPort {

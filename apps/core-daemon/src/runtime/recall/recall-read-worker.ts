@@ -67,6 +67,10 @@ async function handleRequest(message: unknown): Promise<void> {
     return;
   }
   try {
+    // Chunked window bypasses runOperation; reject closed before a reopenable statement.
+    if (runtime.closed && message.operation !== "close") {
+      throw new Error("recall read worker database is closed");
+    }
     if (message.operation === "memory.findRecallTierWindow") {
       const result = await runtime.memoryEntryRepo.findRecallTierWindow(
         readRecallTierWindowQuery(asPayload(message.payload))

@@ -4,8 +4,9 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation anchor: package `0.3.11`, worktree HEAD `d0e1aaed` plus
-P217 planted repairs on 2026-08-17. The earlier `10da1318` B-arm dump remains
+Current documentation anchor: package `0.3.11`, baseline HEAD `3be4b01f` plus
+the uncommitted reviewed P223 A/B/C diff on 2026-08-18. This is not a global
+suite-green or merge-readiness claim. The earlier `10da1318` B-arm dump remains
 historical benchmark evidence only.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
@@ -98,8 +99,8 @@ The principal owners are:
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel; the pass-through object score cannot be demoted. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
 | `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
-| Retrieval-field stop certificate | Live receipt | It binds field captures/refinement receipts to final selection. It must not be confused with projection-bundle frontier control. |
-| Projection-bundle progressive opening | Live selector control; default rebuild opens all L1/L2 | The selector opens matching bundles before matching. A member listed on any still-closed matching bundle is withheld. Ordinary generation materialization still emits `opened: true`; closed frontiers must be planted on artifacts to exercise the gate. |
+| Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
+| Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
 
 ## Algorithm-closure boundary
 
@@ -110,17 +111,15 @@ or as unimplemented. Planted live-path proof now covers:
    identities to `query_task_factors`. Source formation emits both the grounded
    surface and the identity as F3 factors. Proposed routing keys can open field
    membership without becoming grounded truth.
-2. **Progressive opening as control.** `selectPinnedProjectionCandidates` opens
-   matching bundles first, then matches only owners visible on that frontier.
-   Keys not listed on a closed matching bundle stay visible.
+2. **Ordinary legal `slice_key` visibility.** `selectPinnedProjectionCandidates`
+   matches every legal `artifacts.slice_keys` owner, then runs attributed
+   activation. Closed persisted `opened` values cannot withhold membership.
 
 Ordinary SQLite/daemon planted proof now exists for field-only, path-only,
-F3-only, and governance revoke. Closed-bundle visibility is proved on the live
-selector with planted artifacts; default rebuild does not emit closed matching
-bundles. Post-`Select_Gamma` order is proved on the live selector. Worker-read
-re-resolves already selected evidence ids and does not re-run pin/select.
-Selection-boundary replay remains the exact-order owner when an observer is
-attached.
+F3-only, and governance revoke. Post-`Select_Gamma` order is proved on the live
+selector. In-process query-only worker-read re-resolves already selected
+evidence ids and does not re-run pin/select. Selection-boundary replay remains
+the exact-order owner when an observer is attached.
 
 Do not add a second field, selector, query condition, or recall path.
 

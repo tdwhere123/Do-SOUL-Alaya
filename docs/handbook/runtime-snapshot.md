@@ -15,15 +15,14 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Pinned field generation and field admission | Live in Core and SQLite daemon composition |
 | Graph/PathRelation candidate expansion | Live; path fuel activates only with attributed eligible inflow |
 | Slice compatibility and integrated flood | Live; missing or rejected inputs retain explicit status |
-| F3-only field membership | Closure proof pending |
-| Progressive bundle opening as visibility control | Closure proof pending |
+| F3-only field membership | Live; planted SQLite/daemon proof — see [`recall.md`](recall.md) |
 | Final selector | `Select_Gamma` is the sole admission-order owner; delivery asserts the same order |
 | Exact selection-boundary replay | Live contract and capture/restore path |
 | Official 100Q / 500Q promotion | **Not claimed** |
 
 The previous integrated implementation is therefore not a degenerate
-projection and must not be reimplemented wholesale. P217 is a planted
-end-to-end acceptance gate that repairs only a demonstrated missing live seam.
+projection and must not be reimplemented wholesale. P217 was a planted
+end-to-end acceptance gate that repaired only a demonstrated missing live seam.
 
 ## Historical recall snapshot (2026-08-14, `10da1318`)
 
@@ -94,4 +93,4 @@ Not re-verified here.
 | `#BL-052` | Wire LongMemEval CI sample-floor |
 | `#BL-051` | Abstention calibration verdict on a 500q archive |
 | `#BL-057` | Warm-workspace recall prior witness |
-| UGAF algorithm closure | F3-only candidate membership, real bundle-frontier visibility control, and planted SQLite/direct/worker/replay proof — see `recall.md`. Not a `#BL-NNN`. |
+| UGAF algorithm closure | P223 ordinary SQLite/in-process query-only operation proof is closed. Spawned worker-thread/postMessage/concurrent-WAL/timeout remains `NOT_CHECKED` and blocks only stronger transport claims. See `recall.md`. Not a `#BL-NNN`. |

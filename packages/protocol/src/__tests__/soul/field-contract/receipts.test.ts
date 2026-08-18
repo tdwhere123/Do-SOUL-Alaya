@@ -11,11 +11,9 @@ import {
   FIELD_OPERATOR_MANIFEST,
   FactorDescriptorSchema,
   FieldProjectionGenerationSchema,
-  FieldStopCertificateReceiptSchema,
   ProjectionEraseBarrierSchema,
   QUERY_CONDITION_OPERATOR_ID,
   QueryConditionReceiptSchema,
-  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   SourceRecordIdentitySchema,
   classifyFieldValidTime,
@@ -177,44 +175,6 @@ describe("field-contract receipts", () => {
     expect(verifyQueryConditionReceipt(receipt, sha256).identity).toBe(
       hashConditionDigest({ ...condition, request_id: "other" }, sha256)
     );
-  });
-
-  it("lifts the live stop operator without a k=5 cap", () => {
-    const certified = FieldStopCertificateReceiptSchema.parse({
-      schema_version: 1,
-      producer: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-      consumer: "select_gamma",
-      identity: DIGEST_A,
-      replay_rule: "idempotent_same_identity",
-      failure_disposition: "fail_closed",
-      governance_effect: "audit_only",
-      deletion_behavior: "rebuildable",
-      workspace_id: "workspace-1",
-      operator_id: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-      status: "certified",
-      frontier: "closed",
-      reason: "exchange_dominated",
-      selected_candidate_keys: ["c1", "c2", "c3", "c4", "c5", "c6"],
-      exchange_bounds: [{
-        removed_candidate_key: "c6",
-        incumbent_loss: 0.1,
-        unseen_gain_upper_bound: 0.05,
-        improvement_upper_bound: 0
-      }],
-      improvement_upper_bound: 0,
-      generation_id: DIGEST_B,
-      condition_digest: DIGEST_A,
-      candidate_membership_changed: false,
-      recorded_at: RECORDED_AT
-    });
-    expect(certified.operator_id).toBe("recall_field_selector_exchange_bound_v1");
-    expect(certified.selected_candidate_keys).toHaveLength(6);
-    expect(() => FieldStopCertificateReceiptSchema.parse({
-      ...certified,
-      status: "certified",
-      frontier: "incomplete",
-      reason: "activation_budget_exhausted"
-    })).toThrow(/inconsistent|incomplete/u);
   });
 
   it("verifies span, generation, and usage identities against the hasher", () => {

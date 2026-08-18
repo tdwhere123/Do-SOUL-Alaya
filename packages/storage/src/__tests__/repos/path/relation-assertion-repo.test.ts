@@ -167,7 +167,7 @@ describe("SqliteRelationAssertionRepo", () => {
       .rejects.toThrow("active generation is missing or inconsistent");
   });
 
-  it("keeps the active generation while caching a different historical history", async () => {
+  it("keeps the active generation while caching a same-history as-of generation", async () => {
     const { database } = createRepo();
     const repo = new SqliteRelationAssertionRepo(database);
     const currentPath = createPathRelationFixture({
@@ -184,7 +184,7 @@ describe("SqliteRelationAssertionRepo", () => {
     repo.writeProjectionGenerationInCurrentTransaction(
       projectionGeneration(
         "temporal-historical",
-        staleHistoryDigest,
+        currentHistoryDigest,
         "2026-07-16T01:30:00.000Z",
         []
       ),

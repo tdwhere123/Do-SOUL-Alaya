@@ -10,7 +10,6 @@ import type {
 import type { QueryCondition, QueryConditionReceipt } from "./query-condition.js";
 import type { CausalUsageReceipt } from "./causal-usage.js";
 import type { EffectDecisionReceipt, EffectRequest } from "./proof-effect.js";
-import type { FieldStopCertificateReceipt } from "./stop-certificate.js";
 
 export type SourceAdmissionRequest = Readonly<{
   readonly workspace_id: string;
@@ -67,10 +66,6 @@ export type AttributedActivationReceipt = Readonly<{
 
 export interface AttributedActivationPort {
   attribute(input: QueryConditionReceipt): AttributedActivationReceipt;
-}
-
-export interface StopCertificatePort {
-  certify(input: FieldStopCertificateReceipt): FieldStopCertificateReceipt;
 }
 
 export interface ProofEffectPort {

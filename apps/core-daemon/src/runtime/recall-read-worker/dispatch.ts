@@ -1,4 +1,7 @@
-import type { RecallReadWorkerRequest } from "./protocol.js";
+import {
+  isRecallReadWorkerOperation,
+  type RecallReadWorkerRequest
+} from "./protocol.js";
 import { asPayload } from "./payload-readers.js";
 import { runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
@@ -11,6 +14,9 @@ export async function runOperation(
   runtime: RecallReadWorkerRuntime,
   request: RecallReadWorkerRequest
 ): Promise<unknown> {
+  if (!isRecallReadWorkerOperation(request.operation)) {
+    throwUnknownRecallReadWorkerOperation(request.operation);
+  }
   if (runtime.closed && request.operation !== "close") {
     throw new Error("recall read worker database is closed");
   }
@@ -18,6 +24,7 @@ export async function runOperation(
   switch (request.operation) {
     case "ready":
       return null;
+    case "memory.findRecallTierWindow":
     case "memory.findByWorkspaceId":
     case "memory.findByEventTimeWindow":
     case "memory.findByDimension":
@@ -62,5 +69,11 @@ export async function runOperation(
       runtime.database.close();
       runtime.closed = true;
       return null;
+    default:
+      throwUnknownRecallReadWorkerOperation(request.operation);
   }
+}
+
+function throwUnknownRecallReadWorkerOperation(operation: unknown): never {
+  throw new Error(`unknown recall read worker operation: ${String(operation)}`);
 }

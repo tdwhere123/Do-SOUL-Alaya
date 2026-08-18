@@ -85,6 +85,10 @@ export const RelationAssertionEvidenceReceiptSchema = z
 
 const Sha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
+// On-disk temporal bootstrap identity is SHA-256 of empty bytes, not a structured empty hash.
+export const EMPTY_RELATION_HISTORY_DIGEST =
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
 export const RelationFormationSourceKind = {
   EVENT_LOG_ENTRY: "event_log_entry",
   MEMORY_HQ_OBSERVATION: "memory_hq_observation"

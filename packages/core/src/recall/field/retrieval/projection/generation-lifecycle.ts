@@ -12,7 +12,6 @@ import {
   assertProjectionBundleLevelDag,
   materializeSliceKeyL2Bundles,
   type L2MaterializationPolicy,
-  type PlantedBundleFrontier,
   type ProjectionL2Bundle
 } from "../../../flood/slice-key-l2-bundles.js";
 import type { RecallFiniteFieldChannelCapture } from "../../finite-field-capture.js";
@@ -54,7 +53,6 @@ export type ProjectionBuildRequest = Readonly<{
   readonly sliceKeys: readonly SelectedSliceKeyV2[];
   readonly captures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly l2Policy?: L2MaterializationPolicy;
-  readonly plantedFrontiers?: readonly PlantedBundleFrontier[];
 }>;
 
 export function buildProjectionGeneration(
@@ -162,8 +160,7 @@ function materializeArtifacts(
     postings,
     sha256: request.sha256,
     policy,
-    scope: request.workspace_id,
-    plantedFrontiers: request.plantedFrontiers
+    scope: request.workspace_id
   });
   return createProjectionGenerationArtifacts({
     generation_id: generation.generation_id,

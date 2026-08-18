@@ -1,6 +1,7 @@
-import type {
-  RecallReadWorkerRequest,
-  RecallReadWorkerResponse
+import {
+  isRecallReadWorkerOperation,
+  type RecallReadWorkerRequest,
+  type RecallReadWorkerResponse
 } from "./protocol.js";
 
 type WorkerError = Extract<
@@ -27,7 +28,7 @@ export function isRecallReadWorkerRequest(value: unknown): value is RecallReadWo
     readonly id?: unknown;
     readonly operation?: unknown;
   };
-  return typeof record.id === "number" && typeof record.operation === "string";
+  return isFiniteRequestId(record.id) && isRecallReadWorkerOperation(record.operation);
 }
 
 export function readNumericMessageId(value: unknown): number | null {
@@ -35,5 +36,9 @@ export function readNumericMessageId(value: unknown): number | null {
     return null;
   }
   const id = (value as { readonly id?: unknown }).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : null;
+  return isFiniteRequestId(id) ? id : null;
+}
+
+function isFiniteRequestId(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }

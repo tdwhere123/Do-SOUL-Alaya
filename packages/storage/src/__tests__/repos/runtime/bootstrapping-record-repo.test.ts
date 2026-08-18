@@ -26,7 +26,7 @@ describe("SqliteBootstrappingRecordRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(appliedVersion).toEqual({ version: 7 });
+    expect(appliedVersion).toEqual({ version: 8 });
   });
 
   it("returns null when a workspace has no bootstrapping record", async () => {

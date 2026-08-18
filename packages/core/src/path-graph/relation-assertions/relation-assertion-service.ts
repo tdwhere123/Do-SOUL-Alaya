@@ -98,7 +98,7 @@ export class RelationAssertionService {
   ): EventPublisherDecision<RelationAssertionAdmissionResult> {
     assertSameAdmission(existing, admission);
     this.assertFormationInputs(existing);
-    const projection = this.buildProjectionInCurrentTransaction(this.now());
+    const projection = this.buildProjectionInCurrentTransaction(this.now(), true);
     return {
       eventInputs: [],
       apply: () => {
@@ -123,7 +123,7 @@ export class RelationAssertionService {
           assertion: { ...admission, admission_event_id: entry.event_id },
           identityKey
         });
-        const projection = this.buildProjectionInCurrentTransaction(admission.admitted_at);
+        const projection = this.buildProjectionInCurrentTransaction(admission.admitted_at, true);
         this.activateProjection(projection);
         return projectionAdmissionResult("admitted", assertion, projection);
       }
@@ -196,7 +196,7 @@ export class RelationAssertionService {
     resolutionId: string
   ): EventPublisherDecision<RelationAssertionResolutionResult> {
     assertSameResolution(existing, request, resolutionId);
-    const projection = this.buildProjectionInCurrentTransaction(existing.resolved_at);
+    const projection = this.buildProjectionInCurrentTransaction(existing.resolved_at, true);
     return {
       eventInputs: [],
       apply: () => {
@@ -219,7 +219,7 @@ export class RelationAssertionService {
           ...payload,
           event_id: entry.event_id
         });
-        const projection = this.buildProjectionInCurrentTransaction(payload.resolved_at);
+        const projection = this.buildProjectionInCurrentTransaction(payload.resolved_at, true);
         this.activateProjection(projection);
         return projectionResolutionResult("resolved", resolution, projection);
       }
@@ -239,8 +239,8 @@ export class RelationAssertionService {
     return assertion;
   }
 
-  private activateProjection(projection: RelationAssertionProjectionResult): void {
-    this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
+  private activateProjection(projection: RelationAssertionProjectionResult): string {
+    return this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
       projection.generation,
       { activate: true }
     );
@@ -264,17 +264,17 @@ export class RelationAssertionService {
     asOf: string,
     activate: boolean
   ): EventPublisherDecision<RelationAssertionReplayResult> {
-    const projection = this.buildProjectionInCurrentTransaction(asOf);
+    const projection = this.buildProjectionInCurrentTransaction(asOf, activate);
     return {
       eventInputs: [],
       apply: () => {
-        this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
+        const projectionGeneration = this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
           projection.generation,
           { activate }
         );
         return {
           activeProjectionCount: projection.activeProjectionCount,
-          projectionGeneration: projection.generation.generation,
+          projectionGeneration,
           nextProjectionRefreshAt: projection.nextProjectionRefreshAt
         };
       }
@@ -291,14 +291,22 @@ export class RelationAssertionService {
     });
   }
 
-  private buildProjectionInCurrentTransaction(asOf: string): RelationAssertionProjectionResult {
+  private buildProjectionInCurrentTransaction(
+    asOf: string,
+    activate: boolean
+  ): RelationAssertionProjectionResult {
     const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
     const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
     return buildRelationProjection(
       assertions,
       resolutions,
       asOf,
-      this.permittedTimelessPolicyIds
+      this.permittedTimelessPolicyIds,
+      {
+        activate,
+        currentHistoryDigest:
+          this.dependencies.repo.readCurrentHistoryDigestInCurrentTransaction?.() ?? null
+      }
     );
   }
 

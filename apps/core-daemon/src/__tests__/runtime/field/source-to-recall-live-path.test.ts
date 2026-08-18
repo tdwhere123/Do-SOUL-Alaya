@@ -124,11 +124,7 @@ function assertFieldTrace(result: Awaited<ReturnType<RecallService["recall"]>>):
     condition_digest: fieldTrace?.condition_digest,
     opened_candidate_keys: expect.arrayContaining([EVIDENCE_ID])
   });
-  expect(fieldTrace?.stop).toMatchObject({
-    generation_id: fieldTrace?.generation_id,
-    condition_digest: fieldTrace?.condition_digest,
-    selected_candidate_keys: [EVIDENCE_ID]
-  });
+  expect(Object.hasOwn(fieldTrace ?? {}, "stop")).toBe(false);
 }
 
 function openEmptyRecall(): Readonly<{

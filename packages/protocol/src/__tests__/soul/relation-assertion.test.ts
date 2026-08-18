@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_RELATION_HISTORY_DIGEST,
   RelationAssertionResolutionSchema,
   RelationAssertionSchema,
   RelationValiditySchema,
@@ -154,5 +156,11 @@ describe("RelationAssertion temporal contract", () => {
         reason: "not a typed history resolution"
       })
     ).toThrow();
+  });
+
+  it("names the persisted empty relation-history digest as SHA-256 of empty bytes", () => {
+    expect(EMPTY_RELATION_HISTORY_DIGEST).toBe(
+      createHash("sha256").update(Buffer.alloc(0)).digest("hex")
+    );
   });
 });

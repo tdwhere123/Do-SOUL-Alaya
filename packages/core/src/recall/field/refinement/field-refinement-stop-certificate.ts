@@ -1,6 +1,5 @@
 import {
-  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-  type FieldStopReason
+  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
 import {
   evaluateCoverageSelectionCandidateStates,
@@ -33,52 +32,16 @@ import {
 export { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID };
 const SCORE_EPSILON = 1e-12;
 
-export type RecallFieldStopDecision = Readonly<{
-  readonly status: "certified" | "uncertified";
-  readonly frontier: "closed" | "incomplete";
-  readonly reason: FieldStopReason;
-  readonly improvement: number | null;
-}>;
+type RecallFieldRefinementStopReason =
+  | "all_channels_closed"
+  | "source_unavailable"
+  | "relevance_bound_unavailable"
+  | "objective_bound_unavailable"
+  | "exchange_dominated"
+  | "exchange_not_dominated";
 
-export function decideRecallFieldStop(input: Readonly<{
-  readonly bounds: readonly Readonly<{ readonly improvement_upper_bound: number }>[];
-  readonly coreReason?: FieldStopReason;
-  readonly activationBudgetRemaining?: number;
-}>): RecallFieldStopDecision {
-  const improvement = input.bounds.length === 0
-    ? null
-    : Math.max(...input.bounds.map((bound) => bound.improvement_upper_bound));
-  const openGain = input.bounds.some((bound) =>
-    bound.improvement_upper_bound > SCORE_EPSILON
-  );
-  const reason = resolveStopReason(input, openGain, improvement);
-  const certified = reason === "all_channels_closed" || reason === "exchange_dominated";
-  return Object.freeze({
-    status: certified ? "certified" : "uncertified",
-    frontier: certified ? "closed" : "incomplete",
-    reason,
-    improvement
-  });
-}
-
-function resolveStopReason(
-  input: Readonly<{
-    readonly coreReason?: FieldStopReason;
-    readonly activationBudgetRemaining?: number;
-  }>,
-  openGain: boolean,
-  improvement: number | null
-): FieldStopReason {
-  if (!openGain) {
-    if (input.coreReason !== undefined &&
-        input.coreReason !== "all_channels_closed" &&
-        input.coreReason !== "exchange_dominated") {
-      return input.coreReason;
-    }
-    return improvement === null ? "all_channels_closed" : "exchange_dominated";
-  }
-  if (input.activationBudgetRemaining === 0) return "activation_budget_exhausted";
-  return "exchange_not_dominated";
+function isCertifiedStopReason(reason: RecallFieldRefinementStopReason): boolean {
+  return reason === "all_channels_closed" || reason === "exchange_dominated";
 }
 
 export type RecallFieldExchangeBound = Readonly<{
@@ -102,13 +65,7 @@ export type RecallFieldRefinementStopCertificate = Readonly<{
   readonly exchange_bounds: readonly Readonly<RecallFieldExchangeBound>[];
   readonly maximum_exchange_improvement_upper_bound: number | null;
   readonly status: "certified" | "uncertified";
-  readonly reason:
-    | "all_channels_closed"
-    | "source_unavailable"
-    | "relevance_bound_unavailable"
-    | "objective_bound_unavailable"
-    | "exchange_dominated"
-    | "exchange_not_dominated";
+  readonly reason: RecallFieldRefinementStopReason;
   readonly candidate_membership_changed: false;
   readonly receipt_digest: RecallFieldDigest;
 }>;
@@ -220,19 +177,15 @@ function baseContext<T extends CoverageSelectableCandidate>(
 
 function sealCertificate(
   context: CertificateContext,
-  reason: RecallFieldRefinementStopCertificate["reason"],
+  reason: RecallFieldRefinementStopReason,
   bounds: readonly Readonly<RecallFieldExchangeBound>[],
   maximum: number | null = null
 ): RecallFieldRefinementStopCertificate {
-  const decision = decideRecallFieldStop({
-    bounds: reason.startsWith("exchange_") ? bounds : [],
-    coreReason: reason
-  });
   const body = Object.freeze({
     ...context,
     exchange_bounds: Object.freeze(bounds),
     maximum_exchange_improvement_upper_bound: maximum,
-    status: decision.status,
+    status: isCertifiedStopReason(reason) ? "certified" : "uncertified",
     reason
   });
   return Object.freeze({ ...body, receipt_digest: digestRecallFieldIdentity(body) });
@@ -342,8 +295,7 @@ function assertCertificateDecision(
   if (maximum !== receipt.maximum_exchange_improvement_upper_bound) {
     throw new Error("field refinement maximum exchange bound mismatch");
   }
-  const certified = receipt.reason === "all_channels_closed" ||
-    receipt.reason === "exchange_dominated";
+  const certified = isCertifiedStopReason(receipt.reason);
   if ((certified ? "certified" : "uncertified") !== receipt.status ||
       (receipt.reason === "exchange_dominated" &&
         (maximum === null || maximum > SCORE_EPSILON)) ||

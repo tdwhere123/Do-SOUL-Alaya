@@ -3,7 +3,6 @@ import {
   normalizeMemoryObjectKeySurface,
   type AttributedActivationReceipt,
   type FieldContractSha256,
-  type FieldStopCertificateReceipt,
   type QueryConditionReceipt
 } from "@do-soul/alaya-protocol";
 
@@ -21,12 +20,8 @@ import {
   createSelectedSliceKeyV2,
   type SelectedSliceKeyV2
 } from "../../../flood/slice-key-contract.js";
-import { openProjectionBundlesProgressively } from "./progressive-opening.js";
 import type { ProjectionGenerationArtifacts } from "./generation-artifacts.js";
-import type { ProjectionL2Bundle } from "../../../flood/slice-key-l2-bundles.js";
 import type { SourceProjectionSliceKey } from "./source-projection.js";
-import { createFieldStopCertificateEnvelope } from
-  "../../refinement/field-refinement-stop-envelope.js";
 import { compareText } from "../../../../shared/compare-text.js";
 
 const PROPOSED_ROUTING_RELIABILITY_CEILING = 0.5;
@@ -38,7 +33,6 @@ export type PinnedProjectionCandidateSelection = Readonly<{
     Record<string, readonly Readonly<AttributedKeyActivationReceiptV1>[]>
   >;
   readonly activation: AttributedActivationReceipt;
-  readonly stop: FieldStopCertificateReceipt;
 }>;
 
 type QueryFactorKey = Readonly<{
@@ -60,10 +54,9 @@ export function selectPinnedProjectionCandidates(input: Readonly<{
 }>): PinnedProjectionCandidateSelection {
   assertPinnedArtifacts(input.condition, input.artifacts);
   const queryKeys = createQueryFactorKeys(input.condition);
-  const visibility = openVisibleBundleFrontier(input, queryKeys);
   const matches = matchCandidates(
     queryKeys,
-    visibility.slice_keys,
+    input.artifacts.slice_keys,
     input.condition.condition.effective_as_of
   );
   const trace = runAttributedActivation(input.condition, {
@@ -80,8 +73,7 @@ export function selectPinnedProjectionCandidates(input: Readonly<{
       scoreActivatedCandidates(trace, queryKeys.length, candidateIds)
     ),
     candidate_receipts: freezeReceipts(matches, candidateKeys),
-    activation: trace.receipt,
-    stop: recertifyVisibleFrontier(input, visibility, candidateKeys)
+    activation: trace.receipt
   });
 }
 
@@ -368,88 +360,6 @@ function scoreActivatedCandidates(
     const coverage = queryFactorCount === 0 ? 0 : value.seeds.size / queryFactorCount;
     return [candidate, value.max * (0.5 + (0.5 * coverage))];
   }));
-}
-
-type BundleVisibility = Readonly<{
-  readonly slice_keys: readonly SelectedSliceKeyV2[];
-  readonly remaining: ReturnType<typeof openProjectionBundlesProgressively>["remaining"];
-  readonly activation_budget_remaining: number;
-}>;
-
-function openVisibleBundleFrontier(
-  input: Parameters<typeof selectPinnedProjectionCandidates>[0],
-  queryKeys: readonly QueryFactorKey[]
-): BundleVisibility {
-  const matching = matchingQueryBundles(input.artifacts.bundles, queryKeys);
-  const budget = input.condition.condition.activation_budget;
-  const opened = openProjectionBundlesProgressively({
-    workspace_id: input.condition.condition.workspace_id,
-    generation_id: input.condition.generation_id,
-    condition_digest: input.condition.identity,
-    recorded_at: input.condition.recorded_at,
-    sha256: input.sha256,
-    selected_candidate_keys: [],
-    activationBudget: budget,
-    frontiers: matching.map((bundle) => ({
-      bundle_id: bundle.bundle_id,
-      unseen_gain_upper_bound: bundle.unseen_frontier_upper_bound,
-      incumbent_loss: 0,
-      opened: bundle.opened
-    }))
-  });
-  return Object.freeze({
-    slice_keys: sliceKeysVisibleOnOpenedFrontier(
-      input.artifacts.slice_keys,
-      matching,
-      opened.remaining
-    ),
-    remaining: opened.remaining,
-    activation_budget_remaining: Math.max(0, budget - opened.opened_bundle_ids.length)
-  });
-}
-
-function matchingQueryBundles(
-  bundles: readonly ProjectionL2Bundle[],
-  queryKeys: readonly QueryFactorKey[]
-): readonly ProjectionL2Bundle[] {
-  const terms = new Set(queryKeys.map((query) => query.key.normalized_value));
-  return Object.freeze(bundles.filter((bundle) =>
-    bundle.factor_summary.some((factor) => terms.has(factor.value))
-  ));
-}
-
-function sliceKeysVisibleOnOpenedFrontier(
-  sliceKeys: readonly SelectedSliceKeyV2[],
-  matching: readonly ProjectionL2Bundle[],
-  remaining: BundleVisibility["remaining"]
-): readonly SelectedSliceKeyV2[] {
-  const openedIds = new Set(remaining.flatMap((frontier) =>
-    frontier.opened ? [frontier.bundle_id] : []
-  ));
-  const closedMembers = new Set(matching.flatMap((bundle) =>
-    openedIds.has(bundle.bundle_id) ? [] : bundle.member_refs
-  ));
-  if (closedMembers.size === 0) return sliceKeys;
-  return Object.freeze(sliceKeys.filter((key) =>
-    key.owner_id === null || !closedMembers.has(key.owner_id)
-  ));
-}
-
-function recertifyVisibleFrontier(
-  input: Parameters<typeof selectPinnedProjectionCandidates>[0],
-  visibility: BundleVisibility,
-  candidateKeys: readonly string[]
-): FieldStopCertificateReceipt {
-  return createFieldStopCertificateEnvelope({
-    workspace_id: input.condition.condition.workspace_id,
-    generation_id: input.condition.generation_id,
-    condition_digest: input.condition.identity,
-    recorded_at: input.condition.recorded_at,
-    sha256: input.sha256,
-    selected_candidate_keys: candidateKeys,
-    bundleFrontiers: visibility.remaining,
-    activationBudgetRemaining: visibility.activation_budget_remaining
-  });
 }
 
 function freezeRecord(values: Record<string, number>): Readonly<Record<string, number>> {
