@@ -8,13 +8,21 @@ import type { RecallCandidateAnswerSupport } from
 import { createSelectionContext } from
   "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
 import {
+  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID
+} from "../../../recall/field/open-semantic-factors/candidate-attribution.js";
+import type { IntegratedFloodCandidateDiagnostics } from
+  "../../../recall/runtime/recall-service-types.js";
+import {
   createCandidate,
   createConfig,
-  createSupplementaryData
+  createRankedCandidate,
+  createSupplementaryData,
+  rankMap,
+  selectCandidates
 } from "../fine-assessment-selection-fixtures.js";
 
 describe("live Select_Gamma binding", () => {
-  it("binds observed authority, time, path, fact, scope, source, and lineage", () => {
+  it("keeps source and lineage as identity receipts outside cover", () => {
     const candidate = {
       ...createCandidate("bound"),
       evidenceSourceIdentity: "source-1",
@@ -66,17 +74,72 @@ describe("live Select_Gamma binding", () => {
     expect(bound.quality_channels.authority.status).toBe("available");
     expect(bound.quality_channels.temporal.status).toBe("available");
     expect(bound.quality_channels.path.status).toBe("available");
-    expect(Object.keys(bound.cover)).toEqual(expect.arrayContaining([
-      "authority:verified_user_assertion",
-      "temporal:compatible",
-      "path:path-1",
-      "fact:evidence-1:1",
-      `scope:${candidate.entry.scope_class}`,
-      "source:source-1",
-      "lineage:lineage-1"
-    ]));
+    expect(Object.keys(bound.cover)).toEqual([]);
     expect(bound.source).toEqual({ status: "available", key: "source-1" });
     expect(bound.lineage).toEqual({ status: "available", key: "lineage-1" });
+  });
+
+  it("covers only live slice, path, evidence, and F3 axes", () => {
+    const candidate = withFlood(createCandidate("attributed"), {
+      slice: true,
+      path: true,
+      evidence: true
+    });
+    const params = fixture(candidate, createSupplementaryData({
+      sourceCohortKeys: { attributed: "session-lineage" },
+      evidenceGistsByMemoryId: { attributed: "session gist" },
+      openSemanticFactorCandidateActivationsByCandidateKey: new Map([
+        [candidate.fusion.candidate_key, observedOpenSemanticActivation()]
+      ])
+    }));
+    const bound = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    ).candidates[0]!;
+
+    expect(Object.keys(bound.cover).sort()).toEqual([
+      "evidence",
+      "f3",
+      "path",
+      "slice"
+    ]);
+    expect(bound.lineage).toEqual({ status: "available", key: "session-lineage" });
+  });
+
+  it("does not let lineage or gist displace a higher-quality candidate", () => {
+    const gold = createRankedCandidate("gold", 1, 0.8);
+    const distractor = createRankedCandidate("distract", 2, 0.3);
+    const result = selectCandidates({
+      workspace_id: gold.entry.workspace_id,
+      orderedCandidates: [gold, distractor],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData({
+        sourceCohortKeys: { gold: "session-a", distract: "session-b" },
+        evidenceGistsByMemoryId: { gold: "gist-a", distract: "gist-b" }
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([gold, distractor])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["gold"]);
+  });
+
+  it("lets a unique active slice cover promote a weaker candidate", () => {
+    const strong = withFlood(createRankedCandidate("strong", 1, 0.8), {});
+    const weakSlice = withFlood(createRankedCandidate("weak-slice", 2, 0.3), {
+      slice: true
+    });
+    const result = selectCandidates({
+      workspace_id: strong.entry.workspace_id,
+      orderedCandidates: [strong, weakSlice],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([strong, weakSlice])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["weak-slice"]);
   });
 
   it("marks missing authority, temporal, and path channels unavailable", () => {
@@ -247,5 +310,69 @@ function fixture(
     supplementaryData,
     tokenEstimator: { estimate: () => 6 },
     rankByCandidateKey: new Map([[candidate.fusion.candidate_key, 1]])
+  };
+}
+
+function tightBudget(maxEntries: number) {
+  return {
+    ...createConfig(),
+    budgets: {
+      ...createConfig().budgets,
+      max_entries: maxEntries
+    }
+  };
+}
+
+function withFlood(
+  candidate: ReturnType<typeof createCandidate>,
+  axes: Readonly<{
+    readonly slice?: boolean;
+    readonly path?: boolean;
+    readonly evidence?: boolean;
+  }>
+) {
+  return {
+    ...candidate,
+    fusion: {
+      ...candidate.fusion,
+      flood_potential: floodAxes(axes)
+    }
+  };
+}
+
+function floodAxes(axes: Readonly<{
+  readonly slice?: boolean;
+  readonly path?: boolean;
+  readonly evidence?: boolean;
+}>): IntegratedFloodCandidateDiagnostics {
+  return {
+    R_obj: 0,
+    Slice: axes.slice === true ? 1 : 0,
+    A_path: axes.path === true ? 1 : 0,
+    B_evidence: axes.evidence === true ? 1 : 0,
+    E_direct: 0,
+    omega: 1,
+    Flood: 0,
+    lambda: 0.6,
+    beta: 1,
+    final_score: 0,
+    slice_status: axes.slice === true ? "active" : "inactive:no_slice_match",
+    path_status: axes.path === true ? "active" : "inactive:pass_through",
+    evidence_status: axes.evidence === true ? "active" : "inactive:no_evidence",
+    e_direct_status: "inactive:not_applicable",
+    fuel_verified: axes.slice === true || axes.path === true || axes.evidence === true
+  };
+}
+
+function observedOpenSemanticActivation() {
+  return {
+    schema_version: 1 as const,
+    operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
+    state: "observed" as const,
+    score: 1,
+    evidence_ids: Object.freeze(["evidence-1"]),
+    solution_count: 1,
+    proposition_match_count: 1,
+    receipt_digest: `sha256:${"e".repeat(64)}` as const
   };
 }

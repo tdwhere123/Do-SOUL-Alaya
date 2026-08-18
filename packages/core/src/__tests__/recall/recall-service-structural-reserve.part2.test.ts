@@ -205,7 +205,7 @@ const isStructuralDominant = (diagnostic: ReturnType<typeof goldDiag>): boolean 
       return structural > 0 && structural > lexicalLaneContribution(diagnostic);
     };
 
-it("lets Gamma promote relevant path evidence at maxEntries=1", async () => {
+it("does not let unique path identity replace quality at maxEntries=1", async () => {
       const { service } = buildMultiGoldFixture({
         decoyCount: 6,
         golds: [{ id: "memory-gold", pathStrength: 0.05 }]
@@ -213,15 +213,14 @@ it("lets Gamma promote relevant path evidence at maxEntries=1", async () => {
       const result = await runStructuralRecall(service, 1);
       const delivered = result.candidates;
       expect(delivered.length).toBe(1);
-      expect(delivered.map((candidate) => candidate.object_id)).toEqual(["memory-gold"]);
+      expect(delivered.map((candidate) => candidate.object_id)).toEqual(["memory-anchor"]);
       const headDiagnostic = goldDiag(result, delivered[0]!.object_id);
       expect(headDiagnostic?.pre_budget_rank).toBe(1);
       expect(headDiagnostic?.final_rank).toBe(1);
       const goldDiagnostic = goldDiag(result, "memory-gold");
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
       expect(structuralContribution(goldDiagnostic)).toBeGreaterThan(0);
-      expect(goldDiagnostic?.coverage_selector_action).toBe("promoted");
-      expect(goldDiagnostic?.final_rank).toBe(1);
+      expect(goldDiagnostic?.final_rank).toBeNull();
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
       expect(goldDiagnostic?.reserved_by).toBeUndefined();
     });
@@ -349,10 +348,10 @@ it("distinguishes path-plus-lexical evidence from lexical-only evidence", async 
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
       expect(delivered.slice(0, 2)).toEqual([
         "gold-weak-lexical",
-        "filler-strong-lexical"
+        "decoy-1"
       ]);
       expect(goldDiagnostic?.coverage_selector_action).toBe("promoted");
-      expect(fillerDiagnostic?.coverage_selector_action).toBe("promoted");
+      expect(fillerDiagnostic?.final_rank).not.toBe(2);
     });
 
 it("keeps lexical and structural legacy stages aligned to fusion", async () => {

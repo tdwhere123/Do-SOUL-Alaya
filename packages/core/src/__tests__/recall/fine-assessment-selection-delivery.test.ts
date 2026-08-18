@@ -71,7 +71,7 @@ describe("selectFineAssessmentCandidates delivery", () => {
     ]);
   });
 
-  it("attributes gist coverage movement to the coverage selector", () => {
+  it("does not let gist cover move quality order", () => {
     const primary = createRankedCandidate("primary", 1, 1);
     const redundant = createRankedCandidate("redundant", 2, 0.9);
     const diverse = createRankedCandidate("diverse", 3, 0.8);
@@ -96,8 +96,8 @@ describe("selectFineAssessmentCandidates delivery", () => {
     });
 
     expect(stageRanks(result, "primary")).toEqual([1, 1, "kept"]);
-    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted"]);
-    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced"]);
+    expect(stageRanks(result, "redundant")).toEqual([2, 2, "kept"]);
+    expect(stageRanks(result, "diverse")).toEqual([3, 3, "kept"]);
   });
 
   it("captures traces without changing the delivered packet", () => {
@@ -148,8 +148,8 @@ describe("selectFineAssessmentCandidates delivery", () => {
     expect(withoutTrace.diagnostics[0]).not.toHaveProperty("selector_observation");
     expect(withTrace.diagnostics[0]).toMatchObject({
       deep_head_trace: trace,
-      coverage_marginal_gain: 2,
-      selector_observation: { coverage: { marginal_gain: 2 } }
+      coverage_marginal_gain: 1,
+      selector_observation: { coverage: { marginal_gain: 1 } }
     });
     expect(withTrace.diagnostics.find((row) => row.object_id === "redundant"))
       .toMatchObject({ coverage_marginal_gain: 0.9 });

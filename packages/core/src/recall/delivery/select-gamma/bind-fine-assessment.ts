@@ -90,7 +90,7 @@ function formulaCandidates(
         path_support: channelValue(channels.path)
       }),
       quality_channels: channels,
-      cover: candidateCover(candidate, context, observation, channels)
+      cover: candidateCover(candidate, context)
     });
   }));
 }
@@ -152,59 +152,34 @@ function pathQuality(
 
 function candidateCover(
   candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext,
-  observation: ReturnType<typeof buildCandidateSelectorObservation>,
-  channels: ReturnType<typeof qualityChannels>
+  context: FineAssessmentSelectionContext
 ): Readonly<Record<string, number>> {
-  return Object.freeze(Object.fromEntries([
-    ...identityFeatures(candidate, context),
-    ...observedQualityFeatures(observation, channels),
-    ...factFeatures(candidate, context)
-  ].map((key) => [key, 1])));
-}
-
-function identityFeatures(
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
-): readonly string[] {
-  const source = sourceIdentity(candidate);
-  const lineage = lineageIdentity(candidate, context);
-  const gist = context.supplementaryData.evidenceGistsByMemoryId[
-    candidate.entry.object_id
-  ];
-  return Object.freeze([
-    `scope:${candidate.entry.scope_class}`,
-    `dimension:${candidate.entry.dimension}`,
-    ...(source.status === "available" ? [`source:${source.key}`] : []),
-    ...(lineage.status === "available" ? [`lineage:${lineage.key}`] : []),
-    ...(gist === undefined ? [] : [`content:${gist}`])
-  ]);
-}
-
-function observedQualityFeatures(
-  observation: ReturnType<typeof buildCandidateSelectorObservation>,
-  channels: ReturnType<typeof qualityChannels>
-): readonly string[] {
-  return Object.freeze([
-    ...(channels.authority.status === "available"
-      ? [`authority:${observation.evidence.authority}`] : []),
-    ...(channels.temporal.status === "available"
-      ? [`temporal:${channels.temporal.value > 0 ? "compatible" : "conflicted"}`] : []),
-    ...observation.path.receipts.flatMap(({ path_id }) =>
-      path_id === null ? [] : [`path:${path_id}`])
-  ]);
-}
-
-function factFeatures(
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
-): readonly string[] {
-  return Object.freeze(candidate.entry.evidence_refs.flatMap((evidenceRef) =>
-    (context.supplementaryData.evidenceProjectionMatchesByRef[evidenceRef] ?? [])
-      .filter(({ projection_kind, projection_id }) =>
-        projection_kind === "fact_key" && projection_id !== null)
-      .map(({ projection_id }) => `fact:${evidenceRef}:${projection_id}`)
+  return Object.freeze(Object.fromEntries(
+    attributedCoverFeatures(candidate, context).map((feature) => [feature, 1])
   ));
+}
+
+function attributedCoverFeatures(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): readonly string[] {
+  // Lineage/gist/dimension remain identity receipts; unique keys must not buy a slot.
+  const flood = candidate.fusion.flood_potential;
+  return Object.freeze([
+    ...(flood?.slice_status === "active" ? ["slice"] : []),
+    ...(flood?.path_status === "active" ? ["path"] : []),
+    ...(flood?.evidence_status === "active" ? ["evidence"] : []),
+    ...(openSemanticCover(candidate, context) ? ["f3"] : [])
+  ]);
+}
+
+function openSemanticCover(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): boolean {
+  return context.supplementaryData
+    .openSemanticFactorCandidateActivationsByCandidateKey
+    ?.get(candidate.fusion.candidate_key)?.state === "observed";
 }
 
 function sourceIdentity(candidate: FineAssessmentCandidate): SelectGammaIdentityChannel {
