@@ -6,6 +6,10 @@ import {
   toErrorMessage
 } from "../helpers.js";
 import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../constants.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import { scoreQueryEvidenceContent } from "../../recall/scoring/query-evidence-scoring.js";
+
+export const EVIDENCE_CANDIDATE_EMBEDDING_TOP_N = 32;
 import {
   EvidenceDocumentEmbeddingError,
   type EvidenceDocumentEmbeddingEngine
@@ -53,7 +57,10 @@ async function scoreEvidenceCandidates(
   params: ScoreEvidenceCandidatesParams,
   dependencies: EvidenceCandidateScoringDependencies
 ): Promise<EvidenceCandidateScoringResult> {
-  const candidates = params.candidates;
+  const candidates = selectLexicalEvidenceEmbeddingPrefix(
+    params.candidates,
+    params.queryText
+  );
   const startedAt = performance.now();
   if (candidates.length === 0) return scoringResult("not_applicable", 0, 0, 0, startedAt);
   if (!dependencies.provider.isAvailable) {
@@ -163,6 +170,24 @@ function buildObservationCompletenessLookup(
       (!receipt.owner_gist_enabled || ownerGist.has(candidateKey)))
     ? "complete"
     : "bounded_candidate_prefix";
+}
+
+export function selectLexicalEvidenceEmbeddingPrefix(
+  candidates: ScoreEvidenceCandidatesParams["candidates"],
+  queryText: string,
+  limit: number = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N
+): ScoreEvidenceCandidatesParams["candidates"] {
+  if (candidates.length <= limit) return candidates;
+  const queryProbes = compileRecallQueryProbes(queryText);
+  return Object.freeze([...candidates].sort((left, right) => {
+    const scoreDelta =
+      scoreQueryEvidenceContent(right.content, queryProbes) -
+      scoreQueryEvidenceContent(left.content, queryProbes);
+    if (scoreDelta !== 0) return scoreDelta;
+    return compareText(left.candidateKey, right.candidateKey) ||
+      compareText(left.evidenceObjectId, right.evidenceObjectId) ||
+      compareText(left.documentIdentity, right.documentIdentity);
+  }).slice(0, limit));
 }
 
 function observationIdentity(

@@ -53,6 +53,14 @@ export interface RecallEventTimeWindowQuery {
   readonly limit: number;
 }
 
+export interface RecallActivationTopKQuery {
+  readonly workspaceId: string;
+  readonly tier: StorageTier;
+  readonly limit: number;
+  readonly min_activation_score?: number | null;
+  readonly exclude_object_ids?: readonly string[];
+}
+
 export interface MemoryEntryRepoTierUpdateInput {
   readonly objectId: string;
   readonly workspaceId: string;
@@ -119,6 +127,9 @@ export interface MemoryEntryRepo {
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   findRecallTierWindow(query: RecallTierWindowQuery): Promise<Readonly<RecallTierWindowResult>>;
+  findRecallActivationTopK(
+    query: RecallActivationTopKQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByEventTimeWindow(
     query: RecallEventTimeWindowQuery
   ): Promise<readonly Readonly<MemoryEntry>[]>;

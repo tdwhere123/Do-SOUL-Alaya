@@ -47,6 +47,7 @@ import {
   updateScopedMemoryEntry,
   type MemoryEntryUpdateWorkflowHost
 } from "./update-workflows.js";
+import { findRecallActivationTopK } from "./recall/activation-top-k-query.js";
 import {
   type AutonomousTombstoneInput,
   type MemoryEntryKeywordSearchResult,
@@ -54,7 +55,8 @@ import {
   type MemoryEntryRepoDiagnosticSink,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
-  type MemoryEntryRepoUpdateFields
+  type MemoryEntryRepoUpdateFields,
+  type RecallActivationTopKQuery
 } from "./types.js";
 
 // invariant: workflow-host contracts are implemented directly so statement
@@ -156,6 +158,12 @@ export class SqliteMemoryEntryRepo
 
   public async create(entry: MemoryEntry): Promise<Readonly<MemoryEntry>> {
     return createMemoryEntry.call(this, entry);
+  }
+
+  public async findRecallActivationTopK(
+    query: RecallActivationTopKQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return findRecallActivationTopK(this.workflowStatementHolder.active(), query);
   }
 
   public createWithinTransaction(

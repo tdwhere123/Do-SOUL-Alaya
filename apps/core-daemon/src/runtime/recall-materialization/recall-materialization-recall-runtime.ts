@@ -38,6 +38,7 @@ import {
 } from "../recall/recall-path-readers.js";
 import { createRecallGraphExplorePathReader } from "../recall/recall-graph-path-reader.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
+import { bindMainThreadHotReads } from "./main-thread-hot-reads.js";
 
 export function createRecallUtilizationRuntime(input: CreateRecallMaterializationWiringInput) {
   const recallUtilizationService = createRecallUtilizationService({
@@ -91,7 +92,9 @@ export function createRecallSearchRuntime(
   directPathReadPorts: RecallPathReadPorts
 ) {
   return {
-    recallMemoryRepo: recallReadWorkerClient?.memoryRepo ?? input.memoryEntryRepo,
+    recallMemoryRepo: recallReadWorkerClient === null
+      ? input.memoryEntryRepo
+      : bindMainThreadHotReads(recallReadWorkerClient.memoryRepo, input.memoryEntryRepo),
     recallEvidenceSearchPort: createRecallEvidenceSearchPort(input, recallReadWorkerClient),
     recallSynthesisSearchPort: createRecallSynthesisSearchPort(input, recallReadWorkerClient),
     recallActiveConstraintsPort:

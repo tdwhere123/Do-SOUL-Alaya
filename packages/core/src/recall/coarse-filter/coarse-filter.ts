@@ -6,10 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
-  compareMemoryEntriesForActivationAdmission,
   filterMemoriesByTimeWindow,
   matchesDeterministicFilter,
-  matchesPrecomputedRankFilter,
   toErrorMessage,
   type RecallTimeFilter
 } from "../runtime/recall-service-helpers.js";
@@ -30,7 +28,10 @@ import {
   resolveRecallTierWindowStep,
   STORAGE_RECALL_TIER_PAGE_SIZE
 } from "./pagination/recall-tier-window-pagination.js";
-import { selectBoundedTopK } from "./selection/bounded-top-k.js";
+import {
+  canUseSqlActivationAdmissionTopK,
+  loadActivationAdmissionTopK
+} from "./selection/activation-admission-top-k.js";
 import {
   admitDynamicCoarseCandidates,
   admitInitialCoarseCandidates,
@@ -441,6 +442,15 @@ async function loadCoarseFilterInput(
   const deterministicMatches = tierMemories.filter(
     (entry) => !protectedIds.has(entry.object_id) && matchesDeterministicFilter(entry, config)
   );
+  const rankedMatches = await loadActivationAdmissionTopK({
+    memoryRepo: context.dependencies.memoryRepo,
+    workspaceId,
+    tier,
+    config,
+    eligible: deterministicMatches,
+    excludeObjectIds: protectedIds,
+    allowSql: canUseSqlActivationAdmissionTopK(config, options.timeFilter)
+  });
   return Object.freeze({
     tier,
     tierMemories,
@@ -450,10 +460,6 @@ async function loadCoarseFilterInput(
     queryProbes,
     winnerMemoryIds,
     protectedCandidates,
-    rankedMatches: selectBoundedTopK(
-      deterministicMatches.filter((entry) => matchesPrecomputedRankFilter(entry, config)),
-      config.precomputed_rank.max_candidates,
-      compareMemoryEntriesForActivationAdmission
-    )
+    rankedMatches
   });
 }

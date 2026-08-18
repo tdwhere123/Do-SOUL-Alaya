@@ -94,6 +94,37 @@ describe("Memory embedding storage repo", () => {
     });
   });
 
+  it("lists eligible workspace embedding ids without hydrating blobs", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        embedding: new Float32Array([0, 1, 0])
+      })
+    );
+
+    const ids = await repo.listIdsByWorkspace(workspaceId, {
+      tierFilter: ["hot"],
+      providerKind: "openai",
+      modelId: "text-embedding-3-small",
+      schemaVersion: 1,
+      limit: 10
+    });
+    expect(ids).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+    expect(ids.every((objectId) => typeof objectId === "string")).toBe(true);
+  });
+
   it("updates existing rows in place and lists only requested object ids", async () => {
     const { workspaceId, repo } = await createRepoContext();
 

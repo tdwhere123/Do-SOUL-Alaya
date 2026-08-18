@@ -13,6 +13,10 @@ import {
   prepareRecallEventTimeWindowStatements,
   type RecallEventTimeWindowStatements
 } from "./recall/event-time-window-statements.js";
+import {
+  prepareRecallActivationTopKStatements,
+  type RecallActivationTopKStatements
+} from "./recall/activation-top-k-statements.js";
 
 export interface MemoryEntryCreateStatements {
   readonly createStatement: SqliteStatement;
@@ -53,7 +57,8 @@ interface MemoryEntryBaseReadStatements {
 export interface MemoryEntryReadStatements
   extends MemoryEntryBaseReadStatements,
     RecallTierWindowStatements,
-    RecallEventTimeWindowStatements {}
+    RecallEventTimeWindowStatements,
+    RecallActivationTopKStatements {}
 
 export interface MemoryEntryUpdateStatements {
   readonly updateStatement: SqliteStatement;
@@ -462,7 +467,8 @@ export function prepareMemoryEntryReadStatements(db: StorageDatabase): MemoryEnt
   return {
     ...prepareStatementGroup(db, MEMORY_ENTRY_READ_SQL),
     ...prepareRecallTierWindowStatements(db),
-    ...prepareRecallEventTimeWindowStatements(db)
+    ...prepareRecallEventTimeWindowStatements(db),
+    ...prepareRecallActivationTopKStatements(db)
   };
 }
 

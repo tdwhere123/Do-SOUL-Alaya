@@ -89,7 +89,8 @@ export {
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
   type MemoryEntryRepoUpdateFields,
-  type MemoryObjectKeyRepo
+  type MemoryObjectKeyRepo,
+  type RecallActivationTopKQuery
 } from "./repos/memory-entry/index.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,

@@ -12,5 +12,6 @@ export {
   type MemoryEntryRepoDiagnosticSink,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
-  type MemoryEntryRepoUpdateFields
+  type MemoryEntryRepoUpdateFields,
+  type RecallActivationTopKQuery
 } from "./types.js";

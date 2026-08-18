@@ -46,6 +46,13 @@ import type {
   RecallEvidenceSearchMatch,
   RecallQualifiedEvidence
 } from "./recall-search-port-types.js";
+import type {
+  RecallActivationTopKQuery,
+  RecallEventTimeWindowQuery,
+  RecallMemoryListPageOptions,
+  RecallTierWindowCursor,
+  RecallTierWindowResult
+} from "./recall-memory-window-port.js";
 
 export type {
   KeywordSearchBatchQuery,
@@ -62,29 +69,13 @@ export type {
   RecallQualifiedEvidence
 } from "./recall-search-port-types.js";
 
-export interface RecallMemoryListPageOptions {
-  readonly limit: number;
-  readonly offset: number;
-}
-
-export interface RecallTierWindowCursor {
-  readonly created_at: string;
-  readonly object_id: string;
-}
-
-export interface RecallTierWindowResult {
-  readonly memories: readonly Readonly<MemoryEntry>[];
-  readonly next_cursor: Readonly<RecallTierWindowCursor> | null;
-  readonly truncated: boolean;
-}
-
-export interface RecallEventTimeWindowQuery {
-  readonly workspaceId: string;
-  readonly tier: StorageTierType;
-  readonly startTime: string;
-  readonly endTime: string;
-  readonly limit: number;
-}
+export type {
+  RecallActivationTopKQuery,
+  RecallEventTimeWindowQuery,
+  RecallMemoryListPageOptions,
+  RecallTierWindowCursor,
+  RecallTierWindowResult
+} from "./recall-memory-window-port.js";
 
 export interface RecallEvidenceSourceAnchor {
   readonly evidence_object_id: string;
@@ -103,6 +94,9 @@ export interface RecallServiceMemoryRepoPort {
     readonly limit: number;
     readonly cursor?: Readonly<RecallTierWindowCursor>;
   }>): Promise<Readonly<RecallTierWindowResult>>;
+  findRecallActivationTopK?(
+    query: Readonly<RecallActivationTopKQuery>
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByEventTimeWindow?(
     query: Readonly<RecallEventTimeWindowQuery>
   ): Promise<readonly Readonly<MemoryEntry>[]>;

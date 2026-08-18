@@ -118,6 +118,55 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     expect(embedTexts).toHaveBeenCalledTimes(1);
   });
 
+  it("hydrates only the within-cap id window and still sees those neighbors", async () => {
+    const listed = [
+      createEmbeddingRecord({ object_id: "a-excluded", embedding: new Float32Array([0, 1]) }),
+      createEmbeddingRecord({ object_id: "b-visible", embedding: new Float32Array([0.05, 0.99]) }),
+      createEmbeddingRecord({ object_id: "c-beyond", embedding: new Float32Array([0.1, 0.99]) })
+    ];
+    const listIdsByWorkspace = vi.fn(async (
+      _workspaceId: string,
+      options?: { readonly limit?: number }
+    ) => listed.slice(0, options?.limit).map((record) => record.object_id));
+    const listByObjectIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
+      listed.filter((record) => objectIds.includes(record.object_id))
+    );
+    const listByWorkspace = vi.fn(async () => listed);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds, listByWorkspace, listIdsByWorkspace },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
+      }),
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: "event-1",
+          created_at: "2026-04-23T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "query-neighbors-1",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const neighbors = await service.collectWorkspaceNeighbors({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: ["a-excluded"],
+      maxNeighbors: 5
+    });
+
+    expect(listByWorkspace).not.toHaveBeenCalled();
+    expect(listIdsByWorkspace).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.objectContaining({ limit: EMBEDDING_WORKSPACE_SCAN_CAP + 1 })
+    );
+    expect(listByObjectIds).toHaveBeenCalledWith("workspace-1", ["b-visible", "c-beyond"]);
+    expect(neighbors.map((hit) => hit.object_id)).toEqual(["b-visible", "c-beyond"]);
+  });
+
   it("excludes object ids that already entered the candidate pool", async () => {
     const service = buildService({
       queryEmbedding: new Float32Array([0, 1]),

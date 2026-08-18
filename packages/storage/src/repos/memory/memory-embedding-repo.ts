@@ -12,9 +12,7 @@ import {
   parseMemoryEmbeddingMetadataRow,
   parseMemoryEmbeddingRecord,
   parseMemoryEmbeddingRow,
-  parseModelId,
   parseObjectId,
-  parseProviderKind,
   parseWorkspaceId,
   runUpsertArgs,
   type MemoryEmbeddingMetadataRow
@@ -23,6 +21,10 @@ import {
   prepareMemoryEmbeddingStatements,
   type SqliteStatement
 } from "./memory-embedding-statements.js";
+import {
+  buildWorkspaceEmbeddingQuery,
+  rejectUnboundedWorkspaceEmbeddingQuery
+} from "./memory-embedding-workspace-query.js";
 
 export interface MemoryEmbeddingRecord {
   readonly object_id: string;
@@ -96,6 +98,10 @@ export interface MemoryEmbeddingRepo {
     workspaceId: string,
     options?: MemoryEmbeddingListByWorkspaceOptions
   ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
+  listIdsByWorkspace(
+    workspaceId: string,
+    options?: MemoryEmbeddingListByWorkspaceOptions
+  ): Promise<readonly string[]>;
   listByObjectIds(
     workspaceId: string,
     objectIds: readonly string[]
@@ -105,11 +111,6 @@ export interface MemoryEmbeddingRepo {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<boolean>;
-}
-
-interface MemoryEmbeddingWorkspaceQuery {
-  readonly sql: string;
-  readonly args: readonly (string | number)[];
 }
 
 export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
@@ -281,14 +282,8 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
 
     try {
-      if (usesDefaultWorkspaceEmbeddingQuery(options)) {
-        throw new StorageError(
-          "VALIDATION_FAILED",
-          "listByWorkspace requires a positive limit (or tier/provider/model/schema filters) to avoid unbounded embedding blob hydration."
-        );
-      }
-
-      const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options);
+      rejectUnboundedWorkspaceEmbeddingQuery(options);
+      const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options, "blob");
       const rows = parseRows(
         this.db.connection.prepare(query.sql).all(...query.args),
         MemoryEmbeddingRowParser,
@@ -303,6 +298,32 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list memory embeddings for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async listIdsByWorkspace(
+    workspaceId: string,
+    options?: MemoryEmbeddingListByWorkspaceOptions
+  ): Promise<readonly string[]> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+
+    try {
+      rejectUnboundedWorkspaceEmbeddingQuery(options);
+      const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options, "ids");
+      const rows = this.db.connection.prepare(query.sql).all(...query.args) as ReadonlyArray<{
+        readonly object_id: unknown;
+      }>;
+      return Object.freeze(rows.map((row) => parseObjectId(String(row.object_id))));
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to list memory embedding ids for workspace ${parsedWorkspaceId}.`,
         error
       );
     }
@@ -373,88 +394,6 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
   }
 }
-
-// invariant: unfiltered listByWorkspace without a positive limit must not hydrate all blobs.
-function usesDefaultWorkspaceEmbeddingQuery(
-  options: MemoryEmbeddingListByWorkspaceOptions | undefined
-): boolean {
-  return (
-    options?.tierFilter === undefined &&
-    (options?.limit === undefined || options.limit <= 0) &&
-    options?.providerKind === undefined &&
-    options?.modelId === undefined &&
-    options?.schemaVersion === undefined
-  );
-}
-
-function buildWorkspaceEmbeddingQuery(
-  workspaceId: string,
-  options: MemoryEmbeddingListByWorkspaceOptions | undefined
-): MemoryEmbeddingWorkspaceQuery {
-  const clauses = [
-    "e.workspace_id = ?",
-    "e.vector_valid = 1",
-    "m.lifecycle_state = 'active'",
-    "COALESCE(m.retention_state, '') != 'tombstoned'"
-  ];
-  const args: (string | number)[] = [workspaceId];
-  appendWorkspaceEmbeddingFilters(clauses, args, options);
-  let sql = `${WORKSPACE_EMBEDDING_SELECT_SQL}
-        WHERE ${clauses.join(" AND ")}
-        ORDER BY e.object_id ASC`;
-  if (options?.limit !== undefined && options.limit > 0) {
-    sql += " LIMIT ?";
-    args.push(Math.floor(options.limit));
-  }
-  return { sql, args };
-}
-
-function appendWorkspaceEmbeddingFilters(
-  clauses: string[],
-  args: (string | number)[],
-  options: MemoryEmbeddingListByWorkspaceOptions | undefined
-): void {
-  appendTierFilter(clauses, args, options?.tierFilter);
-  if (options?.providerKind !== undefined) {
-    clauses.push("e.provider_kind = ?");
-    args.push(parseProviderKind(options.providerKind));
-  }
-  if (options?.modelId !== undefined) {
-    clauses.push("e.model_id = ?");
-    args.push(parseModelId(options.modelId));
-  }
-  if (options?.schemaVersion !== undefined) {
-    clauses.push("e.schema_version = ?");
-    args.push(Math.floor(options.schemaVersion));
-  }
-}
-
-function appendTierFilter(
-  clauses: string[],
-  args: (string | number)[],
-  tierFilter: readonly ("hot" | "warm" | "cold")[] | undefined
-): void {
-  if (tierFilter === undefined || tierFilter.length === 0) {
-    return;
-  }
-  clauses.push(`m.storage_tier IN (${tierFilter.map(() => "?").join(", ")})`);
-  args.push(...tierFilter);
-}
-
-const WORKSPACE_EMBEDDING_SELECT_SQL = `
-        SELECT
-          e.object_id,
-          e.workspace_id,
-          e.content_hash,
-          e.provider_kind,
-          e.model_id,
-          e.schema_version,
-          e.dimensions,
-          e.embedding_blob,
-          e.created_at,
-          e.updated_at
-        FROM memory_embeddings e
-        INNER JOIN memory_entries m ON m.object_id = e.object_id`;
 
 function parseMemoryContentProbe(value: unknown): { readonly content: string } | null {
   if (value === undefined || value === null) {

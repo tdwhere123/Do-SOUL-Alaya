@@ -9,6 +9,10 @@ import {
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import { selectTopNeighborHits } from "./scoring/neighbor-top-k.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
+import {
+  loadWorkspaceVectorsWithIdPrefilter,
+  workspaceScanOptionsForProvider
+} from "./workspace-vector-prefilter.js";
 import type {
   EmbeddingNeighborHit,
   EmbeddingProviderPort,
@@ -107,12 +111,29 @@ export class WorkspaceNeighborScanner {
       return null;
     }
     try {
+      const scanOptions = workspaceScanOptionsForProvider(
+        this.deps.provider,
+        resolveEmbeddingRecallTiers()
+      );
+      const prefiltered = await loadWorkspaceVectorsWithIdPrefilter({
+        embeddingRepo,
+        workspaceId: params.workspaceId,
+        cap: workspaceScanCap,
+        scanOptions,
+        skipObjectIds: new Set(params.excludeObjectIds)
+      });
+      if (prefiltered !== null) {
+        this.warnIfWorkspaceScanTruncated(params, prefiltered.scannedCount, workspaceScanCap);
+        return Object.freeze({
+          storedVectors: prefiltered.records,
+          workspaceScanCap,
+          workspaceScannedCount: prefiltered.scannedCount,
+          workspaceScanTruncated: prefiltered.truncated
+        });
+      }
       const scanned = await embeddingRepo.listByWorkspace(params.workspaceId, {
-        tierFilter: resolveEmbeddingRecallTiers(),
-        limit: workspaceScanCap + 1,
-        providerKind: this.deps.provider.providerKind,
-        modelId: this.deps.provider.modelId,
-        schemaVersion: this.deps.provider.schemaVersion
+        ...scanOptions,
+        limit: workspaceScanCap + 1
       });
       this.warnIfWorkspaceScanTruncated(params, scanned.length, workspaceScanCap);
       return Object.freeze({

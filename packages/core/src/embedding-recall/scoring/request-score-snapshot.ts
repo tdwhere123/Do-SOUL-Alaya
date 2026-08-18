@@ -26,6 +26,10 @@ import type {
 } from "../types.js";
 import { selectTopNeighborHits } from "./neighbor-top-k.js";
 import {
+  loadWorkspaceVectorsWithIdPrefilter,
+  workspaceScanOptionsForProvider
+} from "../workspace-vector-prefilter.js";
+import {
   buildObjectEmbeddingFieldCaptures,
   type ObjectEmbeddingFieldWorkspaceSnapshot
 } from "../../recall/field/object-embedding-field-capture.js";
@@ -95,12 +99,22 @@ export class RequestScoreSnapshotBuilder {
       return emptyWorkspaceScan(cap);
     }
     try {
+      const scanOptions = workspaceScanOptionsForProvider(
+        this.deps.provider,
+        resolveEmbeddingRecallTiers()
+      );
+      const prefiltered = await loadWorkspaceVectorsWithIdPrefilter({
+        embeddingRepo: this.deps.embeddingRepo,
+        workspaceId: params.workspaceId,
+        cap,
+        scanOptions
+      });
+      if (prefiltered !== null) {
+        return this.buildWorkspaceScan(params, prefiltered.records, cap, prefiltered);
+      }
       const returned = await listByWorkspace.call(this.deps.embeddingRepo, params.workspaceId, {
-        tierFilter: resolveEmbeddingRecallTiers(),
-        limit: cap + 1,
-        providerKind: this.deps.provider.providerKind,
-        modelId: this.deps.provider.modelId,
-        schemaVersion: this.deps.provider.schemaVersion
+        ...scanOptions,
+        limit: cap + 1
       });
       return this.buildWorkspaceScan(params, returned, cap);
     } catch (error) {
@@ -112,28 +126,31 @@ export class RequestScoreSnapshotBuilder {
   private buildWorkspaceScan(
     params: PrepareRecallEmbeddingSnapshotParams,
     returned: readonly Readonly<EmbeddingVectorRecord>[],
-    cap: number
+    cap: number,
+    prefilter?: Readonly<{ readonly scannedCount: number; readonly truncated: boolean }>
   ): WorkspaceScan {
     const records = returned.filter((record) =>
       isProviderMatchedEmbedding(record, this.deps.provider)
     );
-    const neighborObjectIds = returned.slice(0, cap)
+    const neighborObjectIds = (prefilter === undefined ? returned.slice(0, cap) : returned)
       .filter((record) => isProviderMatchedEmbedding(record, this.deps.provider))
       .map((record) => record.object_id);
-    if (returned.length > cap) {
+    const scannedCount = prefilter?.scannedCount ?? returned.length;
+    const truncated = prefilter?.truncated ?? returned.length > cap;
+    if (truncated) {
       this.deps.warn("embedding workspace scan truncated by cap", {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         scan_cap: cap,
-        returned: returned.length
+        returned: scannedCount
       });
     }
     return Object.freeze({
       records: Object.freeze(records),
       objectIds: new Set(neighborObjectIds),
       cap,
-      returned: returned.length,
-      truncated: returned.length > cap,
+      returned: scannedCount,
+      truncated,
       attempted: true,
       failed: false
     });

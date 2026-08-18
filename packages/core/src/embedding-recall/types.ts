@@ -57,6 +57,12 @@ export interface EmbeddingRecallRepoPort {
     workspaceId: string,
     options?: EmbeddingWorkspaceScanOptions
   ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+  // Optional id-only workspace prefilter. Same filters/order/limit as
+  // listByWorkspace, but does not hydrate embedding blobs.
+  listIdsByWorkspace?(
+    workspaceId: string,
+    options?: EmbeddingWorkspaceScanOptions
+  ): Promise<readonly string[]>;
 }
 
 export interface EmbeddingWorkspaceScanOptions {
