@@ -25,6 +25,8 @@ export interface EvidenceCapsuleStatements {
   readonly searchByKeywordTrigramStatement: SqliteStatement;
   readonly searchProjectionByKeywordStatement: SqliteStatement;
   readonly searchProjectionByKeywordTrigramStatement: SqliteStatement;
+  readonly searchOwnerByKeywordUnionStatement: SqliteStatement;
+  readonly searchProjectionByKeywordUnionStatement: SqliteStatement;
 }
 
 export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceCapsuleStatements {
@@ -62,6 +64,12 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
     ),
     searchProjectionByKeywordTrigramStatement: db.connection.prepare(
       SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL
+    ),
+    searchOwnerByKeywordUnionStatement: db.connection.prepare(
+      SEARCH_EVIDENCE_OWNER_KEYWORD_UNION_SQL
+    ),
+    searchProjectionByKeywordUnionStatement: db.connection.prepare(
+      SEARCH_EVIDENCE_PROJECTION_KEYWORD_UNION_SQL
     )
   };
 }
@@ -345,3 +353,31 @@ const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
       ORDER BY raw_rank ASC, owner_content ASC, owner_gist ASC, source_hash ASC,
         projection_kind ASC, projection_content ASC, projection_id ASC, object_id ASC
 `;
+
+const EVIDENCE_OWNER_UNION_COLUMNS = "object_id, raw_rank";
+const EVIDENCE_PROJECTION_UNION_COLUMNS =
+  "object_id, projection_id, projection_kind, raw_rank, projection_content, owner_content, owner_gist, source_hash";
+
+const SEARCH_EVIDENCE_OWNER_KEYWORD_UNION_SQL = unionAllTaggedLanes(
+  SEARCH_EVIDENCE_KEYWORD_SQL,
+  SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL,
+  EVIDENCE_OWNER_UNION_COLUMNS
+);
+
+const SEARCH_EVIDENCE_PROJECTION_KEYWORD_UNION_SQL = unionAllTaggedLanes(
+  SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL,
+  SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL,
+  EVIDENCE_PROJECTION_UNION_COLUMNS
+);
+
+function unionAllTaggedLanes(
+  porterSql: string,
+  trigramSql: string,
+  columns: string
+): string {
+  return `
+      SELECT ${columns}, 'porter' AS fts_lane FROM (${porterSql})
+      UNION ALL
+      SELECT ${columns}, 'trigram' AS fts_lane FROM (${trigramSql})
+    `;
+}

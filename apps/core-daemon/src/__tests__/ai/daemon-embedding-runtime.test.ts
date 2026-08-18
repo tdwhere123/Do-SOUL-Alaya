@@ -6,6 +6,7 @@ import {
   SqliteMemoryEntryRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR } from "../../ai/daemon-embedding-runtime-config.js";
 
@@ -500,6 +501,36 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       })).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
     } finally {
       teardown(fixture);
+    }
+  });
+
+  it("starts local ONNX extractor warmup without blocking runtime construction", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    const warmup = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "warmup")
+      .mockResolvedValue(undefined);
+    const embed = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "embedTexts")
+      .mockResolvedValue([new Float32Array([0.1])]);
+    try {
+      const runtime = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv: new Map([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]),
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn
+      });
+      expect(warmup).toHaveBeenCalledTimes(1);
+      expect(runtime.embeddingRecallService).toBeDefined();
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+    } finally {
+      warmup.mockRestore();
+      embed.mockRestore();
+      teardown(fixture);
+      restoreEnv();
     }
   });
 

@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { getSqliteWriteQueuePort } from "@do-soul/alaya-storage";
+import { describe, expect, it, vi } from "vitest";
+import { getSqliteWriteQueuePort, StorageDatabase } from "@do-soul/alaya-storage";
 import {
   closeDaemonSqliteWriteQueue,
   openDaemonDatabase
@@ -17,6 +17,31 @@ describe("daemon startup database", () => {
     } finally {
       database.close();
       await closeDaemonSqliteWriteQueue();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes sqlite planner stats once on open", async () => {
+    const previousQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
+    process.env.ALAYA_SQLITE_WRITE_QUEUE = "0";
+    const optimize = vi.spyOn(StorageDatabase.prototype, "optimize");
+    const directory = mkdtempSync(join(tmpdir(), "alaya-daemon-database-optimize-test-"));
+    try {
+      const database = await openDaemonDatabase(join(directory, "alaya.db"));
+      try {
+        expect(optimize).toHaveBeenCalledTimes(1);
+        expect(optimize.mock.instances[0]).toBe(database);
+      } finally {
+        database.close();
+        await closeDaemonSqliteWriteQueue();
+      }
+    } finally {
+      optimize.mockRestore();
+      if (previousQueue === undefined) {
+        delete process.env.ALAYA_SQLITE_WRITE_QUEUE;
+      } else {
+        process.env.ALAYA_SQLITE_WRITE_QUEUE = previousQueue;
+      }
       rmSync(directory, { recursive: true, force: true });
     }
   });

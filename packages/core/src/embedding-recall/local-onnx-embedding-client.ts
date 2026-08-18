@@ -126,6 +126,10 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     this.now = options.now ?? (() => Date.now());
   }
 
+  public warmup(): Promise<void> {
+    return this.loadExtractor().then(() => undefined);
+  }
+
   public get isAvailable(): boolean {
     // Outside the backoff window after sustained failure, treat the provider
     // as configured again so a recall path can dial it; the loader will flip

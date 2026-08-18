@@ -64,7 +64,8 @@ const hoisted = vi.hoisted(() => {
       })
     },
     close: vi.fn(),
-    isClosed: vi.fn(() => false)
+    isClosed: vi.fn(() => false),
+    optimize: vi.fn()
   };
 
   const workspace = {
