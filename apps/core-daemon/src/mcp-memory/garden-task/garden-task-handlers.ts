@@ -1,4 +1,7 @@
 import {
+  GardenClaimTaskResponseSchema,
+  GardenCompleteTaskResponseSchema,
+  GardenListPendingTasksResponseSchema,
   GardenTaskKind,
   type CandidateMemorySignal,
   type EdgeClassifyVerdict,
@@ -6,6 +9,7 @@ import {
   type GardenListPendingTasksRequest,
   type GardenRoleValue
 } from "@do-soul/alaya-protocol";
+import type { GardenTaskOperations } from "../tool/tool-handler-operations.js";
 import type {
   GardenTaskCompletionResult,
   GardenTaskEventInput,
@@ -84,14 +88,15 @@ export function createGardenTaskHandlers(params: Readonly<{
   readonly now: () => string;
   readonly warn: WarnPort;
   readonly generateId: () => string;
-}>) {
+}>): GardenTaskOperations {
   const completion = createGardenTaskCompletionHandler(params);
-    return {
-      listPendingGardenTasks: createListPendingGardenTasks(params.deps),
-      claimGardenTask: createClaimGardenTaskHandler(params),
-      completeGardenTask: completion.completeGardenTask
-    };
-  }
+  return {
+    listPendingGardenTasks: createListPendingGardenTasks(params.deps),
+    claimGardenTask: createClaimGardenTaskHandler(params),
+    completeGardenTask: async (request, context) =>
+      GardenCompleteTaskResponseSchema.parse(await completion.completeGardenTask(request, context))
+  };
+}
 
 function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
   return async function listPendingGardenTasks(
@@ -106,7 +111,7 @@ function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
       context.workspaceId,
       request.limit
     );
-    return { tasks: rows.map(toGardenTaskSnapshot) };
+    return GardenListPendingTasksResponseSchema.parse({ tasks: rows.map(toGardenTaskSnapshot) });
   };
 }
 
@@ -135,6 +140,9 @@ function createClaimGardenTaskHandler(params: Readonly<{
     if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {
       return toSilentAlreadyClaimed(request.task_id);
     }
-    return { status: claimResult === "claimed" ? "claimed" : "already_claimed", ...toGardenClaimTaskPayload(row) };
+    return GardenClaimTaskResponseSchema.parse({
+      status: claimResult === "claimed" ? "claimed" : "already_claimed",
+      ...toGardenClaimTaskPayload(row)
+    });
   };
 }

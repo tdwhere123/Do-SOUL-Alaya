@@ -1,11 +1,10 @@
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import {
-  queryBoundedAll as executeBoundedEventLogQuery,
-  wrapBoundedQueryError
-} from "./event-log-bounded-query.js";
+import { parseRows } from "../shared/parse-row.js";
+import { wrapBoundedQueryError } from "./event-log-bounded-query.js";
 import {
   EVENT_LOG_ALL_QUERY_HARD_MAX,
-  type EventLogRow
+  EventLogEntryRowParser,
+  enforceEventLogAllHardCap
 } from "./event-log-rows.js";
 import type { EventLogStatements } from "./event-log-statements.js";
 
@@ -20,34 +19,38 @@ export function queryEventLogScopeAll(
 ): readonly EventLogEntry[] {
   try {
     const statements = loadStatements();
-    let rows: EventLogRow[];
+    let rawRows: unknown;
     let scopeId: string;
 
     if (scope.kind === "entity") {
-      rows = statements.queryByEntityPagedStatement.all(
+      rawRows = statements.queryByEntityPagedStatement.all(
         scope.entityType,
         scope.entityId,
         EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
         0
-      ) as EventLogRow[];
+      );
       scopeId = `${scope.entityType}:${scope.entityId}`;
     } else if (scope.kind === "run") {
-      rows = statements.queryByRunPagedStatement.all(
+      rawRows = statements.queryByRunPagedStatement.all(
         scope.runId,
         EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
         0
-      ) as EventLogRow[];
+      );
       scopeId = scope.runId;
     } else {
-      rows = statements.queryByWorkspacePagedStatement.all(
+      rawRows = statements.queryByWorkspacePagedStatement.all(
         scope.workspaceId,
         EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
         0
-      ) as EventLogRow[];
+      );
       scopeId = scope.workspaceId;
     }
 
-    return executeBoundedEventLogQuery(() => rows, scope.kind, scopeId);
+    return enforceEventLogAllHardCap(
+      parseRows(rawRows, EventLogEntryRowParser, "event log row"),
+      scope.kind,
+      scopeId
+    );
   } catch (error) {
     wrapBoundedQueryError(scope.kind, error);
   }

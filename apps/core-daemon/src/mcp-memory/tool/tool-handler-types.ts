@@ -20,9 +20,25 @@ import {
   type SoulListPendingProposalsRequest,
   type SoulMemorySearchDegradationReason,
   type SoulPendingProposalSummary,
+  type GardenClaimTaskResponse,
+  type GardenCompleteTaskResponse,
+  type GardenListPendingTasksResponse,
+  type SoulApplyOverrideResponse,
+  type SoulBatchReviewEdgeProposalsResponse,
+  type SoulEmitCandidateSignalResponse,
+  type SoulExploreGraphResponse,
+  type SoulListPendingEdgeProposalsResponse,
+  type SoulListPendingProposalsResponse,
+  type SoulMemorySearchResponse,
+  type SoulOpenPointerResponse,
+  type SoulProposeEdgeResponse,
   type SoulProposeMemoryUpdateRequest,
+  type SoulProposeMemoryUpdateResponse,
   type SoulRecallHostContext,
+  type SoulReportContextUsageResponse,
+  type SoulResolveResponse,
   type SoulReviewMemoryProposalRequest,
+  type SoulReviewMemoryProposalResponse,
   type StorageTier,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
@@ -312,12 +328,35 @@ export interface McpMemoryToolHandlerDependencies {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
+export type McpMemoryToolResponseByName = {
+  readonly "soul.recall": SoulMemorySearchResponse;
+  readonly "soul.open_pointer": SoulOpenPointerResponse;
+  readonly "soul.emit_candidate_signal": SoulEmitCandidateSignalResponse;
+  readonly "soul.propose_memory_update": SoulProposeMemoryUpdateResponse;
+  readonly "soul.review_memory_proposal": SoulReviewMemoryProposalResponse;
+  readonly "soul.list_pending_proposals": SoulListPendingProposalsResponse;
+  readonly "soul.propose_edge": SoulProposeEdgeResponse;
+  readonly "soul.list_pending_edge_proposals": SoulListPendingEdgeProposalsResponse;
+  readonly "soul.batch_review_edge_proposals": SoulBatchReviewEdgeProposalsResponse;
+  readonly "soul.apply_override": SoulApplyOverrideResponse;
+  readonly "soul.explore_graph": SoulExploreGraphResponse;
+  readonly "soul.report_context_usage": SoulReportContextUsageResponse;
+  readonly "soul.resolve": SoulResolveResponse;
+  readonly "garden.list_pending_tasks": GardenListPendingTasksResponse;
+  readonly "garden.claim_task": GardenClaimTaskResponse;
+  readonly "garden.complete_task": GardenCompleteTaskResponse;
+};
+
+export type McpMemoryToolSuccessResult = {
+  [K in AlayaMemoryToolName]: Readonly<{
+    readonly ok: true;
+    readonly tool_name: K;
+    readonly output: McpMemoryToolResponseByName[K];
+  }>;
+}[AlayaMemoryToolName];
+
 export type McpMemoryToolCallResult =
-  | Readonly<{
-      readonly ok: true;
-      readonly tool_name: AlayaMemoryToolName;
-      readonly output: unknown;
-    }>
+  | McpMemoryToolSuccessResult
   | Readonly<{
       readonly ok: false;
       readonly tool_name: string;

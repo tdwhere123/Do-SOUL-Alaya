@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { hasAlayaMemoryToolName } from "./tool-catalog.js";
 import { createGardenTaskHandlers } from "../garden-task/garden-task-handlers.js";
+import { createMcpMemoryToolDispatcher } from "./tool-handler-dispatch.js";
 import {
   createAgentSurfaceRegistrar,
-  createMcpMemoryToolDispatcher,
   createMcpMemoryToolOperations
 } from "./tool-handler-operations.js";
 import { createRecallHandler, createReportContextUsageHandler } from "../recall/recall-usage-handlers.js";

@@ -1,4 +1,3 @@
-import type BetterSqlite3 from "better-sqlite3";
 import {
   tokenizeFtsQuery as tokenizeFtsQueryPolicy,
   type FtsLaneRankRow
@@ -7,6 +6,8 @@ import {
   isCjkSegmentationCandidate,
   segmentCjkRun
 } from "./cjk-segmentation.js";
+import { parseRows } from "./parse-row.js";
+import { FtsLaneRankRowParser } from "./sqlite-row-schemas.js";
 
 export {
   CJK_SCRIPT_PATTERN,
@@ -52,14 +53,17 @@ function dedupeNonEmpty(tokens: readonly string[]): readonly string[] {
 }
 
 export function queryFtsLaneRows(
-  statement: BetterSqlite3.Statement,
+  statement: { all(...params: unknown[]): unknown },
   workspaceId: string,
   laneTokens: readonly string[],
   limit: number
 ): readonly FtsLaneRankRow[] {
   const matchExpression = buildWorkspaceScopedFtsMatch(workspaceId, laneTokens);
-  const rows = statement.all(workspaceId, matchExpression, limit) as readonly FtsLaneRankRow[];
-  return Object.freeze(rows);
+  return Object.freeze(parseRows(
+    statement.all(workspaceId, matchExpression, limit),
+    FtsLaneRankRowParser,
+    "fts lane rank row"
+  ));
 }
 
 export function tokenizeFtsQuery(queryText: string): readonly string[] {

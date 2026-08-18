@@ -19,6 +19,7 @@ import {
   type SoulActiveConstraint,
   type SoulMemorySearchDegradationReason,
   type SoulMemorySearchRequest,
+  type SoulMemorySearchResponse,
   type SoulRecallHostContext,
   type SoulReportContextUsageRequest,
   type UsageProofRecord
@@ -153,7 +154,7 @@ async function executeRecall(
   params: RecallHandlerParams,
   request: SoulMemorySearchRequest,
   context: RecallUsageToolCallContext
-): Promise<unknown> {
+): Promise<SoulMemorySearchResponse> {
   const recallStartedAt = Date.now();
   const taskSurface = buildTaskSurface(request, params.generateId);
   const policyOverride = buildRecallPolicy(request, taskSurface.runtime_id, params.generateId());
@@ -252,7 +253,7 @@ function buildRecallResponse(
   recallResult: RecallServiceResult,
   policyOverride: RecallPolicy,
   explainabilityPartial: boolean
-): unknown {
+): SoulMemorySearchResponse {
   return SoulMemorySearchResponseSchema.parse({
     delivery_id: deliveryId,
     protocol_version: 1,

@@ -1,4 +1,5 @@
 import {
+  BoundedJsonObjectSchema,
   RuntimeGovernanceEventType,
   parseRuntimeGovernanceEventPayload,
   type EventLogEntry,
@@ -7,6 +8,7 @@ import {
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
+import { parseRows } from "../shared/parse-row.js";
 import type { SqliteProposalWorkflowContext } from "./accept-workflows.js";
 import { parseAcceptedPathRelationGovernanceInput } from "./acceptance.js";
 import {
@@ -15,7 +17,8 @@ import {
   createStrictlyGovernedPathRelation,
   parseProposedPathRelation,
   parseProposalPathRelationRow,
-  pathRelationMatchesProposalPayload
+  pathRelationMatchesProposalPayload,
+  ProposalPathRelationRowParser
 } from "./path-relations.js";
 import type {
   ProposalPathRelationRow,
@@ -28,13 +31,17 @@ export function upsertStrictlyGovernedPathRelation(
   proposalRow: ProposalRow
 ): Readonly<{ readonly pathRelation: Readonly<PathRelation>; readonly event: EventLogEntry | null }> {
   const proposedPathRelation = parseProposedPathRelation(proposalRow.proposed_path_relation);
-  const existingRows = ctx.findPathRelationByAnchorMemoryIdStatement.all(
-    input.workspace_id,
-    input.target_object_id,
-    input.target_object_id,
-    input.target_object_id,
-    input.target_object_id
-  ) as ProposalPathRelationRow[];
+  const existingRows = parseRows(
+    ctx.findPathRelationByAnchorMemoryIdStatement.all(
+      input.workspace_id,
+      input.target_object_id,
+      input.target_object_id,
+      input.target_object_id,
+      input.target_object_id
+    ),
+    ProposalPathRelationRowParser,
+    "proposal path relation row"
+  );
   const existingRow =
     proposedPathRelation === null
       ? existingRows[0]
@@ -77,7 +84,7 @@ function updateExistingPathRelation(
     workspace_id: updated.workspace_id,
     run_id: proposalRow.run_id,
     caused_by: input.caused_by,
-    payload_json: parseRuntimeGovernanceEventPayload(
+    payload_json: BoundedJsonObjectSchema.parse(parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
       {
         path_id: updated.path_id,
@@ -88,7 +95,7 @@ function updateExistingPathRelation(
         new_evidence_basis: updated.legitimacy.evidence_basis,
         updated_at: updated.updated_at
       }
-    ) as unknown as Record<string, unknown>
+    ))
   });
   return deepFreeze({ pathRelation: updated, event: pathEvent });
 }
@@ -110,7 +117,7 @@ function createGovernedPathRelation(
     workspace_id: created.workspace_id,
     run_id: proposalRow.run_id,
     caused_by: input.caused_by,
-    payload_json: parseRuntimeGovernanceEventPayload(
+    payload_json: BoundedJsonObjectSchema.parse(parseRuntimeGovernanceEventPayload(
       RuntimeGovernanceEventType.PATH_RELATION_CREATED,
       {
         path_id: created.path_id,
@@ -122,7 +129,7 @@ function createGovernedPathRelation(
         governance_class: created.legitimacy.governance_class,
         created_at: created.created_at
       }
-    ) as unknown as Record<string, unknown>
+    ))
   });
   ctx.createPathRelationStatement.run(
     created.path_id,

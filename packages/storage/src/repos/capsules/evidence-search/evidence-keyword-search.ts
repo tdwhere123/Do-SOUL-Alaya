@@ -1,4 +1,5 @@
 import {
+  EvidenceSearchProjectionKindSchema,
   splitFtsLanes,
   type FtsLaneRankRow
 } from "@do-soul/alaya-protocol";
@@ -6,6 +7,16 @@ import {
   buildWorkspaceScopedFtsMatch,
   tokenizeFtsQuery
 } from "../../shared/fts-lane-routing.js";
+import { FtsLaneRankRowParser } from "../../shared/sqlite-row-schemas.js";
+import {
+  parseRows,
+  readFiniteNumberField,
+  readNonEmptyStringField,
+  readPositiveIntField,
+  readRecord,
+  readStringField,
+  type RowParser
+} from "../../shared/parse-row.js";
 import type {
   EvidenceCapsuleStatements,
   SqliteStatement
@@ -112,12 +123,20 @@ export function collectEvidenceKeywordLaneRowsUnion(
   const porterMatch = buildWorkspaceScopedFtsMatch(workspaceId, porterTokens);
   const trigramMatch = buildWorkspaceScopedFtsMatch(workspaceId, trigramTokens);
   return splitTaggedLaneRows(
-    statements.searchOwnerByKeywordUnionStatement.all(
-      workspaceId, porterMatch, limit, workspaceId, trigramMatch, limit
-    ) as readonly TaggedOwnerRow[],
-    statements.searchProjectionByKeywordUnionStatement.all(
-      workspaceId, porterMatch, limit, workspaceId, trigramMatch, limit
-    ) as readonly TaggedProjectionRow[]
+    parseRows(
+      statements.searchOwnerByKeywordUnionStatement.all(
+        workspaceId, porterMatch, limit, workspaceId, trigramMatch, limit
+      ),
+      TaggedOwnerRowParser,
+      "evidence fts owner union row"
+    ),
+    parseRows(
+      statements.searchProjectionByKeywordUnionStatement.all(
+        workspaceId, porterMatch, limit, workspaceId, trigramMatch, limit
+      ),
+      TaggedProjectionRowParser,
+      "evidence fts projection union row"
+    )
   );
 }
 
@@ -133,12 +152,16 @@ function queryOwnerAndProjectionRows(
   }
   const match = buildWorkspaceScopedFtsMatch(workspaceId, tokens);
   return Object.freeze({
-    owners: Object.freeze(ownerStatement.all(
-      workspaceId, match, limit
-    ) as readonly FtsLaneRankRow[]),
-    projections: Object.freeze(projectionStatement.all(
-      workspaceId, match, limit
-    ) as readonly ProjectionRankRow[])
+    owners: Object.freeze(parseRows(
+      ownerStatement.all(workspaceId, match, limit),
+      FtsLaneRankRowParser,
+      "evidence fts owner row"
+    )),
+    projections: Object.freeze(parseRows(
+      projectionStatement.all(workspaceId, match, limit),
+      ProjectionRankRowParser,
+      "evidence fts projection row"
+    ))
   });
 }
 
@@ -149,6 +172,52 @@ interface TaggedOwnerRow extends FtsLaneRankRow {
 interface TaggedProjectionRow extends ProjectionRankRow {
   readonly fts_lane: EvidenceFtsLane;
 }
+
+const ProjectionRankRowParser: RowParser<ProjectionRankRow> = {
+  parse(value: unknown): ProjectionRankRow {
+    const record = readRecord(value, "evidence fts projection row");
+    return Object.freeze({
+      object_id: readNonEmptyStringField(record, "object_id"),
+      raw_rank: readFiniteNumberField(record, "raw_rank"),
+      projection_id: readPositiveIntField(record, "projection_id"),
+      projection_kind: EvidenceSearchProjectionKindSchema.parse(
+        readNonEmptyStringField(record, "projection_kind")
+      ),
+      projection_content: readStringField(record, "projection_content"),
+      owner_content: readStringField(record, "owner_content"),
+      owner_gist: readStringField(record, "owner_gist"),
+      source_hash: readStringField(record, "source_hash")
+    });
+  }
+};
+
+const TaggedOwnerRowParser: RowParser<TaggedOwnerRow> = {
+  parse(value: unknown): TaggedOwnerRow {
+    const record = readRecord(value, "evidence fts owner union row");
+    const lane = readNonEmptyStringField(record, "fts_lane");
+    if (lane !== "porter" && lane !== "trigram") {
+      throw new Error(`evidence fts owner union row: invalid fts_lane ${lane}`);
+    }
+    return Object.freeze({
+      ...FtsLaneRankRowParser.parse(value),
+      fts_lane: lane
+    });
+  }
+};
+
+const TaggedProjectionRowParser: RowParser<TaggedProjectionRow> = {
+  parse(value: unknown): TaggedProjectionRow {
+    const record = readRecord(value, "evidence fts projection union row");
+    const lane = readNonEmptyStringField(record, "fts_lane");
+    if (lane !== "porter" && lane !== "trigram") {
+      throw new Error(`evidence fts projection union row: invalid fts_lane ${lane}`);
+    }
+    return Object.freeze({
+      ...ProjectionRankRowParser.parse(value),
+      fts_lane: lane
+    });
+  }
+};
 
 function splitTaggedLaneRows(
   ownerRows: readonly TaggedOwnerRow[],

@@ -9,13 +9,16 @@ import {
 import { appendEventLogViaWriteQueue } from "./event-log/queue-append.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
+  CreatedAtRowParser,
   DEFAULT_EVENT_LOG_PAGE,
-  parseEventLogEntryRow,
+  EventIdRowParser,
+  EventLogCursorStateRowParser,
+  EventLogEntryRowParser,
   parseEventLogPage,
-  type CountRow,
-  type EventLogCursorStateRow,
-  type EventLogRow
+  queryEventLogRows,
+  wrapEventLogQueryError
 } from "./event-log-rows.js";
+import { CountRowParser, parseOptionalRow } from "../shared/parse-row.js";
 import {
   prepareEventLogStatements,
   type EventLogStatements
@@ -112,17 +115,15 @@ export class SqliteEventLogRepo implements EventLogRepo {
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    try {
-      const rows = this.activeStatements().queryByEntityPagedStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByEntityPagedStatement.all(
         entityType,
         entityId,
         parsedPage.limit,
         parsedPage.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query paged event log by entity.", error);
-    }
+      ),
+      "Failed to query paged event log by entity."
+    );
   }
 
   public async queryByRun(runId: string): Promise<readonly EventLogEntry[]> {
@@ -149,31 +150,24 @@ export class SqliteEventLogRepo implements EventLogRepo {
   public async queryByRunPage(runId: string, page: EventLogPageOptions): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    try {
-      const rows = this.activeStatements().queryByRunPagedStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByRunPagedStatement.all(
         runId,
         parsedPage.limit,
         parsedPage.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query paged event log by run.", error);
-    }
+      ),
+      "Failed to query paged event log by run."
+    );
   }
 
   public async queryByRunAndEntityType(
     runId: string,
     entityType: string
   ): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.activeStatements().queryByRunAndEntityTypeStatement.all(
-        runId,
-        entityType
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and entity type.", error);
-    }
+    return queryEventLogRows(
+      this.activeStatements().queryByRunAndEntityTypeStatement.all(runId, entityType),
+      "Failed to query event log by run and entity type."
+    );
   }
 
   public async queryConversationMessageEventsByRun(
@@ -181,28 +175,29 @@ export class SqliteEventLogRepo implements EventLogRepo {
     page?: EventLogPageOptions
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page ?? DEFAULT_EVENT_LOG_PAGE);
-    try {
-      const rows = this.activeStatements().queryConversationMessageEventsByRunPagedStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryConversationMessageEventsByRunPagedStatement.all(
         runId,
         ...CONVERSATION_MESSAGE_EVENT_TYPES,
         parsedPage.limit,
         parsedPage.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query message events by run.", error);
-    }
+      ),
+      "Failed to query message events by run."
+    );
   }
 
   public async countConversationMessageEventsByRun(runId: string): Promise<number> {
     try {
-      const row = this.activeStatements().countConversationMessageEventsByRunStatement.get(
-        runId,
-        ...CONVERSATION_MESSAGE_EVENT_TYPES
-      ) as CountRow | undefined;
-      return row === undefined ? 0 : Number(row.total);
+      return parseOptionalRow(
+        this.activeStatements().countConversationMessageEventsByRunStatement.get(
+          runId,
+          ...CONVERSATION_MESSAGE_EVENT_TYPES
+        ),
+        CountRowParser,
+        "event log count row"
+      )?.total ?? 0;
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to count message events by run.", error);
+      throw wrapEventLogQueryError("Failed to count message events by run.", error);
     }
   }
 
@@ -230,14 +225,18 @@ export class SqliteEventLogRepo implements EventLogRepo {
     readonly latestEventId: string | null;
   }> {
     try {
-      const row = this.activeStatements().queryByRunCursorStateStatement.get(
-        runId,
-        lastEventId,
-        runId,
-        runId,
-        lastEventId,
-        runId
-      ) as EventLogCursorStateRow | undefined;
+      const row = parseOptionalRow(
+        this.activeStatements().queryByRunCursorStateStatement.get(
+          runId,
+          lastEventId,
+          runId,
+          runId,
+          lastEventId,
+          runId
+        ),
+        EventLogCursorStateRowParser,
+        "event log cursor state row"
+      );
 
       return Object.freeze({
         cursorExists: Number(row?.cursor_exists ?? 0) > 0,
@@ -245,7 +244,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
         latestEventId: row?.latest_event_id ?? null
       });
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log cursor state.", error);
+      throw wrapEventLogQueryError("Failed to query event log cursor state.", error);
     }
   }
 
@@ -263,16 +262,14 @@ export class SqliteEventLogRepo implements EventLogRepo {
   ): Promise<readonly EventLogEntry[]> {
     const parsedPage = parseEventLogPage(page);
 
-    try {
-      const rows = this.activeStatements().queryByWorkspacePagedStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByWorkspacePagedStatement.all(
         workspaceId,
         parsedPage.limit,
         parsedPage.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query paged event log by workspace.", error);
-    }
+      ),
+      "Failed to query paged event log by workspace."
+    );
   }
 
   public async queryByWorkspaceAndType(
@@ -284,19 +281,21 @@ export class SqliteEventLogRepo implements EventLogRepo {
     try {
       const since = sinceIso ?? null;
       const until = untilIso ?? null;
-      const rows = this.activeStatements().queryByWorkspaceAndTypeStatement.all(
-        workspaceId,
-        eventType,
-        since,
-        since,
-        until,
-        until,
-        DEFAULT_EVENT_LOG_PAGE.limit,
-        DEFAULT_EVENT_LOG_PAGE.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
+      return queryEventLogRows(
+        this.activeStatements().queryByWorkspaceAndTypeStatement.all(
+          workspaceId,
+          eventType,
+          since,
+          since,
+          until,
+          until,
+          DEFAULT_EVENT_LOG_PAGE.limit,
+          DEFAULT_EVENT_LOG_PAGE.offset
+        ),
+        "Failed to query event log by workspace and type."
+      );
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log by workspace and type.", error);
+      throw wrapEventLogQueryError("Failed to query event log by workspace and type.", error);
     }
   }
 
@@ -347,87 +346,84 @@ export class SqliteEventLogRepo implements EventLogRepo {
     runId: string,
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.activeStatements().queryByRunAfterEventIdStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByRunAfterEventIdStatement.all(
         runId,
         runId,
         lastEventId,
         DEFAULT_EVENT_LOG_PAGE.limit,
         DEFAULT_EVENT_LOG_PAGE.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log by run after event ID.", error);
-    }
+      ),
+      "Failed to query event log by run after event ID."
+    );
   }
 
   public async queryByWorkspaceAfterEventId(
     workspaceId: string,
     lastEventId: string
   ): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.activeStatements().queryByWorkspaceAfterEventIdStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByWorkspaceAfterEventIdStatement.all(
         workspaceId,
         workspaceId,
         lastEventId,
         DEFAULT_EVENT_LOG_PAGE.limit,
         DEFAULT_EVENT_LOG_PAGE.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        "Failed to query event log by workspace after event ID.",
-        error
-      );
-    }
+      ),
+      "Failed to query event log by workspace after event ID."
+    );
   }
 
   public async queryByType(eventType: string): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.activeStatements().queryByTypeStatement.all(
+    return queryEventLogRows(
+      this.activeStatements().queryByTypeStatement.all(
         eventType,
         DEFAULT_EVENT_LOG_PAGE.limit,
         DEFAULT_EVENT_LOG_PAGE.offset
-      ) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log by type.", error);
-    }
+      ),
+      "Failed to query event log by type."
+    );
   }
 
   public async getLatestEventId(runId: string): Promise<string | null> {
     try {
-      const row = this.activeStatements().getLatestEventIdStatement.get(runId) as
-        | { readonly event_id: string }
-        | undefined;
-      return row?.event_id ?? null;
+      return parseOptionalRow(
+        this.activeStatements().getLatestEventIdStatement.get(runId),
+        EventIdRowParser,
+        "event id row"
+      )?.event_id ?? null;
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to get latest event ID.", error);
+      throw wrapEventLogQueryError("Failed to get latest event ID.", error);
     }
   }
 
   public async getLatestMessageTimestampByRun(runId: string): Promise<string | null> {
     try {
-      const row = this.activeStatements().getLatestMessageTimestampByRunStatement.get(
-        runId,
-        ...CONVERSATION_MESSAGE_EVENT_TYPES
-      ) as { readonly created_at: string } | undefined;
-      return row?.created_at ?? null;
+      return parseOptionalRow(
+        this.activeStatements().getLatestMessageTimestampByRunStatement.get(
+          runId,
+          ...CONVERSATION_MESSAGE_EVENT_TYPES
+        ),
+        CreatedAtRowParser,
+        "created at row"
+      )?.created_at ?? null;
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to get latest message timestamp by run.", error);
+      throw wrapEventLogQueryError("Failed to get latest message timestamp by run.", error);
     }
   }
 
   public async getLatestUserRunMessageByRun(runId: string): Promise<EventLogEntry | null> {
     try {
-      const row = this.activeStatements().getLatestUserRunMessageByRunStatement.get(
-        runId,
-        WorkspaceRunEventType.RUN_MESSAGE_APPENDED
-      ) as EventLogRow | undefined;
-      return row === undefined ? null : parseEventLogEntryRow(row);
+      return parseOptionalRow(
+        this.activeStatements().getLatestUserRunMessageByRunStatement.get(
+          runId,
+          WorkspaceRunEventType.RUN_MESSAGE_APPENDED
+        ),
+        EventLogEntryRowParser,
+        "event log row"
+      );
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to get latest user run message.", error);
+      throw wrapEventLogQueryError("Failed to get latest user run message.", error);
     }
   }
 
@@ -435,12 +431,10 @@ export class SqliteEventLogRepo implements EventLogRepo {
     runId: string,
     eventType: string
   ): Promise<readonly EventLogEntry[]> {
-    try {
-      const rows = this.activeStatements().queryByRunAndEventTypeStatement.all(runId, eventType) as EventLogRow[];
-      return rows.map((row) => parseEventLogEntryRow(row));
-    } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to query event log by run and event type.", error);
-    }
+    return queryEventLogRows(
+      this.activeStatements().queryByRunAndEventTypeStatement.all(runId, eventType),
+      "Failed to query event log by run and event type."
+    );
   }
 
   public async queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]> {
@@ -453,12 +447,13 @@ export class SqliteEventLogRepo implements EventLogRepo {
 
   public async getLatestWorkspaceEventId(workspaceId: string): Promise<string | null> {
     try {
-      const row = this.activeStatements().getLatestWorkspaceEventIdStatement.get(workspaceId) as
-        | { readonly event_id: string }
-        | undefined;
-      return row?.event_id ?? null;
+      return parseOptionalRow(
+        this.activeStatements().getLatestWorkspaceEventIdStatement.get(workspaceId),
+        EventIdRowParser,
+        "event id row"
+      )?.event_id ?? null;
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", "Failed to get latest workspace event ID.", error);
+      throw wrapEventLogQueryError("Failed to get latest workspace event ID.", error);
     }
   }
 

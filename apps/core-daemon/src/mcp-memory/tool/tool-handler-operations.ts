@@ -1,69 +1,65 @@
 import {
   CandidateMemorySignalSchema,
-  GardenClaimTaskRequestSchema,
-  GardenCompleteTaskRequestSchema,
-  GardenListPendingTasksRequestSchema,
   ProposalResolutionState,
   SignalSource,
-  SoulApplyOverrideRequestSchema,
   SoulApplyOverrideResponseSchema,
-  SoulBatchReviewEdgeProposalsRequestSchema,
   SoulBatchReviewEdgeProposalsResponseSchema,
-  SoulEmitCandidateSignalRequestSchema,
   SoulEmitCandidateSignalResponseSchema,
-  SoulExploreGraphRequestSchema,
   SoulExploreGraphResponseSchema,
-  SoulListPendingEdgeProposalsRequestSchema,
   SoulListPendingEdgeProposalsResponseSchema,
-  SoulListPendingProposalsRequestSchema,
   SoulListPendingProposalsResponseSchema,
-  SoulMemorySearchRequestSchema,
-  SoulOpenPointerRequestSchema,
   SoulOpenPointerResponseSchema,
-  SoulProposeEdgeRequestSchema,
   SoulProposeEdgeResponseSchema,
-  SoulProposeMemoryUpdateRequestSchema,
   SoulProposeMemoryUpdateResponseSchema,
-  SoulReportContextUsageRequestSchema,
-  SoulReviewMemoryProposalRequestSchema,
   SoulReviewMemoryProposalResponseSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
   type GardenClaimTaskRequest,
+  type GardenClaimTaskResponse,
   type GardenCompleteTaskRequest,
+  type GardenCompleteTaskResponse,
   type GardenListPendingTasksRequest,
+  type GardenListPendingTasksResponse,
   type SoulApplyOverrideRequest,
+  type SoulApplyOverrideResponse,
   type SoulBatchReviewEdgeProposalsRequest,
+  type SoulBatchReviewEdgeProposalsResponse,
   type SoulEmitCandidateSignalRequest,
+  type SoulEmitCandidateSignalResponse,
   type SoulExploreGraphRequest,
+  type SoulExploreGraphResponse,
   type SoulListPendingEdgeProposalsRequest,
+  type SoulListPendingEdgeProposalsResponse,
   type SoulListPendingProposalsRequest,
+  type SoulListPendingProposalsResponse,
   type SoulOpenPointerRequest,
+  type SoulOpenPointerResponse,
   type SoulProposeEdgeRequest,
+  type SoulProposeEdgeResponse,
   type SoulProposeMemoryUpdateRequest,
-  type SoulReviewMemoryProposalRequest
+  type SoulProposeMemoryUpdateResponse,
+  type SoulResolveResponse,
+  type SoulReviewMemoryProposalRequest,
+  type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
-import { type AlayaMemoryToolName } from "./tool-catalog.js";
 import {
   ToolNotFoundError,
   ToolUnavailableError,
   ToolValidationError,
   assertEdgeReviewCallerIsAllowed,
   normalizeCandidateSignalGraphRefs,
-  ok,
   resolveEdgeReviewerIdentity
 } from "./tool-handler-support.js";
 import type {
   McpMemoryToolCallContext,
-  McpMemoryToolCallResult,
   McpMemoryToolHandlerDependencies
 } from "./tool-handler-types.js";
 import { createVerifiedDeliverySourceObservation } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 
-type GardenTaskOperations = Readonly<{
-  listPendingGardenTasks(request: GardenListPendingTasksRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  claimGardenTask(request: GardenClaimTaskRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  completeGardenTask(request: GardenCompleteTaskRequest, context: McpMemoryToolCallContext): Promise<unknown>;
+export type GardenTaskOperations = Readonly<{
+  listPendingGardenTasks(request: GardenListPendingTasksRequest, context: McpMemoryToolCallContext): Promise<GardenListPendingTasksResponse>;
+  claimGardenTask(request: GardenClaimTaskRequest, context: McpMemoryToolCallContext): Promise<GardenClaimTaskResponse>;
+  completeGardenTask(request: GardenCompleteTaskRequest, context: McpMemoryToolCallContext): Promise<GardenCompleteTaskResponse>;
 }>;
 
 type McpMemoryOperationFactoryInput = Readonly<{
@@ -73,18 +69,18 @@ type McpMemoryOperationFactoryInput = Readonly<{
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>;
 
-type McpMemoryToolOperations = Readonly<{
-  openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  emitCandidateSignal(request: SoulEmitCandidateSignalRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  proposeMemoryUpdate(request: SoulProposeMemoryUpdateRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  reviewMemoryProposal(request: SoulReviewMemoryProposalRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  listPendingProposals(request: SoulListPendingProposalsRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  proposeEdge(request: SoulProposeEdgeRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  listPendingEdgeProposals(request: SoulListPendingEdgeProposalsRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  batchReviewEdgeProposals(request: SoulBatchReviewEdgeProposalsRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  applyOverride(request: SoulApplyOverrideRequest, context: McpMemoryToolCallContext): Promise<unknown>;
-  resolveStagedWarning(rawArguments: unknown, context: McpMemoryToolCallContext): Promise<unknown>;
-  exploreGraph(request: SoulExploreGraphRequest, context: McpMemoryToolCallContext): Promise<unknown>;
+export type McpMemoryToolOperations = Readonly<{
+  openPointer(request: SoulOpenPointerRequest, context: McpMemoryToolCallContext): Promise<SoulOpenPointerResponse>;
+  emitCandidateSignal(request: SoulEmitCandidateSignalRequest, context: McpMemoryToolCallContext): Promise<SoulEmitCandidateSignalResponse>;
+  proposeMemoryUpdate(request: SoulProposeMemoryUpdateRequest, context: McpMemoryToolCallContext): Promise<SoulProposeMemoryUpdateResponse>;
+  reviewMemoryProposal(request: SoulReviewMemoryProposalRequest, context: McpMemoryToolCallContext): Promise<SoulReviewMemoryProposalResponse>;
+  listPendingProposals(request: SoulListPendingProposalsRequest, context: McpMemoryToolCallContext): Promise<SoulListPendingProposalsResponse>;
+  proposeEdge(request: SoulProposeEdgeRequest, context: McpMemoryToolCallContext): Promise<SoulProposeEdgeResponse>;
+  listPendingEdgeProposals(request: SoulListPendingEdgeProposalsRequest, context: McpMemoryToolCallContext): Promise<SoulListPendingEdgeProposalsResponse>;
+  batchReviewEdgeProposals(request: SoulBatchReviewEdgeProposalsRequest, context: McpMemoryToolCallContext): Promise<SoulBatchReviewEdgeProposalsResponse>;
+  applyOverride(request: SoulApplyOverrideRequest, context: McpMemoryToolCallContext): Promise<SoulApplyOverrideResponse>;
+  resolveStagedWarning(rawArguments: unknown, context: McpMemoryToolCallContext): Promise<SoulResolveResponse>;
+  exploreGraph(request: SoulExploreGraphRequest, context: McpMemoryToolCallContext): Promise<SoulExploreGraphResponse>;
 }>;
 
 export function createAgentSurfaceRegistrar(
@@ -135,7 +131,7 @@ async function openPointer(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulOpenPointerRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulOpenPointerResponse> {
   const memory = await deps.memoryService.findByIdScoped(request.object_id, context.workspaceId);
   if (memory !== null) return memoryPointerResponse(memory);
   const evidence = await deps.evidenceService?.findByIdScoped?.(request.object_id, context.workspaceId);
@@ -186,7 +182,7 @@ async function emitCandidateSignal(
   input: McpMemoryOperationFactoryInput,
   request: SoulEmitCandidateSignalRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulEmitCandidateSignalResponse> {
   if (context.runId === null) {
     throw new ToolValidationError("soul.emit_candidate_signal requires a runId in the MCP call context.");
   }
@@ -228,7 +224,7 @@ async function proposeMemoryUpdate(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulProposeMemoryUpdateRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulProposeMemoryUpdateResponse> {
   const workflow = requireProposalWorkflow(deps);
   await validateSourceDeliveryAnchors(deps, request.source_delivery_ids, context);
   return SoulProposeMemoryUpdateResponseSchema.parse(await workflow.proposeMemoryUpdate(request, context));
@@ -238,7 +234,7 @@ async function reviewMemoryProposal(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulReviewMemoryProposalRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulReviewMemoryProposalResponse> {
   const reviewed = await requireProposalWorkflow(deps).reviewMemoryProposal(request, context);
   return SoulReviewMemoryProposalResponseSchema.parse({
     proposal_id: reviewed.proposal_id,
@@ -259,7 +255,7 @@ async function listPendingProposals(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulListPendingProposalsRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulListPendingProposalsResponse> {
   const result = await requireProposalWorkflow(deps).listPendingProposals(request, context);
   return SoulListPendingProposalsResponseSchema.parse({
     proposals: result.proposals,
@@ -278,7 +274,7 @@ async function proposeEdge(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulProposeEdgeRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulProposeEdgeResponse> {
   const service = requireEdgeProposalService(deps);
   return SoulProposeEdgeResponseSchema.parse(await service.proposeExplicitEdge({
     sourceMemoryId: request.source_memory_id,
@@ -295,7 +291,7 @@ async function listPendingEdgeProposals(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulListPendingEdgeProposalsRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulListPendingEdgeProposalsResponse> {
   return SoulListPendingEdgeProposalsResponseSchema.parse(
     requireEdgeProposalService(deps).listPending(context.workspaceId, request)
   );
@@ -305,7 +301,7 @@ async function batchReviewEdgeProposals(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulBatchReviewEdgeProposalsRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulBatchReviewEdgeProposalsResponse> {
   const service = requireEdgeProposalService(deps);
   assertEdgeReviewCallerIsAllowed(context, deps.reviewerIdentityBinding);
   const reviewerIdentity = resolveEdgeReviewerIdentity(request, deps.reviewerIdentityBinding);
@@ -329,7 +325,7 @@ async function applyOverride(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulApplyOverrideRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulApplyOverrideResponse> {
   if (context.runId === null) throw new ToolValidationError("soul.apply_override requires a run context.");
   const applied = await deps.sessionOverrideService.apply({
     runId: context.runId,
@@ -345,7 +341,7 @@ async function resolveStagedWarning(
   deps: McpMemoryToolHandlerDependencies,
   rawArguments: unknown,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulResolveResponse> {
   const handler = deps.soulResolveHandler;
   if (handler === undefined) throw new ToolUnavailableError("soul.resolve is not wired into this daemon");
   return await handler.resolve(rawArguments, {
@@ -360,7 +356,7 @@ async function exploreGraph(
   deps: McpMemoryToolHandlerDependencies,
   request: SoulExploreGraphRequest,
   context: McpMemoryToolCallContext
-): Promise<unknown> {
+): Promise<SoulExploreGraphResponse> {
   const neighbors = await deps.graphExploreService.exploreOneHop(
     request.memory_id,
     context.workspaceId,
@@ -374,53 +370,6 @@ function graphExploreOptions(request: SoulExploreGraphRequest, context: McpMemor
     ...(request.edge_types === undefined ? {} : { edgeTypes: request.edge_types }),
     ...(request.direction === undefined ? {} : { direction: request.direction }),
     runId: context.runId
-  };
-}
-
-export function createMcpMemoryToolDispatcher(input: Readonly<{
-  readonly gardenTasks: GardenTaskOperations;
-  readonly recall: (request: ReturnType<typeof SoulMemorySearchRequestSchema.parse>, context: McpMemoryToolCallContext) => Promise<unknown>;
-  readonly reportContextUsage: (
-    request: ReturnType<typeof SoulReportContextUsageRequestSchema.parse>,
-    context: McpMemoryToolCallContext
-  ) => Promise<unknown>;
-  readonly operations: ReturnType<typeof createMcpMemoryToolOperations>;
-}>): Readonly<{
-  dispatchToolCall(call: {
-    readonly toolName: AlayaMemoryToolName;
-    readonly rawArguments: unknown;
-    readonly context: McpMemoryToolCallContext;
-  }): Promise<McpMemoryToolCallResult>;
-}> {
-  const handlers = createToolDispatchHandlers(input);
-  return {
-    dispatchToolCall: async ({ toolName, rawArguments, context }) => {
-      return ok(toolName, await handlers[toolName](rawArguments, context));
-    }
-  };
-}
-
-type McpMemoryToolDispatcherInput = Parameters<typeof createMcpMemoryToolDispatcher>[0];
-type ToolDispatchHandler = (rawArguments: unknown, context: McpMemoryToolCallContext) => Promise<unknown>;
-
-function createToolDispatchHandlers(input: McpMemoryToolDispatcherInput): Record<AlayaMemoryToolName, ToolDispatchHandler> {
-  return {
-    "soul.recall": (raw, context) => input.recall(SoulMemorySearchRequestSchema.parse(raw), context),
-    "soul.open_pointer": (raw, context) => input.operations.openPointer(SoulOpenPointerRequestSchema.parse(raw), context),
-    "soul.emit_candidate_signal": (raw, context) => input.operations.emitCandidateSignal(SoulEmitCandidateSignalRequestSchema.parse(raw), context),
-    "soul.propose_memory_update": (raw, context) => input.operations.proposeMemoryUpdate(SoulProposeMemoryUpdateRequestSchema.parse(raw), context),
-    "soul.review_memory_proposal": (raw, context) => input.operations.reviewMemoryProposal(SoulReviewMemoryProposalRequestSchema.parse(raw), context),
-    "soul.list_pending_proposals": (raw, context) => input.operations.listPendingProposals(SoulListPendingProposalsRequestSchema.parse(raw), context),
-    "soul.propose_edge": (raw, context) => input.operations.proposeEdge(SoulProposeEdgeRequestSchema.parse(raw), context),
-    "soul.list_pending_edge_proposals": (raw, context) => input.operations.listPendingEdgeProposals(SoulListPendingEdgeProposalsRequestSchema.parse(raw), context),
-    "soul.batch_review_edge_proposals": (raw, context) => input.operations.batchReviewEdgeProposals(SoulBatchReviewEdgeProposalsRequestSchema.parse(raw), context),
-    "soul.apply_override": (raw, context) => input.operations.applyOverride(SoulApplyOverrideRequestSchema.parse(raw), context),
-    "soul.explore_graph": (raw, context) => input.operations.exploreGraph(SoulExploreGraphRequestSchema.parse(raw), context),
-    "soul.report_context_usage": (raw, context) => input.reportContextUsage(SoulReportContextUsageRequestSchema.parse(raw), context),
-    "soul.resolve": (raw, context) => input.operations.resolveStagedWarning(raw, context),
-    "garden.list_pending_tasks": (raw, context) => input.gardenTasks.listPendingGardenTasks(GardenListPendingTasksRequestSchema.parse(raw), context),
-    "garden.claim_task": (raw, context) => input.gardenTasks.claimGardenTask(GardenClaimTaskRequestSchema.parse(raw), context),
-    "garden.complete_task": (raw, context) => input.gardenTasks.completeGardenTask(GardenCompleteTaskRequestSchema.parse(raw), context)
   };
 }
 

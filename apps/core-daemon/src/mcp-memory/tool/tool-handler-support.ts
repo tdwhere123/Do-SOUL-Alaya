@@ -3,7 +3,9 @@ import type { AlayaMemoryToolName } from "./tool-catalog.js";
 import { McpToolError } from "./mcp-tool-error.js";
 import type {
   McpMemoryToolCallResult,
-  McpMemoryToolErrorCode
+  McpMemoryToolErrorCode,
+  McpMemoryToolResponseByName,
+  McpMemoryToolSuccessResult
 } from "./tool-handler-types.js";
 
 export {
@@ -18,8 +20,15 @@ export {
   resolveReviewerIdentity as resolveEdgeReviewerIdentity
 } from "../proposal/reviewer-gating.js";
 
-export function ok(toolName: AlayaMemoryToolName, output: unknown): McpMemoryToolCallResult {
-  return Object.freeze({ ok: true, tool_name: toolName, output });
+export function ok<K extends AlayaMemoryToolName>(
+  toolName: K,
+  output: McpMemoryToolResponseByName[K]
+): McpMemoryToolSuccessResult {
+  return Object.freeze({
+    ok: true,
+    tool_name: toolName,
+    output
+  }) as McpMemoryToolSuccessResult;
 }
 
 export function fail(

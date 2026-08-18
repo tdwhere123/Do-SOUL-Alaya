@@ -48,7 +48,7 @@ export type CoverageSelectionObjectiveReceipt = Readonly<{
   readonly configuration_digest: string | null;
 }>;
 
-export type CoverageSelectionObjective<T, State> = Readonly<{
+export type CoverageSelectionObjective<in T, State> = Readonly<{
   /** Identity of the marginal-gain operator; consumers must not infer it from its score. */
   readonly operator_id: string;
   /** Declared only when the operator's implementation has a separate proof/test. */
@@ -142,10 +142,31 @@ const duplicateGistCoverageObjective: CoverageSelectionObjective<
 export function createDuplicateGistCoverageObjective<
   T extends CoverageSelectableCandidate = CoverageSelectableCandidate
 >(): CoverageSelectionObjective<T, DuplicateGistCoverageState> {
-  return duplicateGistCoverageObjective as unknown as
-    CoverageSelectionObjective<T, DuplicateGistCoverageState>;
+  return duplicateGistCoverageObjective;
 }
 
+export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly objective?: undefined;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>
+): readonly T[];
+export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate, State>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly objective: CoverageSelectionObjective<T, State>;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>
+): readonly T[];
 export function orderByCoverageMarginalGain<
   T extends CoverageSelectableCandidate,
   State = DuplicateGistCoverageState
@@ -160,8 +181,26 @@ export function orderByCoverageMarginalGain<
     readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
   }>
 ): readonly T[] {
-  const objective = params.objective ?? duplicateGistCoverageObjective as
-    unknown as CoverageSelectionObjective<T, State>;
+  if (params.objective === undefined) {
+    return orderByResolvedCoverageObjective(params, duplicateGistCoverageObjective);
+  }
+  return orderByResolvedCoverageObjective(params, params.objective);
+}
+
+function orderByResolvedCoverageObjective<
+  T extends CoverageSelectableCandidate,
+  State
+>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>,
+  objective: CoverageSelectionObjective<T, State>
+): readonly T[] {
   params.onObjective?.(materializeCoverageSelectionObjectiveReceipt(objective));
   const candidates = materializeCoverageSelectionCandidateStates(params);
   return Object.freeze(orderCoverageSelectionCandidateStatesByMarginalGain({
