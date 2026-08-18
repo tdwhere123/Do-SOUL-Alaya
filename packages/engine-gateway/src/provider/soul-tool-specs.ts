@@ -1,5 +1,4 @@
 import {
-  SignalKind,
   GardenClaimTaskRequestSchema,
   GardenCompleteTaskRequestSchema,
   GardenListPendingTasksRequestSchema,
@@ -128,7 +127,3 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
     parametersSchema: GardenCompleteTaskRequestSchema
   }
 ];
-
-export function readSignalKindCount(): number {
-  return Object.values(SignalKind).length;
-}

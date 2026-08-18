@@ -10,9 +10,9 @@ import {
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per
 // new memory and acks; the worker claims oldest-unprocessed rows in batches,
 // runs the governed enrichment services per memory, then marks them processed.
-// DB-backed so a restart never drops queued enrichment (OQ4). enqueue is an
+// DB-backed so a restart never drops queued enrichment. enqueue is an
 // idempotent upsert on (workspace_id, memory_id) so a re-materialize / re-enqueue
-// of the same memory is a no-op (R3). The transient-retry seam is bounded: a
+// of the same memory is a no-op. The transient-retry seam is bounded: a
 // repeated TRANSIENT failure increments attempt_count and, once it reaches the
 // cap, dead-letters the marker (abandoned_at set, excluded from claims) so a
 // never-clearing fault cannot starve the per-pass claim budget forever; the

@@ -2,6 +2,7 @@ import { digestRecallFieldIdentity } from
   "../../../field/field-identity.js";
 import type { SerializedRecallSupplementaryData } from
   "../selection-boundary-types.js";
+import { isRecord } from "../record-guards.js";
 import { throwSelectionBoundaryFidelityMismatch } from "./fidelity-error.js";
 
 export function assertOpenSemanticCandidateActivations(
@@ -47,6 +48,3 @@ function isValidReceipt(value: unknown): boolean {
   return digest === digestRecallFieldIdentity(body);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

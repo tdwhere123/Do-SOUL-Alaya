@@ -45,6 +45,25 @@ function normalizeStorageErrorOptions(
   return { cause: optionsOrCause };
 }
 
+export function isDuplicateKeyError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { readonly code?: unknown }).code;
+    if (code === "DUPLICATE_KEY") {
+      return true;
+    }
+    if (typeof code === "string" && code.startsWith("SQLITE_CONSTRAINT")) {
+      return true;
+    }
+    const message = (current as { readonly message?: unknown }).message;
+    if (typeof message === "string" && /UNIQUE|PRIMARY KEY/i.test(message)) {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function isPlainErrorOptions(value: unknown): value is AlayaErrorOptions {
   if (typeof value !== "object" || value === null) {
     return false;

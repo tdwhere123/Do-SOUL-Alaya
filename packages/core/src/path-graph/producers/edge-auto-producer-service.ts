@@ -219,8 +219,8 @@ export class EdgeAutoProducerService {
       confidence: round2(clampedConfidence),
       triggerSource: EdgeProposalTriggerSource.LLM_SUPPORTS,
       reason: rationale.length === 0
-        ? `B-2 llm pair classifier: ${verdict.edgeType}`
-        : `B-2 llm pair classifier: ${verdict.edgeType} (${rationale})`
+        ? `llm pair classifier: ${verdict.edgeType}`
+        : `llm pair classifier: ${verdict.edgeType} (${rationale})`
     };
   }
 
@@ -410,7 +410,7 @@ export class EdgeAutoProducerService {
     }>;
   }>): readonly string[] {
     return [
-      `${EdgeProposalTriggerSource.LLM_SUPPORTS}: B-2 host-worker pair classifier: ${params.decision.edgeType}${
+      `${EdgeProposalTriggerSource.LLM_SUPPORTS}: host-worker pair classifier: ${params.decision.edgeType}${
         params.decision.rationale.length === 0 ? "" : ` (${params.decision.rationale})`
       }`,
       `source_signal=${params.sourceSignalId ?? params.sourceId} run=${params.runId ?? "unattributed"}`

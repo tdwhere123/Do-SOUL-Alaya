@@ -66,19 +66,14 @@ export type {
 // see also: diagnostics.ts buildRecallDiagnostics/computeRecallTokenEconomy, bench-runner recall-diagnostics-schema.ts, longmemeval/diagnostics.ts.
 // @anchor recall-token-economy-token-units: every "tokens" figure is the chars/4 estimate (OpenAI-style English); CJK is underestimated ~3-4x, so mean/p95 figures must carry this caveat.
 export interface RecallTokenEconomy {
-  // Sum of token_estimate over delivered candidates, same heuristic as RecallCandidate.token_estimate.
   readonly delivered_context_tokens_estimate: number;
-  // Complete admitted candidate field (matches candidate_pool_count).
   readonly coarse_pool_size: number;
-  // Every admitted candidate receives fine scoring before the final Selector.
   readonly fine_evaluated: number;
   // Must remain zero: a non-zero value would reveal hidden pre-selection deletion.
   readonly fine_pruned_count: number;
   // Must remain zero because channel priority cannot own candidate deletion.
   readonly fine_priority_overflow_count: number;
-  // Distinct fusion families with any member-stream hit (~5), not raw lane count.
   readonly fusion_families_with_hits: number;
-  // Embedding provider inference calls for this recall: 0 when not requested / cache hit / failed, 1 on a fresh invocation.
   readonly embedding_inference_calls: number;
 }
 

@@ -187,7 +187,7 @@ export function readOfficialGardenSecretRef(configEnv: ReadonlyMap<string, strin
 export const ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV = "ALAYA_EDGE_PRODUCER_LLM_ENABLED";
 export const ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV = "ALAYA_EDGE_CLASSIFY_HOST_WORKER";
 
-// invariant: the B-2 edge-classify routing mode. Mutually exclusive by
+// invariant: the edge-classify routing mode. Mutually exclusive by
 // construction: host-worker defer wins over the synchronous cloud LLM, which
 // wins over the local heuristic-only floor.
 //   - "host_worker_defer": the EDGE_CLASSIFY garden task is enqueued for an
@@ -216,8 +216,8 @@ function readBooleanOptIn(raw: string | undefined): boolean {
 }
 
 // invariant: the single decision that chooses cloud llmPort vs the
-// host-worker EDGE_CLASSIFY defer queue vs heuristic-only for B-2 edge
-// classification. PURE: depends only on the passed env reader and the resolved
+// host-worker EDGE_CLASSIFY defer queue vs heuristic-only for
+// edge classification. PURE: depends only on the passed env reader and the resolved
 // garden compute provider_kind, so the zero-cloud-by-default guarantee is unit
 // testable without standing up the daemon. index.ts consumes this; behavior
 // must not diverge between the two. A regression that flips the default back

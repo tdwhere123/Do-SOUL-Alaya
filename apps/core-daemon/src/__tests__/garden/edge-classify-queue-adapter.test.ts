@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EdgeClassifyTaskPayloadSchema, GardenTaskKind } from "@do-soul/alaya-protocol";
-import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
+import { StorageError, type GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
 import {
   buildEdgeClassifyTaskId,
   createEdgeClassifyQueueAdapter
@@ -67,6 +67,18 @@ describe("edge-classify-queue-adapter", () => {
   it("swallows a duplicate-insert race (PK collision) without throwing", async () => {
     const enqueue = vi.fn(() => {
       throw new Error("UNIQUE constraint failed: garden_tasks.id");
+    });
+    const adapter = createEdgeClassifyQueueAdapter({
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
+    });
+
+    await expect(adapter.enqueueEdgeClassify(makeInput())).resolves.toBeUndefined();
+  });
+
+  it("swallows a StorageError DUPLICATE_KEY race without throwing", async () => {
+    const enqueue = vi.fn(() => {
+      throw new StorageError("DUPLICATE_KEY", "Garden task edge_classify_x already exists.");
     });
     const adapter = createEdgeClassifyQueueAdapter({
       gardenTaskRepo: { enqueue, findById: () => null },

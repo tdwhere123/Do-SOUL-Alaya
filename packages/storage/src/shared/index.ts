@@ -1,2 +1,2 @@
-export { StorageError, type StorageErrorCode } from "./errors.js";
+export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./errors.js";
 export { isEnvFlagDisabled } from "./env-bool.js";

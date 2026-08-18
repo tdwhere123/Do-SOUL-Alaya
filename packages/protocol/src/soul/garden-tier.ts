@@ -73,7 +73,7 @@ export const GardenTaskKind = {
   POST_TURN_EXTRACT: "post_turn_extract",
   CONSOLIDATION_CYCLE: "consolidation_cycle",
   BULK_ENRICH: "bulk_enrich",
-  // invariant: EDGE_CLASSIFY is the host-worker form of the B-2 LLM-quality
+  // invariant: EDGE_CLASSIFY is the host-worker form of the LLM-quality
   // supports/derives_from pair verdict. The deterministic heuristic still runs
   // inline at enrichment time so an edge always exists; this task carries the
   // best-effort LLM-quality verdict that an attached CLI agent (the compute)

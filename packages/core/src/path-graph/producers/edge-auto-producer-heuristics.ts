@@ -196,20 +196,20 @@ export function classifyNeighbor(
     return {
       edgeType: MemoryGraphEdgeType.SUPERSEDES,
       confidence: confidence(0.55, features, 0.05, 0.85),
-      reason: describeDecision("B-3 local supersedes heuristic", features),
+      reason: describeDecision("local supersedes heuristic", features),
       triggerSource: EdgeProposalTriggerSource.LOCAL_SUPERSEDES,
       contentScore: features.tokenJaccard
     };
   }
   // invariant: contradicts is checked AFTER supersedes — a replacement cue is a
   // stronger retirement signal and wins when both fire. Its own LOCAL_CONTRADICTS
-  // trigger_source keeps the K3.2 per-trigger KPI bucket distinct from the
+  // trigger_source keeps the per-trigger KPI bucket distinct from the
   // supersedes lane.
   if (isContradictsCandidate(newMemory, features)) {
     return {
       edgeType: MemoryGraphEdgeType.CONTRADICTS,
       confidence: confidence(0.55, features, 0, 0.8),
-      reason: describeDecision("B-3 local contradicts heuristic", features),
+      reason: describeDecision("local contradicts heuristic", features),
       triggerSource: EdgeProposalTriggerSource.LOCAL_CONTRADICTS,
       contentScore: features.tokenJaccard
     };
@@ -218,7 +218,7 @@ export function classifyNeighbor(
     return {
       edgeType: MemoryGraphEdgeType.DERIVES_FROM,
       confidence: confidence(0.55, features, 0, 0.8),
-      reason: describeDecision("B-2 local derives_from heuristic", features),
+      reason: describeDecision("local derives_from heuristic", features),
       triggerSource: EdgeProposalTriggerSource.LOCAL_DERIVES_FROM,
       contentScore: features.tokenJaccard
     };
@@ -227,7 +227,7 @@ export function classifyNeighbor(
     return {
       edgeType: MemoryGraphEdgeType.SUPPORTS,
       confidence: confidence(0.55, features, 0, 0.8),
-      reason: describeDecision("B-2 local supports heuristic", features),
+      reason: describeDecision("local supports heuristic", features),
       triggerSource: EdgeProposalTriggerSource.LOCAL_SUPPORTS,
       contentScore: features.tokenJaccard
     };

@@ -102,13 +102,11 @@ export type PiMonoGetModel = (provider: "openai", modelId: string) => PiMonoMode
 const DEFAULT_MAX_RETRIES = 0;
 // invariant: up to 3 retries with exponential jittered backoff on recoverable
 // failure modes (empty body / parse error / 5xx / 429 / unknown transport).
-// Bench evidence (35-question LongMemEval shard, 11/35 fallbacks under the
-// 1-retry policy) showed yunwu.ai-routed gpt-4.1-mini empty-text storms
-// outlasting a single retry, silently degrading the archive to the full-turn
-// fallback path; raise the budget to 3 with bounded backoff (250-1500ms) so
-// the transient empty/5xx burst recovers without doubling-doubling quota
-// burn. Timeouts retry exactly ONCE (see retryBudgetForError) so a chronic
-// slow path cannot 4x the bench's wall time.
+// A single retry does not outlast empty-text / 5xx bursts on the official
+// chat path, and the extractor then silently degrades to the full-turn
+// fallback; three attempts with bounded backoff recover the transient burst
+// without multiplying quota. Timeouts retry exactly ONCE (see
+// retryBudgetForError) so a chronic slow path cannot multiply wall time.
 const MAX_EXTRACTOR_RETRIES = 3;
 const MAX_EXTRACTOR_TIMEOUT_RETRIES = 1;
 // Jittered exponential backoff: attempt 1 sleeps 250-500ms, attempt 2 sleeps

@@ -6,6 +6,7 @@ import type {
   SelectionBoundaryNumberMap,
   SerializedRecallSupplementaryData
 } from "../selection-boundary-types.js";
+import { isRecord } from "../record-guards.js";
 import { throwSelectionBoundaryFidelityMismatch } from "./fidelity-error.js";
 
 const FACT_SLOT_ROLES = new Set([
@@ -301,10 +302,6 @@ function legacySemanticActivation(
     observation_completeness: "winner_only_legacy",
     missing_channel_policy: "no_op"
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNonEmptyString(value: unknown): value is string {

@@ -17,7 +17,7 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
  *   incompatible_with universe. ConflictDetectionService owns the
  *   contradicts / incompatible_with classifier; the supersedes writer
  *   lives in materialization-router via first-class candidate signal
- *   refs. Mixing them would re-collapse the KPI K3.2 per-trigger
+ *   refs. Mixing them would re-collapse the per-trigger KPI
  *   breakdown.
  * - The decision returned here is advisory only. The service applies a
  *   confidence floor (>= 0.85, see LLM_CONFIDENCE_FLOOR in

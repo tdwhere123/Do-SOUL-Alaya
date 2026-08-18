@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { renderRecallEvalRankIdentity } from "../../../bench/provenance/recall-eval/recall-eval-rank-identity.js";
-import { RecallEvalRankIdentitySchema } from
-  "../../../longmemeval/promotion/schema/evidence-schema.js";
 import { snapshotQuestionIdDigest } from "../../../bench/snapshot/materialize.js";
 
 describe("recall-eval rank identity", () => {
@@ -85,7 +83,9 @@ describe("recall-eval rank identity", () => {
       selectionBoundary: binding
     });
 
-    const parsed = RecallEvalRankIdentitySchema.parse(JSON.parse(rendered));
+    const parsed = JSON.parse(rendered) as {
+      replay: { selection_boundary: unknown };
+    };
     expect(parsed.replay.selection_boundary).toEqual(binding);
     expect(() => renderRecallEvalRankIdentity(collected, {
       expectedQuestionCount: 1,

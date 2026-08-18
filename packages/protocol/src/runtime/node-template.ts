@@ -210,8 +210,8 @@ export const FROZEN_NODE_TEMPLATE_CONTRACTS = deepFreeze(
 ) as FrozenNodeTemplateContracts;
 
 /**
- * @deprecated Use FROZEN_NODE_TEMPLATE_CONTRACTS. This alias is kept for A1-1
- * compatibility while callers migrate to the canonical constant name.
+ * @deprecated Use FROZEN_NODE_TEMPLATE_CONTRACTS. This alias is kept so
+ * existing callers can migrate to the canonical constant name.
  */
 export const FrozenNodeTemplateContracts = FROZEN_NODE_TEMPLATE_CONTRACTS;
 

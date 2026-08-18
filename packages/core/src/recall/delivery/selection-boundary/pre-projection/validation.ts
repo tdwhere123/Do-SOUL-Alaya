@@ -4,6 +4,7 @@ import { selectionBoundaryJsonSha256 } from
   "../selection-boundary-json.js";
 import { throwSelectionBoundaryFidelityMismatch } from
   "../validation/fidelity-error.js";
+import { isRecord } from "../record-guards.js";
 import { completeFineAssessmentPreProjection } from "./observation.js";
 
 export function assertPreProjection(
@@ -202,10 +203,6 @@ function assertUniqueKeys(keys: readonly string[]): void {
       `unique=${unique} empty_or_nonstring=${emptyOrNonString}`
     );
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNonEmptyString(value: unknown): value is string {

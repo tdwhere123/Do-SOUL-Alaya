@@ -7,6 +7,7 @@ import {
   type SoulMemorySearchRequest,
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
+import { isDuplicateKeyError } from "@do-soul/alaya-storage";
 import {
   createVerifiedDeliverySourceObservation,
   type VerifiedDeliverySourceObservation
@@ -83,7 +84,7 @@ export function enqueueRecallExtractTask(
       created_at: createdAt
     });
   } catch (error) {
-    if (isDuplicatePostTurnExtractTask(error)) {
+    if (isDuplicateKeyError(error)) {
       return;
     }
     // recall enqueue is best-effort passive ingestion (§17): warn, never throw —
@@ -146,7 +147,7 @@ export function enqueuePostTurnExtractTask(
       created_at: createdAt
     });
   } catch (error) {
-    if (isDuplicatePostTurnExtractTask(error)) {
+    if (isDuplicateKeyError(error)) {
       return;
     }
     // report path is caller-driven (report_context_usage), so a real enqueue
@@ -277,14 +278,3 @@ function buildRecallExtractTaskId(workspaceId: string, runId: string, turnText: 
   return `recall_extract_${digest}`;
 }
 
-function isDuplicatePostTurnExtractTask(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
-    const code = (current as { readonly code?: unknown }).code;
-    if (code === "DUPLICATE_KEY") {
-      return true;
-    }
-    current = (current as { readonly cause?: unknown }).cause;
-  }
-  return false;
-}

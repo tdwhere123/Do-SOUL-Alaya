@@ -6,7 +6,7 @@ import {
   GardenTaskKind,
   GardenTier
 } from "@do-soul/alaya-protocol";
-import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
+import { isDuplicateKeyError, type GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
 
 /**
  * @anchor edge-classify-queue-adapter
@@ -71,7 +71,7 @@ async function enqueueEdgeClassifyTask(
       created_at: createdAt
     });
   } catch (error) {
-    if (isDuplicateInsert(error)) {
+    if (isDuplicateKeyError(error)) {
       return;
     }
     throw error;
@@ -129,7 +129,3 @@ export function buildEdgeClassifyTaskId(
   return `edge_classify_${digest}`;
 }
 
-function isDuplicateInsert(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /UNIQUE|PRIMARY KEY|constraint/i.test(message);
-}

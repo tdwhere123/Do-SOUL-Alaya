@@ -1,5 +1,5 @@
 export { measureSqliteBlockingOnEventLoop, type SqliteBlockingProbeResult } from "./diagnostics/sqlite-blocking-probe.js";
-export { StorageError, type StorageErrorCode } from "./shared/index.js";
+export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./shared/index.js";
 export {
   initDatabase,
   closeCachedDatabase,

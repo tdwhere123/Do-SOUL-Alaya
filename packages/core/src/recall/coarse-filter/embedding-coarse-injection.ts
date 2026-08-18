@@ -18,8 +18,8 @@ import type {
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 
-const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
-const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
+export const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
+export const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
 
 type EmbeddingCoarseInjectionResult = Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];

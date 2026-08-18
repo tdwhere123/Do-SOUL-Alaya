@@ -34,6 +34,10 @@ export * from "./embedding-recall/embedding-backfill-handler.js";
 export * from "./path-graph/edge-proposals/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";
 export { assertValidEmbeddingBatch } from "./embedding-recall/helpers.js";
+export {
+  EMBEDDING_INJECTION_SIMILARITY_FLOOR,
+  EMBEDDING_MAX_INJECTED_DELIVERY
+} from "./recall/coarse-filter/embedding-coarse-injection.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";

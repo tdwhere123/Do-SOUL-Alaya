@@ -8,6 +8,8 @@ import {
   applyRecallPolicyEmbeddingState,
   assertValidEmbeddingBatch,
   defaultLocalOnnxCacheDir,
+  EMBEDDING_INJECTION_SIMILARITY_FLOOR,
+  EMBEDDING_MAX_INJECTED_DELIVERY,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
   type EmbeddingRecallServiceDependencies,
@@ -253,9 +255,9 @@ function applyEmbeddingPolicyDecorator(
   const semantic = policy.coarse_filter.semantic_supplement;
   const embeddingPolicy = applyRecallPolicyEmbeddingState(policy, {
     embeddingEnabled: true,
-    injectionCap: semantic.injection_cap ?? DEFAULT_EMBEDDING_INJECTION_CAP,
+    injectionCap: semantic.injection_cap ?? EMBEDDING_MAX_INJECTED_DELIVERY,
     injectionSimilarityFloor:
-      semantic.injection_similarity_floor ?? DEFAULT_EMBEDDING_INJECTION_FLOOR
+      semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR
   });
   return {
     ...embeddingPolicy,
@@ -301,9 +303,6 @@ function createProviderWarmup(
 
 // Equal family ballot with RECALL_FUSION_DEFAULT_WEIGHTS — not a fitted emb boost.
 const DEFAULT_EMBEDDING_FUSION_WEIGHT = 1;
-// mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
-const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
-const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;
 
 function resolveEmbeddingProvider(input: {
   readonly providerKind: "openai" | "local_onnx";
