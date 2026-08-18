@@ -15,8 +15,16 @@ import { createDaemonFieldRepos, type DaemonFieldRepos } from "./field-repos.js"
 import { createSqliteCausalUsagePort } from "./sqlite-causal-usage-port.js";
 import { createSqliteFieldFormationStores } from "./sqlite-field-formation-stores.js";
 import { createSqliteFieldQuerySession } from "./sqlite-field-query-session.js";
-import { createSqliteFieldProjectionLifecycle } from
-  "./sqlite-field-projection-lifecycle.js";
+import { admitFieldProjectionLifecycle, type FieldProjectionCheckpointPort } from
+  "./admission-checkpoint.js";
+import {
+  DEFAULT_FIELD_PROJECTION_ADMISSION_MODE,
+  type FieldProjectionAdmissionMode
+} from "./admission-mode.js";
+import {
+  createSqliteFieldProjectionLifecycle,
+  type SqliteFieldProjectionLifecycle
+} from "./sqlite-field-projection-lifecycle.js";
 import { createProjectionRebuildingFieldStores } from
   "./projection-rebuilding-field-stores.js";
 
@@ -26,13 +34,15 @@ export type DaemonFieldComposition = Readonly<{
   readonly usagePort: CausalUsagePort;
   readonly effectDecisionStore: EffectDecisionStore;
   readonly querySession: RecallFieldQuerySession;
-  readonly projectionLifecycle: ReturnType<typeof createSqliteFieldProjectionLifecycle>;
+  readonly projectionLifecycle: SqliteFieldProjectionLifecycle;
+  readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
 }>;
 
 export function createDaemonFieldComposition(input: Readonly<{
   readonly database: StorageDatabase;
   readonly eventLogRepo: SqliteEventLogRepo;
   readonly sha256?: FieldContractSha256;
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }>): DaemonFieldComposition {
   const sha256 = input.sha256 ?? fieldContractSha256;
   const fieldRepos = createDaemonFieldRepos({
@@ -43,17 +53,19 @@ export function createDaemonFieldComposition(input: Readonly<{
     repos: fieldRepos,
     database: input.database
   });
-  const projectionLifecycle = createSqliteFieldProjectionLifecycle({
-    generations: fieldRepos.generations,
-    stores: baseStores,
-    database: input.database,
-    eventLog: input.eventLogRepo,
-    sha256
-  });
-  projectionLifecycle.drainPending();
+  const admitted = admitFieldProjectionLifecycle(
+    createSqliteFieldProjectionLifecycle({
+      generations: fieldRepos.generations,
+      stores: baseStores,
+      database: input.database,
+      eventLog: input.eventLogRepo,
+      sha256
+    }),
+    input.fieldProjectionAdmissionMode ?? DEFAULT_FIELD_PROJECTION_ADMISSION_MODE
+  );
   const stores = createProjectionRebuildingFieldStores({
     delegate: baseStores,
-    lifecycle: projectionLifecycle
+    lifecycle: admitted.projectionLifecycle
   });
   return Object.freeze({
     fieldRepos,
@@ -62,8 +74,12 @@ export function createDaemonFieldComposition(input: Readonly<{
       repo: fieldRepos.usage,
       sha256
     }),
-    effectDecisionStore: createEffectDecisionStore(fieldRepos, projectionLifecycle),
-    projectionLifecycle,
+    effectDecisionStore: createEffectDecisionStore(
+      fieldRepos,
+      admitted.projectionLifecycle
+    ),
+    projectionLifecycle: admitted.projectionLifecycle,
+    fieldProjectionCheckpoint: admitted.fieldProjectionCheckpoint,
     querySession: createSqliteFieldQuerySession({
       generations: fieldRepos.generations,
       database: input.database,
@@ -74,7 +90,7 @@ export function createDaemonFieldComposition(input: Readonly<{
 
 function createEffectDecisionStore(
   repos: DaemonFieldRepos,
-  lifecycle: ReturnType<typeof createSqliteFieldProjectionLifecycle>
+  lifecycle: SqliteFieldProjectionLifecycle
 ): EffectDecisionStore {
   return {
     insert(receipt: EffectDecisionReceipt): EffectDecisionReceipt {

@@ -237,6 +237,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
     relationAssertionService: input.relationAssertionService,
     relationAssertionAdmissionPort: input.relationAssertionAdmissionPort,
     relationProjectionCheckpoint: input.relationProjectionCheckpoint,
+    fieldProjectionCheckpoint: input.fieldComposition.fieldProjectionCheckpoint,
     recallUtilizationService: input.recallUtilizationService,
     reconciliationBasisStatus: input.reconciliationBasisStatus,
     runService: input.runService,

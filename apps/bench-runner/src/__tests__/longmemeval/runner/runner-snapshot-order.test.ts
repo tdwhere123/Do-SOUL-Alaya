@@ -24,7 +24,8 @@ const mocks = vi.hoisted(() => ({
   writeSnapshot: vi.fn(),
   snapshotAuthority: vi.fn(),
   snapshotAuthorityProof: vi.fn(),
-  checkpoint: vi.fn()
+  checkpoint: vi.fn(),
+  fieldCheckpoint: vi.fn()
 }));
 const QUESTION_IDS = ["first", "second"] as const;
 const EXTRACTION_CACHE_PREFLIGHT_PROOF = Object.freeze({
@@ -77,6 +78,7 @@ beforeEach(() => {
       }
     },
     shutdown: vi.fn(async () => mocks.events.push("shutdown")),
+    checkpointFieldProjection: mocks.fieldCheckpoint,
     checkpointRelationProjection: mocks.checkpoint
   }));
   mocks.prepare.mockImplementation(async ({ question }) => {
@@ -93,6 +95,9 @@ beforeEach(() => {
   });
   mocks.quiesce.mockImplementation(async () => {
     mocks.events.push("quiescence");
+  });
+  mocks.fieldCheckpoint.mockImplementation(async () => {
+    mocks.events.push("field-checkpoint");
   });
   mocks.checkpoint.mockImplementation(async () => {
     mocks.events.push("checkpoint");
@@ -120,10 +125,15 @@ describe("LongMemEval snapshot execution ordering", () => {
   it("freezes the full seed window and writes the snapshot without a recall pass", async () => {
     const result = await executeLongMemEvalRun(snapshotContext());
 
+    expect(mocks.startDaemon).toHaveBeenCalledWith(expect.objectContaining({
+      fieldProjectionAdmissionMode: "explicit_checkpoint",
+      relationProjectionAdmissionMode: "explicit_checkpoint"
+    }));
     expect(mocks.events).toEqual([
       "prepare:first",
       "prepare:second",
       "quiescence",
+      "field-checkpoint",
       "checkpoint",
       "provenance",
       "snapshot",

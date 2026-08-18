@@ -22,6 +22,8 @@ import type {
 } from "@do-soul/alaya-core";
 import type { MemoryHqRepo } from "@do-soul/alaya-storage";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
+import type { FieldProjectionCheckpointPort } from
+  "../../field/admission-checkpoint.js";
 import type { RelationProjectionCheckpointPort } from
   "../../recall-materialization/relation-projection/checkpoint.js";
 
@@ -125,6 +127,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly relationAssertionService: Pick<RelationAssertionService, "admit">;
   readonly relationAssertionAdmissionPort: RelationAssertionAdmissionPort;
   readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
+  readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

@@ -45,6 +45,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
+import type { FieldProjectionAdmissionMode } from "../../field/admission-mode.js";
 import { createDaemonFieldComposition } from "../../field/field-composition.js";
 import {
   createOptionalGlobalMemoryRecallCacheRepo,
@@ -56,6 +57,7 @@ import { SqliteWorkspaceEngineConfigRepo } from "../../../services/config/worksp
 export function createDaemonRepositories(input: {
   readonly database: StorageDatabase;
   readonly warn: WarnLogger["warn"];
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }) {
   const coreRepos = createCoreDaemonRepos(input.database);
   const memoryRepos = createDaemonMemoryRepos(input);
@@ -63,7 +65,10 @@ export function createDaemonRepositories(input: {
   const runtimeRepos = createDaemonRuntimeRepos(input.database);
   const fieldComposition = createDaemonFieldComposition({
     database: input.database,
-    eventLogRepo: coreRepos.eventLogRepo
+    eventLogRepo: coreRepos.eventLogRepo,
+    ...(input.fieldProjectionAdmissionMode === undefined
+      ? {}
+      : { fieldProjectionAdmissionMode: input.fieldProjectionAdmissionMode })
   });
 
   return Object.freeze({

@@ -107,6 +107,7 @@ async function runSnapshotCompatiblePhases(
   // matrix cells on the sealed DB, not a stress/embedding-off A-like pass.
   const prepared = await prepareSnapshotWindow(context, daemon);
   await awaitLongMemEvalSnapshotQuiescence();
+  await daemon.checkpointFieldProjection();
   await daemon.checkpointRelationProjection();
   await writeLongMemEvalSnapshotIfRequested(
     context,
@@ -257,7 +258,10 @@ async function startLongMemEvalDaemon(
       : { dataDirRoot: context.seedDataDirRoot }),
     recallWeightOverrides: context.recallWeightOverrides,
     ...(context.captureSnapshot
-      ? { relationProjectionAdmissionMode: "explicit_checkpoint" as const }
+      ? {
+          relationProjectionAdmissionMode: "explicit_checkpoint" as const,
+          fieldProjectionAdmissionMode: "explicit_checkpoint" as const
+        }
       : {}),
     ...(context.opts.expectedReconciliationBasis === undefined
       ? {}

@@ -186,15 +186,7 @@ async function prepareLongMemEvalQuestionInWorkspace(
   workspace: BenchWorkspaceHandle,
   phase: ReturnType<typeof createPhaseTimer>
 ): Promise<LongMemEvalPreparedQuestion> {
-  const seedState = await runQuestionPhase(phase, "seed_loop", () =>
-    seedLongMemEvalQuestion({
-      workspace,
-      question: input.question,
-      seedRunner: input.seedRunner,
-      qaChat: input.qaChat,
-      seedFormationMode: input.seedFormationMode
-    })
-  );
+  const seedState = await seedQuestionAndCheckpointField(input, workspace, phase);
   const { embeddingWarmup, queryEmbeddingWarmup } = await runQuestionPhase(
     phase,
     "embedding_warmup",
@@ -213,9 +205,7 @@ async function prepareLongMemEvalQuestionInWorkspace(
     workspace,
     seedState.coherenceMembers
   );
-  await runQuestionPhase(phase, "relation_projection_checkpoint", () =>
-    input.daemon.checkpointRelationProjection()
-  );
+  await checkpointQuestionProjections(input.daemon, phase);
   return buildPreparedQuestion({
     input,
     workspace,
@@ -224,6 +214,43 @@ async function prepareLongMemEvalQuestionInWorkspace(
     embeddingWarmup,
     queryEmbeddingWarmup
   });
+}
+
+async function seedQuestionAndCheckpointField(
+  input: LongMemEvalQuestionRunInput,
+  workspace: BenchWorkspaceHandle,
+  phase: ReturnType<typeof createPhaseTimer>
+): Promise<LongMemEvalQuestionSeedState> {
+  const seedState = await runQuestionPhase(phase, "seed_loop", () =>
+    seedLongMemEvalQuestion({
+      workspace,
+      question: input.question,
+      seedRunner: input.seedRunner,
+      qaChat: input.qaChat,
+      seedFormationMode: input.seedFormationMode
+    })
+  );
+  await checkpointQuestionFieldProjection(input.daemon, phase);
+  return seedState;
+}
+
+async function checkpointQuestionProjections(
+  daemon: BenchDaemonHandle,
+  phase: ReturnType<typeof createPhaseTimer>
+): Promise<void> {
+  await checkpointQuestionFieldProjection(daemon, phase);
+  await runQuestionPhase(phase, "relation_projection_checkpoint", () =>
+    daemon.checkpointRelationProjection()
+  );
+}
+
+async function checkpointQuestionFieldProjection(
+  daemon: BenchDaemonHandle,
+  phase: ReturnType<typeof createPhaseTimer>
+): Promise<void> {
+  await runQuestionPhase(phase, "field_projection_checkpoint", () =>
+    daemon.checkpointFieldProjection()
+  );
 }
 
 function buildPreparedQuestion(input: {

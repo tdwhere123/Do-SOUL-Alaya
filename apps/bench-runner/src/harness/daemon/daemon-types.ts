@@ -8,6 +8,7 @@ import type {
 import type {
   AlayaDaemonRuntime,
   EffectiveReconciliationBasis,
+  FieldProjectionAdmissionMode,
   RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
@@ -67,6 +68,7 @@ export interface BenchDaemonOptions {
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
   readonly reviewerIdentity?: string;
   readonly reviewerToken?: string;
 }
@@ -122,6 +124,8 @@ export interface BenchDaemonHandle {
   runEdgePlanePassIfConfigured(): Promise<void>;
   /** Flushes deferred relation assertions into one active temporal generation. */
   checkpointRelationProjection(): Promise<void>;
+  /** Drains queued field-projection rebuilds into one active generation. */
+  checkpointFieldProjection(): Promise<void>;
   reportContextUsage(input: BenchReportContextUsageInput): Promise<void>;
   /**
    * @anchor proposeMemory — full propose+review chain

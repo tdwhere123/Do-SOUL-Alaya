@@ -23,6 +23,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       return true;
     });
     const checkpointRelationProjection = vi.fn(async () => undefined);
+    const checkpointFieldProjection = vi.fn(async () => undefined);
     const workspace = {
       workspaceId: "workspace-profile",
       runId: "run-profile",
@@ -36,6 +37,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     const daemon = {
       attachWorkspace: vi.fn(async () => workspace),
       runEdgePlanePassIfConfigured: vi.fn(async () => undefined),
+      checkpointFieldProjection,
       checkpointRelationProjection
     } as unknown as BenchDaemonHandle;
 
@@ -52,7 +54,10 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       seedFormationMode: "treatment_neutral"
     });
 
+    expect(checkpointFieldProjection).toHaveBeenCalledTimes(2);
     expect(checkpointRelationProjection).toHaveBeenCalledTimes(1);
+    expect(profileWrites.join(""))
+      .toMatch(/\[bench_profile\].*field_projection_checkpoint=/u);
     expect(profileWrites.join(""))
       .toMatch(/\[bench_profile\].*relation_projection_checkpoint=/u);
   });
@@ -112,6 +117,8 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     });
     const judgeChat = vi.fn(async () => "yes");
     const checkpointRelationProjection = vi.fn(async () => undefined);
+    const checkpointFieldProjection = vi.fn(async () => undefined);
+    const runEdgePlanePassIfConfigured = vi.fn(async () => undefined);
     const accrueSessionCoRecall = vi.fn(async () => ({
       pairsObserved: 0,
       minted: 0,
@@ -147,7 +154,8 @@ describe("runLongMemEvalQuestion QA delivery", () => {
 
     const daemon = {
       attachWorkspace: vi.fn(async () => workspace),
-      runEdgePlanePassIfConfigured: vi.fn(async () => undefined),
+      runEdgePlanePassIfConfigured,
+      checkpointFieldProjection,
       checkpointRelationProjection,
       runtime: {
         services: {
@@ -200,9 +208,16 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       expect.objectContaining({ referenceTime: "2026-01-01T00:00:00.000Z" })
     );
     expect(accrueSessionCoRecall).not.toHaveBeenCalled();
+    expect(checkpointFieldProjection).toHaveBeenCalledTimes(2);
+    expect(checkpointFieldProjection.mock.invocationCallOrder[0])
+      .toBeLessThan(runEdgePlanePassIfConfigured.mock.invocationCallOrder[0]!);
+    expect(checkpointFieldProjection.mock.invocationCallOrder[0])
+      .toBeLessThan(accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
+    expect(checkpointFieldProjection.mock.invocationCallOrder[1])
+      .toBeGreaterThan(accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
     expect(checkpointRelationProjection).toHaveBeenCalledTimes(1);
     expect(checkpointRelationProjection.mock.invocationCallOrder[0])
-      .toBeGreaterThan(accrueAnswersWithCoRelevance.mock.invocationCallOrder[0]!);
+      .toBeGreaterThan(checkpointFieldProjection.mock.invocationCallOrder[1]!);
     expect(checkpointRelationProjection.mock.invocationCallOrder[0])
       .toBeLessThan(recall.mock.invocationCallOrder[0]!);
     expect(result.snapshotQuestion?.questionDate).toBe("2026-01-01T00:00:00.000Z");

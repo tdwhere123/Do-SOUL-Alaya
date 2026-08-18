@@ -4,6 +4,7 @@ import {
   createAlayaDaemonRuntime,
   type AlayaDaemonRuntime,
   type EffectiveReconciliationBasis,
+  type FieldProjectionAdmissionMode,
   type RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
 import { createAlayaMcpServer } from "@do-soul/alaya/mcp-server";
@@ -28,6 +29,7 @@ export interface BenchDaemonStartupInput {
   readonly launch: BenchDaemonLaunchConfig;
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
   readonly configDirectory: BenchDaemonConfigDirectoryLease;
   readonly managedEnvKeys: readonly string[];
   readonly createManagedWorkspaceRoot: (workspaceId: string) => Promise<string>;
@@ -50,7 +52,8 @@ export async function initializeBenchDaemon(
   const resources = await createBenchRuntimeResources(
     input.activeContext,
     input.expectedReconciliationBasis,
-    input.relationProjectionAdmissionMode
+    input.relationProjectionAdmissionMode,
+    input.fieldProjectionAdmissionMode
   );
   try {
     await installBenchProfile(
@@ -71,9 +74,13 @@ export async function initializeBenchDaemon(
 async function createBenchRuntimeResources(
   activeContext: ActiveBenchContext,
   expectedReconciliationBasis: EffectiveReconciliationBasis | undefined,
-  relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined
+  relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined,
+  fieldProjectionAdmissionMode: FieldProjectionAdmissionMode | undefined
 ): Promise<BenchDaemonStartupResources> {
-  const runtime = await createAlayaDaemonRuntime({ relationProjectionAdmissionMode });
+  const runtime = await createAlayaDaemonRuntime({
+    relationProjectionAdmissionMode,
+    fieldProjectionAdmissionMode
+  });
   try {
     assertExpectedReconciliationBasis(runtime, expectedReconciliationBasis);
   } catch (error) {

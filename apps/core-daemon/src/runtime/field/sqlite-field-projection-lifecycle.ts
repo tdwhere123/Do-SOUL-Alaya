@@ -41,6 +41,7 @@ export type SqliteFieldProjectionLifecycle = Readonly<{
   ): FieldProjectionGeneration;
   requestRebuild(workspaceId: string, requestedAt: string): void;
   drainPending(): void;
+  checkpoint(): void;
 }>;
 
 export function createSqliteFieldProjectionLifecycle(
@@ -60,6 +61,9 @@ export function createSqliteFieldProjectionLifecycle(
       `).run(workspaceId, requestedAt);
     },
     drainPending() {
+      drainPendingRebuilds(input.database, lifecycle);
+    },
+    checkpoint() {
       drainPendingRebuilds(input.database, lifecycle);
     }
   };

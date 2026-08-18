@@ -33,6 +33,7 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
+import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
 export type {
@@ -44,6 +45,7 @@ export type {
   EffectiveReconciliationBasis,
   ReconciliationBasisStatus
 } from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+export type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export { resolveSecretRef } from "./secrets/index.js";
@@ -54,6 +56,7 @@ const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export interface AlayaDaemonRuntimeOptions {
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }
 
 export async function createAlayaDaemonRuntime(
@@ -62,7 +65,7 @@ export async function createAlayaDaemonRuntime(
   const bootstrap = await createRuntimeBootstrapContext();
   let recallReadWorkerClient: RecallReadWorkerClient | null = null;
   try {
-    const repositories = createDaemonRepositoryWiring(bootstrap);
+    const repositories = createDaemonRepositoryWiring(bootstrap, options);
     const foundation = await createDaemonFoundationWiring(bootstrap, repositories);
     const recallAndCore = await createRecallAndCoreWiring({
       bootstrap,
@@ -137,10 +140,16 @@ async function createRuntimeBootstrapContext() {
   };
 }
 
-function createDaemonRepositoryWiring(bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>) {
+function createDaemonRepositoryWiring(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  options: AlayaDaemonRuntimeOptions
+) {
   const repositories = createDaemonRepositories({
     database: bootstrap.database,
-    warn: bootstrap.warnLogger.warn
+    warn: bootstrap.warnLogger.warn,
+    ...(options.fieldProjectionAdmissionMode === undefined
+      ? {}
+      : { fieldProjectionAdmissionMode: options.fieldProjectionAdmissionMode })
   });
   recordStartupStep(bootstrap.startupSteps, "repositories");
   return repositories;
