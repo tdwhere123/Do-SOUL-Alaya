@@ -14,13 +14,26 @@ const QUERY_TEXT = "kubernetes staging pipeline checklist";
 
 describe("lexical prefix before evidence candidate embedding", () => {
   it("keeps embedding rank of the retained N identical to scoring those N first", async () => {
-    const allCandidates = buildCandidates(40);
+    const allCandidates = buildCandidates();
+    const lexicalStart = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N + 1;
+    expect(allCandidates.slice(0, lexicalStart).every((candidate) =>
+      candidate.content.includes("unrelated garden")
+    )).toBe(true);
+    const lexicalWinners = allCandidates.slice(
+      lexicalStart,
+      lexicalStart + EVIDENCE_CANDIDATE_EMBEDDING_TOP_N
+    );
+    expect(lexicalWinners).toHaveLength(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N);
+
     const retained = selectLexicalEvidenceEmbeddingPrefix(
       allCandidates,
       QUERY_TEXT,
       EVIDENCE_CANDIDATE_EMBEDDING_TOP_N
     );
     expect(retained).toHaveLength(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N);
+    expect(retained.map((candidate) => candidate.candidateKey)).toEqual(
+      lexicalWinners.map((candidate) => candidate.candidateKey)
+    );
     expect(retained.every((candidate) => candidate.content.includes("kubernetes"))).toBe(true);
 
     const prefixed = await scoreWithDeterministicEmbeddings(allCandidates);
@@ -32,9 +45,11 @@ describe("lexical prefix before evidence candidate embedding", () => {
   });
 });
 
-function buildCandidates(count: number): readonly EvidenceEmbeddingCandidate[] {
-  return Object.freeze(Array.from({ length: count }, (_, index) => {
-    const hitsQuery = index < EVIDENCE_CANDIDATE_EMBEDDING_TOP_N;
+function buildCandidates(): readonly EvidenceEmbeddingCandidate[] {
+  const unrelatedCount = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N + 1;
+  const total = unrelatedCount + EVIDENCE_CANDIDATE_EMBEDDING_TOP_N;
+  return Object.freeze(Array.from({ length: total }, (_, index) => {
+    const hitsQuery = index >= unrelatedCount;
     return Object.freeze({
       candidateKey: `memory:${String(index).padStart(2, "0")}`,
       evidenceObjectId: `evidence-${String(index).padStart(2, "0")}`,
