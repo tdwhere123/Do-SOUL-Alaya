@@ -19,7 +19,6 @@ type AdmissionState = Readonly<{
   readonly tokenBudget: number;
   readonly retainedByObjectKey: ReadonlyMap<string, string>;
   readonly retainedBySourceKey: ReadonlyMap<string, string>;
-  readonly retainedByLineageKey: ReadonlyMap<string, string>;
   readonly perDimensionCounts: ReadonlyMap<string, number>;
   readonly limits: Readonly<{
     readonly maxSelected: number;
@@ -64,7 +63,6 @@ function greedySelect(
   const covered = new Map<string, number>();
   const retainedByObjectKey = new Map<string, string>();
   const retainedBySourceKey = new Map<string, string>();
-  const retainedByLineageKey = new Map<string, string>();
   const perDimensionCounts = new Map<string, number>();
   let usedTokens = 0;
   while (remaining.length > 0) {
@@ -74,7 +72,6 @@ function greedySelect(
       tokenBudget,
       retainedByObjectKey,
       retainedBySourceKey,
-      retainedByLineageKey,
       perDimensionCounts,
       limits
     }, decisions);
@@ -91,7 +88,6 @@ function greedySelect(
     usedTokens += candidate.token_cost;
     retainedByObjectKey.set(objectKey(candidate), candidate.candidate_key);
     retainIdentity(candidate.source, candidate.candidate_key, retainedBySourceKey);
-    retainIdentity(candidate.lineage, candidate.candidate_key, retainedByLineageKey);
     const dimension = candidate.dimension ?? "unbound";
     perDimensionCounts.set(
       dimension,
@@ -167,10 +163,6 @@ function rejectedReceipt(
   if (sourceRetained !== null) {
     return duplicateReceipt("source", sourceRetained);
   }
-  const lineageRetained = retainedIdentity(candidate.lineage, state.retainedByLineageKey);
-  if (lineageRetained !== null) {
-    return duplicateReceipt("lineage", lineageRetained);
-  }
   const dimension = candidate.dimension;
   const dimensionCount = state.perDimensionCounts.get(dimension) ?? 0;
   const dimensionLimit = state.limits.perDimensionLimits?.[dimension] ?? null;
@@ -224,7 +216,7 @@ function objectKey(candidate: SelectGammaFormulaCandidate): string {
 }
 
 function duplicateReceipt(
-  identityChannel: "object" | "source" | "lineage",
+  identityChannel: "object" | "source",
   retainedCandidateKey: string
 ): SelectGammaDecisionReceipt {
   return Object.freeze({

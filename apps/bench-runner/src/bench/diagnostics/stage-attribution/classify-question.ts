@@ -1,4 +1,5 @@
 import type { LongMemEvalQuestionDiagnostic } from "../schema/diagnostics-types.js";
+import { isDeliveryAdmissionLoss } from "../schema/diagnostics-private.js";
 import { readQuestionMissTaxonomy } from "../miss/diagnostics-miss-taxonomy.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
 import {
@@ -68,10 +69,13 @@ export function classifyQuestionStage(
     }
   } else if (
     taxonomy === "budget_drop" ||
-    taxonomy === "answer_set_coverage_drop"
+    taxonomy === "answer_set_coverage_drop" ||
+    question.gold.some(isDeliveryAdmissionLoss)
   ) {
     stage = 5;
-    proof = `miss_taxonomy.${taxonomy}`;
+    proof = taxonomy === "budget_drop" || taxonomy === "answer_set_coverage_drop"
+      ? `miss_taxonomy.${taxonomy}`
+      : "delivery_admission_refusal";
     mechanism = "coverage_admission";
   } else if (bestPoolRank !== null && bestPoolRank <= 10) {
     stage = 6;

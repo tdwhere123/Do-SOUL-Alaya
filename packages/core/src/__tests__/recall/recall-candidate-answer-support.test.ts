@@ -7,7 +7,16 @@ import {
   projectVerifiedUserAssertionContext
 } from "../../recall/query/recall-user-assertion-context.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import { createCandidate } from "./fine-assessment-selection-fixtures.js";
+import { createSelectionContext } from
+  "../../recall/delivery/fine-assessment-selection/coverage-order.js";
+import { deriveSelectGammaEligibility } from
+  "../../recall/delivery/select-gamma/bind-fine-assessment.js";
+import {
+  createCandidate,
+  createConfig,
+  createSupplementaryData,
+  FIELD_PINS
+} from "./fine-assessment-selection-fixtures.js";
 
 function planFor(query: string) {
   return compileRecallAnswerShapePlan(compileRecallQueryProbes(query));
@@ -294,6 +303,67 @@ describe("recall candidate answer support", () => {
     );
 
     expect(support?.authority?.behavior_eligible).toBe(false);
+  });
+
+  it("does not treat incidental didn't in the surrounding turn as a negated assertion", () => {
+    const support = verifiedSupport(
+      "Where did I redeem a $5 coupon on coffee creamer?",
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday",
+      "User: I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox."
+    );
+
+    expect(support?.authority?.event_status).toBe("asserted");
+  });
+
+  it("does not block Select_Gamma risk for incidental didn't in the gist", () => {
+    const content =
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday";
+    const evidenceRef = "evidence-1";
+    const candidate = createCandidate("coupon", {
+      content,
+      evidence_refs: [evidenceRef]
+    });
+    const verified = projectVerifiedUserAssertionContext({
+      evidenceRef,
+      entryContent: content,
+      gist: "User: I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox."
+    });
+    if (verified === null) throw new Error("test fixture must project a User assertion");
+    const context = createSelectionContext({
+      ...FIELD_PINS,
+      orderedCandidates: [candidate],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes: compileRecallQueryProbes(
+          "Where did I redeem a $5 coupon on coffee creamer?"
+        ),
+        verifiedUserAssertionContextsByMemoryId: {
+          [candidate.entry.object_id]: verified
+        }
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: new Map(),
+      captureAnswerFeatures: true
+    });
+
+    expect(context.answerSupportByCandidateKey.get(candidate.fusion.candidate_key)
+      ?.authority?.event_status).toBe("asserted");
+    expect(deriveSelectGammaEligibility(candidate, context).risk).toBe("clear");
+  });
+
+  it.each([
+    [
+      "Where did I redeem a $5 coupon on coffee creamer?",
+      "I never redeemed a coupon"
+    ],
+    [
+      "Where did I buy my new bookshelf from?",
+      "I didn't buy the bookshelf"
+    ]
+  ])("treats negation in the assertion itself as negated", (query, content) => {
+    const support = verifiedSupport(query, content, `User: ${content}`);
+
+    expect(support?.authority?.event_status).toBe("negated");
   });
 
   it.each([

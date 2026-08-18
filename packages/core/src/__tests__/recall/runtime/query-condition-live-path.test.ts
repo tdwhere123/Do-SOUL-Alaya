@@ -59,7 +59,7 @@ describe("live query condition capture", () => {
     expect(view?.query_cache_key).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(view?.generation_id).not.toBe(`sha256:${"a".repeat(64)}`);
     expect(view?.condition_digest).not.toBe(`sha256:${"b".repeat(64)}`);
-    expect(session.pinActiveGeneration).toHaveBeenCalledWith("workspace-1", CLOCK_AS_OF);
+    expect(session.pinActiveGeneration).toHaveBeenCalledWith("workspace-1", operationalAt);
     expect(session.selectCandidates).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

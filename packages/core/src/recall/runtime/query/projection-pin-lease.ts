@@ -13,12 +13,43 @@ export type ProjectionPinLeaseGuard = Readonly<{
   stop(): void;
 }>;
 
-export function projectionPinExpiry(renewedAt: string): string {
-  const renewedAtMs = Date.parse(renewedAt);
-  if (!Number.isFinite(renewedAtMs)) {
-    throw new Error("projection pin renewal time must be a valid date-time");
+export function finishProjectionPinCleanup(
+  steps: readonly (() => void)[],
+  warn: (message: string, meta: Record<string, unknown>) => void
+): void {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    try {
+      step();
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  const warningFailures: unknown[] = [];
+  for (const error of failures) {
+    try {
+      warn("projection pin cleanup failed", {
+        operation: "projection_pin_cleanup",
+        errorName: error instanceof Error ? error.name : typeof error,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } catch (warningFailure) {
+      warningFailures.push(warningFailure);
+    }
+  }
+  const allFailures = [...failures, ...warningFailures];
+  if (allFailures.length > 0) {
+    throw new AggregateError(allFailures, "projection pin cleanup failed");
+  }
+}
+
+export function projectionPinExpiry(renewedAt: string): string {
+  const renewedAtMs = projectionPinTimeMs(renewedAt);
   return new Date(renewedAtMs + PROJECTION_PIN_LEASE_MS).toISOString();
+}
+
+export function canonicalProjectionPinTime(value: string): string {
+  return new Date(projectionPinTimeMs(value)).toISOString();
 }
 
 export function startProjectionPinLeaseGuard(input: Readonly<{
@@ -29,36 +60,86 @@ export function startProjectionPinLeaseGuard(input: Readonly<{
 }>): ProjectionPinLeaseGuard {
   let failure: unknown = null;
   let stopped = false;
-  const renew = () => {
+  let expiresAt = input.pin.expires_at;
+  const renew = (renewedAt: string) => {
     if (stopped || failure !== null) return;
     try {
-      input.session.renew(input.pin, input.captureOperationalTime());
+      expiresAt = input.session.renew(input.pin, renewedAt).expires_at;
     } catch (error) {
       failure = error;
     }
   };
-  renew();
+  const renewNow = () => {
+    if (stopped || failure !== null) return;
+    try {
+      renew(canonicalProjectionPinTime(input.captureOperationalTime()));
+    } catch (error) {
+      failure = error;
+    }
+  };
+  renewNow();
+  if (failure !== null) throw failure;
   const cancel = (input.scheduler ?? systemHeartbeatScheduler).every(
     PROJECTION_PIN_HEARTBEAT_MS,
-    renew
+    renewNow
   );
   return Object.freeze({
     assertHealthy() {
       if (failure !== null) throw failure;
+      let operationalTime: string;
+      try {
+        operationalTime = canonicalProjectionPinTime(input.captureOperationalTime());
+      } catch (error) {
+        failure = error;
+        throw error;
+      }
+      if (renewalIsDue(expiresAt, operationalTime)) renew(operationalTime);
+      if (failure !== null) throw failure;
     },
     stop() {
       if (stopped) return;
-      stopped = true;
-      cancel();
-      if (failure !== null) throw failure;
+      try {
+        cancelHeartbeat(cancel);
+      } finally {
+        // A failed scheduler must not keep extending a pin after recall termination.
+        stopped = true;
+      }
     }
   });
 }
 
+function cancelHeartbeat(cancel: () => void): void {
+  try {
+    cancel();
+  } catch (firstFailure) {
+    try {
+      cancel();
+    } catch (secondFailure) {
+      throw new AggregateError(
+        [firstFailure, secondFailure],
+        "projection pin heartbeat cancellation failed"
+      );
+    }
+  }
+}
+
+function renewalIsDue(expiresAt: string, operationalTime: string): boolean {
+  return projectionPinTimeMs(expiresAt) - projectionPinTimeMs(operationalTime) <=
+    PROJECTION_PIN_HEARTBEAT_MS;
+}
+
+function projectionPinTimeMs(value: string): number {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) {
+    throw new Error("projection pin time must be a valid date-time");
+  }
+  return milliseconds;
+}
+
 const systemHeartbeatScheduler: ProjectionPinHeartbeatScheduler = Object.freeze({
   every(intervalMs, callback) {
+    // In-flight recall must keep the event loop alive.
     const timer = setInterval(callback, intervalMs);
-    timer.unref?.();
     return () => clearInterval(timer);
   }
 });

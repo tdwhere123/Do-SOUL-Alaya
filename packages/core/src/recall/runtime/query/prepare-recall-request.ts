@@ -19,7 +19,10 @@ import type {
 } from "../recall-service-runner-types.js";
 import { loadActiveConstraints, resolvePolicy } from "../orchestration.js";
 import { capturePreparedRequestCondition } from "./prepare-recall-query-condition.js";
-import { startProjectionPinLeaseGuard } from "./projection-pin-lease.js";
+import {
+  finishProjectionPinCleanup,
+  startProjectionPinLeaseGuard
+} from "./projection-pin-lease.js";
 import type { ProjectionPinLeaseGuard } from "./projection-pin-lease.js";
 
 export async function prepareRecallRequest(
@@ -42,16 +45,18 @@ export async function prepareRecallRequest(
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
+    projectionPinLease = startProjectionPinLeaseGuard({
+      session: context.fieldQuerySession,
+      pin: captured.pin,
+      captureOperationalTime: time.captureOperationalTime,
+      scheduler: context.projectionPinHeartbeatScheduler
+    });
     const fieldSelection = context.fieldQuerySession.selectCandidates(
       captured.receipt,
       captured.pin,
       time.captureOperationalTime()
     );
-    projectionPinLease = startProjectionPinLeaseGuard({
-      session: context.fieldQuerySession,
-      pin: captured.pin,
-      captureOperationalTime: time.captureOperationalTime
-    });
+    projectionPinLease.assertHealthy();
     const loaded = await loadPreparationInputs(
       context,
       params,
@@ -59,6 +64,7 @@ export async function prepareRecallRequest(
       fieldSelection.candidate_keys,
       captured.referenceTime
     );
+    projectionPinLease.assertHealthy();
     return Object.freeze({
       ...seed,
       ...loaded,
@@ -73,9 +79,19 @@ export async function prepareRecallRequest(
     });
   } catch (error) {
     try {
-      projectionPinLease?.stop();
-    } finally {
-      releaseProjectionPin();
+      finishProjectionPinCleanup([
+        () => {
+          projectionPinLease?.stop();
+        },
+        releaseProjectionPin
+      ], context.warn);
+    } catch (cleanupError) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new AggregateError(
+        [error, cleanupError],
+        `recall preparation failed: ${message}`,
+        { cause: error }
+      );
     }
     throw error;
   }

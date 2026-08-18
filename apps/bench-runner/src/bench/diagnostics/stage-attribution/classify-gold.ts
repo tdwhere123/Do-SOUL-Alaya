@@ -2,6 +2,10 @@ import type {
   LongMemEvalGoldDiagnostic,
   LongMemEvalQuestionDiagnostic
 } from "../schema/diagnostics-types.js";
+import {
+  isDeliveryAdmissionLoss,
+  isDeliveryBudgetLoss
+} from "../schema/diagnostics-private.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
 import { goldPoolRank } from "./pool-rank.js";
 import type {
@@ -57,10 +61,13 @@ export function classifyGoldObjectStage(input: {
   } else if (
     taxonomy === "budget_drop" ||
     taxonomy === "answer_set_coverage_drop" ||
+    isDeliveryAdmissionLoss(gold) ||
     hasCoverageOrBudgetSignal(gold)
   ) {
     stage = 5;
-    proof = taxonomy ?? "coverage_or_budget_signal";
+    proof = isDeliveryAdmissionLoss(gold)
+      ? "delivery_admission_refusal"
+      : (taxonomy ?? "coverage_or_budget_signal");
   } else if (poolRank !== null && poolRank <= 10) {
     stage = 6;
     proof = "pool_rank<=10_not_delivered_top5";
@@ -99,6 +106,7 @@ export function classifyMechanism(
   if (
     gold.miss_taxonomy === "budget_drop" ||
     gold.miss_taxonomy === "answer_set_coverage_drop" ||
+    isDeliveryAdmissionLoss(gold) ||
     hasCoverageOrBudgetSignal(gold)
   ) {
     return "coverage_admission";
@@ -114,10 +122,7 @@ export function classifyMechanism(
 }
 
 function hasCoverageOrBudgetSignal(gold: LongMemEvalGoldDiagnostic): boolean {
-  if (gold.budget_drop_reason !== null) {
-    const rank = gold.pre_budget_rank ?? gold.fused_rank;
-    if (rank !== null && rank <= 10) return true;
-  }
+  if (isDeliveryBudgetLoss(gold)) return true;
   const preCoverage =
     gold.rank_after_feature_rerank ??
     gold.rank_after_fusion ??

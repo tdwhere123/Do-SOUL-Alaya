@@ -18,7 +18,10 @@ import {
   selectPinnedProjectionCandidates,
   type PinnedProjectionCandidateSelection
 } from "../../field/retrieval/projection/pinned-projection-selection.js";
-import { projectionPinExpiry } from "./projection-pin-lease.js";
+import {
+  canonicalProjectionPinTime,
+  projectionPinExpiry
+} from "./projection-pin-lease.js";
 export const SEALED_EMPTY_FRONTIER = "sealed:empty";
 
 export interface RecallFieldQuerySession {
@@ -45,20 +48,21 @@ export function createTestOnlyInMemoryFieldQuerySession(
       return activateTestOnlyEmptyGeneration(store, sha256, workspaceId, recordedAt);
     },
     pinActiveGeneration(workspaceId, recordedAt) {
+      const pinnedAt = canonicalProjectionPinTime(recordedAt);
       const active = store.readActive(workspaceId);
       if (active === null) throw new Error("active projection generation is missing");
       return store.pin({
         workspace_id: workspaceId,
         generation_id: active.generation_id,
         reader_id: randomUUID(),
-        pinned_at: recordedAt,
-        expires_at: projectionPinExpiry(recordedAt),
+        pinned_at: pinnedAt,
+        expires_at: projectionPinExpiry(pinnedAt),
         released_at: null
       });
     },
     selectCandidates(condition, pin, selectedAt) {
       assertPinMatchesCondition(condition, pin);
-      store.requireActivePin(pin, selectedAt);
+      store.requireActivePin(pin, canonicalProjectionPinTime(selectedAt));
       const artifacts = store.readArtifacts(
         condition.condition.workspace_id,
         condition.generation_id
@@ -67,22 +71,24 @@ export function createTestOnlyInMemoryFieldQuerySession(
       return selectPinnedProjectionCandidates({ condition, artifacts, sha256 });
     },
     renew(pin, renewedAt) {
+      const canonicalRenewedAt = canonicalProjectionPinTime(renewedAt);
       const existing = store.readPin(pin.workspace_id, pin.generation_id, pin.reader_id);
       if (existing === null || existing.released_at !== null) {
         throw new Error("projection pin is missing or released");
       }
-      return store.renew(pin, renewedAt, projectionPinExpiry(renewedAt));
+      return store.renew(pin, canonicalRenewedAt, projectionPinExpiry(canonicalRenewedAt));
     },
     release(pin, releasedAt) {
+      const canonicalReleasedAt = canonicalProjectionPinTime(releasedAt);
       const existing = store.readPin(pin.workspace_id, pin.generation_id, pin.reader_id);
       if (existing === null) throw new Error("projection pin is missing");
       const released = store.release({
         workspace_id: pin.workspace_id,
         generation_id: pin.generation_id,
         reader_id: pin.reader_id,
-        released_at: releasedAt
+        released_at: canonicalReleasedAt
       });
-      store.collectRetired(pin.workspace_id, releasedAt);
+      store.collectRetired(pin.workspace_id, canonicalReleasedAt);
       return released;
     }
   };

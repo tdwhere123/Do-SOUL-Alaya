@@ -32,16 +32,36 @@ describe("diagnostic-loop failures", () => {
     expect(rendered).toContain("--from-phase snapshot");
   });
 
-  it("classifies wrapped recall errors as candidate failures", () => {
+  it.each(["control_recall", "treatment_recall"] as const)(
+    "classifies untyped %s errors as infrastructure failures",
+    (phase) => {
+      const failure = wrapPhaseError({
+        phase,
+        mode: "run",
+        workRoot: "/tmp/loop",
+        argv: [],
+        request: loopRequest(),
+        error: new Error("daemon unavailable")
+      });
+      expect(failure.classification).toBe("infrastructure");
+      expect(failure.phase).toBe(phase);
+    }
+  );
+
+  it("preserves an explicitly typed candidate failure", () => {
     const failure = wrapPhaseError({
       phase: "control_recall",
       mode: "run",
       workRoot: "/tmp/loop",
       argv: [],
       request: loopRequest(),
-      error: new Error("daemon unavailable")
+      error: new DiagnosticLoopFailure({
+        phase: "control_recall",
+        classification: "candidate",
+        message: "candidate contract failed",
+        resumeCommand: "ignored"
+      })
     });
     expect(failure.classification).toBe("candidate");
-    expect(failure.phase).toBe("control_recall");
   });
 });

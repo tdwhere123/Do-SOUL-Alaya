@@ -16,6 +16,7 @@ import {
 export function createSqliteProjectionGenerationStore(
   repo: FieldProjectionGenerationRepo
 ): ProjectionGenerationLifecycleStore {
+  const cache = createLastArtifactsCache();
   return Object.freeze({
     snapshot: (generation: FieldProjectionGeneration) =>
       generationFromRow(repo.insert(generationToRow(generation))),
@@ -26,10 +27,32 @@ export function createSqliteProjectionGenerationStore(
     )),
     activatePointer: (pointer: ProjectionGenerationPointer) => repo.activatePointer(pointer),
     putArtifacts: (workspaceId: string, artifacts: ProjectionGenerationArtifacts) =>
-      persistArtifacts(repo, workspaceId, artifacts),
-    readArtifacts: (workspaceId: string, generationId: string) =>
-      readArtifacts(repo, workspaceId, generationId)
+      cache.remember(workspaceId, persistArtifacts(repo, workspaceId, artifacts)),
+    readArtifacts: (workspaceId: string, generationId: string) => {
+      const hit = cache.read(workspaceId, generationId);
+      if (hit !== undefined) return hit;
+      const loaded = readArtifacts(repo, workspaceId, generationId);
+      return loaded === null ? null : cache.remember(workspaceId, loaded);
+    }
   });
+}
+
+function createLastArtifactsCache() {
+  let cached: Readonly<{
+    readonly key: string;
+    readonly artifacts: ProjectionGenerationArtifacts;
+  }> | null = null;
+  const keyOf = (workspaceId: string, generationId: string) => `${workspaceId}\0${generationId}`;
+  return {
+    read(workspaceId: string, generationId: string) {
+      const key = keyOf(workspaceId, generationId);
+      return cached?.key === key ? cached.artifacts : undefined;
+    },
+    remember(workspaceId: string, artifacts: ProjectionGenerationArtifacts) {
+      cached = { key: keyOf(workspaceId, artifacts.generation_id), artifacts };
+      return artifacts;
+    }
+  };
 }
 
 function persistArtifacts(

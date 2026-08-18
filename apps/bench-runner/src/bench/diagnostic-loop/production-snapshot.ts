@@ -1,7 +1,5 @@
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { pipeline } from "node:stream/promises";
+import { sha256File } from "../snapshot/integrity.js";
 import {
   isLongMemEvalSnapshotMaterializationResult,
   runLongMemEval
@@ -54,11 +52,12 @@ export async function runProductionSnapshotPhase(
       resumeCommand: ""
     });
   }
+  const digest = await sha256File(result.snapshotPath);
   return {
-    contentIdentity: await sha256File(result.snapshotPath),
+    contentIdentity: digest,
     physicalCalls: 0,
     artifactPaths: { snapshot: result.snapshotPath },
-    details: { snapshot_identity: await sha256File(result.snapshotPath) }
+    details: { snapshot_identity: digest }
   };
 }
 
@@ -78,10 +77,4 @@ async function reuseSnapshot(snapshotPath: string): Promise<DiagnosticLoopPhaseR
     artifactPaths: { snapshot: snapshotPath },
     details: { snapshot_identity: digest }
   };
-}
-
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  await pipeline(createReadStream(path), hash);
-  return hash.digest("hex");
 }

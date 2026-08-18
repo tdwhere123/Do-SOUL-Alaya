@@ -132,10 +132,10 @@ export class InMemoryProjectionGenerationStore {
     if (existing === undefined || existing.released_at !== null) {
       throw new Error("projection pin is missing or released");
     }
-    if (existing.expires_at <= renewedAt) {
+    if (projectionTimeMs(existing.expires_at) <= projectionTimeMs(renewedAt)) {
       throw new Error("projection pin is expired");
     }
-    if (expiresAt <= existing.expires_at) return existing;
+    if (projectionTimeMs(expiresAt) <= projectionTimeMs(existing.expires_at)) return existing;
     const renewed = Object.freeze({ ...existing, expires_at: expiresAt });
     this.pins.set(key, renewed);
     return renewed;
@@ -147,11 +147,13 @@ export class InMemoryProjectionGenerationStore {
 
   public requireActivePin(pin: ProjectionPin, asOf: string): ProjectionPin {
     const existing = this.pins.get(pinKey(pin.workspace_id, pin.generation_id, pin.reader_id));
-    if (existing === undefined || !samePin(existing, pin)) {
+    // Store expiry moves on renew; the caller handle snapshot does not.
+    if (existing === undefined || existing.pinned_at !== pin.pinned_at) {
       throw new Error("projection reader pin is missing or mismatched");
     }
     if (existing.released_at !== null) throw new Error("projection reader pin is released");
-    if (existing.pinned_at > asOf || existing.expires_at <= asOf) {
+    if (projectionTimeMs(existing.pinned_at) > projectionTimeMs(asOf) ||
+        projectionTimeMs(existing.expires_at) <= projectionTimeMs(asOf)) {
       throw new Error("projection reader pin is not live");
     }
     return existing;
@@ -290,7 +292,8 @@ export class InMemoryProjectionGenerationStore {
   private hasActivePin(workspaceId: string, generationId: string, asOf: string): boolean {
     const prefix = `${generationKey(workspaceId, generationId)}\0`;
     for (const [key, pin] of this.pins) {
-      if (key.startsWith(prefix) && pin.released_at === null && pin.expires_at > asOf) return true;
+      if (key.startsWith(prefix) && pin.released_at === null &&
+          projectionTimeMs(pin.expires_at) > projectionTimeMs(asOf)) return true;
     }
     return false;
   }
@@ -311,18 +314,16 @@ export class InMemoryProjectionGenerationStore {
   }
 }
 
+function projectionTimeMs(value: string): number {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) throw new Error("projection pin time must be valid");
+  return milliseconds;
+}
+
 function generationKey(workspaceId: string, generationId: string): string {
   return `${workspaceId}\0${generationId}`;
 }
 
 function pinKey(workspaceId: string, generationId: string, readerId: string): string {
   return `${generationKey(workspaceId, generationId)}\0${readerId}`;
-}
-
-function samePin(existing: ProjectionPin, incoming: ProjectionPin): boolean {
-  return existing.workspace_id === incoming.workspace_id &&
-    existing.generation_id === incoming.generation_id &&
-    existing.reader_id === incoming.reader_id &&
-    existing.pinned_at === incoming.pinned_at &&
-    existing.expires_at === incoming.expires_at;
 }

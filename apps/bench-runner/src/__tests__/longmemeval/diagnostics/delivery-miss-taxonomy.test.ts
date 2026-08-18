@@ -88,6 +88,62 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("budget_drop");
   });
 
+  it("classifies dimension capacity as budget_drop inside the delivery window", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: candidate({
+          preBudgetRank: 4,
+          fusedRank: 4,
+          finalRank: null,
+          droppedReason: "dimension_limit"
+        }),
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: true
+      })
+    ).toBe("budget_drop");
+  });
+
+  it("does not classify coverage-kept ineligible admission as budget_drop", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: candidate({
+          preBudgetRank: 1,
+          fusedRank: 1,
+          finalRank: null,
+          droppedReason: "ineligible",
+          rankAfterFusion: 1,
+          rankAfterFeatureRerank: 1,
+          rankAfterCoverageSelector: 1,
+          coverageSelectorAction: "kept"
+        }),
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: true
+      })
+    ).toBe("delivery_order_drop");
+  });
+
+  it("does not classify duplicate admission inside the delivery window as budget_drop", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: candidate({
+          preBudgetRank: 9,
+          fusedRank: 9,
+          finalRank: null,
+          droppedReason: "duplicate",
+          rankAfterFusion: 9,
+          rankAfterFeatureRerank: 9,
+          rankAfterCoverageSelector: 9,
+          coverageSelectorAction: "kept"
+        }),
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: true
+      })
+    ).toBe("delivery_order_drop");
+  });
+
   it("does not blame coverage when the feature head already moved fused top-5 gold out", () => {
     expect(
       classifyDeliveryMissTaxonomy({

@@ -40,28 +40,50 @@ describe("Select_Gamma admission walk", () => {
     });
   });
 
-  it.each(["source", "lineage"] as const)(
-    "rejects a repeated %s identity and refills with a novel candidate",
-    (identityChannel) => {
-      const result = selectGammaWalk(REQUEST, {
-        ...BINDING,
-        candidates: [
-          candidate("duplicate-a", 3, { [identityChannel]: "shared" }),
-          candidate("duplicate-b", 2, { [identityChannel]: "shared" }),
-          candidate("novel", 1, { [identityChannel]: "novel" })
-        ],
-        max_selected: 2
-      });
+  it("rejects a repeated source identity and refills with a novel candidate", () => {
+    const result = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      candidates: [
+        candidate("duplicate-a", 3, { source: "shared" }),
+        candidate("duplicate-b", 2, { source: "shared" }),
+        candidate("novel", 1, { source: "novel" })
+      ],
+      max_selected: 2
+    });
 
-      expect(result.selected_candidate_keys).toEqual(["duplicate-a", "novel"]);
-      expect(result.decisions.find(({ candidate_key }) =>
-        candidate_key === "duplicate-b")?.receipt).toMatchObject({
-        kind: "duplicate",
-        identity_channel: identityChannel,
-        retained_candidate_key: "duplicate-a"
-      });
-    }
-  );
+    expect(result.selected_candidate_keys).toEqual(["duplicate-a", "novel"]);
+    expect(result.decisions.find(({ candidate_key }) =>
+      candidate_key === "duplicate-b")?.receipt).toMatchObject({
+      kind: "duplicate",
+      identity_channel: "source",
+      retained_candidate_key: "duplicate-a"
+    });
+  });
+
+  it("admits a second distinct object that shares lineage", () => {
+    const result = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      candidates: [
+        candidate("duplicate-a", 3, {
+          object_key: "memory:a",
+          lineage: "session:shared"
+        }),
+        candidate("duplicate-b", 2, {
+          object_key: "memory:b",
+          lineage: "session:shared"
+        }),
+        candidate("novel", 1, {
+          object_key: "memory:novel",
+          lineage: "session:novel"
+        })
+      ],
+      max_selected: 2
+    });
+
+    expect(result.selected_candidate_keys).toEqual(["duplicate-a", "duplicate-b"]);
+    expect(result.decisions.filter((decision) =>
+      decision.receipt.kind === "duplicate")).toEqual([]);
+  });
 
   it("rejects a saturated dimension inside the walk and refills another dimension", () => {
     const result = selectGammaWalk(REQUEST, {

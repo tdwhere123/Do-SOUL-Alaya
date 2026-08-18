@@ -44,6 +44,7 @@ import {
   measureAsync,
   measureSync
 } from "./orchestration/recall-phase-latency.js";
+import { finishProjectionPinCleanup } from "./query/projection-pin-lease.js";
 import { prepareRecallRequest } from "./query/prepare-recall-request.js";
 import { captureRecallRequestTime } from "./query/recall-request-time.js";
 import { applySelectGammaSynthesis } from
@@ -63,6 +64,12 @@ export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallReque
 
 type AssessmentStageResult = RecallAssessmentStageResult;
 type ManifestedRecallResult = RecallManifestedResult;
+type PreparedRecallOutcome = Readonly<{
+  readonly coarse: CoarseStageResult;
+  readonly assessment: AssessmentStageResult;
+  readonly manifested: ManifestedRecallResult;
+  readonly synthesis: Awaited<ReturnType<typeof applySelectGammaSynthesis>>;
+}>;
 type AssessmentPhaseSeed = Readonly<{
   readonly embedding: number;
   readonly assessment: number;
@@ -81,51 +88,93 @@ export async function executeRecall(
     now: executionContext.now
   });
   const prepared = await prepareRecallRequest(executionContext, params, time);
+  let outcome: PreparedRecallOutcome;
   try {
-    const coarse = await collectCoarseStage(executionContext, params, prepared);
-    prepared.projectionPinLease.assertHealthy();
-    const assessment = await assessCandidateStage(executionContext, params, prepared, coarse);
-    prepared.projectionPinLease.assertHealthy();
-    const synthesis = await applySelectGammaSynthesis({
-      workspace_id: params.workspaceId,
-      run_id: params.runId ?? null,
-      query_text: prepared.queryText,
-      selected_evidence: assessment.finalAssessment.candidates,
-      port: executionContext.dependencies.selectGammaSynthesisPort
-    });
-    prepared.projectionPinLease.assertHealthy();
-    const manifested = await manifestCandidateStage(
-      executionContext,
-      params,
-      synthesis.selected_evidence,
-      assessment.finalAssessment.diagnostics
-    );
-    prepared.projectionPinLease.assertHealthy();
-    const completedAt = time.captureOperationalTime();
-    await recordRecallSideEffects(
-      executionContext,
-      params,
-      prepared,
-      coarse,
-      assessment,
-      manifested,
-      completedAt
-    );
-    return buildRecallResult(
-      prepared,
-      coarse,
-      assessment,
-      manifested,
-      degradationReasons,
-      synthesis.synthesis
-    );
-  } finally {
-    try {
-      prepared.projectionPinLease.stop();
-    } finally {
-      prepared.releaseProjectionPin();
-    }
+    outcome = await collectPreparedRecallOutcome(executionContext, params, prepared);
+  } catch (error) {
+    finishProjectionPinAfterFailure(prepared, executionContext.warn, error);
   }
+  finishPreparedProjectionPin(prepared, executionContext.warn);
+  const result = buildRecallResult(
+    prepared,
+    outcome.coarse,
+    outcome.assessment,
+    outcome.manifested,
+    degradationReasons,
+    outcome.synthesis.synthesis
+  );
+  await recordRecallSideEffects(
+    executionContext,
+    params,
+    prepared,
+    outcome.coarse,
+    outcome.assessment,
+    outcome.manifested,
+    time.captureOperationalTime()
+  );
+  return result;
+}
+
+async function collectPreparedRecallOutcome(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest
+): Promise<PreparedRecallOutcome> {
+  const coarse = await collectCoarseStage(context, params, prepared);
+  prepared.projectionPinLease.assertHealthy();
+  const assessment = await assessCandidateStage(context, params, prepared, coarse);
+  prepared.projectionPinLease.assertHealthy();
+  const synthesis = await applySelectGammaSynthesis({
+    workspace_id: params.workspaceId,
+    run_id: params.runId ?? null,
+    query_text: prepared.queryText,
+    selected_evidence: assessment.finalAssessment.candidates,
+    port: context.dependencies.selectGammaSynthesisPort
+  });
+  prepared.projectionPinLease.assertHealthy();
+  const manifested = await manifestCandidateStage(
+    context,
+    params,
+    synthesis.selected_evidence,
+    assessment.finalAssessment.diagnostics
+  );
+  prepared.projectionPinLease.assertHealthy();
+  return Object.freeze({
+    coarse,
+    assessment,
+    manifested,
+    synthesis
+  });
+}
+
+function finishPreparedProjectionPin(
+  prepared: PreparedRecallRequest,
+  warn: RecallExecutionContext["warn"]
+): void {
+  finishProjectionPinCleanup([
+    () => prepared.projectionPinLease.stop(),
+    prepared.releaseProjectionPin
+  ], warn);
+}
+
+function finishProjectionPinAfterFailure(
+  prepared: PreparedRecallRequest,
+  warn: RecallExecutionContext["warn"],
+  primaryFailure: unknown
+): never {
+  try {
+    finishPreparedProjectionPin(prepared, warn);
+  } catch (cleanupError) {
+    const message = primaryFailure instanceof Error
+      ? primaryFailure.message
+      : String(primaryFailure);
+    throw new AggregateError(
+      [primaryFailure, cleanupError],
+      `recall execution failed: ${message}`,
+      { cause: primaryFailure }
+    );
+  }
+  throw primaryFailure;
 }
 
 async function assessCandidateStage(

@@ -156,34 +156,56 @@ function materializeLevelTwoBundles(
   identityBundleIds: ReadonlySet<string>
 ): readonly ProjectionL2Bundle[] {
   const pairs: ProjectionL2Bundle[] = [];
-  for (let leftIndex = 0; leftIndex < levelOne.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < levelOne.length; rightIndex += 1) {
-      const left = levelOne[leftIndex]!;
-      const right = levelOne[rightIndex]!;
-      // Grounded lexical L1 still routes; pairing it would re-inflate co-member L2.
-      if (!identityBundleIds.has(left.bundle_id) || !identityBundleIds.has(right.bundle_id)) {
-        continue;
-      }
-      if (!sharesMember(left.member_refs, right.member_refs)) continue;
-      const members = uniqueSorted([...left.member_refs, ...right.member_refs])
-        .slice(0, params.policy.maxMembers);
-      pairs.push(createBundle(params, scope, {
-        anchorDigest: hashLabeledIdentity("bundle_anchor", [
-          left.bundle_id,
-          right.bundle_id
-        ], params.sha256),
-        level: 2,
-        members,
-        children: [left.bundle_id, right.bundle_id],
-        summary: Object.freeze([...left.factor_summary, ...right.factor_summary]),
-        opened: true,
-        unseen: 0
-      }));
-    }
+  for (const [left, right] of identityCoMemberPairs(levelOne, identityBundleIds)) {
+    const members = uniqueSorted([...left.member_refs, ...right.member_refs])
+      .slice(0, params.policy.maxMembers);
+    pairs.push(createBundle(params, scope, {
+      anchorDigest: hashLabeledIdentity("bundle_anchor", [
+        left.bundle_id,
+        right.bundle_id
+      ], params.sha256),
+      level: 2,
+      members,
+      children: [left.bundle_id, right.bundle_id],
+      summary: Object.freeze([...left.factor_summary, ...right.factor_summary]),
+      opened: true,
+      unseen: 0
+    }));
   }
   return Object.freeze(pairs.sort((left, right) =>
     compareText(left.bundle_id, right.bundle_id)
   ));
+}
+
+function identityCoMemberPairs(
+  levelOne: readonly ProjectionL2Bundle[],
+  identityBundleIds: ReadonlySet<string>
+): readonly (readonly [ProjectionL2Bundle, ProjectionL2Bundle])[] {
+  // Grounded L1 still routes at L1; pairing it would re-inflate co-member L2.
+  const identity = levelOne.filter((bundle) => identityBundleIds.has(bundle.bundle_id));
+  const byId = new Map(identity.map((bundle) => [bundle.bundle_id, bundle]));
+  const memberBundleIds = new Map<string, string[]>();
+  for (const bundle of identity) {
+    for (const member of bundle.member_refs) {
+      const ids = memberBundleIds.get(member) ?? [];
+      ids.push(bundle.bundle_id);
+      memberBundleIds.set(member, ids);
+    }
+  }
+  const seen = new Set<string>();
+  const pairs: (readonly [ProjectionL2Bundle, ProjectionL2Bundle])[] = [];
+  for (const ids of memberBundleIds.values()) {
+    const unique = uniqueSorted(ids);
+    for (let leftIndex = 0; leftIndex < unique.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < unique.length; rightIndex += 1) {
+        const pairKey = `${unique[leftIndex]}\0${unique[rightIndex]}`;
+        if (seen.has(pairKey)) continue;
+        seen.add(pairKey);
+        pairs.push([byId.get(unique[leftIndex]!)!, byId.get(unique[rightIndex]!)!]);
+      }
+    }
+  }
+  return pairs;
 }
 
 function applyPlantedFrontiers(
@@ -285,11 +307,6 @@ function workspaceScope(postings: readonly ProjectionL1Posting[]): string {
 function splitAnchorKey(anchorKey: string): readonly [string, string] {
   const split = anchorKey.indexOf("\0");
   return [anchorKey.slice(0, split), anchorKey.slice(split + 1)];
-}
-
-function sharesMember(left: readonly string[], right: readonly string[]): boolean {
-  const rightSet = new Set(right);
-  return left.some((member) => rightSet.has(member));
 }
 
 function uniqueSorted(values: readonly string[]): readonly string[] {

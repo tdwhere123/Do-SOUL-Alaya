@@ -31,6 +31,16 @@ export function requireDeliveryMissDropReason(
 
 export const DELIVERY_MISS_TOP_K = 5;
 export const DELIVERY_BUDGET_LOSS_RANK = 10;
+// Admission refusals are not entry/token capacity cuts.
+const DELIVERY_BUDGET_CAPACITY_REASONS = [
+  "dimension_limit",
+  "max_entries",
+  "max_total_tokens"
+] as const satisfies readonly DeliveryMissDropReason[];
+const DELIVERY_ADMISSION_REASONS = [
+  "ineligible",
+  "duplicate"
+] as const satisfies readonly DeliveryMissDropReason[];
 
 export type DeliveryMissTaxonomy =
   | "candidate_absent"
@@ -90,12 +100,40 @@ export function classifyDeliveryMissTaxonomy(
   return "delivery_order_drop";
 }
 
-function isDeliveryBudgetDrop(candidate: DeliveryMissCandidateInput): boolean {
-  if (candidate.droppedReason === null) {
+export function isDeliveryBudgetDrop(
+  candidate: Pick<
+    DeliveryMissCandidateInput,
+    "droppedReason" | "preBudgetRank" | "fusedRank"
+  >
+): boolean {
+  if (!isDeliveryBudgetCapacityReason(candidate.droppedReason)) {
     return false;
   }
   const candidateRank = candidate.preBudgetRank ?? candidate.fusedRank;
   return candidateRank !== null && candidateRank <= DELIVERY_BUDGET_LOSS_RANK;
+}
+
+export function isDeliveryAdmissionDrop(
+  candidate: Pick<
+    DeliveryMissCandidateInput,
+    "droppedReason" | "preBudgetRank" | "fusedRank"
+  >
+): boolean {
+  if (candidate.droppedReason === null ||
+      !(DELIVERY_ADMISSION_REASONS as readonly string[]).includes(candidate.droppedReason)) {
+    return false;
+  }
+  const candidateRank = candidate.preBudgetRank ?? candidate.fusedRank;
+  return candidateRank !== null && candidateRank <= DELIVERY_BUDGET_LOSS_RANK;
+}
+
+function isDeliveryBudgetCapacityReason(
+  reason: string | null
+): reason is (typeof DELIVERY_BUDGET_CAPACITY_REASONS)[number] {
+  return (
+    reason !== null &&
+    (DELIVERY_BUDGET_CAPACITY_REASONS as readonly string[]).includes(reason)
+  );
 }
 
 function isAnswerSetCoverageDrop(candidate: DeliveryMissCandidateInput): boolean {

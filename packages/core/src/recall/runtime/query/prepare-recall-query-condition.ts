@@ -45,7 +45,11 @@ export function capturePreparedRequestCondition(input: Readonly<{
   readonly semanticCapture?: Readonly<OpenSemanticFactorFormationCapture>;
 }>): PreparedQueryConditionCapture {
   const referenceTime = input.time.effectiveAsOf;
-  const pin = input.session.pinActiveGeneration(input.workspaceId, input.time.capturedAt);
+  // Pin lease follows operational now, not query as-of.
+  const pin = input.session.pinActiveGeneration(
+    input.workspaceId,
+    input.time.captureOperationalTime()
+  );
   try {
     return {
       referenceTime,
@@ -57,7 +61,7 @@ export function capturePreparedRequestCondition(input: Readonly<{
       })
     };
   } catch (error) {
-    input.session.release(pin, input.time.capturedAt);
+    input.session.release(pin, input.time.captureOperationalTime());
     throw error;
   }
 }

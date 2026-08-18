@@ -99,6 +99,8 @@ export interface RecallExecutionContext {
   readonly degradationReasons?: Set<RecallDegradationReason>;
   readonly fieldQuerySession: RecallFieldQuerySession;
   readonly sha256: FieldContractSha256;
+  readonly projectionPinHeartbeatScheduler?:
+    import("./query/projection-pin-lease.js").ProjectionPinHeartbeatScheduler;
 }
 
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;

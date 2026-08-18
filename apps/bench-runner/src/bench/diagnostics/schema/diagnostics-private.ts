@@ -1,4 +1,7 @@
-import { DELIVERY_BUDGET_LOSS_RANK } from "../miss/delivery-miss-taxonomy.js";
+import {
+  isDeliveryAdmissionDrop,
+  isDeliveryBudgetDrop
+} from "../miss/delivery-miss-taxonomy.js";
 import type {
   BenchEmbeddingProviderState,
   LongMemEvalGoldDiagnostic,
@@ -314,9 +317,19 @@ function sanitizeProviderDegradationReason(value: string | null): string | null 
 }
 
 export function isDeliveryBudgetLoss(item: LongMemEvalGoldDiagnostic): boolean {
-  if (item.budget_drop_reason === null) return false;
-  const candidateRank = item.pre_budget_rank ?? item.fused_rank;
-  return candidateRank !== null && candidateRank <= DELIVERY_BUDGET_LOSS_RANK;
+  return isDeliveryBudgetDrop({
+    droppedReason: item.budget_drop_reason,
+    preBudgetRank: item.pre_budget_rank,
+    fusedRank: item.fused_rank
+  });
+}
+
+export function isDeliveryAdmissionLoss(item: LongMemEvalGoldDiagnostic): boolean {
+  return isDeliveryAdmissionDrop({
+    droppedReason: item.budget_drop_reason,
+    preBudgetRank: item.pre_budget_rank,
+    fusedRank: item.fused_rank
+  });
 }
 
 export function hasStructuralPlane(planes: readonly string[]): boolean {

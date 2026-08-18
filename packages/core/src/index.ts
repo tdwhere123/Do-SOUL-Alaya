@@ -232,7 +232,7 @@ export * from "./recall/field/facility/selection-objective.js";
 export * from "./recall/field/query-facility-demand.js";
 export * from "./recall/field/fact-frame-semantic-factors.js";
 export * from "./recall/field/query-attribution/query-field-attribution.js";
-export { projectionPinExpiry } from
+export { canonicalProjectionPinTime, projectionPinExpiry } from
   "./recall/runtime/query/projection-pin-lease.js";
 export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/query-fact-frame-extraction-port.js";

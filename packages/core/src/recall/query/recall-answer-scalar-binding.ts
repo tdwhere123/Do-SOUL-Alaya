@@ -189,7 +189,7 @@ function assessPlaceBinding(
     ? isBoundPurchasePlace(plan, sentence, assertionText)
     : isBoundEventPlace(plan, assertionText);
   if (!tupleBound) return null;
-  return bindingAssessment(probes, sentence);
+  return bindingAssessment(probes, sentence, resolveRecallScalarEventStatus(assertionText));
 }
 
 function isBoundPurchasePlace(

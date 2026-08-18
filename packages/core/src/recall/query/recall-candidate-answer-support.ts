@@ -176,12 +176,13 @@ function buildScalarAuthority(
     ? context.verifiedUserAssertionContext
     : undefined;
   const assertionContext = verified?.user_context ?? entry.content;
+  const assertionText = verified?.assertion_text ?? entry.content;
   const tokens = new Set(splitLexicalTokens(assertionContext));
   const binding = assessRecallScalarBinding(
     plan,
     context.queryProbes,
     assertionContext,
-    verified?.assertion_text ?? entry.content
+    assertionText
   );
   const targetStatus = binding?.target_status ??
     resolveRecallTargetStatus(plan.target_terms, tokens);
@@ -189,7 +190,7 @@ function buildScalarAuthority(
     resolveRecallRelationStatus(plan.relation_terms, tokens);
   const subjectStatus = binding?.subject_status ??
     resolveSubjectStatus(context.queryProbes, assertionContext);
-  const eventStatus = binding?.event_status ?? resolveRecallScalarEventStatus(assertionContext);
+  const eventStatus = binding?.event_status ?? resolveRecallScalarEventStatus(assertionText);
   const timeStatus = binding?.time_status ?? resolveTimeStatus(context.queryProbes);
   const bindingStatus = binding === null ? "missing_or_ambiguous" as const : "unique" as const;
   const provenanceStatus = verified === undefined

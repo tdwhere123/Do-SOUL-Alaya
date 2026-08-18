@@ -16,6 +16,7 @@ import {
   createTestOnlyInMemoryFieldQuerySession,
   type RecallFieldQuerySession
 } from "./runtime/query/field-query-session.js";
+import type { ProjectionPinHeartbeatScheduler } from "./runtime/query/projection-pin-lease.js";
 import { buildDefaultPolicy } from "./runtime/orchestration.js";
 import { executeRecall, type RecallExecutionParams } from "./runtime/recall-service-runner.js";
 import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
@@ -26,6 +27,7 @@ export type RecallServiceFieldDeps = Readonly<{
   readonly fieldQuerySession?: RecallFieldQuerySession;
   readonly sha256?: FieldContractSha256;
   readonly testOnlyAllowInMemoryFieldQuerySession?: true;
+  readonly projectionPinHeartbeatScheduler?: ProjectionPinHeartbeatScheduler;
 }>;
 
 export type RecallServiceSynthesisDeps = SelectGammaSynthesisDependencies;
@@ -103,7 +105,8 @@ export class RecallService {
       buildDefaultPolicy: (strategy, taskSurfaceRef, capturedAt) =>
         this.buildDefaultPolicy(strategy, taskSurfaceRef, capturedAt),
       fieldQuerySession: this.fieldQuerySession,
-      sha256: this.sha256
+      sha256: this.sha256,
+      projectionPinHeartbeatScheduler: this.dependencies.projectionPinHeartbeatScheduler
     }, params);
   }
 

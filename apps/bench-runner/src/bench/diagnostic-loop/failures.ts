@@ -27,7 +27,6 @@ export class DiagnosticLoopFailure extends Error {
 
 export function defaultFailureClass(phase: DiagnosticLoopPhase): DiagnosticLoopFailureClass {
   if (phase === "authority_cache" || phase === "extraction") return "authority";
-  if (phase === "control_recall" || phase === "treatment_recall") return "candidate";
   if (phase === "miss_ledger") return "selection";
   return "infrastructure";
 }

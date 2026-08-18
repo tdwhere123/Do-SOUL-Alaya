@@ -301,6 +301,20 @@ describe("projection L1/L2 bundles and honest stop envelopes", () => {
     expect(mixed.some((bundle) => bundle.level === 2)).toBe(false);
   });
 
+  it("pairs identity L2 among grounded co-members without dropping the identity pair", () => {
+    const postings = materializeSliceKeyL1Postings(GENERATION, [
+      groundedKey("memory-1", "some"),
+      groundedKey("memory-1", "have"),
+      groundedKey("memory-1", "how"),
+      groundedKey("memory-1", "think"),
+      identityKey("memory-1", "semantic", "graduate", "signal_fact"),
+      identityKey("memory-1", "semantic", "student", "signal_fact")
+    ], sha256);
+    const bundles = materializePolicyBundles(postings);
+    expect(bundles.filter((bundle) => bundle.level === 1)).toHaveLength(6);
+    expect(bundles.filter((bundle) => bundle.level === 2)).toHaveLength(1);
+  });
+
   it("turns retrieval-field observations into generation-scoped L1 postings", () => {
     const capture = createRecallFiniteFieldChannelCapture({
       source_snapshot_digest: GENERATION,
