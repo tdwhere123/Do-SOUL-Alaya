@@ -499,6 +499,24 @@ describe("MCP memory authenticity proof", () => {
         factorValue: "Mina Voss"
       }
     ] as const;
+    const decoys = [
+      {
+        object_id: "00000000-0000-4000-8000-0000000000d0",
+        content: "Unrelated kettle descaling interval note 0."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000d1",
+        content: "Unrelated kettle descaling interval note 1."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000d2",
+        content: "Unrelated kettle descaling interval note 2."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000d3",
+        content: "Unrelated kettle descaling interval note 3."
+      }
+    ] as const;
 
     const harness = await createAuthenticityHarness(async (repos, database) => {
       for (const gold of golds) {
@@ -520,6 +538,15 @@ describe("MCP memory authenticity proof", () => {
           recordedAt: memory.created_at
         });
       }
+      for (const decoy of decoys) {
+        await repos.memoryRepo.create(createMemoryEntry({
+          object_id: decoy.object_id,
+          evidence_refs: [],
+          content: decoy.content,
+          dimension: MemoryDimension.FACT,
+          activation_score: 0.95
+        }));
+      }
     });
 
     try {
@@ -532,7 +559,9 @@ describe("MCP memory authenticity proof", () => {
       });
       const deliveredIds = recall.results.map((result) => result.object_id);
       const goldIds = golds.map((gold) => gold.object_id);
+      const decoyIds = decoys.map((decoy) => decoy.object_id);
       expect(goldIds.every((id) => deliveredIds.includes(id))).toBe(true);
+      expect(decoyIds.some((id) => !deliveredIds.includes(id))).toBe(true);
     } finally {
       await harness.close();
     }
