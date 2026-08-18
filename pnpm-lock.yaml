@@ -248,9 +248,6 @@ importers:
 
   packages/soul:
     dependencies:
-      '@do-soul/alaya-engine-gateway':
-        specifier: workspace:*
-        version: link:../engine-gateway
       '@do-soul/alaya-graph-algorithms':
         specifier: workspace:*
         version: link:../graph-algorithms

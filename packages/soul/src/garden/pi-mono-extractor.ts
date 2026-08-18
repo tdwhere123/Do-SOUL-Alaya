@@ -1,7 +1,3 @@
-import {
-  isRetryableProviderHttpStatus,
-  withProviderRetry
-} from "@do-soul/alaya-engine-gateway";
 import { SignalExtractorError, type RetryClassification } from "./pi-mono-errors.js";
 import { parseOrRecoverJson, type JsonRecoveryKind } from "./pi-mono-json-recovery.js";
 import { readTextContent, requestJsonPayload, selectModel } from "./pi-mono-transport.js";
@@ -171,55 +167,18 @@ async function runExtractionLoop(
   input: ExtractInput
 ): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }> {
   const state: RetryState = { attempt: 0, timeoutRetries: 0, lastError: null };
-  try {
-    return await withProviderRetry(
-      (attempt) => runExtractionAttempt(runtime, input, attempt),
-      {
-        delaysMs: Array.from({ length: MAX_EXTRACTOR_RETRIES }, () => 0),
-        isRetryable: (error, attempt) => decideExtractorRetry(input, state, error, attempt),
-        waitForRetry: (attempt) => runtime.sleep(computeJitterMs(attempt, runtime.random))
-      }
-    );
-  } catch (error) {
-    if (error instanceof SignalExtractorError) throw error;
-    throw buildExhaustedRetriesError(input, { ...state, lastError: error });
-  }
-}
-
-function decideExtractorRetry(
-  input: ExtractInput,
-  state: RetryState,
-  error: unknown,
-  attempt: number
-): boolean {
-  state.attempt = attempt;
-  state.lastError = error;
-  const mapped = mapExtractorTransportError(
-    error,
-    input.abortSignal,
-    input.timeoutMs,
-    attempt
-  );
-  if (input.abortSignal?.aborted === true) {
-    throw withClassification(mapped, "failure_aborted");
-  }
-  if (mapped.kind === "timeout") {
-    if (state.timeoutRetries >= MAX_EXTRACTOR_TIMEOUT_RETRIES) {
-      throw withClassification(mapped, "failure_timeout");
+  // Bounded loop: at most MAX_EXTRACTOR_RETRIES + 1 attempts (default 4).
+  // Timeout failures consume a SEPARATE smaller budget so a chronic slow path
+  // cannot 4x the bench wall time.
+  // see also: packages/engine-gateway/src/provider/with-provider-retry.ts withProviderRetry
+  while (state.attempt <= MAX_EXTRACTOR_RETRIES) {
+    try {
+      return await runExtractionAttempt(runtime, input, state.attempt);
+    } catch (error) {
+      await handleExtractionFailure(runtime, input, state, error);
     }
-    if (attempt >= MAX_EXTRACTOR_RETRIES) {
-      throw withClassification(mapped, "failure_max_retries");
-    }
-    state.timeoutRetries += 1;
-    return true;
   }
-  if (!isRetryableExtractorError(mapped, error) || attempt >= MAX_EXTRACTOR_RETRIES) {
-    throw withClassification(
-      mapped,
-      isRetryableExtractorError(mapped, error) ? "failure_max_retries" : "failure_non_retryable_4xx"
-    );
-  }
-  return true;
+  throw buildExhaustedRetriesError(input, state);
 }
 
 async function runExtractionAttempt(
@@ -281,6 +240,58 @@ function recoverAttemptJson(
     "Signal extractor returned invalid JSON.",
     { retryCount: attempt }
   );
+}
+
+async function handleExtractionFailure(
+  runtime: ExtractorRuntime,
+  input: ExtractInput,
+  state: RetryState,
+  error: unknown
+): Promise<void> {
+  state.lastError = error;
+  const mapped = mapExtractorTransportError(
+    error,
+    input.abortSignal,
+    input.timeoutMs,
+    state.attempt
+  );
+  if (input.abortSignal?.aborted === true) {
+    throw withClassification(mapped, "failure_aborted");
+  }
+  if (mapped.kind === "timeout") {
+    await retryTimeoutFailure(runtime, state, mapped);
+    return;
+  }
+  if (!isRetryableExtractorError(mapped, error)) {
+    throw withClassification(mapped, "failure_non_retryable_4xx");
+  }
+  await retryAfterBackoff(runtime, state, mapped);
+}
+
+async function retryTimeoutFailure(
+  runtime: ExtractorRuntime,
+  state: RetryState,
+  error: SignalExtractorError
+): Promise<void> {
+  if (state.timeoutRetries >= MAX_EXTRACTOR_TIMEOUT_RETRIES) {
+    throw withClassification(error, "failure_timeout");
+  }
+  state.timeoutRetries += 1;
+  await retryAfterBackoff(runtime, state, error);
+}
+
+async function retryAfterBackoff(
+  runtime: ExtractorRuntime,
+  state: RetryState,
+  error: SignalExtractorError
+): Promise<void> {
+  if (state.attempt >= MAX_EXTRACTOR_RETRIES) {
+    throw withClassification(error, "failure_max_retries");
+  }
+  // 0-indexed backoff: jitter off the current attempt, then advance the counter.
+  const jitterMs = computeJitterMs(state.attempt, runtime.random);
+  state.attempt += 1;
+  await runtime.sleep(jitterMs);
 }
 
 function buildExhaustedRetriesError(
@@ -376,7 +387,8 @@ function isRetryableExtractorError(
     // the next request.
     return true;
   }
-  return isRetryableProviderHttpStatus(status);
+  // see also: packages/engine-gateway/src/provider/with-provider-retry.ts isRetryableProviderHttpStatus
+  return status === 429 || (status >= 500 && status < 600);
 }
 
 function extractStatusFromError(error: unknown): number | null {
