@@ -90,3 +90,7 @@ export const EmbeddingStatusSchema = z
 
 export type EmbeddingEffectiveMode = z.infer<typeof EmbeddingEffectiveModeSchema>;
 export type EmbeddingStatus = z.infer<typeof EmbeddingStatusSchema>;
+
+export const EmbeddingProviderKindSchema = z.enum(["openai", "local_onnx"]);
+export type EmbeddingProviderKind = z.infer<typeof EmbeddingProviderKindSchema>;
+

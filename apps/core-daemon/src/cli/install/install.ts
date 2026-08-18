@@ -4,6 +4,7 @@ import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import {
   RuntimeGardenProviderKindSchema,
   formatFileSecretRef,
+  type EmbeddingProviderKind,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "@do-soul/alaya-storage";
@@ -90,8 +91,6 @@ async function ensureSchemaReady(dbPath: string): Promise<void> {
   }
   initDatabase({ filename: dbPath });
 }
-
-type EmbeddingProviderKind = "openai" | "local_onnx";
 
 interface ExistingInstallConfig {
   readonly db_path: string | null;

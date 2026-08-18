@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  resolveEffectiveEmbeddingPosture,
   resolveSecretRef,
   type ResolveSecretError
 } from "@do-soul/alaya";
-import { resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
+import { parseSourceRefRobust, resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
@@ -107,6 +108,7 @@ export function createBenchDaemonLaunchConfig(input: {
     reviewerCredentials,
     openAiSecretRef
   });
+  assertBenchEmbeddingModeMatchesEffective(input.embeddingMode, environment);
   return Object.freeze({
     dataDir: input.dataDir,
     configDir,
@@ -258,11 +260,20 @@ function resolveLocalModelCacheRoot(
 }
 
 export function resolveSourceRefRobust(raw: string | undefined): boolean {
-  const normalized = raw?.trim().toLowerCase();
-  if (normalized === undefined || normalized.length === 0) return true;
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  throw new Error("ALAYA_RECALL_SOURCE_REF_ROBUST must be true, false, 1, or 0");
+  return parseSourceRefRobust(raw);
+}
+
+export function assertBenchEmbeddingModeMatchesEffective(
+  embeddingMode: BenchEmbeddingMode,
+  environment: Readonly<Record<string, string | undefined>>
+): void {
+  if (embeddingMode !== "disabled") return;
+  const posture = resolveEffectiveEmbeddingPosture((key) => environment[key]);
+  if (posture.embeddingSupplementEnabled) {
+    throw new Error(
+      "bench embeddingMode=disabled but effective embedding supplement is on"
+    );
+  }
 }
 
 function setEnvValue(key: string, value: string | undefined): void {

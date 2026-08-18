@@ -88,6 +88,18 @@ function teardown(fixture: RuntimeFixture): void {
   fixture.database.close();
 }
 
+function createReadyLocalProvider(
+  embedTexts: () => Promise<readonly Float32Array[]> = async () => [new Float32Array([1])]
+) {
+  return {
+    providerKind: "local_onnx" as const,
+    modelId: "local/test-model",
+    schemaVersion: 1,
+    isAvailable: true,
+    embedTexts
+  };
+}
+
 const SAVED_ENV: Record<string, string | undefined> = {};
 const MANAGED_KEYS = [
   "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
@@ -132,7 +144,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           eventLogRepo: fixture.eventLogRepo,
           healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
           memoryEntryRepo: fixture.memoryEntryRepo,
-          warn: fixture.warn as unknown as WarnFn
+          warn: fixture.warn as unknown as WarnFn,
+          embeddingProviderOverride: createReadyLocalProvider()
         });
 
         expect(defaultPolicyDecorator).toBeDefined();
@@ -170,7 +183,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         eventLogRepo: fixture.eventLogRepo,
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
-        warn: fixture.warn as unknown as WarnFn
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: createReadyLocalProvider()
       });
 
       expect(defaultPolicyDecorator).toBeDefined();

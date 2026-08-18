@@ -149,6 +149,13 @@ export type { ToolGovernancePort } from "./tools/tool-governance-port.js";
 export * from "./runtime/node-template.js";
 export * from "./workers/auditor-ports.js";
 export * from "./shared/read-error-message.js";
+export {
+  parseEnvBoolean,
+  parseEnvOptionalNonNegativeSafeInt,
+  parseEnvOptionalNumber,
+  parseEnvPositiveInt
+} from "./shared/env-value.js";
+
 export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
 export { deepFreeze } from "./shared/deep-freeze.js";
 export {

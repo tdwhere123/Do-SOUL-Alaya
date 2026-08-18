@@ -134,7 +134,7 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ),
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "true",
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "false",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true",
       ALAYA_EMBEDDING_PROVIDER: "local_onnx"
     });
@@ -168,7 +168,7 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ));
-      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBe("true");
+      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBe("false");
       await daemon.shutdown();
       daemon = undefined;
       expect(process.env.HOME).toBe(operatorHome);

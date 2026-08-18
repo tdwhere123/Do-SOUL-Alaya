@@ -31,10 +31,10 @@ describe("effective recall config identity", () => {
       maxResults: 20
     });
     const equivalentAdapter = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "true"
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
     }, options);
     const adapterDrift = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "true"
     }, options);
     const h1Drift = buildEffectiveRecallConfigIdentity({
       ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
@@ -231,7 +231,7 @@ describe("effective recall config identity", () => {
     { ALAYA_RECALL_EVAL_MAX_RESULTS: "20" },
     { ALAYA_EMBEDDING_RECALL_TIERS: "cold" },
     { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "2" },
-    { ALAYA_RECALL_SOURCE_REF_ROBUST: "false" }
+    { ALAYA_RECALL_SOURCE_REF_ROBUST: "true" }
   ])("rejects effective product recall drift before reading inputs", async (drift) => {
     await expect(prepareRecallEvalRunContext({
       snapshotDbPath: "/missing/snapshot.db",

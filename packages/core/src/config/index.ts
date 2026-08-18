@@ -7,9 +7,18 @@ export {
   type PathGraphRuntimeConfig
 } from "./core-config.js";
 export {
+  CORE_CONFIG_ENV_KEYS,
   isCoreConfigEnvironmentKey,
   resolveCoreConfigEnvironmentKeys
 } from "./core-config-environment.js";
+export {
+  parseDefaultOnFlag,
+  parseEnvBoolean,
+  parseEnvOptionalNonNegativeSafeInt,
+  parseEnvOptionalNumber,
+  parseEnvPositiveInt,
+  parseSourceRefRobust
+} from "./env-value.js";
 export {
   getCoreConfig,
   installCoreConfig,
@@ -25,7 +34,6 @@ export {
   readRecallPositiveInt,
   readRecallRatio,
   readRecallUnitFloat,
-  recallAnswersWithEnabled,
   recallEnvRaw,
   recallProjectionScoringEnabled
 } from "./recall-env-access.js";

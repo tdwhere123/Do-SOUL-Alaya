@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
+import { getCoreConfig, installCoreConfigFromProcessEnv, parseSourceRefRobust } from "@do-soul/alaya-core";
 import {
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
@@ -33,6 +33,10 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
+import {
+  DAEMON_ONLY_CONFIG_ENV_KEYS,
+  readDaemonProcessEnv
+} from "./runtime/config/daemon-config-environment.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
@@ -48,6 +52,10 @@ export type {
 export type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+export {
+  resolveEffectiveEmbeddingPosture,
+  type EffectiveEmbeddingPosture
+} from "./ai/daemon-embedding-runtime-config.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
 
@@ -114,6 +122,12 @@ async function createRuntimeBootstrapContext() {
   });
   // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
+  warnLogger.info("effective recall runtime", {
+    projections_enabled: getCoreConfig().recall.projectionsEnabled,
+    source_ref_robust: parseSourceRefRobust(
+      readDaemonProcessEnv(DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
+    )
+  });
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);

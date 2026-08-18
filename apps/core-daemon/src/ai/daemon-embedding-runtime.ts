@@ -35,6 +35,7 @@ import {
 import {
   isD2qActive,
   readEmbeddingRuntimeConfig,
+  type EmbeddingProviderKind,
   type EmbeddingRuntimeConfig
 } from "./daemon-embedding-runtime-config.js";
 import {
@@ -305,7 +306,7 @@ function createProviderWarmup(
 const DEFAULT_EMBEDDING_FUSION_WEIGHT = 1;
 
 function resolveEmbeddingProvider(input: {
-  readonly providerKind: "openai" | "local_onnx";
+  readonly providerKind: EmbeddingProviderKind;
   readonly storageAvailable: boolean;
   readonly optInEnabled: boolean;
   readonly apiKey: string | null;
@@ -332,6 +333,11 @@ function resolveEmbeddingProvider(input: {
   }
 
   if (input.apiKey === null) {
+    if (input.optInEnabled) {
+      throw new Error(
+        "ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF"
+      );
+    }
     return null;
   }
   return new OpenAIEmbeddingClient({

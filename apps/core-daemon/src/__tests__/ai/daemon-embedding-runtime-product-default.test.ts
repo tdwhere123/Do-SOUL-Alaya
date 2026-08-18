@@ -226,6 +226,8 @@ describe("daemon local embedding product default", () => {
   });
 
   it("keeps an explicitly selected API provider off unless the operator enables it", async () => {
+    const previousSecret = process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY;
+    process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY = "test-openai-embedding-key";
     const disabledEmbedTexts = vi.fn(async () => [new Float32Array([1])]);
     const disabled = createRuntime(
       new Map([["ALAYA_EMBEDDING_PROVIDER", "openai"]]),
@@ -233,7 +235,8 @@ describe("daemon local embedding product default", () => {
     );
     const enabled = createRuntime(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "openai"],
-      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "1"]
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "1"],
+      ["ALAYA_OPENAI_SECRET_REF", "env:ALAYA_TEST_OPENAI_EMBEDDING_KEY"]
     ]));
     try {
       await expect(disabled.runtime.providerWarmup).resolves.toBe("not_requested");
@@ -244,6 +247,8 @@ describe("daemon local embedding product default", () => {
     } finally {
       disabled.database.close();
       enabled.database.close();
+      if (previousSecret === undefined) delete process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY;
+      else process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY = previousSecret;
     }
   });
 

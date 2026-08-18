@@ -5,6 +5,7 @@ import {
 import {
   ContextLensAssembler,
   GraphExploreService,
+  parseSourceRefRobust,
   RecallService,
   RuleBasedEntityExtractor,
   RuleBasedQueryFactFrameExtractor
@@ -16,6 +17,10 @@ import {
 } from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
+import {
+  DAEMON_ONLY_CONFIG_ENV_KEYS,
+  readDaemonProcessEnv
+} from "../config/daemon-config-environment.js";
 import {
   annotateRecallEmbeddingWarmupHold,
   type EmbeddingWarmupHoldReason
@@ -344,9 +349,8 @@ function createRecallContextLensAssembler(
 }
 
 function readRobustSourceRefParsing(): boolean {
-  return (
-    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "1" ||
-    process.env.ALAYA_RECALL_SOURCE_REF_ROBUST === "true"
+  return parseSourceRefRobust(
+    readDaemonProcessEnv(DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
   );
 }
 

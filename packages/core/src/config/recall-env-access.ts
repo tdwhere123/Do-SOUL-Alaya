@@ -1,3 +1,4 @@
+import { parseEnvOptionalNumber } from "./env-value.js";
 import { getCoreConfig } from "./install-core-config.js";
 
 type RecallConfig = ReturnType<typeof getCoreConfig>["recall"];
@@ -61,27 +62,36 @@ export function recallProjectionScoringEnabled(): boolean {
   return getCoreConfig().recall.projectionsEnabled;
 }
 
-/** answers_with / flood path fuel is always on; no closable off-switch. */
-export function recallAnswersWithEnabled(): boolean {
-  return true;
-}
-
 export function readRecallPositiveInt(name: string, fallback: number): number {
-  const raw = Number(recallEnvRaw(name));
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+  const parsed = readInstalledRecallNumber(name);
+  if (parsed === undefined) return fallback;
+  if (parsed <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return Math.floor(parsed);
 }
 
 export function readRecallRatio(name: string, fallback: number): number {
-  const raw = Number(recallEnvRaw(name));
-  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+  const parsed = readInstalledRecallNumber(name);
+  if (parsed === undefined) return fallback;
+  if (parsed < 0) {
+    throw new Error(`${name} must be a non-negative number`);
+  }
+  return parsed;
 }
 
 export function readRecallUnitFloat(name: string, fallback: number): number {
-  const raw = Number(recallEnvRaw(name));
-  return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : fallback;
+  const parsed = readInstalledRecallNumber(name);
+  if (parsed === undefined) return fallback;
+  return Math.max(0, Math.min(1, parsed));
 }
 
 export function readRecallFloat(name: string, fallback: number, min: number): number {
-  const raw = Number(recallEnvRaw(name));
-  return Number.isFinite(raw) ? Math.max(min, raw) : fallback;
+  const parsed = readInstalledRecallNumber(name);
+  if (parsed === undefined) return fallback;
+  return Math.max(min, parsed);
+}
+
+function readInstalledRecallNumber(name: string): number | undefined {
+  return parseEnvOptionalNumber(recallEnvRaw(name), name);
 }
