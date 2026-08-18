@@ -43,4 +43,13 @@ describe("isDuplicateKeyError", () => {
     expect(isDuplicateKeyError(new Error("disk is full"))).toBe(false);
     expect(isDuplicateKeyError(null)).toBe(false);
   });
+
+  it("does not treat QUERY_FAILED NOTNULL or FOREIGN KEY wrappers as duplicates", () => {
+    expect(isDuplicateKeyError(new StorageError("QUERY_FAILED", "Failed to enqueue Garden task x.", {
+      cause: { code: "SQLITE_CONSTRAINT_NOTNULL", message: "NOT NULL constraint failed: garden_tasks.kind" }
+    }))).toBe(false);
+    expect(isDuplicateKeyError(new StorageError("QUERY_FAILED", "Failed to enqueue Garden task x.", {
+      cause: { code: "SQLITE_CONSTRAINT_FOREIGNKEY", message: "FOREIGN KEY constraint failed" }
+    }))).toBe(false);
+  });
 });

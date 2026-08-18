@@ -45,18 +45,24 @@ function normalizeStorageErrorOptions(
   return { cause: optionsOrCause };
 }
 
+// Enqueue swallows only unique/PK collisions. NOTNULL / FOREIGN KEY / CHECK
+// stay QUERY_FAILED so a bind or schema fault is not treated as "already exists".
+const SQLITE_UNIQUE_OR_PK_CODES = new Set([
+  "SQLITE_CONSTRAINT_UNIQUE",
+  "SQLITE_CONSTRAINT_PRIMARYKEY"
+]);
+
 export function isDuplicateKeyError(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
     const code = (current as { readonly code?: unknown }).code;
-    if (code === "DUPLICATE_KEY") {
-      return true;
-    }
-    if (typeof code === "string" && code.startsWith("SQLITE_CONSTRAINT")) {
+    if (code === "DUPLICATE_KEY" ||
+      (typeof code === "string" && SQLITE_UNIQUE_OR_PK_CODES.has(code))) {
       return true;
     }
     const message = (current as { readonly message?: unknown }).message;
-    if (typeof message === "string" && /UNIQUE|PRIMARY KEY/i.test(message)) {
+    if (typeof message === "string" &&
+      /UNIQUE constraint failed|PRIMARY KEY constraint failed/i.test(message)) {
       return true;
     }
     current = (current as { readonly cause?: unknown }).cause;
