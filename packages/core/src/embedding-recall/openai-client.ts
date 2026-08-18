@@ -9,6 +9,7 @@ import {
   MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS,
   MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS
 } from "./constants.js";
+import { raceAgainstTransportBackstop } from "./transport-backstop.js";
 
 export interface EmbeddingRetryEvent {
   readonly host: string;
@@ -231,7 +232,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
       );
       attemptTimeout.unref?.();
       try {
-        const response = await this.raceFetchAgainstBackstop(
+        const response = await raceAgainstTransportBackstop(
           this.fetchImpl(`${this.baseUrl}/embeddings`, {
             method: "POST",
             headers: {
@@ -244,7 +245,8 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
             }),
             signal: attemptAbort.signal
           }),
-          backstopMs
+          backstopMs,
+          () => new EmbeddingTransportBackstopError(this.baseUrl, backstopMs)
         );
         if (attempt < this.maxAttempts && isRetryableEmbeddingStatus(response.status)) {
           if (this.now() >= deadline) {
@@ -301,31 +303,6 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     return remainingBackoffMs - delayMs;
   }
 
-  // invariant: this race is the wall-clock backstop. It does NOT replace the
-  // AbortController (still the primary mechanism that aborts and frees the
-  // socket); it guarantees the awaited fetch settles even when undici never
-  // honors the abort on a stalled connection. The rejection is shaped so the
-  // caller's catch turns it into the existing "transport failed" surface.
-  // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
-  private async raceFetchAgainstBackstop(
-    fetchPromise: Promise<Response>,
-    backstopMs: number
-  ): Promise<Response> {
-    let backstopHandle: ReturnType<typeof setTimeout> | null = null;
-    const backstop = new Promise<never>((_resolve, reject) => {
-      backstopHandle = setTimeout(() => {
-        reject(new EmbeddingTransportBackstopError(this.baseUrl, backstopMs));
-      }, backstopMs);
-      backstopHandle.unref?.();
-    });
-    try {
-      return await Promise.race([fetchPromise, backstop]);
-    } finally {
-      if (backstopHandle !== null) {
-        clearTimeout(backstopHandle);
-      }
-    }
-  }
 }
 
 class EmbeddingTransportBackstopError extends AlayaError {

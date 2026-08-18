@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { LongMemEvalFullDiagnosticsValidationInput } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 import {
   rAt5WithProviderReturned,
   summarizeProviderStates

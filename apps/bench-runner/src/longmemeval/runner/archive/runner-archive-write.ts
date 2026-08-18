@@ -60,7 +60,7 @@ import {
 } from "../../history/evidence-context.js";
 import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 
 export async function writeLongMemEvalRunArchive(input: {
   readonly opts: LongMemEvalRunOptions;

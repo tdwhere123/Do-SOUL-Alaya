@@ -1,54 +1,13 @@
-import {
-  NonEmptyStringSchema,
-  type SoulReviewMemoryProposalRequest
-} from "@do-soul/alaya-protocol";
+import { NonEmptyStringSchema } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler.js";
-import { HUMAN_REVIEWER_AGENT_TARGETS, INSPECTOR_REVIEWER_AGENT_TARGET } from "./reviewer-surfaces.js";
-import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
-
-export interface ReviewerIdentityBinding {
-  readonly token: string;
-  readonly identity: string;
-}
-
-export function assertReviewCallerIsAllowed(
-  context: McpMemoryToolCallContext,
-  binding: ReviewerIdentityBinding | undefined
-): void {
-  // The Inspector HTTP loopback asserts reviewer_identity over the network with
-  // no token; without a configured binding it would forge the audit trail.
-  if (context.agentTarget === INSPECTOR_REVIEWER_AGENT_TARGET) {
-    if (binding === undefined) {
-      throw createWorkflowError("VALIDATION", "reviewer binding not configured");
-    }
-    return;
-  }
-
-  if (HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
-    return;
-  }
-
-  throw createWorkflowError(
-    "VALIDATION",
-    "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
-  );
-}
-
-export function resolveReviewerIdentity(
-  input: SoulReviewMemoryProposalRequest,
-  binding: ReviewerIdentityBinding | undefined
-): string {
-  if (binding === undefined) {
-    return input.reviewer_identity;
-  }
-  if (!matchesReviewerToken(input.reviewer_token, binding.token)) {
-    throw createWorkflowError("VALIDATION", "Invalid reviewer token.");
-  }
-  if (input.reviewer_identity !== binding.identity) {
-    throw createWorkflowError("VALIDATION", "Reviewer identity does not match server-bound reviewer.");
-  }
-  return binding.identity;
-}
+import { createWorkflowError } from "../tool/mcp-tool-error.js";
+import { HUMAN_REVIEWER_AGENT_TARGETS } from "./reviewer-surfaces.js";
+export {
+  assertReviewCallerIsAllowed,
+  resolveReviewerIdentity,
+  type ReviewerIdentityBinding
+} from "./reviewer-gating.js";
+export { createWorkflowError } from "../tool/mcp-tool-error.js";
 
 export function assertReviewerAssignment(
   scopedProposal: Readonly<{
@@ -60,13 +19,6 @@ export function assertReviewerAssignment(
   if (assignment !== null && assignment.reviewer_identity !== reviewerIdentity) {
     throw createWorkflowError("VALIDATION", "Proposal is assigned to a different reviewer.");
   }
-}
-
-function matchesReviewerToken(providedToken: string | undefined, expectedToken: string): boolean {
-  if (providedToken === undefined || providedToken.length === 0) {
-    return false;
-  }
-  return constantTimeTokenEqual(providedToken, expectedToken);
 }
 
 export function assertProposalContext(
@@ -97,15 +49,6 @@ export function assertProposalContext(
   if (scopedProposal.run_id !== runId) {
     throw createWorkflowError("NOT_FOUND", "Proposal not found in current workspace/run context.");
   }
-}
-
-export function createWorkflowError(
-  code: "NOT_FOUND" | "VALIDATION" | "NEEDS_CONTEXT",
-  message: string
-): Error & { readonly code: string } {
-  const error = new Error(message) as Error & { code: string };
-  error.code = code;
-  return error;
 }
 
 export function normalizeResolutionError(error: unknown): unknown {

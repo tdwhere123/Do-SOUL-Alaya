@@ -10,6 +10,7 @@ import {
   ProviderChatCompletionError,
   type ProviderRequestProfile
 } from "@do-soul/alaya-engine-gateway";
+import { WallClockTimeoutError, withWallClockTimeout } from "@do-soul/alaya-soul";
 import { extractGardenHttpWithAssertionPartition } from "./http/garden-http-assertion-partition.js";
 import { wrapGardenHttpTransportError } from "./http/garden-http-terminal-error.js";
 import {
@@ -44,10 +45,7 @@ import {
 } from "./http/garden-http-failure-attempt.js";
 import { buildGardenHttpAttemptResponse } from "./http/garden-http-response-validation.js";
 import { observeLateGardenHttpRejection } from "./http/garden-http-late-rejection.js";
-import {
-  startGardenHttpAttemptSettlement,
-  type GardenHttpAttemptSettlement
-} from "./http/stream/garden-http-attempt-settlement.js";
+
 import { resolveGardenSchemaRetryInstruction, withGardenResponseSchemaRepair } from
   "./http/garden-http-schema-retry.js";
 import {
@@ -240,42 +238,27 @@ async function runGardenHttpAttempt(
   input: GardenHttpExtractInput,
   attempt: number
 ): Promise<GardenHttpAttemptResponse> {
-  const controller = new AbortController();
-  const settlement = startGardenHttpAttemptSettlement({
-    idleTimeoutMs: resolveAttemptIdleTimeoutMs(input),
-    controller,
-    ...(input.abortSignal === undefined ? {} : {
-      operatorAbortSignal: input.abortSignal
-    })
-  });
   let attemptSettled = false;
+  const controller = new AbortController();
   try {
-    const transport = resolveExtractionTransportRoute(config);
-    assertRequiredRequestProfile(config);
-    const completePromise = fetchProviderChatCompletion({
-      providerUrl: transport.providerUrl,
-      apiKey,
-      model: transport.model,
-      systemPrompt: input.systemPrompt,
-      userPrompt: input.userPrompt,
-      mode: "sse",
-      jsonObject: true,
-      profile: config.requestProfile as ProviderRequestProfile,
-      abortSignal: controller.signal,
-      fetchImpl: deps.fetch,
-      timeoutMs: input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS,
-      ...(input.maxOutputTokens === undefined ? {} : {
-        maxOutputTokens: input.maxOutputTokens,
-        outputTokenField: input.outputTokenField
-      })
-    });
-    observeLateGardenHttpRejection(
-      { attempt, controller, isAttemptSettled: () => attemptSettled },
-      completePromise,
-      "fetch"
+    const result = await withWallClockTimeout(
+      async (signal) => {
+        bindAttemptAbort(controller, signal);
+        const completePromise = fetchGardenHttpAttempt(config, apiKey, deps, input, signal);
+        observeLateGardenHttpRejection(
+          { attempt, controller, isAttemptSettled: () => attemptSettled },
+          completePromise,
+          "fetch"
+        );
+        return completePromise;
+      },
+      {
+        budgetMs: resolveAttemptIdleTimeoutMs(input),
+        ...(input.abortSignal === undefined ? {} : {
+          operatorAbortSignal: input.abortSignal
+        })
+      }
     );
-    const result = await Promise.race([completePromise, settlement.promise]);
-    settlement.noteProgress();
     return buildGardenHttpAttemptResponse({
       content: result.text,
       finishReason: result.finishReason,
@@ -284,11 +267,48 @@ async function runGardenHttpAttempt(
       ? "default_envelope"
       : "caller_owned");
   } catch (error) {
-    throw settleGardenHttpFailure(mapProviderChatError(error), settlement, input);
+    throw settleGardenHttpFailure(mapProviderChatError(error), input);
   } finally {
     attemptSettled = true;
-    settlement.dispose();
+    controller.abort();
   }
+}
+
+function fetchGardenHttpAttempt(
+  config: CompileSeedExtractionConfig,
+  apiKey: string,
+  deps: GardenHttpExtractorDeps,
+  input: GardenHttpExtractInput,
+  signal: AbortSignal
+): Promise<Awaited<ReturnType<typeof fetchProviderChatCompletion>>> {
+  const transport = resolveExtractionTransportRoute(config);
+  assertRequiredRequestProfile(config);
+  return fetchProviderChatCompletion({
+    providerUrl: transport.providerUrl,
+    apiKey,
+    model: transport.model,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    mode: "sse",
+    jsonObject: true,
+    profile: config.requestProfile as ProviderRequestProfile,
+    abortSignal: signal,
+    fetchImpl: deps.fetch,
+    timeoutMs: input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS,
+    ...(input.maxOutputTokens === undefined ? {} : {
+      maxOutputTokens: input.maxOutputTokens,
+      outputTokenField: input.outputTokenField
+    })
+  });
+}
+
+function bindAttemptAbort(controller: AbortController, signal: AbortSignal): void {
+  const onAbort = (): void => controller.abort();
+  if (signal.aborted) {
+    onAbort();
+    return;
+  }
+  signal.addEventListener("abort", onAbort, { once: true });
 }
 
 function mapProviderChatError(error: unknown): unknown {
@@ -302,13 +322,12 @@ function mapProviderChatError(error: unknown): unknown {
 
 function settleGardenHttpFailure(
   error: unknown,
-  settlement: GardenHttpAttemptSettlement,
   input: GardenHttpExtractInput
 ): Error {
   const planTimedOut = isExtractionPlanDeadlineError(input.abortSignal?.reason);
   return settleGardenHttpAttemptFailure(
     error,
-    settlement.hasTimedOut() || planTimedOut,
+    error instanceof WallClockTimeoutError || planTimedOut,
     input.abortSignal?.aborted === true && !planTimedOut
   );
 }

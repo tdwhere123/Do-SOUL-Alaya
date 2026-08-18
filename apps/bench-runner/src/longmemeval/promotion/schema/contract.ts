@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   LongMemEvalMatrixTreatmentWireSchema,
   LongMemEvalPromotionCodeWireSchema
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { z } from "zod";
 import { LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY } from "./material-effect.js";
 import { LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY } from "./absolute-quality.js";

@@ -1,5 +1,5 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 import { selectOffsetLimitWindow } from "../../bench/window.js";
 import type { BenchRecallWeightOverrides } from
   "../../harness/recall/recall-weight-overrides.js";

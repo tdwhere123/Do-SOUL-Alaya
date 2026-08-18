@@ -1,5 +1,5 @@
 import { assertLongMemEvalExpansionAuthorityPair } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 import type { ExtractionFillManifestContract } from "./fill/manifest/fill-manifest-contract.js";
 import {
   LongMemEvalExpansionLineageSchema,

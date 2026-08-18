@@ -10,7 +10,7 @@ import {
 import {
   createLongMemEvalReleaseEvidenceAuthority,
   type LongMemEvalReleaseEvidenceAuthority
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import type { LongMemEvalSelectionAssignment } from "@do-soul/alaya-eval";
 import { classifyLongMemEvalDatasetCohort } from "../../bench/selection/dataset-cohort.js";
 import { streamLongMemEvalDataset } from "./streaming-dataset-reader.js";

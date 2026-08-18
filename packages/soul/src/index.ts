@@ -56,6 +56,8 @@ export {
   TopologyService,
   reviewPathGraphSnapshotHistory,
   OfficialApiGardenProvider,
+  WallClockTimeoutError,
+  withWallClockTimeout,
   createPiMonoExtractor,
   type SignalExtractor,
   auditOfficialApiSignalFormation,

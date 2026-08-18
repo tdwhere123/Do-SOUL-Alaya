@@ -11,7 +11,7 @@ import {
   type LongMemEvalArtifactDescriptor,
   type LongMemEvalFanoutAuthority,
   type LongMemEvalShardAuthorityReference
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { openContainedArtifact } from "../../../cli/merge/contained-artifact-path.js";
 import type { VerifiedLongMemEvalFanoutChild } from
   "../../../longmemeval/promotion/fanout-authority.js";

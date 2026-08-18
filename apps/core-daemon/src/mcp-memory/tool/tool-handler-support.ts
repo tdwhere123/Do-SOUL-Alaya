@@ -1,16 +1,22 @@
-import { timingSafeEqual } from "node:crypto";
-import {
-  CandidateMemorySignalMemoryRefKeys,
-  type SoulBatchReviewEdgeProposalsRequest
-} from "@do-soul/alaya-protocol";
+import { CandidateMemorySignalMemoryRefKeys } from "@do-soul/alaya-protocol";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
-import { HUMAN_REVIEWER_AGENT_TARGETS, INSPECTOR_REVIEWER_AGENT_TARGET } from "../proposal/reviewer-surfaces.js";
-import type { ReviewerIdentityBinding } from "../proposal/proposal-workflow.js";
+import { McpToolError } from "./mcp-tool-error.js";
 import type {
-  McpMemoryToolCallContext,
   McpMemoryToolCallResult,
   McpMemoryToolErrorCode
 } from "./tool-handler-types.js";
+
+export {
+  McpToolError,
+  ToolNotFoundError,
+  ToolUnavailableError,
+  ToolValidationError,
+  createWorkflowError
+} from "./mcp-tool-error.js";
+export {
+  assertReviewCallerIsAllowed as assertEdgeReviewCallerIsAllowed,
+  resolveReviewerIdentity as resolveEdgeReviewerIdentity
+} from "../proposal/reviewer-gating.js";
 
 export function ok(toolName: AlayaMemoryToolName, output: unknown): McpMemoryToolCallResult {
   return Object.freeze({ ok: true, tool_name: toolName, output });
@@ -26,52 +32,6 @@ export function fail(
     tool_name: toolName,
     error: Object.freeze({ code, message })
   });
-}
-
-export function assertEdgeReviewCallerIsAllowed(
-  context: McpMemoryToolCallContext,
-  binding: ReviewerIdentityBinding | undefined
-): void {
-  if (context.agentTarget === INSPECTOR_REVIEWER_AGENT_TARGET) {
-    if (binding === undefined) {
-      throw new ToolValidationError("reviewer binding not configured");
-    }
-    return;
-  }
-
-  if (HUMAN_REVIEWER_AGENT_TARGETS.has(context.agentTarget)) {
-    return;
-  }
-
-  throw new ToolValidationError(
-    "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
-  );
-}
-
-export function resolveEdgeReviewerIdentity(
-  request: SoulBatchReviewEdgeProposalsRequest,
-  binding: ReviewerIdentityBinding | undefined
-): string {
-  if (binding === undefined) {
-    return request.reviewer_identity;
-  }
-
-  if (!matchesReviewerToken(request.reviewer_token, binding.token)) {
-    throw new ToolValidationError("Invalid reviewer token.");
-  }
-  if (request.reviewer_identity !== binding.identity) {
-    throw new ToolValidationError("Reviewer identity does not match server-bound reviewer.");
-  }
-  return binding.identity;
-}
-
-function matchesReviewerToken(providedToken: string | undefined, expectedToken: string): boolean {
-  if (providedToken === undefined || providedToken.length === 0) {
-    return false;
-  }
-  const provided = Buffer.from(providedToken);
-  const expected = Buffer.from(expectedToken);
-  return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
 type CandidateSignalGraphRefKey = (typeof CandidateMemorySignalMemoryRefKeys)[number];
@@ -114,18 +74,6 @@ function hasOwnProperty(record: Readonly<Record<string, unknown>>, key: string):
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-export class ToolValidationError extends Error {
-  public readonly code = "VALIDATION";
-}
-
-export class ToolUnavailableError extends Error {
-  public readonly code = "UNAVAILABLE";
-}
-
-export class ToolNotFoundError extends Error {
-  public readonly code = "NOT_FOUND";
-}
-
 export class RecallHitTierPromotionCasMiss extends Error {
   public constructor() {
     super("Recall-hit tier promotion CAS predicate did not match.");
@@ -134,6 +82,9 @@ export class RecallHitTierPromotionCasMiss extends Error {
 }
 
 export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {
+  if (error instanceof McpToolError) {
+    return classifyMcpToolErrorCode(error.code);
+  }
   if (
     error instanceof Error &&
     "code" in error &&
@@ -144,17 +95,22 @@ export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "N
   ) {
     return error.code;
   }
-  if (
-    error instanceof ToolValidationError ||
-    (error instanceof Error && "name" in error && error.name === "ZodError")
-  ) {
+  if (error instanceof Error && error.name === "ZodError") {
     return "VALIDATION";
   }
-  if (error instanceof ToolUnavailableError) {
-    return "UNAVAILABLE";
-  }
-  if (error instanceof ToolNotFoundError) {
-    return "NOT_FOUND";
+  return "INTERNAL";
+}
+
+function classifyMcpToolErrorCode(
+  code: McpMemoryToolErrorCode
+): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {
+  if (
+    code === "VALIDATION" ||
+    code === "UNAVAILABLE" ||
+    code === "NOT_FOUND" ||
+    code === "NEEDS_CONTEXT"
+  ) {
+    return code;
   }
   return "INTERNAL";
 }

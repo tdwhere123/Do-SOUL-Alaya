@@ -150,7 +150,7 @@ describe("OpenAIEmbeddingClient", () => {
   // resolves AND the abort signal is ignored (the undici half-open stall). Only
   // the wall-clock backstop guarantees this; without it the guard race below
   // observes "HANG".
-  // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.raceFetchAgainstBackstop
+  // see also: packages/core/src/embedding-recall/transport-backstop.ts raceAgainstTransportBackstop
   // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS
   it("rejects via the wall-clock backstop when the transport never settles and the abort is ignored", async () => {
     // seam: never-resolving fetch that ignores the abort signal == half-open

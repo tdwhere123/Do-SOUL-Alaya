@@ -15,6 +15,10 @@
     "./internal": {
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
+    },
+    "./authority": {
+      "types": "./dist/authority.d.ts",
+      "import": "./dist/authority.js"
     }
   },
   "bin": {

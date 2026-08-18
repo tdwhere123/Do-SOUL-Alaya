@@ -1,5 +1,5 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 import type { BenchRecallWeightOverrides } from
   "../../../harness/recall/recall-weight-overrides.js";
 import { assertProductFormationEnvironment } from

@@ -1,3 +1,4 @@
+import { isRetryableProviderHttpStatus } from "@do-soul/alaya-engine-gateway";
 import type { BenchRetryClassification } from "../compile-seed-types.js";
 
 export type BenchHttpError = {
@@ -12,7 +13,7 @@ export function classifyBenchHttpError(
   if (error instanceof Error && /abort/iu.test(error.name + error.message)) {
     return { classification: "failure_aborted", retryable: false };
   }
-  if (status === 429 || (status !== null && status >= 500 && status < 600)) {
+  if (status !== null && isRetryableProviderHttpStatus(status)) {
     return { classification: "failure_max_retries", retryable: true };
   }
   if (status !== null && status >= 400 && status < 500) {

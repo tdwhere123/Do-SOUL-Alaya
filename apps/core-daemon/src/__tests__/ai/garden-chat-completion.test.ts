@@ -65,4 +65,32 @@ describe("requestGardenChatCompletionContent", () => {
     expect(String((thrown as { readonly cause?: unknown }).cause)).not.toContain(apiKey);
     expect(String((thrown as { readonly cause?: unknown }).cause)).toContain("[REDACTED_SECRET]");
   });
+
+  it("retries a 503 once after 100ms then succeeds", async () => {
+    const sleep = vi.spyOn(globalThis, "setTimeout");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: "{\"kind\":\"add\"}" } }]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+
+    await expect(requestGardenChatCompletionContent({
+      config: {
+        providerUrl: "https://garden.example.test/v1",
+        model: "garden-model",
+        apiKey: "sk-garden-secret"
+      },
+      systemPrompt: "system",
+      userPrompt: "user",
+      timeoutMs: 50,
+      failureLabel: "garden test"
+    })).resolves.toBe("{\"kind\":\"add\"}");
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(sleep.mock.calls.some((call) => call[1] === 100)).toBe(true);
+  });
 });
+

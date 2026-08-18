@@ -66,7 +66,7 @@ import {
 import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
 import { publishMergedArchive } from "../archive-publisher.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 
 type ShardDiagnostics = ShardArchiveRef["diagnostics"];
 type PreviousKpiPayload = Awaited<ReturnType<typeof readLatest>>;

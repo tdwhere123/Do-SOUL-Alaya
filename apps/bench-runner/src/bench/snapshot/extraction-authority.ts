@@ -8,7 +8,7 @@ import {
   hashLongMemEvalSupplementalSourceBinding,
   parseLongMemEvalExtractionAuthority,
   type LongMemEvalExtractionAuthority
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   extractionCacheManifestPath,

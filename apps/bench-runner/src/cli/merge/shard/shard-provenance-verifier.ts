@@ -1,6 +1,6 @@
 import {
   assertLongMemEvalFullExtractionClosure
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import {
   bindShardRunProvenanceAuthority,
   parseShardExtractionAuthorityReference,

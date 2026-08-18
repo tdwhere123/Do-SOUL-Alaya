@@ -1,6 +1,7 @@
 import {
   fetchProviderChatCompletion,
-  ProviderChatCompletionError
+  ProviderChatCompletionError,
+  withProviderRetry
 } from "@do-soul/alaya-engine-gateway";
 
 export interface GardenChatCompletionConfig {
@@ -22,20 +23,13 @@ const RETRY_DELAYS_MS = [100, 250] as const;
 export async function requestGardenChatCompletionContent(
   input: GardenChatCompletionRequest
 ): Promise<string> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      return await requestGardenChatCompletionContentOnce(input);
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableGardenChatError(error) || attempt === RETRY_DELAYS_MS.length) {
-        throw error;
-      }
-      await sleep(RETRY_DELAYS_MS[attempt] ?? 0);
+  return withProviderRetry(
+    () => requestGardenChatCompletionContentOnce(input),
+    {
+      delaysMs: RETRY_DELAYS_MS,
+      isRetryable: isRetryableGardenChatError
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error(`${input.failureLabel} request failed`);
+  );
 }
 
 async function requestGardenChatCompletionContentOnce(
@@ -146,8 +140,3 @@ function redactSecret(value: string, secret: string): string {
   return value.split(secret).join("[REDACTED_SECRET]");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}

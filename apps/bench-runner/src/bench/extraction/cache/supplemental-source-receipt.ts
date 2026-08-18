@@ -7,7 +7,7 @@ import {
   LongMemEvalSupplementalSourceManifestBindingWireSchema,
   LongMemEvalSupplementalSourceProvenanceBindingWireSchema,
   type LongMemEvalSupplementalSourceReceiptExtensionWire
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { redactProvenanceUrl } from "../../provenance/paired-environment.js";
 import {
   EXTRACTION_REQUEST_PROFILES,

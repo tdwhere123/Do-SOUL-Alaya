@@ -8,7 +8,7 @@ import {
   type LongMemEvalArtifactDescriptor,
   type LongMemEvalFanoutAuthority,
   type LongMemEvalFanoutPlan
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { openContainedArtifact } from "../../cli/merge/contained-artifact-path.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import type { CapturedSnapshotExtractionAuthority } from

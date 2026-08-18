@@ -3,4 +3,4 @@ export {
   LongMemEvalExpansionSourceCacheWireSchema as LongMemEvalExpansionSourceCacheSchema,
   LongMemEvalExpansionTargetCacheWireSchema as LongMemEvalExpansionTargetCacheSchema,
   type LongMemEvalExpansionLineageWire as LongMemEvalExpansionLineage
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";

@@ -6,7 +6,7 @@ import {
 import {
   loadLongMemEvalReleaseEvidenceFromAuthority,
   type LongMemEvalReleaseEvidenceAuthority
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { validateLongMemEvalReleaseDiagnostics } from
   "../../bench/diagnostics/release-evidence-validator.js";
 

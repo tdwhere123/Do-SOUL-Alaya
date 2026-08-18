@@ -17,7 +17,7 @@ import type { LongMemEvalWorkerResult } from "../question/runner-question.js";
 import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import type { LongMemEvalSelectionContract } from "../../../bench/selection/contract.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 
 // End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
 export async function finalizeLongMemEvalRun(input: {
