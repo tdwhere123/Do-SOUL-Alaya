@@ -19,7 +19,7 @@ import {
   createRecallCandidate
 } from "./mcp-memory-tool-handler-fixture.js";
 
-describe("mcp memory tool handler", () => {
+describe("mcp memory tool handler wiring", () => {
 
   it("prefers cascade degradation over explainability partial degradation", async () => {
     const deps = createDeps();

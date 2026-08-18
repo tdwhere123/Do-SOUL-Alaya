@@ -26,8 +26,8 @@ import {
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
-// invariant: end-to-end coverage for soul.recall -> staged_warning ->
-// soul.resolve -> apply. The confirm path activates a draft
+// invariant: handler-fixture wiring for soul.recall -> staged_warning ->
+// soul.resolve -> apply. Maps + mock publish; not a live EventLog path. The confirm path activates a draft
 // claim_form via ClaimService.transitionLifecycle(draft -> active);
 // the audit row records the activated_claim_id.
 // see also: packages/core/src/governance/resolution-service.ts (dispatcher)
@@ -39,10 +39,10 @@ const context: McpMemoryToolCallContext = {
   workspaceId: "ws-e2e",
   runId: "run-e2e",
   agentTarget: "codex",
-  sessionId: "soul-resolve-e2e-session"
+  sessionId: "soul-resolve-wiring-session"
 };
 
-interface E2EHarness {
+interface WiringHarness {
   readonly handler: ReturnType<typeof createMcpMemoryToolHandler>;
   readonly claims: Map<string, ClaimForm>;
   readonly memories: Map<string, MemoryEntry>;
@@ -51,7 +51,7 @@ interface E2EHarness {
   readonly deliveries: Map<string, ContextDeliveryRecord>;
 }
 
-function createHarness(): E2EHarness {
+function createHarness(): WiringHarness {
   let claimTransitionCounter = 0;
   let eventCounter = 0;
   const claims = new Map<string, ClaimForm>();
@@ -168,6 +168,11 @@ function createHarness(): E2EHarness {
       readonly workspaceId: string;
       readonly targetEntityId?: string;
       readonly expiresAt: string;
+    }, options?: {
+      readonly buildAdditionalEventInputs?: (
+        obligation: Readonly<DeferredObligation>
+      ) => readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
+      readonly additionalEventsSink?: EventLogEntry[];
     }): Promise<Readonly<DeferredObligation>> => {
       const obligation: DeferredObligation = {
         obligation_id: `obligation-${obligations.size + 1}`,
@@ -181,6 +186,10 @@ function createHarness(): E2EHarness {
         expires_at: input.expiresAt
       };
       obligations.set(obligation.obligation_id, obligation);
+      for (const eventInput of options?.buildAdditionalEventInputs?.(obligation) ?? []) {
+        const persisted = publish(eventInput);
+        options?.additionalEventsSink?.push(persisted);
+      }
       return obligation;
     })
   };
@@ -358,61 +367,77 @@ function buildMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   } as MemoryEntry;
 }
 
-describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
+describe("soul.resolve handler fixture wiring", () => {
 
-  it("not_relevant path: emits the dismissal event without lifecycle changes", async () => {
+  it("stale path: transitions a memory_entry active -> dormant", async () => {
     const harness = createHarness();
     harness.memories.set("mem-1", buildMemory({ lifecycle_state: ObjectLifecycleState.ACTIVE }));
-    harness.deliveries.set("delivery-5", {
-      delivery_id: "delivery-5",
+    harness.deliveries.set("delivery-3", {
+      delivery_id: "delivery-3",
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: ["mem-1"],
       delivered_at: FIXED_NOW,
-      audit_event_id: "delivery-evt-5"
+      audit_event_id: "delivery-evt-3"
     });
 
     const result = await harness.handler.call({
       toolName: "soul.resolve",
       arguments: {
         target_object_id: "mem-1",
-        resolution: SoulResolutionKind.NOT_RELEVANT,
-        delivery_id: "delivery-5"
+        resolution: SoulResolutionKind.STALE,
+        delivery_id: "delivery-3"
       },
       context
     });
     expect(result.ok).toBe(true);
-    expect(harness.memories.get("mem-1")?.lifecycle_state).toBe(ObjectLifecycleState.ACTIVE);
+    expect(harness.memories.get("mem-1")?.lifecycle_state).toBe(ObjectLifecycleState.DORMANT);
     expect(
       harness.events.some(
-        (e) =>
-          e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_NOT_RELEVANT_APPLIED
+        (e) => e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_STALE_APPLIED
       )
     ).toBe(true);
   });
 
-  it("scope check: rejects soul.resolve when delivery_id does not belong to the calling agent", async () => {
+  it("defer path: creates a DeferredObligation and emits the defer audit event", async () => {
     const harness = createHarness();
     harness.claims.set("claim-1", buildClaim({ object_id: "claim-1" }));
-    harness.deliveries.set("foreign-delivery", {
-      delivery_id: "foreign-delivery",
-      agent_target: "other-agent",
+    harness.deliveries.set("delivery-4", {
+      delivery_id: "delivery-4",
+      agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: ["claim-1"],
+      delivered_objects: [{ object_id: "claim-1", object_kind: "claim_form" }],
       delivered_at: FIXED_NOW,
-      audit_event_id: "delivery-evt-x"
+      audit_event_id: "delivery-evt-4"
     });
+
     const result = await harness.handler.call({
       toolName: "soul.resolve",
       arguments: {
         target_object_id: "claim-1",
-        resolution: SoulResolutionKind.CONFIRM,
-        delivery_id: "foreign-delivery"
+        resolution: SoulResolutionKind.DEFER,
+        delivery_id: "delivery-4",
+        defer_until: "2026-05-18T00:00:00.000Z",
+        reason: "agent needs supporting evidence"
       },
       context
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const output = result.output as {
+      readonly status: string;
+      readonly obligation_id?: string;
+    };
+    expect(output.status).toBe("deferred");
+    expect(output.obligation_id).toBe("obligation-1");
+    expect(harness.obligations.get("obligation-1")?.kind).toBe("evidence_refresh");
+    expect(
+      harness.events.some(
+        (e) => e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_DEFER_APPLIED
+      )
+    ).toBe(true);
   });
 });

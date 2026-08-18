@@ -45,7 +45,7 @@ vi.mock("../../../recall/supplements/supplements.js", () => ({
   collectSynthesisCoarseCandidates: producerMocks.collectSynthesisCoarseCandidates
 }));
 
-describe("collectCoarseStage logical-object waist", () => {
+describe("collectCoarseStage wiring (mocked coarse producers)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

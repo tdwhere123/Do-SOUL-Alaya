@@ -67,7 +67,7 @@ function buildFakeRepo(): EventPublisherEventLogRepoPort & {
   };
 }
 
-describe("EventPublisher.appendManyWithMutation (atomic)", () => {
+describe("EventPublisher.appendManyWithMutation wiring (fake EventLog repo)", () => {
   it("decides idempotency in the transaction before appending its EventLog row", async () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({

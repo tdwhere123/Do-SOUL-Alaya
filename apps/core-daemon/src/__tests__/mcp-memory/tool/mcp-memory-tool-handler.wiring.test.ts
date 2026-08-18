@@ -21,7 +21,7 @@ import {
   createRecallCandidate
 } from "./mcp-memory-tool-handler-fixture.js";
 
-describe("mcp memory tool handler", () => {
+describe("mcp memory tool handler wiring", () => {
 
   it("enforces active zero-day deny_tool policy before MCP dispatch", async () => {
     const deps = createDeps();

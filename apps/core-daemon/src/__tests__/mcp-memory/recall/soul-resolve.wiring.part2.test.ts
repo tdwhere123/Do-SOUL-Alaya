@@ -26,8 +26,8 @@ import {
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
-// invariant: end-to-end coverage for soul.recall -> staged_warning ->
-// soul.resolve -> apply. The confirm path activates a draft
+// invariant: handler-fixture wiring for soul.recall -> staged_warning ->
+// soul.resolve -> apply. Maps + mock publish; not a live EventLog path. The confirm path activates a draft
 // claim_form via ClaimService.transitionLifecycle(draft -> active);
 // the audit row records the activated_claim_id.
 // see also: packages/core/src/governance/resolution-service.ts (dispatcher)
@@ -39,10 +39,10 @@ const context: McpMemoryToolCallContext = {
   workspaceId: "ws-e2e",
   runId: "run-e2e",
   agentTarget: "codex",
-  sessionId: "soul-resolve-e2e-session"
+  sessionId: "soul-resolve-wiring-session"
 };
 
-interface E2EHarness {
+interface WiringHarness {
   readonly handler: ReturnType<typeof createMcpMemoryToolHandler>;
   readonly claims: Map<string, ClaimForm>;
   readonly memories: Map<string, MemoryEntry>;
@@ -51,7 +51,7 @@ interface E2EHarness {
   readonly deliveries: Map<string, ContextDeliveryRecord>;
 }
 
-function createHarness(): E2EHarness {
+function createHarness(): WiringHarness {
   let claimTransitionCounter = 0;
   let eventCounter = 0;
   const claims = new Map<string, ClaimForm>();
@@ -134,7 +134,11 @@ function createHarness(): E2EHarness {
         options?.additionalEventsSink?.push(persisted);
       }
       return updated;
-    }
+    },
+    recordEffectDecision: async (
+      _receipt: unknown,
+      eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    ) => publish(eventInput)
   };
   const memoryService = {
     transitionLifecycle: async (
@@ -168,11 +172,6 @@ function createHarness(): E2EHarness {
       readonly workspaceId: string;
       readonly targetEntityId?: string;
       readonly expiresAt: string;
-    }, options?: {
-      readonly buildAdditionalEventInputs?: (
-        obligation: Readonly<DeferredObligation>
-      ) => readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[];
-      readonly additionalEventsSink?: EventLogEntry[];
     }): Promise<Readonly<DeferredObligation>> => {
       const obligation: DeferredObligation = {
         obligation_id: `obligation-${obligations.size + 1}`,
@@ -186,10 +185,6 @@ function createHarness(): E2EHarness {
         expires_at: input.expiresAt
       };
       obligations.set(obligation.obligation_id, obligation);
-      for (const eventInput of options?.buildAdditionalEventInputs?.(obligation) ?? []) {
-        const persisted = publish(eventInput);
-        options?.additionalEventsSink?.push(persisted);
-      }
       return obligation;
     })
   };
@@ -367,77 +362,78 @@ function buildMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   } as MemoryEntry;
 }
 
-describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
+describe("soul.resolve handler fixture wiring", () => {
 
-  it("stale path: transitions a memory_entry active -> dormant", async () => {
+  it("reject path: archives a non-draft claim and emits the reject audit event", async () => {
     const harness = createHarness();
-    harness.memories.set("mem-1", buildMemory({ lifecycle_state: ObjectLifecycleState.ACTIVE }));
-    harness.deliveries.set("delivery-3", {
-      delivery_id: "delivery-3",
-      agent_target: context.agentTarget,
-      workspace_id: context.workspaceId,
-      run_id: context.runId,
-      delivered_object_ids: ["mem-1"],
-      delivered_at: FIXED_NOW,
-      audit_event_id: "delivery-evt-3"
-    });
-
-    const result = await harness.handler.call({
-      toolName: "soul.resolve",
-      arguments: {
-        target_object_id: "mem-1",
-        resolution: SoulResolutionKind.STALE,
-        delivery_id: "delivery-3"
-      },
-      context
-    });
-    expect(result.ok).toBe(true);
-    expect(harness.memories.get("mem-1")?.lifecycle_state).toBe(ObjectLifecycleState.DORMANT);
-    expect(
-      harness.events.some(
-        (e) => e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_STALE_APPLIED
-      )
-    ).toBe(true);
-  });
-
-  it("defer path: creates a DeferredObligation and emits the defer audit event", async () => {
-    const harness = createHarness();
-    harness.claims.set("claim-1", buildClaim({ object_id: "claim-1" }));
-    harness.deliveries.set("delivery-4", {
-      delivery_id: "delivery-4",
+    harness.claims.set(
+      "claim-1",
+      buildClaim({ object_id: "claim-1", claim_status: ClaimLifecycleState.ACTIVE })
+    );
+    harness.deliveries.set("delivery-1", {
+      delivery_id: "delivery-1",
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
       delivered_object_ids: ["claim-1"],
       delivered_objects: [{ object_id: "claim-1", object_kind: "claim_form" }],
       delivered_at: FIXED_NOW,
-      audit_event_id: "delivery-evt-4"
+      audit_event_id: "delivery-evt-1"
     });
 
     const result = await harness.handler.call({
       toolName: "soul.resolve",
       arguments: {
         target_object_id: "claim-1",
-        resolution: SoulResolutionKind.DEFER,
-        delivery_id: "delivery-4",
-        defer_until: "2026-05-18T00:00:00.000Z",
-        reason: "agent needs supporting evidence"
+        resolution: SoulResolutionKind.REJECT,
+        delivery_id: "delivery-1"
       },
       context
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const output = result.output as {
-      readonly status: string;
-      readonly obligation_id?: string;
-    };
-    expect(output.status).toBe("deferred");
-    expect(output.obligation_id).toBe("obligation-1");
-    expect(harness.obligations.get("obligation-1")?.kind).toBe("evidence_refresh");
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(harness.claims.get("claim-1")?.claim_status).toBe(ClaimLifecycleState.ARCHIVED);
     expect(
       harness.events.some(
-        (e) => e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_DEFER_APPLIED
+        (event) =>
+          event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_REJECT_APPLIED
       )
     ).toBe(true);
+  });
+
+  it("correct path: emits the audit event with the corrected proposition", async () => {
+    const harness = createHarness();
+    const correction = "the build command is `make ci`";
+    harness.memories.set("mem-1", buildMemory());
+    harness.deliveries.set("delivery-2", {
+      delivery_id: "delivery-2",
+      agent_target: context.agentTarget,
+      workspace_id: context.workspaceId,
+      run_id: context.runId,
+      delivered_object_ids: ["mem-1"],
+      delivered_at: FIXED_NOW,
+      audit_event_id: "delivery-evt-2"
+    });
+
+    const result = await harness.handler.call({
+      toolName: "soul.resolve",
+      arguments: {
+        target_object_id: "mem-1",
+        resolution: SoulResolutionKind.CORRECT,
+        delivery_id: "delivery-2",
+        correction
+      },
+      context
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const event = harness.events.find(
+      (e) => e.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_CORRECT_APPLIED
+    );
+    expect(event?.payload_json).toMatchObject({
+      correction,
+      predecessor_receipt_id: expect.any(String),
+      successor_receipt_id: expect.any(String)
+    });
+    expect(harness.claims.size).toBe(0);
+    expect(harness.memories.get("mem-1")?.lifecycle_state).toBe(ObjectLifecycleState.ACTIVE);
   });
 });

@@ -1,3 +1,4 @@
+// Handler-fixture deps stub recallService.recall; live recall lives in authenticity proofs.
 import { vi } from "vitest";
 import {
   MemoryDimension,

@@ -167,6 +167,63 @@ function createEvidenceCapsule(overrides: Partial<EvidenceCapsule>): EvidenceCap
 }
 
 describe("RecallService integration (real SQLite + FTS5)", () => {
+  it("delivers every planted gold for a multi-fact lexical query through coarse FTS", async () => {
+    const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRealStorage();
+
+    const golds = [
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a1",
+        content: "Office wifi passphrase is ZebraQuiltNine."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a2",
+        content: "Backup vault unlock PIN is 448291."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a3",
+        content: "On-call rotation starter is Mina Voss."
+      }
+    ] as const;
+    for (const gold of golds) {
+      await memoryEntryRepo.create(createMemoryEntry({
+        object_id: gold.object_id,
+        content: gold.content,
+        activation_score: 0.2
+      }));
+    }
+    for (let index = 0; index < 4; index += 1) {
+      await memoryEntryRepo.create(createMemoryEntry({
+        object_id: `00000000-0000-4000-8000-0000000000b${index}`,
+        content: `Unrelated kettle descaling interval note ${index}.`,
+        activation_score: 0.95
+      }));
+    }
+
+    const recallService = buildRecallService({ memoryEntryRepo, evidenceCapsuleRepo });
+    const result = await recallService.recall({
+      taskSurface: createTaskSurface(
+        "ZebraQuiltNine wifi passphrase, 448291 vault unlock PIN, and on-call rotation starter Mina Voss"
+      ),
+      workspaceId: WS,
+      runId: RUN,
+      strategy: "build",
+      policyOverride: withMaxEntries(recallService, 5)
+    });
+
+    const deliveredIds = result.candidates.map((row) => row.object_id);
+    const goldIds = golds.map((gold) => gold.object_id);
+    expect(goldIds.every((id) => deliveredIds.includes(id))).toBe(true);
+    expect(result.coarse_filter_count).toBeGreaterThanOrEqual(goldIds.length);
+    expect(result.degradation_reason).toBeNull();
+    for (const goldId of goldIds) {
+      const diagnostic = result.diagnostics?.candidates.find((item) => item.object_id === goldId);
+      expect(diagnostic?.admission_planes).toContain("lexical");
+    }
+
+    database.close();
+    databases.delete(database);
+  });
+
   it("places a lexically matching gold memory in the top five recalled candidates", async () => {
     const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRealStorage();
 

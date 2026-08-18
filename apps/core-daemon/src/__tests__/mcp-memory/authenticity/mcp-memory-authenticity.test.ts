@@ -46,7 +46,8 @@ import {
   SqliteProposalRepo,
   SqliteRunRepo,
   SqliteTrustStateRepo,
-  SqliteWorkspaceRepo
+  SqliteWorkspaceRepo,
+  type StorageDatabase
 } from "@do-soul/alaya-storage";
 
 import { createAlayaDaemonRuntime } from "../../../index.js";
@@ -83,6 +84,7 @@ const originalHome = process.env.HOME;
 const originalReviewerIdentity = process.env.ALAYA_REVIEWER_IDENTITY;
 
 const originalReviewerToken = process.env.ALAYA_REVIEWER_TOKEN;
+const originalSqliteWriteQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
 
 interface AuthenticityHarness {
   readonly dataDir: string;
@@ -100,8 +102,10 @@ interface EvidenceRepos {
   readonly workspaceRepo: SqliteWorkspaceRepo;
 }
 
+type ExtraSeed = (repos: EvidenceRepos, database: StorageDatabase) => Promise<void> | void;
+
 async function createAuthenticityHarness(
-  extraSeed?: (repos: EvidenceRepos) => Promise<void> | void
+  extraSeed?: ExtraSeed
 ): Promise<AuthenticityHarness> {
   const dataDir = await createTempDataDir();
   configureProcessEnv(dataDir);
@@ -156,7 +160,7 @@ async function createAuthenticityHarness(
 
 async function seedFixture(
   dataDir: string,
-  extraSeed?: (repos: EvidenceRepos) => Promise<void> | void
+  extraSeed?: ExtraSeed
 ): Promise<void> {
   const database = initDatabase({ filename: join(dataDir, "alaya.db") });
 
@@ -203,7 +207,7 @@ async function seedFixture(
     });
 
     if (extraSeed !== undefined) {
-      await extraSeed(repos);
+      await extraSeed(repos, database);
     }
   } finally {
     database.close();
@@ -306,6 +310,8 @@ function configureProcessEnv(dataDir: string): void {
   process.env.HOME = join(dataDir, "home");
   process.env.ALAYA_REVIEWER_IDENTITY = "user:lane-f-authenticity";
   process.env.ALAYA_REVIEWER_TOKEN = "lane-f-authenticity-token";
+  // Vitest loads storage from source, so the write-queue worker.js sibling is absent.
+  process.env.ALAYA_SQLITE_WRITE_QUEUE = "0";
 }
 
 function restoreProcessEnv(): void {
@@ -361,6 +367,12 @@ function restoreProcessEnv(): void {
     delete process.env.ALAYA_REVIEWER_TOKEN;
   } else {
     process.env.ALAYA_REVIEWER_TOKEN = originalReviewerToken;
+  }
+
+  if (originalSqliteWriteQueue === undefined) {
+    delete process.env.ALAYA_SQLITE_WRITE_QUEUE;
+  } else {
+    process.env.ALAYA_SQLITE_WRITE_QUEUE = originalSqliteWriteQueue;
   }
 }
 
@@ -461,6 +473,66 @@ describe("MCP memory authenticity proof", () => {
         usage_state: "used",
         workspace_id: "workspace-1"
       });
+    } finally {
+      await harness.close();
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it("delivers every planted gold through soul.recall on a real RecallService", async () => {
+    const golds = [
+      {
+        object_id: "00000000-0000-4000-8000-0000000000c1",
+        evidence_id: "11111111-1111-4111-8111-1111111111c1",
+        content: "Office wifi passphrase is ZebraQuiltNine.",
+        factorValue: "ZebraQuiltNine"
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000c2",
+        evidence_id: "11111111-1111-4111-8111-1111111111c2",
+        content: "Backup vault unlock PIN is 448291.",
+        factorValue: "448291"
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000c3",
+        evidence_id: "11111111-1111-4111-8111-1111111111c3",
+        content: "On-call rotation starter is Mina Voss.",
+        factorValue: "Mina Voss"
+      }
+    ] as const;
+
+    const harness = await createAuthenticityHarness(async (repos, database) => {
+      for (const gold of golds) {
+        const memory = createMemoryEntry({
+          object_id: gold.object_id,
+          evidence_refs: [gold.evidence_id],
+          content: gold.content,
+          dimension: MemoryDimension.FACT,
+          activation_score: 0.2
+        });
+        await repos.memoryRepo.create(memory);
+        seedSourceBoundRecall({
+          database,
+          workspaceId: memory.workspace_id,
+          runId: memory.run_id,
+          evidenceId: gold.evidence_id,
+          factorValue: gold.factorValue,
+          body: memory.content,
+          recordedAt: memory.created_at
+        });
+      }
+    });
+
+    try {
+      const recall = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+        query: "ZebraQuiltNine wifi passphrase, 448291 vault unlock PIN, and on-call rotation starter Mina Voss",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 5
+      });
+      const deliveredIds = recall.results.map((result) => result.object_id);
+      const goldIds = golds.map((gold) => gold.object_id);
+      expect(goldIds.every((id) => deliveredIds.includes(id))).toBe(true);
     } finally {
       await harness.close();
     }

@@ -19,7 +19,7 @@ import {
   createRecallCandidate
 } from "./mcp-memory-tool-handler-fixture.js";
 
-describe("mcp memory tool handler", () => {
+describe("mcp memory tool handler wiring", () => {
 
   it("validates used memories without mutating tier or access state", async () => {
     const deps = createDeps();

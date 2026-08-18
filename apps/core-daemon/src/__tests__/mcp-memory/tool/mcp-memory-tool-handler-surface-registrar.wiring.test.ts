@@ -47,7 +47,7 @@ function makeMinimalDeps(
   };
 }
 
-describe("mcp memory tool handler · attachSurfaceRegistrar", () => {
+describe("mcp memory tool handler wiring · attachSurfaceRegistrar", () => {
   it("calls ensureAgentSurface exactly once per (workspaceId, agentTarget)", async () => {
     const ensureAgentSurface = vi.fn(async () => undefined);
     const handler = createMcpMemoryToolHandler(makeMinimalDeps({ ensureAgentSurface }));

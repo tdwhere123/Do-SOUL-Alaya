@@ -26,8 +26,8 @@ import {
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
-// invariant: end-to-end coverage for soul.recall -> staged_warning ->
-// soul.resolve -> apply. The confirm path activates a draft
+// invariant: handler-fixture wiring for soul.recall -> staged_warning ->
+// soul.resolve -> apply. Maps + mock publish; not a live EventLog path. The confirm path activates a draft
 // claim_form via ClaimService.transitionLifecycle(draft -> active);
 // the audit row records the activated_claim_id.
 // see also: packages/core/src/governance/resolution-service.ts (dispatcher)
@@ -39,10 +39,10 @@ const context: McpMemoryToolCallContext = {
   workspaceId: "ws-e2e",
   runId: "run-e2e",
   agentTarget: "codex",
-  sessionId: "soul-resolve-e2e-session"
+  sessionId: "soul-resolve-wiring-session"
 };
 
-interface E2EHarness {
+interface WiringHarness {
   readonly handler: ReturnType<typeof createMcpMemoryToolHandler>;
   readonly claims: Map<string, ClaimForm>;
   readonly memories: Map<string, MemoryEntry>;
@@ -51,7 +51,7 @@ interface E2EHarness {
   readonly deliveries: Map<string, ContextDeliveryRecord>;
 }
 
-function createHarness(): E2EHarness {
+function createHarness(): WiringHarness {
   let claimTransitionCounter = 0;
   let eventCounter = 0;
   const claims = new Map<string, ClaimForm>();
@@ -358,45 +358,43 @@ function buildMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   } as MemoryEntry;
 }
 
-describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
+describe("soul.resolve handler fixture wiring", () => {
 
-  it("scope check: rejects memory resolution when delivery only carried a same-id synthesis capsule", async () => {
+  // invariant: a valid in-scope delivery_id MUST NOT authorise mutating
+  // a target_object_id that was not in that delivery's
+  // delivered_object_ids — the resolve handler rejects scope-confusion
+  // attempts even when every other check passes.
+  it("scope check: rejects soul.resolve when target_object_id is not in the delivery", async () => {
     const harness = createHarness();
-    harness.memories.set(
-      "shared-object",
-      buildMemory({
-        object_id: "shared-object",
-        lifecycle_state: ObjectLifecycleState.ACTIVE
-      })
+    harness.claims.set(
+      "claim-other",
+      buildClaim({ object_id: "claim-other", claim_status: ClaimLifecycleState.DRAFT })
     );
-    harness.deliveries.set("delivery-synthesis-only", {
-      delivery_id: "delivery-synthesis-only",
+    harness.deliveries.set("delivery-scoped", {
+      delivery_id: "delivery-scoped",
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
       run_id: context.runId,
-      delivered_object_ids: ["shared-object"],
-      delivered_objects: [
-        { object_id: "shared-object", object_kind: "synthesis_capsule" }
-      ],
+      delivered_object_ids: ["claim-1"],
       delivered_at: FIXED_NOW,
-      audit_event_id: "delivery-evt-synthesis-only"
+      audit_event_id: "delivery-evt-scoped"
     });
 
     const result = await harness.handler.call({
       toolName: "soul.resolve",
       arguments: {
-        target_object_id: "shared-object",
-        resolution: SoulResolutionKind.STALE,
-        delivery_id: "delivery-synthesis-only"
+        target_object_id: "claim-other",
+        resolution: SoulResolutionKind.CONFIRM,
+        delivery_id: "delivery-scoped"
       },
       context
     });
 
     expect(result.ok).toBe(false);
-    expect(harness.memories.get("shared-object")?.lifecycle_state).toBe(ObjectLifecycleState.ACTIVE);
+    expect(harness.claims.get("claim-other")?.claim_status).toBe(ClaimLifecycleState.DRAFT);
     expect(
       harness.events.some(
-        (event) => event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_STALE_APPLIED
+        (event) => event.event_type === GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED
       )
     ).toBe(false);
   });

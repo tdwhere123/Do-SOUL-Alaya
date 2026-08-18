@@ -10,7 +10,7 @@ import {
   createDeps
 } from "./mcp-memory-tool-handler-fixture.js";
 
-describe("mcp memory tool handler", () => {
+describe("mcp memory tool handler wiring", () => {
   it("fails closed for unsupported tools and invalid input", async () => {
     const handler = createMcpMemoryToolHandler(createDeps());
 

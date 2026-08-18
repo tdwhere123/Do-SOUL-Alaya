@@ -22,7 +22,7 @@ const context = {
       sessionId: "mcp-memory-tool-handler-pending-proposals-session",
 };
 
-describe("mcp memory tool handler — soul.list_pending_proposals (A1)", () => {
+describe("mcp memory tool handler wiring — soul.list_pending_proposals", () => {
   it("forwards workspace + filters and returns the projected summary list", async () => {
     const summary: SoulPendingProposalSummary = {
       proposal_id: "prop-1",

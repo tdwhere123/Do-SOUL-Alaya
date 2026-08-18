@@ -6,7 +6,7 @@ import {
   createDeps
 } from "./mcp-memory-tool-handler-fixture.js";
 
-describe("mcp memory tool handler source observation", () => {
+describe("mcp memory tool handler wiring source observation", () => {
   it("derives the explicit candidate receipt from a verified delivery instead of client input", async () => {
     const deps = createDeps();
     deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) =>

@@ -26,8 +26,8 @@ import {
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
 
-// invariant: end-to-end coverage for soul.recall -> staged_warning ->
-// soul.resolve -> apply. The confirm path activates a draft
+// invariant: handler-fixture wiring for soul.recall -> staged_warning ->
+// soul.resolve -> apply. Maps + mock publish; not a live EventLog path. The confirm path activates a draft
 // claim_form via ClaimService.transitionLifecycle(draft -> active);
 // the audit row records the activated_claim_id.
 // see also: packages/core/src/governance/resolution-service.ts (dispatcher)
@@ -39,10 +39,10 @@ const context: McpMemoryToolCallContext = {
   workspaceId: "ws-e2e",
   runId: "run-e2e",
   agentTarget: "codex",
-  sessionId: "soul-resolve-e2e-session"
+  sessionId: "soul-resolve-wiring-session"
 };
 
-interface E2EHarness {
+interface WiringHarness {
   readonly handler: ReturnType<typeof createMcpMemoryToolHandler>;
   readonly claims: Map<string, ClaimForm>;
   readonly memories: Map<string, MemoryEntry>;
@@ -51,7 +51,7 @@ interface E2EHarness {
   readonly deliveries: Map<string, ContextDeliveryRecord>;
 }
 
-function createHarness(): E2EHarness {
+function createHarness(): WiringHarness {
   let claimTransitionCounter = 0;
   let eventCounter = 0;
   const claims = new Map<string, ClaimForm>();
@@ -358,7 +358,7 @@ function buildMemory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   } as MemoryEntry;
 }
 
-describe("soul.recall -> staged_warning -> soul.resolve -> apply", () => {
+describe("soul.resolve handler fixture wiring", () => {
 
   it("confirm path: garden-compiled draft claim becomes active via soul.resolve.confirm", async () => {
     const harness = createHarness();
