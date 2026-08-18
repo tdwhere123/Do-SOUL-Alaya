@@ -59,9 +59,13 @@ export function materializeSliceKeyL2Bundles(params: Readonly<{
   const scope = params.scope ?? workspaceScope(params.postings);
   const levelOne = materializeLevelOneBundles(params, scope);
   const higher = params.policy.maxLevel >= 2
-    ? materializeLevelTwoBundles(params, scope, levelOne)
+    ? materializeLevelTwoBundles(params, scope, levelOne.bundles, levelOne.identityBundleIds)
     : [];
-  return applyPlantedFrontiers(params, scope, Object.freeze([...levelOne, ...higher]));
+  return applyPlantedFrontiers(
+    params,
+    scope,
+    Object.freeze([...levelOne.bundles, ...higher])
+  );
 }
 
 export function assertProjectionBundleLevelDag(
@@ -111,38 +115,55 @@ export function applyEraseToL2Bundles(
 function materializeLevelOneBundles(
   params: Parameters<typeof materializeSliceKeyL2Bundles>[0],
   scope: string
-): readonly ProjectionL2Bundle[] {
+): Readonly<{
+  readonly bundles: readonly ProjectionL2Bundle[];
+  readonly identityBundleIds: ReadonlySet<string>;
+}> {
   const groups = groupPostings(params.postings);
-  return Object.freeze([...groups.entries()].flatMap(([anchorKey, members]) => {
-    const uniqueMembers = uniqueSorted(members);
+  const identityBundleIds = new Set<string>();
+  const bundles = Object.freeze([...groups.entries()].flatMap(([anchorKey, group]) => {
+    const uniqueMembers = uniqueSorted(group.members);
     if (uniqueMembers.length < params.policy.minMembers) return [];
-    const [dimension, value] = splitAnchorKey(anchorKey);
-    const anchorDigest = hashLabeledIdentity("bundle_anchor", [
-      dimension,
-      value
-    ], params.sha256);
-    return [createBundle(params, scope, {
-      anchorDigest,
-      level: 1,
-      members: uniqueMembers.slice(0, params.policy.maxMembers),
-      children: [],
-      summary: [Object.freeze({ dimension, value })],
-      opened: true,
-      unseen: 0
-    })];
+    const bundle = createLevelOneBundle(params, scope, anchorKey, uniqueMembers);
+    if (group.identity) identityBundleIds.add(bundle.bundle_id);
+    return [bundle];
   }).sort((left, right) => compareText(left.bundle_id, right.bundle_id)));
+  return Object.freeze({ bundles, identityBundleIds });
+}
+
+function createLevelOneBundle(
+  params: Parameters<typeof materializeSliceKeyL2Bundles>[0],
+  scope: string,
+  anchorKey: string,
+  uniqueMembers: readonly string[]
+): ProjectionL2Bundle {
+  const [dimension, value] = splitAnchorKey(anchorKey);
+  return createBundle(params, scope, {
+    anchorDigest: hashLabeledIdentity("bundle_anchor", [dimension, value], params.sha256),
+    level: 1,
+    members: uniqueMembers.slice(0, params.policy.maxMembers),
+    children: [],
+    summary: [Object.freeze({ dimension, value })],
+    opened: true,
+    unseen: 0
+  });
 }
 
 function materializeLevelTwoBundles(
   params: Parameters<typeof materializeSliceKeyL2Bundles>[0],
   scope: string,
-  levelOne: readonly ProjectionL2Bundle[]
+  levelOne: readonly ProjectionL2Bundle[],
+  identityBundleIds: ReadonlySet<string>
 ): readonly ProjectionL2Bundle[] {
   const pairs: ProjectionL2Bundle[] = [];
   for (let leftIndex = 0; leftIndex < levelOne.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < levelOne.length; rightIndex += 1) {
       const left = levelOne[leftIndex]!;
       const right = levelOne[rightIndex]!;
+      // Grounded lexical L1 still routes; pairing it would re-inflate co-member L2.
+      if (!identityBundleIds.has(left.bundle_id) || !identityBundleIds.has(right.bundle_id)) {
+        continue;
+      }
       if (!sharesMember(left.member_refs, right.member_refs)) continue;
       const members = uniqueSorted([...left.member_refs, ...right.member_refs])
         .slice(0, params.policy.maxMembers);
@@ -236,16 +257,23 @@ function createBundle(
   });
 }
 
+type GroupedL1Anchor = Readonly<{
+  readonly members: readonly string[];
+  readonly identity: boolean;
+}>;
+
 function groupPostings(
   postings: readonly ProjectionL1Posting[]
-): ReadonlyMap<string, readonly string[]> {
-  const groups = new Map<string, string[]>();
+): ReadonlyMap<string, GroupedL1Anchor> {
+  const groups = new Map<string, { members: string[]; identity: boolean }>();
   for (const posting of postings) {
     if (posting.erased || posting.source !== "slice_key") continue;
     const key = `${posting.dimension}\0${posting.normalized_value}`;
-    const members = groups.get(key) ?? [];
-    members.push(posting.member_ref);
-    groups.set(key, members);
+    const group = groups.get(key) ?? { members: [], identity: false };
+    group.members.push(posting.member_ref);
+    // Any F3 posting marks the whole L1; majority would hide mixed anchors.
+    if (posting.authority === "proposed_routing_only") group.identity = true;
+    groups.set(key, group);
   }
   return groups;
 }

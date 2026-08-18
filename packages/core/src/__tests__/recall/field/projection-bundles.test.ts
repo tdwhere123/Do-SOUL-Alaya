@@ -62,10 +62,10 @@ describe("projection L1/L2 bundles and honest stop envelopes", () => {
 
   it("keeps a strict level DAG, allows overlap, and rejects mixed generations", () => {
     const postings = materializeSliceKeyL1Postings(GENERATION, [
-      entityKey("memory-1"),
-      timeKey("memory-1"),
-      entityKey("memory-2"),
-      timeKey("memory-2")
+      identityKey("memory-1", "entity", "Ada Lovelace", "canonical_entity"),
+      identityKey("memory-1", "time", "day:2026-08-16", "event_time"),
+      identityKey("memory-2", "entity", "Ada Lovelace", "canonical_entity"),
+      identityKey("memory-2", "time", "day:2026-08-16", "event_time")
     ], sha256);
     const other = materializeSliceKeyL1Postings(`sha256:${"c".repeat(64)}`, [
       entityKey("memory-3")
@@ -272,6 +272,35 @@ describe("projection L1/L2 bundles and honest stop envelopes", () => {
     expect(closed.stop.reason).toBe("all_channels_closed");
   });
 
+  it("keeps grounded co-membered L1 bundles without pairing them at L2", () => {
+    const postings = materializeSliceKeyL1Postings(GENERATION, [
+      groundedKey("memory-1", "some"),
+      groundedKey("memory-1", "have")
+    ], sha256);
+    const bundles = materializePolicyBundles(postings);
+    const levelOne = bundles.filter((bundle) => bundle.level === 1);
+
+    expect(levelOne).toHaveLength(2);
+    expect(levelOne.every((bundle) => bundle.member_refs.includes("memory-1"))).toBe(true);
+    expect(bundles.some((bundle) => bundle.level === 2)).toBe(false);
+  });
+
+  it("pairs L2 only when both co-membered L1 anchors are identity", () => {
+    const identity = materializePolicyBundles(materializeSliceKeyL1Postings(GENERATION, [
+      identityKey("memory-1", "semantic", "graduate", "signal_fact"),
+      identityKey("memory-1", "semantic", "student", "signal_fact")
+    ], sha256));
+    const mixed = materializePolicyBundles(materializeSliceKeyL1Postings(GENERATION, [
+      groundedKey("memory-1", "some"),
+      identityKey("memory-1", "semantic", "graduate", "signal_fact")
+    ], sha256));
+
+    expect(identity.filter((bundle) => bundle.level === 1)).toHaveLength(2);
+    expect(identity.filter((bundle) => bundle.level === 2)).toHaveLength(1);
+    expect(mixed.filter((bundle) => bundle.level === 1)).toHaveLength(2);
+    expect(mixed.some((bundle) => bundle.level === 2)).toBe(false);
+  });
+
   it("turns retrieval-field observations into generation-scoped L1 postings", () => {
     const capture = createRecallFiniteFieldChannelCapture({
       source_snapshot_digest: GENERATION,
@@ -325,6 +354,52 @@ function timeKey(ownerId: string) {
     provenance: { kind: "event_time", source_ref: `event-time:${ownerId}` },
     source_version: "projection:1",
     freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
+  });
+}
+
+function groundedKey(ownerId: string, value: string) {
+  return createSelectedSliceKeyV2({
+    workspace_id: "workspace-1",
+    owner_id: ownerId,
+    dimension: "semantic",
+    value,
+    authority: "grounded",
+    reliability: 1,
+    independence_group: `memory:${ownerId}`,
+    provenance: { kind: "signal_fact", source_ref: `span:${ownerId}` },
+    source_version: "projection:1",
+    freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
+  });
+}
+
+function identityKey(
+  ownerId: string,
+  dimension: "entity" | "time" | "semantic",
+  value: string,
+  kind: "canonical_entity" | "event_time" | "signal_fact"
+) {
+  return createSelectedSliceKeyV2({
+    workspace_id: "workspace-1",
+    owner_id: ownerId,
+    dimension,
+    value,
+    authority: "proposed_routing_only",
+    reliability: null,
+    independence_group: `memory:${ownerId}`,
+    provenance: { kind, source_ref: `${dimension}:${ownerId}` },
+    source_version: "projection:1",
+    freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
+  });
+}
+
+function materializePolicyBundles(
+  postings: ReturnType<typeof materializeSliceKeyL1Postings>
+) {
+  return materializeSliceKeyL2Bundles({
+    generationId: GENERATION,
+    postings,
+    sha256,
+    policy: { materialize: true, maxLevel: 2, maxMembers: 8, minMembers: 1 }
   });
 }
 
