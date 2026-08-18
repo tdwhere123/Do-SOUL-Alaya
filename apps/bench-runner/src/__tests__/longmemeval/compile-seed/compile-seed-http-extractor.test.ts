@@ -10,6 +10,7 @@ import {
   OfficialApiGardenProvider,
   parseOfficialApiSignals
 } from "@do-soul/alaya-soul";
+import { DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS } from "@do-soul/alaya-engine-gateway";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -23,6 +24,8 @@ import {
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
 } from "../../../bench/compile-seed.js";
+import { EXTRACTION_REQUEST_TIMEOUT_MS } from
+  "../../../bench/compile-seed/compile-seed-http.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
@@ -543,6 +546,46 @@ describe("createGardenHttpExtractor retry policy", () => {
   // operator-supplied timeoutMs is large enough that without the wall-clock
   // tick the test would time out.
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  it("does not abort a compile-seed fetch at the 10s provider default", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal;
+            signal?.addEventListener("abort", () => {
+              aborted = true;
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            });
+          })
+      );
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        retryMode: "disabled"
+      });
+      await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS);
+      expect(aborted).toBe(false);
+
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+      await vi.advanceTimersByTimeAsync(
+        EXTRACTION_REQUEST_TIMEOUT_MS - DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
+      );
+      await rejection;
+      expect(aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
     vi.useFakeTimers();
     try {

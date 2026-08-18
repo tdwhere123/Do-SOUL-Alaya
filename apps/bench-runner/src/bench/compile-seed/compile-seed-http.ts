@@ -18,6 +18,7 @@ import {
   type GardenHttpRetryDecision
 } from "./http/garden-http-retry-loop.js";
 import {
+  EXTRACTION_REQUEST_TIMEOUT_MS,
   isOutputTokenTruncation,
   resolveAttemptIdleTimeoutMs,
   withAttemptOutputTokenLimit
@@ -58,7 +59,7 @@ import {
 } from "./http/extraction-plan-deadline.js";
 export { extractContentFromChatCompletionBody } from "../extraction/chat-completion-response.js";
 export { EXTRACTION_HTTP_MAX_RETRY_JITTER_MS } from "./http/garden-http-retry-policy.js";
-export { EXTRACTION_REQUEST_TIMEOUT_MS } from "./http/output-token-retry.js";
+export { EXTRACTION_REQUEST_TIMEOUT_MS };
 
 // OpenAI-compatible live garden LLM delegate with bench-visible retry metadata.
 export function createGardenHttpExtractor(
@@ -262,6 +263,7 @@ async function runGardenHttpAttempt(
       profile: config.requestProfile as ProviderRequestProfile,
       abortSignal: controller.signal,
       fetchImpl: deps.fetch,
+      timeoutMs: input.timeoutMs ?? EXTRACTION_REQUEST_TIMEOUT_MS,
       ...(input.maxOutputTokens === undefined ? {} : {
         maxOutputTokens: input.maxOutputTokens,
         outputTokenField: input.outputTokenField
