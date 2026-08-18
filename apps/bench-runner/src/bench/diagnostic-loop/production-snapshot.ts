@@ -43,7 +43,8 @@ export async function runProductionSnapshotPhase(
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
     ...(context.request.extractionCacheRoot === undefined
       ? {}
-      : { extractionCacheRoot: context.request.extractionCacheRoot })
+      : { extractionCacheRoot: context.request.extractionCacheRoot }),
+    snapshotWriteAuthority: "diagnostic"
   });
   if (!isLongMemEvalSnapshotMaterializationResult(result)) {
     throw new DiagnosticLoopFailure({

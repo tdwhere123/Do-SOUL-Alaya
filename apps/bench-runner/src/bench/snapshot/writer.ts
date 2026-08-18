@@ -19,7 +19,8 @@ import {
 import { deriveSnapshotAttribution } from "./attribution.js";
 import {
   assertCurrentPostFillCacheAuthorityProofManifest,
-  assertCurrentSnapshotWriteAuthority
+  assertCurrentSnapshotWriteAuthority,
+  type SnapshotWriteAuthority
 } from "./current/current-substrate-authority.js";
 import { assertSnapshotAnswersWithFormation } from
   "./current/snapshot-answers-with-formation.js";
@@ -57,6 +58,7 @@ export interface WriteRecallEvalSnapshotInput {
   readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
+  readonly snapshotWriteAuthority?: SnapshotWriteAuthority;
 }
 
 interface SnapshotArtifactWritePreparation {
@@ -151,6 +153,9 @@ function assertPreparedWriteAuthority(
     datasetSha256: prepared.datasetSha,
     ...(input.semanticSupplementBinding === undefined ? {} : {
       semanticSupplementBinding: input.semanticSupplementBinding
+    }),
+    ...(input.snapshotWriteAuthority === undefined ? {} : {
+      snapshotWriteAuthority: input.snapshotWriteAuthority
     })
   });
 }

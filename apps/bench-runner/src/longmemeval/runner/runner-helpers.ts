@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BenchPolicyShape, SeedExtractionPath } from "@do-soul/alaya-eval";
+import type { BenchPolicyShape } from "@do-soul/alaya-eval";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import {
   resolveBenchCommitInfo
@@ -13,18 +13,15 @@ import type {
   BenchQueryEmbeddingWarmupSummary
 } from "../../harness/daemon.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon/daemon-types.js";
-import type { LongMemEvalSnapshotQuestion } from "../../bench/snapshot/materialize.js";
-import type { LongMemEvalRunProvenance } from "../../bench/provenance/run.js";
-import { writeRecallEvalSnapshotArtifacts } from "../../bench/snapshot/writer.js";
+import {
+  writeRecallEvalSnapshotArtifacts,
+  type WriteRecallEvalSnapshotInput
+} from "../../bench/snapshot/writer.js";
 import type {
   LongMemEvalEmbeddingVectorCacheSummary,
   LongMemEvalQueryEmbeddingCacheSummary
 } from "../../bench/diagnostics.js";
-import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
-import type { SourceAssertionSupplementBinding } from
-  "../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
-import type { ExtractionCachePreflightProof } from
-  "../../bench/compile-seed/compile-seed-types.js";
+import type { LongMemEvalVariant } from "../ingestion/dataset.js";
 export {
   buildLongMemEvalReportContextUsage,
   readLongMemEvalReportSideEffectSnapshot,
@@ -120,20 +117,9 @@ export function recallOptionsForPolicyShape(
   };
 }
 
-export function writeRecallEvalSnapshot(input: {
-  readonly snapshotOut: string;
-  readonly seedDataDirRoot: string;
-  readonly variant: LongMemEvalVariant;
-  readonly commitSha7: string;
-  readonly canonicalQuestions: readonly LongMemEvalQuestion[];
-  readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
-  readonly extractionCacheRoot: string;
-  readonly extractionCachePreflightProof: ExtractionCachePreflightProof;
-  readonly datasetSha256: string;
-  readonly seedExtractionPath: SeedExtractionPath;
-  readonly runProvenance: LongMemEvalRunProvenance;
-  readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
-}): Promise<void> {
+export function writeRecallEvalSnapshot(
+  input: WriteRecallEvalSnapshotInput
+): Promise<void> {
   return writeRecallEvalSnapshotArtifacts(input);
 }
 

@@ -110,6 +110,7 @@ export interface LongMemEvalRunOptions {
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly promotionContractPath?: string;
+  readonly snapshotWriteAuthority?: "diagnostic" | "promotion";
 }
 
 export interface LongMemEvalRunResult {

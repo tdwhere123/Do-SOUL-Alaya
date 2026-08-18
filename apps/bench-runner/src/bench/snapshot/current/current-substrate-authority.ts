@@ -57,6 +57,10 @@ import {
   assertExtractionCachePreflightProofReuse,
   createExtractionCachePreflightProof
 } from "../../compile-seed/preflight/cache-preflight-proof.js";
+import {
+  assertDiagnosticSnapshotWriteAuthority,
+  type SnapshotWriteAuthority
+} from "./diagnostic-write-authority.js";
 
 const currentPostFillProofRoots = new WeakMap<
   ExtractionCachePreflightProof,
@@ -197,6 +201,8 @@ function assertIncompletePostFillCache(
   throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
 }
 
+export type { SnapshotWriteAuthority };
+
 export function assertCurrentSnapshotWriteAuthority(input: {
   readonly dbPath: string;
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
@@ -207,27 +213,12 @@ export function assertCurrentSnapshotWriteAuthority(input: {
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly datasetSha256: string;
   readonly semanticSupplementBinding?: SourceAssertionSupplementBinding;
+  readonly snapshotWriteAuthority?: SnapshotWriteAuthority;
 }): void {
-  const questionDigest = snapshotQuestionIdDigest(input.sidecar.questions);
-  const compactRunProvenance = compactSnapshotRunProvenance(input.runProvenance);
-  const attribution = deriveSnapshotAttribution({
-    artifactIntegrity: {
-      db_sha256: "0".repeat(64),
-      sidecar_sha256: "0".repeat(64),
-      extraction_authority_filename: "snapshot.extraction-authority.json",
-      extraction_authority_sha256: "0".repeat(64),
-      extraction_authority_bytes: 1
-    },
-    runProvenance: compactRunProvenance,
-    questionIdDigest: questionDigest,
-    datasetSha256: input.datasetSha256,
-    seedExtractionPath: input.seedExtractionPath,
-    extractionProvenance: input.extraction
-  });
-  if (!isLongMemEvalRunProvenanceGateEligible(input.runProvenance) ||
-      !isCacheOnlySeedExtractionPath(input.seedExtractionPath) ||
-      attribution.status !== "attributed" || !attribution.gate_eligible) {
-    throw new Error("snapshot writer requires gate-eligible cache-only provenance");
+  if ((input.snapshotWriteAuthority ?? "promotion") === "diagnostic") {
+    assertDiagnosticSnapshotWriteAuthority(input);
+  } else {
+    assertPromotionSnapshotWriteAuthority(input);
   }
   if (!isDeepStrictEqual(
     input.runProvenance.semantic_supplement,
@@ -303,6 +294,36 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
     datasetSha256: dataset.sha256,
     measurementForQuestion: buildSnapshotMeasurementOracle(questions, input.sidecar)
   };
+}
+
+function assertPromotionSnapshotWriteAuthority(input: {
+  readonly sidecar: LongMemEvalSnapshotSidecarFile;
+  readonly extraction: SnapshotExtractionProvenanceV3;
+  readonly seedExtractionPath: SeedExtractionPath;
+  readonly runProvenance: LongMemEvalRunProvenance;
+  readonly datasetSha256: string;
+}): void {
+  const questionDigest = snapshotQuestionIdDigest(input.sidecar.questions);
+  const compactRunProvenance = compactSnapshotRunProvenance(input.runProvenance);
+  const attribution = deriveSnapshotAttribution({
+    artifactIntegrity: {
+      db_sha256: "0".repeat(64),
+      sidecar_sha256: "0".repeat(64),
+      extraction_authority_filename: "snapshot.extraction-authority.json",
+      extraction_authority_sha256: "0".repeat(64),
+      extraction_authority_bytes: 1
+    },
+    runProvenance: compactRunProvenance,
+    questionIdDigest: questionDigest,
+    datasetSha256: input.datasetSha256,
+    seedExtractionPath: input.seedExtractionPath,
+    extractionProvenance: input.extraction
+  });
+  if (!isLongMemEvalRunProvenanceGateEligible(input.runProvenance) ||
+      !isCacheOnlySeedExtractionPath(input.seedExtractionPath) ||
+      attribution.status !== "attributed" || !attribution.gate_eligible) {
+    throw new Error("snapshot writer requires gate-eligible cache-only provenance");
+  }
 }
 
 function bindCurrentRunProvenance(

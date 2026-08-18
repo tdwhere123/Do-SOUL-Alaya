@@ -451,6 +451,9 @@ async function writeLongMemEvalSnapshotIfRequested(
     ...(context.seedRunner.semanticSupplementBinding === undefined
       ? {}
       : { semanticSupplementBinding: context.seedRunner.semanticSupplementBinding }),
+    ...(context.opts.snapshotWriteAuthority === undefined
+      ? {}
+      : { snapshotWriteAuthority: context.opts.snapshotWriteAuthority }),
     runProvenance
   });
   process.stdout.write(
