@@ -169,9 +169,7 @@ function createBenchRecallOperation(
       diagnosticCapture:
         input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"
           ? "packet_trace"
-          : opts.selectionBoundaryObserver === undefined
-            ? undefined
-            : "answer_features",
+          : undefined,
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
       ...(opts.selectionBoundaryObserver === undefined
         ? {}

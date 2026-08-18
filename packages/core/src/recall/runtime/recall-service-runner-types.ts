@@ -57,14 +57,6 @@ export function capturesRecallAnswerFeatures(
   return capture === "answer_features" || capture === "packet_trace";
 }
 
-export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
-  readonly diagnosticCapture?: RecallDiagnosticCapture;
-  readonly selectionBoundaryObserver?: unknown;
-}>): boolean {
-  return capturesRecallAnswerFeatures(params.diagnosticCapture) ||
-    params.selectionBoundaryObserver !== undefined;
-}
-
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly workspaceId: string;
@@ -82,6 +74,7 @@ export interface RecallExecutionParams {
     import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
   >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  // Observer attachment is observation-only; answer features follow diagnosticCapture.
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;

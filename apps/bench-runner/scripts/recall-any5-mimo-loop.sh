@@ -12,7 +12,7 @@ SMALL_WINDOW_CEILING=3
 
 usage() {
   cat <<'EOF'
-usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N]
+usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--snapshot PATH]
 
   --limit is required. Windows larger than 3 also need --confirm-window equal
   to that limit. 100Q is refused unless you pass --confirm-window 100 after a
@@ -22,6 +22,7 @@ usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-see
   query-factor-fill  live query-compiler fill (API). Needs credentials.
   diagnostic         cache-only credentialless diagnostic-loop
   inspect-seed       print projection artifact inflation from a seed sqlite
+  --snapshot PATH    diagnostic reuse of a sealed DB; omits --snapshot-out
 EOF
 }
 
@@ -36,6 +37,8 @@ OFFSET="0"
 CONFIRM_WINDOW=""
 WORK_ROOT=""
 SEED_DB=""
+SNAPSHOT=""
+SNAPSHOT_FLAG=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +47,15 @@ while [[ $# -gt 0 ]]; do
     --confirm-window) CONFIRM_WINDOW="${2:-}"; shift 2 ;;
     --work-root) WORK_ROOT="${2:-}"; shift 2 ;;
     --seed-db) SEED_DB="${2:-}"; shift 2 ;;
+    --snapshot)
+      # Presence is independent of value so an empty operand cannot materialize.
+      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+        die "--snapshot requires a non-empty path"
+      fi
+      SNAPSHOT="$2"
+      SNAPSHOT_FLAG=1
+      shift 2
+      ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown flag $1" ;;
   esac
@@ -55,6 +67,9 @@ if [[ "$COMMAND" != "inspect-seed" ]]; then
   if [[ "$LIMIT" -gt "$SMALL_WINDOW_CEILING" && "$CONFIRM_WINDOW" != "$LIMIT" ]]; then
     die "refusing limit=$LIMIT (>$SMALL_WINDOW_CEILING) without --confirm-window $LIMIT"
   fi
+fi
+if [[ "$SNAPSHOT_FLAG" -eq 1 && "$COMMAND" != "diagnostic" ]]; then
+  die "--snapshot is only valid for diagnostic"
 fi
 
 ENV_FILE="${ALAYA_RECALL_ANY5_ENV:-$DEFAULT_ENV}"
@@ -116,6 +131,43 @@ run_replay() {
   rm -f "$keys_file"
 }
 
+reject_completed_recall_checkpoints() {
+  local work="$1"
+  local rc=0
+  python3 - "$work" <<'PY' || rc=$?
+import json, os, sys
+work = sys.argv[1]
+for name in ("control_recall.json", "treatment_recall.json"):
+    path = os.path.join(work, "checkpoints", name)
+    if not os.path.isfile(path):
+        continue
+    try:
+        payload = json.loads(open(path, encoding="utf-8").read())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise SystemExit(3)
+    if not isinstance(payload, dict):
+        raise SystemExit(3)
+    expected_phase = name[:-5]
+    # Schema-invalid objects would otherwise reach persistRunRecord.
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("kind") != "diagnostic_loop_checkpoint"
+        or payload.get("phase") != expected_phase
+        or payload.get("status") not in ("completed", "failed")
+    ):
+        raise SystemExit(3)
+    if payload.get("status") == "completed":
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+  if [[ $rc -eq 1 ]]; then
+    die "completed recall checkpoint under $work"
+  fi
+  if [[ $rc -ne 0 ]]; then
+    die "unreadable or invalid recall checkpoint under $work"
+  fi
+}
+
 run_query_factor_fill() {
   local questions="$G2/questions-${LIMIT}.json"
   local out="$G2/query-factor-cache-${LIMIT}q.json"
@@ -146,14 +198,30 @@ run_diagnostic() {
   if [[ ! -f "$qcache" && -f "$G2/query-factor-cache-100q.json" ]]; then
     qcache="$G2/query-factor-cache-100q.json"
   fi
-  mkdir -p "$work/history"
-  # post-fill stages must stay credentialless
+  local snapshot_args=()
+  if [[ "$SNAPSHOT_FLAG" -eq 1 ]]; then
+    [[ -f "$SNAPSHOT" ]] || die "snapshot is not a file: $SNAPSHOT"
+    # --snapshot-out would materialize a new DB; reuse must stay read-only.
+    snapshot_args+=(--snapshot "$SNAPSHOT")
+  else
+    # Default materialize would replace a sealed work DB already on disk.
+    if [[ -f "$work/snapshot.db" ]]; then
+      die "refusing to overwrite existing snapshot: $work/snapshot.db"
+    fi
+    snapshot_args+=(--snapshot-out "$work/snapshot.db")
+  fi
+  reject_completed_recall_checkpoints "$work"
+  # post-fill stages must stay credentialless before history/run mutation
   unset ALAYA_OFFICIAL_GARDEN_SECRET_REF
   unset ALAYA_OFFICIAL_GARDEN_API_KEY
   unset OFFICIAL_API_GARDEN_API_KEY
   unset ALAYA_QA_API_KEY
+  unset ALAYA_GARDEN_OPENAI_SECRET_REF
+  unset ALAYA_CONFLICT_LLM_PROVIDER_URL
+  unset ALAYA_CONFLICT_LLM_API_KEY
   export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0
   export ALAYA_GARDEN_PROVIDER_KIND=local_heuristics
+  mkdir -p "$work/history"
   local extra=()
   if [[ -f "$qcache" ]]; then
     extra+=(--query-semantic-factor-cache "$qcache")
@@ -172,7 +240,7 @@ run_diagnostic() {
     --mode cache-only \
     --variant s --limit "$LIMIT" --offset "$OFFSET" \
     --extraction-cache-root "$CACHE_ROOT" \
-    --snapshot-out "$work/snapshot.db" \
+    "${snapshot_args[@]}" \
     --history-root "$work/history" \
     "${extra[@]}"
 }

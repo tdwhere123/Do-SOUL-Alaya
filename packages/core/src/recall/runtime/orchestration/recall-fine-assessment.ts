@@ -6,14 +6,14 @@ import {
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
-import type {
-  FineAssessmentPreparation,
-  FineAssessmentResult,
-  PreparedRecallRequest,
-  RecallExecutionContext,
-  RecallExecutionParams
+import {
+  capturesRecallAnswerFeatures,
+  type FineAssessmentPreparation,
+  type FineAssessmentResult,
+  type PreparedRecallRequest,
+  type RecallExecutionContext,
+  type RecallExecutionParams
 } from "../recall-service-runner-types.js";
-import { shouldCaptureRecallAnswerFeatures } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import { attributeEvidenceSemanticActivations } from
@@ -142,7 +142,7 @@ function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver,
@@ -176,7 +176,7 @@ function buildCoarseAssessmentParams(
       params.querySemanticFactorFormationCapture,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
     degradationReasons: context.degradationReasons
   };
 }

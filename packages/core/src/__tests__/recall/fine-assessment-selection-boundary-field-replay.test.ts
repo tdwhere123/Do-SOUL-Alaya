@@ -25,7 +25,12 @@ import {
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
 import { createSelectionBoundary } from
   "../../recall/delivery/fine-assessment-selection/consensus-result.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
+  projectVerifiedUserAssertionContext
+} from "../../recall/query/recall-user-assertion-context.js";
+import {
+  createCandidate,
   createConfig,
   createRankedCandidate,
   createSupplementaryData,
@@ -332,7 +337,76 @@ describe("fine-assessment selection boundary field replay", () => {
     expect(() => replayFineAssessmentSelectionBoundary(tampered))
       .toThrow(/selection boundary fidelity mismatch/u);
   });
+
+  it("keeps ordinary and observer-only negated-assertion disposition identical", () => {
+    const ordinary = selectNegatedAssertion(false, false);
+    const observerOnly = selectNegatedAssertion(false, true);
+    const captured = selectNegatedAssertion(true, true);
+    const disposition = (
+      result: ReturnType<typeof selectFineAssessmentCandidates>
+    ) => result.diagnostics.map((row) => ({
+      candidate_key: row.candidate_key,
+      dropped_reason: row.dropped_reason
+    }));
+
+    expect(observerOnly.result.candidates).toEqual(ordinary.result.candidates);
+    expect(disposition(observerOnly.result)).toEqual(disposition(ordinary.result));
+    expect(observerOnly.boundary?.input.capture_answer_features).toBe(false);
+    for (const row of [...ordinary.result.diagnostics, ...observerOnly.result.diagnostics]) {
+      expect(row).not.toHaveProperty("selector_observation");
+      expect(row).not.toHaveProperty("answer_features");
+    }
+    expect(captured.result.diagnostics[0]?.selector_observation?.evidence.event_status)
+      .toBe("negated");
+    expect(captured.boundary?.expected.pre_projection?.admission_actions[0])
+      .toMatchObject({
+        dropped_reason: "ineligible",
+        witness: { kind: "ineligible", risk: "blocked" }
+      });
+  });
 });
+
+function selectNegatedAssertion(captureAnswerFeatures: boolean, observe: boolean) {
+  const content = "I didn't buy the bookshelf";
+  const evidenceRef = "evidence-bookshelf";
+  const candidate = createCandidate("bookshelf", {
+    content,
+    evidence_refs: [evidenceRef]
+  });
+  const verified = projectVerifiedUserAssertionContext({
+    evidenceRef,
+    entryContent: content,
+    gist: `User: ${content}`
+  });
+  if (verified === null) throw new Error("test fixture must project a User assertion");
+  let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+  const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+    orderedCandidates: [candidate],
+    config: createConfig(),
+    supplementaryData: createSupplementaryData({
+      queryProbes: compileRecallQueryProbes(
+        "Where did I buy my new bookshelf from?"
+      ),
+      verifiedUserAssertionContextsByMemoryId: {
+        [candidate.entry.object_id]: verified
+      }
+    }),
+    tokenEstimator: { estimate: () => 5 },
+    rankByCandidateKey: rankMap([candidate]),
+    captureAnswerFeatures,
+    ...(observe ? {
+      selectionBoundaryObserver: (pending) => {
+        boundary = materializeFineAssessmentSelectionBoundary(pending);
+        return undefined;
+      }
+    } : {})
+  });
+  if (observe && boundary === undefined) {
+    throw new Error("selection boundary was not observed");
+  }
+  return { result, boundary };
+}
 
 function captureBoundary(
   estimator = vi.fn((_content: string) => 5)
@@ -374,7 +448,7 @@ function fieldLane(
 function selectFixture(
   observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
   estimator = vi.fn((_content: string) => 5),
-  captureAnswerFeatures = observer !== undefined,
+  captureAnswerFeatures = false,
   reverseFinalOrder = false,
   supplementaryData = createSupplementaryData()
 ) {

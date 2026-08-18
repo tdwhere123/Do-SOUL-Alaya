@@ -421,26 +421,10 @@ function readPreProjection(
   return boundary.expected.pre_projection;
 }
 
-function fieldLane(
-  lane: "exact" | "porter" | "trigram",
-  objectId?: string
-) {
-  const observations = objectId === undefined
-    ? []
-    : [{ object_id: objectId, rank: 1, normalized_rank: 1 }];
-  return {
-    lane,
-    status: objectId === undefined ? "ineligible" as const : "complete" as const,
-    depth: observations.length,
-    observations,
-    unseen_upper_bound: objectId === undefined ? null : 0
-  };
-}
-
 function selectFixture(
   observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
   estimator = vi.fn((_content: string) => 5),
-  captureAnswerFeatures = observer !== undefined,
+  captureAnswerFeatures = false,
   reverseFinalOrder = false,
   supplementaryData = createSupplementaryData()
 ) {
