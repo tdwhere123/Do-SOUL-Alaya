@@ -27,6 +27,7 @@ import type { ProjectionL2Bundle } from "../../../flood/slice-key-l2-bundles.js"
 import type { SourceProjectionSliceKey } from "./source-projection.js";
 import { createFieldStopCertificateEnvelope } from
   "../../refinement/field-refinement-stop-envelope.js";
+import { compareText } from "../../../../shared/compare-text.js";
 
 const PROPOSED_ROUTING_RELIABILITY_CEILING = 0.5;
 
@@ -478,6 +479,3 @@ function assertPinnedArtifacts(
   }
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}

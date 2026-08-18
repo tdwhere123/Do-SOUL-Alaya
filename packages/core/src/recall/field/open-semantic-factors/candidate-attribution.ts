@@ -6,6 +6,7 @@ import type { CoarseRecallCandidate, RecallSupplementaryData } from
   "../../runtime/recall-service-types.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "../field-identity.js";
 import type { OpenSemanticFactorActivationReceipt } from "./activation.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID =
   "open_semantic_factor_candidate_activation_v1";
@@ -69,9 +70,6 @@ function candidateEvidenceIds(candidate: Readonly<CoarseRecallCandidate>): reado
   return [...new Set(candidate.entry.evidence_refs)];
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 export type OpenSemanticFactorCandidateActivationSupplement = Pick<
   RecallSupplementaryData,

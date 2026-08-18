@@ -18,6 +18,7 @@ import {
   type SelectedSliceKeyV2
 } from "../../../flood/slice-key-contract.js";
 import { digestRecallFieldIdentity } from "../../field-identity.js";
+import { compareText } from "../../../../shared/compare-text.js";
 
 export type SourceProjectionState = Readonly<{
   readonly scope: string;
@@ -244,6 +245,3 @@ function sortByIdentity<T extends Readonly<{ identity: string }>>(rows: readonly
   return Object.freeze([...rows].sort((left, right) => compareText(left.identity, right.identity)));
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}

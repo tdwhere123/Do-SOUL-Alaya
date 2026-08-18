@@ -2,14 +2,12 @@ import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import {
   open,
-  lstat,
   readFile as fsReadFile,
   realpath,
-  unlink,
   type FileHandle
 } from "node:fs/promises";
 import path from "node:path";
-import type { ExecShellToolInput, WriteFileToolInput } from "@do-soul/alaya-protocol";
+import type { ExecShellToolInput } from "@do-soul/alaya-protocol";
 import type { GitBindingValidationOptions } from "./tool-runtime-files.js";
 import {
   DEFAULT_EXEC_TIMEOUT_MS,
@@ -26,10 +24,18 @@ import {
   mapFileSystemError,
   readFileSystemEntry,
   resolveContainedPath,
+  resolveOpenedFileRealPath,
+  resolveRealWritableRoots,
+  swallowBestEffortCleanup,
   type WorkspaceGitBindingStatus
 } from "./tool-runtime-file-common.js";
+export { writeFile } from "./tool-runtime-file-write.js";
 
 const EXEC_COMMAND_CONTAINMENT_MESSAGE = "Command must be a real non-symlink executable inside a writable root.";
+
+function fdExecPath(fd: number): string {
+  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
+}
 
 function warnExecContainmentFailure(operation: string, error: unknown): void {
   process.emitWarning(`[ToolRuntime] exec containment ${operation} failed`, {
@@ -41,23 +47,6 @@ function warnExecContainmentFailure(operation: string, error: unknown): void {
   });
 }
 
-function warnBestEffortCleanup(operation: string, error: unknown): void {
-  process.emitWarning(`[ToolRuntime] best-effort ${operation} failed`, {
-    code: "ALAYA_TOOL_RUNTIME_CLEANUP_FAILED",
-    detail: JSON.stringify({
-      operation,
-      errno: isNodeErrorWithCode(error) ? error.code : "unknown"
-    })
-  });
-}
-
-function swallowBestEffortCleanup(operation: string): (error: unknown) => undefined {
-  return (error) => {
-    warnBestEffortCleanup(operation, error);
-    return undefined;
-  };
-}
-
 function mapExecContainmentOpenError(error: unknown): ReturnType<typeof createAccessDenied> {
   if (isNodeErrorWithCode(error)) {
     if (error.code === "ENOSPC" || error.code === "EIO" || error.code === "EMFILE" || error.code === "ENFILE") {
@@ -65,107 +54,6 @@ function mapExecContainmentOpenError(error: unknown): ReturnType<typeof createAc
     }
   }
   return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
-}
-
-export async function writeFile(
-  input: WriteFileToolInput,
-  writableRoots: readonly string[]
-): Promise<unknown> {
-  const containedPath = resolveContainedPath(input.path, writableRoots);
-  if (!containedPath.ok) {
-    return containedPath;
-  }
-
-  const entry = await readFileSystemEntry(containedPath.resolvedPath);
-  if (!entry.ok && entry.code !== "NOT_FOUND") {
-    return entry;
-  }
-
-  if (entry.ok && !entry.stats.isFile()) {
-    return createFileToolError("WRITE_ERROR", `Path is not a regular file: ${containedPath.resolvedPath}`);
-  }
-
-  const parentDirectory = path.dirname(containedPath.resolvedPath);
-  const parentEntry = await readFileSystemEntry(parentDirectory);
-  if (!parentEntry.ok) {
-    return parentEntry;
-  }
-
-  if (!parentEntry.stats.isDirectory()) {
-    return createFileToolError("WRITE_ERROR", `Parent path is not a directory: ${parentDirectory}`);
-  }
-
-  let realWritableRoots: readonly string[];
-  try {
-    const realParentDirectory = await realpath(parentDirectory);
-    realWritableRoots = await resolveRealWritableRoots(writableRoots);
-
-    if (!realWritableRoots.some((root) => isPathWithinRoot(realParentDirectory, root))) {
-      return createAccessDenied("Path is outside the workspace boundary.");
-    }
-  } catch (error) {
-    return mapFileSystemError(error, parentDirectory, "WRITE_ERROR");
-  }
-
-  let handle: FileHandle | undefined;
-  let newlyCreated = false;
-  try {
-    if (entry.ok) {
-      try {
-        const linkStat = await lstat(containedPath.resolvedPath);
-        if (linkStat.isSymbolicLink()) {
-          return createAccessDenied("Path is outside the workspace boundary.");
-        }
-      } catch (error) {
-        return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
-      }
-    }
-
-    const buffer = Buffer.from(input.content, "utf8");
-    const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
-    if (entry.ok) {
-      handle = await open(
-        containedPath.resolvedPath,
-        constants.O_RDWR | noFollow,
-        0o666
-      );
-    } else {
-      handle = await open(
-        containedPath.resolvedPath,
-        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow,
-        0o666
-      );
-      newlyCreated = true;
-    }
-
-    const openedFileRealPath = await resolveOpenedFileRealPath(handle.fd, containedPath.resolvedPath);
-    if (!realWritableRoots.some((root) => isPathWithinRoot(openedFileRealPath, root))) {
-      await handle.close();
-      handle = undefined;
-      if (newlyCreated) {
-        await unlink(containedPath.resolvedPath).catch(swallowBestEffortCleanup("unlink-new-file"));
-      }
-      return createAccessDenied("Path is outside the workspace boundary.");
-    }
-
-    await handle.truncate(0);
-    await handle.write(buffer, 0, buffer.length, 0);
-    await handle.close();
-    handle = undefined;
-
-    return {
-      ok: true,
-      bytesWritten: buffer.byteLength
-    };
-  } catch (error) {
-    if (handle) {
-      await handle.close().catch(swallowBestEffortCleanup("close-write-handle"));
-    }
-    if (newlyCreated) {
-      await unlink(containedPath.resolvedPath).catch(swallowBestEffortCleanup("unlink-rolled-back-file"));
-    }
-    return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
-  }
 }
 
 export async function execShell(
@@ -329,38 +217,9 @@ async function resolveContainedExecutablePath(
   }
 }
 
-async function resolveRealWritableRoots(writableRoots: readonly string[]): Promise<readonly string[]> {
-  return (
-    await Promise.all(
-      writableRoots.map(async (root) => {
-        try {
-          return await realpath(root);
-        } catch (error) {
-          process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
-            code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
-            detail: JSON.stringify({
-              root,
-              code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
-            })
-          });
-          return null;
-        }
-      })
-    )
-  ).filter((root): root is string => root !== null);
-}
-
 async function resolveExecCwd(writableRoots: readonly string[]): Promise<string> {
   const realRoots = await resolveRealWritableRoots(writableRoots);
   return realRoots[0] ?? writableRoots[0]!;
-}
-
-function fdExecPath(fd: number): string {
-  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
-}
-
-async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
-  return process.platform === "linux" ? await realpath(fdExecPath(fd)) : await realpath(resolvedPath);
 }
 
 function hasExecutableMode(mode: number | bigint): boolean {

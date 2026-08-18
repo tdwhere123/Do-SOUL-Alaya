@@ -17,6 +17,7 @@ import {
   projectFactFrameSemanticFactors,
   type FactFrameSemanticAlignment
 } from "../fact-frame-semantic-factors.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export type AttributedFacilityMatchCandidate = Readonly<{
   readonly candidate_key: string;
@@ -189,6 +190,3 @@ function compareMatches(
     compareText(left.independence_key, right.independence_key);
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

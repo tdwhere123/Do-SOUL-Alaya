@@ -302,6 +302,19 @@ function consumeOtherPathFlags(
   if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
   const recallEvalIndex = consumeRecallEvalPathFlag(args, index, token, state);
   if (recallEvalIndex !== undefined) return recallEvalIndex;
+  const snapshotIndex = consumeSnapshotCachePathFlags(args, index, token, state);
+  if (snapshotIndex !== undefined) return snapshotIndex;
+  const extractionIndex = consumeExtractionReceiptPathFlags(args, index, token, state);
+  if (extractionIndex !== undefined) return extractionIndex;
+  return consumeConcurrencyPathFlags(args, index, token, state);
+}
+
+function consumeSnapshotCachePathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (token === "--data-dir") {
     state.dataDir = args[index + 1];
     return index + 1;
@@ -322,6 +335,19 @@ function consumeOtherPathFlags(
     state.extractionCacheRoot = readFlagValue(args, index, token, "--extraction-cache-root");
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--snapshot")) {
+    state.snapshot = readFlagValue(args, index, token, "--snapshot");
+    return nextIndex(index, token);
+  }
+  return undefined;
+}
+
+function consumeExtractionReceiptPathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (matchFlagToken(token, "--extraction-authority")) {
     state.extractionAuthority = readRequiredFlagValue(
       args,
@@ -352,10 +378,15 @@ function consumeOtherPathFlags(
     );
     return nextIndex(index, token);
   }
-  if (matchFlagToken(token, "--snapshot")) {
-    state.snapshot = readFlagValue(args, index, token, "--snapshot");
-    return nextIndex(index, token);
-  }
+  return undefined;
+}
+
+function consumeConcurrencyPathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
       readFlagValue(args, index, token, "--concurrency"), "--concurrency"

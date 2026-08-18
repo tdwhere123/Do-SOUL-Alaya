@@ -3,9 +3,7 @@ import {
   SignalEventType,
   SignalState,
   SoulSignalTriagedPayloadSchema,
-  readErrorMessage,
-  type CandidateMemorySignal,
-  type EventLogEntry
+  type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 import {
   assertReplayMatchesExistingSignal,
@@ -21,28 +19,21 @@ import {
   resolveStoredSignalEmissionContext
 } from "./signal-emission-recovery.js";
 import {
-  buildSignalMaterializationEvent,
   claimSourceGroundingRedrive,
-  completeDeferredMaterialization,
-  completeSuccessfulSourceGroundingRedrive,
   emptySourceGroundingDeferStats,
-  reconcileStaleSourceGroundingClaim,
-  recordFailedSourceGroundingRedrive
+  reconcileStaleSourceGroundingClaim
 } from "./signal-service-grounding-defer.js";
+import { materializeAcceptedSignal } from "./signal-service-materialization.js";
 import {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
   type SourceGroundingDeferStats
 } from "./source-grounding-defer-queue.js";
 import type {
   SignalListPageOptions,
-  SignalMaterializationFailureResult,
   SignalMaterializationContext,
-  SignalMaterializationResult,
   SignalServiceDependencies,
-  SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
-  SignalServiceWarnPort,
-  SignalTriageResult
+  SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
 export type {
@@ -87,12 +78,6 @@ export {
   type SourceGroundingDeferTransitionPort
 } from "./source-grounding-defer-queue.js";
 export { resolveStoredSignalEmissionContext } from "./signal-emission-recovery.js";
-
-interface MaterializationAttempt {
-  readonly materializingSignal: CandidateMemorySignal;
-  readonly materialization: SignalMaterializationResult;
-  readonly caughtMaterializationError: boolean;
-}
 
 export class SignalService {
   private readonly warn: SignalServiceWarnPort;
@@ -187,7 +172,14 @@ export class SignalService {
       // nullable control flow after that helper returns successfully.
       return await this.deferUnverifiableEmission(claim.signal);
     }
-    return await this.materializeAcceptedSignal(claim.signal, "accepted", context, claim.claim_token);
+    return await materializeAcceptedSignal(
+      this.dependencies,
+      this.warn,
+      claim.signal,
+      "accepted",
+      context,
+      claim.claim_token
+    );
   }
 
   public async reconcileStaleSourceGroundingRedrive(input: {
@@ -272,194 +264,13 @@ export class SignalService {
       };
     }
 
-    return await this.materializeAcceptedSignal(triagedSignal, triageResult, context);
-  }
-
-  private async materializeAcceptedSignal(
-    triagedSignal: CandidateMemorySignal,
-    triageResult: SignalTriageResult,
-    context: SignalMaterializationContext,
-    claimToken?: string
-  ): Promise<SignalServiceReceiveResult> {
-    const materializer = this.dependencies.postTriageMaterializer;
-    if (materializer === undefined) {
-      return {
-        signal: triagedSignal,
-        triage_result: triageResult,
-        materialization: null
-      };
-    }
-
-    const attempt = await this.runMaterializationAttempt(
-      triagedSignal,
-      materializer,
-      context,
-      claimToken !== undefined
-    );
-    return await this.completeMaterializationAttempt(
+    return await materializeAcceptedSignal(
+      this.dependencies,
+      this.warn,
       triagedSignal,
       triageResult,
-      attempt,
-      claimToken
+      context
     );
-  }
-
-  private async completeMaterializationAttempt(
-    triagedSignal: CandidateMemorySignal,
-    triageResult: SignalTriageResult,
-    attempt: MaterializationAttempt,
-    claimToken?: string
-  ): Promise<SignalServiceReceiveResult> {
-    if (attempt.materialization.success !== true) {
-      if (claimToken !== undefined) {
-        return await recordFailedSourceGroundingRedrive({
-          dependencies: this.dependencies,
-          warn: this.warn,
-          signal: attempt.materializingSignal,
-          materialization: attempt.materialization,
-          claimToken
-        });
-      }
-      const matEvent = await this.appendMaterializationEvent(triagedSignal, attempt.materialization);
-      return await this.completeFailedMaterialization(triageResult, attempt, matEvent);
-    }
-
-    if (attempt.materialization.target_kind === "deferred") {
-      return await completeDeferredMaterialization({
-        dependencies: this.dependencies,
-        warn: this.warn,
-        signal: attempt.materializingSignal,
-        materialization: attempt.materialization,
-        ...(claimToken === undefined ? {} : { claimToken })
-      });
-    }
-
-    if (claimToken !== undefined) {
-      return await completeSuccessfulSourceGroundingRedrive({
-        dependencies: this.dependencies,
-        warn: this.warn,
-        signal: attempt.materializingSignal,
-        materialization: attempt.materialization,
-        claimToken
-      });
-    }
-    const matEvent = await this.appendMaterializationEvent(triagedSignal, attempt.materialization);
-    return await this.completeSuccessfulMaterialization(triageResult, attempt, matEvent);
-  }
-
-  private async runMaterializationAttempt(
-    triagedSignal: CandidateMemorySignal,
-    materializer: SignalServicePostTriageMaterializer,
-    context: SignalMaterializationContext,
-    alreadyClaimed: boolean
-  ): Promise<MaterializationAttempt> {
-    const materializingSignal = alreadyClaimed
-      ? triagedSignal
-      : await this.dependencies.signalRepo.updateState(triagedSignal.signal_id, SignalState.COMPILED);
-
-    try {
-      return {
-        materializingSignal,
-        materialization: await materializer.materialize(materializingSignal, context),
-        caughtMaterializationError: false
-      };
-    } catch (error) {
-      const materialization = {
-        signal_id: triagedSignal.signal_id,
-        target_kind: "evidence_only",
-        routing_reason: "materialization_exception",
-        created_objects: [],
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      } satisfies SignalMaterializationFailureResult;
-
-      this.warn(
-        "Signal materialization failed.",
-        buildSignalWarningMeta({
-          phase: "materialization",
-          code: "MATERIALIZER_THROW",
-          detail: readErrorMessage(error, "Unknown materialization error")
-        })
-      );
-
-      return {
-        materializingSignal,
-        materialization,
-        caughtMaterializationError: true
-      };
-    }
-  }
-
-  private async appendMaterializationEvent(
-    triagedSignal: CandidateMemorySignal,
-    materialization: SignalMaterializationResult
-  ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append(
-      this.buildMaterializationEvent(triagedSignal, materialization)
-    );
-  }
-
-  private buildMaterializationEvent(
-    signal: CandidateMemorySignal,
-    materialization: SignalMaterializationResult
-  ) {
-    return buildSignalMaterializationEvent(signal, materialization);
-  }
-
-  private async completeFailedMaterialization(
-    triageResult: SignalTriageResult,
-    attempt: MaterializationAttempt,
-    matEvent: EventLogEntry
-  ): Promise<SignalServiceReceiveResult> {
-    const failedSignal = await this.dependencies.signalRepo.updateState(
-      attempt.materializingSignal.signal_id,
-      SignalState.FAILED
-    );
-    await this.notifyRunBoundEvent(matEvent);
-
-    if (!attempt.caughtMaterializationError) {
-      this.warn(
-        "Signal materialization returned unsuccessful result.",
-        buildSignalWarningMeta({
-          phase: "materialization",
-          code: "MATERIALIZATION_UNSUCCESSFUL",
-          detail: attempt.materialization.success
-            ? attempt.materialization.routing_reason
-            : attempt.materialization.error,
-          itemCount: attempt.materialization.created_objects.length
-        })
-      );
-    }
-
-    return {
-      signal: failedSignal,
-      triage_result: triageResult,
-      materialization: attempt.materialization
-    };
-  }
-
-  private async completeSuccessfulMaterialization(
-    triageResult: SignalTriageResult,
-    attempt: MaterializationAttempt,
-    matEvent: EventLogEntry
-  ): Promise<SignalServiceReceiveResult> {
-    const materializedSignal = await this.dependencies.signalRepo.updateState(
-      attempt.materializingSignal.signal_id,
-      SignalState.MATERIALIZED
-    );
-    await this.notifyRunBoundEvent(matEvent);
-
-    return {
-      signal: materializedSignal,
-      triage_result: triageResult,
-      materialization: attempt.materialization
-    };
-  }
-
-  private async notifyRunBoundEvent(event: EventLogEntry): Promise<void> {
-    if (event.run_id !== null) {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
   }
 
   /** Compatibility path for isolated fakes; daemon wiring always supplies emissionWriter. */

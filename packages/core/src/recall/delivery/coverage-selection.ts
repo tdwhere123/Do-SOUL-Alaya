@@ -13,6 +13,7 @@ import {
   resolveCandidateCoverageReceipt,
   type CandidateCoverageReceipt
 } from "./fine-assessment-selection/coverage-atoms.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export type CoverageIdentity = Readonly<{
   readonly objectKey: string;
@@ -466,6 +467,3 @@ function resolveRelevance(
   return candidate.fusion.fused_score;
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

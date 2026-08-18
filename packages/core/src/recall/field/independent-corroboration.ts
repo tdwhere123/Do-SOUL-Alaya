@@ -1,6 +1,7 @@
 import type { CandidateCoverageReceipt } from
   "../delivery/fine-assessment-selection/coverage-atoms.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "./field-identity.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export const INDEPENDENT_EVIDENCE_CORROBORATION_OPERATOR_ID =
   "independent_evidence_corroboration_v1";
@@ -91,6 +92,3 @@ function assertNonNegative(value: number, field: string): void {
   }
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { FileToolError, FileToolErrorCode } from "@do-soul/alaya-protocol";
 
@@ -107,4 +107,52 @@ export function isPathWithinRoot(candidate: string, root: string): boolean {
 
 export function isNodeErrorWithCode(error: unknown): error is NodeJS.ErrnoException & { readonly code: string } {
   return error instanceof Error && "code" in error && typeof error.code === "string";
+}
+
+export function warnBestEffortCleanup(operation: string, error: unknown): void {
+  process.emitWarning(`[ToolRuntime] best-effort ${operation} failed`, {
+    code: "ALAYA_TOOL_RUNTIME_CLEANUP_FAILED",
+    detail: JSON.stringify({
+      operation,
+      errno: isNodeErrorWithCode(error) ? error.code : "unknown"
+    })
+  });
+}
+
+export function swallowBestEffortCleanup(operation: string): (error: unknown) => undefined {
+  return (error) => {
+    warnBestEffortCleanup(operation, error);
+    return undefined;
+  };
+}
+
+export async function resolveRealWritableRoots(
+  writableRoots: readonly string[]
+): Promise<readonly string[]> {
+  return (
+    await Promise.all(
+      writableRoots.map(async (root) => {
+        try {
+          return await realpath(root);
+        } catch (error) {
+          process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
+            code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
+            detail: JSON.stringify({
+              root,
+              code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
+            })
+          });
+          return null;
+        }
+      })
+    )
+  ).filter((root): root is string => root !== null);
+}
+
+function fdExecPath(fd: number): string {
+  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
+}
+
+export async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
+  return process.platform === "linux" ? await realpath(fdExecPath(fd)) : await realpath(resolvedPath);
 }

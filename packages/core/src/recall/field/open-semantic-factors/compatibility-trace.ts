@@ -6,6 +6,7 @@ import {
   materializeOpenSemanticFactorCompatibility,
   type OpenSemanticFactorCompatibilityReceipt
 } from "./compatibility.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_TRACE_OPERATOR_ID =
   "open_semantic_factor_compatibility_trace_v1";
@@ -171,6 +172,3 @@ function sealFromCapture(
   return "none";
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

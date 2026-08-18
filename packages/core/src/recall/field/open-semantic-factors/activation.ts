@@ -8,6 +8,7 @@ import {
   verifyOpenSemanticFactorComposition,
   type OpenSemanticFactorCompositionReceipt
 } from "./composition.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID =
   "open_semantic_solution_membership_activation_v1";
@@ -113,6 +114,3 @@ function compatibilityFraction(
   return receipt.matched_query_proposition_count / receipt.query_proposition_count;
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

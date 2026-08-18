@@ -2,6 +2,7 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "./field-identity.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export const SAFE_CANDIDATE_DOMINANCE_OPERATOR_ID =
   "safe_candidate_dominance_v1";
@@ -219,6 +220,3 @@ function assertIdentity(value: string, field: string): void {
   }
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

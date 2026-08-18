@@ -1,5 +1,4 @@
 import {
-  compareCodeUnits,
   hashBundleId,
   hashLabeledIdentity,
   PROJECTION_GENERATION_OPERATOR_ID,
@@ -11,6 +10,7 @@ import {
   assertSingleGeneration,
   type ProjectionL1Posting
 } from "../field/retrieval/projection/l1-postings.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export type ProjectionFactorSummary = Readonly<{
   readonly dimension: string;
@@ -313,6 +313,3 @@ function uniqueSorted(values: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(values)].sort(compareText));
 }
 
-function compareText(left: string, right: string): number {
-  return compareCodeUnits(left, right);
-}

@@ -5,6 +5,7 @@ import type {
   RecallQueryFieldAttribution,
   RecallQueryFieldRole
 } from "./query-field-attribution.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export type SoftConditionFactorRole = RecallQueryFieldRole | "task";
 
@@ -66,6 +67,3 @@ function uniqueFactors(
   );
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}

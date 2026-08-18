@@ -1,3 +1,4 @@
+import { compareText } from "../../shared/compare-text.js";
 export type PathPair = readonly [sourceObjectId: string, targetObjectId: string];
 
 export interface PathPairObject {
@@ -113,6 +114,3 @@ function compareByFormation(
     (objectOrder.get(right) ?? Number.MAX_SAFE_INTEGER);
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}

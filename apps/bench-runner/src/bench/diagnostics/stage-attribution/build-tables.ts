@@ -51,42 +51,20 @@ export function buildStageAttributionTables(input: {
     evaluated += 1;
     if (isAbstention(question)) continue;
     scorable += 1;
-
-    const goldBearingQuestion = question.gold.length > 0;
-    if (goldBearingQuestion) goldBearing += 1;
-
-    if (!question.hit_at_5) miss += 1;
-
-    const questionRow = classifyQuestionStage(question);
-    questionRows.push(questionRow);
-    questionCounts[stageCountKey(questionRow.stage)] += 1;
-    if (questionRow.opportunity_pre_budget_6_10) kpiPre610 += 1;
-    if (isDeliveryOrderDrop(question)) deliveryOrder += 1;
-
-    if (!question.hit_at_5 && isMissTaxonomyCandidateAbsent(question)) {
-      taxonomyAbsentIds.push(question.question_id);
-    }
-    if (isQualityCandidateAbsent(question)) {
-      qualityAbsentIds.push(question.question_id);
-    }
-    if (
-      goldBearingQuestion &&
-      !question.hit_at_5 &&
-      isRankBucketCandidateAbsent(question.gold)
-    ) {
-      rankAbsentIds.push(question.question_id);
-    }
-
-    for (const gold of question.gold) {
-      goldAll += 1;
-      const goldRow = classifyGoldObjectStage({
-        question,
-        gold,
-        opportunityQuestion: questionRow.opportunity_pre_budget_6_10
-      });
-      goldRows.push(goldRow);
-      goldCounts[stageCountKey(goldRow.stage)] += 1;
-    }
+    const accounted = accumulateQuestionAttribution(question, {
+      questionRows,
+      goldRows,
+      questionCounts,
+      goldCounts,
+      taxonomyAbsentIds,
+      qualityAbsentIds,
+      rankAbsentIds
+    });
+    if (accounted.goldBearing) goldBearing += 1;
+    if (accounted.miss) miss += 1;
+    if (accounted.kpiPre610) kpiPre610 += 1;
+    if (accounted.deliveryOrder) deliveryOrder += 1;
+    goldAll += accounted.goldAll;
   }
 
   const absenceViews: CandidateAbsenceViews = {
@@ -134,6 +112,58 @@ export function buildStageAttributionTables(input: {
     summary,
     questions: questionRows,
     gold_objects: goldRows
+  };
+}
+
+function accumulateQuestionAttribution(
+  question: LongMemEvalQuestionDiagnostic,
+  acc: {
+    readonly questionRows: QuestionStageRow[];
+    readonly goldRows: GoldObjectStageRow[];
+    readonly questionCounts: ReturnType<typeof emptyStageCounts>;
+    readonly goldCounts: ReturnType<typeof emptyStageCounts>;
+    readonly taxonomyAbsentIds: string[];
+    readonly qualityAbsentIds: string[];
+    readonly rankAbsentIds: string[];
+  }
+): Readonly<{
+  readonly goldBearing: boolean;
+  readonly miss: boolean;
+  readonly kpiPre610: boolean;
+  readonly deliveryOrder: boolean;
+  readonly goldAll: number;
+}> {
+  const goldBearing = question.gold.length > 0;
+  const questionRow = classifyQuestionStage(question);
+  acc.questionRows.push(questionRow);
+  acc.questionCounts[stageCountKey(questionRow.stage)] += 1;
+
+  if (!question.hit_at_5 && isMissTaxonomyCandidateAbsent(question)) {
+    acc.taxonomyAbsentIds.push(question.question_id);
+  }
+  if (isQualityCandidateAbsent(question)) {
+    acc.qualityAbsentIds.push(question.question_id);
+  }
+  if (goldBearing && !question.hit_at_5 && isRankBucketCandidateAbsent(question.gold)) {
+    acc.rankAbsentIds.push(question.question_id);
+  }
+
+  for (const gold of question.gold) {
+    const goldRow = classifyGoldObjectStage({
+      question,
+      gold,
+      opportunityQuestion: questionRow.opportunity_pre_budget_6_10
+    });
+    acc.goldRows.push(goldRow);
+    acc.goldCounts[stageCountKey(goldRow.stage)] += 1;
+  }
+
+  return {
+    goldBearing,
+    miss: !question.hit_at_5,
+    kpiPre610: questionRow.opportunity_pre_budget_6_10,
+    deliveryOrder: isDeliveryOrderDrop(question),
+    goldAll: question.gold.length
   };
 }
 

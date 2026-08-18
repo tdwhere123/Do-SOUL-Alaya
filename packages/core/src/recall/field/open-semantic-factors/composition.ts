@@ -11,6 +11,7 @@ import {
   verifyOpenSemanticFactorCompatibilityTrace,
   type OpenSemanticFactorCompatibilityTrace
 } from "./compatibility-trace.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID =
   "open_semantic_factor_composition_v1";
@@ -477,9 +478,6 @@ function compareBindings(
     compareText(left.query_proposition_id, right.query_proposition_id);
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");

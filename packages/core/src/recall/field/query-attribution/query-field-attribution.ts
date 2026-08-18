@@ -7,6 +7,7 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "../field-identity.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const QUERY_FIELD_ATTRIBUTION_RECEIPT_OPERATOR_ID =
   "query_field_attribution_receipt_v2";
@@ -320,9 +321,6 @@ function assertSha256(value: string, field: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 const FIELD_ROLES: ReadonlySet<string> = new Set(["entity", "relation"]);
 const QUERY_DEMAND_KINDS: ReadonlySet<string> = new Set([

@@ -1,5 +1,4 @@
 import {
-  compareCodeUnits,
   hashLabeledIdentity,
   type FieldContractSha256,
   type ProjectionEraseSubjectKind
@@ -9,6 +8,7 @@ import {
   recallFiniteFieldCapturePostingSeeds,
   type RecallFiniteFieldChannelCapture
 } from "../../finite-field-capture.js";
+import { compareText } from "../../../../shared/compare-text.js";
 
 export type ProjectionL1PostingSource = "slice_key" | "retrieval_channel";
 
@@ -116,6 +116,3 @@ function matchesEraseSubject(
   return posting.subject_id === subjectId;
 }
 
-function compareText(left: string, right: string): number {
-  return compareCodeUnits(left, right);
-}

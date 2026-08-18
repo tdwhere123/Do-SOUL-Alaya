@@ -1,3 +1,4 @@
+import { compareText } from "../../shared/compare-text.js";
 export const SELECTED_SLICE_KEY_SCHEMA_VERSION = 2 as const;
 
 export const SELECTED_SLICE_KEY_V2_SEED_DIMENSIONS = Object.freeze([
@@ -216,9 +217,6 @@ export function createSelectedSliceKeyV2(input: SelectedSliceKeyInputV2): Select
   });
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 export function mergeSelectedSliceKeysV2(
   left: readonly SelectedSliceKeyV2[],

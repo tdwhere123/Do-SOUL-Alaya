@@ -15,6 +15,7 @@ import {
   type EvidenceDocumentEmbeddingEngine
 } from "./evidence-document-embedding-engine.js";
 import type { QueryEmbeddingEngine } from "../query-embedding-engine.js";
+import { compareText } from "../../shared/compare-text.js";
 import type {
   EmbeddingProviderPort,
   EvidenceCandidateScoringFailureClass,
@@ -207,9 +208,6 @@ function compareWinners(
     : compareText(left.documentIdentity, right.documentIdentity);
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 async function resolveQueryEmbedding(
   prepared: PreparedEmbeddingQueryHandle,

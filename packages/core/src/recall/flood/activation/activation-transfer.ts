@@ -1,4 +1,4 @@
-import { compareCodeUnits, type QueryCondition } from "@do-soul/alaya-protocol";
+import { type QueryCondition } from "@do-soul/alaya-protocol";
 import { applySoftConditionFactors } from
   "../../query/condition/hard-soft-masks.js";
 import { computeDissipativeEdgeStep } from "../edge-transfer.js";
@@ -13,6 +13,7 @@ import type {
   ActivationSlicePort
 } from "./activation-graph.js";
 import { sortedKeys } from "./activation-membership.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export type PreparedTransfer = Readonly<{
   readonly edge: ActivationEdge;
@@ -112,6 +113,3 @@ function compareEdges(left: ActivationEdge, right: ActivationEdge): number {
     compareText(left.source, right.source);
 }
 
-function compareText(left: string, right: string): number {
-  return compareCodeUnits(left, right);
-}

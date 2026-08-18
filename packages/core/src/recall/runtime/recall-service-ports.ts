@@ -9,7 +9,6 @@ import type {
   ProjectMappingAnchor,
   ScopeClass,
   SoulActiveConstraint,
-  SoulRecallTokenizerHint,
   Slot,
   StorageTier as StorageTierType,
   SynthesisCapsule
@@ -35,13 +34,8 @@ import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox
 import type { RecallRoutingKeyProjectionPort } from "./routing-key-projection-port.js";
 import type {
   KeywordSearchBatchQuery,
-  KeywordSearchFieldRefinementLevel,
   KeywordSearchFieldResult,
-  KeywordSearchLaneId,
-  KeywordSearchLaneObservation,
-  KeywordSearchLaneReceipt,
   KeywordSearchLaneScope,
-  KeywordSearchLaneStatus,
   KeywordSearchResult,
   RecallEvidenceSearchMatch,
   RecallQualifiedEvidence
@@ -53,6 +47,11 @@ import type {
   RecallTierWindowCursor,
   RecallTierWindowResult
 } from "./recall-memory-window-port.js";
+import type {
+  RecallEvidenceSourceAnchor,
+  RecallServiceWarnPort,
+  RecallTemporalProjectionReadOptions
+} from "./recall-service-port-types.js";
 
 export type {
   KeywordSearchBatchQuery,
@@ -68,7 +67,6 @@ export type {
   RecallEvidenceSearchProjectionIdentity,
   RecallQualifiedEvidence
 } from "./recall-search-port-types.js";
-
 export type {
   RecallActivationTopKQuery,
   RecallEventTimeWindowQuery,
@@ -76,11 +74,16 @@ export type {
   RecallTierWindowCursor,
   RecallTierWindowResult
 } from "./recall-memory-window-port.js";
-
-export interface RecallEvidenceSourceAnchor {
-  readonly evidence_object_id: string;
-  readonly artifact_ref: string;
-}
+export type {
+  RecallEvidenceSourceAnchor,
+  RecallServiceWarnPort,
+  RecallTemporalProjectionReadOptions,
+  TokenEstimator
+} from "./recall-service-port-types.js";
+export {
+  makeTokenEstimator,
+  readWithTemporalProjection
+} from "./recall-service-port-helpers.js";
 
 export interface RecallServiceMemoryRepoPort {
   findByWorkspaceId(
@@ -284,10 +287,6 @@ export interface RecallServiceClaimResolverPort {
   }>[]>;
 }
 
-export interface RecallTemporalProjectionReadOptions {
-  readonly asOf?: string;
-}
-
 /** Optional port: strongest direction-eligible PathPlasticityState.strength per memory (value in [0,1]); missing entry = no plasticity boost. Reads precomputed PathRelation rows; recall does not compute paths itself. */
 export interface RecallServicePathPlasticityPort {
   getStrengthByMemoryId(
@@ -310,18 +309,6 @@ export interface RecallServicePathExpansionPort {
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
-/**
- * Keeps the current-projection call shape compatible with legacy two-argument
- * readers while making an explicit historical projection opt-in.
- */
-export function readWithTemporalProjection<T>(
-  asOf: string | undefined,
-  readCurrent: () => Promise<T>,
-  readHistorical: (options: RecallTemporalProjectionReadOptions) => Promise<T>
-): Promise<T> {
-  return asOf === undefined ? readCurrent() : readHistorical({ asOf });
-}
-
 export interface RecallServiceActiveConstraintsPort {
   findActiveConstraints(params: Readonly<{
     readonly workspaceId: string;
@@ -341,35 +328,6 @@ export interface RecallServiceManifestationSidecarPort {
     readonly anchorMemoryObjectIds: readonly string[];
     readonly taskSurfaceRef: Readonly<import("@do-soul/alaya-protocol").TaskObjectSurface> | null;
   }>): Promise<readonly Readonly<ManifestationBiasSidecarEntry>[]>;
-}
-
-export interface TokenEstimator {
-  estimate(text: string): number;
-}
-
-export function makeTokenEstimator(opts: {
-  readonly hint?: SoulRecallTokenizerHint | null;
-} = {}): TokenEstimator {
-  const charsPerToken = resolveCharsPerToken(opts.hint ?? null);
-
-  return Object.freeze({
-    estimate(text: string): number {
-      return Math.ceil(text.length / charsPerToken);
-    }
-  });
-}
-
-function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
-  switch (hint) {
-    case "cl100k":
-      // Conservative chars/token heuristic, not a native tokenizer.
-      return 3.6;
-    case "o200k":
-      return 3.2;
-    case "approx_chars_per_token":
-    case null:
-      return 4;
-  }
 }
 
 export interface RecallServiceEmbeddingRecallPort {
@@ -486,8 +444,4 @@ export interface RecallServiceDependencies {
   readonly warn?: RecallServiceWarnPort;
   // Unexpected recall auxiliary failures (not graceful degradations) land here.
   readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
-}
-
-export interface RecallServiceWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
 }

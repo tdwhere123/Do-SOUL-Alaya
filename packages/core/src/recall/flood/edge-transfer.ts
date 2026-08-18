@@ -6,6 +6,7 @@ import type {
 import type { SliceCompatibilityV2 } from "./slice-key-selector.js";
 import { evaluateSingleHopRemoteness } from "./remoteness.js";
 import { clamp01 } from "../../shared/clamp.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export const RECALL_FLOOD_EDGE_TRACE_LIMIT = 16;
 
@@ -106,9 +107,6 @@ function compareNumberDescending(left: number, right: number): number {
   return left > right ? -1 : 1;
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 export function computeDissipativeEdgeStep(input: Readonly<{
   readonly inputPotential: number;

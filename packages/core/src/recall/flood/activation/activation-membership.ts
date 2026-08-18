@@ -1,5 +1,6 @@
-import { compareCodeUnits, type QueryCondition } from "@do-soul/alaya-protocol";
+import { type QueryCondition } from "@do-soul/alaya-protocol";
 import type { ActivationNode } from "./activation-graph.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export function freezeSeeds(
   authorized: ReadonlyMap<string, ActivationNode>,
@@ -35,6 +36,3 @@ function isInitialSeed(
     condition.query_task_factors.includes(node.task_factor_id);
 }
 
-function compareText(left: string, right: string): number {
-  return compareCodeUnits(left, right);
-}

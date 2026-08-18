@@ -16,6 +16,7 @@ import {
   semanticDemandKindForRole,
   type FactFrameSemanticFactor
 } from "./fact-frame-semantic-factors.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export const ATTRIBUTED_QUERY_FACILITY_DEMAND_OPERATOR_ID =
   "attributed_query_facility_demand_v1";
@@ -205,9 +206,6 @@ function compareDemandAtoms(
   return sourceOrder === 0 ? compareText(left.kind, right.kind) : sourceOrder;
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 const TYPED_DEMAND_KINDS: ReadonlyMap<RecallQueryDemandAtom["kind"], FacilityDemandKind> =
   new Map([

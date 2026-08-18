@@ -11,6 +11,7 @@ import {
   orderCoverageSelectionCandidateStatesByMarginalGain
 } from
   "../../delivery/coverage-selection.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 const SCORE_EPSILON = 1e-12;
 
@@ -401,9 +402,6 @@ function candidateKey<T extends CoverageSelectableCandidate>(
   return value.candidate.fusion.candidate_key;
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 class MaxBoundQueue<T, State> {
   readonly #values: SolverNode<T, State>[];

@@ -11,6 +11,7 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "./field-identity.js";
+import { compareText } from "../../shared/compare-text.js";
 import {
   verifyAttributedQueryFacilityDemand,
   type AttributedQueryFacilityDemandReceipt
@@ -322,9 +323,6 @@ function assertNonNegative(value: number, field: string): number {
   return value;
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 const DEMAND_KINDS: ReadonlySet<string> = new Set([
   "entity",

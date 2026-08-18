@@ -97,6 +97,44 @@ export function buildRecallDiagnostics(
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),
+    ...buildOptionalQueryDiagnosticFields(params),
+    query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
+    total_scanned: params.totalScanned,
+    candidate_pool_count: params.candidatePoolCount,
+    pre_budget_count: params.preBudgetCount,
+    delivered_count: params.deliveredCount,
+    ...(params.packetPlanTrace === undefined
+      ? {}
+      : { packet_plan_trace: params.packetPlanTrace }),
+    embedding_provider_status: params.embeddingProviderStatus,
+    embedding_supplement_status: params.embeddingSupplementStatus,
+    ...buildEvidenceEmbeddingDiagnostics(params.evidenceEmbeddingScoring),
+    provider_degradation_reason: params.providerDegradationReason,
+    ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
+    ...buildDegradationDiagnostics(params.degradationReasons),
+    ...buildEmbeddingWorkspaceScanDiagnostics(embeddingWorkspaceScan),
+    graph_expansion_plane_count_per_hop:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
+    graph_expansion_plane_count_per_edge_type:
+      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
+    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
+      ? {}
+      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
+    ...buildCandidateEvidenceDiagnostics(
+      params.candidates,
+      params.fineAssessmentPrunedCandidates
+    ),
+    token_economy: params.tokenEconomy,
+    ...(params.phaseLatencyMs === undefined
+      ? {}
+      : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
+  });
+}
+
+function buildOptionalQueryDiagnosticFields(
+  params: BuildRecallDiagnosticsParams
+): Partial<RecallDiagnostics> {
+  return {
     ...(params.queryEntityExtraction === undefined
       ? {}
       : { query_entity_extraction: params.queryEntityExtraction }),
@@ -150,38 +188,8 @@ export function buildRecallDiagnostics(
       : { field_projection_trace: params.fieldProjectionTrace }),
     ...(params.answerShapePlan === undefined
       ? {}
-      : { answer_shape_plan: params.answerShapePlan }),
-    query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
-    total_scanned: params.totalScanned,
-    candidate_pool_count: params.candidatePoolCount,
-    pre_budget_count: params.preBudgetCount,
-    delivered_count: params.deliveredCount,
-    ...(params.packetPlanTrace === undefined
-      ? {}
-      : { packet_plan_trace: params.packetPlanTrace }),
-    embedding_provider_status: params.embeddingProviderStatus,
-    embedding_supplement_status: params.embeddingSupplementStatus,
-    ...buildEvidenceEmbeddingDiagnostics(params.evidenceEmbeddingScoring),
-    provider_degradation_reason: params.providerDegradationReason,
-    ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
-    ...buildDegradationDiagnostics(params.degradationReasons),
-    ...buildEmbeddingWorkspaceScanDiagnostics(embeddingWorkspaceScan),
-    graph_expansion_plane_count_per_hop:
-      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
-    graph_expansion_plane_count_per_edge_type:
-      params.graphExpansionDiagnostics.graph_expansion_plane_count_per_edge_type,
-    ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
-      ? {}
-      : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
-    ...buildCandidateEvidenceDiagnostics(
-      params.candidates,
-      params.fineAssessmentPrunedCandidates
-    ),
-    token_economy: params.tokenEconomy,
-    ...(params.phaseLatencyMs === undefined
-      ? {}
-      : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
-  });
+      : { answer_shape_plan: params.answerShapePlan })
+  };
 }
 
 function buildEvidenceEmbeddingDiagnostics(

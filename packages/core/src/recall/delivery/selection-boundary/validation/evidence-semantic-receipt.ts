@@ -8,6 +8,7 @@ import type {
 } from "../selection-boundary-types.js";
 import { isRecord } from "../record-guards.js";
 import { throwSelectionBoundaryFidelityMismatch } from "./fidelity-error.js";
+import { compareText } from "../../../../shared/compare-text.js";
 
 const FACT_SLOT_ROLES = new Set([
   "subject",
@@ -285,9 +286,6 @@ function compareSemanticObservations(
     : compareText(left.documentIdentity as string, right.documentIdentity as string);
 }
 
-function compareText(left: string, right: string): number {
-  return left === right ? 0 : left < right ? -1 : 1;
-}
 
 function legacySemanticActivation(
   winner: Readonly<RecallEvidenceSemanticWinnerReceipt>
