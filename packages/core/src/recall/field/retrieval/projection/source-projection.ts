@@ -2,6 +2,7 @@ import {
   hashContentDigest,
   type AddressableSourceSpan,
   type FactorDescriptor,
+  type FactorFamily,
   type FactorIncidence,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
@@ -124,7 +125,8 @@ function projectSliceKeys(
       record === undefined ||
       span === undefined ||
       factor === undefined ||
-      !isLegalSourceSliceValue(payload)
+      !isLegalSourceSliceValue(payload) ||
+      !isLegalSourceSemanticRoutingKey(factor.family, payload)
     ) {
       continue;
     }
@@ -177,6 +179,53 @@ function sourceSliceKey(
 function isLegalSourceSliceValue(payload: string | null | undefined): payload is string {
   // Empty after trim/NFC is not a legal slice-key value.
   return payload != null && payload.trim().normalize("NFC").length > 0;
+}
+
+const SOURCE_METADATA_PREFIXES = [
+  "source_version:",
+  "source_id:",
+  "source:",
+  "actor:",
+  "scope:",
+  "event_time:",
+  "valid_from:",
+  "valid_to:"
+] as const;
+
+const SOURCE_SEMANTIC_STOP_TOKENS: ReadonlySet<string> = new Set([
+  "a", "about", "after", "also", "an", "and", "as", "at",
+  "be", "been", "before", "being", "but", "by",
+  "can", "could",
+  "for", "from",
+  "he", "her", "his",
+  "i", "if", "in", "into", "is", "it", "its",
+  "just",
+  "my",
+  "no", "not",
+  "of", "on", "only", "or", "our", "over",
+  "she", "should", "so",
+  "than", "that", "the", "their", "these", "they", "this", "those", "to",
+  "was", "we", "were", "will", "with", "would",
+  "you", "your"
+]);
+
+function isLegalSourceSemanticRoutingKey(family: FactorFamily, payload: string): boolean {
+  // Legal factor payloads; not legal semantic routing keys (L2 would pair every co-member).
+  const normalized = payload.trim().normalize("NFC");
+  return !isSourceMetadataRoutingLabel(family, normalized)
+    && !isSourceSemanticStopToken(family, normalized);
+}
+
+function isSourceMetadataRoutingLabel(family: FactorFamily, normalized: string): boolean {
+  if (family !== "f0" && family !== "f2") return false;
+  const lower = normalized.toLowerCase();
+  return SOURCE_METADATA_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+function isSourceSemanticStopToken(family: FactorFamily, normalized: string): boolean {
+  if (family !== "f1") return false;
+  const token = normalized.toLowerCase();
+  return token.length <= 2 || SOURCE_SEMANTIC_STOP_TOKENS.has(token);
 }
 
 function groupBindings(

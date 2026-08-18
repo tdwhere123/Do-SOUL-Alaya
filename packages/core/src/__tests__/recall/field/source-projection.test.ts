@@ -41,6 +41,31 @@ describe("source formation projection", () => {
     expect(snapshot.slice_keys[0]?.normalized_value).toBe("atlas");
     expect(snapshot.slice_keys[0]?.owner_id).toBe(EVIDENCE_ID);
   });
+
+  it("omits metadata labels and F1 stop tokens from semantic slice keys", () => {
+    const stores = createInMemoryFieldStores();
+    const spanId = admitSource(stores).spans[0]!.identity;
+    seedFactor(stores, spanId, "f0", "source_version:1");
+    seedFactor(stores, spanId, "f2", "actor:garden_compile");
+    seedFactor(stores, spanId, "f2", "scope:ws");
+    seedFactor(stores, spanId, "f1", "the");
+    seedFactor(stores, spanId, "f1", "i");
+    seedFactor(stores, spanId, "f1", "to");
+    seedFactor(stores, spanId, "f1", "atlas");
+    seedFactor(stores, spanId, "f3", "graduate");
+
+    const snapshot = projectSourceFormationSnapshot({
+      workspaceId: "workspace-1",
+      stores,
+      resolveState: () => sourceState()
+    });
+
+    expect(snapshot.slice_keys.map((key) => key.normalized_value).sort()).toEqual([
+      "atlas",
+      "graduate"
+    ]);
+    expect(snapshot.slice_keys.every((key) => key.owner_id === EVIDENCE_ID)).toBe(true);
+  });
 });
 
 function admitSource(stores: FieldFormationStores) {
