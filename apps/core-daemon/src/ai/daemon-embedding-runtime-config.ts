@@ -1,7 +1,5 @@
-import {
-  parseEnvBoolean,
-  type EmbeddingProviderKind
-} from "@do-soul/alaya-protocol";
+import { parseEnvBoolean } from "@do-soul/alaya-core";
+import type { EmbeddingProviderKind } from "@do-soul/alaya-protocol";
 import type { ResolveSecretError } from "../secrets/index.js";
 import { resolveSecretRef } from "../secrets/index.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../runtime/config/daemon-config-environment.js";

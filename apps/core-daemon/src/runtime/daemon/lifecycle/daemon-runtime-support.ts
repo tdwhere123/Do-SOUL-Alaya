@@ -45,6 +45,7 @@ import { parseEnv } from "../../../services/env-file/env-file-service.js";
 import { resolveConfiguredDatabasePath } from "../support/storage-config.js";
 import { isNodeErrorWithCode } from "../../../services/support/private-file-service.js";
 import { resolveSecretRef, type ResolveSecretError } from "../../../secrets/index.js";
+import { assertRegisteredDaemonEnvKey } from "../../config/daemon-config-environment.js";
 import type { AlayaRuntimeNotifier } from "../support/runtime-notifier.js";
 export {
   classifySoulGraphOriginKind,
@@ -151,6 +152,7 @@ export async function loadConfigEnv(
 }
 
 export function readConfigEnvValue(configEnv: ReadonlyMap<string, string>, key: string): string | undefined {
+  assertRegisteredDaemonEnvKey(key);
   return process.env[key] ?? configEnv.get(key);
 }
 

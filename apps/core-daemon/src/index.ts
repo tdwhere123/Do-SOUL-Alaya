@@ -19,6 +19,7 @@ import {
   createRequestProtection,
   listServerHardConstraints,
   loadConfigEnv,
+  readConfigEnvValue,
   recordStartupStep,
   resolveDatabasePath
 } from "./runtime/daemon/lifecycle/daemon-runtime-support.js";
@@ -33,10 +34,7 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
-import {
-  DAEMON_ONLY_CONFIG_ENV_KEYS,
-  readDaemonProcessEnv
-} from "./runtime/config/daemon-config-environment.js";
+import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "./runtime/config/daemon-config-environment.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
@@ -125,7 +123,7 @@ async function createRuntimeBootstrapContext() {
   warnLogger.info("effective recall runtime", {
     projections_enabled: getCoreConfig().recall.projectionsEnabled,
     source_ref_robust: parseSourceRefRobust(
-      readDaemonProcessEnv(DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
+      readConfigEnvValue(configEnvResult, DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
     )
   });
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));

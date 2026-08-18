@@ -1,9 +1,6 @@
-import {
-  parseEnvPositiveInt,
-  type ConversationRuntimeContext,
-  type ToolUseBlock
-} from "@do-soul/alaya-protocol";
+import { type ConversationRuntimeContext, type ToolUseBlock } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "../provider/soul-tool-specs.js";
+import { parseEnvPositiveInt } from "./env-value.js";
 import { withTimeout } from "./with-timeout.js";
 
 export const DEFAULT_TOOL_TIMEOUT_MS = 30000;

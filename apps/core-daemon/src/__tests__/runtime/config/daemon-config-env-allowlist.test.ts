@@ -2,7 +2,11 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { listRegisteredDaemonEnvKeys } from "../../../runtime/config/daemon-config-environment.js";
+import {
+  listRegisteredDaemonEnvKeys,
+  readDaemonProcessEnv
+} from "../../../runtime/config/daemon-config-environment.js";
+import { readConfigEnvValue } from "../../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 
 const SRC_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const ENV_KEY = /process\.env(?:\.([A-Z][A-Z0-9_]*)|\["([A-Z][A-Z0-9_]*)"\])/g;
@@ -38,5 +42,14 @@ describe("daemon env registry allowlist", () => {
       }
     }
     expect(unknown).toEqual([]);
+  });
+
+  it("rejects an unregistered helper key", () => {
+    expect(() => readDaemonProcessEnv("ALAYA_UNREGISTERED_KNOB")).toThrow(
+      /unregistered daemon env key: ALAYA_UNREGISTERED_KNOB/
+    );
+    expect(() => readConfigEnvValue(new Map(), "ALAYA_UNREGISTERED_KNOB")).toThrow(
+      /unregistered daemon env key: ALAYA_UNREGISTERED_KNOB/
+    );
   });
 });

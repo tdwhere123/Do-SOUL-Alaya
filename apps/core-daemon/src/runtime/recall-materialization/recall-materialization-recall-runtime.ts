@@ -17,10 +17,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
-import {
-  DAEMON_ONLY_CONFIG_ENV_KEYS,
-  readDaemonProcessEnv
-} from "../config/daemon-config-environment.js";
+import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../config/daemon-config-environment.js";
 import {
   annotateRecallEmbeddingWarmupHold,
   type EmbeddingWarmupHoldReason
@@ -31,7 +28,10 @@ import {
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/memory/recall/recall-utilization.js";
 import { createRecallUtilizationService } from "../../services/status/recall-utilization-service.js";
-import { createGlobalMemoryRecallCachePort } from "../daemon/lifecycle/daemon-runtime-support.js";
+import {
+  createGlobalMemoryRecallCachePort,
+  readConfigEnvValue
+} from "../daemon/lifecycle/daemon-runtime-support.js";
 import {
   type RecallPathProjectionReadOptions,
   type RecallPathReadPorts
@@ -249,7 +249,7 @@ function createRecallService(input: {
     pathPlasticityPort: input.recallPathRuntime.recallPathPlasticityPort as never,
     pathExpansionPort: input.recallPathRuntime.recallPathExpansionPort as never,
     activeConstraintsPort: input.recallSearchRuntime.recallActiveConstraintsPort,
-    robustSourceRefParsing: readRobustSourceRefParsing(),
+    robustSourceRefParsing: readRobustSourceRefParsing(input.input.configEnv),
     evidenceSearchPort: input.recallSearchRuntime.recallEvidenceSearchPort,
     routingKeyProjectionPort: new SqliteRecallRoutingKeyProjectionRepo(input.input.database),
     synthesisSearchPort: input.recallSearchRuntime.recallSynthesisSearchPort,
@@ -348,9 +348,9 @@ function createRecallContextLensAssembler(
   });
 }
 
-function readRobustSourceRefParsing(): boolean {
+function readRobustSourceRefParsing(configEnv: ReadonlyMap<string, string>): boolean {
   return parseSourceRefRobust(
-    readDaemonProcessEnv(DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
+    readConfigEnvValue(configEnv, DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
   );
 }
 

@@ -32,6 +32,10 @@ export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
     conflictProviderUrl: "ALAYA_CONFLICT_LLM_PROVIDER_URL",
     conflictTimeoutMs: "ALAYA_CONFLICT_LLM_TIMEOUT_MS",
     officialSecretRef: "ALAYA_OFFICIAL_GARDEN_SECRET_REF",
+    officialModel: "OFFICIAL_API_GARDEN_MODEL",
+    officialProviderUrl: "OFFICIAL_API_GARDEN_PROVIDER_URL",
+    gardenProviderKind: "ALAYA_GARDEN_PROVIDER_KIND",
+    legacyGardenSecretRef: "ALAYA_GARDEN_OPENAI_SECRET_REF",
     edgeProducerLlmEnabled: "ALAYA_EDGE_PRODUCER_LLM_ENABLED",
     edgeClassifyHostWorker: "ALAYA_EDGE_CLASSIFY_HOST_WORKER",
     conflictDetectionEnabled: "ALAYA_CONFLICT_DETECTION_ENABLED",
@@ -65,15 +69,25 @@ const DAEMON_ONLY_KEY_LIST: readonly string[] = Object.freeze(
   Object.values(DAEMON_ONLY_CONFIG_ENV_KEYS).flatMap((group) => Object.values(group))
 );
 
+const REGISTERED_DAEMON_ENV_KEYS: ReadonlySet<string> = new Set([
+  ...resolveCoreConfigEnvironmentKeys(),
+  ...DAEMON_ONLY_KEY_LIST
+]);
+
 export function listRegisteredDaemonEnvKeys(): readonly string[] {
-  return Object.freeze([
-    ...new Set([...resolveCoreConfigEnvironmentKeys(), ...DAEMON_ONLY_KEY_LIST])
-  ].sort());
+  return Object.freeze([...REGISTERED_DAEMON_ENV_KEYS].sort());
+}
+
+export function assertRegisteredDaemonEnvKey(key: string): void {
+  if (!REGISTERED_DAEMON_ENV_KEYS.has(key)) {
+    throw new Error(`unregistered daemon env key: ${key}`);
+  }
 }
 
 export function readDaemonProcessEnv(
   key: string,
   env: Readonly<Record<string, string | undefined>> = process.env
 ): string | undefined {
+  assertRegisteredDaemonEnvKey(key);
   return env[key];
 }
