@@ -88,7 +88,7 @@ const SnapshotArtifactIntegritySchema = z
   .readonly();
 const SnapshotAttributionSchema = z
   .object({
-    status: z.enum(["attributed", "legacy_unattributed"]),
+    status: z.enum(["attributed", "legacy_unattributed", "diagnostic_attributed"]),
     gate_eligible: z.boolean()
   })
   .readonly();
@@ -136,7 +136,10 @@ export function validateSnapshotManifest(
     questionIdDigest: optionalString(record.question_id_digest),
     datasetSha256: optionalString(record.dataset_sha256),
     seedExtractionPath,
-    extractionProvenance
+    extractionProvenance,
+    ...(storedAttribution?.status === "diagnostic_attributed"
+      ? { snapshotWriteAuthority: "diagnostic" as const }
+      : {})
   });
   assertAttributionClaim(storedAttribution, derivedAttribution, filePath);
   return {
@@ -144,7 +147,7 @@ export function validateSnapshotManifest(
     ...(artifactIntegrity === undefined ? {} : { artifact_integrity: artifactIntegrity }),
     ...(runProvenance === undefined ? {} : { run_provenance: runProvenance }),
     ...(graphPreflight === undefined ? {} : { graph_preflight: graphPreflight }),
-    attribution: storedAttribution?.status === "attributed"
+    attribution: isStoredBoundAttribution(storedAttribution)
       ? derivedAttribution
       : { status: "legacy_unattributed", gate_eligible: false }
   };
@@ -238,16 +241,28 @@ function parseSnapshotAttribution(
   }
 }
 
+function isStoredBoundAttribution(
+  stored: LongMemEvalSnapshotManifest["attribution"]
+): boolean {
+  return stored?.status === "attributed" || stored?.status === "diagnostic_attributed";
+}
+
 function assertAttributionClaim(
   stored: LongMemEvalSnapshotManifest["attribution"],
   derived: NonNullable<LongMemEvalSnapshotManifest["attribution"]>,
   filePath: string
 ): void {
   if (stored === undefined) return;
-  if (stored?.status === "attributed" && derived.status !== "attributed") {
+  if (stored.status === "attributed" && derived.status !== "attributed") {
     throw new Error(`recall-eval attributed snapshot manifest at ${filePath} is incomplete`);
   }
-  if (stored?.gate_eligible === true && !derived.gate_eligible) {
+  if (stored.status === "diagnostic_attributed" &&
+      derived.status !== "diagnostic_attributed") {
+    throw new Error(
+      `recall-eval diagnostic snapshot manifest at ${filePath} is incomplete`
+    );
+  }
+  if (stored.gate_eligible === true && !derived.gate_eligible) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} overclaims gate eligibility`);
   }
   if (stored.status !== derived.status ||

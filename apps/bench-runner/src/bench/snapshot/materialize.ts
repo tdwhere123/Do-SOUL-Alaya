@@ -205,7 +205,7 @@ export interface LongMemEvalSnapshotManifest {
   readonly dataset_sha256?: string;
   readonly graph_preflight?: Readonly<SnapshotGraphPreflight>;
   readonly attribution?: Readonly<{
-    status: "attributed" | "legacy_unattributed";
+    status: "attributed" | "legacy_unattributed" | "diagnostic_attributed";
     gate_eligible: boolean;
   }>;
 }
@@ -398,7 +398,8 @@ export function assertSnapshotConsumerBinding(input: {
   if (input.manifest.question_id_digest !== undefined && input.manifest.question_id_digest !== digest) {
     throw new Error("recall-eval snapshot question digest binding mismatch");
   }
-  if (input.manifest.attribution?.status === "attributed" && input.manifest.question_id_digest !== digest) {
+  if (isBoundSnapshotAttribution(input.manifest.attribution?.status) &&
+      input.manifest.question_id_digest !== digest) {
     throw new Error("recall-eval attributed snapshot requires a bound question digest");
   }
   const provenanceDataset =
@@ -410,6 +411,10 @@ export function assertSnapshotConsumerBinding(input: {
     /^[a-f0-9]{64}$/u.test(provenanceDataset) &&
     input.manifest.dataset_sha256 !== provenanceDataset
   ) throw new Error("recall-eval snapshot dataset binding mismatch");
+}
+
+function isBoundSnapshotAttribution(status: string | undefined): boolean {
+  return status === "attributed" || status === "diagnostic_attributed";
 }
 
 function snapshotConsumerQuestionIdDigest(

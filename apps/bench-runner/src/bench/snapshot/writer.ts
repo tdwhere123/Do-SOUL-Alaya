@@ -218,7 +218,10 @@ function buildManifest(context: {
       questionIdDigest: context.questionDigest,
       datasetSha256: context.datasetSha,
       seedExtractionPath: input.seedExtractionPath,
-      extractionProvenance: context.extraction
+      extractionProvenance: context.extraction,
+      ...(input.snapshotWriteAuthority === undefined ? {} : {
+        snapshotWriteAuthority: input.snapshotWriteAuthority
+      })
     })
   };
 }

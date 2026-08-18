@@ -35,6 +35,7 @@ export async function runProductionRecallPhase(
     snapshotDbPath: snapshot,
     variant: context.request.variant,
     historyRoot,
+    snapshotConsumeAuthority: "diagnostic",
     ...(context.request.limit === undefined ? {} : { limit: context.request.limit }),
     ...(context.request.offset === undefined ? {} : { offset: context.request.offset }),
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),

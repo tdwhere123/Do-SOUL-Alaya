@@ -247,6 +247,7 @@ function attribution(input: {
   readonly snapshotWindowOffset?: number;
   readonly runSupplementalReceiptSha?: string;
   readonly snapshotSupplementalReceiptSha?: string;
+  readonly snapshotWriteAuthority?: "diagnostic" | "promotion";
 }) {
   const family = input.snapshotModelFamily ?? input.modelFamily ?? "fixture-family";
   const profile = input.snapshotRequestProfile ?? input.requestProfile ?? "provider-default-v1";
@@ -294,7 +295,10 @@ function attribution(input: {
       ...(input.snapshotWindowOffset === undefined
         ? {}
         : { window_offset: input.snapshotWindowOffset })
-    }
+    },
+    ...(input.snapshotWriteAuthority === undefined
+      ? {}
+      : { snapshotWriteAuthority: input.snapshotWriteAuthority })
   });
 }
 
@@ -489,5 +493,14 @@ describe("snapshot attribution dataset binding", () => {
       status: "attributed",
       gate_eligible: false
     });
+  });
+
+  it("stores diagnostic_attributed and gate_eligible false under diagnostic write authority", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      snapshotWriteAuthority: "diagnostic"
+    })).toEqual({ status: "diagnostic_attributed", gate_eligible: false });
   });
 });

@@ -16,6 +16,7 @@ import {
   sha256Buffer
 } from "../bound-file.js";
 import { assertCurrentSnapshotAttributionClaim } from "./current-attribution.js";
+import type { SnapshotConsumeAuthority } from "./diagnostic-write-authority.js";
 import {
   MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,
   assertSnapshotExtractionAuthorityBinding,
@@ -42,12 +43,15 @@ export interface BoundCurrentSnapshotArtifacts {
 export function bindCurrentSnapshotArtifacts(input: {
   readonly sourceDbPath: string;
   readonly targetRoot: string;
+  readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
 }): BoundCurrentSnapshotArtifacts {
-  const current = readCurrentManifest(input.sourceDbPath);
+  const consume = input.snapshotConsumeAuthority ?? "promotion";
+  const current = readCurrentManifest(input.sourceDbPath, consume);
   const authority = readCurrentExtractionAuthority(
     input.sourceDbPath,
     current.manifest,
-    current.integrity
+    current.integrity,
+    consume
   );
   const sidecar = readCurrentSidecar(input.sourceDbPath, current.integrity);
   const snapshotDbPath = join(input.targetRoot, basename(input.sourceDbPath));
@@ -72,7 +76,10 @@ export function bindCurrentSnapshotArtifacts(input: {
   };
 }
 
-function readCurrentManifest(sourceDbPath: string) {
+function readCurrentManifest(
+  sourceDbPath: string,
+  consumeAuthority: SnapshotConsumeAuthority
+) {
   const manifestBytes = readRegularFileNoFollow(
     snapshotManifestPath(sourceDbPath),
     MAX_SNAPSHOT_MANIFEST_BYTES
@@ -81,14 +88,15 @@ function readCurrentManifest(sourceDbPath: string) {
     parseJson(manifestBytes, "current snapshot manifest"),
     snapshotManifestPath(sourceDbPath)
   );
-  assertCurrentSnapshotAttributionClaim(manifest);
+  assertCurrentSnapshotAttributionClaim(manifest, consumeAuthority);
   return { bytes: manifestBytes, manifest, integrity: requireIntegrity(manifest) };
 }
 
 function readCurrentExtractionAuthority(
   sourceDbPath: string,
   manifest: LongMemEvalSnapshotManifest,
-  integrity: NonNullable<LongMemEvalSnapshotManifest["artifact_integrity"]>
+  integrity: NonNullable<LongMemEvalSnapshotManifest["artifact_integrity"]>,
+  consumeAuthority: SnapshotConsumeAuthority
 ) {
   const authorityPath = snapshotExtractionAuthorityPath(sourceDbPath);
   const authorityBytes = readRegularFileNoFollow(
@@ -107,21 +115,28 @@ function readCurrentExtractionAuthority(
     extractionAuthority,
     manifest.extraction_provenance
   );
-  assertCurrentRunAuthority(manifest, extractionAuthority);
+  assertCurrentRunAuthority(manifest, extractionAuthority, consumeAuthority);
   return { bytes: authorityBytes, value: extractionAuthority };
 }
 
 function assertCurrentRunAuthority(
   manifest: LongMemEvalSnapshotManifest,
-  extractionAuthority: SnapshotExtractionAuthority
+  extractionAuthority: SnapshotExtractionAuthority,
+  consumeAuthority: SnapshotConsumeAuthority
 ): void {
-  if (manifest.run_provenance === undefined ||
-      !isLongMemEvalRunProvenanceGateEligible(
-        bindSnapshotRunProvenanceAuthority(
-          manifest.run_provenance,
-          extractionAuthority
-        )
-      )) {
+  if (manifest.run_provenance === undefined) {
+    throw new Error(
+      consumeAuthority === "diagnostic"
+        ? "diagnostic snapshot consumer requires run provenance"
+        : "current snapshot run authority is incomplete"
+    );
+  }
+  const bound = bindSnapshotRunProvenanceAuthority(
+    manifest.run_provenance,
+    extractionAuthority
+  );
+  if (consumeAuthority !== "diagnostic" &&
+      !isLongMemEvalRunProvenanceGateEligible(bound)) {
     throw new Error("current snapshot run authority is incomplete");
   }
 }

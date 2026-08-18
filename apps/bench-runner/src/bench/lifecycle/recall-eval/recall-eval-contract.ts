@@ -20,6 +20,8 @@ import type { EvidenceSearchProjectionRebuildReport } from
 import type { RecallEvalMemoryProfileCompletion } from
   "../../measurement/recall-eval-memory-profile.js";
 import type { BoundedLifecycleFailure } from "../errors.js";
+import type { SnapshotConsumeAuthority } from
+  "../../snapshot/current/diagnostic-write-authority.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -46,6 +48,7 @@ export interface RecallEvalOptions {
   readonly seedExtractionSystemPromptPath?: string;
   readonly querySemanticFactorCachePath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
+  readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
 }
 
 export interface RecallEvalResult {

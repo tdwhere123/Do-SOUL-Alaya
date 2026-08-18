@@ -58,7 +58,12 @@ import {
   createExtractionCachePreflightProof
 } from "../../compile-seed/preflight/cache-preflight-proof.js";
 import {
+  assertDiagnosticManifestConsumeAuthority,
+  assertDiagnosticSnapshotConsumeAuthority
+} from "./diagnostic-consume-authority.js";
+import {
   assertDiagnosticSnapshotWriteAuthority,
+  type SnapshotConsumeAuthority,
   type SnapshotWriteAuthority
 } from "./diagnostic-write-authority.js";
 
@@ -201,7 +206,7 @@ function assertIncompletePostFillCache(
   throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
 }
 
-export type { SnapshotWriteAuthority };
+export type { SnapshotConsumeAuthority, SnapshotWriteAuthority };
 
 export function assertCurrentSnapshotWriteAuthority(input: {
   readonly dbPath: string;
@@ -256,16 +261,29 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
   readonly systemPrompt?: string;
+  readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
 }): Promise<{
   readonly datasetSha256: string;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor;
 }> {
-  assertCurrentSnapshotAttributionClaim(input.manifest);
-  const extraction = assertCurrentManifestAuthority(input.manifest);
+  const consume = input.snapshotConsumeAuthority ?? "promotion";
+  assertCurrentSnapshotAttributionClaim(input.manifest, consume);
+  const extraction = consume === "diagnostic"
+    ? assertDiagnosticManifestConsumeAuthority(input.manifest)
+    : assertCurrentManifestAuthority(input.manifest);
+  if (consume === "diagnostic") {
+    assertDiagnosticSnapshotConsumeAuthority({
+      extraction,
+      seedExtractionPath: input.manifest.seed_extraction_path,
+      runProvenance: input.manifest.run_provenance!,
+      datasetSha256: input.manifest.dataset_sha256!
+    });
+  }
   assertSnapshotExtractionAuthorityBinding(input.extractionAuthority, extraction);
   const runProvenance = bindCurrentRunProvenance(
     input.manifest,
-    input.extractionAuthority
+    input.extractionAuthority,
+    consume
   );
   await verifySnapshotArtifactIntegrity(
     input.snapshotDbPath,
@@ -328,13 +346,15 @@ function assertPromotionSnapshotWriteAuthority(input: {
 
 function bindCurrentRunProvenance(
   manifest: LongMemEvalSnapshotManifest,
-  extractionAuthority: SnapshotExtractionAuthority
+  extractionAuthority: SnapshotExtractionAuthority,
+  consumeAuthority: SnapshotConsumeAuthority = "promotion"
 ): LongMemEvalRunProvenance {
   const runProvenance = bindSnapshotRunProvenanceAuthority(
     manifest.run_provenance!,
     extractionAuthority
   );
-  if (!isLongMemEvalRunProvenanceGateEligible(runProvenance)) {
+  if (consumeAuthority !== "diagnostic" &&
+      !isLongMemEvalRunProvenanceGateEligible(runProvenance)) {
     throw new Error("current recall-eval snapshot run authority is incomplete");
   }
   if (!isDeepStrictEqual(

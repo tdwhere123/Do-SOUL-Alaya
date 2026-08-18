@@ -12,6 +12,8 @@ import type { SnapshotMeasurementOracleAccessor } from
 import { verifyCurrentRecallSnapshotAuthority } from
   "../current/current-substrate-authority.js";
 import { bindCurrentSnapshotArtifacts } from "../current/current-bound-artifacts.js";
+import type { SnapshotConsumeAuthority } from
+  "../current/diagnostic-write-authority.js";
 import type { SnapshotExtractionAuthority } from "../extraction-authority.js";
 import { readRegularFileNoFollow, sha256Buffer } from "../bound-file.js";
 
@@ -37,6 +39,7 @@ export async function loadRecallEvalSnapshot(input: {
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
   readonly seedExtractionSystemPromptPath?: string;
+  readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
 }, currentSnapshotRoot?: string): Promise<RecallEvalSnapshotBundle> {
   if (input.legacySnapshot === true) {
     throw new Error("legacy snapshots are not supported");
@@ -84,7 +87,10 @@ async function readAttributedSnapshotBundle(
 ): Promise<RecallEvalSnapshotBundle> {
   const bound = bindCurrentSnapshotArtifacts({
     sourceDbPath: input.snapshotDbPath,
-    targetRoot: currentSnapshotRoot
+    targetRoot: currentSnapshotRoot,
+    ...(input.snapshotConsumeAuthority === undefined ? {} : {
+      snapshotConsumeAuthority: input.snapshotConsumeAuthority
+    })
   });
   const { manifest, sidecar, snapshotDbPath, extractionAuthority } = bound;
   const historicalPrompt = input.seedExtractionSystemPromptPath === undefined
@@ -104,7 +110,10 @@ async function readAttributedSnapshotBundle(
     extractionAuthority,
     dataDir: input.dataDir,
     pinnedMetaRoot: input.pinnedMetaRoot,
-    ...(historicalPrompt === null ? {} : { systemPrompt: historicalPrompt.text })
+    ...(historicalPrompt === null ? {} : { systemPrompt: historicalPrompt.text }),
+    ...(input.snapshotConsumeAuthority === undefined ? {} : {
+      snapshotConsumeAuthority: input.snapshotConsumeAuthority
+    })
   });
   return {
     snapshotDbPath,

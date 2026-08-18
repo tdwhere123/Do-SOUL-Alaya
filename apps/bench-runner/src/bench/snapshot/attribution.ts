@@ -14,6 +14,7 @@ import type {
   SnapshotExtractionProvenance
 } from "./materialize.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
+import type { SnapshotWriteAuthority } from "./current/diagnostic-write-authority.js";
 import { isDeepStrictEqual } from "node:util";
 
 export function deriveSnapshotAttribution(input: {
@@ -23,9 +24,13 @@ export function deriveSnapshotAttribution(input: {
   readonly datasetSha256?: string;
   readonly seedExtractionPath?: SeedExtractionPath;
   readonly extractionProvenance?: SnapshotExtractionProvenance | null;
+  readonly snapshotWriteAuthority?: SnapshotWriteAuthority;
 }): NonNullable<LongMemEvalSnapshotManifest["attribution"]> {
   if (!hasCompleteBinding(input)) {
     return { status: "legacy_unattributed", gate_eligible: false };
+  }
+  if (input.snapshotWriteAuthority === "diagnostic") {
+    return { status: "diagnostic_attributed", gate_eligible: false };
   }
   const provenance = input.runProvenance!;
   return {

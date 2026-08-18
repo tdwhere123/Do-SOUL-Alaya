@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from "../../../bench/snapshot/materialize.js";
 import { validateSnapshotManifest } from "../../../bench/snapshot/manifest-validation.js";
+import { currentSnapshotManifestFor } from
+  "../snapshot/current-snapshot-fixture.js";
 
 const FILE_PATH = "/tmp/snapshot.db.manifest.json";
 
@@ -82,6 +84,30 @@ describe("validateSnapshotManifest invalid payload rejection", () => {
         gate_eligible: true
       }
     }, FILE_PATH)).toThrow(/overclaims gate eligibility/u);
+  });
+
+  it("preserves diagnostic_attributed without promoting gate_eligible", () => {
+    expect(validateSnapshotManifest({
+      ...currentSnapshotManifestFor("q-1"),
+      attribution: { status: "diagnostic_attributed", gate_eligible: false }
+    }, FILE_PATH).attribution).toEqual({
+      status: "diagnostic_attributed",
+      gate_eligible: false
+    });
+  });
+
+  it("rejects diagnostic_attributed that overclaims gate eligibility", () => {
+    expect(() => validateSnapshotManifest({
+      ...currentSnapshotManifestFor("q-1"),
+      attribution: { status: "diagnostic_attributed", gate_eligible: true }
+    }, FILE_PATH)).toThrow(/overclaims gate eligibility/u);
+  });
+
+  it("rejects diagnostic_attributed without complete binding evidence", () => {
+    expect(() => validateSnapshotManifest({
+      ...baseManifest(),
+      attribution: { status: "diagnostic_attributed", gate_eligible: false }
+    }, FILE_PATH)).toThrow(/diagnostic snapshot manifest.*incomplete/u);
   });
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(

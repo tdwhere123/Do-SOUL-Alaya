@@ -177,7 +177,9 @@ export async function buildRecallEvalRuntimeAttribution(
     extractionProvenance: manifest.extraction_provenance
   });
   return {
-    status: manifest.attribution?.status ?? "legacy_unattributed",
+    status: manifest.attribution?.status === "attributed"
+      ? "attributed"
+      : "legacy_unattributed",
     gate_eligible: evaluatorBinding.nonPromotableDerivedRebuild === true
       ? false
       : isRecallEvalRuntimeGateEligible(manifest, snapshotAttribution.gate_eligible),

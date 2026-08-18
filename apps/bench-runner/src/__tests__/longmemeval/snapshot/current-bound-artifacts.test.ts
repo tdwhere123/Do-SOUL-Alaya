@@ -133,9 +133,33 @@ describe("current snapshot immutable artifact binding", () => {
       targetRoot: fixture.targetRoot
     })).toThrow(/exceeds its size budget/u);
   });
+
+  it("binds a diagnostic_attributed snapshot without a promotion gate contract", async () => {
+    const fixture = await snapshotFixture({ diagnostic: true });
+    const bound = bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot,
+      snapshotConsumeAuthority: "diagnostic"
+    });
+    expect(bound.manifest.attribution).toEqual({
+      status: "diagnostic_attributed",
+      gate_eligible: false
+    });
+  });
+
+  it("keeps promotion binding rejected for a diagnostic_attributed snapshot", async () => {
+    const fixture = await snapshotFixture({ diagnostic: true });
+    expect(() => bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    })).toThrow(/stored gate_eligible claim is false/u);
+  });
 });
 
-async function snapshotFixture(options: { readonly validV1AssertionReceipt?: boolean } = {}) {
+async function snapshotFixture(options: {
+  readonly validV1AssertionReceipt?: boolean;
+  readonly diagnostic?: boolean;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "current-bound-snapshot-"));
   roots.push(root);
   const targetRoot = join(root, "bound");
@@ -154,13 +178,13 @@ async function snapshotFixture(options: { readonly validV1AssertionReceipt?: boo
   const authorityBytes = renderSnapshotExtractionAuthority(
     currentSnapshotExtractionAuthority()
   );
-  const manifest = currentSnapshotManifestFor("q-1", {
+  const manifest = diagnosticManifest(currentSnapshotManifestFor("q-1", {
     db_sha256: sha256(dbBytes),
     sidecar_sha256: sha256(sidecarBytes),
     extraction_authority_filename: "snapshot.db.extraction-authority.json",
     extraction_authority_sha256: sha256(authorityBytes),
     extraction_authority_bytes: authorityBytes.byteLength
-  });
+  }), options.diagnostic === true);
   await Promise.all([
     writeFile(snapshotDbPath, dbBytes),
     writeFile(`${snapshotDbPath}.sidecar.json`, sidecarBytes),
@@ -168,6 +192,27 @@ async function snapshotFixture(options: { readonly validV1AssertionReceipt?: boo
     writeFile(`${snapshotDbPath}.extraction-authority.json`, authorityBytes)
   ]);
   return { root, targetRoot, snapshotDbPath };
+}
+
+function diagnosticManifest(
+  manifest: ReturnType<typeof currentSnapshotManifestFor>,
+  diagnostic: boolean
+): ReturnType<typeof currentSnapshotManifestFor> {
+  if (!diagnostic) return manifest;
+  const provenance = manifest.run_provenance!;
+  return {
+    ...manifest,
+    attribution: { status: "diagnostic_attributed", gate_eligible: false },
+    run_provenance: {
+      ...provenance,
+      code: {
+        commit_sha7: provenance.code.commit_sha7,
+        gate_sha256: null,
+        worktree_state_sha256: null,
+        executed_dist: provenance.code.executed_dist
+      }
+    }
+  };
 }
 
 function sha256(value: Uint8Array): string {

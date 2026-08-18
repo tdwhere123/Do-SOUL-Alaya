@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
+import { deriveSnapshotAttribution } from "../../../bench/snapshot/attribution.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 import {
   currentCanonicalQuestions as questions,
   currentSnapshotExtractionAuthority as authorityFor,
@@ -74,6 +76,25 @@ describe("diagnostic snapshot write authority", () => {
       ...diagnostic,
       datasetSha256: "f".repeat(64)
     })).toThrow(/dataset identity mismatch/u);
+  });
+
+  it("stores diagnostic_attributed and gate_eligible false under diagnostic write authority", async () => {
+    const input = await writeInput();
+    expect(deriveSnapshotAttribution({
+      artifactIntegrity: {
+        db_sha256: "0".repeat(64),
+        sidecar_sha256: "1".repeat(64),
+        extraction_authority_filename: "snapshot.db.extraction-authority.json",
+        extraction_authority_sha256: "2".repeat(64),
+        extraction_authority_bytes: 1
+      },
+      runProvenance: compactSnapshotRunProvenance(input.runProvenance),
+      questionIdDigest: manifestFor("q-1").question_id_digest,
+      datasetSha256: input.datasetSha256,
+      seedExtractionPath: input.seedExtractionPath,
+      extractionProvenance: input.extraction,
+      snapshotWriteAuthority: "diagnostic"
+    })).toEqual({ status: "diagnostic_attributed", gate_eligible: false });
   });
 
   it("keeps promotion writes rejected without a frozen gate contract", async () => {
