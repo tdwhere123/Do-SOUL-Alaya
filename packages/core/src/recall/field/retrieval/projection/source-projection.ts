@@ -119,13 +119,21 @@ function projectSliceKeys(
     const span = spans.get(incidence.span_id);
     const factor = factors.get(incidence.factor_id);
     const record = span === undefined ? undefined : records.get(span.record_id);
-    if (record === undefined || span === undefined || factor?.canonical_payload == null) continue;
+    const payload = factor?.canonical_payload;
+    if (
+      record === undefined ||
+      span === undefined ||
+      factor === undefined ||
+      !isLegalSourceSliceValue(payload)
+    ) {
+      continue;
+    }
     for (const evidenceId of bindings.get(record.identity) ?? []) {
       const key = sourceSliceKey(
         record,
         span,
         factor,
-        factor.canonical_payload,
+        payload,
         evidenceId,
         resolveState({ record, evidenceId, scope: incidence.scope })
       );
@@ -164,6 +172,11 @@ function sourceSliceKey(
     ...key,
     source_state: sourceState
   });
+}
+
+function isLegalSourceSliceValue(payload: string | null | undefined): payload is string {
+  // Empty after trim/NFC is not a legal slice-key value.
+  return payload != null && payload.trim().normalize("NFC").length > 0;
 }
 
 function groupBindings(
