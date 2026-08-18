@@ -132,6 +132,9 @@ importers:
       hono:
         specifier: 4.12.28
         version: 4.12.28
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   apps/inspector/web:
     dependencies:
