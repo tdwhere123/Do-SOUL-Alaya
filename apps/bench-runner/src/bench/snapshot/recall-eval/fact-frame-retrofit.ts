@@ -213,7 +213,8 @@ function assertRuntimeQualifiedOwners(
 ): void {
   const reader = new RecallQualifiedEvidenceReader(
     db,
-    verifyOfficialApiSourceLocatorBinding
+    verifyOfficialApiSourceLocatorBinding,
+    { strictParse: true }
   );
   const byWorkspace = new Map<string, RetrofitPlan[]>();
   for (const plan of plans) {

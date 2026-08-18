@@ -124,6 +124,7 @@ describe("entity seed scalar fallback isolation", () => {
     expect(result.results.map(({ memoryId }) => memoryId)).toEqual(["alpha", "gamma"]);
     expect(result.admitted).toEqual(["alpha", "gamma"]);
     expect(result.singleSearch).toHaveBeenCalledTimes(3);
+    expect(result.degradationReasons).toEqual(new Set(["entity_seed_lookup_failed"]));
     expect(result.warn).toHaveBeenCalledWith(
       "entity seed lookup failed",
       expect.objectContaining({
@@ -181,6 +182,42 @@ describe("entity seed optional search ports", () => {
         failure_class: "no_search_port"
       })
     );
+    expect(result.degradationReasons).toEqual(new Set(["entity_seed_lookup_failed"]));
+  });
+});
+
+describe("entity seed lookup degradation", () => {
+  it("records entity_seed_lookup_failed when keyword search throws", async () => {
+    const emptyHits = await runEntitySeedCollection({
+      surfaces: ["MissingEntity"]
+    });
+    const thrown = await runEntitySeedCollection({
+      surfaces: ["MissingEntity"],
+      scalarFailureSurface: "MissingEntity"
+    });
+
+    expect(emptyHits.results).toEqual([]);
+    expect(thrown.results).toEqual([]);
+    expect(emptyHits.degradationReasons.size).toBe(0);
+    expect(thrown.degradationReasons).toEqual(new Set(["entity_seed_lookup_failed"]));
+    expect(thrown.warn).toHaveBeenCalledWith(
+      "entity seed lookup failed",
+      expect.objectContaining({
+        entity_surface: "MissingEntity",
+        operation: "entity_seed_lookup"
+      })
+    );
+  });
+
+  it("records entity_seed_lookup_failed when bulk fails without a scalar fallback", async () => {
+    const result = await runEntitySeedCollection({
+      withBulk: true,
+      withScalar: false,
+      bulkFails: true
+    });
+
+    expect(result.results).toEqual([]);
+    expect(result.degradationReasons).toEqual(new Set(["entity_seed_lookup_failed"]));
   });
 });
 
@@ -219,6 +256,7 @@ async function runEntitySeedCollection(options: EntitySeedFixtureOptions = {}) {
     query_text: "entity query",
     port: { extract: async () => buildEntities(options.surfaces) }
   });
+  const degradationReasons = new Set<"entity_seed_lookup_failed">();
   const results = await collectEntityDerivedSeeds({
     workspaceId: "workspace-1",
     queryEntityExtraction,
@@ -234,9 +272,10 @@ async function runEntitySeedCollection(options: EntitySeedFixtureOptions = {}) {
     entitySeedPerEntityTopKStrong: 8,
     entitySeedPerEntityTopKWeak: 5,
     entitySeedTotalAdmitCap: 60,
-    entitySeedMinSurfaceLength: 2
+    entitySeedMinSurfaceLength: 2,
+    degradationReasons
   });
-  return { results, admitted, singleSearch, bulkSearch, warn };
+  return { results, admitted, singleSearch, bulkSearch, warn, degradationReasons };
 }
 
 function buildSearchPorts(

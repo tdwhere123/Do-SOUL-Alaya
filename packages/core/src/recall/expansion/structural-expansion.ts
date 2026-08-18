@@ -54,6 +54,7 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly entitySeedPerEntityTopKWeak: number;
   readonly entitySeedTotalAdmitCap: number;
   readonly entitySeedMinSurfaceLength: number;
+  readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
   if (shouldSkipEntitySeedCollection(params)) {
     return [];
@@ -323,7 +324,8 @@ async function loadEntitySeedBatchesForCollection(
     lookups,
     candidateIds,
     memoryRepo: params.memoryRepo,
-    warn: params.warn
+    warn: params.warn,
+    degradationReasons: params.degradationReasons
   });
 }
 

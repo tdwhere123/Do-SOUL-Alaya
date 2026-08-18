@@ -103,15 +103,23 @@ interface QualifiedEvidenceProof {
 
 export class RecallQualifiedEvidenceReader {
   private readonly statementHolder: RefreshableStatementHolder<QualifiedEvidenceStatements>;
+  private readonly strictParse: boolean;
+  private parseSkipCount = 0;
 
   public constructor(
     db: StorageDatabase,
-    private readonly resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver
+    private readonly resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver,
+    options: Readonly<{ readonly strictParse?: boolean }> = {}
   ) {
     this.statementHolder = new RefreshableStatementHolder(
       db,
       prepareQualifiedEvidenceStatements
     );
+    this.strictParse = options.strictParse === true;
+  }
+
+  public get skippedParseCount(): number {
+    return this.parseSkipCount;
   }
 
   public find(
@@ -222,7 +230,13 @@ export class RecallQualifiedEvidenceReader {
       this.statementHolder.active().findEvidenceRows.all(
         workspaceId,
         JSON.stringify(evidenceObjectIds)
-      ) as EvidenceQualificationRow[]
+      ) as EvidenceQualificationRow[],
+      {
+        strictParse: this.strictParse,
+        recordSkip: () => {
+          this.parseSkipCount += 1;
+        }
+      }
     );
     const signalIds = [...new Set(candidates.flatMap((candidate) =>
       candidate.signalId === null ? [] : [candidate.signalId]
@@ -240,18 +254,27 @@ export class RecallQualifiedEvidenceReader {
   }
 }
 
+interface EvidenceParseSink {
+  readonly strictParse: boolean;
+  recordSkip(): void;
+}
+
 function readEvidenceCandidates(
-  rows: readonly EvidenceQualificationRow[]
+  rows: readonly EvidenceQualificationRow[],
+  parse: EvidenceParseSink
 ): readonly EvidenceCandidate[] {
   const candidates: EvidenceCandidate[] = [];
   for (const row of rows) {
-    const candidate = readEvidenceCandidate(row);
+    const candidate = readEvidenceCandidate(row, parse);
     if (candidate !== null) candidates.push(candidate);
   }
   return candidates;
 }
 
-function readEvidenceCandidate(row: EvidenceQualificationRow): EvidenceCandidate | null {
+function readEvidenceCandidate(
+  row: EvidenceQualificationRow,
+  parse: EvidenceParseSink
+): EvidenceCandidate | null {
   try {
     const capsule = parseEvidenceCapsuleRow(row);
     const signalId = row.source_signal_id ?? readGardenSourceTurnFallbackArtifactSignalId(
@@ -267,6 +290,8 @@ function readEvidenceCandidate(row: EvidenceQualificationRow): EvidenceCandidate
       : null;
   } catch (error) {
     if (error instanceof EvidenceProjectionIntegrityError) throw error;
+    parse.recordSkip();
+    if (parse.strictParse) throw error;
     process.emitWarning("evidence candidate parse failed; skipping row", {
       code: "ALAYA_EVIDENCE_CANDIDATE_PARSE_FAILED",
       detail: JSON.stringify({

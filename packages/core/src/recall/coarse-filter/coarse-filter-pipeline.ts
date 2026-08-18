@@ -315,7 +315,8 @@ async function collectGraphExpansionSeedIds(
     entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
     entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
     entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
-    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH
+    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
+    degradationReasons: params.context.degradationReasons
   });
   return entityDerivedSeeds
     .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)

@@ -10,13 +10,11 @@ export async function selectGlobalMemoryRecallEntries(
   limit: number
 ): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
   if (source.listPage !== undefined) {
-    const listPage = source.listPage.bind(source);
-    try {
-      return await selectPagedGlobalMemoryEntries(listPage, queryTokens, limit);
-    } catch (error) {
-      // listAll was authoritative when both ports existed, so it remains the compatibility fallback.
-      if (source.listAll === undefined) throw error;
-    }
+    return await selectPagedGlobalMemoryEntries(
+      source.listPage.bind(source),
+      queryTokens,
+      limit
+    );
   }
   const entries = source.listAll === undefined ? await source.list() : await source.listAll();
   return selectBoundedTopK(

@@ -134,7 +134,7 @@ export interface CoreDaemonRouteServices {
  * a finally block; shutdown awaits it reaching zero (with a timeout).
  */
 export interface CoreDaemonLifecycleState {
-  readonly drainState: { isDraining: boolean };
+  readonly drainState: { isDraining: boolean; forced?: boolean };
   readonly inFlight: { count: number };
 }
 

@@ -19,11 +19,13 @@ import {
   toErrorMessage
 } from "../../runtime/recall-service-helpers.js";
 import type {
+  RecallDegradationReason,
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallEvidenceSemanticDocument
 } from "../../runtime/recall-service-types.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
+import { recordEvidenceContextBulkFailure } from "./evidence-context-bulk-failure.js";
 import { ownerSemanticDocuments } from "./owner-semantic-documents.js";
 
 const MAX_REFS_PER_MEMORY = 8;
@@ -59,6 +61,7 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }>): Promise<Readonly<RecallEvidenceContexts>> {
   const gistCandidates = collectRelevantCandidates(
     params.candidates,
@@ -96,12 +99,7 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       semanticFormations.unavailableEvidenceIds
     );
   } catch (error) {
-    params.warn("evidence context lookup for coverage and answer authority failed", {
-      workspace_id: params.workspaceId,
-      operation: "evidence_gist_lookup_for_coverage",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
+    recordEvidenceContextBulkFailure(params, error);
     return emptyEvidenceContexts(evidenceIds);
   }
 }

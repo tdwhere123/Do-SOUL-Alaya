@@ -370,8 +370,11 @@ export {
   warmCjkSegmentation,
   segmentCjkRun,
   isCjkSegmentationCandidate,
+  readCjkSegmentationStatus,
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE as STORAGE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
   __resetCjkSegmentationStateForTests as __resetStorageCjkSegmentationStateForTests
 } from "./repos/shared/cjk-segmentation.js";
+export type { CjkSegmentationStatus } from "./repos/shared/cjk-segmentation.js";
 export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,

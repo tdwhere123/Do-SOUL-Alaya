@@ -176,6 +176,7 @@ function buildCoarseAssessmentParams(
       params.querySemanticFactorFormationCapture,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)
+    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
+    degradationReasons: context.degradationReasons
   };
 }

@@ -7,6 +7,7 @@ import type { RecallVerifiedUserAssertionContext } from
   "../../query/recall-user-assertion-context.js";
 import type {
   PathInflowEdge,
+  RecallDegradationReason,
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallSupplementaryData
@@ -47,6 +48,7 @@ export async function collectEvidenceAndGovernanceSupplement(params: Readonly<{
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }>): Promise<Readonly<EvidenceAndGovernanceSupplement>> {
   const [evidenceContexts, governanceDerivations] = await Promise.all([
     collectRecallEvidenceContexts({
@@ -55,7 +57,8 @@ export async function collectEvidenceAndGovernanceSupplement(params: Readonly<{
       workspaceId: params.workspaceId,
       candidates: params.candidates,
       coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-      coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+      coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+      degradationReasons: params.degradationReasons
     }),
     collectGovernancePathDerivations({
       dependencies: params.dependencies,

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
   fetchProviderChatCompletion,
   normalizeProviderBaseUrl,
   type ProviderRequestProfile
@@ -46,7 +47,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
         systemPrompt: context.systemPrompt,
         userPrompt: context.messages[0]?.content ?? "",
         temperature: options?.temperature ?? 0,
-        timeoutMs: options?.timeoutMs,
+        timeoutMs: options?.timeoutMs ?? DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
         abortSignal: options?.signal,
         mode: "json",
         jsonObject: true,

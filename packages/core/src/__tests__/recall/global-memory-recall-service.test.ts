@@ -204,7 +204,7 @@ describe("createGlobalMemoryRecallPort", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
-  it("preserves the prior full-load source when the optional paged source fails", async () => {
+  it("does not dump the full corpus when the paged source fails", async () => {
     const list = vi.fn(async () => []);
     const listAll = vi.fn(async () => [
       createSourceEntry({ global_object_id: "global-list-all", activation_score: 0.7 })
@@ -217,9 +217,9 @@ describe("createGlobalMemoryRecallPort", () => {
     });
 
     await expect(port.recall({ workspaceId: "workspace-1", queryText: null, limit: 1 }))
-      .resolves.toEqual([expect.objectContaining({ global_object_id: "global-list-all" })]);
+      .rejects.toThrow("paged source unavailable");
     expect(listPage).toHaveBeenCalledOnce();
-    expect(listAll).toHaveBeenCalledOnce();
+    expect(listAll).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
   });
 

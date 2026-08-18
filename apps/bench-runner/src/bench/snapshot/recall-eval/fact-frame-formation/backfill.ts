@@ -141,7 +141,8 @@ function assertRuntimeQualifiedOwners(
   }
   const reader = new RecallQualifiedEvidenceReader(
     db,
-    verifyOfficialApiSourceLocatorBinding
+    verifyOfficialApiSourceLocatorBinding,
+    { strictParse: true }
   );
   for (const [workspaceId, workspaceAuthorities] of byWorkspace) {
     const requested = workspaceAuthorities.map(({ owner }) => owner.object_id);

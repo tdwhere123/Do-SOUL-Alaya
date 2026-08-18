@@ -1,6 +1,9 @@
 export { ProviderChatCompletionError } from "./errors.js";
 export type { ProviderTransportFailureKind } from "./errors.js";
-export { fetchProviderChatCompletion } from "./fetch-chat-completion.js";
+export {
+  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
+  fetchProviderChatCompletion
+} from "./fetch-chat-completion.js";
 export { inspectProviderChatCompletionResponse } from "./inspect-response.js";
 export {
   buildProviderChatRequestInit,

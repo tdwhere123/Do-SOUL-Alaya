@@ -18,7 +18,8 @@ export function isSqliteWriteQueueDisabled(env: NodeJS.ProcessEnv = process.env)
  * Replaces any previously configured port after awaiting its close.
  */
 export async function installDefaultSqliteWriteQueue(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  resolveWorkerUrl: () => URL | null = resolveSqliteWriteQueueWorkerUrl
 ): Promise<SqliteWriteQueuePort | null> {
   await closeConfiguredSqliteWriteQueuePort();
 
@@ -27,16 +28,11 @@ export async function installDefaultSqliteWriteQueue(
     return null;
   }
 
-  const workerUrl = resolveSqliteWriteQueueWorkerUrl();
+  const workerUrl = resolveWorkerUrl();
   if (workerUrl === null) {
-    process.emitWarning(
-      "SQLite write-queue worker script missing; leaving write queue unconfigured",
-      {
-        code: "ALAYA_SQLITE_WRITE_QUEUE_WORKER_MISSING"
-      }
+    throw new Error(
+      "SQLite write-queue worker script missing; set ALAYA_SQLITE_WRITE_QUEUE=0 to opt out"
     );
-    configureSqliteWriteQueuePort(null);
-    return null;
   }
 
   const port = createWorkerThreadSqliteWriteQueuePort({ workerUrl });

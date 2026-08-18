@@ -203,6 +203,25 @@ describe("createDaemonLifecycleControls", () => {
     expect(runBulkEnrichPass).toHaveBeenCalledWith("workspace-1");
   });
 
+  it("marks forced drain when in-flight requests outlive the drain timeout", async () => {
+    vi.useFakeTimers();
+    const database = { close: vi.fn() };
+    const { controls, lifecycleState, warn } = createControls("env", { database });
+    lifecycleState.inFlight.count = 1;
+
+    const shutdown = controls.shutdown();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await shutdown;
+
+    expect(lifecycleState.drainState.forced).toBe(true);
+    expect(lifecycleState.inFlight.count).toBe(1);
+    expect(warn).toHaveBeenCalledWith(
+      "daemon shutdown drain timed out with in-flight requests",
+      expect.objectContaining({ inFlight: 1, forced_drain: true })
+    );
+    expect(database.close).toHaveBeenCalledTimes(1);
+  });
+
   it("closes the recall read worker before closing the database", async () => {
     const order: string[] = [];
     const recallReadWorkerClient = {

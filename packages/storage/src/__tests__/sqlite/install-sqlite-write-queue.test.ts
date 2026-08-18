@@ -53,4 +53,11 @@ describe("installDefaultSqliteWriteQueue", () => {
     expect(port).toBeNull();
     expect(getSqliteWriteQueuePort()).toBeNull();
   });
+
+  it("fails fast when the worker script is missing and the queue is enabled", async () => {
+    await expect(installDefaultSqliteWriteQueue({}, () => null)).rejects.toThrow(
+      /SQLite write-queue worker script missing/
+    );
+    expect(getSqliteWriteQueuePort()).toBeNull();
+  });
 });

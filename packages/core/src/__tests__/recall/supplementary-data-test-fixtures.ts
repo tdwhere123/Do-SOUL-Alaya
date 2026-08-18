@@ -31,6 +31,7 @@ interface CollectWithParams {
   readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
   readonly referenceTime?: string;
+  readonly degradationReasons?: Parameters<typeof collectSupplementaryData>[0]["degradationReasons"];
 }
 
 interface EvidenceCapsuleOverrides {
@@ -89,7 +90,8 @@ export async function collectWith(params: CollectWithParams) {
     coarseEntitySeedScores: {},
     coarsePathExpansionScores: {},
     coarsePathSuppressionScores: {},
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    degradationReasons: params.degradationReasons
   });
 }
 

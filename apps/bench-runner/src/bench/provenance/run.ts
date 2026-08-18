@@ -44,6 +44,7 @@ import {
   SourceAssertionSupplementBindingSchema,
   type SourceAssertionSupplementBinding
 } from "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import { collectCjkSegmentationProvenance } from "./cjk-segmentation.js";
 
 export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";
 export { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
@@ -139,7 +140,12 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     query_semantic_factor_cache: QuerySemanticFactorCacheIdentitySchema.optional(),
     embedding_cache_overlay: EmbeddingCacheOverlayBindingSchema.optional(),
     reconciliation_basis: z.enum(["rule_only", "garden_llm"]).optional(),
-    paired_env: z.record(z.string(), z.string())
+    paired_env: z.record(z.string(), z.string()),
+    cjk_segmentation: z.object({
+      core_status: z.enum(["uninitialized", "loading", "ready", "unavailable"]),
+      storage_status: z.enum(["uninitialized", "loading", "ready", "unavailable"]),
+      warnings: z.array(z.string())
+    }).strict().optional()
   }).strict(),
   execution: z.object({
     protocol: z.literal("sequential"),
@@ -328,7 +334,8 @@ async function buildRuntimeIdentity(
     ...(input.reconciliationBasis === undefined
       ? {}
       : { reconciliation_basis: input.reconciliationBasis }),
-    paired_env: collectPairedEnvironment(input.env)
+    paired_env: collectPairedEnvironment(input.env),
+    cjk_segmentation: collectCjkSegmentationProvenance()
   };
 }
 

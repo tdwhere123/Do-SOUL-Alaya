@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
+import {
+  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
+  fetchProviderChatCompletion
+} from "@do-soul/alaya-engine-gateway";
 import {
   createOfficialGardenExtractor,
   resolveVendorModelAlias
@@ -54,7 +57,8 @@ describe("createOfficialGardenExtractor", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
       model: "mimo-v2.5",
-      profile: "mimo-v2.5-nonthinking-v1"
+      profile: "mimo-v2.5-nonthinking-v1",
+      timeoutMs: DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
     }));
   });
 

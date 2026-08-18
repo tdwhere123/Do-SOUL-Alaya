@@ -40,7 +40,10 @@ export type RecallDegradationReason =
   | "embedding_coarse_injection_failed"
   | "graph_expansion_failed"
   | "path_expansion_failed"
-  | "packet_plan_trace_capture_failed";
+  | "packet_plan_trace_capture_failed"
+  | "entity_seed_lookup_failed"
+  | "evidence_context_bulk_failed"
+  | "graph_metrics_bulk_failed";
 
 export interface RecallEmbeddingWorkspaceScanDiagnostics {
   readonly workspace_scan_truncated?: boolean;

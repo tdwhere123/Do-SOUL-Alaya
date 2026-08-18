@@ -44,6 +44,7 @@ export class GardenBacklogTelemetryService {
   private acceptingOperations = true;
   private drainBoundaryFrozen = false;
   private stopTimedOut = false;
+  private snapshotPublishRetryArmed = false;
   private finalDrainBoundaryTransitionId: number | null = null;
   private readonly thresholds: GardenBacklogThresholds;
   private readonly stopTimeoutMs: number | null;
@@ -286,10 +287,12 @@ export class GardenBacklogTelemetryService {
         ComputeRecallGardenEventType.GARDEN_BACKLOG_TELEMETRY_SNAPSHOT,
         payload
       );
+      this.snapshotPublishRetryArmed = false;
     } catch (error) {
       this.warn("garden backlog snapshot publish failed", {
         error: toErrorMessage(error)
       });
+      this.scheduleSnapshotPublishRetry();
       return;
     }
 
@@ -401,6 +404,20 @@ export class GardenBacklogTelemetryService {
 
   private warn(message: string, meta: Record<string, unknown>): void {
     this.deps.warn?.(message, meta);
+  }
+
+  private scheduleSnapshotPublishRetry(): void {
+    if (this.snapshotPublishRetryArmed || !this.acceptingOperations) {
+      return;
+    }
+    this.snapshotPublishRetryArmed = true;
+    queueMicrotask(() => {
+      if (!this.acceptingOperations) {
+        return;
+      }
+      this.snapshotRequestedVersion += 1;
+      void this.ensureSnapshotRunner();
+    });
   }
 
   private invalidateTimedOutRunners(): void {

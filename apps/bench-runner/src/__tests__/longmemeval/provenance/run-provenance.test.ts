@@ -83,6 +83,11 @@ describe("LongMemEval run provenance", () => {
       },
       answer_rerank: { enabled: false },
       reconciliation_basis: "rule_only",
+      cjk_segmentation: expect.objectContaining({
+        core_status: expect.stringMatching(/^(?:uninitialized|loading|ready|unavailable)$/u),
+        storage_status: expect.stringMatching(/^(?:uninitialized|loading|ready|unavailable)$/u),
+        warnings: expect.any(Array)
+      }),
       paired_env: {
         ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
         ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",

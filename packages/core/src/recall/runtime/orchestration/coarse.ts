@@ -15,6 +15,7 @@ import { collectSupplementaryData } from "../../supplements/supplementary-data.j
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
+  RecallDegradationReason,
   RecallEvidenceProjectionMatchReceipt,
   RecallGraphExpansionDiagnostics,
   RecallResult,
@@ -101,6 +102,7 @@ export type AssessCoarseFilterParams = Readonly<{
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;
   readonly captureAnswerFeatures?: boolean;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }>;
 
 export type AssessCoarseFilterResult = Readonly<{
@@ -148,7 +150,8 @@ export async function collectCoarseFilterSupplementaryData(
     coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
     coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
     coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores,
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    degradationReasons: params.degradationReasons
   });
 }
 

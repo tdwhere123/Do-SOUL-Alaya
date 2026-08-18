@@ -390,6 +390,7 @@ describe("collectSupplementaryData", () => {
 
   it("preserves legacy graph results when the bulk read fails", async () => {
     const warn = vi.fn();
+    const degradationReasons = new Set<"graph_metrics_bulk_failed">();
     const candidate = createMemoryEntry({ object_id: "memory-a" });
     const graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]> = {
       countInboundSupports: vi.fn(async () => 0),
@@ -400,10 +401,16 @@ describe("collectSupplementaryData", () => {
       })
     };
 
-    const result = await collectWith({ candidates: [candidate], graphSupportPort, warn });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort,
+      warn,
+      degradationReasons
+    });
 
     expect(result.graphSupportCounts).toEqual({ "memory-a": 1.5 });
     expect(result.recallsEdgeCount).toBe(2);
+    expect(degradationReasons).toEqual(new Set(["graph_metrics_bulk_failed"]));
     expect(warn).toHaveBeenCalledWith(
       "bulk graph metrics lookup failed; using legacy lookups",
       expect.objectContaining({

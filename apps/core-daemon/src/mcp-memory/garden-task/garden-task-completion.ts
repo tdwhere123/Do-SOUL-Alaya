@@ -82,15 +82,21 @@ export function createGardenTaskCompletionHandler(params: GardenTaskCompletionPa
   };
 }
 
+function requireGardenTaskRepo(
+  deps: GardenTaskHandlerDependencies
+): NonNullable<GardenTaskHandlerDependencies["gardenTaskRepo"]> {
+  if (deps.gardenTaskRepo === undefined) {
+    throw new GardenTaskUnavailableError("Garden task queue is not available.");
+  }
+  return deps.gardenTaskRepo;
+}
+
 function requireClaimedGardenTask(
   deps: GardenTaskHandlerDependencies,
   taskId: string,
   context: GardenTaskToolCallContext
 ): GardenTaskRow {
-  const repo = deps.gardenTaskRepo;
-  if (repo === undefined) {
-    throw new GardenTaskUnavailableError("Garden task queue is not available.");
-  }
+  const repo = requireGardenTaskRepo(deps);
   const row = repo.findById(taskId);
   if (row === null || row.workspace_id !== context.workspaceId) {
     throw new GardenTaskNotFoundError(`Garden task not found: ${taskId}`);
@@ -162,7 +168,7 @@ async function completeCandidateSignalTask(
   row: GardenTaskRow,
   resolvedRunId: string | null
 ): Promise<GardenTaskCompletionResult> {
-  const repo = params.deps.gardenTaskRepo!;
+  const repo = requireGardenTaskRepo(params.deps);
   const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
   const preservesPostTurnEvidence =
     row.kind === GardenTaskKind.POST_TURN_EXTRACT && request.status === "completed";
@@ -209,7 +215,7 @@ async function commitCandidateSignalCompletion(
   const emittedSignalIds = await emitTaskCandidateSignals(
     params, request, row, postTurnPayload, candidateSignals, completionClaimedBy
   );
-  await params.deps.gardenTaskRepo!.completeWithEvents(
+  await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {
       status: request.status,
@@ -322,7 +328,7 @@ async function completeEdgeClassifyTask(
     verdict
   );
 
-  await params.deps.gardenTaskRepo!.completeWithEvents(
+  await requireGardenTaskRepo(params.deps).completeWithEvents(
     row.id,
     {
       status: request.status,

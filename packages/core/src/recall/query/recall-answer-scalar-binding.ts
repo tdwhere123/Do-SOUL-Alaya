@@ -116,11 +116,13 @@ export function assessRecallScalarBinding(
     .map((sentence, index) => ({ sentence, index }))
     .filter(({ sentence }) => sentence.includes(assertionText));
   if (anchored.length !== 1) return null;
+  const anchoredHit = anchored[0];
+  if (anchoredHit === undefined) return null;
   if (plan.shape === "place") {
-    return assessPlaceBinding(plan, probes, anchored[0]!.sentence, assertionText);
+    return assessPlaceBinding(plan, probes, anchoredHit.sentence, assertionText);
   }
   if (plan.shape === "duration") {
-    return assessDurationBinding(plan, probes, sentences, anchored[0]!.index, assertionText);
+    return assessDurationBinding(plan, probes, sentences, anchoredHit.index, assertionText);
   }
   return null;
 }
@@ -294,12 +296,13 @@ function assessDurationBinding(
 ): Readonly<RecallScalarBindingAssessment> | null {
   if (!plan.relation_terms.some((term) => WAIT_RELATION.has(term))) return null;
   if (countDurationValues(assertionText) !== 1) return null;
-  const anchoredSentence = sentences[anchoredIndex]!;
+  const anchoredSentence = sentences[anchoredIndex];
+  if (anchoredSentence === undefined) return null;
   const sameSentence = isBoundDurationEvent(plan, anchoredSentence, true)
     ? anchoredSentence
     : null;
-  const priorSentence = anchoredIndex > 0 ? sentences[anchoredIndex - 1]! : null;
-  const adjacent = priorSentence !== null &&
+  const priorSentence = anchoredIndex > 0 ? sentences[anchoredIndex - 1] : undefined;
+  const adjacent = priorSentence !== undefined &&
     isDurationContinuation(assertionText) &&
     countDurationValues(priorSentence) === 0 &&
     isBoundDurationEvent(plan, priorSentence, false)

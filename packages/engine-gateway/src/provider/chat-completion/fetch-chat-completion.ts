@@ -9,6 +9,8 @@ import type {
   ProviderChatCompletionResult
 } from "./types.js";
 
+export const DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS = 10_000;
+
 export async function fetchProviderChatCompletion(
   request: ProviderChatCompletionRequest
 ): Promise<ProviderChatCompletionResult> {
@@ -79,10 +81,16 @@ function startTimeout(
   timeoutMs: number | undefined,
   controller: AbortController
 ): ReturnType<typeof setTimeout> | null {
-  if (timeoutMs === undefined) return null;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const resolvedMs = resolveProviderChatTimeoutMs(timeoutMs);
+  const timer = setTimeout(() => controller.abort(), resolvedMs);
   timer.unref?.();
   return timer;
+}
+
+function resolveProviderChatTimeoutMs(timeoutMs: number | undefined): number {
+  return timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS;
 }
 
 function normalizeTransportError(

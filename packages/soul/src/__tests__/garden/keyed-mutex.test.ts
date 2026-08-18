@@ -75,4 +75,20 @@ describe("KeyedMutex", () => {
     const mutex = new KeyedMutex();
     await expect(mutex.runExclusive("k", async () => 42)).resolves.toBe(42);
   });
+
+  it("does not leak tails after exclusive work completes", async () => {
+    const mutex = new KeyedMutex();
+
+    await mutex.runExclusive("same", async () => "first");
+    expect(mutex.size).toBe(0);
+
+    await Promise.all([
+      mutex.runExclusive("alpha", async () => "a"),
+      mutex.runExclusive("beta", async () => "b")
+    ]);
+    expect(mutex.size).toBe(0);
+
+    await mutex.runExclusive("same", async () => "again");
+    expect(mutex.size).toBe(0);
+  });
 });

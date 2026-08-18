@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 import {
+  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
   fetchProviderChatCompletion,
   providerChatCompletionsUrl
 } from "../../provider/chat-completion/index.js";
@@ -67,6 +72,34 @@ describe("provider chat completion", () => {
 
     expect(result.text).toBe('{"a"}');
     expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+  });
+
+  it("aborts within the default timeout when none is provided", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      })
+    );
+
+    const pending = fetchProviderChatCompletion({
+      providerUrl: "https://proxy.example/v1",
+      apiKey: "sk-test",
+      model: "mimo-v2.5",
+      systemPrompt: "sys",
+      userPrompt: "user",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    const expectation = expect(pending).rejects.toMatchObject({
+      name: "ProviderChatCompletionError"
+    });
+    await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS);
+    await expectation;
+    vi.useRealTimers();
   });
 
   it("fails closed on a non-OK provider status", async () => {

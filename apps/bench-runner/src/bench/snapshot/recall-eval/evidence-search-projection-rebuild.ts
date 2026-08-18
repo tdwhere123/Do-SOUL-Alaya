@@ -234,7 +234,8 @@ function readRuntimeQualifiedOwnerIds(
   }
   const reader = new RecallQualifiedEvidenceReader(
     db,
-    verifyOfficialApiSourceLocatorBinding
+    verifyOfficialApiSourceLocatorBinding,
+    { strictParse: true }
   );
   const qualified = new Set<string>();
   for (const [workspaceId, workspaceOwners] of byWorkspace) {

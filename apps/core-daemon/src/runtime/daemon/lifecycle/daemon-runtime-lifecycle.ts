@@ -324,8 +324,10 @@ async function drainInFlightRequests(input: CreateDaemonLifecycleControlsInput):
     attempt += 1;
   }
   if (input.lifecycleState.inFlight.count > 0) {
+    input.lifecycleState.drainState.forced = true;
     input.warnLogger.warn("daemon shutdown drain timed out with in-flight requests", {
-      inFlight: input.lifecycleState.inFlight.count
+      inFlight: input.lifecycleState.inFlight.count,
+      forced_drain: true
     });
   }
 }

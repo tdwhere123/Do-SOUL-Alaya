@@ -10,8 +10,10 @@ import {
   normalizeGraphSupport,
   toErrorMessage
 } from "../runtime/recall-service-helpers.js";
+import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type {
   EvidenceSupportVector,
+  RecallDegradationReason,
   RecallEvidenceProjectionMatchReceipt,
   RecallServiceDependencies,
   RecallServiceWarnPort,
@@ -95,6 +97,7 @@ interface CollectSupplementaryDataParams {
   readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
   readonly captureAnswerFeatures: boolean;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }
 
 export async function collectSupplementaryData(
@@ -159,7 +162,8 @@ export async function collectSupplementaryData(
         pathProjectionAsOf: params.pathProjectionAsOf,
         candidates,
         coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+        degradationReasons: params.degradationReasons
       }),
       collectRoutingKeySupplement({
         dependencies: params.dependencies,
@@ -324,6 +328,7 @@ async function collectGraphMetrics(
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
+    recordRecallDegradation(params, "graph_metrics_bulk_failed");
     return collectLegacyGraphMetrics(params);
   }
 }
