@@ -4,10 +4,11 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation anchor: package `0.3.11`, baseline HEAD `3be4b01f` plus
-the uncommitted reviewed P223 A/B/C diff on 2026-08-18. This is not a global
-suite-green or merge-readiness claim. The earlier `10da1318` B-arm dump remains
-historical benchmark evidence only.
+Current documentation anchor: package `0.3.11`, committed HEAD `263c6600` on
+2026-08-19. The provider, cache-admission, replay, and diagnostic authority
+boundaries at that commit passed architecture and standards review, the root
+build, and the full repository test suite. This is not a KPI-promotion claim.
+The earlier `10da1318` B-arm dump remains historical benchmark evidence only.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -165,6 +166,10 @@ not be used to describe current connectedness or to claim a current score gate.
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate
 discovery, identical control/treatment substrate, and a fresh native benchmark.
+The pre-`263c6600` MiMo cache lacks a sealed completion witness and is therefore
+retained only as historical bytes; it cannot authorize replay, snapshot, or
+score claims. A new completion-witness-bearing cache must be generated in a new
+root before the credentialless 1Q -> 3Q -> 100Q diagnostic ladder can begin.
 
 ## Related authority
 

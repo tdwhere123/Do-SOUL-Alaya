@@ -138,8 +138,9 @@ packages/core            business logic, state transitions, EventLog
                          RecallService, GreenService, governance services
 packages/soul            SOUL kernel, Garden, heuristics, maintenance
                          roles (Auditor / Janitor / Librarian / Scheduler)
-packages/engine-gateway  provider adapters (OpenAI / Anthropic / custom)
-                         and MCP bridge (routing only)
+packages/engine-gateway  provider adapters and the shared execution authority
+                         for attempts, retry, timeout, response, and usage;
+                         plus the MCP bridge
 packages/eval            benchmark KPI schemas, history diff/report utilities,
                          release gates, and metric helpers grouped by domain
 ```
@@ -162,6 +163,13 @@ Forbidden:
 - `packages/* -> apps/*`
 - business or governance logic in `engine-gateway`
 - direct package-to-package imports across the dependency direction
+
+Provider consumers inject or call `executeProviderChatCompletion`; they may
+declare operation budgets and response policy but do not own transport retry,
+HTTP parsing, or completion classification. A provider-backed extraction cache
+write is admissible only with a versioned completion witness. Cache-only replay
+uses an exact canonical request manifest and a provider-absent receipt rather
+than inferring authority from credentials, a model name, or a key subset.
 
 ## Surface Shape
 

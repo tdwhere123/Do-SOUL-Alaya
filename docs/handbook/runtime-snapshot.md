@@ -1,12 +1,12 @@
 # Runtime Snapshot
 
 Package version is `0.3.11`; the current documentation anchor is committed HEAD
-`892ebde0` on 2026-08-17. This file is readiness vocabulary and dated
+`263c6600` on 2026-08-19. This file is readiness vocabulary and dated
 snapshots. It is **not** a KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture (2026-08-17 live-source pass)
+## Recall posture (2026-08-19 live-source pass)
 
 | Fact | Status |
 |---|---|
@@ -18,11 +18,18 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | F3-only field membership | Live; planted SQLite/daemon proof — see [`recall.md`](recall.md) |
 | Final selector | `Select_Gamma` is the sole admission-order owner; delivery asserts the same order |
 | Exact selection-boundary replay | Live contract and capture/restore path |
+| Provider execution authority | One exported engine-gateway executor owns attempts, retry timing, timeout/abort classification, response inspection, usage, and completion witnesses |
+| Provider-backed cache admission | New writes and all live readers require versioned completion authority; deterministic no-provider shards remain explicit |
+| Cache-only replay authority | Canonical manifest binds the exact dataset window, cache closure, provider route, and source digests; replay emits a structured zero-call receipt |
+| Diagnostic resume authority | v2 checkpoints bind cache, snapshot, question window, query-factor inputs, artifacts, and a per-work-root execution lock |
 | Official 100Q / 500Q promotion | **Not claimed** |
 
 The previous integrated implementation is therefore not a degenerate
 projection and must not be reimplemented wholesale. P217 was a planted
 end-to-end acceptance gate that repaired only a demonstrated missing live seam.
+The legacy MiMo cache predates the completion-witness contract and is not a
+current replay authority. Cache regeneration and the 1Q -> 3Q -> 100Q ladder
+remain not started at this documentation anchor.
 
 ## Historical recall snapshot (2026-08-14, `10da1318`)
 
