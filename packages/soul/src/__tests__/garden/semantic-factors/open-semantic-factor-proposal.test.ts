@@ -38,7 +38,7 @@ describe("open semantic factor formation proposal", () => {
       graph: grounded.draft.semantic_factor_graph
     });
     expect(GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID)
-      .toBe("garden_source_bound_open_semantic_factor_v2");
+      .toBe("garden_source_bound_open_semantic_factor_v3");
   });
 
   it("removes a graph whose exact surface is absent from the source", () => {
@@ -74,6 +74,34 @@ describe("open semantic factor formation proposal", () => {
       reasons: expect.arrayContaining(["proposed_semantic_factor_graph_not_source_grounded"])
     });
   });
+
+  it("rejects overlapping nodes in source evidence", () => {
+    const graph = semanticGraph();
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [signalJson({
+        ...graph,
+        factors: [
+          ...graph.factors,
+          factor("nested-object", "las", 8, 11, "las")
+        ],
+        propositions: [{
+          ...graph.propositions[0],
+          arguments: [
+            ...graph.propositions[0]!.arguments,
+            argument(3, "nested-object")
+          ]
+        }]
+      })]
+    }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    expect(grounded.draft.semantic_factor_graph).toBeUndefined();
+    expect(grounded.draft.semantic_factor_graph_projection).toMatchObject({
+      status: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
+  });
 });
 
 function signalJson(graph: unknown) {
@@ -90,7 +118,7 @@ function signalJson(graph: unknown) {
 
 function semanticGraph() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "evidence" as const,
     factors: [
       factor("actor", "I", 0, 1, "speaker"),

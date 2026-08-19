@@ -56,6 +56,7 @@ export {
   parseOfficialApiExtractionRequest,
   salvageRawSignalElements,
   stringifyOfficialApiExtractionRequest,
+  officialApiExtractionRequestTemplatePreimage,
   type GardenCompileContext,
   type GardenComputeProvider,
   type OfficialApiSignalAuditDisposition,
@@ -70,7 +71,9 @@ export {
 } from "./compute-provider.js";
 export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
+  buildOpenSemanticFactorQueryUserPrompt,
   createOpenSemanticFactorQueryCompiler,
   parseOpenSemanticFactorQueryResponse,
   type OpenSemanticFactorQueryCompiler

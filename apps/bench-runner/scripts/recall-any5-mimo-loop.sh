@@ -40,10 +40,14 @@ SEED_DB=""
 SNAPSHOT=""
 SNAPSHOT_FLAG=0
 TEMP_REQUEST_FILE=""
+TEMP_RECEIPT_FILE=""
 
 cleanup_temp_request() {
   if [[ -n "$TEMP_REQUEST_FILE" ]]; then
     rm -f -- "$TEMP_REQUEST_FILE"
+  fi
+  if [[ -n "$TEMP_RECEIPT_FILE" ]]; then
+    rm -f -- "$TEMP_RECEIPT_FILE"
   fi
 }
 trap cleanup_temp_request EXIT
@@ -138,18 +142,29 @@ run_replay() {
     read -r provider
   } < <(load_identity)
   echo "replay identity model=$model profile=$profile limit=$LIMIT offset=$OFFSET"
-  local request_file rc=0
+  local request_file receipt_file rc=0
   request_file="$(mktemp)"
+  receipt_file="$(mktemp)"
   TEMP_REQUEST_FILE="$request_file"
+  TEMP_RECEIPT_FILE="$receipt_file"
   clear_provider_credentials
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
   if [[ $rc -eq 0 ]]; then
     rtk node "$BIN" provider-preflight --mode replay \
-      --request-manifest "$request_file" || rc=$?
+      --request-manifest "$request_file" > "$receipt_file" || rc=$?
+  fi
+  if [[ $rc -eq 0 ]]; then
+    rtk node "$BIN" provider-preflight --mode validate-replay-receipt \
+      --receipt "$receipt_file" --request-manifest "$request_file" || rc=$?
+  fi
+  if [[ $rc -eq 0 ]]; then
+    cat "$receipt_file"
   fi
   rm -f -- "$request_file"
+  rm -f -- "$receipt_file"
   TEMP_REQUEST_FILE=""
+  TEMP_RECEIPT_FILE=""
   return "$rc"
 }
 

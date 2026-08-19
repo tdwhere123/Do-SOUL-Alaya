@@ -11,6 +11,7 @@ import {
 import {
   OFFICIAL_API_GARDEN_MODEL,
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
@@ -47,6 +48,7 @@ const TransportProvenanceSchema = z.object({
 const QuerySemanticFactorCacheBaseSchema = z.object({
   compiler_operator_id: z.literal(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID),
   system_prompt_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  request_template_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   model_id: z.string().min(1),
   provider_url_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   source_set_sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
@@ -70,6 +72,7 @@ export type QuerySemanticFactorCacheBinding = Readonly<{
   cache_content_sha256: string;
   compiler_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
   system_prompt_sha256: string;
+  request_template_sha256: string;
   model_id: string;
   provider_url_sha256: string;
   source_set_sha256: string;
@@ -154,6 +157,9 @@ function fillIdentity(
     schema_version: 1 as const,
     compiler_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
     system_prompt_sha256: prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
+    request_template_sha256: prefixedSha256(
+      OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
+    ),
     model_id: input.model_id,
     provider_url_sha256: prefixedSha256(input.provider_url),
     source_set_sha256: sourceSetSha256(sourceTexts)
@@ -254,6 +260,9 @@ export function createQuerySemanticFactorCache(input: Readonly<{
     schema_version: QUERY_SEMANTIC_FACTOR_CACHE_SCHEMA_VERSION,
     compiler_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
     system_prompt_sha256: prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
+    request_template_sha256: prefixedSha256(
+      OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
+    ),
     model_id: input.model_id,
     provider_url_sha256: prefixedSha256(input.provider_url),
     transport_routes: normalizeTransportProvenance(input.transport_routes ?? [{
@@ -310,6 +319,12 @@ function assertQuerySemanticFactorCache(cache: QuerySemanticFactorCache): void {
   const expectedPrompt = prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT);
   if (cache.system_prompt_sha256 !== expectedPrompt) {
     throw new Error("query semantic factor cache prompt identity does not match this runtime");
+  }
+  const expectedRequestTemplate = prefixedSha256(
+    OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
+  );
+  if (cache.request_template_sha256 !== expectedRequestTemplate) {
+    throw new Error("query semantic factor cache request template does not match this runtime");
   }
   const sources = new Set<string>();
   for (const entry of cache.entries) {
@@ -369,6 +384,7 @@ function toBinding(cache: QuerySemanticFactorCache): QuerySemanticFactorCacheBin
     cache_content_sha256: cache.cache_content_sha256,
     compiler_operator_id: cache.compiler_operator_id,
     system_prompt_sha256: cache.system_prompt_sha256,
+    request_template_sha256: cache.request_template_sha256,
     model_id: cache.model_id,
     provider_url_sha256: cache.provider_url_sha256,
     source_set_sha256: cache.source_set_sha256,

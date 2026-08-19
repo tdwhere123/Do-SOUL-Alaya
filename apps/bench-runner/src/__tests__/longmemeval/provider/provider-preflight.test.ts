@@ -4,16 +4,17 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-shard.js";
-import {
-  findProviderBinding,
-  requireProviderBinding,
-  resolveVendorModel
-} from "../../../bench/provider/catalog.js";
-import { probeProviderProtocol } from "../../../bench/provider/protocol-probe.js";
+import { requireProviderBinding } from "../../../bench/provider/catalog.js";
 import { proveProviderZeroCallReplay } from "../../../bench/provider/replay-proof.js";
+import {
+  ProviderPreflightReplayReceiptSchema,
+  verifyProviderPreflightReplayReceipt,
+  verifyProviderPreflightReplayReceiptBinding
+} from
+  "../../../bench/provider/replay-receipt.js";
 import { retireObsoleteCache } from "../../../bench/provider/retire-obsolete-cache.js";
-import { assertRequiredRequestProfile } from "../../../bench/extraction/transport-route.js";
 import { digest, loopRequest } from "../diagnostic-loop/fixture.js";
 import {
   readExtractionCacheManifestIdentity,
@@ -46,87 +47,113 @@ import {
 
 const MIMO = requireProviderBinding("mimo-v2.5");
 const PRIOR_SEMANTIC_PRODUCER_OPERATOR_DIGEST =
-  "53de85d652e15c979b74d64c2e1a019fc2451af3277b841a7a3232a6057c7ae5";
+  "a04ec267912e54669d3c39382d5118da5e6b9d9f3382ab7721179fb0a79f503a";
 const roots: string[] = [];
+
+function replayReceiptFixture() {
+  return {
+    schema_version: 2 as const,
+    kind: "provider_preflight_replay_receipt" as const,
+    provider_port: "absent" as const,
+    physical_calls: 0 as const,
+    model: MIMO.id,
+    profile: MIMO.requestProfile,
+    key_count: 1,
+    request_manifest_sha256: "a".repeat(64),
+    cache_manifest_sha256: "b".repeat(64),
+    evidence_prompt_sha256: "c".repeat(64),
+    query_prompt_sha256: "d".repeat(64),
+    evidence_request_template_sha256: "e".repeat(64),
+    query_request_template_sha256: "f".repeat(64)
+  };
+}
+
+function receiptForManifest(manifest: ReturnType<typeof sealReplayManifest>) {
+  const seal = sourceBoundF3Seal();
+  return {
+    schema_version: 2 as const,
+    kind: "provider_preflight_replay_receipt" as const,
+    provider_port: "absent" as const,
+    physical_calls: 0 as const,
+    model: manifest.request.model,
+    profile: manifest.request.requestProfile,
+    key_count: manifest.request.requestedKeys.length,
+    request_manifest_sha256: manifest.request_manifest_sha256,
+    cache_manifest_sha256: manifest.cache_authority.manifest_sha256,
+    evidence_prompt_sha256: seal.evidence_prompt_sha256,
+    query_prompt_sha256: seal.query_prompt_sha256,
+    evidence_request_template_sha256: seal.evidence_request_template_sha256,
+    query_request_template_sha256: seal.query_request_template_sha256
+  };
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("provider catalog", () => {
-  it("remaps vendor aliases through the binding table", () => {
-    expect(resolveVendorModel("Mimo-V2.5")).toBe(MIMO.id);
-    expect(resolveVendorModel("mimo-v2-flash")).toBe(MIMO.id);
-    expect(findProviderBinding("unknown-model")).toBeUndefined();
+describe("provider replay receipt", () => {
+  it("rejects legacy, minimal, and extra-key evidence shapes", () => {
+    const current = replayReceiptFixture();
+    expect(ProviderPreflightReplayReceiptSchema.parse(current)).toEqual(current);
+    expect(ProviderPreflightReplayReceiptSchema.safeParse({
+      ...current,
+      schema_version: 1
+    }).success).toBe(false);
+    expect(ProviderPreflightReplayReceiptSchema.safeParse({
+      schema_version: 2,
+      kind: "provider_preflight_replay_receipt",
+      provider_port: "absent",
+      physical_calls: 0
+    }).success).toBe(false);
+    expect(ProviderPreflightReplayReceiptSchema.safeParse({
+      ...current,
+      unsealed_note: "accepted by a loose consumer"
+    }).success).toBe(false);
+    expect(() => verifyProviderPreflightReplayReceipt({
+      ...current,
+      evidence_request_template_sha256:
+        "38fa28af7f5d2a1895cc6cd6879ba3de827800c2713af054f976d3175a348200"
+    })).toThrow("semantic contract does not match");
   });
 
-  it("refuses a bound vendor with the wrong request profile", () => {
-    expect(() => assertRequiredRequestProfile({
-      model: "Mimo-V2.5",
-      requestProfile: "provider-default-v1"
-    })).toThrow(/requires request profile mimo-v2.5-nonthinking-v1/u);
-    expect(() => assertRequiredRequestProfile({
-      model: MIMO.id,
-      requestProfile: MIMO.requestProfile
-    })).not.toThrow();
-  });
-});
+  it.each([
+    ["model", { model: "other-model" }],
+    ["profile", { profile: "provider-default-v1" }],
+    ["key count", { key_count: 999 }],
+    ["request digest", { request_manifest_sha256: "1".repeat(64) }],
+    ["cache digest", { cache_manifest_sha256: "2".repeat(64) }]
+  ])("rejects same-shape %s drift from its canonical authority", async (_label, drift) => {
+    const body = await canonicalReplayManifestBody();
+    const manifest = sealReplayManifest(body);
+    const receipt = receiptForManifest(manifest);
+    const cacheRoot = body.request.extractionCacheRoot!;
+    const manifestPath = join(cacheRoot, "receipt-request.json");
+    const receiptPath = join(cacheRoot, "receipt.json");
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+    await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`);
 
-describe("provider protocol probe", () => {
-  it("caps physical calls and confirms the sealed F3 identity", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
-    }), { status: 200 }));
-
-    const receipt = await probeProviderProtocol({
-      providerUrl: "https://proxy.example/v1",
-      apiKey: "sk-test",
-      model: MIMO.id,
-      fetchImpl: fetchImpl as unknown as typeof fetch
-    });
-
-    expect(receipt.physical_calls).toBe(1);
-    expect(receipt.physical_calls).toBeLessThanOrEqual(MIMO.probeCallCeiling);
-    expect(receipt.profile).toBe(MIMO.requestProfile);
-    expect(receipt.model).toBe(MIMO.id);
-    expect(receipt.usage_present).toBe(true);
-    expect(receipt.f3_seal_current).toBe(true);
-    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body.model).toBe(MIMO.id);
-    expect(body.enable_thinking).toBe(false);
-    expect(body.stream).toBeUndefined();
-  });
-
-  it("requests SSE framing for the stream probe", async () => {
-    const fetchImpl = vi.fn(async () => new Response(
-      "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ok\\\":true}\" }}]}\n\n" +
-      "data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n" +
-      "data: [DONE]\n",
-      { status: 200, headers: { "content-type": "text/event-stream" } }
+    expect(() => verifyProviderPreflightReplayReceiptBinding(receipt, manifest))
+      .not.toThrow();
+    await expect(runProviderPreflightCommand([
+      "--mode", "validate-replay-receipt",
+      "--receipt", receiptPath,
+      "--request-manifest", manifestPath
+    ])).resolves.toBe(0);
+    expect(() => verifyProviderPreflightReplayReceiptBinding({
+      ...receipt,
+      ...drift
+    }, manifest)).toThrow("does not match its canonical request authority");
+    await writeFile(receiptPath, `${JSON.stringify({ ...receipt, ...drift })}\n`);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    await expect(runProviderPreflightCommand([
+      "--mode", "validate-replay-receipt",
+      "--receipt", receiptPath,
+      "--request-manifest", manifestPath
+    ])).resolves.toBe(2);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining(
+      "does not match its canonical request authority"
     ));
-    const receipt = await probeProviderProtocol({
-      providerUrl: "https://proxy.example/v1",
-      apiKey: "sk-test",
-      model: MIMO.id,
-      framing: "sse",
-      fetchImpl: fetchImpl as unknown as typeof fetch
-    });
-    expect(receipt.framing).toBe("sse");
-    expect(receipt.physical_calls).toBe(1);
-    expect(receipt.json_object).toBe(true);
-    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body.stream).toBe(true);
-    expect(body.model).toBe(MIMO.id);
-  });
-
-  it("refuses an empty key", async () => {
-    await expect(probeProviderProtocol({
-      providerUrl: "https://proxy.example/v1",
-      apiKey: "",
-      model: MIMO.id,
-      fetchImpl: fetch
-    })).rejects.toThrow(/empty API key/u);
+    stderr.mockRestore();
   });
 });
 

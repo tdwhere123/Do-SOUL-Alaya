@@ -108,7 +108,7 @@ function formedQueryCapture(
       producer_operator_id: "open-factor-test-producer-v1",
       source_text: sourceText,
       graph: {
-        schema_version: 1,
+        schema_version: 2,
         source_kind: "query",
         factors: factors.map(([factorId, surface, identity]) => ({
           factor_id: factorId,

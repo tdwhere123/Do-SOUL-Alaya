@@ -11,6 +11,7 @@ const FillIdentitySchema = z.object({
   schema_version: z.literal(1),
   compiler_operator_id: z.string().min(1),
   system_prompt_sha256: Sha256Schema,
+  request_template_sha256: Sha256Schema,
   model_id: z.string().min(1),
   provider_url_sha256: Sha256Schema,
   source_set_sha256: Sha256Schema

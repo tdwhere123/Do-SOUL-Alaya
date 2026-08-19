@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
@@ -6,6 +7,7 @@ import {
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
   parseOfficialApiExtractionRequest,
+  officialApiExtractionRequestTemplatePreimage,
   stringifyOfficialApiExtractionRequest
 } from "../../garden/official-api/extraction-request.js";
 
@@ -66,4 +68,33 @@ describe("official API extraction request", () => {
       source_corpus_identity
     ))).toHaveLength(1);
   });
+
+  it("binds the assertion wire shape and batching parameters in the template preimage", () => {
+    const preimage = JSON.parse(officialApiExtractionRequestTemplatePreimage()) as {
+      serialized_request: string;
+      assertions_per_batch: number;
+      batch_contract_version: number;
+    };
+    const request = JSON.parse(preimage.serialized_request) as Record<string, unknown>;
+
+    expect(request.source_assertions).toEqual([{
+      assertion_id: 1,
+      text: "User: I recorded the source-bound semantic factor request template."
+    }]);
+    expect(preimage.assertions_per_batch).toBe(OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH);
+    expect(preimage.batch_contract_version)
+      .toBe(OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION);
+    expect(hash(preimage)).not.toBe(hash({
+      ...preimage,
+      assertions_per_batch: preimage.assertions_per_batch + 1
+    }));
+    expect(hash(preimage)).not.toBe(hash({
+      ...preimage,
+      serialized_request: preimage.serialized_request.replace("assertion_id", "id")
+    }));
+  });
 });
+
+function hash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}

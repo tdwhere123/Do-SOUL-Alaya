@@ -86,6 +86,7 @@ const QuerySemanticFactorCacheIdentitySchema = z.object({
   cache_content_sha256: PrefixedSha256Schema,
   compiler_operator_id: z.string().min(1),
   system_prompt_sha256: PrefixedSha256Schema,
+  request_template_sha256: PrefixedSha256Schema,
   model_id: z.string().min(1),
   provider_url_sha256: PrefixedSha256Schema,
   source_set_sha256: PrefixedSha256Schema,

@@ -106,3 +106,16 @@ export function stringifyOfficialApiExtractionRequest(
 ): string {
   return JSON.stringify(parseOfficialApiExtractionRequest(request));
 }
+
+export function officialApiExtractionRequestTemplatePreimage(): string {
+  const sentinel = "I recorded the source-bound semantic factor request template.";
+  const request = buildOfficialApiExtractionRequest(
+    sentinel,
+    [{ role: "user", content: sentinel }]
+  );
+  return JSON.stringify({
+    serialized_request: stringifyOfficialApiExtractionRequest(request),
+    assertions_per_batch: OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
+    batch_contract_version: OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION
+  });
+}

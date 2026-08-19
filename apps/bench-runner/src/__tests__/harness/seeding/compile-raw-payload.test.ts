@@ -237,7 +237,7 @@ function canonicalDigest(value: Readonly<Record<string, unknown>>): string {
 
 function semanticGraph(): Readonly<Record<string, unknown>> {
   return {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       { factor_id: "actor", surface: "I", semantic_identity: "speaker" },
@@ -284,7 +284,7 @@ function maximalSemanticGraph(): Readonly<Record<string, unknown>> {
     }))
   }));
   return {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors,
     variables: [],

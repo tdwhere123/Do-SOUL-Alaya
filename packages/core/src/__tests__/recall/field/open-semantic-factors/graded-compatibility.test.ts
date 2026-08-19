@@ -13,7 +13,7 @@ import { materializeOpenSemanticFactorActivation } from
 describe("open semantic graded compatibility", () => {
   it("matches a proposition when normalized surfaces overlap even if identities differ", () => {
     const evidence = formation("evidence", "I bought three books.", {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("actor", "I", "i"),
@@ -32,7 +32,7 @@ describe("open semantic graded compatibility", () => {
       }]
     });
     const query = formation("query", "Which books have I bought?", {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "query",
       factors: [
         factor("query-actor", "I", "i"),
@@ -100,7 +100,7 @@ describe("open semantic graded compatibility", () => {
 
   it("rejects a proposition when a query answer variable has no evidence counterpart", () => {
     const evidence = formation("evidence", "I used Atlas for research.", {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("actor", "I", "i"),
@@ -121,7 +121,7 @@ describe("open semantic graded compatibility", () => {
       }]
     });
     const query = formation("query", "How long did I use Atlas for research?", {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "query",
       factors: [
         factor("query-actor", "I", "i"),
@@ -154,7 +154,7 @@ describe("open semantic graded compatibility", () => {
 
   it("keeps missing query or evidence factors as an inactive seal, not a zero score", () => {
     const evidence = formation("evidence", "I used Atlas for research.", {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("actor", "I", "i"),
@@ -191,7 +191,7 @@ function conflictingPersonGraphs() {
   const queryText = "Who likes tea and owns mug?";
   return {
     evidence: formation("evidence", evidenceText, {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("alice", "Alice", "alice"),
@@ -209,7 +209,7 @@ function conflictingPersonGraphs() {
       ]
     }),
     query: formation("query", queryText, {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "query",
       factors: [
         factor("query-likes", "likes", "like"),

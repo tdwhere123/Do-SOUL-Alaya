@@ -7,6 +7,7 @@ import {
   expectCacheOnlyLoopEnv,
   execFileAsync,
   invokeDiagnosticLoop,
+  replayReceiptFixture,
   script,
   writeOperatorLoopHarness,
   writeReplayAwareRtk
@@ -56,5 +57,39 @@ describe("recall-any5-mimo-loop replay guards", () => {
       { env: harness.env, timeout: 10_000 }
     );
     expect(result.stdout).toContain('"kind":"provider_preflight_replay_receipt"');
+  });
+
+  it.each([
+    ["legacy v1", { ...replayReceiptFixture(), schema_version: 1 }],
+    ["minimal", {
+      schema_version: 2,
+      kind: "provider_preflight_replay_receipt",
+      provider_port: "absent",
+      physical_calls: 0
+    }],
+    ["extra key", { ...replayReceiptFixture(), note: "loose evidence" }],
+    ["wrong model", { ...replayReceiptFixture(), model: "other-model" }],
+    ["wrong profile", { ...replayReceiptFixture(), profile: "provider-default-v1" }],
+    ["wrong key count", { ...replayReceiptFixture(), key_count: 999 }],
+    ["wrong request digest", {
+      ...replayReceiptFixture(), request_manifest_sha256: "1".repeat(64)
+    }],
+    ["wrong cache digest", {
+      ...replayReceiptFixture(), cache_manifest_sha256: "2".repeat(64)
+    }],
+    ["prior template", {
+      ...replayReceiptFixture(),
+      evidence_request_template_sha256:
+        "38fa28af7f5d2a1895cc6cd6879ba3de827800c2713af054f976d3175a348200"
+    }]
+  ])("rejects a %s provider replay receipt", async (_label, receipt) => {
+    const harness = await writeOperatorLoopHarness(tmpDir, "replay-invalid-receipt");
+    await writeReplayAwareRtk(harness.binDir, receipt);
+
+    await expect(execFileAsync(
+      "bash",
+      [script, "replay", "--limit", "1"],
+      { env: harness.env, timeout: 10_000 }
+    )).rejects.toMatchObject({ code: 1 });
   });
 });

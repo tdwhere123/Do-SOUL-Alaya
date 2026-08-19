@@ -5,7 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export const GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID =
-  "garden_source_bound_open_semantic_factor_v2";
+  "garden_source_bound_open_semantic_factor_v3";
 
 export function buildOpenSemanticFactorFormationProposal(
   rawPayload: CandidateMemorySignal["raw_payload"]

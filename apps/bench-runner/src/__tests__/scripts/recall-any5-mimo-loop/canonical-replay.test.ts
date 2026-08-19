@@ -49,14 +49,24 @@ describe("canonical cache-only replay process", () => {
     expectManifestMatchesFixture(prepared.manifest, prepared.fixture);
     const result = await runReplayConsumer(prepared.requestPath, prepared.denyNetwork);
     const receipt = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(receipt).toMatchObject({
-      schema_version: 1,
+    expect(receipt).toEqual({
+      schema_version: 2,
       kind: "provider_preflight_replay_receipt",
       provider_port: "absent",
       physical_calls: 0,
+      model: MODEL,
+      profile: PROFILE,
       key_count: prepared.fixture.keys.length,
       request_manifest_sha256: prepared.manifest.request_manifest_sha256,
-      cache_manifest_sha256: prepared.fixture.manifestSha256
+      cache_manifest_sha256: prepared.fixture.manifestSha256,
+      evidence_prompt_sha256:
+        "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a",
+      query_prompt_sha256:
+        "967bcda95e56bfa434329a71d9893d89c64ee9beb566610b7d8fb41e9703f786",
+      evidence_request_template_sha256:
+        "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
+      query_request_template_sha256:
+        "c7777cd641779a8903a988a481b97cb8a26252a6b7dcc995383ca13fa91f0089"
     });
     await expect(runReplayConsumer(
       prepared.requestPath,

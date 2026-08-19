@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION = 1 as const;
+export const OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION = 2 as const;
 export const OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID =
   "open_semantic_factor_formation_v1" as const;
 export const OPEN_SEMANTIC_FACTOR_LIMIT = 32;
@@ -104,7 +104,7 @@ export const OpenSemanticFactorGraphSchema = OpenSemanticFactorGraphStructureSch
   variables: z.array(OpenSemanticVariableSchema)
     .max(OPEN_SEMANTIC_VARIABLE_LIMIT)
     .readonly()
-}).strict().superRefine(validateGraphStructure).readonly();
+}).strict().superRefine(validateGroundedGraph).readonly();
 
 export type OpenSemanticFactorProposal =
   z.infer<typeof OpenSemanticFactorProposalSchema>;
@@ -175,8 +175,7 @@ export function groundOpenSemanticFactorGraph(
   if (!parsed.success || sourceText.length === 0) return null;
   const groundedFactors = groundProposedSurfaces(parsed.data.factors, sourceText);
   const groundedVariables = groundProposedSurfaces(parsed.data.variables, sourceText);
-  if (groundedFactors === null || groundedVariables === null ||
-      hasDuplicateSourceSpans([...groundedFactors, ...groundedVariables])) {
+  if (groundedFactors === null || groundedVariables === null) {
     return null;
   }
   const grounded = OpenSemanticFactorGraphSchema.safeParse({
@@ -185,13 +184,6 @@ export function groundOpenSemanticFactorGraph(
     variables: groundedVariables
   });
   return grounded.success ? canonicalGraph(grounded.data) : null;
-}
-
-function hasDuplicateSourceSpans(
-  nodes: readonly Readonly<{ readonly source_span: readonly [number, number] }>[]
-): boolean {
-  const spans = nodes.map(({ source_span: [start, end] }) => `${start}:${end}`);
-  return new Set(spans).size !== spans.length;
 }
 
 export function openSemanticFactorFormationCapturePreimage(
@@ -232,27 +224,10 @@ function validateGraphStructure(
   }>,
   context: z.RefinementCtx
 ): void {
-  const factorIds = uniqueIds(graph.factors.map((factor) => factor.factor_id));
-  const variableIds = uniqueIds(graph.variables.map((variable) => variable.variable_id));
-  const propositionIds = uniqueIds(
-    graph.propositions.map((proposition) => proposition.proposition_id)
-  );
-  if (factorIds === null || variableIds === null || propositionIds === null ||
-      intersects(factorIds, variableIds)) {
-    context.addIssue({ code: "custom", message: "open semantic identities must be unique" });
-    return;
-  }
-  if (graph.source_kind === "evidence" && graph.variables.length > 0) {
-    context.addIssue({ code: "custom", message: "evidence graph cannot contain variables" });
-  }
-  const resultVariableIds = uniqueIds(graph.result_variable_ids);
-  if (resultVariableIds === null ||
-      [...(resultVariableIds ?? [])].some((id) => !variableIds.has(id))) {
-    context.addIssue({ code: "custom", message: "result variables must reference unique variables" });
-  }
-  if (graph.source_kind === "evidence" && graph.result_variable_ids.length > 0) {
-    context.addIssue({ code: "custom", message: "evidence graph cannot declare result variables" });
-  }
+  const identities = validateGraphIdentities(graph, context);
+  if (identities === null) return;
+  const { factorIds, variableIds } = identities;
+  validateGraphVariables(graph, variableIds, context);
   const referencedFactors = new Set<string>();
   const referencedVariables = new Set<string>();
   for (const proposition of graph.propositions) {
@@ -272,6 +247,77 @@ function validateGraphStructure(
   if ([...factorIds].some((id) => !referencedFactors.has(id)) ||
       [...variableIds].some((id) => !referencedVariables.has(id))) {
     context.addIssue({ code: "custom", message: "semantic factor graph has unbound values" });
+  }
+}
+
+function validateGraphIdentities(
+  graph: Readonly<{
+    factors: readonly Readonly<{ readonly factor_id: string }>[];
+    variables: readonly Readonly<{ readonly variable_id: string }>[];
+    propositions: readonly Readonly<OpenSemanticProposition>[];
+  }>,
+  context: z.RefinementCtx
+): Readonly<{
+  factorIds: ReadonlySet<string>;
+  variableIds: ReadonlySet<string>;
+}> | null {
+  const factorIds = uniqueIds(graph.factors.map((factor) => factor.factor_id));
+  const variableIds = uniqueIds(graph.variables.map((variable) => variable.variable_id));
+  const propositionIds = uniqueIds(
+    graph.propositions.map((proposition) => proposition.proposition_id)
+  );
+  if (factorIds === null || variableIds === null || propositionIds === null ||
+      intersects(factorIds, variableIds)) {
+    context.addIssue({ code: "custom", message: "open semantic identities must be unique" });
+    return null;
+  }
+  return { factorIds, variableIds };
+}
+
+function validateGraphVariables(
+  graph: Readonly<{
+    source_kind: "evidence" | "query";
+    variables: readonly Readonly<{ readonly variable_id: string }>[];
+    result_variable_ids: readonly string[];
+  }>,
+  variableIds: ReadonlySet<string>,
+  context: z.RefinementCtx
+): void {
+  if (graph.source_kind === "evidence" && graph.variables.length > 0) {
+    context.addIssue({ code: "custom", message: "evidence graph cannot contain variables" });
+  }
+  const resultVariableIds = uniqueIds(graph.result_variable_ids);
+  if (resultVariableIds === null ||
+      [...(resultVariableIds ?? [])].some((id) => !variableIds.has(id))) {
+    context.addIssue({ code: "custom", message: "result variables must reference unique variables" });
+  }
+  if (graph.source_kind === "evidence" && graph.result_variable_ids.length > 0) {
+    context.addIssue({ code: "custom", message: "evidence graph cannot declare result variables" });
+  }
+}
+
+function validateGroundedGraph(
+  graph: Readonly<{
+    source_kind: "evidence" | "query";
+    factors: readonly Readonly<{
+      readonly factor_id: string;
+      readonly source_span: readonly [number, number];
+    }>[];
+    variables: readonly Readonly<{
+      readonly variable_id: string;
+      readonly source_span: readonly [number, number];
+    }>[];
+    result_variable_ids: readonly string[];
+    propositions: readonly Readonly<OpenSemanticProposition>[];
+  }>,
+  context: z.RefinementCtx
+): void {
+  validateGraphStructure(graph, context);
+  const spans = [...graph.factors, ...graph.variables]
+    .map(({ source_span }) => source_span)
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  if (spans.some((span, index) => index > 0 && span[0] < spans[index - 1]![1])) {
+    context.addIssue({ code: "custom", message: "semantic graph source spans must not overlap" });
   }
 }
 

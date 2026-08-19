@@ -161,7 +161,7 @@ describe("open semantic factor tracer", () => {
       source_kind: "evidence",
       source_text: evidenceText,
       proposal: proposal(evidenceText, {
-        schema_version: 1,
+        schema_version: 2,
         source_kind: "evidence",
         factors: [
           factor("alice", "Alice", 0, 5, "alice"),
@@ -183,7 +183,7 @@ describe("open semantic factor tracer", () => {
       source_kind: "query",
       source_text: queryText,
       proposal: proposal(queryText, {
-        schema_version: 1,
+        schema_version: 2,
         source_kind: "query",
         factors: [
           factor("query-likes", "likes", 4, 9, "like"),
@@ -216,7 +216,7 @@ describe("open semantic factor tracer", () => {
       source_kind: "query",
       source_text: queryText,
       proposal: proposal(queryText, {
-        schema_version: 1,
+        schema_version: 2,
         source_kind: "query",
         factors: [
           factor("query-likes", "likes", 4, 9, "like"),

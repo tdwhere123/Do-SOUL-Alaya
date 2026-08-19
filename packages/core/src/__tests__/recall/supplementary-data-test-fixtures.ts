@@ -142,7 +142,7 @@ function semanticGraph(
   }>[]
 ) {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: sourceKind,
     factors,
     variables,

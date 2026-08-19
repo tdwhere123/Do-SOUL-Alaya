@@ -94,7 +94,7 @@ export function withOpenSemanticFactorGraph<T extends Readonly<{
   return {
     ...signal,
     semantic_factor_graph: {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [{
         factor_id: "fact",

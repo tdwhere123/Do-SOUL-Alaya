@@ -32,7 +32,9 @@ export function canonicalReplayContractDigests(): {
       evidence_operator_id: seal.evidence_operator_id,
       query_operator_id: seal.query_operator_id,
       evidence_prompt_sha256: seal.evidence_prompt_sha256,
-      query_prompt_sha256: seal.query_prompt_sha256
+      query_prompt_sha256: seal.query_prompt_sha256,
+      evidence_request_template_sha256: seal.evidence_request_template_sha256,
+      query_request_template_sha256: seal.query_request_template_sha256
     })
   };
 }

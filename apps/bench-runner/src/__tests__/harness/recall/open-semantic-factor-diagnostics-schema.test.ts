@@ -56,7 +56,7 @@ function resealAsLegacyV3(trace: ReturnType<typeof coreCompatibilityTrace>) {
 
 function evidenceGraph() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "evidence" as const,
     factors: [
       factor("predicate", "graduated", "graduate"),
@@ -78,7 +78,7 @@ function evidenceGraph() {
 
 function queryGraph() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [
       factor("predicate", "graduated", "graduate"),

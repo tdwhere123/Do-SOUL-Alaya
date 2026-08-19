@@ -124,7 +124,7 @@ function compatibility(evidenceGraphValue: unknown, queryGraphValue: unknown) {
 
 function evidenceGraph(degreeIdentity: string) {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "evidence" as const,
     factors: [
       factor("predicate", "graduated", "graduate"),
@@ -146,7 +146,7 @@ function evidenceGraph(degreeIdentity: string) {
 
 function queryGraph(degreeIdentity: string) {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [
       factor("predicate", "graduated", "graduate"),

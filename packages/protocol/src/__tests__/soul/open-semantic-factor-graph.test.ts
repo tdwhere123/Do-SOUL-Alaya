@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+  OpenSemanticFactorFormationCaptureSchema,
   OpenSemanticFactorGraphProposalSchema,
+  type OpenSemanticFactorFormationCaptureBody,
   openSemanticFactorFormationCapturePreimage,
   groundOpenSemanticFactorGraph,
   verifyOpenSemanticFactorFormationCapture
@@ -12,7 +14,7 @@ describe("open semantic factor graph", () => {
   it("grounds open factors and preserves open proposition bindings", () => {
     const source = "I bought three used books in July.";
     const graph = groundOpenSemanticFactorGraph({
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("actor", "I", 0, 1),
@@ -47,7 +49,7 @@ describe("open semantic factor graph", () => {
   it("represents a query unknown as a structural variable without an answer ontology", () => {
     const source = "What did I buy?";
     const graph = groundOpenSemanticFactorGraph({
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "query",
       factors: [
         factor("actor", "I", 9, 10),
@@ -77,7 +79,7 @@ describe("open semantic factor graph", () => {
 
   it("rejects ungrounded, dangling, and evidence-variable graphs", () => {
     const evidence = {
-      schema_version: 1 as const,
+      schema_version: 2 as const,
       source_kind: "evidence" as const,
       factors: [factor("actor", "I", 0, 1), factor("predicate", "use", 2, 5)],
       variables: [{ variable_id: "missing", surface: "Atlas" }],
@@ -119,7 +121,7 @@ describe("open semantic factor graph", () => {
 
   it("rejects every emitted factor or variable that propositions do not use", () => {
     const query = {
-      schema_version: 1 as const,
+      schema_version: 2 as const,
       source_kind: "query" as const,
       factors: [factor("predicate", "give", 4, 8), factor("participant", "A", 9, 10)],
       variables: [{ variable_id: "answer", surface: "Who" }],
@@ -146,7 +148,7 @@ describe("open semantic factor graph", () => {
 
   it("uses position to distinguish parallel arguments with one open binding identity", () => {
     const graph = groundOpenSemanticFactorGraph({
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       variables: [],
       result_variable_ids: [],
@@ -180,7 +182,7 @@ describe("open semantic factor graph", () => {
 
   it("requires graph nodes to own distinct exact source occurrences", () => {
     expect(groundOpenSemanticFactorGraph({
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("actor", "I", 0, 1),
@@ -200,9 +202,59 @@ describe("open semantic factor graph", () => {
     }, "I use Atlas.")).toBeNull();
   });
 
+  it("rejects factor, variable, and cross-kind source-span overlap", () => {
+    expect(groundOpenSemanticFactorGraph(overlapGraph(
+      [factor("whole", "New York", 0, 8), factor("part", "York", 4, 8)],
+      []
+    ), "New York")).toBeNull();
+    expect(groundOpenSemanticFactorGraph(overlapGraph(
+      [factor("predicate", "ask", 0, 3)],
+      [variable("whole", "What degree"), variable("part", "degree")]
+    ), "ask What degree")).toBeNull();
+    expect(groundOpenSemanticFactorGraph(overlapGraph(
+      [factor("predicate", "degree", 5, 11)],
+      [variable("answer", "What degree")]
+    ), "What degree")).toBeNull();
+  });
+
+  it("allows adjacent spans and separate occurrences of the same surface", () => {
+    expect(groundOpenSemanticFactorGraph(overlapGraph(
+      [factor("predicate", "A", 0, 1), factor("adjacent", "B", 1, 2)],
+      []
+    ), "AB")).not.toBeNull();
+    expect(groundOpenSemanticFactorGraph({
+      ...overlapGraph([
+        factor("predicate", "gives", 2, 7),
+        factor("first", "A", 0, 1),
+        { ...factor("second", "A", 8, 9), source_occurrence: 1 }
+      ], []),
+      propositions: [{
+        proposition_id: "separate-occurrences",
+        predicate_factor_id: "predicate",
+        arguments: [
+          argument(0, "factor", "first"),
+          argument(1, "factor", "second")
+        ]
+      }]
+    }, "A gives A")).not.toBeNull();
+  });
+
+  it("rejects legacy v1 graphs and formation captures", () => {
+    expect(OpenSemanticFactorGraphProposalSchema.safeParse({
+      ...overlapGraph(
+        [factor("predicate", "A", 0, 1), factor("argument", "B", 1, 2)],
+        []
+      ),
+      schema_version: 1
+    }).success).toBe(false);
+    expect(OpenSemanticFactorFormationCaptureSchema.safeParse(
+      legacyV1Capture()
+    ).success).toBe(false);
+  });
+
   it("binds formation capture identity to producer, source, and graph", () => {
     const graph = groundOpenSemanticFactorGraph({
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [factor("actor", "I", 0, 1), factor("predicate", "work", 2, 6)],
       variables: [],
@@ -247,6 +299,61 @@ function factor(
     factor_id: factorId,
     surface,
     semantic_identity: semanticIdentity
+  };
+}
+
+function variable(variableId: string, surface: string) {
+  return { variable_id: variableId, surface };
+}
+
+function legacyV1Capture() {
+  const body = {
+    schema_version: 1,
+    operator_id: "open_semantic_factor_formation_v1",
+    status: "formed",
+    producer_operator_id: "legacy-producer-v1",
+    source_sha256: `sha256:${"1".repeat(64)}`,
+    graph: {
+      schema_version: 1,
+      source_kind: "evidence",
+      factors: [{
+        factor_id: "predicate",
+        surface: "A",
+        source_span: [0, 1],
+        semantic_identity: "a"
+      }],
+      variables: [],
+      result_variable_ids: [],
+      propositions: [{
+        proposition_id: "legacy",
+        predicate_factor_id: "predicate",
+        arguments: [argument(0, "factor", "predicate")]
+      }]
+    }
+  };
+  const preimage = openSemanticFactorFormationCapturePreimage(
+    body as unknown as OpenSemanticFactorFormationCaptureBody
+  );
+  return { ...body, capture_digest: `sha256:${sha256(preimage)}` };
+}
+
+function overlapGraph(factors: ReturnType<typeof factor>[], variables: ReturnType<typeof variable>[]) {
+  const references = [
+    ...factors.slice(1).map(({ factor_id }) => ["factor", factor_id] as const),
+    ...variables.map(({ variable_id }) => ["variable", variable_id] as const)
+  ];
+  return {
+    schema_version: 2 as const,
+    source_kind: (variables.length === 0 ? "evidence" : "query") as "evidence" | "query",
+    factors,
+    variables,
+    result_variable_ids: variables.map(({ variable_id }) => variable_id),
+    propositions: [{
+      proposition_id: "overlap",
+      predicate_factor_id: factors[0]!.factor_id,
+      arguments: references.map(([kind, id], position) =>
+        argument(position, kind, id))
+    }]
   };
 }
 

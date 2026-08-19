@@ -110,6 +110,7 @@ export interface RecallEvalRuntimeAttribution {
     cache_content_sha256: string;
     compiler_operator_id: string;
     system_prompt_sha256: string;
+    request_template_sha256: string;
     model_id: string;
     provider_url_sha256: string;
     source_set_sha256: string;

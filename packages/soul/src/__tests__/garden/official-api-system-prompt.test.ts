@@ -78,6 +78,12 @@ describe("official API system prompt", () => {
       "never collapse a multi-participant relation into a unary proposition"
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "Each factor or variable surface must own a non-overlapping exact source span"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      '"schema_version":2,"source_kind":"evidence"'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       '"arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"factor","reference_id":"answer"}]'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(

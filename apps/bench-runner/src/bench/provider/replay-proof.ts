@@ -18,6 +18,8 @@ export function proveProviderZeroCallReplay(input: {
   readonly profile: ExtractionRequestProfile;
   readonly evidence_prompt_sha256: string;
   readonly query_prompt_sha256: string;
+  readonly evidence_request_template_sha256: string;
+  readonly query_request_template_sha256: string;
 } {
   assertSourceBoundF3SealCurrent();
   if (isObsoleteRequestProfile(input.request.requestProfile)) {
@@ -45,7 +47,9 @@ export function proveProviderZeroCallReplay(input: {
     physical_calls: 0,
     profile: requireKnownRequestProfile(input.request.requestProfile),
     evidence_prompt_sha256: seal.evidence_prompt_sha256,
-    query_prompt_sha256: seal.query_prompt_sha256
+    query_prompt_sha256: seal.query_prompt_sha256,
+    evidence_request_template_sha256: seal.evidence_request_template_sha256,
+    query_request_template_sha256: seal.query_request_template_sha256
   };
 }
 

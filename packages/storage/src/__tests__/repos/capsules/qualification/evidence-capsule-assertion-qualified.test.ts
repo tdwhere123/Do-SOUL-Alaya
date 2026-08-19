@@ -315,7 +315,7 @@ function factFrameFormationCapture(
 
 function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
   const graph = groundOpenSemanticFactorGraph({
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       factor("actor", "I", 0, 1, "speaker"),

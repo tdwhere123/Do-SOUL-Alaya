@@ -77,23 +77,17 @@ describe("open semantic merged-solution attribution", () => {
 });
 
 function giftQuery() {
-  return formation("query", "How old was I when my grandma gave me the silver necklace?", {
-    schema_version: 1,
+  return formation("query", "Who did my grandma give the silver necklace to?", {
+    schema_version: 2,
     source_kind: "query",
     factors: [
-      factor("predicate_age", "old", "old"),
       factor("factor_grandma", "my grandma", "my grandma"),
-      factor("predicate_gave", "gave", "give"),
+      factor("predicate_gave", "give", "give"),
       factor("factor_necklace", "the silver necklace", "the silver necklace")
     ],
-    variables: [{ variable_id: "answer", surface: "How old" }],
+    variables: [{ variable_id: "answer", surface: "Who" }],
     result_variable_ids: ["answer"],
     propositions: [
-      {
-        proposition_id: "query_age",
-        predicate_factor_id: "predicate_age",
-        arguments: [argument(0, "subject", "variable", "answer")]
-      },
       {
         proposition_id: "query_gave",
         predicate_factor_id: "predicate_gave",
@@ -109,7 +103,7 @@ function giftQuery() {
 
 function giftEvidence(sourceText: string) {
   return formation("evidence", sourceText, {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       factor("f0", "grandma", "my grandma"),

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SignalExtractor } from "../../../garden/pi-mono-extractor.js";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
   createOpenSemanticFactorQueryCompiler,
   parseOpenSemanticFactorQueryResponse
@@ -19,11 +21,11 @@ describe("open semantic factor query compiler", () => {
 
     await expect(compiler.compile(QUERY)).resolves.toMatchObject(queryGraph());
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
-    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v4");
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v5");
     expect(extractor.extract).toHaveBeenCalledWith(expect.objectContaining({
       systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
       userPrompt: JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         source_kind: "query",
         source_text: QUERY
       }),
@@ -32,7 +34,7 @@ describe("open semantic factor query compiler", () => {
     }));
     const request = extractor.extract.mock.calls[0]?.[0];
     const completeEnvelope =
-      '"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]';
+      '"schema_version":2,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]';
     const variableShape =
       '"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING';
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(completeEnvelope);
@@ -52,6 +54,12 @@ describe("open semantic factor query compiler", () => {
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
       "Keep every explicit non-WH participant or constraint"
     );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "belongs exclusively to one variable"
+    );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "any substring inside its surface"
+    );
     expect(request?.responseSchemaRetryInstruction).toContain(
       "Preserve each predicate's semantic argument order"
     );
@@ -60,6 +68,16 @@ describe("open semantic factor query compiler", () => {
     );
     expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
     expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE).toBe(JSON.stringify({
+      schema_version: 2,
+      source_kind: "query",
+      source_text: "{source_text}"
+    }));
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE).not.toBe(JSON.stringify({
+      schema_version: 1,
+      source_kind: "query",
+      source_text: "{source_text}"
+    }));
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
       '"predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]'
     );
@@ -112,11 +130,92 @@ describe("open semantic factor query compiler", () => {
       }
     }))).toBeNull();
   });
+
+  it("rejects the observed overlapping G5 query and accepts the corrected relation", async () => {
+    const badCompiler = createOpenSemanticFactorQueryCompiler({
+      extractor: responseExtractor(g5OverlappingQueryGraph())
+    });
+    await expect(badCompiler.compile("What degree did I graduate with?"))
+      .resolves.toBeNull();
+
+    const goodCompiler = createOpenSemanticFactorQueryCompiler({
+      extractor: responseExtractor(g5CorrectedQueryGraph())
+    });
+    await expect(goodCompiler.compile("What degree did I graduate with?"))
+      .resolves.toMatchObject(g5CorrectedQueryGraph());
+  });
+
+  it("lets schema retry replace an overlapping G5 graph with the corrected graph", async () => {
+    const goodRaw = JSON.stringify({ semantic_factor_graph: g5CorrectedQueryGraph() });
+    const extractor = {
+      extract: vi.fn(async (input: Parameters<SignalExtractor["extract"]>[0]) => {
+        expect(() => input.validateRawJson?.(JSON.stringify({
+          semantic_factor_graph: g5OverlappingQueryGraph()
+        }))).toThrow(/query semantic factor graph missing or invalid/u);
+        expect(() => input.validateRawJson?.(goodRaw)).not.toThrow();
+        return { rawJson: goodRaw };
+      })
+    };
+    const compiler = createOpenSemanticFactorQueryCompiler({ extractor });
+
+    await expect(compiler.compile("What degree did I graduate with?"))
+      .resolves.toMatchObject(g5CorrectedQueryGraph());
+  });
 });
+
+function responseExtractor(graph: unknown) {
+  return {
+    extract: vi.fn().mockResolvedValue({
+      rawJson: JSON.stringify({ semantic_factor_graph: graph })
+    })
+  };
+}
+
+function g5OverlappingQueryGraph() {
+  return {
+    schema_version: 2 as const,
+    source_kind: "query" as const,
+    factors: [
+      factor("predicate", "graduate", "graduate"),
+      factor("degree", "degree", "degree")
+    ],
+    variables: [{ variable_id: "answer", surface: "What degree" }],
+    result_variable_ids: ["answer"],
+    propositions: [{
+      proposition_id: "graduation-query",
+      predicate_factor_id: "predicate",
+      arguments: [
+        argument(0, "variable", "answer", "agent"),
+        argument(1, "factor", "degree", "credential")
+      ]
+    }]
+  };
+}
+
+function g5CorrectedQueryGraph() {
+  return {
+    schema_version: 2 as const,
+    source_kind: "query" as const,
+    factors: [
+      factor("predicate", "graduate", "graduate"),
+      factor("participant", "I", "i")
+    ],
+    variables: [{ variable_id: "answer", surface: "What degree" }],
+    result_variable_ids: ["answer"],
+    propositions: [{
+      proposition_id: "graduation-query",
+      predicate_factor_id: "predicate",
+      arguments: [
+        argument(0, "factor", "participant", "agent"),
+        argument(1, "variable", "answer", "credential")
+      ]
+    }]
+  };
+}
 
 function queryGraph() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [
       factor("actor", "I", "speaker"),

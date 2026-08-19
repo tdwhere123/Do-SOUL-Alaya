@@ -1,5 +1,5 @@
 import process from "node:process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   requireProviderBinding,
@@ -7,6 +7,8 @@ import {
 } from "../../bench/provider/catalog.js";
 import { probeProviderProtocol } from "../../bench/provider/protocol-probe.js";
 import { proveProviderZeroCallReplay } from "../../bench/provider/replay-proof.js";
+import { verifyProviderPreflightReplayReceiptBinding } from
+  "../../bench/provider/replay-receipt.js";
 import { retireObsoleteCache } from "../../bench/provider/retire-obsolete-cache.js";
 import { readCheckpoint } from "../../bench/diagnostic-loop/checkpoint.js";
 import {
@@ -24,21 +26,10 @@ export async function runProviderPreflightCommand(
       return await runProbe(args, mode === "probe-sse" ? "sse" : "json");
     }
     if (mode === "replay") {
-      const requestManifest = required(args, "--request-manifest");
-      assertCacheOnlyEnvironment(process.env);
-      const verifiedManifest = await verifyCanonicalReplayRequestManifest(requestManifest);
-      const request = verifiedManifest.request;
-      const proof = proveProviderZeroCallReplay({ request });
-      process.stdout.write(`${JSON.stringify({
-        schema_version: 1,
-        kind: "provider_preflight_replay_receipt",
-        provider_port: "absent",
-        physical_calls: proof.physical_calls,
-        profile: proof.profile,
-        key_count: request.requestedKeys.length,
-        request_manifest_sha256: verifiedManifest.request_manifest_sha256,
-        cache_manifest_sha256: verifiedManifest.cache_authority.manifest_sha256
-      })}\n`);
+      return await runReplay(args);
+    }
+    if (mode === "validate-replay-receipt") {
+      await validateReplayReceipt(args);
       return 0;
     }
     if (mode === "validate-recall-checkpoints") {
@@ -65,6 +56,39 @@ export async function runProviderPreflightCommand(
     );
     return 2;
   }
+}
+
+async function runReplay(args: ReadonlyArray<string>): Promise<0> {
+  const requestManifest = required(args, "--request-manifest");
+  assertCacheOnlyEnvironment(process.env);
+  const verifiedManifest = await verifyCanonicalReplayRequestManifest(requestManifest);
+  const request = verifiedManifest.request;
+  const proof = proveProviderZeroCallReplay({ request });
+  const receipt = verifyProviderPreflightReplayReceiptBinding({
+    schema_version: 2,
+    kind: "provider_preflight_replay_receipt",
+    provider_port: "absent",
+    physical_calls: proof.physical_calls,
+    model: request.model,
+    profile: proof.profile,
+    key_count: request.requestedKeys.length,
+    request_manifest_sha256: verifiedManifest.request_manifest_sha256,
+    cache_manifest_sha256: verifiedManifest.cache_authority.manifest_sha256,
+    evidence_prompt_sha256: proof.evidence_prompt_sha256,
+    query_prompt_sha256: proof.query_prompt_sha256,
+    evidence_request_template_sha256: proof.evidence_request_template_sha256,
+    query_request_template_sha256: proof.query_request_template_sha256
+  }, verifiedManifest);
+  process.stdout.write(`${JSON.stringify(receipt)}\n`);
+  return 0;
+}
+
+async function validateReplayReceipt(args: ReadonlyArray<string>): Promise<void> {
+  const manifest = await verifyCanonicalReplayRequestManifest(
+    required(args, "--request-manifest")
+  );
+  const receipt = JSON.parse(readFileSync(required(args, "--receipt"), "utf8")) as unknown;
+  verifyProviderPreflightReplayReceiptBinding(receipt, manifest);
 }
 
 async function runProbe(
@@ -108,7 +132,7 @@ function resolveProbeModel(args: ReadonlyArray<string>): string {
 function readMode(
   args: ReadonlyArray<string>
 ): "probe" | "probe-sse" | "replay" | "retire-obsolete" |
-  "validate-recall-checkpoints" {
+  "validate-recall-checkpoints" | "validate-replay-receipt" {
   const index = args.findIndex((token) => token === "--mode" || token.startsWith("--mode="));
   const value = index < 0
     ? "replay"
@@ -118,13 +142,13 @@ function readMode(
   if (
     value === "probe" || value === "probe-sse" ||
     value === "replay" || value === "retire-obsolete" ||
-    value === "validate-recall-checkpoints"
+    value === "validate-recall-checkpoints" || value === "validate-replay-receipt"
   ) {
     return value;
   }
   throw new Error(
     "provider-preflight --mode must be probe, probe-sse, replay, " +
-      "retire-obsolete, or validate-recall-checkpoints"
+      "retire-obsolete, validate-recall-checkpoints, or validate-replay-receipt"
   );
 }
 

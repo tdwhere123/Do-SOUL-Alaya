@@ -294,7 +294,7 @@ describe("canonical extraction request cache identity", () => {
         matched_text: "I avoid any.",
         distilled_fact: "I avoid any.",
         semantic_factor_graph: {
-          schema_version: 1,
+          schema_version: 2,
           source_kind: "evidence",
           factors: [{
             factor_id: "f0",

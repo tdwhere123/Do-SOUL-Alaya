@@ -3,10 +3,13 @@ import {
   OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "../official-api/system-prompt.js";
+import { officialApiExtractionRequestTemplatePreimage } from
+  "../official-api/extraction-request.js";
 import { GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID } from
   "../grounding/semantic-factors/formation-proposal.js";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
 } from "./query-compiler.js";
 
@@ -31,9 +34,13 @@ export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
 ] as const;
 
 export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 =
-  "2f99ca087c6ec0644fb3c737e4da4ed05e801ae778e5bca93e5f7bf79b7a293b";
+  "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a";
 export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
-  "63cc29f6ba1465d34f919b3d25bdf9d373cbae797bbe3e2ba124c5888dfa68e4";
+  "967bcda95e56bfa434329a71d9893d89c64ee9beb566610b7d8fb41e9703f786";
+export const SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256 =
+  "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396";
+export const SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256 =
+  "c7777cd641779a8903a988a481b97cb8a26252a6b7dcc995383ca13fa91f0089";
 
 export interface SourceBoundF3Seal {
   readonly schema_version: 1;
@@ -45,6 +52,8 @@ export interface SourceBoundF3Seal {
   readonly query_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
   readonly evidence_prompt_sha256: string;
   readonly query_prompt_sha256: string;
+  readonly evidence_request_template_sha256: string;
+  readonly query_request_template_sha256: string;
   readonly forbidden_writes: typeof SOURCE_BOUND_F3_FORBIDDEN_WRITES;
 }
 
@@ -59,6 +68,12 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
     query_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
     evidence_prompt_sha256: sha256Utf8(OFFICIAL_API_SYSTEM_PROMPT),
     query_prompt_sha256: sha256Utf8(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
+    evidence_request_template_sha256: sha256Utf8(
+      officialApiExtractionRequestTemplatePreimage()
+    ),
+    query_request_template_sha256: sha256Utf8(
+      OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
+    ),
     forbidden_writes: SOURCE_BOUND_F3_FORBIDDEN_WRITES
   };
 }
@@ -70,6 +85,14 @@ export function assertSourceBoundF3SealCurrent(): void {
   }
   if (seal.query_prompt_sha256 !== SOURCE_BOUND_F3_QUERY_PROMPT_SHA256) {
     throw new Error("source-bound F3 query prompt drifted from the sealed digest");
+  }
+  if (seal.evidence_request_template_sha256 !==
+      SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256) {
+    throw new Error("source-bound F3 evidence request template drifted from the sealed digest");
+  }
+  if (seal.query_request_template_sha256 !==
+      SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256) {
+    throw new Error("source-bound F3 query request template drifted from the sealed digest");
   }
 }
 

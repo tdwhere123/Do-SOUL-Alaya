@@ -78,7 +78,7 @@ describe("open semantic repeated binding compatibility", () => {
 
 function parallelEvidence() {
   return formation("evidence", "I use Atlas and Gaia.", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       factor("actor", "I", "i"),
@@ -102,7 +102,7 @@ function parallelEvidence() {
 
 function parallelQuery(bindingIdentity: string) {
   return formation("query", "What do I use?", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "query",
     factors: [
       factor("query-actor", "I", "i"),

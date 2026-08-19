@@ -176,7 +176,7 @@ function formation(
       producer_operator_id: "open-factor-result-slot-test-v1",
       source_text: sourceText,
       graph: {
-        schema_version: 1,
+        schema_version: 2,
         source_kind: sourceKind,
         factors,
         variables,

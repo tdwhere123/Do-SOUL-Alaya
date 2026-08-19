@@ -204,7 +204,7 @@ function surfacesOf(
 
 function osfGraph(): OpenSemanticFactorGraph {
   return {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       {

@@ -150,7 +150,10 @@ export async function writeOperatorLoopHarness(
   };
 }
 
-export async function writeReplayAwareRtk(binDir: string): Promise<void> {
+export async function writeReplayAwareRtk(
+  binDir: string,
+  receipt: Readonly<Record<string, unknown>> = replayReceiptFixture()
+): Promise<void> {
   const rtkPath = path.join(binDir, "rtk");
   await writeFile(rtkPath, [
     "#!/usr/bin/env bash",
@@ -163,9 +166,24 @@ export async function writeReplayAwareRtk(binDir: string): Promise<void> {
     "fi",
     "if [[ \"${1:-}\" == *alaya-bench-runner.mjs && \"${2:-}\" == provider-preflight ]]; then",
     "  [[ \" $* \" == *' --request-manifest '* ]] || { echo 'missing complete request manifest' >&2; exit 2; }",
+    "  if [[ \" $* \" == *' --mode validate-replay-receipt '* ]]; then",
+    "    receipt='' request=''",
+    "    while [[ $# -gt 0 ]]; do",
+    "      case \"$1\" in --receipt) receipt=$2; shift 2 ;; --request-manifest) request=$2; shift 2 ;; *) shift ;; esac",
+    "    done",
+    "    python3 - \"$receipt\" \"$request\" <<'PY'",
+    "import json, sys",
+    `expected = ${JSON.stringify(JSON.stringify(replayReceiptFixture()))}`,
+    "receipt = json.loads(open(sys.argv[1], encoding='utf-8').read())",
+    "request = json.loads(open(sys.argv[2], encoding='utf-8').read())",
+    "assert receipt == json.loads(expected)",
+    "assert request == {'schema_version': 1, 'kind': 'provider_preflight_replay_request'}",
+    "PY",
+    "    exit 0",
+    "  fi",
     "  [[ -z \"${ALAYA_OFFICIAL_GARDEN_SECRET_REF:-}${ALAYA_OFFICIAL_GARDEN_API_KEY:-}${OFFICIAL_API_GARDEN_API_KEY:-}${ALAYA_QA_API_KEY:-}${ALAYA_GARDEN_OPENAI_SECRET_REF:-}${ALAYA_CONFLICT_LLM_PROVIDER_URL:-}${ALAYA_CONFLICT_LLM_API_KEY:-}\" ]] || { echo 'provider credentials reached replay' >&2; exit 2; }",
     "  [[ \"${ALAYA_BENCH_ALLOW_LIVE_EXTRACTION:-}\" == 0 ]] || { echo 'live extraction reached replay' >&2; exit 2; }",
-    "  echo '{\"schema_version\":1,\"kind\":\"provider_preflight_replay_receipt\",\"provider_port\":\"absent\",\"physical_calls\":0}'",
+    `  echo '${JSON.stringify(receipt)}'`,
     "  exit 0",
     "fi",
     "echo 'unexpected rtk invocation' >&2",
@@ -173,6 +191,28 @@ export async function writeReplayAwareRtk(binDir: string): Promise<void> {
     ""
   ].join("\n"), "utf8");
   await chmod(rtkPath, 0o755);
+}
+
+export function replayReceiptFixture(): Readonly<Record<string, unknown>> {
+  return {
+    schema_version: 2,
+    kind: "provider_preflight_replay_receipt",
+    provider_port: "absent",
+    physical_calls: 0,
+    model: "mimo-v2.5",
+    profile: "mimo-v2.5-nonthinking-v1",
+    key_count: 1,
+    request_manifest_sha256: DIGEST,
+    cache_manifest_sha256: DIGEST,
+    evidence_prompt_sha256:
+      "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a",
+    query_prompt_sha256:
+      "967bcda95e56bfa434329a71d9893d89c64ee9beb566610b7d8fb41e9703f786",
+    evidence_request_template_sha256:
+      "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
+    query_request_template_sha256:
+      "c7777cd641779a8903a988a481b97cb8a26252a6b7dcc995383ca13fa91f0089"
+  };
 }
 
 export async function writeCompletedRecallCheckpoint(

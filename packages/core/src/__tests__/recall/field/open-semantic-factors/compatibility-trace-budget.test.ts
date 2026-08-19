@@ -286,7 +286,7 @@ function memoryCandidate(evidenceId: string): CoarseRecallCandidate {
 
 function unboundQueryGraph() {
   return formation("query", "Which books have I bought?", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "query",
     factors: [
       factor("query-actor", "I", "i"),
@@ -309,7 +309,7 @@ function unboundQueryGraph() {
 
 function queryGraph() {
   return formation("query", "Which books have I bought?", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "query",
     factors: [
       factor("query-actor", "I", "i"),
@@ -331,7 +331,7 @@ function queryGraph() {
 
 function matchingEvidence() {
   return formation("evidence", "I bought three books.", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       factor("actor", "I", "i"),
@@ -353,7 +353,7 @@ function matchingEvidence() {
 
 function disjointEvidence() {
   return formation("evidence", "Alice likes tea.", {
-    schema_version: 1,
+    schema_version: 2,
     source_kind: "evidence",
     factors: [
       factor("alice", "Alice", "alice"),

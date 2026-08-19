@@ -89,6 +89,7 @@ export {
   buildOfficialApiExtractionRequests,
   computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiExtractionRequest,
+  officialApiExtractionRequestTemplatePreimage,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "./official-api/extraction-request.js";

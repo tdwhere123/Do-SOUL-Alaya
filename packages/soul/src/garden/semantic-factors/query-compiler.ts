@@ -9,17 +9,20 @@ import { OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS } from
   "../official-api/system-prompt.js";
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v4";
+  "open_semantic_factor_query_compiler_v5";
+export const OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE =
+  buildOpenSemanticFactorQueryUserPrompt("{source_text}");
 
 const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
-  'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
+  'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
   'Each variable is {"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
   "A variable surface is the exact query phrase that stands for an unknown, never a predicted answer.",
   "Every variable referenced by a proposition must appear in variables, and every result_variable_ids entry must reference one of those variables.",
   "Preserve each predicate's semantic argument order; relation-local binding names need not match source evidence graphs.",
   "Place every WH phrase or other requested unknown as the structural variable in the exact predicate argument position it asks for; never append it as an extra argument or substitute it for a different participant.",
-  "Keep every explicit non-WH participant or constraint in its own position-preserving factor argument.",
-  'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
+  "The full requested or WH phrase belongs exclusively to one variable; never emit a factor for that variable or any substring inside its surface.",
+  "Keep every explicit non-WH participant or constraint in its original position-preserving factor argument.",
+  'Structure example only: {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
@@ -52,11 +55,7 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
       const response = await withWallClockTimeout(
         (abortSignal) => input.extractor.extract({
           systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
-          userPrompt: JSON.stringify({
-            schema_version: 1,
-            source_kind: "query",
-            source_text: normalized
-          }),
+          userPrompt: buildOpenSemanticFactorQueryUserPrompt(normalized),
           timeoutMs,
           abortSignal,
           responseSchemaRetryInstruction: [
@@ -75,6 +74,14 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
       return parsed;
     }
   };
+}
+
+export function buildOpenSemanticFactorQueryUserPrompt(sourceText: string): string {
+  return JSON.stringify({
+    schema_version: 2,
+    source_kind: "query",
+    source_text: sourceText
+  });
 }
 
 function assertOpenSemanticFactorQueryResponse(

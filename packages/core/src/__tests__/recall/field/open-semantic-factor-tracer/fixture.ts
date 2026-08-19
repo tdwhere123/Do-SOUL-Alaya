@@ -3,7 +3,7 @@ import { materializeOpenSemanticFactorFormation } from
 
 export function evidenceProposal() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "evidence" as const,
     factors: [
       factor("actor", "I", 0, 1),
@@ -27,7 +27,7 @@ export function evidenceProposal() {
 
 export function queryProposal() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [
       factor("query-actor", "I", 8, 9),
@@ -60,7 +60,7 @@ export function personEvidence(
     source_kind: "evidence",
     source_text: sourceText,
     proposal: proposal(sourceText, {
-      schema_version: 1,
+      schema_version: 2,
       source_kind: "evidence",
       factors: [
         factor("person", "Alice", 0, 5, "alice"),

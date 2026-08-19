@@ -267,7 +267,7 @@ function sequentialIds(): () => string {
 
 function semanticGraph(_source: string) {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "evidence" as const,
     factors: [
       semanticFactor("atlas", "Atlas", "atlas"),
