@@ -78,16 +78,16 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   "Argument positions start at 0 and are contiguous, and preserve the predicate's semantic argument order.",
   "binding_identity is a concise, relation-local canonical name; it is open text, not a fixed role list or a cross-graph identity. Use the same name for repeated parallel values of one relation-local binding.",
   "Every factor must be used as a predicate or argument. Reuse one factor in multiple propositions when the same source phrase has the same meaning.",
-  "Do not emit alternative, explanatory, or otherwise unused factors; an unreferenced factor has no graph meaning and is discarded.",
+  "Do not emit alternative, explanatory, or otherwise unused nodes; an unreferenced factor or variable makes the entire graph invalid.",
   "Do not emit character spans; the runtime grounds exact surfaces and derives spans.",
   "Do not force facts into subject/relation/value/qualifier/time slots and do not invent entity, event, attribute, or answer-family categories."
 ]);
 
 const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
   'Use "semantic_factor_graph":{"schema_version":1,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
-  'For a single atomic assertion, a minimal valid graph still has one predicate factor, one argument factor, and one proposition; never omit the graph or replace it with fact_frame.',
+  'For a single atomic assertion, a valid graph has one predicate factor, every explicit relation participant as an argument, and at least one proposition; never omit the graph or replace it with fact_frame.',
   "Represent every explicit, source-grounded participant of a relation as its own factor argument, preserving the relation's stated arity and semantic order; never collapse a multi-participant relation into a unary proposition.",
-  'Example structure only: {"factors":[{"factor_id":"f0","surface":"A","semantic_identity":"a"},{"factor_id":"f1","surface":"B","semantic_identity":"b"}],"variables":[],"result_variable_ids":[],"propositions":[{"proposition_id":"p0","predicate_factor_id":"f0","arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]}]}.',
+  'Example structure only: {"factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"},{"factor_id":"answer","surface":"B","semantic_identity":"b"}],"variables":[],"result_variable_ids":[],"propositions":[{"proposition_id":"relation","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"factor","reference_id":"answer"}]}]}.',
   "Do not emit variables in evidence graphs.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ]);

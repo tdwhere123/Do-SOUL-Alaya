@@ -37,6 +37,8 @@ describe("open semantic factor formation proposal", () => {
       source_text: SOURCE,
       graph: grounded.draft.semantic_factor_graph
     });
+    expect(GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID)
+      .toBe("garden_source_bound_open_semantic_factor_v2");
   });
 
   it("removes a graph whose exact surface is absent from the source", () => {

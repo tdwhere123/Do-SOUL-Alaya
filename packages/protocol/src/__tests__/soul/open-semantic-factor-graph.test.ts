@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+  OpenSemanticFactorGraphProposalSchema,
   openSemanticFactorFormationCapturePreimage,
   groundOpenSemanticFactorGraph,
   verifyOpenSemanticFactorFormationCapture
@@ -114,6 +115,33 @@ describe("open semantic factor graph", () => {
       source_kind: "query",
       result_variable_ids: ["unknown"]
     }, "I use Atlas.")).toBeNull();
+  });
+
+  it("rejects every emitted factor or variable that propositions do not use", () => {
+    const query = {
+      schema_version: 1 as const,
+      source_kind: "query" as const,
+      factors: [factor("predicate", "give", 4, 8), factor("participant", "A", 9, 10)],
+      variables: [{ variable_id: "answer", surface: "Who" }],
+      result_variable_ids: ["answer"],
+      propositions: [{
+        proposition_id: "give-query",
+        predicate_factor_id: "predicate",
+        arguments: [
+          argument(0, "factor", "participant"),
+          argument(1, "variable", "answer")
+        ]
+      }]
+    };
+
+    expect(OpenSemanticFactorGraphProposalSchema.safeParse({
+      ...query,
+      factors: [...query.factors, factor("unused", "extra", 11, 16)]
+    }).success).toBe(false);
+    expect(OpenSemanticFactorGraphProposalSchema.safeParse({
+      ...query,
+      variables: [...query.variables, { variable_id: "unused", surface: "other" }]
+    }).success).toBe(false);
   });
 
   it("uses position to distinguish parallel arguments with one open binding identity", () => {

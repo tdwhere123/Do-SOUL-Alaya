@@ -62,14 +62,14 @@ describe("query semantic factor cache", () => {
 
       expect(loaded.binding.entry_count).toBe(1);
       expect(loaded.binding.compiler_operator_id)
-        .toBe("open_semantic_factor_query_compiler_v3");
+        .toBe("open_semantic_factor_query_compiler_v4");
       expect(loaded.captures_by_source_text.get(sourceText)).toEqual(capture);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects a legacy v2 compiler cache at the replay boundary", async () => {
+  it("rejects a legacy v3 compiler cache at the replay boundary", async () => {
     const sourceText = "What do I use?";
     const capture = materializeOpenSemanticFactorFormation({
       source_kind: "query",
@@ -85,7 +85,7 @@ describe("query semantic factor cache", () => {
       }]
     });
     const legacy = structuredClone(cache);
-    Reflect.set(legacy, "compiler_operator_id", "open_semantic_factor_query_compiler_v2");
+    Reflect.set(legacy, "compiler_operator_id", "open_semantic_factor_query_compiler_v3");
     const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-cache-"));
     const outputPath = join(root, "query-cache.json");
     try {

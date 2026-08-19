@@ -52,7 +52,7 @@ describe("official API system prompt", () => {
       "one bounded source assertion batch"
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      "an unreferenced factor has no graph meaning and is discarded"
+      "an unreferenced factor or variable makes the entire graph invalid"
     );
   });
 
@@ -76,6 +76,12 @@ describe("official API system prompt", () => {
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       "never collapse a multi-participant relation into a unary proposition"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      '"arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"factor","reference_id":"answer"}]'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
+      '"arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]'
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(

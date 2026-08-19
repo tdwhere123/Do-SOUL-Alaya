@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "../official-api/system-prompt.js";
+import { GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID } from
+  "../grounding/semantic-factors/formation-proposal.js";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
@@ -30,9 +31,9 @@ export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
 ] as const;
 
 export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 =
-  "d0337da9be44c6287e6591ca7f9663097c92bb7b8b658bc0b8ab6032e2aef990";
+  "2f99ca087c6ec0644fb3c737e4da4ed05e801ae778e5bca93e5f7bf79b7a293b";
 export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
-  "30c496993934e941045d92bc6df716cee0a21a520200d660a2a01883225debec";
+  "63cc29f6ba1465d34f919b3d25bdf9d373cbae797bbe3e2ba124c5888dfa68e4";
 
 export interface SourceBoundF3Seal {
   readonly schema_version: 1;
@@ -40,7 +41,7 @@ export interface SourceBoundF3Seal {
   readonly membership_capability: typeof SELECTED_SOURCE_BOUND_F3_CAPABILITY;
   readonly prompt_asks: typeof SOURCE_BOUND_F3_PROMPT_ASKS;
   readonly graph_schema_version: typeof OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION;
-  readonly evidence_operator_id: typeof OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID;
+  readonly evidence_operator_id: typeof GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID;
   readonly query_operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
   readonly evidence_prompt_sha256: string;
   readonly query_prompt_sha256: string;
@@ -54,7 +55,7 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
     membership_capability: SELECTED_SOURCE_BOUND_F3_CAPABILITY,
     prompt_asks: SOURCE_BOUND_F3_PROMPT_ASKS,
     graph_schema_version: OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION,
-    evidence_operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+    evidence_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
     query_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
     evidence_prompt_sha256: sha256Utf8(OFFICIAL_API_SYSTEM_PROMPT),
     query_prompt_sha256: sha256Utf8(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),

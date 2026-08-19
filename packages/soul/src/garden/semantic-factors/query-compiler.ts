@@ -7,10 +7,9 @@ import type { SignalExtractor } from "../pi-mono-extractor.js";
 import { withWallClockTimeout } from "../wall-clock-timeout.js";
 import { OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS } from
   "../official-api/system-prompt.js";
-import { pruneUnboundOpenSemanticFactorProposal } from "./proposal-normalizer.js";
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v3";
+  "open_semantic_factor_query_compiler_v4";
 
 const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
@@ -20,7 +19,7 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   "Preserve each predicate's semantic argument order; relation-local binding names need not match source evidence graphs.",
   "Place every WH phrase or other requested unknown as the structural variable in the exact predicate argument position it asks for; never append it as an extra argument or substitute it for a different participant.",
   "Keep every explicit non-WH participant or constraint in its own position-preserving factor argument.",
-  'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"buy","semantic_identity":"buy"}],"variables":[{"variable_id":"answer","surface":"What"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]}]}}.'
+  'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
@@ -102,9 +101,7 @@ export function parseOpenSemanticFactorQueryResponse(
   }
   const graph = (value as { readonly semantic_factor_graph?: unknown })
     .semantic_factor_graph;
-  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(
-    pruneUnboundOpenSemanticFactorProposal(graph)
-  );
+  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(graph);
   return parsed.success && parsed.data.source_kind === "query"
     ? parsed.data
     : null;

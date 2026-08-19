@@ -24,7 +24,7 @@ function validEntry(matchedText: string, objectKind = "user_preference"): string
 }
 
 describe("parseOfficialApiSignals element-wise salvage", () => {
-  it("prunes graph factors that no proposition can observe", () => {
+  it("rejects a source graph containing an emitted but unbound factor", () => {
     const candidate = withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "fact",
@@ -51,8 +51,11 @@ describe("parseOfficialApiSignals element-wise salvage", () => {
 
     const [draft] = parseOfficialApiSignals(rawJson);
 
-    expect(draft?.semantic_factor_graph?.factors.map(({ factor_id }) => factor_id))
-      .not.toContain("unused");
+    expect(draft?.semantic_factor_graph).toBeUndefined();
+    expect(draft?.semantic_factor_graph_projection).toEqual({
+      status: "rejected",
+      reason: "semantic_factor_graph_invalid_unbound"
+    });
   });
 
   it("recovers valid siblings when one entry has a bad JSON escape", () => {

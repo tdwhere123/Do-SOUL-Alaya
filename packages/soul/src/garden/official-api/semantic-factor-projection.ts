@@ -3,8 +3,6 @@ import {
   OpenSemanticFactorGraphProposalSchema,
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
-import { pruneUnboundOpenSemanticFactorProposal } from
-  "../semantic-factors/proposal-normalizer.js";
 
 type SemanticGraphCardinalitySubject =
   | "arguments"
@@ -72,9 +70,7 @@ export function inspectOfficialApiSemanticFactorGraphProjection(
       })
     });
   }
-  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(
-    pruneUnboundOpenSemanticFactorProposal(value)
-  );
+  const parsed = OpenSemanticFactorGraphProposalSchema.safeParse(value);
   return parsed.success
     ? Object.freeze({ graph: parsed.data })
     : Object.freeze({

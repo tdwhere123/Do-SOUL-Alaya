@@ -21,6 +21,9 @@ describe("source-bound F3 seal", () => {
     expect(SELECTED_SOURCE_BOUND_F3_CAPABILITY).toBe("identities_only");
     expect(seal.evidence_prompt_sha256).toBe(SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256);
     expect(seal.query_prompt_sha256).toBe(SOURCE_BOUND_F3_QUERY_PROMPT_SHA256);
+    expect(seal.evidence_operator_id)
+      .toBe("garden_source_bound_open_semantic_factor_v2");
+    expect(seal.query_operator_id).toBe("open_semantic_factor_query_compiler_v4");
     expect(seal.forbidden_writes).toContain("RelationAssertion");
     expect(seal.forbidden_writes).toContain("PathRelation");
   });

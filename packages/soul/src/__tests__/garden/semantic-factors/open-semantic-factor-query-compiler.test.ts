@@ -19,7 +19,7 @@ describe("open semantic factor query compiler", () => {
 
     await expect(compiler.compile(QUERY)).resolves.toMatchObject(queryGraph());
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
-    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v3");
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v4");
     expect(extractor.extract).toHaveBeenCalledWith(expect.objectContaining({
       systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
       userPrompt: JSON.stringify({
@@ -60,6 +60,12 @@ describe("open semantic factor query compiler", () => {
     );
     expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
     expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      '"predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]'
+    );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).not.toContain(
+      '"arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]'
+    );
     expect(() => request?.validateRawJson?.(
       JSON.stringify({ semantic_factor_graph: queryGraph() })
     )).not.toThrow();
@@ -87,6 +93,24 @@ describe("open semantic factor query compiler", () => {
       }
     });
     await expect(compiler.compile(QUERY)).resolves.toBeNull();
+  });
+
+  it("rejects raw query graphs containing emitted but unbound nodes", () => {
+    expect(parseOpenSemanticFactorQueryResponse(JSON.stringify({
+      semantic_factor_graph: {
+        ...queryGraph(),
+        factors: [...queryGraph().factors, factor("unused", "did", "do")]
+      }
+    }))).toBeNull();
+    expect(parseOpenSemanticFactorQueryResponse(JSON.stringify({
+      semantic_factor_graph: {
+        ...queryGraph(),
+        variables: [
+          ...queryGraph().variables,
+          { variable_id: "unused", surface: "did" }
+        ]
+      }
+    }))).toBeNull();
   });
 });
 
