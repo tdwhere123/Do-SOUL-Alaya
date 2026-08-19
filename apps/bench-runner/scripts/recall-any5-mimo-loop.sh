@@ -198,7 +198,7 @@ invoke_cache_only_diagnostic() {
   local work="$1" qcache="$2" request_file="$3"
   # post-fill stages must stay credentialless before history/run mutation
   clear_provider_credentials
-  export ALAYA_GARDEN_PROVIDER_KIND=local_heuristics
+  export ALAYA_GARDEN_PROVIDER_KIND=host_worker
   mkdir -p "$work/history"
   local extra=()
   if [[ -f "$qcache" ]]; then

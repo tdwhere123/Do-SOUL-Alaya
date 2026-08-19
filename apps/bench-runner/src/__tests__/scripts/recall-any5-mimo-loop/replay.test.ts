@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   diagnosticArgs,
+  expectCacheOnlyLoopEnv,
   execFileAsync,
+  invokeDiagnosticLoop,
   script,
   writeOperatorLoopHarness,
   writeReplayAwareRtk
@@ -34,6 +36,15 @@ describe("recall-any5-mimo-loop replay guards", () => {
     await expect(access(harness.argvCapture)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(path.join(harness.workRoot, "history")))
       .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("forwards the credentialless product formation route to diagnostic-loop", async () => {
+    const harness = await writeOperatorLoopHarness(tmpDir, "credentialless-formation");
+    const argv = await invokeDiagnosticLoop(harness, [
+      "--limit", "1", "--snapshot", harness.snapshot, "--work-root", harness.workRoot
+    ]);
+
+    await expectCacheOnlyLoopEnv(harness, argv);
   });
 
   it("forwards the canonical request manifest to provider-preflight", async () => {

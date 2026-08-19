@@ -37,6 +37,7 @@ export interface OperatorLoopHarness {
 interface CapturedLoopEnv {
   readonly credentials: Record<(typeof CREDENTIAL_ENV_KEYS)[number], boolean>;
   readonly ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: string | null;
+  readonly ALAYA_GARDEN_PROVIDER_KIND: string | null;
 }
 
 export function diagnosticArgs(
@@ -99,6 +100,7 @@ export async function expectCacheOnlyLoopEnv(
   const captured = JSON.parse(await readFile(harness.envCapture, "utf8")) as CapturedLoopEnv;
   expect(captured.credentials).toEqual(ABSENT_CREDENTIALS);
   expect(captured.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION).toBe("0");
+  expect(captured.ALAYA_GARDEN_PROVIDER_KIND).toBe("host_worker");
 }
 
 export async function writeOperatorLoopHarness(
@@ -132,6 +134,7 @@ export async function writeOperatorLoopHarness(
   await writeFile(envFile, [
     `ALAYA_BENCH_EXTRACTION_CACHE_ROOT=${cacheRoot}`,
     "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=1",
+    "ALAYA_GARDEN_PROVIDER_KIND=official_api",
     ...CREDENTIAL_ENV_KEYS.map((key) => `${key}=fixture-${key}`),
     ""
   ].join("\n"));
@@ -299,6 +302,7 @@ function fakeRtkScript(argvCapture: string, envCapture: string): string {
       "payload = {",
       "    'credentials': {key: bool(os.environ.get(key)) for key in keys},",
       "    'ALAYA_BENCH_ALLOW_LIVE_EXTRACTION': os.environ.get('ALAYA_BENCH_ALLOW_LIVE_EXTRACTION'),",
+      "    'ALAYA_GARDEN_PROVIDER_KIND': os.environ.get('ALAYA_GARDEN_PROVIDER_KIND'),",
       "}",
       "open(sys.argv[2], 'w', encoding='utf-8').write(json.dumps(payload) + '\\n')",
       "PY",
