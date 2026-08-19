@@ -81,7 +81,7 @@ export function materializeFineAssessmentSelectionBoundary(
   pending: FineAssessmentSelectionBoundaryPendingCapture
 ): FineAssessmentSelectionBoundaryCase {
   const boundary = Object.freeze({
-    schema_version: 2 as const,
+    schema_version: 3 as const,
     input: buildSelectionBoundaryInput(
       pending.params,
       pending.tokenEstimatesByContent

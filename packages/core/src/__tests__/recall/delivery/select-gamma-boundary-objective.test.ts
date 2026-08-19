@@ -20,7 +20,8 @@ describe("Select_Gamma boundary objective", () => {
   it("records Select_Gamma as the complete live objective", () => {
     const { boundary } = captureBoundary();
 
-    expect(boundary.schema_version).toBe(2);
+    expect(boundary.schema_version).toBe(3);
+    expect(boundary.expected.pre_projection.schema_version).toBe(2);
     expect(boundary.expected.coverage_objective).toEqual({
       schema_version: 1,
       operator_id: "select_gamma_v1",

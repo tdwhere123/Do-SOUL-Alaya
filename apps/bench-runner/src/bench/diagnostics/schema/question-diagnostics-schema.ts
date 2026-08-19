@@ -38,6 +38,8 @@ import {
   DiagnosticStreamRanksSchema,
   LongMemEvalMissTaxonomySchema
 } from "./diagnostics-schema-base.js";
+import { OpenSemanticFactorCandidateActivationsSchema } from
+  "./field/open-semantic-candidate-activation-schema.js";
 
 const DeliveryStageActionSchema = z.enum([
   "noop",
@@ -358,6 +360,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
       .default([]),
     query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
     ...LongMemEvalFieldDiagnosticSchemaShape,
+    open_semantic_factor_candidate_activations:
+      OpenSemanticFactorCandidateActivationsSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),

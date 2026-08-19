@@ -8,7 +8,7 @@ import { computeSourceTurnCacheKey } from
 import { cacheFilePath } from "../../../bench/compile-seed/cache/cache-shard.js";
 import { computeSystemPromptSha256 } from
   "../../../bench/extraction/cache/extraction-cache-manifest.js";
-import { resolveSnapshotIdentity } from
+import { diagnosticAuthorityDigest, resolveSnapshotIdentity } from
   "../../../bench/diagnostic-loop/authority/identity.js";
 import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
 import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
@@ -298,7 +298,48 @@ describe("diagnostic-loop resolved authority", () => {
     })).rejects.toThrow(/snapshot and extraction cache authority mismatch/iu);
     expect(tracked.calls).not.toContain("control_recall");
   });
+
+  it.each(["artifact_paths", "content_identity"] as const)(
+    "rejects re-sealed report miss-ledger %s drift with an unchanged gate",
+    async (field) => {
+      const root = await tempRoot();
+      const workRoot = join(root, "work");
+      await runDiagnosticLoop({
+        workRoot, request: loopRequest(), mode: "run",
+        adapters: trackingAdapters().adapters, argv: []
+      });
+      await tamperReportMissLedger(workRoot, field);
+      await expect(runDiagnosticLoop({
+        workRoot, request: loopRequest(), mode: "report-only",
+        adapters: trackingAdapters().adapters, argv: []
+      })).rejects.toThrow(/report promotion authority mismatch/iu);
+    }
+  );
 });
+
+async function tamperReportMissLedger(
+  workRoot: string,
+  field: "artifact_paths" | "content_identity"
+): Promise<void> {
+  const reportPath = join(workRoot, "report.json");
+  const report = JSON.parse(await readFile(reportPath, "utf8")) as Record<string, unknown>;
+  const ledger = { ...(report.miss_ledger as Record<string, unknown>) };
+  ledger[field] = field === "artifact_paths"
+    ? { missLedger: join(workRoot, "forged.json") }
+    : digest("forged-miss-ledger-content");
+  const changed = { ...report, miss_ledger: ledger };
+  await writeFile(reportPath, `${JSON.stringify(changed, null, 2)}\n`);
+  const checkpointPath = join(workRoot, "checkpoints", "report.json");
+  const checkpoint = JSON.parse(
+    await readFile(checkpointPath, "utf8")
+  ) as Record<string, unknown>;
+  const { checkpoint_digest: _digest, ...body } = {
+    ...checkpoint, content_identity: diagnosticAuthorityDigest(changed)
+  };
+  await writeFile(checkpointPath, `${JSON.stringify({
+    ...body, checkpoint_digest: checkpointDigest(body as never)
+  }, null, 2)}\n`);
+}
 
 function adaptersForSnapshot(snapshotPath: string) {
   const tracked = trackingAdapters();

@@ -17,6 +17,7 @@ import type {
   FineAssessmentAdmissionReceipt,
   FineAssessmentCandidate
 } from "../fine-assessment-selection.js";
+import type { SelectGammaSelectionReceipt } from "../select-gamma/types.js";
 
 export type SelectionBoundaryMap<T> = readonly (
   readonly [key: string, value: T]
@@ -39,7 +40,8 @@ export type FineAssessmentPreProjectionWitness =
   FineAssessmentAdmissionReceipt;
 
 export type FineAssessmentPreProjectionObservation = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
+  readonly selection_receipt: SelectGammaSelectionReceipt;
   readonly candidate_keys: readonly string[];
   readonly token_total: number;
   readonly admission_actions: readonly FineAssessmentPreProjectionAction[];
@@ -50,7 +52,8 @@ export type FineAssessmentPreProjectionObservation = Readonly<{
 }>;
 
 export type FineAssessmentPreProjectionCapture = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
+  readonly selection_receipt: SelectGammaSelectionReceipt;
   readonly candidate_keys: readonly string[];
   readonly token_total: number;
   readonly admission_actions: readonly FineAssessmentPreProjectionAction[];
@@ -146,7 +149,7 @@ export type FineAssessmentSelectionBoundaryExpected = Readonly<{
 }>;
 
 export type FineAssessmentSelectionBoundaryCase = Readonly<{
-  readonly schema_version: 2;
+  readonly schema_version: 3;
   readonly input: FineAssessmentSelectionBoundaryInput;
   readonly expected: FineAssessmentSelectionBoundaryExpected;
 }>;

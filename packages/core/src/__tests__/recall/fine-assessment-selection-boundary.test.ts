@@ -58,7 +58,7 @@ describe("fine-assessment selection boundary fidelity", () => {
       "workspace_local:memory_entry:candidate-5",
       "workspace_local:memory_entry:candidate-6"
     ]);
-    expect(preProjection.schema_version).toBe(1);
+    expect(preProjection.schema_version).toBe(2);
     expect(preProjection.candidate_keys).toEqual([
       "workspace_local:memory_entry:candidate-1",
       "workspace_local:memory_entry:candidate-2",

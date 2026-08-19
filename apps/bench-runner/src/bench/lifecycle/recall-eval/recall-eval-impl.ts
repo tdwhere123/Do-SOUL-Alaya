@@ -56,6 +56,10 @@ import { recallEvalOneQuestion } from
   "./question/recall-eval-question.js";
 import { recallOptionsForQuestion } from "./recall-eval-question-options.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
+import {
+  combineSelectionBoundaryObservers,
+  createCandidateActivationCapture
+} from "./recall-eval-candidate-activation.js";
 export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 
 /** Run recall-only scoring against an integrity-checked working snapshot copy. */
@@ -191,20 +195,28 @@ async function executeRecallEvalQuestions(
   for (let i = 0; i < context.window.length; i += 1) {
     const question = context.window[i];
     if (question === undefined) continue;
+    const candidateActivation = createCandidateActivationCapture(
+      context.options.captureOpenSemanticFactorCandidateActivations === true
+    );
     const fullResult = await captureRecallEvalQuestion(
       context.selectionBoundarySpool, question.questionId,
       (selectionBoundaryObserver) => recallEvalOneQuestion({
         daemon, question, turnIndex: i + 1,
         embeddingMode: context.daemonLaunch.embeddingMode,
         recallOptions: recallOptionsForQuestion(
-          context, question.question, selectionBoundaryObserver
+          context,
+          question.question,
+          combineSelectionBoundaryObservers(
+            selectionBoundaryObserver,
+            candidateActivation.observer
+          )
         ),
         simulateReport: context.simulateReport,
         measurement: context.measurementForQuestion?.(question.questionId),
         ...buildFirstWarmupProfiler(context, warmupProfiled)
       })
     );
-    const result = await diagnosticsSpool.append(fullResult);
+    const result = await diagnosticsSpool.append(candidateActivation.attach(fullResult));
     collected.push(result);
     await context.memoryProfile?.sample({
       phase: "question_complete",

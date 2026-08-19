@@ -105,6 +105,89 @@ describe("selection boundary pre-projection decision receipts", () => {
       .toThrow(/selection boundary fidelity mismatch/u);
   });
 
+  it("persists the versioned Select_Gamma ordering witness", () => {
+    const boundary = captureBoundary({
+      candidates: rankedCandidates(2),
+      maxEntries: 1,
+      maxTotalTokens: 5,
+      tokenEstimator: () => 5
+    });
+
+    expect(boundary.expected.pre_projection.selection_receipt).toEqual({
+      schema_version: 1,
+      ordering_basis: "raw_marginal_gain",
+      witness: {
+        kind: "static_top_k_token_bound",
+        eligible_candidate_count: 2,
+        k: 1,
+        top_k_token_cost_upper_bound: 5,
+        token_budget: 5
+      }
+    });
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+  });
+
+  it("rejects outer v2 boundaries as legacy and non-authoritative", () => {
+    const boundary = captureBoundary({ candidates: rankedCandidates(2) });
+    const legacy = {
+      ...boundary,
+      schema_version: 2
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(legacy))
+      .toThrow(/legacy.*schema_version=2.*non-authoritative/u);
+    expect(() => replayFineAssessmentSelectionBoundary(legacy))
+      .toThrow(/legacy.*schema_version=2.*non-authoritative/u);
+  });
+
+  it("rejects pre-projection v1 as a legacy receipt shape", () => {
+    const boundary = captureBoundary({ candidates: rankedCandidates(2) });
+    const { selection_receipt: _receipt, ...legacyBody } =
+      boundary.expected.pre_projection;
+    const legacy = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: { ...legacyBody, schema_version: 1 }
+      }
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(legacy))
+      .toThrow(/legacy pre_projection schema_version=1.*selection receipt/u);
+    expect(() => replayFineAssessmentSelectionBoundary(legacy))
+      .toThrow(/legacy pre_projection schema_version=1.*selection receipt/u);
+  });
+
+  it("replay rejects a self-consistent bound that differs from live top-K", () => {
+    const boundary = captureBoundary({
+      candidates: rankedCandidates(2),
+      maxEntries: 1,
+      maxTotalTokens: 100,
+      tokenEstimator: () => 5
+    });
+    const receipt = boundary.expected.pre_projection.selection_receipt;
+    const tampered = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: {
+          ...boundary.expected.pre_projection,
+          selection_receipt: {
+            ...receipt,
+            witness: {
+              ...receipt.witness,
+              top_k_token_cost_upper_bound: 6
+            }
+          }
+        }
+      }
+    } satisfies FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(tampered)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
   it.each([
     ["missing source", { status: "available" }],
     ["empty source", { status: "available", key: "" }],
@@ -160,7 +243,7 @@ describe("selection boundary pre-projection decision receipts", () => {
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
   });
 
-  it("rejects a schema-v2 boundary without pre-projection", () => {
+  it("rejects a schema-v3 boundary without pre-projection", () => {
     const current = captureBoundary({ candidates: rankedCandidates(4) });
     const { pre_projection: _preProjection, ...legacyExpected } = current.expected;
     const legacy = {

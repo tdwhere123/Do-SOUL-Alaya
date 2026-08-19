@@ -10,6 +10,7 @@ import type {
   SelectGammaFeatureWeights,
   SelectGammaFormulaCandidate,
   SelectGammaRequest,
+  SelectGammaSelectionReceipt,
   SelectGammaWalkResult
 } from "./types.js";
 
@@ -25,6 +26,8 @@ type AdmissionState = Readonly<{
     readonly perDimensionLimits: Readonly<Record<string, number>> | null;
   }>;
 }>;
+
+type SelectionLimits = AdmissionState["limits"];
 
 export function selectGammaWalk(
   request: SelectGammaRequest,
@@ -43,20 +46,23 @@ export function selectGammaWalk(
     }
     return candidate;
   });
+  const selectionReceipt = buildSelectionReceipt(
+    remaining,
+    maxSelected,
+    request.token_budget
+  );
   return greedySelect(remaining, request.token_budget, binding.feature_weights, {
     maxSelected,
     perDimensionLimits: binding.per_dimension_limits
-  });
+  }, selectionReceipt);
 }
 
 function greedySelect(
   remaining: SelectGammaFormulaCandidate[],
   tokenBudget: number,
   weights: SelectGammaFeatureWeights,
-  limits: Readonly<{
-    readonly maxSelected: number;
-    readonly perDimensionLimits: Readonly<Record<string, number>> | null;
-  }>
+  limits: SelectionLimits,
+  selectionReceipt: SelectGammaSelectionReceipt
 ): SelectGammaWalkResult {
   const selected: string[] = [];
   const decisions: SelectGammaDecision[] = [];
@@ -78,33 +84,49 @@ function greedySelect(
     if (rejected.size === remaining.length) break;
     remaining.splice(0, remaining.length, ...remaining.filter((_, index) =>
       !rejected.has(index)));
-    const picked = pickNext(remaining, covered, weights);
+    const picked = pickNext(
+      remaining, covered, weights, selectionReceipt.ordering_basis
+    );
     if (picked === null) break;
     const candidate = remaining.splice(picked.index, 1)[0]!;
     decisions.push(retainedDecision(
-      candidate, decisions.length + 1, selected.length, usedTokens, picked.gain
+      candidate, decisions.length + 1, selected.length, usedTokens,
+      picked.gain
     ));
     selected.push(candidate.candidate_key);
     usedTokens += candidate.token_cost;
     retainedByObjectKey.set(objectKey(candidate), candidate.candidate_key);
     retainIdentity(candidate.source, candidate.candidate_key, retainedBySourceKey);
-    const dimension = candidate.dimension ?? "unbound";
-    perDimensionCounts.set(
-      dimension,
-      (perDimensionCounts.get(dimension) ?? 0) + 1
-    );
+    incrementDimensionCount(candidate.dimension ?? "unbound", perDimensionCounts);
     acceptSelectGammaCoverage(candidate, covered);
   }
+  return materializeWalkResult(selected, decisions, selectionReceipt);
+}
+
+function materializeWalkResult(
+  selected: string[],
+  decisions: SelectGammaDecision[],
+  selectionReceipt: SelectGammaSelectionReceipt
+): SelectGammaWalkResult {
   return Object.freeze({
     selected_candidate_keys: Object.freeze(selected),
-    decisions: Object.freeze(decisions)
+    decisions: Object.freeze(decisions),
+    selection_receipt: selectionReceipt
   });
+}
+
+function incrementDimensionCount(
+  dimension: string,
+  counts: Map<string, number>
+): void {
+  counts.set(dimension, (counts.get(dimension) ?? 0) + 1);
 }
 
 function pickNext(
   remaining: readonly SelectGammaFormulaCandidate[],
   covered: ReadonlyMap<string, number>,
-  weights: SelectGammaFeatureWeights
+  weights: SelectGammaFeatureWeights,
+  orderingBasis: SelectGammaSelectionReceipt["ordering_basis"]
 ): Readonly<{ readonly index: number; readonly gain: number }> | null {
   let bestIndex = -1;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -114,7 +136,8 @@ function pickNext(
     const candidate = remaining[index]!;
     assertTokenCost(candidate.token_cost);
     const gain = selectGammaMarginalGain(candidate, covered, weights);
-    const score = gain / candidate.token_cost;
+    const score = orderingBasis === "raw_marginal_gain"
+      ? gain : gain / candidate.token_cost;
     if (score > bestScore || (score === bestScore &&
         compareCodeUnits(candidate.candidate_key, bestKey) < 0)) {
       bestScore = score;
@@ -194,7 +217,6 @@ function retainedDecision(
   usedTokens: number,
   gain: number
 ): SelectGammaDecision {
-  const unavailable = Object.freeze({ status: "unavailable" as const });
   return Object.freeze({
     candidate_key: candidate.candidate_key,
     selection_order: selectionOrder,
@@ -209,6 +231,50 @@ function retainedDecision(
       lineage: candidate.lineage
     })
   });
+}
+
+function buildSelectionReceipt(
+  candidates: readonly SelectGammaFormulaCandidate[],
+  maxSelected: number,
+  tokenBudget: number
+): SelectGammaSelectionReceipt {
+  const cardinalityBound = Math.min(maxSelected, candidates.length);
+  const tokenCosts = candidates.map(({ token_cost }) => {
+    assertTokenCost(token_cost);
+    return token_cost;
+  }).sort((left, right) => right - left);
+  const maxTokenCostSum = sumFiniteTopKTokenCosts(
+    tokenCosts,
+    cardinalityBound
+  );
+  const witness = Object.freeze({
+    kind: "static_top_k_token_bound" as const,
+    eligible_candidate_count: candidates.length,
+    k: cardinalityBound,
+    top_k_token_cost_upper_bound: maxTokenCostSum,
+    token_budget: tokenBudget
+  });
+  return Object.freeze({
+    schema_version: 1 as const,
+    ordering_basis: maxTokenCostSum <= tokenBudget
+      ? "raw_marginal_gain" as const
+      : "marginal_gain_per_token" as const,
+    witness
+  });
+}
+
+function sumFiniteTopKTokenCosts(
+  descendingTokenCosts: readonly number[],
+  k: number
+): number {
+  let sum = 0;
+  for (const tokenCost of descendingTokenCosts.slice(0, k)) {
+    sum += tokenCost;
+    if (!Number.isFinite(sum)) {
+      throw new Error("Select_Gamma top-K token cost upper bound must be finite");
+    }
+  }
+  return sum;
 }
 
 function objectKey(candidate: SelectGammaFormulaCandidate): string {

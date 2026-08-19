@@ -63,9 +63,17 @@ export function validateSelectionBoundary(
 function assertSelectionBoundaryEnvelope(
   boundary: FineAssessmentSelectionBoundaryCase
 ): void {
-  if (boundary.schema_version !== 2) {
+  const schemaVersion = (boundary as Readonly<{ schema_version: unknown }>)
+    .schema_version;
+  if (schemaVersion === 2) {
     throwSelectionBoundaryFidelityMismatch(
-      `expected schema_version=2, actual ${String(boundary.schema_version)}`
+      "legacy selection boundary schema_version=2 is non-authoritative; " +
+      "versioned Select_Gamma selection receipt requires schema_version=3"
+    );
+  }
+  if (schemaVersion !== 3) {
+    throwSelectionBoundaryFidelityMismatch(
+      `expected schema_version=3, actual ${String(schemaVersion)}`
     );
   }
   assertSelectionBoundaryJsonValue(boundary);

@@ -96,12 +96,12 @@ describe("Select_Gamma", () => {
     expect(request.condition_digest).not.toBe("unspecified");
   });
 
-  it("selects by gain per token with deterministic ties and no 5-cap", () => {
+  it("uses deterministic ties and no 5-cap under a slack budget", () => {
     const binding = {
       candidates: [
         formulaCandidate("tie-b", { quality: 1, token_cost: 2 }),
         formulaCandidate("tie-a", { quality: 1, token_cost: 2 }),
-        formulaCandidate("cheap", { quality: 0.6, token_cost: 1 }),
+        formulaCandidate("cheap", { quality: 1.2, token_cost: 1 }),
         formulaCandidate("k3", { quality: 0.2, token_cost: 1 }),
         formulaCandidate("k4", { quality: 0.2, token_cost: 1 }),
         formulaCandidate("k5", { quality: 0.2, token_cost: 1 }),
@@ -114,6 +114,79 @@ describe("Select_Gamma", () => {
     expect(selected[0]).toBe("cheap");
     expect(selected.slice(1, 3)).toEqual(["tie-a", "tie-b"]);
     expect(selected).toHaveLength(7);
+  });
+
+  it("uses raw marginal gain when cardinality proves the token budget slack", () => {
+    const binding = {
+      candidates: [
+        formulaCandidate("long-high-gain", { quality: 10, token_cost: 8 }),
+        formulaCandidate("short-high-density", { quality: 2, token_cost: 1 })
+      ],
+      max_selected: 1
+    } satisfies SelectGammaBinding;
+    const result = selectResult(binding, [
+      "long-high-gain", "short-high-density"
+    ], 8);
+
+    expect(result.selected_candidate_keys).toEqual(["long-high-gain"]);
+    expect(result.selection_receipt).toEqual({
+      schema_version: 1,
+      ordering_basis: "raw_marginal_gain",
+      witness: {
+        kind: "static_top_k_token_bound",
+        eligible_candidate_count: 2,
+        k: 1,
+        top_k_token_cost_upper_bound: 8,
+        token_budget: 8
+      }
+    });
+  });
+
+  it("keeps density ordering when the static token-slack witness fails", () => {
+    const binding = {
+      candidates: [
+        formulaCandidate("long-high-gain", { quality: 10, token_cost: 6 }),
+        formulaCandidate("short-high-density", { quality: 4, token_cost: 2 }),
+        formulaCandidate("medium", { quality: 5, token_cost: 4 })
+      ],
+      max_selected: 2
+    } satisfies SelectGammaBinding;
+    const result = selectResult(binding, [
+      "long-high-gain", "short-high-density", "medium"
+    ], 7);
+
+    expect(result.selected_candidate_keys).toEqual([
+      "short-high-density", "medium"
+    ]);
+    expect(result.selection_receipt.ordering_basis)
+      .toBe("marginal_gain_per_token");
+    expect(result.selection_receipt.witness).toMatchObject({
+      k: 2,
+      top_k_token_cost_upper_bound: 10,
+      token_budget: 7
+    });
+  });
+
+  it("fails before selection when the top-K token upper bound overflows", () => {
+    const binding = {
+      candidates: [
+        formulaCandidate("huge-a", {
+          quality: 2,
+          token_cost: Number.MAX_VALUE
+        }),
+        formulaCandidate("huge-b", {
+          quality: 1,
+          token_cost: Number.MAX_VALUE
+        })
+      ],
+      max_selected: 2
+    } satisfies SelectGammaBinding;
+
+    expect(() => selectResult(
+      binding,
+      ["huge-a", "huge-b"],
+      Number.MAX_VALUE
+    )).toThrow(/top-K token cost upper bound must be finite/u);
   });
 
   it("stops at the hard token boundary", () => {
@@ -225,6 +298,14 @@ function selectKeys(
   eligible: readonly string[],
   tokenBudget: number
 ): readonly string[] {
+  return selectResult(binding, eligible, tokenBudget).selected_candidate_keys;
+}
+
+function selectResult(
+  binding: SelectGammaBinding,
+  eligible: readonly string[],
+  tokenBudget: number
+) {
   const bound: SelectGammaBinding = {
     workspace_id: "workspace-1",
     generation_id: `sha256:${"a".repeat(64)}`,
@@ -240,7 +321,7 @@ function selectKeys(
     condition_digest: `sha256:${"b".repeat(64)}`,
     eligible_candidate_keys: eligible,
     token_budget: tokenBudget
-  }, bound).selected_candidate_keys;
+  }, bound);
 }
 
 function formulaCandidate(

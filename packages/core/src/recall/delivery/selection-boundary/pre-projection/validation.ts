@@ -6,16 +6,29 @@ import { throwSelectionBoundaryFidelityMismatch } from
   "../validation/fidelity-error.js";
 import { isRecord } from "../record-guards.js";
 import { completeFineAssessmentPreProjection } from "./observation.js";
+import { isValidSelectGammaSelectionReceipt } from
+  "../../select-gamma/validation/decision-receipts.js";
 
 export function assertPreProjection(
   observation: unknown,
   deliveredCandidateKeys: readonly string[]
 ): void {
+  if (isRecord(observation) && observation.schema_version === 1) {
+    throwSelectionBoundaryFidelityMismatch(
+      "legacy pre_projection schema_version=1 has no authoritative " +
+      "Select_Gamma selection receipt; expected schema_version=2"
+    );
+  }
   const parsed = parsePreProjection(observation);
   assertUniqueKeys(parsed.candidate_keys);
   assertUniqueKeys(parsed.admission_actions.map((action) => action.candidate_key));
   assertUniqueKeys(parsed.projection_actions.map((action) => action.candidate_key));
   assertUniqueKeys(parsed.introduced_candidate_keys);
+  if (!isValidSelectGammaSelectionReceipt(parsed.selection_receipt)) {
+    throwSelectionBoundaryFidelityMismatch(
+      "expected versioned Select_Gamma selection receipt, actual invalid"
+    );
+  }
   assertAdmissionActions(parsed);
   assertProjectionActions(parsed, deliveredCandidateKeys);
 }
@@ -25,7 +38,7 @@ function parsePreProjection(
 ): FineAssessmentPreProjectionObservation {
   if (!isPreProjectionObservation(observation)) {
     throwSelectionBoundaryFidelityMismatch(
-      "expected pre_projection schema_version=1 with action arrays, actual invalid"
+      "expected pre_projection schema_version=2 with action arrays, actual invalid"
     );
   }
   if (observation.admission_actions.some((action) => !isRecord(action)) ||
@@ -40,7 +53,7 @@ function parsePreProjection(
 function isPreProjectionObservation(
   value: unknown
 ): value is FineAssessmentPreProjectionObservation {
-  return isRecord(value) && value.schema_version === 1 &&
+  return isRecord(value) && value.schema_version === 2 &&
     Array.isArray(value.candidate_keys) &&
     Array.isArray(value.admission_actions) &&
     Array.isArray(value.projection_actions) &&
@@ -117,6 +130,7 @@ function assertProjectionActions(
 ): void {
   const expected = completeFineAssessmentPreProjection({
     schema_version: observation.schema_version,
+    selection_receipt: observation.selection_receipt,
     candidate_keys: observation.candidate_keys,
     token_total: observation.token_total,
     admission_actions: observation.admission_actions

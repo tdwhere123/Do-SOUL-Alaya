@@ -5,6 +5,10 @@ import { RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME } from
   "../provenance/recall-eval/recall-eval-diagnostics.js";
 import { writeStageAttributionTables } from "../diagnostics/stage-attribution/write-tables.js";
 import { compareF0F2VsCachedF3 } from "../diagnostics/stage-attribution/diagnostic-100q.js";
+import { loadRecallEvalQuestionDiagnostics } from
+  "../diagnostics/stage-attribution/load-recall-eval-diagnostics.js";
+import { buildTreatmentExposureReceipts } from
+  "../diagnostics/stage-attribution/exposure/build-receipts.js";
 import { DiagnosticLoopFailure } from "./failures.js";
 import { sha256Utf8 } from "./identity.js";
 import { sharedSubstrateIdentities } from "./run.js";
@@ -15,16 +19,31 @@ import type {
 import { resolveSnapshotIdentity } from "./authority/identity.js";
 import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { sha256File } from "../snapshot/integrity.js";
+import { missLedgerContentIdentity } from "./miss-ledger-authority.js";
 
 export async function runProductionRecallPhase(
   context: DiagnosticLoopPhaseContext,
   arm: "control" | "treatment"
 ): Promise<DiagnosticLoopPhaseResult> {
+  const prepared = await prepareRecallPhase(context, arm);
+  const evaluationSlice = expectedEvaluationSlice(
+    context, prepared.questionIds, prepared.phase
+  );
+  const result = await executeRecallEvaluation(context, arm, prepared);
+  assertRecallCompleted(result, evaluationSlice, prepared.phase, arm);
+  return await buildRecallPhaseResult(result, prepared, evaluationSlice, arm);
+}
+
+async function prepareRecallPhase(
+  context: DiagnosticLoopPhaseContext,
+  arm: "control" | "treatment"
+) {
   const substrate = sharedSubstrateIdentities(context);
   const snapshotCheckpoint = context.checkpoints.get("snapshot");
   const snapshot = snapshotCheckpoint?.artifact_paths.snapshot;
   const historyRoot = context.request.historyRoot;
-  const phase = arm === "control" ? "control_recall" : "treatment_recall";
+  const phase: "control_recall" | "treatment_recall" = arm === "control"
+    ? "control_recall" : "treatment_recall";
   if (substrate.cache_identity.length === 0 || substrate.snapshot_identity.length === 0) {
     throw fail(phase, "formation", `${arm} recall requires extraction and snapshot checkpoints`);
   }
@@ -38,14 +57,20 @@ export async function runProductionRecallPhase(
   if (snapshotCheckpoint?.content_identity !== snapshotIdentity.identity_digest) {
     throw fail(phase, "infrastructure", `${arm} recall snapshot checkpoint drifted`);
   }
-  const evaluationSlice = expectedEvaluationSlice(
-    context, snapshotIdentity.question_ids, phase
-  );
-  const result = await runRecallEval({
-    snapshotDbPath: snapshot,
+  return { substrate, snapshot, historyRoot, phase, questionIds: snapshotIdentity.question_ids };
+}
+
+async function executeRecallEvaluation(
+  context: DiagnosticLoopPhaseContext,
+  arm: "control" | "treatment",
+  prepared: Awaited<ReturnType<typeof prepareRecallPhase>>
+) {
+  return await runRecallEval({
+    snapshotDbPath: prepared.snapshot,
     variant: context.request.variant,
-    historyRoot,
+    historyRoot: prepared.historyRoot,
     snapshotConsumeAuthority: "diagnostic",
+    captureOpenSemanticFactorCandidateActivations: true,
     ...(context.request.limit === undefined ? {} : { limit: context.request.limit }),
     ...(context.request.offset === undefined ? {} : { offset: context.request.offset }),
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
@@ -53,6 +78,14 @@ export async function runProductionRecallPhase(
       ? { querySemanticFactorCachePath: context.request.treatmentFactorCachePath }
       : {})
   });
+}
+
+function assertRecallCompleted(
+  result: Awaited<ReturnType<typeof runRecallEval>>,
+  evaluationSlice: ReturnType<typeof expectedEvaluationSlice>,
+  phase: "control_recall" | "treatment_recall",
+  arm: "control" | "treatment"
+): void {
   if (result.completion.status !== "complete") {
     throw fail(phase, "infrastructure", `${arm} recall completed incompletely`);
   }
@@ -60,21 +93,28 @@ export async function runProductionRecallPhase(
   if (JSON.stringify(actualSlice) !== JSON.stringify(evaluationSlice)) {
     throw fail(phase, "infrastructure", `${arm} recall evaluation slice mismatch`);
   }
+}
+
+async function buildRecallPhaseResult(
+  result: Awaited<ReturnType<typeof runRecallEval>>,
+  prepared: Awaited<ReturnType<typeof prepareRecallPhase>>,
+  evaluationSlice: ReturnType<typeof expectedEvaluationSlice>,
+  arm: "control" | "treatment"
+): Promise<DiagnosticLoopPhaseResult> {
   const artifacts = {
-    snapshot,
+    snapshot: prepared.snapshot,
     kpi: result.kpiPath,
     report: result.reportPath,
     diagnostics: join(dirname(result.kpiPath), RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME)
   };
-  const artifactSha256 = await hashRecallArtifacts(artifacts);
   return {
-    contentIdentity: sha256Utf8(`${arm}:${result.slug}:${substrate.snapshot_identity}`),
+    contentIdentity: sha256Utf8(`${arm}:${result.slug}:${prepared.substrate.snapshot_identity}`),
     physicalCalls: 0,
     artifactPaths: artifacts,
     details: {
-      ...substrate,
+      ...prepared.substrate,
       evaluation_slice: evaluationSlice,
-      artifact_sha256: artifactSha256
+      artifact_sha256: await hashRecallArtifacts(artifacts)
     }
   };
 }
@@ -130,6 +170,26 @@ export async function runProductionMissLedgerPhase(
       "miss ledger requires control and treatment diagnostics artifacts"
     );
   }
+  const { comparison, missLedgerPath } = await buildProductionMissLedger(
+    outDir, controlDiag, treatmentDiag
+  );
+  return {
+    contentIdentity: missLedgerContentIdentity(control, treatment),
+    physicalCalls: 0,
+    artifactPaths: { missLedger: missLedgerPath },
+    details: {
+      ...sharedSubstrateIdentities(context),
+      artifact_sha256: await sha256File(missLedgerPath),
+      exposed_denominator_gate: comparison.exposed_denominator_gate
+    }
+  };
+}
+
+async function buildProductionMissLedger(
+  outDir: string,
+  controlDiag: string,
+  treatmentDiag: string
+) {
   const tables = await writeStageAttributionTables({
     outDir,
     cells: [
@@ -139,7 +199,13 @@ export async function runProductionMissLedgerPhase(
   });
   const comparison = compareF0F2VsCachedF3({
     control: tables.A.questions,
-    treatment: tables.B.questions
+    treatment: tables.B.questions,
+    treatmentExposure: buildTreatmentExposureReceipts({
+      control: await loadRecallEvalQuestionDiagnostics(controlDiag),
+      treatment: await loadRecallEvalQuestionDiagnostics(treatmentDiag),
+      controlStages: tables.A.questions,
+      treatmentStages: tables.B.questions
+    })
   });
   const missLedgerPath = join(outDir, "diagnostic-100q.json");
   await writeFile(
@@ -147,18 +213,7 @@ export async function runProductionMissLedgerPhase(
     `${JSON.stringify(comparison, null, 2)}\n`,
     "utf8"
   );
-  return {
-    contentIdentity: sha256Utf8(JSON.stringify({
-      control: control?.content_identity ?? null,
-      treatment: treatment?.content_identity ?? null
-    })),
-    physicalCalls: 0,
-    artifactPaths: { missLedger: missLedgerPath },
-    details: {
-      ...sharedSubstrateIdentities(context),
-      artifact_sha256: await sha256File(missLedgerPath)
-    }
-  };
+  return { comparison, missLedgerPath };
 }
 
 function fail(

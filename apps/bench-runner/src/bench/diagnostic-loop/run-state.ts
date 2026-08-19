@@ -9,7 +9,7 @@ import { isDiagnosticLoopMode, type DiagnosticLoopMode } from "./phases.js";
 import { assertDiagnosticLoopIdentity, isSha256Hex, sha256Utf8 } from "./identity.js";
 
 export interface DiagnosticLoopRunRecord {
-  readonly schema_version: 2;
+  readonly schema_version: 4;
   readonly kind: "diagnostic_loop_run";
   readonly identity_digest: string;
   readonly identity: ResolvedDiagnosticLoopIdentity;
@@ -56,7 +56,7 @@ export function persistRunRecord(input: {
     return existing.run_record_digest;
   }
   const unsigned: UnsignedRunRecord = {
-    schema_version: 2,
+    schema_version: 4,
     kind: "diagnostic_loop_run",
     identity_digest: identityDigest,
     identity: input.identity,
@@ -91,7 +91,7 @@ function assertRunRecordShape(
   path: string
 ): asserts value is DiagnosticLoopRunRecord {
   if (!isRecord(value) || !hasExactKeys(value, RUN_RECORD_KEYS) ||
-      value.schema_version !== 2 || value.kind !== "diagnostic_loop_run" ||
+      value.schema_version !== 4 || value.kind !== "diagnostic_loop_run" ||
       !isSha(value.identity_digest) || !isSha(value.run_record_digest) ||
       typeof value.mode !== "string" || !isDiagnosticLoopMode(value.mode) ||
       !Array.isArray(value.argv) ||
@@ -102,16 +102,27 @@ function assertRunRecordShape(
 }
 
 function isResolvedIdentity(value: unknown): value is ResolvedDiagnosticLoopIdentity {
-  if (!isRecord(value) || value.schema_version !== 1 ||
+  if (!isRecord(value) || value.schema_version !== 3 ||
       value.canonical_mode !== "cache_only" ||
       !isSha(value.request_identity_digest) || !isRequest(value.request)) return false;
   const allowed = new Set([
     "schema_version", "canonical_mode", "request_identity_digest", "request",
-    "extraction_cache", "snapshot", "query_factor_cache"
+    "extraction_cache", "snapshot", "query_factor_cache", "treatment_exposure_policy"
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return false;
-  return optionalExtraction(value.extraction_cache) &&
+  return isExposurePolicy(value.treatment_exposure_policy) &&
+    optionalExtraction(value.extraction_cache) &&
     optionalSnapshot(value.snapshot) && optionalQueryCache(value.query_factor_cache);
+}
+
+function isExposurePolicy(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, [
+    "schema_version", "kind", "declared_minimum_rate", "candidate_attribution_required",
+    "control_non_exposure_required"
+  ]) && value.schema_version === 2 &&
+    value.kind === "cached_f3_exposed_denominator_policy" &&
+    value.declared_minimum_rate === 1 && value.candidate_attribution_required === true &&
+    value.control_non_exposure_required === true;
 }
 
 function isRequest(value: unknown): boolean {

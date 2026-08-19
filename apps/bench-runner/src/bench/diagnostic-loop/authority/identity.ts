@@ -43,6 +43,8 @@ import type {
   DiagnosticLoopIdentity,
   DiagnosticLoopRequest
 } from "../types.js";
+import { CACHED_F3_EXPOSURE_POLICY } from
+  "../../diagnostics/stage-attribution/exposure/contract.js";
 
 export interface DiagnosticExtractionCacheIdentity {
   readonly root: string;
@@ -78,13 +80,14 @@ export interface DiagnosticSnapshotIdentity {
 }
 
 export interface ResolvedDiagnosticLoopIdentity {
-  readonly schema_version: 1;
+  readonly schema_version: 3;
   readonly canonical_mode: "cache_only";
   readonly request_identity_digest: string;
   readonly request: DiagnosticLoopIdentity;
   readonly extraction_cache?: DiagnosticExtractionCacheIdentity;
   readonly snapshot?: DiagnosticSnapshotIdentity;
   readonly query_factor_cache?: Readonly<Record<string, unknown>>;
+  readonly treatment_exposure_policy: typeof CACHED_F3_EXPOSURE_POLICY;
 }
 
 type CompleteExtractionManifest = ExtractionCacheManifestV3 & Readonly<{
@@ -110,10 +113,11 @@ export async function resolveDiagnosticLoopIdentity(
     ? undefined
     : await resolveQueryFactorCacheIdentity(request.treatmentFactorCachePath);
   return {
-    schema_version: 1,
+    schema_version: 3,
     canonical_mode: "cache_only",
     request_identity_digest: diagnosticLoopIdentityDigest(request),
     request,
+    treatment_exposure_policy: CACHED_F3_EXPOSURE_POLICY,
     ...(extraction === undefined ? {} : { extraction_cache: extraction }),
     ...(snapshot === undefined ? {} : { snapshot }),
     ...(query === undefined ? {} : { query_factor_cache: query })

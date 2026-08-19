@@ -14,6 +14,16 @@ import type {
 import type { DiagnosticLoopPhase } from "../phases.js";
 import { sha256File } from "../../snapshot/integrity.js";
 import { readFile } from "node:fs/promises";
+import { readDiagnostic100QComparisonArtifact } from
+  "../../diagnostics/stage-attribution/exposure/comparison-artifact.js";
+import { rebuildDiagnostic100QComparison } from
+  "../../diagnostics/stage-attribution/exposure/rebuild-comparison.js";
+import type { Diagnostic100QComparison } from
+  "../../diagnostics/stage-attribution/diagnostic-100q.js";
+import {
+  missLedgerContentIdentity,
+  summarizeMissLedgerCheckpoint
+} from "../miss-ledger-authority.js";
 
 export async function assertCheckpointAuthorities(
   request: DiagnosticLoopRequest,
@@ -27,21 +37,58 @@ export async function assertCheckpointAuthorities(
     request, identity, checkpoints.get("snapshot")
   );
   assertRelationalAuthority(identity.extraction_cache, snapshot);
-  await assertRecallArtifacts(checkpoints.get("control_recall"));
-  await assertRecallArtifacts(checkpoints.get("treatment_recall"));
-  await assertMissLedgerArtifact(checkpoints.get("miss_ledger"));
-  await assertReportArtifact(checkpoints.get("report"));
+  const control = checkpoints.get("control_recall");
+  const treatment = checkpoints.get("treatment_recall");
+  await assertRecallArtifacts(control);
+  await assertRecallArtifacts(treatment);
+  const comparison = await assertMissLedgerArtifact(
+    checkpoints.get("miss_ledger"), control, treatment
+  );
+  await assertReportArtifact(
+    checkpoints.get("report"), checkpoints.get("miss_ledger"), comparison
+  );
 }
 
 async function assertMissLedgerArtifact(
-  checkpoint: DiagnosticLoopCheckpoint | undefined
-): Promise<void> {
-  if (checkpoint === undefined) return;
+  checkpoint: DiagnosticLoopCheckpoint | undefined,
+  control: DiagnosticLoopCheckpoint | undefined,
+  treatment: DiagnosticLoopCheckpoint | undefined
+): Promise<Diagnostic100QComparison | undefined> {
+  if (checkpoint === undefined) return undefined;
   const path = checkpoint.artifact_paths.missLedger;
   if (typeof path !== "string" ||
       checkpoint.details.artifact_sha256 !== await sha256File(path)) {
     throw new Error("diagnostic-loop miss-ledger artifact authority mismatch");
   }
+  const artifact = await readDiagnostic100QComparisonArtifact(path);
+  if (checkpoint.content_identity !== missLedgerContentIdentity(control, treatment)) {
+    throw new Error("diagnostic-loop miss-ledger content identity mismatch");
+  }
+  const source = await rebuildDiagnostic100QComparison({
+    controlDiagnosticsPath: requireDiagnosticsPath(control, "control"),
+    treatmentDiagnosticsPath: requireDiagnosticsPath(treatment, "treatment")
+  });
+  if (!isDeepStrictEqual(artifact, source)) {
+    throw new Error("diagnostic-loop miss-ledger source authority mismatch");
+  }
+  if (!isDeepStrictEqual(
+    checkpoint.details.exposed_denominator_gate,
+    artifact.exposed_denominator_gate
+  )) {
+    throw new Error("diagnostic-loop miss-ledger exposure gate authority mismatch");
+  }
+  return source;
+}
+
+function requireDiagnosticsPath(
+  checkpoint: DiagnosticLoopCheckpoint | undefined,
+  arm: string
+): string {
+  const path = checkpoint?.artifact_paths.diagnostics;
+  if (typeof path !== "string") {
+    throw new Error(`diagnostic-loop ${arm} diagnostics authority is incomplete`);
+  }
+  return path;
 }
 
 async function assertRecallArtifacts(
@@ -64,7 +111,9 @@ async function assertRecallArtifacts(
 }
 
 async function assertReportArtifact(
-  checkpoint: DiagnosticLoopCheckpoint | undefined
+  checkpoint: DiagnosticLoopCheckpoint | undefined,
+  missLedger: DiagnosticLoopCheckpoint | undefined,
+  comparison: Diagnostic100QComparison | undefined
 ): Promise<void> {
   if (checkpoint === undefined) return;
   const path = checkpoint.artifact_paths.report;
@@ -75,6 +124,26 @@ async function assertReportArtifact(
   if (diagnosticAuthorityDigest(parsed) !== checkpoint.content_identity) {
     throw new Error("diagnostic-loop report checkpoint artifact authority mismatch");
   }
+  if (comparison !== undefined && !isReportPromotionBound(parsed, missLedger, comparison)) {
+    throw new Error("diagnostic-loop report promotion authority mismatch");
+  }
+}
+
+function isReportPromotionBound(
+  value: unknown,
+  missLedger: DiagnosticLoopCheckpoint | undefined,
+  comparison: Diagnostic100QComparison
+): boolean {
+  if (!isRecord(value) || value.schema_version !== 3 ||
+      value.kind !== "diagnostic_loop_report") return false;
+  const promotion = value.diagnostic_100q_promotion;
+  const parsedLedger = value.miss_ledger;
+  if (!isRecord(promotion) || !isRecord(parsedLedger)) return false;
+  const passed = comparison.exposed_denominator_gate.passed;
+  return promotion.eligible === passed && promotion.reason === (passed
+    ? "exposed_denominator_gate_passed" : "exposed_denominator_gate_not_passed") &&
+    isDeepStrictEqual(value.miss_ledger, summarizeMissLedgerCheckpoint(missLedger)) &&
+    isDeepStrictEqual(parsedLedger.exposed_denominator_gate, comparison.exposed_denominator_gate);
 }
 
 function isEvaluationSlice(value: unknown): boolean {

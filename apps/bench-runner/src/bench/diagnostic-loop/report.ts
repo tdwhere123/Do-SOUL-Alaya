@@ -8,6 +8,7 @@ import type {
   DiagnosticLoopIdentity,
   DiagnosticLoopPhaseResult
 } from "./types.js";
+import { summarizeMissLedgerCheckpoint } from "./miss-ledger-authority.js";
 
 export function writeDiagnosticLoopReport(input: {
   readonly workRoot: string;
@@ -17,11 +18,24 @@ export function writeDiagnosticLoopReport(input: {
   readonly avoidedWork: DiagnosticLoopAvoidedWork;
   readonly skippedPhases: readonly DiagnosticLoopPhase[];
 }): DiagnosticLoopPhaseResult {
+  const report = buildReport(input);
+  const reportPath = join(input.workRoot, "report.json");
+  writeJsonAtomic(reportPath, report);
+  return reportPhaseResult(report, reportPath);
+}
+
+function buildReport(input: {
+  readonly identity: DiagnosticLoopIdentity;
+  readonly identityDigest: string;
+  readonly checkpoints: ReadonlyMap<DiagnosticLoopPhase, DiagnosticLoopCheckpoint>;
+  readonly avoidedWork: DiagnosticLoopAvoidedWork;
+  readonly skippedPhases: readonly DiagnosticLoopPhase[];
+}) {
   const control = requireCompleted(input.checkpoints, "control_recall");
   const treatment = requireCompleted(input.checkpoints, "treatment_recall");
   assertSharedSubstrate(control, treatment);
-  const report = {
-    schema_version: 1,
+  return {
+    schema_version: 3,
     kind: "diagnostic_loop_report",
     identity_digest: input.identityDigest,
     identity: {
@@ -43,14 +57,19 @@ export function writeDiagnosticLoopReport(input: {
     skipped_phases: input.skippedPhases,
     control: summarizeArm(control),
     treatment: summarizeArm(treatment),
-    miss_ledger: summarizeOptional(input.checkpoints.get("miss_ledger")),
+    miss_ledger: summarizeMissLedgerCheckpoint(input.checkpoints.get("miss_ledger")),
+    diagnostic_100q_promotion: summarizePromotion(input.checkpoints.get("miss_ledger")),
     shared_substrate: {
       cache_identity: control.details.cache_identity,
       snapshot_identity: control.details.snapshot_identity
     }
   };
-  const reportPath = join(input.workRoot, "report.json");
-  writeJsonAtomic(reportPath, report);
+}
+
+function reportPhaseResult(
+  report: ReturnType<typeof buildReport>,
+  reportPath: string
+): DiagnosticLoopPhaseResult {
   return {
     contentIdentity: sha256Utf8(JSON.stringify(report)),
     physicalCalls: 0,
@@ -99,8 +118,14 @@ function summarizeArm(checkpoint: DiagnosticLoopCheckpoint): Readonly<Record<str
   };
 }
 
-function summarizeOptional(
+function summarizePromotion(
   checkpoint: DiagnosticLoopCheckpoint | undefined
-): Readonly<Record<string, unknown>> | null {
-  return checkpoint === undefined ? null : summarizeArm(checkpoint);
+): Readonly<Record<string, unknown>> {
+  const gate = checkpoint?.details.exposed_denominator_gate as
+    { readonly passed?: unknown } | undefined;
+  return {
+    eligible: gate?.passed === true,
+    reason: gate?.passed === true ? "exposed_denominator_gate_passed" :
+      "exposed_denominator_gate_not_passed"
+  };
 }

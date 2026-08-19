@@ -49,6 +49,7 @@ export interface RecallEvalOptions {
   readonly querySemanticFactorCachePath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
+  readonly captureOpenSemanticFactorCandidateActivations?: boolean;
 }
 
 export interface RecallEvalResult {

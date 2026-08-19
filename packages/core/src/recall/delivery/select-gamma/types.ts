@@ -65,6 +65,18 @@ export type SelectGammaRequest = Readonly<{
 
 export type SelectGammaCoverState = Map<string, number>;
 
+export type SelectGammaSelectionReceipt = Readonly<{
+  readonly schema_version: 1;
+  readonly ordering_basis: "raw_marginal_gain" | "marginal_gain_per_token";
+  readonly witness: Readonly<{
+    readonly kind: "static_top_k_token_bound";
+    readonly eligible_candidate_count: number;
+    readonly k: number;
+    readonly top_k_token_cost_upper_bound: number;
+    readonly token_budget: number;
+  }>;
+}>;
+
 export type SelectGammaDecisionReceipt =
   | Readonly<{
       readonly kind: "ineligible";
@@ -113,4 +125,5 @@ export type SelectGammaDecision = Readonly<{
 export type SelectGammaWalkResult = Readonly<{
   readonly selected_candidate_keys: readonly string[];
   readonly decisions: readonly SelectGammaDecision[];
+  readonly selection_receipt: SelectGammaSelectionReceipt;
 }>;

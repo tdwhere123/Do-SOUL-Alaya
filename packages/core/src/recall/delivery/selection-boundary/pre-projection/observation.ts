@@ -2,6 +2,8 @@ import { buildRecallCandidateSelectionKey } from
   "../../../runtime/recall-candidate-builder.js";
 import type { FineAssessmentAccumulator } from
   "../../fine-assessment-selection/types.js";
+import type { SelectGammaSelectionReceipt } from
+  "../../select-gamma/types.js";
 import type {
   FineAssessmentPreProjectionAction,
   FineAssessmentPreProjectionCapture,
@@ -10,7 +12,8 @@ import type {
 } from "../selection-boundary-types.js";
 
 export function captureFineAssessmentPreProjection(
-  accumulator: FineAssessmentAccumulator
+  accumulator: FineAssessmentAccumulator,
+  selectionReceipt: SelectGammaSelectionReceipt
 ): FineAssessmentPreProjectionCapture {
   const receipts = accumulator.admissionReceipts;
   if (
@@ -30,7 +33,8 @@ export function captureFineAssessmentPreProjection(
     .map((action) => action.candidate_key));
   assertSelectedCandidateIdentity(accumulator, candidateKeys);
   return Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 2 as const,
+    selection_receipt: selectionReceipt,
     candidate_keys: candidateKeys,
     token_total: accumulator.selected.reduce(
       (total, candidate) => total + candidate.token_estimate,

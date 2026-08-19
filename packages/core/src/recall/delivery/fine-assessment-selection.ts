@@ -69,7 +69,10 @@ export function selectFineAssessmentCandidates(
     boundaryCapture !== undefined
   );
   const preProjection = boundaryCapture === undefined
-    ? undefined : captureFineAssessmentPreProjection(accumulator);
+    ? undefined : captureFineAssessmentPreProjection(
+      accumulator,
+      walk.selection_receipt
+    );
   const delivered = materializeFineAssessmentDelivery(accumulator, context);
   const packetObservation = buildSelectGammaPacketObservation(
     selected,

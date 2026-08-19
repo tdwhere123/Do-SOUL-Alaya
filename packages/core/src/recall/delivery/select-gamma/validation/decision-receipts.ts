@@ -1,12 +1,16 @@
 import type {
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
+  SelectGammaSelectionReceipt,
   SelectGammaWalkResult
 } from "../types.js";
 
 export function assertSelectGammaWalkReceipts(
   walk: SelectGammaWalkResult
 ): void {
+  if (!isValidSelectGammaSelectionReceipt(walk.selection_receipt)) {
+    throw new Error("Select_Gamma selection receipt is invalid");
+  }
   const retainedKeys: string[] = [];
   const decisionKeys = new Set<string>();
   let selectedCount = 0;
@@ -26,6 +30,57 @@ export function assertSelectGammaWalkReceipts(
   if (!sameOrder(walk.selected_candidate_keys, retainedKeys)) {
     throw new Error("Select_Gamma selected keys do not match retained receipts");
   }
+  assertWalkMatchesSelectionReceipt(walk, selectedCount, tokenTotal);
+}
+
+function assertWalkMatchesSelectionReceipt(
+  walk: SelectGammaWalkResult,
+  selectedCount: number,
+  tokenTotal: number
+): void {
+  const { witness, ordering_basis: orderingBasis } = walk.selection_receipt;
+  const tokenExclusionInSlackMode = orderingBasis === "raw_marginal_gain" &&
+    walk.decisions.some(({ receipt }) => receipt.kind === "max_total_tokens");
+  if (witness.eligible_candidate_count !== walk.decisions.length ||
+      selectedCount > witness.k ||
+      tokenTotal > witness.top_k_token_cost_upper_bound ||
+      tokenTotal > witness.token_budget || tokenExclusionInSlackMode) {
+    throw new Error("Select_Gamma walk does not match its selection receipt");
+  }
+}
+
+export function isValidSelectGammaSelectionReceipt(
+  value: unknown
+): value is SelectGammaSelectionReceipt {
+  if (!record(value) || !record(value.witness)) return false;
+  const witness = value.witness;
+  if (!hasExactKeys(value, ["schema_version", "ordering_basis", "witness"]) ||
+      !hasExactKeys(witness, [
+        "kind",
+        "eligible_candidate_count",
+        "k",
+        "top_k_token_cost_upper_bound",
+        "token_budget"
+      ])) return false;
+  if (!nonNegativeInteger(witness.eligible_candidate_count) ||
+      !nonNegativeInteger(witness.k) ||
+      witness.k > witness.eligible_candidate_count ||
+      !nonNegativeFinite(witness.top_k_token_cost_upper_bound) ||
+      !nonNegativeFinite(witness.token_budget)) return false;
+  const expectedBasis = witness.top_k_token_cost_upper_bound <= witness.token_budget
+    ? "raw_marginal_gain" : "marginal_gain_per_token";
+  return value.schema_version === 1 &&
+    witness.kind === "static_top_k_token_bound" &&
+    value.ordering_basis === expectedBasis;
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[]
+): boolean {
+  const actual = Object.keys(value);
+  return actual.length === expected.length &&
+    actual.every((key) => expected.includes(key));
 }
 
 function assertDecisionIdentity(

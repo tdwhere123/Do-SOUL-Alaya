@@ -41,6 +41,9 @@ import {
   currentSnapshotSidecarFor
 } from "../snapshot/current-snapshot-fixture.js";
 import { sha256File } from "../../../bench/snapshot/integrity.js";
+import { gzipSync } from "node:zlib";
+import { missLedgerContentIdentity } from
+  "../../../bench/diagnostic-loop/miss-ledger-authority.js";
 
 export function digest(seed: string): string {
   return sha256Utf8(seed);
@@ -82,7 +85,12 @@ export function trackingAdapters(network: { calls: number } = { calls: 0 }): {
       calls.push(phase);
       const artifactPaths = trackingArtifactPaths(phase, context);
       return {
-        contentIdentity: digest(`${phase}:${context.request.datasetRevision}`),
+        contentIdentity: phase === "miss_ledger"
+          ? missLedgerContentIdentity(
+              context.checkpoints.get("control_recall"),
+              context.checkpoints.get("treatment_recall")
+            )
+          : digest(`${phase}:${context.request.datasetRevision}`),
         physicalCalls: 0,
         artifactPaths,
         details: phase === "control_recall" || phase === "treatment_recall"
@@ -118,10 +126,34 @@ async function trackingMissLedgerDetails(
   context: Parameters<DiagnosticLoopAdapters["preflight"]>[0],
   paths: Readonly<Record<string, string>>
 ) {
-  await writeFile(paths.missLedger!, "miss-ledger", "utf8");
+  const gate = {
+    schema_version: 1,
+    kind: "cached_f3_exposed_denominator_gate",
+    declared_minimum_rate: 1,
+    evaluated_count: 0,
+    exposed_count: 0,
+    actual_rate: 0,
+    passed: false
+  };
+  await writeFile(paths.missLedger!, `${JSON.stringify({
+    schema_version: 4,
+    kind: "diagnostic_100q_f0f2_vs_cached_f3",
+    physical_calls: 0,
+    five_hundred_q_closed: true,
+    control_misses: { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 },
+    treatment_misses: { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 },
+    membership_improved: [],
+    still_missing: [],
+    not_exercised: [],
+    inconclusive: [],
+    treatment_exposure_receipts: [],
+    causal_comparison_status: "inconclusive",
+    exposed_denominator_gate: gate
+  })}\n`, "utf8");
   return {
     ...sharedSubstrateIdentities(context),
-    artifact_sha256: await sha256File(paths.missLedger!)
+    artifact_sha256: await sha256File(paths.missLedger!),
+    exposed_denominator_gate: gate
   };
 }
 
@@ -130,7 +162,15 @@ async function trackingRecallDetails(
   paths: Readonly<Record<string, string>>
 ) {
   const keys = ["kpi", "report", "diagnostics"] as const;
-  await Promise.all(keys.map(async (key) => await writeFile(paths[key]!, key, "utf8")));
+  await Promise.all(keys.map(async (key) => await writeFile(
+    paths[key]!,
+    key === "diagnostics" ? gzipSync(JSON.stringify({
+      schema_version: 2,
+      kind: "recall_eval_diagnostics",
+      questions: []
+    })) : key,
+    key === "diagnostics" ? undefined : "utf8"
+  )));
   const hashes = await Promise.all(keys.map(async (key) => [
     key, await sha256File(paths[key]!)
   ] as const));
