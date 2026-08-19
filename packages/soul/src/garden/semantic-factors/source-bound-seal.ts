@@ -30,9 +30,9 @@ export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
 ] as const;
 
 export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 =
-  "6778430dcac6689a2f9e25d8b9aca6415f209a3965f859d2360cffcd53b8a6d3";
+  "d0337da9be44c6287e6591ca7f9663097c92bb7b8b658bc0b8ab6032e2aef990";
 export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
-  "6996c7148f9646322e2e060f5e9e4087ffde38c30efd679d1d1e0f645048b56a";
+  "30c496993934e941045d92bc6df716cee0a21a520200d660a2a01883225debec";
 
 export interface SourceBoundF3Seal {
   readonly schema_version: 1;

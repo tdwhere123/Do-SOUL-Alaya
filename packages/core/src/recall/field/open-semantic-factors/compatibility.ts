@@ -25,7 +25,7 @@ export type {
 } from "./argument-alignment.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID =
-  "open_semantic_factor_compatibility_v3";
+  "open_semantic_factor_compatibility_v4";
 
 export type OpenSemanticPropositionMatch = Readonly<{
   readonly query_proposition_id: string;

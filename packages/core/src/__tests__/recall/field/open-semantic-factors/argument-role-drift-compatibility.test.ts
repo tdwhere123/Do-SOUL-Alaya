@@ -82,7 +82,7 @@ describe("open semantic argument role drift compatibility", () => {
       .toMatchObject({ status: "incompatible", proposition_match_candidates: [] });
   });
 
-  it("rejects an internally consistent receipt from the prior alignment operator", () => {
+  it("rejects an internally consistent receipt from compatibility v3", () => {
     const evidenceCapture = formation(
       "evidence", "The user graduated with a bachelor degree and a degree.",
       evidenceGraph("degree")
@@ -95,18 +95,7 @@ describe("open semantic argument role drift compatibility", () => {
       evidence_capture: evidenceCapture,
       query_capture: queryCapture
     }));
-    Reflect.set(legacyReceipt, "operator_id", "open_semantic_factor_compatibility_v2");
-    for (const match of [
-      ...legacyReceipt.proposition_match_candidates,
-      ...legacyReceipt.proposition_matches
-    ]) {
-      for (const mapping of match.argument_mappings) {
-        if (mapping.binding_alignment_operator_id ===
-            "position_anchored_binding_group_v1") {
-          Reflect.set(mapping, "binding_alignment_operator_id", "semantic_position_v1");
-        }
-      }
-    }
+    Reflect.set(legacyReceipt, "operator_id", "open_semantic_factor_compatibility_v3");
     const { receipt_digest: _digest, ...legacyBody } = legacyReceipt;
     Reflect.set(legacyReceipt, "receipt_digest", digestRecallFieldIdentity(legacyBody));
 

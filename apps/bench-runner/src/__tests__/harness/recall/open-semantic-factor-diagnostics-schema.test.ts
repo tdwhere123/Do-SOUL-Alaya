@@ -8,16 +8,16 @@ import { digestRecallFieldIdentity } from
   "../../../../../../packages/core/src/recall/field/field-identity.js";
 
 describe("open semantic factor diagnostics schema cutover", () => {
-  it("accepts the v3 compatibility trace emitted by Core", () => {
+  it("accepts the v4 compatibility trace emitted by Core", () => {
     const trace = coreCompatibilityTrace();
 
     expect(trace.entries[0]?.receipt.operator_id)
-      .toBe("open_semantic_factor_compatibility_v3");
+      .toBe("open_semantic_factor_compatibility_v4");
     expect(OpenSemanticFactorCompatibilityTraceSchema.parse(trace)).toEqual(trace);
   });
 
-  it("rejects a resealed trace from the prior v2 alignment operator", () => {
-    const legacyTrace = resealAsLegacyV2(coreCompatibilityTrace());
+  it("rejects a resealed trace from the prior v3 compatibility operator", () => {
+    const legacyTrace = resealAsLegacyV3(coreCompatibilityTrace());
 
     expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(legacyTrace).success)
       .toBe(false);
@@ -43,21 +43,10 @@ function coreCompatibilityTrace() {
   });
 }
 
-function resealAsLegacyV2(trace: ReturnType<typeof coreCompatibilityTrace>) {
+function resealAsLegacyV3(trace: ReturnType<typeof coreCompatibilityTrace>) {
   const legacy = structuredClone(trace);
   const receipt = legacy.entries[0]!.receipt;
-  Reflect.set(receipt, "operator_id", "open_semantic_factor_compatibility_v2");
-  for (const match of [
-    ...receipt.proposition_match_candidates,
-    ...receipt.proposition_matches
-  ]) {
-    for (const mapping of match.argument_mappings) {
-      if (mapping.binding_alignment_operator_id ===
-          "position_anchored_binding_group_v1") {
-        Reflect.set(mapping, "binding_alignment_operator_id", "semantic_position_v1");
-      }
-    }
-  }
+  Reflect.set(receipt, "operator_id", "open_semantic_factor_compatibility_v3");
   const { receipt_digest: _receiptDigest, ...receiptBody } = receipt;
   Reflect.set(receipt, "receipt_digest", digestRecallFieldIdentity(receiptBody));
   const { trace_digest: _traceDigest, ...traceBody } = legacy;

@@ -68,6 +68,15 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       "same name for repeated parallel values"
     );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "every explicit, source-grounded participant of a relation"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "preserving the relation's stated arity and semantic order"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "never collapse a multi-participant relation into a unary proposition"
+    );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       `response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}`

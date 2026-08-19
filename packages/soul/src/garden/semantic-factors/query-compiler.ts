@@ -10,7 +10,7 @@ import { OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS } from
 import { pruneUnboundOpenSemanticFactorProposal } from "./proposal-normalizer.js";
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v2";
+  "open_semantic_factor_query_compiler_v3";
 
 const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
@@ -18,6 +18,8 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   "A variable surface is the exact query phrase that stands for an unknown, never a predicted answer.",
   "Every variable referenced by a proposition must appear in variables, and every result_variable_ids entry must reference one of those variables.",
   "Preserve each predicate's semantic argument order; relation-local binding names need not match source evidence graphs.",
+  "Place every WH phrase or other requested unknown as the structural variable in the exact predicate argument position it asks for; never append it as an extra argument or substitute it for a different participant.",
+  "Keep every explicit non-WH participant or constraint in its own position-preserving factor argument.",
   'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"buy","semantic_identity":"buy"}],"variables":[{"variable_id":"answer","surface":"What"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
 

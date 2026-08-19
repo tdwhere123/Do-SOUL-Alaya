@@ -86,6 +86,7 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
 const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
   'Use "semantic_factor_graph":{"schema_version":1,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
   'For a single atomic assertion, a minimal valid graph still has one predicate factor, one argument factor, and one proposition; never omit the graph or replace it with fact_frame.',
+  "Represent every explicit, source-grounded participant of a relation as its own factor argument, preserving the relation's stated arity and semantic order; never collapse a multi-participant relation into a unary proposition.",
   'Example structure only: {"factors":[{"factor_id":"f0","surface":"A","semantic_identity":"a"},{"factor_id":"f1","surface":"B","semantic_identity":"b"}],"variables":[],"result_variable_ids":[],"propositions":[{"proposition_id":"p0","predicate_factor_id":"f0","arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]}]}.',
   "Do not emit variables in evidence graphs.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS

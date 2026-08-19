@@ -93,13 +93,6 @@ function searchArgumentAlignments(params: Readonly<{
       mappings: [...params.mappings, mapped.mapping]
     });
   }
-  if (queryArgument.reference_kind === "variable" && candidates.length === 0) {
-    // Skip only answer slots with no evidence counterpart; do not drop mapped constraints.
-    searchArgumentAlignments({
-      ...params,
-      queryIndex: params.queryIndex + 1
-    });
-  }
 }
 
 function selectEvidenceArguments(

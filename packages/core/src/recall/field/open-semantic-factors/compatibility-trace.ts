@@ -3,6 +3,7 @@ import type { OpenSemanticFactorFormationCapture } from
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../field-identity.js";
 import {
+  OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID,
   materializeOpenSemanticFactorCompatibility,
   type OpenSemanticFactorCompatibilityReceipt
 } from "./compatibility.js";
@@ -108,6 +109,7 @@ export function verifyOpenSemanticFactorCompatibilityTrace(
     const unique = !evidenceIds.has(entry.evidence_id);
     evidenceIds.add(entry.evidence_id);
     return unique && entry.evidence_id.trim().length > 0 &&
+      entry.receipt.operator_id === OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID &&
       entry.receipt.query_capture_digest === trace.query_capture_digest &&
       digestRecallFieldIdentity(receiptBody) === entry.receipt.receipt_digest;
   });
@@ -171,4 +173,3 @@ function sealFromCapture(
   }
   return "none";
 }
-

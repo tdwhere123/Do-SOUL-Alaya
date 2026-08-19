@@ -140,6 +140,25 @@ describe("open semantic compatibility evaluation budget", () => {
     expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
   });
 
+  it("rejects a resealed trace containing a legacy v3 compatibility receipt", () => {
+    const query = queryGraph();
+    const current = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: { evidence: matchingEvidence() }
+    });
+    const legacy = resealNestedCompatibilityOperator(
+      current,
+      "open_semantic_factor_compatibility_v3"
+    );
+
+    expect(() => verifyOpenSemanticFactorCompatibilityTrace(legacy))
+      .toThrow("open semantic factor compatibility trace contract mismatch");
+    expect(() => materializeOpenSemanticFactorComposition({
+      trace: legacy,
+      query_capture: query
+    })).toThrow("open semantic factor compatibility trace contract mismatch");
+  });
+
   it("seals formed evidence against an unformed query from the query capture status", () => {
     const evidence = matchingEvidence();
     expect(evidence.status).toBe("formed");
@@ -204,6 +223,20 @@ function retargetSeal(
     ...nextBody,
     trace_digest: digestRecallFieldIdentity(nextBody)
   });
+}
+
+function resealNestedCompatibilityOperator(
+  trace: OpenSemanticFactorCompatibilityTrace,
+  operatorId: string
+): OpenSemanticFactorCompatibilityTrace {
+  const next = structuredClone(trace);
+  const receipt = next.entries[0]!.receipt;
+  Reflect.set(receipt, "operator_id", operatorId);
+  const { receipt_digest: _receiptDigest, ...receiptBody } = receipt;
+  Reflect.set(receipt, "receipt_digest", digestRecallFieldIdentity(receiptBody));
+  const { trace_digest: _traceDigest, ...traceBody } = next;
+  Reflect.set(next, "trace_digest", digestRecallFieldIdentity(traceBody));
+  return next;
 }
 
 function compatibleEvidenceIds(

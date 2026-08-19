@@ -98,7 +98,7 @@ describe("open semantic graded compatibility", () => {
     });
   });
 
-  it("does not zero a proposition when a query answer variable has no evidence counterpart", () => {
+  it("rejects a proposition when a query answer variable has no evidence counterpart", () => {
     const evidence = formation("evidence", "I used Atlas for research.", {
       schema_version: 1,
       source_kind: "evidence",
@@ -147,8 +147,8 @@ describe("open semantic graded compatibility", () => {
       evidence_capture: evidence,
       query_capture: query
     })).toMatchObject({
-      status: "compatible",
-      matched_query_proposition_count: 1
+      status: "incompatible",
+      matched_query_proposition_count: 0
     });
   });
 

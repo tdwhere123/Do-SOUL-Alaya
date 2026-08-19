@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -61,7 +61,39 @@ describe("query semantic factor cache", () => {
       });
 
       expect(loaded.binding.entry_count).toBe(1);
+      expect(loaded.binding.compiler_operator_id)
+        .toBe("open_semantic_factor_query_compiler_v3");
       expect(loaded.captures_by_source_text.get(sourceText)).toEqual(capture);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a legacy v2 compiler cache at the replay boundary", async () => {
+    const sourceText = "What do I use?";
+    const capture = materializeOpenSemanticFactorFormation({
+      source_kind: "query",
+      source_text: sourceText
+    });
+    const cache = createQuerySemanticFactorCache({
+      model_id: "test-model",
+      provider_url: "https://provider.invalid/v1",
+      entries: [{
+        source_text: sourceText,
+        source_sha256: capture.source_sha256!,
+        capture
+      }]
+    });
+    const legacy = structuredClone(cache);
+    Reflect.set(legacy, "compiler_operator_id", "open_semantic_factor_query_compiler_v2");
+    const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-cache-"));
+    const outputPath = join(root, "query-cache.json");
+    try {
+      await writeFile(outputPath, JSON.stringify(legacy), "utf8");
+      await expect(readQuerySemanticFactorCache({
+        path: outputPath,
+        required_source_texts: [sourceText]
+      })).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -19,6 +19,7 @@ describe("open semantic factor query compiler", () => {
 
     await expect(compiler.compile(QUERY)).resolves.toMatchObject(queryGraph());
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v3");
     expect(extractor.extract).toHaveBeenCalledWith(expect.objectContaining({
       systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
       userPrompt: JSON.stringify({
@@ -42,8 +43,20 @@ describe("open semantic factor query compiler", () => {
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
       "binding names need not match source evidence graphs"
     );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "Place every WH phrase or other requested unknown"
+    );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "exact predicate argument position it asks for"
+    );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "Keep every explicit non-WH participant or constraint"
+    );
     expect(request?.responseSchemaRetryInstruction).toContain(
       "Preserve each predicate's semantic argument order"
+    );
+    expect(request?.responseSchemaRetryInstruction).toContain(
+      "Place every WH phrase or other requested unknown"
     );
     expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
     expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
