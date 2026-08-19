@@ -58,6 +58,7 @@ export {
   OfficialApiGardenProvider,
   WallClockTimeoutError,
   withWallClockTimeout,
+  SignalExtractorError,
   createPiMonoExtractor,
   type SignalExtractor,
   auditOfficialApiSignalFormation,

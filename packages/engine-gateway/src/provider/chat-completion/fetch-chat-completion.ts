@@ -56,7 +56,7 @@ async function runProviderChatRequest(
   observeStatus(response.status);
   await throwIfHttpError(response);
   const bodyText = await readBody(response);
-  return inspectBody(bodyText, response.headers.get("content-type"), response.status);
+  return inspectBody(request, bodyText, response.headers.get("content-type"), response.status);
 }
 
 async function postChatCompletion(
@@ -98,12 +98,15 @@ async function readBody(response: Response): Promise<string> {
 }
 
 function inspectBody(
+  request: ProviderChatCompletionRequest,
   bodyText: string,
   contentType: string | null,
   httpStatus: number
 ): ProviderChatCompletionResult {
   try {
-    return inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus);
+    return inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus, {
+      sseCompletionPolicy: request.sseCompletionPolicy
+    });
   } catch (error) {
     throw new ProviderChatCompletionError(
       error instanceof Error ? error.message : "provider chat completion response inspect failed",
@@ -180,7 +183,7 @@ function normalizeTransportError(
   knownStatus: number | null
 ): Error {
   if (callerSignal?.aborted === true || requestSignal.aborted) {
-    return toAbortedError(error, knownStatus);
+    return toCancellationError(error, callerSignal, requestSignal, knownStatus);
   }
   if (error instanceof ProviderChatCompletionError) return error;
   return new ProviderChatCompletionError(
@@ -191,13 +194,23 @@ function normalizeTransportError(
   );
 }
 
-function toAbortedError(cause: unknown, knownStatus: number | null): ProviderChatCompletionError {
-  if (cause instanceof ProviderChatCompletionError && cause.kind === "aborted") {
+function toCancellationError(
+  cause: unknown,
+  callerSignal: AbortSignal | undefined,
+  requestSignal: AbortSignal,
+  knownStatus: number | null
+): ProviderChatCompletionError {
+  const kind = callerSignal?.aborted === true || requestSignal.reason === CALLER_ABORT
+    ? "aborted"
+    : "timeout";
+  if (cause instanceof ProviderChatCompletionError && cause.kind === kind) {
     return cause;
   }
   return new ProviderChatCompletionError(
-    "provider chat completion aborted",
-    "aborted",
+    kind === "timeout"
+      ? "provider chat completion timed out"
+      : "provider chat completion aborted",
+    kind,
     cause instanceof ProviderChatCompletionError ? cause.httpStatus : knownStatus,
     { cause }
   );

@@ -36,6 +36,8 @@ import {
 } from "../../../../bench/extraction/content-closure.js";
 import { buildExtractionTransportProvenance } from
   "../../../../bench/extraction/transport-route.js";
+import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
+  "../extraction-cache-test-fixture.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
@@ -473,6 +475,7 @@ function writeShard(cacheRoot: string, cacheKey: string): void {
     raw_json: rawJson,
     transport_provenance: buildExtractionTransportProvenance({
       providerUrl: "https://example.test/v1", model
-    })
+    }),
+    response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
   }), "utf8");
 }

@@ -1,4 +1,4 @@
-import { fetchProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
+import { executeProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
 import { assertSourceBoundF3SealCurrent } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { requireProviderBinding, resolveVendorModel } from "./catalog.js";
@@ -42,7 +42,7 @@ export async function probeProviderProtocol(
   };
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
-  const result = await fetchProviderChatCompletion({
+  const execution = await executeProviderChatCompletion({
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,
     model,
@@ -54,6 +54,9 @@ export async function probeProviderProtocol(
     timeoutMs: 20_000,
     maxOutputTokens: 256,
     fetchImpl
+  }, {
+    maxRetries: 0,
+    retryDelaysMs: []
   });
   if (physicalCalls === 0) {
     throw new Error("provider protocol probe made no physical call");
@@ -63,9 +66,9 @@ export async function probeProviderProtocol(
     model,
     framing,
     physical_calls: physicalCalls,
-    json_object: result.text.trim().startsWith("{"),
-    usage_present: result.usage !== undefined,
-    finish_reason: result.finishReason,
+    json_object: execution.result.text.trim().startsWith("{"),
+    usage_present: execution.result.usage !== undefined,
+    finish_reason: execution.result.finishReason,
     f3_seal_current: true
   };
 }

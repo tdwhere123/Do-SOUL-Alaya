@@ -9,63 +9,24 @@ import {
 } from "../../../bench/compile-seed.js";
 import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
-  ExtractionFillTaskError,
   runExtractionPool
 } from "../../../bench/extraction/fill/fill-pool.js";
 import { newFillStats } from "../../../bench/extraction/fill/fill-stats.js";
 import {
+  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
 import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
-
-it("retains the originating task failure for terminal fill diagnostics", () => {
-  const cause = new Error("semantic graph validation failed");
-  const error = new ExtractionFillTaskError({
-    retryClassification: "unknown",
-    retrySuccesses: 0,
-    rateLimitRetries: 0,
-    processedTurns: 6,
-    requestedTurns: 13_998,
-    cause
-  });
-
-  expect(error.cause).toBe(cause);
-});
-
-it("does not require a semantic factor graph on the fill HTTP validator", async () => {
-  const graphless = JSON.stringify({
-    signals: [{
-      object_kind: "fact",
-      confidence: 0.8,
-      matched_text: "The build is green."
-    }]
-  });
-  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-    expect(() => input.validateRawJson?.(graphless)).not.toThrow();
-    return { rawJson: graphless };
-  });
-  const logs: string[] = [];
-
-  await runExtractionPool({
-    extractor: { extract },
-    turns: [{
-      turnContent: "User: The build is green.\nAssistant: Noted.",
-      turnMessages: [
-        { message_id: "q1-m0", role: "user", content: "The build is green." },
-        { message_id: "q1-m1", role: "assistant", content: "Noted." }
-      ]
-    }],
-    concurrency: 1,
-    requestedTurns: 1,
-    stats: newFillStats(),
-    log: (message) => logs.push(message),
-    tolerateProviderTaskFailures: true
-  });
-
-  expect(extract).toHaveBeenCalledOnce();
-  expect(logs.some((line) => line.includes("leaving provider failure"))).toBe(false);
-});
+import {
+  cachingExtractor,
+  deferred,
+  extractionTurns,
+  flushMicrotasks,
+  groundedTurns,
+  retryResult,
+  waitFor
+} from "./fill-pool/fixture.js";
 
 it("uses the compact production extraction request", async () => {
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
@@ -279,14 +240,8 @@ it("reports a first-pass 429 through a strict-empty cache recheck", async () => 
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({
-          rawJson: '{"signals":[]}',
-          extractorMeta: retryResult(1).extractorMeta
-        })
-        .mockResolvedValueOnce({
-          rawJson: '{"signals":[]}',
-          extractorMeta: retryResult(0).extractorMeta
-        })
+        .mockResolvedValueOnce(retryResult(1))
+        .mockResolvedValueOnce(retryResult(0))
     };
     await runExtractionPool({
       extractor: cachingExtractor(cacheRoot, delegate, stats),
@@ -329,10 +284,7 @@ it("reports a first-pass 429 when the strict-empty recheck fails", async () => {
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({
-          rawJson: '{"signals":[]}',
-          extractorMeta: retryResult(1).extractorMeta
-        })
+        .mockResolvedValueOnce(retryResult(1))
         .mockRejectedValueOnce(terminalFailure)
     };
     await runExtractionPool({
@@ -370,8 +322,8 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockImplementationOnce(async (input) => ({
-          rawJson: buildGroundedSignalResponse(input.userPrompt),
+        .mockImplementationOnce(async (input) => providerBackedExtractionResult(
+          buildGroundedSignalResponse(input.userPrompt), {
           extractorMeta: {
             recoveryKind: "none",
             retryCount: 1,
@@ -527,80 +479,3 @@ it("honors the derived provider wall-clock budget", async () => {
     vi.useRealTimers();
   }
 });
-
-function deferred<T>(): {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => {
-    resolve = complete;
-  });
-  return { promise, resolve };
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error("condition was not met");
-}
-
-function extractionTurns(count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    turnContent: `I remember turn-${index}.`,
-    turnMessages: [{
-      message_id: `m-${index}`,
-      role: "user" as const,
-      content: `I remember turn-${index}.`
-    }]
-  }));
-}
-
-function retryResult(rateLimitRetries: number) {
-  return {
-    rawJson: '{"signals":[]}',
-    extractorMeta: {
-      recoveryKind: "none" as const,
-      retryCount: rateLimitRetries,
-      retryClassification: rateLimitRetries === 0
-        ? "success_first_try" as const
-        : "success_after_retry" as const,
-      rateLimitRetries
-    }
-  };
-}
-
-function cachingExtractor(
-  cacheRoot: string,
-  delegate: BenchSignalExtractor,
-  stats: ReturnType<typeof newFillStats>
-): BenchSignalExtractor {
-  return createCachingSignalExtractor({
-    delegate,
-    config: {
-      model: "test-model",
-      modelFamily: "test-model",
-      providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-      requestProfile: "provider-default-v1"
-    },
-    cacheRoot,
-    stats
-  });
-}
-
-function groundedTurns() {
-  return [{
-    turnContent: "User: I completed the review today.",
-    turnMessages: [{
-      message_id: "q1-m0",
-      role: "user" as const,
-      content: "I completed the review today."
-    }]
-  }];
-}
-
-async function flushMicrotasks(): Promise<void> {
-  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
-}

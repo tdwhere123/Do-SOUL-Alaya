@@ -10,6 +10,7 @@ import { runExtractionFill } from
   "../../../../../bench/extraction/extraction-fill.js";
 import type { LongMemEvalQuestion } from
   "../../../../../longmemeval/ingestion/dataset.js";
+import { providerBackedExtractionResult } from "../../fixture.js";
 
 const CRASH_CHILD_ENV = "ALAYA_TEST_CATALOG_REFILL_CRASH_CHILD";
 const FAILPOINT_ENV = "ALAYA_TEST_CATALOG_REFILL_SIGKILL_AFTER";
@@ -48,7 +49,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
       await input.onTransportAttempt?.();
       calls += 1;
       if (calls === 2) throw fixture.providerTimeoutFailure();
-      return { rawJson: fixture.groundedResponse(input.userPrompt) };
+      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
     });
     const roots = fixture.roots();
     await expect(runExtractionFill({
@@ -61,7 +62,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     const staleResumeBytes = readFileSync(join(roots.cacheRoot, resumeName));
     const fillExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: fixture.groundedResponse(input.userPrompt) };
+      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
     });
     const completed = await runExtractionFill({
       variant: fixture.variant, ...roots,
@@ -112,7 +113,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       expect(fixture.controlArtifacts(".catalog-refill-resume.")).toHaveLength(1);
       await input.onTransportAttempt?.();
-      return { rawJson: fixture.groundedResponse(input.userPrompt) };
+      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
     });
 
     const result = await runExtractionFill({
@@ -150,7 +151,7 @@ export function registerCatalogRefillCrashChild(
       await request.onTransportAttempt?.();
       calls += 1;
       if (input.mode === "provider-failure" && calls === 2) throw providerTimeoutFailure();
-      return { rawJson: groundedResponse(request.userPrompt) };
+      return providerBackedExtractionResult(groundedResponse(request.userPrompt));
     };
     await runExtractionFill({
       variant, concurrency: 1, cacheRoot: input.cacheRoot, dataDir: input.dataDir,

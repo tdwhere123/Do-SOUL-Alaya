@@ -32,6 +32,7 @@ const PROVIDER_FAILURE_PHASE: Record<ProviderTransportFailureKind, BenchTranspor
   http_error: "response_status",
   body_read_error: "response_body",
   response_parse_error: "response_parse",
+  timeout: "request",
   aborted: "request"
 };
 

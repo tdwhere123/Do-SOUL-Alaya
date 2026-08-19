@@ -323,7 +323,7 @@ function persistExtraction(
       ...(providerBacked ? {
         transport_provenance: buildExtractionTransportProvenance(options.config)
       } : {}),
-      ...persistedResponseMetadata(result.responseMetadata, result.usage)
+      ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked)
     });
   } catch (cause) {
     throw new ExtractionCacheInvariantError(

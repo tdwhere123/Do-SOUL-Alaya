@@ -22,6 +22,7 @@ import {
   buildGroundedSignalResponse,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -44,9 +45,9 @@ describe("runExtractionFill", () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
-      rawJson: buildGroundedSignalResponse(input.userPrompt)
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const factory = (): BenchSignalExtractor => ({ extract });
 
     const first = await runExtractionFill({
@@ -99,7 +100,7 @@ describe("runExtractionFill", () => {
       builder: "test"
     });
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -133,7 +134,7 @@ describe("runExtractionFill", () => {
     );
     mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
     const liveWriter = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[]}' }) },
+      delegate: { extract: async () => providerBackedExtractionResult('{"signals":[]}') },
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
         providerUrl: "https://fixture-provider.invalid/v1",
@@ -153,9 +154,9 @@ describe("runExtractionFill", () => {
       buildQuestion("q002", "I remember two.", "I prefer decoy two."),
       buildQuestion("q003", "I remember three.", "I prefer decoy three.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
-      rawJson: buildGroundedSignalResponse(input.userPrompt)
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const result = await runExtractionFill({
       variant: VARIANT,
       limit: 1,

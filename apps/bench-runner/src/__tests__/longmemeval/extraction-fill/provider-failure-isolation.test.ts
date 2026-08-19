@@ -27,6 +27,7 @@ import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -120,7 +121,9 @@ describe("authority-bound provider failure isolation", () => {
       await input.onTransportAttempt?.();
       const turn = readTurnContent(input.userPrompt);
       if (turn.includes("provider-failure")) throw nonRetryable4xx();
-      return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt)
+      );
     });
 
     const result = await runExtractionFill({

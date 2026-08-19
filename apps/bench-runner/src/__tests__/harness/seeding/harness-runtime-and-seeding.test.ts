@@ -22,7 +22,10 @@ import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
 } from "../../../bench/compile-seed.js";
-import { writeExtractionCacheTestManifest } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
+import {
+  TEST_PROVIDER_COMPLETION_METADATA,
+  writeExtractionCacheTestManifest
+} from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
@@ -298,7 +301,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
-            })
+            }),
+            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
           })
         })
       });
@@ -408,7 +412,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   }
                 }
               ].map(withOpenSemanticFactorGraph)
-            })
+            }),
+            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
           })
         })
       });

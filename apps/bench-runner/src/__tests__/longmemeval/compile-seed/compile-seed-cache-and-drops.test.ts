@@ -29,6 +29,7 @@ import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
+  providerBackedResult,
   makeSeed,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
@@ -62,7 +63,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       distilled: "The user moved to Berlin."
     }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson }))
+      extract: vi.fn(async () => providerBackedResult(rawJson))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -149,8 +150,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({ rawJson: firstRaw })
-        .mockResolvedValueOnce({ rawJson: secondRaw })
+        .mockResolvedValueOnce(providerBackedResult(firstRaw))
+        .mockResolvedValueOnce(providerBackedResult(secondRaw))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -243,6 +244,7 @@ describe("bench evidence capsule — production-faithful span", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([{
             matched: "I moved to Berlin",
             distilled: "Alice lives in Berlin."

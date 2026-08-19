@@ -7,6 +7,13 @@ export const PROVIDER_REQUEST_PROFILES = [
 export type ProviderRequestProfile = (typeof PROVIDER_REQUEST_PROFILES)[number];
 export type ProviderChatMode = "json" | "sse";
 export type ProviderOutputTokenField = "max_tokens" | "max_completion_tokens";
+export type ProviderSseCompletionPolicy = "require_witness" | "allow_clean_eof_v1";
+
+export type ProviderCompletionWitness = Readonly<{
+  readonly mode: "json" | "sse";
+  readonly complete: true;
+  readonly witness: "message" | "done_sentinel" | "finish_reason" | "profile_clean_eof";
+}>;
 
 export type ProviderChatCompletionRequest = Readonly<{
   readonly providerUrl: string;
@@ -22,6 +29,8 @@ export type ProviderChatCompletionRequest = Readonly<{
   readonly jsonObject?: boolean;
   readonly maxOutputTokens?: number;
   readonly outputTokenField?: ProviderOutputTokenField;
+  /** Versioned compatibility authority for providers documented to omit SSE sentinels. */
+  readonly sseCompletionPolicy?: ProviderSseCompletionPolicy;
   readonly fetchImpl?: typeof fetch;
 }>;
 
@@ -36,4 +45,5 @@ export type ProviderChatCompletionResult = Readonly<{
   readonly finishReason: string | null;
   readonly usage?: ProviderUsage;
   readonly httpStatus: number;
+  readonly completion?: ProviderCompletionWitness;
 }>;

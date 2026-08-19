@@ -18,6 +18,7 @@ import {
   signalsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
 import {
+  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
@@ -108,7 +109,7 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: TURN_RESPONSE }))
+      extract: vi.fn(async () => providerBackedExtractionResult(TURN_RESPONSE))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -137,7 +138,7 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: TURN_RESPONSE }))
+      extract: vi.fn(async () => providerBackedExtractionResult(TURN_RESPONSE))
     };
     const writer = createCachingSignalExtractor({
       delegate,
@@ -169,7 +170,7 @@ describe("single-source extraction model", () => {
       model: CONFIG.model,
       systemPrompt: "sys"
     });
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
     const extractor = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: { ...CONFIG, requestProfile: "deepseek-v4-nonthinking-v1" },
@@ -185,7 +186,7 @@ describe("single-source extraction model", () => {
 
   it("fails closed on a cache miss when live extraction is disabled", async () => {
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -209,7 +210,7 @@ describe("single-source extraction model", () => {
     mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
     writeFileSync(cacheFilePath(cacheRoot, cacheKey), "{torn", "utf8");
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     };
     const extractor = createCachingSignalExtractor({
       delegate,

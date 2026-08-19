@@ -18,13 +18,41 @@ export function createProductionDiagnosticLoopAdapters(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): DiagnosticLoopAdapters {
   return {
-    preflight: (context) => Promise.resolve(runPreflightPhase(context, env)),
-    authority_cache: (context) => Promise.resolve(runAuthorityCachePhase(context)),
-    extraction: (context) => Promise.resolve(proveCacheOnlyExtraction(context.request)),
-    snapshot: runProductionSnapshotPhase,
-    control_recall: (context) => runProductionRecallPhase(context, "control"),
-    treatment_recall: (context) => runProductionRecallPhase(context, "treatment"),
-    miss_ledger: runProductionMissLedgerPhase
+    preflight: credentialless(env, (context) => runPreflightPhase(context, env)),
+    authority_cache: credentialless(env, runAuthorityCachePhase),
+    extraction: credentialless(env, (context) => proveCacheOnlyExtraction(context.request)),
+    snapshot: credentialless(env, runProductionSnapshotPhase),
+    control_recall: credentialless(
+      env, (context) => runProductionRecallPhase(context, "control")
+    ),
+    treatment_recall: credentialless(
+      env, (context) => runProductionRecallPhase(context, "treatment")
+    ),
+    miss_ledger: credentialless(env, runProductionMissLedgerPhase)
+  };
+}
+
+function credentialless(
+  env: Readonly<Record<string, string | undefined>>,
+  handler: (
+    context: DiagnosticLoopPhaseContext
+  ) => DiagnosticLoopPhaseResult | Promise<DiagnosticLoopPhaseResult>
+) {
+  return async (context: DiagnosticLoopPhaseContext): Promise<DiagnosticLoopPhaseResult> => {
+    assertCacheOnlyEnvironment(env);
+    const result = await handler(context);
+    if (result.physicalCalls !== 0) {
+      throw new Error("credentialless diagnostic phase reported provider calls");
+    }
+    return {
+      ...result,
+      noProviderCallReceipt: {
+        schema_version: 1,
+        kind: "credentialless_environment",
+        provider_port: "absent",
+        physical_calls: 0
+      }
+    };
   };
 }
 

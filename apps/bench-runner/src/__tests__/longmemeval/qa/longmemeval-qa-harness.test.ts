@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateQaVerdicts,
   buildQaAnswerContext,
@@ -11,9 +11,15 @@ import {
   QA_ENV_API_KEY,
   QA_ENV_MODEL,
   QA_ENV_PROVIDER_URL,
+  QaChatError,
   createGardenChatFn,
   resolveQaChatConfig
 } from "../../../bench/qa/qa-chat.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 // A fake chat fn that records every (system,user) call and replays scripted
 // replies. Zero network, zero cost — the whole point of the --qa unit gate.
@@ -323,3 +329,56 @@ describe("resolveQaChatConfig (env gating)", () => {
     expect(typeof fn).toBe("function");
   });
 });
+
+describe("createGardenChatFn provider execution", () => {
+  it("preserves the five-attempt policy for declared transient statuses", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(qaChatResponse("answer"));
+    const pending = createGardenChatFn(qaConfig())("system", "user");
+
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBe("answer");
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it("maps exhausted transient transport to QaChatError", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    const pending = createGardenChatFn(qaConfig())("system", "user");
+    const assertion = expect(pending).rejects.toBeInstanceOf(QaChatError);
+
+    await vi.runAllTimersAsync();
+
+    await assertion;
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps nonretryable HTTP failure plain and performs one call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("unauthorized", { status: 401 })
+    );
+    const error = await createGardenChatFn(qaConfig())("system", "user")
+      .then(() => null, (cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(QaChatError);
+    expect((error as Error).message).toBe("garden chat HTTP 401");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+});
+
+function qaConfig() {
+  return { url: "https://provider.example/v1", apiKey: "sk-test", model: "qa-model" };
+}
+
+function qaChatResponse(content: string): Response {
+  return new Response(JSON.stringify({
+    choices: [{ message: { content }, finish_reason: "stop" }]
+  }), { headers: { "content-type": "application/json" } });
+}

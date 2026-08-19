@@ -21,6 +21,7 @@ import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion as buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -41,7 +42,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath, preservedPath] = shardPaths();
@@ -50,10 +53,10 @@ describe("strict JSON repair authority runtime", () => {
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return {
-        rawJson: buildGroundedSignalResponse(input.userPrompt),
-        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 }
-      };
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt),
+        { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
+      );
     });
 
     const result = await runExtractionFill({
@@ -87,7 +90,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [mutatedPath, untouchedPath] = shardPaths();
@@ -96,10 +101,10 @@ describe("strict JSON repair authority runtime", () => {
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return {
-        rawJson: buildGroundedSignalResponse(input.userPrompt),
-        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 }
-      };
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt),
+        { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
+      );
     });
 
     const result = await runExtractionFill({
@@ -153,7 +158,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath, preservedPath] = shardPaths();
@@ -185,7 +192,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();
@@ -226,7 +235,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();
@@ -263,7 +274,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();

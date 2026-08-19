@@ -11,6 +11,7 @@ export type ProviderTransportFailureKind =
   | "http_error"
   | "body_read_error"
   | "response_parse_error"
+  | "timeout"
   | "aborted";
 
 export class ProviderChatCompletionError extends Error {

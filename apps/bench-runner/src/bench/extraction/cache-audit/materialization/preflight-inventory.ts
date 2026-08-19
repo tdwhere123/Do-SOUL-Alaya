@@ -123,7 +123,8 @@ function inspectShardBytes(
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
     inspectCachedResponseMetadata(
-      parsed.response_metadata as CachedExtractionResponseMetadata | undefined
+      parsed.response_metadata as CachedExtractionResponseMetadata | undefined,
+      parsed.transport_provenance !== undefined
     );
     const content = inspectExtractionRawJson(rawJson);
     return Object.freeze({ cacheKey, status: "hit", ...content });

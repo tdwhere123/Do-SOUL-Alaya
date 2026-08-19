@@ -8,6 +8,8 @@ import { readValidLedgerShard } from
   "../../../../../bench/extraction/authority/attempt-ledger-shards.js";
 import { buildExtractionTransportProvenance } from
   "../../../../../bench/extraction/transport-route.js";
+import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
+  "../../extraction-cache-test-fixture.js";
 
 describe("attempt ledger raw observation validation", () => {
   let root: string | undefined;
@@ -32,7 +34,8 @@ describe("attempt ledger raw observation validation", () => {
       extracted_at: new Date(0).toISOString(),
       transport_provenance: buildExtractionTransportProvenance({
         providerUrl: "https://example.test/v1", model: "model"
-      })
+      }),
+      response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
     });
 
     expect(inspectCachedExtraction(

@@ -6,6 +6,13 @@ import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-s
 import { proveCacheOnlyExtraction } from "../../../bench/diagnostic-loop/cache-only.js";
 import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
 import { digest, loopRequest } from "./fixture.js";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { computeSourceTurnCacheKey } from
+  "../../../bench/compile-seed/compile-seed-cache.js";
+import { computeSystemPromptSha256 } from
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { writeCompletedExtractionCacheFixture } from
+  "../extraction/completed-extraction-cache-fixture.js";
 
 const roots: string[] = [];
 
@@ -27,20 +34,25 @@ describe("cache-only extraction proof", () => {
 
   it("proves zero physical calls when every requested key is present", async () => {
     const cacheRoot = await tempRoot();
-    const key = digest("present");
-    writeCachedExtraction(cacheRoot, key, {
-      model: "mimo-v2.5",
-      request_profile: "mimo-v2.5-nonthinking-v1",
-      cache_key: key,
-      raw_json: "{\"signals\":[]}",
-      extracted_at: "2026-08-17T00:00:00.000Z"
+    const model = "test-extraction-model";
+    const key = computeSourceTurnCacheKey(
+      model, "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: "turn" }
+    );
+    writeCompletedExtractionCacheFixture({
+      cacheRoot,
+      turnContents: ["turn"],
+      datasetRevision: digest("dataset"),
+      windowOffset: 0,
+      windowLimit: 1,
+      model
     });
 
     const result = proveCacheOnlyExtraction(loopRequest({
       extractionCacheRoot: cacheRoot,
       requestedKeys: [key],
-      model: "mimo-v2.5",
-      requestProfile: "mimo-v2.5-nonthinking-v1"
+      model,
+      requestProfile: "provider-default-v1",
+      promptDigest: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT)
     }));
 
     expect(result.physicalCalls).toBe(0);

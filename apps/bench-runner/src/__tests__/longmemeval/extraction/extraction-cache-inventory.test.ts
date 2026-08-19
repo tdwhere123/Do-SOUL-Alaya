@@ -5,8 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cacheFilePath } from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   hashExtractionCacheInventory,
-  inspectExtractionCacheInventory
+  inspectExtractionCacheInventory,
+  type ExtractionCacheInventory
 } from "../../../bench/extraction/cache-audit/inventory.js";
+import { inspectBoundedMaterializationInventory } from
+  "../../../bench/extraction/cache-audit/materialization/preflight-inventory.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -120,6 +123,34 @@ describe("extraction cache inventory", () => {
     });
   });
 
+  it("materialization rejects provider-backed legacy completion metadata", () => {
+    const root = cacheRoot();
+    const key = "f".repeat(64);
+    writeShard(root, key, JSON.stringify({ signals: [] }), {
+      finish_reason: "stop"
+    }, true);
+    const audited: ExtractionCacheInventory = {
+      shards: [{ cacheKey: key, status: "hit" }],
+      orphanKeys: [], retiredKeys: [], controlArtifactPaths: [], unexpectedPaths: [],
+      counts: { expected: 1, hit: 1, missing: 0, invalid: 0, orphan: 0 }
+    };
+
+    const inspected = inspectBoundedMaterializationInventory({
+      sourceRoot: root,
+      audited,
+      model,
+      requestProfile,
+      maxShardBytes: 1024 * 1024
+    });
+
+    expect(inspected.inventory.shards[0]).toMatchObject({
+      cacheKey: key,
+      status: "invalid",
+      reason: expect.stringContaining("lacks versioned completion authority")
+    });
+    expect(inspected.descriptors).toEqual([]);
+  });
+
   it("rejects a symlinked cache root rather than following it", () => {
     const root = cacheRoot();
     const link = `${root}-link`;
@@ -163,7 +194,8 @@ function writeShard(
   root: string,
   cacheKey: string,
   rawJson = JSON.stringify({ signals: [] }),
-  responseMetadata?: unknown
+  responseMetadata?: unknown,
+  providerBacked = false
 ): void {
   const path = cacheFilePath(root, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
@@ -172,6 +204,12 @@ function writeShard(
     model,
     request_profile: requestProfile,
     raw_json: rawJson,
-    ...(responseMetadata === undefined ? {} : { response_metadata: responseMetadata })
+    ...(responseMetadata === undefined ? {} : { response_metadata: responseMetadata }),
+    ...(providerBacked ? {
+      transport_provenance: {
+        provider_url_sha256: `sha256:${"a".repeat(64)}`,
+        model
+      }
+    } : {})
   }), "utf8");
 }

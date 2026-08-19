@@ -50,7 +50,10 @@ import {
   CREDENTIALLED_CONFIG,
   signalsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import {
+  providerBackedExtractionResult,
+  writeExtractionCacheTestManifest
+} from "../extraction/extraction-cache-test-fixture.js";
 import {
   SOURCE_EVIDENCE_USER_CONTENT,
   sourceEvidenceCorpus,
@@ -340,12 +343,10 @@ async function seedFixture(
     requiredExtractionTurns: keySpace.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 1 },
     extractorFactory: () => ({
-      extract: async () => ({
-        rawJson: signalsEnvelope([{
+      extract: async () => providerBackedExtractionResult(signalsEnvelope([{
           matched: "I check the platform near the main entrance.",
           distilled: "The user checks the platform near the main entrance."
-        }])
-      })
+        }]))
     })
   });
   const workspace = { ...daemon, detach: async () => undefined };

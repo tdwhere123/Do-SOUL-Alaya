@@ -2,31 +2,12 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 
 export type SignalExtractorErrorKind = "timeout" | "transport_failure" | "invalid_json";
 
-// invariant: a closed enum so the bench / dump consumers (compute-provider
-// dumpInvalidResponseDiagnostic, compile-seed dumpSeedExtractionFailureDiagnostic,
-// seed-extraction-blocker) can branch on the terminal outcome without
-// re-deriving it from retryCount + kind.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-//   createGardenHttpExtractor mirrors this classification for the bench HTTP
-//   transport that does not go through this file.
-export type RetryClassification =
-  | "success_first_try"
-  | "success_after_retry"
-  | "failure_max_retries"
-  | "failure_non_retryable_4xx"
-  | "failure_non_retryable_response"
-  | "failure_timeout"
-  | "failure_aborted";
-
 export class SignalExtractorError extends AlayaError {
-  // invariant: retryCount on the thrown error reflects the attempt index at
-  // the moment the failure escaped (0 = first attempt threw and was not
-  // retried, e.g. a 4xx auth fail; N = first attempt failed, retried N
-  // times, all attempts still failed). retryClassification labels which
-  // branch of the retry policy terminated.
+  // Retry metadata is an opaque receipt from the transport port. Soul does
+  // not define or infer the provider retry vocabulary.
   public readonly kind: SignalExtractorErrorKind;
   public readonly retryCount: number;
-  public readonly retryClassification: RetryClassification;
+  public readonly retryClassification: string;
 
   public constructor(
     kind: SignalExtractorErrorKind,
@@ -34,13 +15,13 @@ export class SignalExtractorError extends AlayaError {
     options?: {
       readonly cause?: unknown;
       readonly retryCount?: number;
-      readonly retryClassification?: RetryClassification;
+      readonly retryClassification?: string;
     }
   ) {
     super(kind, message, options);
     this.name = "SignalExtractorError";
     this.kind = kind;
     this.retryCount = options?.retryCount ?? 0;
-    this.retryClassification = options?.retryClassification ?? "failure_max_retries";
+    this.retryClassification = options?.retryClassification ?? "failure_consumer";
   }
 }

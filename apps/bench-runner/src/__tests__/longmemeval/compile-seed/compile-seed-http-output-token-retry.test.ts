@@ -30,7 +30,9 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(prompts[1]).toContain("merge overlapping or entailed catalog assertions");
     expect(result.responseMetadata).toEqual({
       finishReason: "stop",
-      maxOutputTokens: 32_768
+      maxOutputTokens: 32_768,
+      completionContractVersion: 1,
+      completionWitness: "done_sentinel"
     });
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
   });
@@ -71,7 +73,9 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestTokenCaps(fetchMock)).toEqual([2_048, 2_048, 2_048, 32_768]);
     expect(result.responseMetadata).toEqual({
       finishReason: "stop",
-      maxOutputTokens: 32_768
+      maxOutputTokens: 32_768,
+      completionContractVersion: 1,
+      completionWitness: "done_sentinel"
     });
   });
 
@@ -130,6 +134,11 @@ describe("createGardenHttpExtractor output-token retries", () => {
     expect(requestAssertionIds(fetchMock)).toEqual([[1, 2, 3], [1, 2], [1], [2], [3]]);
     expect(JSON.parse(result.rawJson)).toEqual({
       signals: [signal(1, "alpha"), signal(2, "beta"), signal(3, "gamma")]
+    });
+    expect(result.responseMetadata).toEqual({
+      finishReason: null,
+      completionContractVersion: 1,
+      completionWitness: "partition_composition"
     });
     expect(result.extractorMeta).toMatchObject({
       retryCount: 2,

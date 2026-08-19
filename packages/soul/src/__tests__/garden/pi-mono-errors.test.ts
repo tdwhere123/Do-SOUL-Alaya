@@ -10,7 +10,7 @@ describe("SignalExtractorError", () => {
     expect(error.kind).toBe("timeout");
     expect(error.message).toBe("extractor timed out");
     expect(error.retryCount).toBe(0);
-    expect(error.retryClassification).toBe("failure_max_retries");
+    expect(error.retryClassification).toBe("failure_consumer");
   });
 
   it("preserves provided retry metadata and cause", () => {

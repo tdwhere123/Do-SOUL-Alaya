@@ -34,6 +34,9 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("longmemeval [--variant");
     expect(stdoutBuf).toContain("locomo [--limit");
     expect(stdoutBuf).toContain("provider-preflight");
+    expect(stdoutBuf).toContain(
+      "provider-preflight --mode replay --request-manifest <json>"
+    );
     expect(stdoutBuf).toContain("s       longmemeval_s (operator bench)");
     expect(stdoutBuf).not.toContain("controlled-replay");
     expect(stdoutBuf).not.toContain("longmemeval-multiturn");

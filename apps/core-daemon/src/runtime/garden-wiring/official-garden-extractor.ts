@@ -1,11 +1,14 @@
 import {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
-  fetchProviderChatCompletion,
+  executeProviderChatCompletion,
   normalizeProviderBaseUrl,
+  providerExecutionFailureOf,
+  ProviderChatCompletionError,
   type ProviderRequestProfile
 } from "@do-soul/alaya-engine-gateway";
 import {
   createPiMonoExtractor,
+  SignalExtractorError,
   type SignalExtractor
 } from "@do-soul/alaya-soul";
 
@@ -25,6 +28,8 @@ const VENDOR_MODEL_ALIASES: readonly VendorModelAlias[] = [
   }
 ];
 
+const OFFICIAL_GARDEN_MAX_RETRIES = 3;
+
 export function createOfficialGardenExtractor(input: Readonly<{
   readonly apiKey: string;
   readonly model: string;
@@ -40,7 +45,7 @@ export function createOfficialGardenExtractor(input: Readonly<{
     model: input.model,
     ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
     complete: async (model, context, options) => {
-      const result = await fetchProviderChatCompletion({
+      const execution = await executeProviderChatCompletion({
         providerUrl: model.baseUrl || providerUrl,
         apiKey: options?.apiKey ?? input.apiKey,
         model: resolveVendorModelAlias(model.id).id,
@@ -52,11 +57,36 @@ export function createOfficialGardenExtractor(input: Readonly<{
         mode: "json",
         jsonObject: true,
         ...(profile === undefined ? {} : { profile })
+      }, {
+        maxRetries: OFFICIAL_GARDEN_MAX_RETRIES,
+        retryDelaysMs: [],
+        retryJitter: { baseMs: 250, maxMs: 1_500, random: Math.random },
+        maxTimeoutRetries: 1,
+        retryNetworkErrors: true,
+        retryBodyReadErrors: true
+      }).catch((error: unknown) => {
+        throw toSignalExtractorTransportError(error);
       });
       return {
-        content: [{ type: "text", text: result.text }]
+        content: [{ type: "text", text: execution.result.text }],
+        executionMeta: {
+          retryCount: execution.retryCount,
+          retryClassification: execution.retryClassification
+        }
       };
     }
+  });
+}
+
+function toSignalExtractorTransportError(error: unknown): SignalExtractorError {
+  const execution = providerExecutionFailureOf(error);
+  const kind = error instanceof ProviderChatCompletionError && error.kind === "timeout"
+    ? "timeout"
+    : "transport_failure";
+  return new SignalExtractorError(kind, "Signal extractor request failed.", {
+    cause: error,
+    retryCount: execution?.retryCount ?? 0,
+    retryClassification: execution?.retryClassification ?? "failure_transport_port"
   });
 }
 

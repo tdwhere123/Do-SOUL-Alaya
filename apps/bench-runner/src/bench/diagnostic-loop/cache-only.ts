@@ -4,7 +4,10 @@ import {
   type ExtractionRequestProfile
 } from "../extraction/request-profile.js";
 import { DiagnosticLoopFailure } from "./failures.js";
-import { sha256Utf8 } from "./identity.js";
+import {
+  diagnosticAuthorityDigest,
+  resolveExtractionCacheIdentity
+} from "./authority/identity.js";
 import type { DiagnosticLoopPhaseResult, DiagnosticLoopRequest } from "./types.js";
 
 export function proveCacheOnlyExtraction(
@@ -45,11 +48,17 @@ export function proveCacheOnlyExtraction(
       resumeCommand: ""
     });
   }
+  const authority = resolveExtractionCacheIdentity(request);
   return {
-    contentIdentity: sha256Utf8(request.requestedKeys.join("\n")),
+    contentIdentity: diagnosticAuthorityDigest(authority),
     physicalCalls: 0,
     artifactPaths: { cacheRoot: request.extractionCacheRoot },
-    details: { cache_mode: "cache_only", key_count: request.requestedKeys.length },
+    details: {
+      cache_mode: "cache_only",
+      key_count: request.requestedKeys.length,
+      extraction_cache_identity: diagnosticAuthorityDigest(authority),
+      extraction_cache_authority: authority
+    },
     avoidedWork: { providerCallsAvoided: request.requestedKeys.length }
   };
 }

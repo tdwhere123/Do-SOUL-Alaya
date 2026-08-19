@@ -30,6 +30,7 @@ import {
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -61,7 +62,7 @@ describe("runExtractionFill authority", () => {
       concurrency: 8,
       initialConcurrency: 9,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"signals":[]}' })
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
       }),
       log: () => undefined
     })).rejects.toThrow(/initial concurrency must be an integer from 1 to 8/u);
@@ -73,9 +74,9 @@ describe("runExtractionFill authority", () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () =>
+      providerBackedExtractionResult('{"signals":[]}')
+    );
     let interrupted = false;
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -129,14 +130,14 @@ describe("runExtractionFill writer lease", () => {
         extract: async () => {
           markStarted();
           await blocked;
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined
     });
     await started;
     const secondFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -162,7 +163,7 @@ describe("runExtractionFill writer lease", () => {
       pinnedMetaRoot,
       concurrency: 1,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"signals":[]}' })
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
       }),
       log: () => undefined
     });
@@ -197,10 +198,12 @@ describe("runExtractionFill live-write identity", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
     const liveWriter = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: {
@@ -218,7 +221,7 @@ describe("runExtractionFill live-write identity", () => {
   });
 
   it("rejects an ordinary live write when extraction-fill has not initialized identity", async () => {
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
     const liveWriter = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: {
@@ -247,7 +250,9 @@ describe("runExtractionFill delegate mutation", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const turn = "I started a new project after fill.";
@@ -258,7 +263,7 @@ describe("runExtractionFill delegate mutation", () => {
       delegate: {
         extract: async () => {
           rmSync(join(cacheRoot, "manifest.json"), { force: true });
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       },
       config: {
@@ -302,7 +307,7 @@ describe("runExtractionFill delegate mutation", () => {
             JSON.stringify({ pid: process.pid, token: "replacement" }),
             "utf8"
           );
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       },
       config: {
@@ -332,7 +337,9 @@ describe("runExtractionFill finalization", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     })).rejects.toThrow(/writer lock.*metadata is unreadable/iu);
     expect(existsSync(lockPath)).toBe(true);
@@ -355,7 +362,7 @@ describe("runExtractionFill finalization", () => {
             JSON.stringify({ pid: process.pid, token: "replacement" }),
             "utf8"
           );
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined
@@ -392,7 +399,7 @@ describe("runExtractionFill finalization", () => {
             built_at: "2026-07-12T00:00:00.000Z",
             builder: "intruder"
           });
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined

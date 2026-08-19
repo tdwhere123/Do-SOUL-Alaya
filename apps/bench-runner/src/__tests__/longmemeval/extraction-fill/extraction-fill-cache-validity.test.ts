@@ -14,6 +14,7 @@ import {
 } from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -42,7 +43,8 @@ afterEach(async () => {
 describe("extraction-fill cache validity", () => {
   it("rejects a non-empty signals array with no valid entries", async () => {
     await writeDataset();
-    await expect(fill(() => ({ rawJson: '{"signals":[42]}' }))).rejects.toMatchObject({
+    await expect(fill(() => providerBackedExtractionResult('{"signals":[42]}')))
+      .rejects.toMatchObject({
       name: "ExtractionFillTaskError",
       retryClassification: "unknown"
     });
@@ -86,7 +88,7 @@ describe("extraction-fill cache validity", () => {
         }
       }]
     });
-    const result = await fill(() => ({ rawJson }));
+    const result = await fill(() => providerBackedExtractionResult(rawJson));
     expect(result).toMatchObject({ coverage: 1, newlyExtracted: 2 });
     const shard = JSON.parse(readFileSync(firstShardPath(), "utf8")) as {
       readonly cache_key: string;
@@ -105,12 +107,12 @@ describe("extraction-fill cache validity", () => {
 
   it("replaces a semantically invalid existing shard during live fill", async () => {
     await writeDataset();
-    await fill(() => ({ rawJson: '{"signals":[]}' }));
+    await fill(() => providerBackedExtractionResult('{"signals":[]}'));
     const shardPath = firstShardPath();
     const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
     writeFileSync(shardPath, JSON.stringify({ ...shard, raw_json: '{"signals":[42]}' }));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
-      async () => ({ rawJson: '{"signals":[]}' })
+      async () => providerBackedExtractionResult('{"signals":[]}')
     );
 
     const result = await fill(delegate);
@@ -145,7 +147,7 @@ describe("extraction-fill cache validity", () => {
             input.userPrompt
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: (message) => logs.push(message)
@@ -179,15 +181,14 @@ describe("extraction-fill cache validity", () => {
         extract: async () => {
           call += 1;
           if (call === 1) {
-            return {
-              rawJson: '{"signals":[]}',
+            return providerBackedExtractionResult('{"signals":[]}', {
               extractorMeta: {
                 recoveryKind: "none",
                 retryCount: 1,
                 retryClassification: "success_after_retry",
                 rateLimitRetries: 1
               }
-            };
+            });
           }
           const error = new Error("provider retries exhausted");
           (error as { benchRetry?: unknown }).benchRetry = {

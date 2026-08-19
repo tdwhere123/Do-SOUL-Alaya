@@ -35,6 +35,8 @@ export function writeDiagnosticLoopReport(input: {
       operatorDigest: input.identity.operatorDigest,
       cacheMode: input.identity.cacheMode,
       variant: input.identity.variant,
+      limit: input.identity.limit ?? null,
+      offset: input.identity.offset ?? 0,
       worker: input.identity.worker
     },
     avoided_work: input.avoidedWork,
@@ -53,7 +55,13 @@ export function writeDiagnosticLoopReport(input: {
     contentIdentity: sha256Utf8(JSON.stringify(report)),
     physicalCalls: 0,
     artifactPaths: { report: reportPath },
-    details: { shared_substrate: report.shared_substrate }
+    details: { shared_substrate: report.shared_substrate },
+    noProviderCallReceipt: {
+      schema_version: 1,
+      kind: "internal_no_provider_port",
+      provider_port: "absent",
+      physical_calls: 0
+    }
   };
 }
 
@@ -85,6 +93,7 @@ function summarizeArm(checkpoint: DiagnosticLoopCheckpoint): Readonly<Record<str
     content_identity: checkpoint.content_identity,
     physical_calls: checkpoint.physical_calls,
     artifact_paths: checkpoint.artifact_paths,
+    evaluation_slice: checkpoint.details.evaluation_slice,
     cache_identity: checkpoint.details.cache_identity,
     snapshot_identity: checkpoint.details.snapshot_identity
   };
@@ -95,5 +104,3 @@ function summarizeOptional(
 ): Readonly<Record<string, unknown>> | null {
   return checkpoint === undefined ? null : summarizeArm(checkpoint);
 }
-
-

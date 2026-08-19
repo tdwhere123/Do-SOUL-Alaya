@@ -1,6 +1,10 @@
-import type { ProviderChatCompletionResult, ProviderUsage } from "./types.js";
+import type {
+  ProviderChatCompletionResult,
+  ProviderSseCompletionPolicy,
+  ProviderUsage
+} from "./types.js";
 
-export type ProviderResponseInspectionReason = "parse" | "schema";
+export type ProviderResponseInspectionReason = "parse" | "schema" | "incomplete_stream";
 
 export class ProviderResponseInspectionError extends Error {
   public readonly reason: ProviderResponseInspectionReason;
@@ -22,10 +26,11 @@ const MIXED_STREAM_MESSAGE =
 export function inspectProviderChatCompletionResponse(
   bodyText: string,
   contentType: string | null,
-  httpStatus: number
+  httpStatus: number,
+  options?: { readonly sseCompletionPolicy?: ProviderSseCompletionPolicy }
 ): ProviderChatCompletionResult {
   const inspection = isSseBody(bodyText, contentType)
-    ? inspectSse(bodyText)
+    ? inspectSse(bodyText, options?.sseCompletionPolicy ?? "require_witness")
     : inspectJson(bodyText);
   return { ...inspection, httpStatus };
 }
@@ -42,19 +47,27 @@ function inspectJson(bodyText: string): Omit<ProviderChatCompletionResult, "http
   return {
     text: content ?? "",
     finishReason: stringOrNull(choice?.finish_reason),
+    completion: { mode: "json", complete: true, witness: "message" },
     ...usageFields(usageFromUnknown(payload.usage))
   };
 }
 
-function inspectSse(bodyText: string): Omit<ProviderChatCompletionResult, "httpStatus"> {
+function inspectSse(
+  bodyText: string,
+  completionPolicy: ProviderSseCompletionPolicy
+): Omit<ProviderChatCompletionResult, "httpStatus"> {
   let mode: "delta" | "message" | null = null;
   let text = "";
   let finishReason: string | null = null;
   let usage: ProviderUsage | undefined;
+  let sawDone = false;
   for (const rawLine of bodyText.split("\n")) {
     const data = readSseData(rawLine);
     if (data === null) continue;
-    if (data === "[DONE]") break;
+    if (data === "[DONE]") {
+      sawDone = true;
+      break;
+    }
     const chunk = parseObject(data, "chunk");
     const choice = firstChoice(chunk);
     const delta = readNestedString(choice, "delta", "content");
@@ -74,7 +87,25 @@ function inspectSse(bodyText: string): Omit<ProviderChatCompletionResult, "httpS
     finishReason = stringOrNull(choice?.finish_reason) ?? finishReason;
     usage = usageFromUnknown(chunk.usage) ?? usage;
   }
-  return { text, finishReason, ...usageFields(usage) };
+  const witness = sawDone
+    ? "done_sentinel"
+    : finishReason !== null
+      ? "finish_reason"
+      : completionPolicy === "allow_clean_eof_v1"
+        ? "profile_clean_eof"
+        : null;
+  if (witness === null) {
+    throw new ProviderResponseInspectionError(
+      "provider chat completion stream ended without a completion witness",
+      "incomplete_stream"
+    );
+  }
+  return {
+    text,
+    finishReason,
+    ...usageFields(usage),
+    completion: { mode: "sse", complete: true, witness }
+  };
 }
 
 function readSseData(rawLine: string): string | null {

@@ -12,14 +12,17 @@ import type {
   DiagnosticLoopPhaseContext,
   DiagnosticLoopPhaseResult
 } from "./types.js";
+import { resolveSnapshotIdentity } from "./authority/identity.js";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
+import { sha256File } from "../snapshot/integrity.js";
 
 export async function runProductionRecallPhase(
   context: DiagnosticLoopPhaseContext,
   arm: "control" | "treatment"
 ): Promise<DiagnosticLoopPhaseResult> {
   const substrate = sharedSubstrateIdentities(context);
-  const snapshot = context.request.snapshotPath ??
-    context.checkpoints.get("snapshot")?.artifact_paths.snapshot;
+  const snapshotCheckpoint = context.checkpoints.get("snapshot");
+  const snapshot = snapshotCheckpoint?.artifact_paths.snapshot;
   const historyRoot = context.request.historyRoot;
   const phase = arm === "control" ? "control_recall" : "treatment_recall";
   if (substrate.cache_identity.length === 0 || substrate.snapshot_identity.length === 0) {
@@ -31,6 +34,13 @@ export async function runProductionRecallPhase(
   if (arm === "treatment" && context.request.treatmentFactorCachePath === undefined) {
     throw fail(phase, "formation", "treatment recall requires --query-semantic-factor-cache");
   }
+  const snapshotIdentity = await resolveSnapshotIdentity(snapshot, context.request.variant);
+  if (snapshotCheckpoint?.content_identity !== snapshotIdentity.identity_digest) {
+    throw fail(phase, "infrastructure", `${arm} recall snapshot checkpoint drifted`);
+  }
+  const evaluationSlice = expectedEvaluationSlice(
+    context, snapshotIdentity.question_ids, phase
+  );
   const result = await runRecallEval({
     snapshotDbPath: snapshot,
     variant: context.request.variant,
@@ -46,16 +56,62 @@ export async function runProductionRecallPhase(
   if (result.completion.status !== "complete") {
     throw fail(phase, "infrastructure", `${arm} recall completed incompletely`);
   }
+  const actualSlice = result.payload.recall_eval_attribution?.evaluation_slice;
+  if (JSON.stringify(actualSlice) !== JSON.stringify(evaluationSlice)) {
+    throw fail(phase, "infrastructure", `${arm} recall evaluation slice mismatch`);
+  }
+  const artifacts = {
+    snapshot,
+    kpi: result.kpiPath,
+    report: result.reportPath,
+    diagnostics: join(dirname(result.kpiPath), RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME)
+  };
+  const artifactSha256 = await hashRecallArtifacts(artifacts);
   return {
     contentIdentity: sha256Utf8(`${arm}:${result.slug}:${substrate.snapshot_identity}`),
     physicalCalls: 0,
-    artifactPaths: {
-      snapshot,
-      kpi: result.kpiPath,
-      report: result.reportPath,
-      diagnostics: join(dirname(result.kpiPath), RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME)
-    },
-    details: substrate
+    artifactPaths: artifacts,
+    details: {
+      ...substrate,
+      evaluation_slice: evaluationSlice,
+      artifact_sha256: artifactSha256
+    }
+  };
+}
+
+async function hashRecallArtifacts(
+  artifacts: Readonly<Record<"kpi" | "report" | "diagnostics", string>> & {
+    readonly snapshot: string;
+  }
+) {
+  const entries = await Promise.all((["kpi", "report", "diagnostics"] as const)
+    .map(async (key) => [key, await sha256File(artifacts[key])] as const));
+  return Object.fromEntries(entries);
+}
+
+function expectedEvaluationSlice(
+  context: DiagnosticLoopPhaseContext,
+  questionIds: readonly string[],
+  phase: "control_recall" | "treatment_recall"
+) {
+  const offset = context.request.offset ?? 0;
+  const limit = context.request.limit ?? questionIds.length - offset;
+  if (offset > questionIds.length || limit < 1 || offset + limit > questionIds.length) {
+    throw fail(
+      phase, "infrastructure",
+      "requested evaluation window is not contained in the snapshot"
+    );
+  }
+  const selected = questionIds.slice(offset, offset + limit).map((questionId) => ({
+    questionId
+  }));
+  return {
+    offset,
+    limit: context.request.limit ?? null,
+    evaluated_count: selected.length,
+    question_id_digest: computeLongMemEvalQuestionIdDigest(
+      selected.map((question) => question.questionId)
+    )
   };
 }
 
@@ -85,8 +141,9 @@ export async function runProductionMissLedgerPhase(
     control: tables.A.questions,
     treatment: tables.B.questions
   });
+  const missLedgerPath = join(outDir, "diagnostic-100q.json");
   await writeFile(
-    join(outDir, "diagnostic-100q.json"),
+    missLedgerPath,
     `${JSON.stringify(comparison, null, 2)}\n`,
     "utf8"
   );
@@ -96,8 +153,11 @@ export async function runProductionMissLedgerPhase(
       treatment: treatment?.content_identity ?? null
     })),
     physicalCalls: 0,
-    artifactPaths: { missLedger: outDir },
-    details: sharedSubstrateIdentities(context)
+    artifactPaths: { missLedger: missLedgerPath },
+    details: {
+      ...sharedSubstrateIdentities(context),
+      artifact_sha256: await sha256File(missLedgerPath)
+    }
   };
 }
 

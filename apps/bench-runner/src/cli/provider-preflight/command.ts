@@ -1,5 +1,6 @@
 import process from "node:process";
-import { parseDiagnosticLoopArgs } from "../diagnostic-loop/args.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   requireProviderBinding,
   resolveVendorModel
@@ -7,6 +8,12 @@ import {
 import { probeProviderProtocol } from "../../bench/provider/protocol-probe.js";
 import { proveProviderZeroCallReplay } from "../../bench/provider/replay-proof.js";
 import { retireObsoleteCache } from "../../bench/provider/retire-obsolete-cache.js";
+import { readCheckpoint } from "../../bench/diagnostic-loop/checkpoint.js";
+import {
+  verifyCanonicalReplayRequestManifest
+} from "./replay-request-manifest.js";
+import { assertCacheOnlyEnvironment } from
+  "../../bench/snapshot/current/current-substrate-authority.js";
 
 export async function runProviderPreflightCommand(
   args: ReadonlyArray<string>
@@ -17,12 +24,26 @@ export async function runProviderPreflightCommand(
       return await runProbe(args, mode === "probe-sse" ? "sse" : "json");
     }
     if (mode === "replay") {
-      const parsed = parseDiagnosticLoopArgs(withoutMode(args));
-      const proof = proveProviderZeroCallReplay({ request: parsed.request });
-      process.stdout.write(
-        `Done. provider-preflight replay physical_calls=${proof.physical_calls} ` +
-        `profile=${proof.profile}\n`
-      );
+      const requestManifest = required(args, "--request-manifest");
+      assertCacheOnlyEnvironment(process.env);
+      const verifiedManifest = await verifyCanonicalReplayRequestManifest(requestManifest);
+      const request = verifiedManifest.request;
+      const proof = proveProviderZeroCallReplay({ request });
+      process.stdout.write(`${JSON.stringify({
+        schema_version: 1,
+        kind: "provider_preflight_replay_receipt",
+        provider_port: "absent",
+        physical_calls: proof.physical_calls,
+        profile: proof.profile,
+        key_count: request.requestedKeys.length,
+        request_manifest_sha256: verifiedManifest.request_manifest_sha256,
+        cache_manifest_sha256: verifiedManifest.cache_authority.manifest_sha256
+      })}\n`);
+      return 0;
+    }
+    if (mode === "validate-recall-checkpoints") {
+      validateRecallCheckpoints(required(args, "--work-root"));
+      process.stdout.write("Done. recall checkpoint guard validated\n");
       return 0;
     }
     const cacheRoot = required(args, "--extraction-cache-root");
@@ -86,7 +107,8 @@ function resolveProbeModel(args: ReadonlyArray<string>): string {
 
 function readMode(
   args: ReadonlyArray<string>
-): "probe" | "probe-sse" | "replay" | "retire-obsolete" {
+): "probe" | "probe-sse" | "replay" | "retire-obsolete" |
+  "validate-recall-checkpoints" {
   const index = args.findIndex((token) => token === "--mode" || token.startsWith("--mode="));
   const value = index < 0
     ? "replay"
@@ -95,27 +117,43 @@ function readMode(
       : args[index + 1];
   if (
     value === "probe" || value === "probe-sse" ||
-    value === "replay" || value === "retire-obsolete"
+    value === "replay" || value === "retire-obsolete" ||
+    value === "validate-recall-checkpoints"
   ) {
     return value;
   }
   throw new Error(
-    "provider-preflight --mode must be probe, probe-sse, replay, or retire-obsolete"
+    "provider-preflight --mode must be probe, probe-sse, replay, " +
+      "retire-obsolete, or validate-recall-checkpoints"
   );
 }
 
-function withoutMode(args: ReadonlyArray<string>): readonly string[] {
-  const stripped: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]!;
-    if (token === "--mode") {
-      index += 1;
-      continue;
+function validateRecallCheckpoints(workRoot: string): void {
+  for (const phase of ["control_recall", "treatment_recall"] as const) {
+    const path = join(workRoot, "checkpoints", `${phase}.json`);
+    if (!existsSync(path)) continue;
+    const checkpoint = readRecallCheckpoint(path, phase);
+    if (checkpoint.phase !== phase) {
+      throw new Error(`recall checkpoint phase mismatch at ${phase}`);
     }
-    if (token.startsWith("--mode=")) continue;
-    stripped.push(token);
+    if (checkpoint.status === "completed") {
+      throw new Error(`completed recall checkpoint under ${workRoot}`);
+    }
   }
-  return stripped;
+}
+
+function readRecallCheckpoint(
+  path: string,
+  phase: "control_recall" | "treatment_recall"
+): ReturnType<typeof readCheckpoint> {
+  try {
+    return readCheckpoint(path);
+  } catch (error) {
+    throw new Error(
+      `invalid recall checkpoint at ${phase}: ${
+        error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 function required(args: ReadonlyArray<string>, flag: string): string {

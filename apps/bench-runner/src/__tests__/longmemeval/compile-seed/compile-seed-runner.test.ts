@@ -26,6 +26,7 @@ import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
+  providerBackedResult,
   signalsEnvelope,
   withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
@@ -82,6 +83,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." },
             {
@@ -141,7 +143,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           userPrompt = JSON.parse(input.userPrompt) as Record<string, unknown>;
-          return { rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
+          return providerBackedResult(JSON.stringify({ signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_claim",
             object_kind: "memory_entry",
             confidence: 0.9,
@@ -152,7 +154,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
               kind: "assertion_catalog",
               assertion_id: 1
             }
-          })] }) };
+          })] }));
         }
       })
     });
@@ -212,7 +214,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: corruptEnvelope })
+        extract: async () => providerBackedResult(corruptEnvelope)
       })
     });
 
@@ -258,7 +260,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: degenerate })
+        extract: async () => providerBackedResult(degenerate)
       })
     });
 
@@ -289,7 +291,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"signals":[]}' })
+        extract: async () => providerBackedResult('{"signals":[]}')
       })
     });
 
@@ -392,7 +394,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"not_signals":[]}' })
+        extract: async () => providerBackedResult('{"not_signals":[]}')
       })
     });
     await expect(
@@ -408,7 +410,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(firstRunner.stats.liveExtractionFailures).toBe(1);
 
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
-      async () => ({ rawJson: signalsEnvelope([]) })
+      async () => providerBackedResult(signalsEnvelope([]))
     );
     const seeded: BenchSignalSeedInput[] = [];
     const secondDaemon = buildCompileSeedDaemon((input) => {
@@ -461,6 +463,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Fact A.", matched: "Fact A." },
             { distilled: "Fact B.", matched: "Fact B." },

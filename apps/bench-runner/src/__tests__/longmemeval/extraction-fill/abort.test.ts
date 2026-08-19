@@ -16,7 +16,7 @@ import type {
 import type {
   LongMemEvalQuestion
 } from "../../../longmemeval/ingestion/dataset.js";
-import { TEST_EXTRACTION_PROVIDER_URL } from
+import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
@@ -51,10 +51,10 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return { rawJson: signalsEnvelope([{
+    if (calls === 1) return providerBackedExtractionResult(signalsEnvelope([{
       distilled: "I saved alpha.",
       matched: "I saved alpha."
-    }]) };
+    }]));
     secondStarted.resolve();
     return waitForAbort(input.abortSignal);
   });
@@ -90,7 +90,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
     }),
     log: () => undefined
   });
@@ -175,7 +175,7 @@ it("stops without caching a semantically invalid extraction payload", async () =
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"not_signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"not_signals":[]}')
     }),
     log: () => undefined
   });
@@ -203,7 +203,7 @@ it("does not finalize coverage when interruption follows the last response", asy
     concurrency: 1,
     signal: controller.signal,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
     }),
     log: (message) => {
       if (message.includes("2/2")) controller.abort(interrupted);

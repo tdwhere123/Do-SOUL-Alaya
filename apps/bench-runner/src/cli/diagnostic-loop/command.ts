@@ -8,6 +8,8 @@ import {
 } from "../../bench/diagnostic-loop/index.js";
 import { DiagnosticLoopFailure } from "../../bench/diagnostic-loop/failures.js";
 import { parseDiagnosticLoopArgs } from "./args.js";
+import { verifyCanonicalReplayRequestManifest } from
+  "../provider-preflight/replay-request-manifest.js";
 
 export interface DiagnosticLoopCommandDependencies {
   readonly run?: typeof runDiagnosticLoop;
@@ -20,6 +22,11 @@ export async function runDiagnosticLoopCommand(
 ): Promise<number> {
   try {
     const parsed = parseDiagnosticLoopArgs(args);
+    if (parsed.requestManifestPath !== undefined) {
+      await verifyCanonicalReplayRequestManifest(parsed.requestManifestPath);
+    } else if (deps.run === undefined && deps.adapters === undefined) {
+      throw new Error("diagnostic-loop requires --request-manifest");
+    }
     const run = deps.run ?? runDiagnosticLoop;
     const result = await run({
       workRoot: parsed.workRoot,

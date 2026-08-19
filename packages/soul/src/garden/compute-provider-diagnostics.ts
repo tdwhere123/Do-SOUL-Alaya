@@ -44,7 +44,7 @@ export function extractRetryCountFromInputs(
 // only when neither extractorMeta nor a typed SignalExtractorError carries
 // the label — happens when a transport error fires before the extractor
 // loop even started. The closed enum branches stay in sync with
-// RetryClassification in pi-mono-extractor.ts.
+// The transport port supplies retry outcome text; Soul only forwards it.
 export function extractRetryClassificationFromInputs(
   meta: ExtractorMetaSnapshot | null,
   error: unknown

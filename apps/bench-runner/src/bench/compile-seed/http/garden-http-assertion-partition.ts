@@ -157,6 +157,7 @@ function buildPartitionSuccess(
   return {
     rawJson,
     ...(aggregate.usage === undefined ? {} : { usage: aggregate.usage }),
+    responseMetadata: partitionCompletionMetadata(results),
     extractorMeta: {
       recoveryKind: "none",
       retryCount: aggregate.failures.length,
@@ -166,6 +167,21 @@ function buildPartitionSuccess(
       usageRequestCount: aggregate.usageRequestCount,
       transportFailures: aggregate.failures
     }
+  };
+}
+
+function partitionCompletionMetadata(
+  results: readonly ExtractResult[]
+): NonNullable<ExtractResult["responseMetadata"]> {
+  if (results.length === 0 || results.some((result) =>
+    result.responseMetadata?.completionContractVersion !== 1 ||
+    result.responseMetadata.completionWitness === undefined)) {
+    throw new Error("partition composition lacks child completion authority");
+  }
+  return {
+    finishReason: null,
+    completionContractVersion: 1,
+    completionWitness: "partition_composition"
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ChatCompletionResponseInspection } from "../../extraction/chat-completion-response.js";
 import type { BenchProviderUsage } from "../compile-seed-types.js";
+import type { ProviderCompletionWitness } from "@do-soul/alaya-engine-gateway";
 import {
   markOutputTokenTruncation
 } from "./output-token-retry.js";
@@ -35,13 +36,18 @@ export function extractValidGardenHttpContent(
 export function buildGardenHttpAttemptResponse(
   response: ChatCompletionResponseInspection,
   maxOutputTokens: number | undefined,
-  validation: "default_envelope" | "caller_owned"
+  validation: "default_envelope" | "caller_owned",
+  completion?: ProviderCompletionWitness
 ) {
   return {
     rawJson: extractValidGardenHttpContent(response, validation),
     ...(response.usage === undefined ? {} : { usage: response.usage }),
     responseMetadata: {
       finishReason: response.finishReason,
+      ...(completion === undefined ? {} : {
+        completionContractVersion: 1 as const,
+        completionWitness: completion.witness
+      }),
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens })
     }
   };

@@ -1,4 +1,19 @@
 export { ProviderChatCompletionError } from "./errors.js";
+export {
+  executeProviderChatCompletion,
+  computeProviderRetryJitterMs,
+  isRetryableProviderHttpStatus,
+  providerExecutionFailureOf,
+  providerRetryJitterUpperBoundMs,
+  type ProviderAttemptFailure,
+  type ProviderChatExecutionPort,
+  type ProviderExecutionObserver,
+  type ProviderExecutionFailure,
+  type ProviderOperationRetryDecision,
+  type ProviderExecutionPolicy,
+  type ProviderExecutionResult,
+  type ProviderRetryClassification
+} from "./execute-chat-completion.js";
 export type {
   ProviderResponseInspectionReason,
   ProviderTransportFailureKind
@@ -9,8 +24,7 @@ export {
   type ProviderFailureIdentity
 } from "./failure-identity.js";
 export {
-  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
-  fetchProviderChatCompletion
+  DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
 } from "./fetch-chat-completion.js";
 export { inspectProviderChatCompletionResponse } from "./inspect-response.js";
 export {
@@ -21,9 +35,11 @@ export {
 export type {
   ProviderChatCompletionRequest,
   ProviderChatCompletionResult,
+  ProviderCompletionWitness,
   ProviderChatMode,
   ProviderOutputTokenField,
   ProviderRequestProfile,
+  ProviderSseCompletionPolicy,
   ProviderUsage
 } from "./types.js";
 export { PROVIDER_REQUEST_PROFILES } from "./types.js";

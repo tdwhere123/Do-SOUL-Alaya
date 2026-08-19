@@ -187,7 +187,7 @@ describe("requestGardenChatCompletionContent", () => {
 
       expect(error).toMatchObject({
         name: "GardenChatCompletionTransportError",
-        kind: "aborted"
+        kind: "timeout"
       });
       expect(Object.hasOwn(error as object, "status")).toBe(false);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -212,7 +212,7 @@ describe("requestGardenChatCompletionContent", () => {
 
     expect(error).toMatchObject({
       name: "GardenChatCompletionTransportError",
-      kind: "aborted"
+      kind: "timeout"
     });
     expect(Object.hasOwn(error as object, "status")).toBe(false);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -236,4 +236,3 @@ function gardenRequest(timeoutMs: number) {
 function hangingBodyResponse(status: number): Response {
   return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status });
 }
-

@@ -6,10 +6,11 @@ import {
   invalidateFromPhase,
   loadCompletedCheckpoints,
   writeCheckpointAtomic,
-  checkpointPath
+  checkpointPath,
+  checkpointDigest
 } from "./checkpoint.js";
 import { DiagnosticLoopFailure, wrapPhaseError } from "./failures.js";
-import { assertDiagnosticLoopIdentity, diagnosticLoopIdentityDigest } from "./identity.js";
+import { assertDiagnosticLoopIdentity } from "./identity.js";
 import {
   isExpensivePhase,
   phasesForMode,
@@ -28,15 +29,32 @@ import type {
   DiagnosticLoopRunInput,
   DiagnosticLoopRunResult
 } from "./types.js";
+import {
+  resolveDiagnosticLoopIdentity,
+  resolvedDiagnosticLoopIdentityDigest,
+  type ResolvedDiagnosticLoopIdentity
+} from "./authority/identity.js";
+import { assertCheckpointAuthorities } from "./authority/checkpoint.js";
+import { withDiagnosticLoopRunLock } from "./authority/run-lock.js";
 
 export async function runDiagnosticLoop(
   input: DiagnosticLoopRunInput
 ): Promise<DiagnosticLoopRunResult> {
+  return await withDiagnosticLoopRunLock(
+    input.workRoot,
+    async () => await runDiagnosticLoopLocked(input)
+  );
+}
+
+async function runDiagnosticLoopLocked(
+  input: DiagnosticLoopRunInput
+): Promise<DiagnosticLoopRunResult> {
   assertDiagnosticLoopIdentity(input.request);
   assertSmokeLimit(input);
+  const resolvedIdentity = await resolveDiagnosticLoopIdentity(input.request);
   const identityDigest = persistRunRecord({
     workRoot: input.workRoot,
-    identity: input.request,
+    identity: resolvedIdentity,
     mode: input.mode,
     argv: input.argv
   });
@@ -44,12 +62,14 @@ export async function runDiagnosticLoop(
     invalidateFromPhase(input.workRoot, input.fromPhase);
   }
   const checkpoints = loadCompletedCheckpoints(input.workRoot, identityDigest);
+  await assertCheckpointAuthorities(input.request, resolvedIdentity, checkpoints);
   const avoided = emptyAvoidedWork();
   const skipped: DiagnosticLoopPhase[] = [];
   const completed: DiagnosticLoopPhase[] = [];
   try {
     await executePhases({
-      input, identityDigest, checkpoints, avoided, skipped, completed
+      input, identityDigest, initialIdentity: resolvedIdentity,
+      checkpoints, avoided, skipped, completed
     });
     if (input.mode === "smoke") {
       writeSmokeGate({
@@ -73,6 +93,7 @@ export async function runDiagnosticLoop(
 
 async function executePhases(state: PhaseRunState): Promise<void> {
   for (const phase of phasesForMode(state.input.mode)) {
+    await assertPhaseBoundary(state);
     assertSmokeAllowsPhase(state.input, phase);
     const existing = state.checkpoints.get(phase);
     if (existing !== undefined) {
@@ -80,12 +101,34 @@ async function executePhases(state: PhaseRunState): Promise<void> {
       continue;
     }
     const result = await runPhase(state, phase);
+    await assertPhaseBoundary(state);
     const checkpoint = toCheckpoint(state, phase, result);
+    await assertProducedCheckpoint(state, phase, checkpoint);
     writeCheckpointAtomic(checkpointPath(state.input.workRoot, phase), checkpoint);
     state.checkpoints.set(phase, checkpoint);
     state.completed.push(phase);
     Object.assign(state.avoided, addAvoidedWork(state.avoided, result.avoidedWork));
   }
+}
+
+async function assertPhaseBoundary(state: PhaseRunState): Promise<void> {
+  const current = await resolveDiagnosticLoopIdentity(state.input.request);
+  if (resolvedDiagnosticLoopIdentityDigest(current) !==
+      resolvedDiagnosticLoopIdentityDigest(state.initialIdentity)) {
+    throw new Error("diagnostic-loop authority changed between phases");
+  }
+  await assertCheckpointAuthorities(state.input.request, current, state.checkpoints);
+}
+
+async function assertProducedCheckpoint(
+  state: PhaseRunState,
+  phase: DiagnosticLoopPhase,
+  checkpoint: DiagnosticLoopCheckpoint
+): Promise<void> {
+  const candidate = new Map(state.checkpoints);
+  candidate.set(phase, checkpoint);
+  const current = await resolveDiagnosticLoopIdentity(state.input.request);
+  await assertCheckpointAuthorities(state.input.request, current, candidate);
 }
 
 async function runPhase(
@@ -153,8 +196,11 @@ function toCheckpoint(
   phase: DiagnosticLoopPhase,
   result: DiagnosticLoopPhaseResult
 ): DiagnosticLoopCheckpoint {
-  return {
-    schema_version: 1,
+  if (result.noProviderCallReceipt === undefined) {
+    throw new Error(`diagnostic-loop phase ${phase} omitted no-provider-call receipt`);
+  }
+  const checkpoint: Omit<DiagnosticLoopCheckpoint, "checkpoint_digest"> = {
+    schema_version: 2,
     kind: "diagnostic_loop_checkpoint",
     phase,
     status: "completed",
@@ -164,9 +210,13 @@ function toCheckpoint(
     physical_calls: result.physicalCalls,
     avoided_work: addAvoidedWork(emptyAvoidedWork(), result.avoidedWork),
     artifact_paths: result.artifactPaths,
-    details: result.details ?? {},
+    details: {
+      ...(result.details ?? {}),
+      no_provider_call_receipt: result.noProviderCallReceipt
+    },
     completed_at: state.input.now?.() ?? new Date().toISOString()
   };
+  return { ...checkpoint, checkpoint_digest: checkpointDigest(checkpoint) };
 }
 
 function assertSmokeLimit(input: DiagnosticLoopRunInput): void {
@@ -223,6 +273,7 @@ function failRun(
 interface PhaseRunState {
   readonly input: DiagnosticLoopRunInput;
   readonly identityDigest: string;
+  readonly initialIdentity: ResolvedDiagnosticLoopIdentity;
   readonly checkpoints: Map<DiagnosticLoopPhase, DiagnosticLoopCheckpoint>;
   readonly avoided: DiagnosticLoopAvoidedWork;
   readonly skipped: DiagnosticLoopPhase[];

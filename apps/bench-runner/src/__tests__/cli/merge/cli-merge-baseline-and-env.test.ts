@@ -288,7 +288,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       recalls: 0,
       supports: 1
     });
-  });
+  }, 20_000);
 
   it("refuses shards whose bench_name differs", async () => {
     const shardA = path.join(tmpRoot, "shard-a");

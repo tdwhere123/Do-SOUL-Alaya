@@ -29,6 +29,7 @@ import {
 import { BENCH_DAEMON_DB_FILENAME } from "../../../bench/snapshot/materialize.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import {
+  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
@@ -212,11 +213,9 @@ describe("materialization fuel inventory integration", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate = {
-      extract: vi.fn(async () => ({
-        rawJson: signalsEnvelope([
+      extract: vi.fn(async () => providerBackedExtractionResult(signalsEnvelope([
           { distilled: "Alice lives in Berlin.", matched: "moved to Berlin" }
-        ])
-      }))
+        ])))
     };
     const warmStats = freshStats();
     const warmExtractor = createCachingSignalExtractor({

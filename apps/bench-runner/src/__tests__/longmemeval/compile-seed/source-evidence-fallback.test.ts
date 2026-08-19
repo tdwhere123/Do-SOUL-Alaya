@@ -14,6 +14,7 @@ import type { SeededObjectResult } from
   "../../../harness/daemon/seed/daemon-seed-types.js";
 import {
   CREDENTIALLED_CONFIG,
+  providerBackedResult,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from
@@ -60,7 +61,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+        extract: async () => providerBackedResult("{\"signals\":[]}")
       })
     });
     const turnMessages = structuredTurnMessages();
@@ -116,7 +117,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+        extract: async () => providerBackedResult("{\"signals\":[]}")
       })
     });
 
@@ -168,6 +169,7 @@ describe("compile seed source evidence fallback", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([{
             distilled: "The user takes the 7:15 train.",
             matched: "I take the 7:15 train."
@@ -351,7 +353,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+        extract: async () => providerBackedResult("{\"signals\":[]}")
       })
     });
 
@@ -388,7 +390,7 @@ describe("compile seed source evidence fallback", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+        extract: async () => providerBackedResult("{\"signals\":[]}")
       })
     });
     const result = await runner.seedTurn({
@@ -412,6 +414,7 @@ function createRunnerWithOneClaim(cacheRoot: string) {
     allowLiveExtraction: true,
     extractorFactory: () => ({
       extract: async () => ({
+        ...providerBackedResult(""),
         rawJson: signalsEnvelope([{
           distilled: "The user takes the 7:15 train.",
           matched: "I take the 7:15 train."

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +15,22 @@ import { proveProviderZeroCallReplay } from "../../../bench/provider/replay-proo
 import { retireObsoleteCache } from "../../../bench/provider/retire-obsolete-cache.js";
 import { assertRequiredRequestProfile } from "../../../bench/extraction/transport-route.js";
 import { digest, loopRequest } from "../diagnostic-loop/fixture.js";
+import {
+  readExtractionCacheManifestIdentity,
+  writeExtractionCacheManifest
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import {
+  computeExtractionContentClosureSha256,
+  computeExtractionKeySetSha256,
+  inspectExtractionRawJson
+} from
+  "../../../bench/extraction/content-closure.js";
+import { readReplayRequestManifest } from
+  "../../../cli/provider-preflight/replay-request-manifest.js";
+import { runProviderPreflightCommand } from
+  "../../../cli/provider-preflight/command.js";
+import { manifestFor } from
+  "../extraction/extraction-cache-preflight-fixture.js";
 
 const MIMO = requireProviderBinding("mimo-v2.5");
 const roots: string[] = [];
@@ -100,23 +117,31 @@ describe("provider protocol probe", () => {
 });
 
 describe("provider cache-only replay", () => {
+  it("rejects the legacy scalar replay route without a canonical manifest", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const exitCode = await runProviderPreflightCommand([
+      "--mode", "replay",
+      "--model", MIMO.id,
+      "--request-profile", MIMO.requestProfile,
+      "--requested-keys", digest("legacy-key")
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("--request-manifest is required"));
+  });
+
   it("proves zero physical calls on a bound-profile cache", async () => {
     const cacheRoot = await tempRoot();
     const key = digest("provider-key");
-    writeCachedExtraction(cacheRoot, key, {
-      model: MIMO.id,
-      request_profile: MIMO.requestProfile,
-      cache_key: key,
-      raw_json: "{\"signals\":[]}",
-      extracted_at: "2026-08-17T00:00:00.000Z"
-    });
+    const authority = writeCompleteMimoCache(cacheRoot, key);
 
     const proof = proveProviderZeroCallReplay({
       request: loopRequest({
         extractionCacheRoot: cacheRoot,
         requestedKeys: [key],
         model: MIMO.id,
-        requestProfile: MIMO.requestProfile
+        requestProfile: MIMO.requestProfile,
+        promptDigest: authority.systemPromptSha256
       })
     });
     expect(proof.physical_calls).toBe(0);
@@ -129,6 +154,82 @@ describe("provider cache-only replay", () => {
         requestProfile: "deepseek-v4-nonthinking-v1"
       })
     })).toThrow(/obsolete request profile/u);
+  });
+
+  it("loads a complete canonical request manifest and preserves zero-call proof", async () => {
+    const cacheRoot = await tempRoot();
+    const key = digest("provider-manifest-key");
+    const authority = writeCompleteMimoCache(cacheRoot, key);
+    const cacheIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    const request = loopRequest({
+      extractionCacheRoot: cacheRoot,
+      requestedKeys: [key],
+      promptDigest: authority.systemPromptSha256,
+      limit: 1,
+      offset: 0
+    });
+    const manifestPath = join(cacheRoot, "replay-request.json");
+    const body = {
+      schema_version: 1,
+      kind: "provider_preflight_replay_request",
+      request,
+      canonical_keys: {
+        count: 1,
+        key_set_sha256: computeExtractionKeySetSha256([key])
+      },
+      cache_authority: {
+        manifest_sha256: cacheIdentity.manifestSha256,
+        content_closure_sha256: cacheIdentity.manifest.content_closure_sha256,
+        expected_key_set_sha256: cacheIdentity.manifest.expected_key_set_sha256,
+        shard_count: cacheIdentity.manifest.expected_turns,
+        window_offset: cacheIdentity.manifest.window_offset,
+        window_limit: cacheIdentity.manifest.window_limit
+      },
+      dataset_authority: {}
+    } as const;
+    await writeFile(manifestPath, `${JSON.stringify(sealReplayManifest(body))}\n`);
+
+    const loaded = readReplayRequestManifest(manifestPath);
+    expect(loaded).toEqual(request);
+    expect(proveProviderZeroCallReplay({ request: loaded }).physical_calls).toBe(0);
+
+    const extraPath = join(cacheRoot, "replay-request-extra.json");
+    await writeFile(extraPath, `${JSON.stringify(sealReplayManifest({
+      ...body,
+      request: { ...request, extraAuthority: "untrusted" }
+    }))}\n`);
+    expect(() => readReplayRequestManifest(extraPath)).toThrow(
+      /invalid provider replay request manifest/u
+    );
+  });
+
+  it("rejects a request manifest that labels one key as a larger window", async () => {
+    const cacheRoot = await tempRoot();
+    writeExtractionCacheManifest(cacheRoot, manifestFor());
+    const cacheIdentity = readExtractionCacheManifestIdentity(cacheRoot)!;
+    const key = digest("single-key");
+    const manifestPath = join(cacheRoot, "bad-replay-request.json");
+    await writeFile(manifestPath, `${JSON.stringify(sealReplayManifest({
+      schema_version: 1,
+      kind: "provider_preflight_replay_request",
+      request: loopRequest({
+        extractionCacheRoot: cacheRoot, requestedKeys: [key], limit: 1, offset: 0
+      }),
+      canonical_keys: {
+        count: 2,
+        key_set_sha256: computeExtractionKeySetSha256([key])
+      },
+      cache_authority: {
+        manifest_sha256: cacheIdentity.manifestSha256,
+        content_closure_sha256: digest("content-closure"),
+        expected_key_set_sha256: digest("expected-keys"),
+        shard_count: 1,
+        window_offset: 0,
+        window_limit: 1
+      },
+      dataset_authority: {}
+    }))}\n`);
+    expect(() => readReplayRequestManifest(manifestPath)).toThrow(/key count mismatch/u);
   });
 });
 
@@ -175,4 +276,61 @@ async function tempRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "provider-preflight-"));
   roots.push(root);
   return root;
+}
+
+function writeCompleteMimoCache(
+  cacheRoot: string,
+  key: string
+): { readonly systemPromptSha256: string } {
+  const rawJson = "{\"signals\":[]}";
+  const inspected = inspectExtractionRawJson(rawJson);
+  writeCachedExtraction(cacheRoot, key, {
+    model: MIMO.id,
+    request_profile: MIMO.requestProfile,
+    cache_key: key,
+    raw_json: rawJson,
+    extracted_at: "2026-08-17T00:00:00.000Z"
+  });
+  const entry = {
+    cacheKey: key,
+    model: MIMO.id,
+    requestProfile: MIMO.requestProfile,
+    ...inspected
+  };
+  const manifest = manifestFor({
+    extraction_model: MIMO.id,
+    model_family: MIMO.id,
+    request_profile: MIMO.requestProfile,
+    provider_url: "mimo",
+    dataset_revision: digest("dataset"),
+    requested_turns: 1,
+    cached_turns: 1,
+    coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: 1,
+    expected_key_set_sha256: computeExtractionKeySetSha256([key]),
+    content_closure_sha256: computeExtractionContentClosureSha256([entry]),
+    content_closure_index: {
+      [key]: [
+        inspected.rawJsonSha256,
+        inspected.rawSignalCount,
+        inspected.parsedDraftCount
+      ]
+    }
+  });
+  writeExtractionCacheManifest(cacheRoot, manifest);
+  return { systemPromptSha256: manifest.system_prompt_sha256 };
+}
+
+function sealReplayManifest<T extends Record<string, unknown>>(
+  body: T
+): T & { readonly request_manifest_sha256: string } {
+  return {
+    ...body,
+    request_manifest_sha256: createHash("sha256")
+      .update(JSON.stringify(body), "utf8")
+      .digest("hex")
+  };
 }

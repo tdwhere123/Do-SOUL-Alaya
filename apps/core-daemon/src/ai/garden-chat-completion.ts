@@ -1,8 +1,6 @@
 import {
-  fetchProviderChatCompletion,
-  isRetryableProviderHttpStatus,
+  executeProviderChatCompletion,
   ProviderChatCompletionError,
-  withProviderRetry,
   type ProviderTransportFailureKind
 } from "@do-soul/alaya-engine-gateway";
 
@@ -25,20 +23,14 @@ const RETRY_DELAYS_MS = [100, 250] as const;
 export async function requestGardenChatCompletionContent(
   input: GardenChatCompletionRequest
 ): Promise<string> {
-  return withProviderRetry(
-    () => requestGardenChatCompletionContentOnce(input),
-    {
-      delaysMs: RETRY_DELAYS_MS,
-      isRetryable: isRetryableGardenChatError
-    }
-  );
+  return requestGardenChatCompletionContentOnce(input);
 }
 
 async function requestGardenChatCompletionContentOnce(
   input: GardenChatCompletionRequest
 ): Promise<string> {
   const apiKey = requireGardenApiKey(input.config.apiKey);
-  const result = await fetchProviderChatCompletion({
+  const execution = await executeProviderChatCompletion({
     providerUrl: input.config.providerUrl,
     apiKey,
     model: input.config.model,
@@ -47,9 +39,15 @@ async function requestGardenChatCompletionContentOnce(
     timeoutMs: input.timeoutMs,
     mode: "json",
     jsonObject: true
+  }, {
+    maxRetries: RETRY_DELAYS_MS.length,
+    retryDelaysMs: RETRY_DELAYS_MS,
+    retryNetworkErrors: true,
+    retryBodyReadErrors: true
   }).catch((error: unknown) => {
     throw mapGardenChatCompletionError(error, input.failureLabel, apiKey);
   });
+  const result = execution.result;
   if (result.text.trim().length === 0) {
     throw new Error(`${input.failureLabel} returned no content`);
   }
@@ -103,15 +101,6 @@ class GardenChatCompletionTransportError extends Error {
   }
 }
 
-function isRetryableGardenChatError(error: unknown): boolean {
-  if (error instanceof GardenChatCompletionHttpError) {
-    return isRetryableProviderHttpStatus(error.status);
-  }
-  // Parse/schema/abort stay terminal; redaction replaces the provider error cause.
-  return error instanceof GardenChatCompletionTransportError &&
-    (error.kind === "network_error" || error.kind === "body_read_error");
-}
-
 function redactSecretFromCause(error: unknown, secret: string): unknown {
   if (secret.length === 0) {
     return error;
@@ -144,4 +133,3 @@ function collectErrorMessages(error: unknown): readonly string[] {
 function redactSecret(value: string, secret: string): string {
   return value.split(secret).join("[REDACTED_SECRET]");
 }
-

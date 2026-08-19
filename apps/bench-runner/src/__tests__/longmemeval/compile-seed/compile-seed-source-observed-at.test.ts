@@ -11,6 +11,7 @@ import {
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   CREDENTIALLED_CONFIG,
+  providerBackedResult,
   withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
@@ -38,7 +39,7 @@ describe("compile seed source observation", () => {
     const extractor: BenchSignalExtractor = {
       extract: async () => {
         extractCalls += 1;
-        return { rawJson: relativeSignalEnvelope() };
+        return providerBackedResult(relativeSignalEnvelope());
       }
     };
     const runner = createCompileSeedRunner({

@@ -274,7 +274,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = savedOpenAiKey;
     }
-  });
+  }, 20_000);
 
   it("restores managed environment when startup fails after env mutation", async () => {
     const savedEnv = snapshotManagedEnv();

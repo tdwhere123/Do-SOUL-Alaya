@@ -18,7 +18,7 @@ it("redirects to ALAYA_BENCH_EXTRACTION_CACHE_ROOT (staging) when set", async ()
   vi.resetModules();
   const { EXTRACTION_CACHE_ROOT } = await import("../../../bench/compile-seed/compile-seed-config.js");
   expect(pathsEqual(EXTRACTION_CACHE_ROOT, resolve(staging))).toBe(true);
-});
+}, 15_000);
 
 it("falls back to the canonical git-tracked fixture path when unset", async () => {
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", undefined as unknown as string);

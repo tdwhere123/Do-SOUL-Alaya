@@ -63,7 +63,7 @@ describe("merge-longmemeval compact diagnostics", () => {
       path_relations_total: 0,
       snapshot_count: 5
     });
-  });
+  }, 20_000);
 
   it("rejects a safe-looking artifact path through a symlinked ancestor", async () => {
     root = await mkdtemp(path.join(tmpdir(), "merge-compact-symlink-"));

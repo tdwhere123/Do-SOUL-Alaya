@@ -31,6 +31,7 @@ import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -79,7 +80,7 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
     extractorFactory: () => ({
       extract: async () => {
         firstWorkerManifest ??= readExtractionCacheManifest(cacheRoot);
-        return { rawJson: '{"signals":[]}' };
+        return providerBackedExtractionResult('{"signals":[]}');
       }
     }),
     log: () => undefined
@@ -317,7 +318,7 @@ it("rejects a narrower window on a superset root before creating a delegate", as
 });
 
 function emptyExtractor() {
-  return { extract: async () => ({ rawJson: '{"signals":[]}' }) };
+  return { extract: async () => providerBackedExtractionResult('{"signals":[]}') };
 }
 
 function firstShardPath(): string {

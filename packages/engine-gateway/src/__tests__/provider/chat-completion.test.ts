@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
-  fetchProviderChatCompletion,
   providerChatCompletionsUrl
 } from "../../provider/chat-completion/index.js";
+import { fetchProviderChatCompletion } from
+  "../../provider/chat-completion/fetch-chat-completion.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -51,7 +52,8 @@ describe("provider chat completion", () => {
       text: '{"ok":true}',
       finishReason: "stop",
       usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
-      httpStatus: 200
+      httpStatus: 200,
+      completion: { mode: "json", complete: true, witness: "message" }
     });
   });
 
@@ -81,6 +83,59 @@ describe("provider chat completion", () => {
 
     expect(result.text).toBe('{"a"}');
     expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    expect(result.completion).toEqual({
+      mode: "sse",
+      complete: true,
+      witness: "done_sentinel"
+    });
+  });
+
+  it("rejects clean SSE EOF after JSON delta without a completion witness", async () => {
+    const fetchImpl = vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      mode: "sse",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({
+      kind: "response_parse_error",
+      inspectionReason: "incomplete_stream"
+    });
+  });
+
+  it("accepts terminal finish_reason as an SSE completion witness", async () => {
+    const fetchImpl = vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"},"finish_reason":"stop"}]}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      mode: "sse",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).resolves.toMatchObject({
+      text: '{"signals":[]}',
+      completion: { mode: "sse", complete: true, witness: "finish_reason" }
+    });
+  });
+
+  it("accepts clean SSE EOF only under the explicit versioned compatibility policy", async () => {
+    const fetchImpl = vi.fn(async () => new Response(
+      'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      mode: "sse",
+      sseCompletionPolicy: "allow_clean_eof_v1",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).resolves.toMatchObject({
+      completion: { mode: "sse", complete: true, witness: "profile_clean_eof" }
+    });
   });
 
   it("aborts within the default timeout when none is provided", async () => {
@@ -105,7 +160,7 @@ describe("provider chat completion", () => {
     });
     const expectation = expect(pending).rejects.toMatchObject({
       name: "ProviderChatCompletionError",
-      kind: "aborted"
+      kind: "timeout"
     });
     await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS);
     await expectation;
@@ -139,7 +194,7 @@ describe("provider chat completion", () => {
       const error = await captured;
 
       expect(error).toMatchObject({
-        kind: "aborted",
+        kind: "timeout",
         httpStatus: status
       });
       expect(Object.hasOwn(error as object, "status")).toBe(false);
@@ -160,7 +215,7 @@ describe("provider chat completion", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch
     });
     const captured = expect(pending).rejects.toMatchObject({
-      kind: "aborted",
+      kind: "timeout",
       httpStatus: 200
     });
     await vi.advanceTimersByTimeAsync(20);

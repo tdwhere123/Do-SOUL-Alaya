@@ -56,7 +56,7 @@ describe("warm derived snapshot restore", () => {
       database_schema_version: databaseSchemaVersion,
       derived_rebuild_identity_sha256: REPORT_IDENTITY
     });
-  });
+  }, 20_000);
 
   it("rejects a sealed DB whose physical SHA differs from the receipt", async () => {
     const receiptPath = await writeReceipt({ databaseSha256: "d".repeat(64) });

@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { sha256File } from "../snapshot/integrity.js";
 import {
   isLongMemEvalSnapshotMaterializationResult,
   runLongMemEval
@@ -9,12 +8,13 @@ import type {
   DiagnosticLoopPhaseContext,
   DiagnosticLoopPhaseResult
 } from "./types.js";
+import { resolveSnapshotIdentity } from "./authority/identity.js";
 
 export async function runProductionSnapshotPhase(
   context: DiagnosticLoopPhaseContext
 ): Promise<DiagnosticLoopPhaseResult> {
   if (context.request.snapshotPath !== undefined) {
-    return reuseSnapshot(context.request.snapshotPath);
+    return reuseSnapshot(context.request.snapshotPath, context.request.variant);
   }
   if (context.request.snapshotOutPath === undefined) {
     throw new DiagnosticLoopFailure({
@@ -52,16 +52,19 @@ export async function runProductionSnapshotPhase(
       resumeCommand: ""
     });
   }
-  const digest = await sha256File(result.snapshotPath);
+  const identity = await resolveSnapshotIdentity(result.snapshotPath, context.request.variant);
   return {
-    contentIdentity: digest,
+    contentIdentity: identity.identity_digest,
     physicalCalls: 0,
     artifactPaths: { snapshot: result.snapshotPath },
-    details: { snapshot_identity: digest }
+    details: { ...identity }
   };
 }
 
-async function reuseSnapshot(snapshotPath: string): Promise<DiagnosticLoopPhaseResult> {
+async function reuseSnapshot(
+  snapshotPath: string,
+  variant: DiagnosticLoopPhaseContext["request"]["variant"]
+): Promise<DiagnosticLoopPhaseResult> {
   if (!existsSync(snapshotPath)) {
     throw new DiagnosticLoopFailure({
       phase: "snapshot",
@@ -70,11 +73,11 @@ async function reuseSnapshot(snapshotPath: string): Promise<DiagnosticLoopPhaseR
       resumeCommand: ""
     });
   }
-  const digest = await sha256File(snapshotPath);
+  const identity = await resolveSnapshotIdentity(snapshotPath, variant);
   return {
-    contentIdentity: digest,
+    contentIdentity: identity.identity_digest,
     physicalCalls: 0,
     artifactPaths: { snapshot: snapshotPath },
-    details: { snapshot_identity: digest }
+    details: { ...identity }
   };
 }

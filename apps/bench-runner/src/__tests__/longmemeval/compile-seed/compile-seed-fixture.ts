@@ -84,6 +84,9 @@ export function signalsEnvelope(
   });
 }
 
+export { providerBackedExtractionResult as providerBackedResult } from
+  "../extraction/extraction-cache-test-fixture.js";
+
 export function withOpenSemanticFactorGraph<T extends Readonly<{
   readonly matched_text: string;
 }>>(signal: T): T & Readonly<{ semantic_factor_graph: Readonly<Record<string, unknown>> }> {

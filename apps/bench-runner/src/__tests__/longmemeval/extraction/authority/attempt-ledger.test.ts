@@ -7,6 +7,8 @@ import {
   readExtractionAttemptLedger,
   openExtractionAttemptLedger
 } from "../../../../bench/extraction/authority/attempt-ledger.js";
+import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
+  "../extraction-cache-test-fixture.js";
 
 const key = (digit: string): string => digit.repeat(64);
 const cacheIdentity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;
@@ -434,7 +436,8 @@ async function writeValidShard(cacheKey: string): Promise<void> {
     transport_provenance: {
       provider_url_sha256: `sha256:${key("a")}`,
       model: cacheIdentity.model
-    }
+    },
+    response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
   }));
 }
 

@@ -12,6 +12,10 @@ import {
 } from "@do-soul/alaya-soul";
 import { resolveSecretRef, type ResolveSecretError } from "../../secrets/index.js";
 import type { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
+import {
+  executeProviderChatCompletion,
+  ProviderChatCompletionError
+} from "@do-soul/alaya-engine-gateway";
 
 const DEFAULT_GARDEN_STATUS_WORKSPACE_ID = "default";
 
@@ -183,56 +187,38 @@ async function classifyConflictPair(
     readonly scopeClass: string;
   }
 ): Promise<"contradicts" | "incompatible_with" | "none"> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-  timer.unref?.();
   try {
-    const content = await requestConflictDetectionClassification(config, pair, controller.signal);
-    return parseConflictDetectionClassification(content);
+    const execution = await executeProviderChatCompletion({
+      providerUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      systemPrompt: "Reply with exactly one word.",
+      userPrompt: buildConflictDetectionPrompt(pair),
+      temperature: 0,
+      timeoutMs: config.timeoutMs,
+      mode: "json",
+      jsonObject: false,
+      maxOutputTokens: 8,
+      outputTokenField: "max_tokens"
+    }, {
+      maxRetries: 0,
+      retryDelaysMs: []
+    });
+    return parseConflictDetectionClassification(execution.result.text.trim().toLowerCase());
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Conflict detection LLM HTTP ")) {
-      throw error;
+    if (error instanceof ProviderChatCompletionError && error.kind === "http_error") {
+      throw mapConflictDetectionHttpError(error);
     }
     throw new Error("Conflict detection LLM request failed", { cause: error });
-  } finally {
-    clearTimeout(timer);
   }
 }
 
-async function requestConflictDetectionClassification(
-  config: ConflictDetectionLlmConfig,
-  pair: {
-    readonly newContent: string;
-    readonly existingContent: string;
-    readonly dimension: string;
-    readonly scopeClass: string;
-  },
-  signal: AbortSignal
-): Promise<string> {
-  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: "system", content: "Reply with exactly one word." },
-        { role: "user", content: buildConflictDetectionPrompt(pair) }
-      ],
-      temperature: 0,
-      max_tokens: 8
-    }),
-    signal
-  });
-  if (!response.ok) {
-    throw new Error(`Conflict detection LLM HTTP ${response.status} ${response.statusText}`);
-  }
-  const data = (await response.json()) as {
-    readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? "";
+function mapConflictDetectionHttpError(error: ProviderChatCompletionError): Error {
+  const prefix = "provider chat completion failed: ";
+  const detail = error.message.startsWith(prefix)
+    ? error.message.slice(prefix.length)
+    : `HTTP ${error.httpStatus ?? "unknown"}`;
+  return new Error(`Conflict detection LLM ${detail}`, { cause: error });
 }
 
 function buildConflictDetectionPrompt(input: {

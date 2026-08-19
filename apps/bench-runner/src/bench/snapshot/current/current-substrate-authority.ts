@@ -77,7 +77,10 @@ export function assertCacheOnlyEnvironment(
 ): void {
   const live = env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION?.trim().toLowerCase();
   const credential = env.ALAYA_OFFICIAL_GARDEN_SECRET_REF?.trim() ||
-    env.ALAYA_GARDEN_OPENAI_SECRET_REF?.trim();
+    env.ALAYA_OFFICIAL_GARDEN_API_KEY?.trim() ||
+    env.OFFICIAL_API_GARDEN_API_KEY?.trim() ||
+    env.ALAYA_GARDEN_OPENAI_SECRET_REF?.trim() ||
+    env.ALAYA_QA_API_KEY?.trim();
   const conflictCredential = env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim() ||
     env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
   if (credential || conflictCredential || live === "1" || live === "true") {

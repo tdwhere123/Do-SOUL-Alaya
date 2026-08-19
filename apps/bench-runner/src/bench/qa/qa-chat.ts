@@ -1,9 +1,6 @@
 /**
- * @anchor longmemeval-qa-chat — thin OpenAI-compatible chat primitive for the
- * end-to-end QA harness (answer-LLM + LLM-judge). It issues a bare POST
- * /v1/chat/completions against the garden provider URL. The garden extractor reuses the
- * SAME primitive, but a thin helper keeps the QA path self-contained,
- * dependency-light, and mockable (the QA harness takes a `QaChatFn` so unit
+ * @anchor longmemeval-qa-chat — provider-backed chat port for the end-to-end
+ * QA harness (answer-LLM + LLM-judge). The harness takes a `QaChatFn` so unit
  * tests inject a fake chat and spend zero network / zero tokens).
  *
  * Credentials come from env only (never hard-coded). The QA path is gated OFF
@@ -12,6 +9,12 @@
  *
  * see also: apps/bench-runner/src/longmemeval/qa-harness.ts — answer/judge flow
  */
+
+import {
+  executeProviderChatCompletion,
+  providerExecutionFailureOf,
+  ProviderChatCompletionError
+} from "@do-soul/alaya-engine-gateway";
 
 /** A single chat turn: system + user prompt -> assistant text. */
 export type QaChatFn = (system: string, user: string) => Promise<string>;
@@ -73,10 +76,7 @@ export function resolveQaJudgeChatConfig(
 // client error and fails fast.
 const QA_MAX_ATTEMPTS = 5;
 const QA_RETRY_BASE_MS = 600;
-const QA_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const QA_RETRYABLE_STATUSES = [408, 409, 425, 429, 500, 502, 503, 504] as const;
 
 /**
  * Terminal QA-chat failure after the transient retries are exhausted (network
@@ -93,58 +93,57 @@ export class QaChatError extends Error {
 }
 
 /**
- * Build a real chat fn over fetch. Same shape as the verified probe: one
- * system + one user message, returns the first choice's content. Transient
+ * Build a real chat fn over the shared provider executor. One system + one
+ * user message returns the first choice's content. Transient
  * provider/network errors are retried; a non-retryable non-2xx surfaces so a
  * transient provider error never scores a blank answer as WRONG.
  */
 export function createGardenChatFn(config: QaChatConfig): QaChatFn {
-  const endpoint = `${config.url.replace(/\/+$/u, "")}/chat/completions`;
   return async (system: string, user: string): Promise<string> => {
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= QA_MAX_ATTEMPTS; attempt += 1) {
-      let res: Response;
-      try {
-        res = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: config.model,
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: user }
-            ]
-          })
-        });
-      } catch (err) {
-        // network-level reject ("fetch failed") — retry until attempts exhausted
-        lastErr = err;
-        if (attempt >= QA_MAX_ATTEMPTS) break;
-        await sleep(QA_RETRY_BASE_MS * 2 ** (attempt - 1));
-        continue;
-      }
-      if (!res.ok) {
-        const body = (await res.text()).slice(0, 300);
-        if (QA_RETRYABLE_STATUS.has(res.status) && attempt < QA_MAX_ATTEMPTS) {
-          lastErr = new Error(`garden chat HTTP ${res.status}: ${body}`);
-          await sleep(QA_RETRY_BASE_MS * 2 ** (attempt - 1));
-          continue;
-        }
-        throw new Error(`garden chat HTTP ${res.status}: ${body}`);
-      }
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      return data.choices?.[0]?.message?.content ?? "";
+    try {
+      const execution = await executeProviderChatCompletion({
+        providerUrl: config.url,
+        apiKey: config.apiKey,
+        model: config.model,
+        systemPrompt: system,
+        userPrompt: user,
+        mode: "json",
+        jsonObject: false
+      }, {
+        maxRetries: QA_MAX_ATTEMPTS - 1,
+        retryDelaysMs: Array.from(
+          { length: QA_MAX_ATTEMPTS - 1 },
+          (_, attempt) => QA_RETRY_BASE_MS * 2 ** attempt
+        ),
+        retryHttpStatuses: QA_RETRYABLE_STATUSES,
+        retryNetworkErrors: true
+      });
+      return execution.result.text;
+    } catch (error) {
+      throw mapQaChatFailure(error);
     }
-    throw new QaChatError(
-      `garden chat failed after ${QA_MAX_ATTEMPTS} attempts: ${
-        lastErr instanceof Error ? lastErr.message : String(lastErr)
-      }`,
-      { cause: lastErr }
-    );
   };
+}
+
+function mapQaChatFailure(error: unknown): Error {
+  const receipt = providerExecutionFailureOf(error);
+  if (error instanceof ProviderChatCompletionError && error.kind === "http_error") {
+    if (receipt?.retryClassification !== "failure_max_retries") {
+      return new Error(`garden chat HTTP ${error.httpStatus ?? "unknown"}`, { cause: error });
+    }
+  }
+  if (receipt?.retryClassification === "failure_max_retries") {
+    return new QaChatError(
+      `garden chat failed after ${QA_MAX_ATTEMPTS} attempts: ${providerFailureDetail(error)}`,
+      { cause: error }
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function providerFailureDetail(error: unknown): string {
+  if (error instanceof ProviderChatCompletionError && error.cause instanceof Error) {
+    return error.cause.message;
+  }
+  return error instanceof Error ? error.message : String(error);
 }

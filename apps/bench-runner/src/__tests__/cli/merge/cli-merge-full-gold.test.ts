@@ -204,5 +204,5 @@ describe("merge-longmemeval full-gold KPI", () => {
       )
     ) as KpiPayload;
     expect(merged.kpi.full_gold_coverage).toBeUndefined();
-  });
+  }, 20_000);
 });

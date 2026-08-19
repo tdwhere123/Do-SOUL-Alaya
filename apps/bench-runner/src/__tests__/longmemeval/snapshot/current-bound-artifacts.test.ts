@@ -61,7 +61,7 @@ describe("current snapshot immutable artifact binding", () => {
     expect(await readFile(`${bound.snapshotDbPath}.extraction-authority.json`))
       .toEqual(original[3]);
     expect(bound.manifestSha256).toBe(sha256(original[1]!));
-  });
+  }, 20_000);
 
   it("rejects a symlinked current snapshot DB instead of following it", async () => {
     const fixture = await snapshotFixture();

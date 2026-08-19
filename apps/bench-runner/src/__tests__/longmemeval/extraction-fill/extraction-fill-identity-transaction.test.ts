@@ -12,7 +12,10 @@ import {
   writeExtractionCacheManifest
 } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { buildGroundedSignalResponse } from "./fixture.js";
+import {
+  buildGroundedSignalResponse,
+  providerBackedExtractionResult
+} from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -82,7 +85,9 @@ describe("extraction-fill identity transaction", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: (message) => {
         if (!message.includes("2/2")) return;
         writeIdentityManifest("https://provider-a.invalid/v1", "family-a", "replacement");
@@ -116,7 +121,9 @@ describe("extraction-fill identity transaction", () => {
             blockedStarted();
             await blocked;
           }
-          return { rawJson: buildGroundedSignalResponse(input.userPrompt) };
+          return providerBackedExtractionResult(
+            buildGroundedSignalResponse(input.userPrompt)
+          );
         }
       }),
       log: () => undefined
@@ -138,7 +145,9 @@ async function fillSuccessfully() {
     dataDir,
     pinnedMetaRoot,
     concurrency: 1,
-    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+    extractorFactory: () => ({
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
+    }),
     log: () => undefined
   });
 }

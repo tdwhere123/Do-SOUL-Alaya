@@ -31,6 +31,7 @@ import {
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
+  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
@@ -53,7 +54,7 @@ describe("createCachingSignalExtractor provider execution", () => {
       matched: "I have a dog."
     }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson }))
+      extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
     };
     const stats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -98,6 +99,31 @@ describe("createCachingSignalExtractor provider execution", () => {
     expect(stats.lastExtractionSource).toBe("live");
   });
 
+  it("rejects a provider-backed delegate result without completion authority", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({
+        rawJson: signalsEnvelope([{ distilled: "Fact X.", matched: "X" }])
+      }))
+    };
+    const extractor = createCachingSignalExtractor({
+      delegate,
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
+      cacheRoot
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: "sys",
+      userPrompt: canonicalExtractionUserPrompt("I have a dog.")
+    })).rejects.toThrow("failed to persist extraction cache shard");
+    expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
+  });
+
   it("rejects deterministic empty extraction when provider backing is required", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
@@ -133,7 +159,7 @@ describe("createCachingSignalExtractor replay", () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const rawJson = signalsEnvelope([{ distilled: "Fact X.", matched: "X" }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson }))
+      extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -218,8 +244,8 @@ describe("createCachingSignalExtractor identity", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({ rawJson: firstRaw })
-        .mockResolvedValueOnce({ rawJson: secondRaw })
+        .mockResolvedValueOnce(providerBackedExtractionResult(firstRaw))
+        .mockResolvedValueOnce(providerBackedExtractionResult(secondRaw))
     };
     const extractor = createCachingSignalExtractor({
       delegate,

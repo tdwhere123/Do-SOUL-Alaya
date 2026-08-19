@@ -12,6 +12,7 @@ import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -111,7 +112,7 @@ function fill(limit: number) {
 }
 
 function extractor(): BenchSignalExtractor {
-  return { extract: async () => ({ rawJson: '{"signals":[]}' }) };
+  return { extract: async () => providerBackedExtractionResult('{"signals":[]}') };
 }
 
 async function pinnedRevision(): Promise<string> {

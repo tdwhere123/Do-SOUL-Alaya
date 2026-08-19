@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
-  fetchProviderChatCompletion
+  executeProviderChatCompletion
 } from "@do-soul/alaya-engine-gateway";
 import {
   createOfficialGardenExtractor,
@@ -12,14 +12,14 @@ vi.mock("@do-soul/alaya-engine-gateway", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@do-soul/alaya-engine-gateway")>();
   return {
     ...actual,
-    fetchProviderChatCompletion: vi.fn()
+    executeProviderChatCompletion: vi.fn()
   };
 });
 
-const fetchMock = vi.mocked(fetchProviderChatCompletion);
+const executeMock = vi.mocked(executeProviderChatCompletion);
 
 afterEach(() => {
-  fetchMock.mockReset();
+  executeMock.mockReset();
 });
 
 describe("resolveVendorModelAlias", () => {
@@ -39,10 +39,11 @@ describe("resolveVendorModelAlias", () => {
 
 describe("createOfficialGardenExtractor", () => {
   it("sends the remapped vendor id and table profile to the provider", async () => {
-    fetchMock.mockResolvedValue({
-      text: '{"signals":[]}',
-      finishReason: "stop",
-      httpStatus: 200
+    executeMock.mockResolvedValue({
+      result: { text: '{"signals":[]}', finishReason: "stop", httpStatus: 200 },
+      retryCount: 0,
+      retryClassification: "success_first_try",
+      failures: []
     });
     const extractor = createOfficialGardenExtractor({
       apiKey: "sk-test",
@@ -55,18 +56,19 @@ describe("createOfficialGardenExtractor", () => {
       userPrompt: "{}"
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({
       model: "mimo-v2.5",
       profile: "mimo-v2.5-nonthinking-v1",
       timeoutMs: DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
-    }));
+    }), expect.objectContaining({ maxRetries: 3 }));
   });
 
   it("does not attach a request profile for an unknown model", async () => {
-    fetchMock.mockResolvedValue({
-      text: '{"signals":[]}',
-      finishReason: "stop",
-      httpStatus: 200
+    executeMock.mockResolvedValue({
+      result: { text: '{"signals":[]}', finishReason: "stop", httpStatus: 200 },
+      retryCount: 2,
+      retryClassification: "success_after_retry",
+      failures: []
     });
     const extractor = createOfficialGardenExtractor({
       apiKey: "sk-test",
@@ -79,8 +81,23 @@ describe("createOfficialGardenExtractor", () => {
       userPrompt: "{}"
     });
 
-    const request = fetchMock.mock.calls[0]?.[0];
+    const request = executeMock.mock.calls[0]?.[0];
     expect(request?.model).toBe("unknown-garden-model");
     expect(request?.profile).toBeUndefined();
+  });
+
+  it("passes the gateway execution receipt through the Soul consumer port", async () => {
+    executeMock.mockResolvedValue({
+      result: { text: '{"signals":[]}', finishReason: "stop", httpStatus: 200 },
+      retryCount: 2,
+      retryClassification: "success_after_retry",
+      failures: []
+    });
+    const extractor = createOfficialGardenExtractor({ apiKey: "sk", model: "model" });
+
+    await expect(extractor.extract({ systemPrompt: "sys", userPrompt: "{}" }))
+      .resolves.toMatchObject({
+        extractorMeta: { retryCount: 2, retryClassification: "success_after_retry" }
+      });
   });
 });

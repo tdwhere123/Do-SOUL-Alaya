@@ -144,7 +144,7 @@ describe("pi-mono-extractor-contract", () => {
     expect(model.baseUrl).toBe("https://proxy.example.test/v1");
   });
 
-  it("retries a 5xx from the injected transport and reports failure_max_retries", async () => {
+  it("does not infer retry policy from a 5xx-shaped injected port error", async () => {
     const complete = vi.fn(async () => {
       const error = new Error("HTTP 503 Service Unavailable");
       (error as { status?: number }).status = 503;
@@ -153,17 +153,15 @@ describe("pi-mono-extractor-contract", () => {
     const extractor = createPiMonoExtractor({
       apiKey: "sk-live",
       model: "custom-model",
-      complete,
-      sleep: async () => undefined,
-      random: () => 0
+      complete
     });
     await expect(
       extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
     ).rejects.toMatchObject({
       kind: "transport_failure",
-      retryClassification: "failure_max_retries"
+      retryClassification: "failure_transport_port"
     });
-    expect(complete).toHaveBeenCalledTimes(4);
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it("does not retry a 4xx from the injected transport", async () => {
@@ -175,15 +173,13 @@ describe("pi-mono-extractor-contract", () => {
     const extractor = createPiMonoExtractor({
       apiKey: "sk-live",
       model: "custom-model",
-      complete,
-      sleep: async () => undefined,
-      random: () => 0
+      complete
     });
     await expect(
       extractor.extract({ systemPrompt: "sys", userPrompt: "turn" })
     ).rejects.toMatchObject({
       kind: "transport_failure",
-      retryClassification: "failure_non_retryable_4xx"
+      retryClassification: "failure_transport_port"
     });
     expect(complete).toHaveBeenCalledTimes(1);
   });
@@ -194,9 +190,7 @@ describe("pi-mono-extractor-contract", () => {
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete: invalidJsonComplete,
-      getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     await expect(invalidJsonExtractor.extract({ systemPrompt: "system", userPrompt: "turn" }))
       .rejects.toMatchObject({
@@ -211,7 +205,9 @@ describe("pi-mono-extractor-contract", () => {
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete: vi.fn(async () => {
-        throw new Error("request timed out");
+        throw new SignalExtractorError("timeout", "request timed out", {
+          retryClassification: "failure_timeout"
+        });
       }),
       getModel: vi.fn(() => createModel())
     });
@@ -227,9 +223,7 @@ describe("pi-mono-extractor-contract", () => {
         (err as { status?: number }).status = 401;
         throw err;
       }),
-      getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     await expect(transportExtractor.extract({ systemPrompt: "system", userPrompt: "turn" }))
       .rejects.toMatchObject({ name: "SignalExtractorError", kind: "transport_failure", retryCount: 0 } satisfies Partial<SignalExtractorError>);

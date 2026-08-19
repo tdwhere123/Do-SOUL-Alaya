@@ -30,6 +30,7 @@ import {
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
   makeSeed,
+  providerBackedResult,
   signalsEnvelope,
   withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
@@ -82,6 +83,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: JSON.stringify({
             signals: [
               {
@@ -154,6 +156,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           // The model envelope carries 3 raw signals. The middle one is
           // malformed — its confidence is not numeric —
           // so parseOfficialApiSignalEntry returns null and it never
@@ -241,6 +244,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Survivor.", matched: "Intro span" },
             { distilled: "Absent.", matched: "Middle span" },
@@ -301,6 +305,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([{ distilled: "Created but unaccepted.", matched: "Intro span" }])
         })
       })
@@ -391,7 +396,12 @@ describe("extraction cache write is atomic", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({
         rawJson: bigRawJson,
-        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 },
+        responseMetadata: {
+          finishReason: "stop",
+          maxOutputTokens: 2048,
+          completionContractVersion: 1,
+          completionWitness: "message"
+        },
         usage: { inputTokens: 17, outputTokens: 23, totalTokens: 40 }
       }))
     };
@@ -427,6 +437,8 @@ describe("extraction cache write is atomic", () => {
     expect(onDisk.response_metadata).toEqual({
       finish_reason: "stop",
       max_output_tokens: 2048,
+      completion_contract_version: 1,
+      completion_witness: "message",
       usage: { input_tokens: 17, output_tokens: 23, total_tokens: 40 }
     });
 

@@ -25,7 +25,7 @@ import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
   "../../../bench/snapshot/materialize.js";
 import { CREDENTIALLED_CONFIG, withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from
+import { providerBackedExtractionResult, writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
 
 let daemon: BenchDaemonHandle | undefined;
@@ -58,7 +58,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+        extract: async () => providerBackedExtractionResult("{\"signals\":[]}")
       })
     });
 
@@ -193,8 +193,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({
-          rawJson: JSON.stringify({
+        extract: async () => providerBackedExtractionResult(JSON.stringify({
             signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
@@ -207,8 +206,7 @@ describe("LongMemEval source evidence fallback integration", () => {
                 assertion_id: 1
               }
             })]
-          })
-        })
+          }))
       })
     });
 
@@ -282,8 +280,7 @@ describe("LongMemEval source evidence fallback integration", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({
-          rawJson: JSON.stringify({
+        extract: async () => providerBackedExtractionResult(JSON.stringify({
             signals: [withOpenSemanticFactorGraph({
               signal_kind: "potential_claim",
               object_kind: "unroutable_observation",
@@ -296,8 +293,7 @@ describe("LongMemEval source evidence fallback integration", () => {
                 assertion_id: 1
               }
             })]
-          })
-        })
+          }))
       })
     });
 

@@ -23,6 +23,8 @@ import {
   parsePositiveInt,
   readRequiredFlagValue
 } from "../options/flag-values.js";
+import { readCanonicalReplayRequestManifest } from
+  "../provider-preflight/replay-request-manifest.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -30,6 +32,7 @@ export interface DiagnosticLoopArgs {
   readonly workRoot: string;
   readonly mode: DiagnosticLoopMode;
   readonly fromPhase?: DiagnosticLoopPhase;
+  readonly requestManifestPath?: string;
   readonly request: DiagnosticLoopRequest;
 }
 
@@ -39,6 +42,25 @@ export function parseDiagnosticLoopArgs(
   const parsed = readArgs(args);
   assertRequired(parsed);
   const mode = parsed.mode ?? "run";
+  const manifest = parsed.requestManifest === undefined
+    ? undefined
+    : readCanonicalReplayRequestManifest(parsed.requestManifest);
+  if (manifest !== undefined) {
+    return {
+      workRoot: path.resolve(parsed.workRoot!),
+      mode,
+      ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
+      requestManifestPath: parsed.requestManifest,
+      request: operationalOverrides(manifest.request, parsed, mode)
+    };
+  }
+  return parseScalarArgs(parsed, mode);
+}
+
+function parseScalarArgs(
+  parsed: RawArgs,
+  mode: DiagnosticLoopMode
+): DiagnosticLoopArgs {
   const variant = parseVariant(parsed.variant ?? "s");
   const requestedKeys = parseRequestedKeys(parsed.requestedKeys);
   const worker = parsed.worker === true || mode === "smoke";
@@ -105,6 +127,7 @@ interface RawArgs {
   treatmentFactorCache?: string;
   historyRoot?: string;
   dataDir?: string;
+  requestManifest?: string;
 }
 
 function readArgs(args: ReadonlyArray<string>): RawArgs {
@@ -125,6 +148,9 @@ function consumeToken(
   if (assignString(parsed, args, index, token, "--work-root", "workRoot")) {
     return nextIndex(index, token);
   }
+  if (assignString(
+    parsed, args, index, token, "--request-manifest", "requestManifest"
+  )) return nextIndex(index, token);
   if (matchFlagToken(token, "--mode")) {
     const value = required(args, index, token, "--mode");
     if (!isDiagnosticLoopMode(value)) throw new Error(`unsupported --mode ${value}`);
@@ -227,6 +253,12 @@ function required(
 }
 
 function assertRequired(parsed: RawArgs): void {
+  if (parsed.requestManifest !== undefined) {
+    if (parsed.workRoot === undefined) {
+      throw new Error("missing required diagnostic-loop flags: workRoot");
+    }
+    return;
+  }
   const requiredFlags: Array<keyof RawArgs> = [
     "workRoot", "datasetRevision", "requestedKeys", "providerRoute",
     "model", "requestProfile", "promptDigest", "schemaDigest", "operatorDigest"
@@ -235,6 +267,24 @@ function assertRequired(parsed: RawArgs): void {
   if (missing.length > 0) {
     throw new Error(`missing required diagnostic-loop flags: ${missing.join(", ")}`);
   }
+}
+
+function operationalOverrides(
+  request: DiagnosticLoopRequest,
+  parsed: RawArgs,
+  mode: DiagnosticLoopMode
+): DiagnosticLoopRequest {
+  return {
+    ...request,
+    worker: parsed.worker === true || mode === "smoke" || request.worker,
+    ...(parsed.snapshot === undefined ? {} : { snapshotPath: parsed.snapshot }),
+    ...(parsed.snapshotOut === undefined ? {} : { snapshotOutPath: parsed.snapshotOut }),
+    ...(parsed.treatmentFactorCache === undefined
+      ? {}
+      : { treatmentFactorCachePath: parsed.treatmentFactorCache }),
+    historyRoot: parsed.historyRoot ?? request.historyRoot ?? DEFAULT_HISTORY_ROOT,
+    ...(parsed.dataDir === undefined ? {} : { dataDir: parsed.dataDir })
+  };
 }
 
 function parseRequestedKeys(raw: string | undefined): readonly string[] {

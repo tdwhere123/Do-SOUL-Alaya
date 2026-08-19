@@ -1,11 +1,17 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../../../cli/index.js";
 import { runDiagnosticLoopCommand } from "../../../cli/diagnostic-loop/command.js";
 import { parseDiagnosticLoopArgs } from "../../../cli/diagnostic-loop/args.js";
-import { digest, trackingAdapters } from "./fixture.js";
+import { digest, loopRequest, trackingAdapters } from "./fixture.js";
+import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
+import { readExtractionCacheManifestIdentity } from
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { computeExtractionKeySetSha256 } from
+  "../../../bench/extraction/content-closure.js";
 
 const roots: string[] = [];
 
@@ -91,8 +97,84 @@ describe("diagnostic-loop CLI", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     expect(await runCli(["diagnostic-loop"])).toBe(2);
     expect(stderr.mock.calls.map((call) => String(call[0])).join("")).toMatch(
-      /missing required diagnostic-loop flags/u
+      /missing required diagnostic-loop flags|requires --request-manifest/u
     );
+  });
+
+  it("rejects the legacy scalar identity route at the production CLI", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    expect(await runCli(["diagnostic-loop", ...requiredFlags({})])).toBe(2);
+    expect(stderr.mock.calls.map((call) => String(call[0])).join(""))
+      .toContain("diagnostic-loop requires --request-manifest");
+  });
+
+  it("validates and reruns a failed v2 checkpoint", async () => {
+    const workRoot = await tempRoot();
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    expect(await runDiagnosticLoopCommand(
+      requiredFlags({ workRoot }), { adapters: trackingAdapters().adapters }
+    )).toBe(0);
+    const path = join(workRoot, "checkpoints", "control_recall.json");
+    const current = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const { checkpoint_digest: _digest, ...body } = { ...current, status: "failed" };
+    await writeFile(path, `${JSON.stringify({
+      ...body,
+      checkpoint_digest: checkpointDigest(body as never)
+    }, null, 2)}\n`);
+
+    const resumed = trackingAdapters();
+    expect(await runDiagnosticLoopCommand(
+      requiredFlags({ workRoot }), { adapters: resumed.adapters }
+    )).toBe(0);
+    expect(resumed.calls).toEqual(["control_recall", "treatment_recall", "miss_ledger"]);
+  });
+
+  it("reads the shared sealed request manifest instead of a giant key argv", async () => {
+    const root = await tempRoot();
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const workRoot = join(root, "source-run");
+    expect(await runDiagnosticLoopCommand(
+      requiredFlags({ workRoot }), { adapters: trackingAdapters().adapters }
+    )).toBe(0);
+    const cacheRoot = join(workRoot, "tracking-extraction-cache");
+    const cache = readExtractionCacheManifestIdentity(cacheRoot)!;
+    const request = loopRequest({
+      extractionCacheRoot: cacheRoot,
+      providerRoute: cache.manifest.provider_url,
+      limit: 1,
+      offset: 0
+    });
+    const manifestPath = join(root, "request-manifest.json");
+    const body = {
+      schema_version: 1,
+      kind: "provider_preflight_replay_request",
+      request,
+      canonical_keys: {
+        count: request.requestedKeys.length,
+        key_set_sha256: computeExtractionKeySetSha256(request.requestedKeys)
+      },
+      cache_authority: {
+        manifest_sha256: cache.manifestSha256,
+        content_closure_sha256: cache.manifest.content_closure_sha256,
+        expected_key_set_sha256: cache.manifest.expected_key_set_sha256,
+        shard_count: cache.manifest.expected_turns,
+        window_offset: cache.manifest.window_offset,
+        window_limit: cache.manifest.window_limit
+      },
+      dataset_authority: {}
+    };
+    await writeFile(manifestPath, `${JSON.stringify({
+      ...body,
+      request_manifest_sha256: createHash("sha256")
+        .update(JSON.stringify(body), "utf8").digest("hex")
+    })}\n`);
+
+    const parsed = parseDiagnosticLoopArgs([
+      "--work-root", join(root, "target"), "--request-manifest", manifestPath
+    ]);
+    expect(parsed.request.requestedKeys).toEqual(request.requestedKeys);
+    expect(parsed.request.extractionCacheRoot).toBe(cacheRoot);
   });
 });
 

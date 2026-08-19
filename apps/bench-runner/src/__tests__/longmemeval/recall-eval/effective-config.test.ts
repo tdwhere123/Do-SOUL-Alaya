@@ -199,7 +199,10 @@ describe("effective recall config identity", () => {
 
   it.each([
     { ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:GARDEN_API_KEY" },
+    { ALAYA_OFFICIAL_GARDEN_API_KEY: "secret" },
+    { OFFICIAL_API_GARDEN_API_KEY: "secret" },
     { ALAYA_GARDEN_OPENAI_SECRET_REF: "env:LEGACY_GARDEN_API_KEY" },
+    { ALAYA_QA_API_KEY: "secret" },
     { ALAYA_CONFLICT_LLM_PROVIDER_URL: "https://example.invalid/v1" },
     { ALAYA_CONFLICT_LLM_API_KEY: "secret" },
     { ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "true" }

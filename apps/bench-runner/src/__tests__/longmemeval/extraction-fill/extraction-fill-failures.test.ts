@@ -33,6 +33,7 @@ import {
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -60,7 +61,9 @@ describe("runExtractionFill", () => {
         dataDir,
         pinnedMetaRoot,
         concurrency: 1,
-        extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+        extractorFactory: () => ({
+          extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        }),
         log: (message) => {
           if (!message.includes("1/2")) return;
           writeFileSync(
@@ -105,7 +108,7 @@ describe("runExtractionFill", () => {
     ]);
     await writeFile(join(cacheRoot, "aa"), "not-a-shard-directory", "utf8");
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -198,9 +201,9 @@ describe("runExtractionFill", () => {
       buildAuthorityQuestion("q001", "shared fact", "decoy one"),
       buildAuthorityQuestion("q002", "shared fact", "decoy two")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => ({
-      rawJson: buildGroundedSignalResponse(input.userPrompt)
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const result = await runExtractionFill({
       variant: VARIANT,
       cacheRoot,

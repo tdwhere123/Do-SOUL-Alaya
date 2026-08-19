@@ -51,6 +51,15 @@ export interface DiagnosticLoopPhaseResult {
   readonly artifactPaths: Readonly<Record<string, string>>;
   readonly details?: Readonly<Record<string, unknown>>;
   readonly avoidedWork?: Partial<DiagnosticLoopAvoidedWork>;
+  readonly noProviderCallReceipt?: DiagnosticNoProviderCallReceipt;
+}
+
+export interface DiagnosticNoProviderCallReceipt {
+  readonly schema_version: 1;
+  readonly kind: "credentialless_environment" | "injected_no_provider_port" |
+    "internal_no_provider_port";
+  readonly provider_port: "absent";
+  readonly physical_calls: 0;
 }
 
 export interface DiagnosticLoopPhaseContext {
@@ -75,7 +84,7 @@ export interface DiagnosticLoopAdapters {
 }
 
 export interface DiagnosticLoopCheckpoint {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly kind: "diagnostic_loop_checkpoint";
   readonly phase: DiagnosticLoopPhase;
   readonly status: "completed" | "failed";
@@ -87,6 +96,7 @@ export interface DiagnosticLoopCheckpoint {
   readonly artifact_paths: Readonly<Record<string, string>>;
   readonly details: Readonly<Record<string, unknown>>;
   readonly completed_at: string;
+  readonly checkpoint_digest: string;
 }
 
 export interface DiagnosticLoopRunResult {

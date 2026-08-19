@@ -39,6 +39,22 @@ WORK_ROOT=""
 SEED_DB=""
 SNAPSHOT=""
 SNAPSHOT_FLAG=0
+TEMP_REQUEST_FILE=""
+
+cleanup_temp_request() {
+  if [[ -n "$TEMP_REQUEST_FILE" ]]; then
+    rm -f -- "$TEMP_REQUEST_FILE"
+  fi
+}
+trap cleanup_temp_request EXIT
+
+clear_provider_credentials() {
+  unset ALAYA_OFFICIAL_GARDEN_SECRET_REF ALAYA_OFFICIAL_GARDEN_API_KEY
+  unset OFFICIAL_API_GARDEN_API_KEY ALAYA_QA_API_KEY
+  unset ALAYA_GARDEN_OPENAI_SECRET_REF
+  unset ALAYA_CONFLICT_LLM_PROVIDER_URL ALAYA_CONFLICT_LLM_API_KEY
+  export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,19 +95,20 @@ set -a
 source "$ENV_FILE"
 set +a
 
+if [[ "${ALAYA_BENCH_RECALL_PACKET_TRACE:-0}" == "1" ]]; then
+  die "ALAYA_BENCH_RECALL_PACKET_TRACE=1 is forbidden for the pinned recall-only operator"
+fi
+
 CACHE_ROOT="${ALAYA_BENCH_EXTRACTION_CACHE_ROOT:-}"
 [[ -n "$CACHE_ROOT" ]] || die "ALAYA_BENCH_EXTRACTION_CACHE_ROOT unset after sourcing env"
 G2="$(cd "$(dirname "$CACHE_ROOT")" && pwd)"
-IDENTITY_FILE="${ALAYA_RECALL_ANY5_IDENTITY:-$G2/diagnostic-identity.json}"
 MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  [[ -f "$IDENTITY_FILE" ]] || die "identity sidecar missing: $IDENTITY_FILE (write schema/operator/requested key once)"
-  python3 - "$MANIFEST" "$IDENTITY_FILE" <<'PY'
+  python3 - "$MANIFEST" <<'PY'
 import json, sys
 manifest = json.loads(open(sys.argv[1], encoding="utf-8").read())
-identity = json.loads(open(sys.argv[2], encoding="utf-8").read())
 required = (
     "dataset_revision", "extraction_model", "request_profile",
     "system_prompt_sha256", "provider_url"
@@ -99,73 +116,47 @@ required = (
 missing = [key for key in required if not manifest.get(key)]
 if missing:
     raise SystemExit(f"manifest missing {missing}")
-for key in ("schema_digest", "operator_digest", "requested_key"):
-    if not identity.get(key):
-        raise SystemExit(f"identity sidecar missing {key}")
 print(manifest["dataset_revision"])
 print(manifest["extraction_model"])
 print(manifest["request_profile"])
 print(manifest["system_prompt_sha256"])
 print(manifest["provider_url"])
-print(identity["schema_digest"])
-print(identity["operator_digest"])
-print(identity["requested_key"])
 PY
 }
 
+build_canonical_request_manifest() {
+  local output="$1" dataset="$2" prompt="$3" provider="$4" model="$5" profile="$6"
+  rtk node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
+    "$output" \
+    "$dataset" "$prompt" "$CACHE_ROOT" \
+    "$LIMIT" "$OFFSET" "$provider" "$model" "$profile"
+}
+
 run_replay() {
-  local dataset model profile prompt schema operator key
+  local dataset model profile prompt provider
   { read -r dataset; read -r model; read -r profile; read -r prompt
-    read -r provider; read -r schema; read -r operator; read -r key
+    read -r provider
   } < <(load_identity)
   echo "replay identity model=$model profile=$profile limit=$LIMIT offset=$OFFSET"
-  rtk node "$BIN" provider-preflight --mode replay \
-    --model "$model" --request-profile "$profile"
-  local keys_file
-  keys_file="$(mktemp)"
-  printf '%s\n' "$key" > "$keys_file"
-  rtk node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
-    "$keys_file" \
-    "$dataset" "$prompt" "$schema" "$operator" "$CACHE_ROOT" \
-    "$LIMIT" "$OFFSET" "$provider" "$model" "$profile"
-  rm -f "$keys_file"
+  local request_file rc=0
+  request_file="$(mktemp)"
+  TEMP_REQUEST_FILE="$request_file"
+  clear_provider_credentials
+  build_canonical_request_manifest \
+    "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    rtk node "$BIN" provider-preflight --mode replay \
+      --request-manifest "$request_file" || rc=$?
+  fi
+  rm -f -- "$request_file"
+  TEMP_REQUEST_FILE=""
+  return "$rc"
 }
 
 reject_completed_recall_checkpoints() {
   local work="$1"
-  local rc=0
-  python3 - "$work" <<'PY' || rc=$?
-import json, os, sys
-work = sys.argv[1]
-for name in ("control_recall.json", "treatment_recall.json"):
-    path = os.path.join(work, "checkpoints", name)
-    if not os.path.isfile(path):
-        continue
-    try:
-        payload = json.loads(open(path, encoding="utf-8").read())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        raise SystemExit(3)
-    if not isinstance(payload, dict):
-        raise SystemExit(3)
-    expected_phase = name[:-5]
-    # Schema-invalid objects would otherwise reach persistRunRecord.
-    if (
-        payload.get("schema_version") != 1
-        or payload.get("kind") != "diagnostic_loop_checkpoint"
-        or payload.get("phase") != expected_phase
-        or payload.get("status") not in ("completed", "failed")
-    ):
-        raise SystemExit(3)
-    if payload.get("status") == "completed":
-        raise SystemExit(1)
-raise SystemExit(0)
-PY
-  if [[ $rc -eq 1 ]]; then
-    die "completed recall checkpoint under $work"
-  fi
-  if [[ $rc -ne 0 ]]; then
-    die "unreadable or invalid recall checkpoint under $work"
-  fi
+  rtk node "$BIN" provider-preflight \
+    --mode validate-recall-checkpoints --work-root "$work"
 }
 
 run_query_factor_fill() {
@@ -187,39 +178,26 @@ PY
   rtk node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
 }
 
-run_diagnostic() {
-  local dataset model profile prompt schema operator key
-  { read -r dataset; read -r model; read -r profile; read -r prompt
-    read -r provider; read -r schema; read -r operator; read -r key
-  } < <(load_identity)
-  local work="${WORK_ROOT:-$G2/diagnostic-${LIMIT}q-run}"
-  local qcache="$G2/query-factor-cache-${LIMIT}q.json"
-  # Sealed 100Q query cache is a superset; small windows may reuse it.
-  if [[ ! -f "$qcache" && -f "$G2/query-factor-cache-100q.json" ]]; then
-    qcache="$G2/query-factor-cache-100q.json"
-  fi
-  local snapshot_args=()
+prepare_snapshot_args() {
+  local work="$1"
+  SNAPSHOT_ARGS=()
   if [[ "$SNAPSHOT_FLAG" -eq 1 ]]; then
     [[ -f "$SNAPSHOT" ]] || die "snapshot is not a file: $SNAPSHOT"
     # --snapshot-out would materialize a new DB; reuse must stay read-only.
-    snapshot_args+=(--snapshot "$SNAPSHOT")
+    SNAPSHOT_ARGS+=(--snapshot "$SNAPSHOT")
   else
     # Default materialize would replace a sealed work DB already on disk.
     if [[ -f "$work/snapshot.db" ]]; then
       die "refusing to overwrite existing snapshot: $work/snapshot.db"
     fi
-    snapshot_args+=(--snapshot-out "$work/snapshot.db")
+    SNAPSHOT_ARGS+=(--snapshot-out "$work/snapshot.db")
   fi
-  reject_completed_recall_checkpoints "$work"
+}
+
+invoke_cache_only_diagnostic() {
+  local work="$1" qcache="$2" request_file="$3"
   # post-fill stages must stay credentialless before history/run mutation
-  unset ALAYA_OFFICIAL_GARDEN_SECRET_REF
-  unset ALAYA_OFFICIAL_GARDEN_API_KEY
-  unset OFFICIAL_API_GARDEN_API_KEY
-  unset ALAYA_QA_API_KEY
-  unset ALAYA_GARDEN_OPENAI_SECRET_REF
-  unset ALAYA_CONFLICT_LLM_PROVIDER_URL
-  unset ALAYA_CONFLICT_LLM_API_KEY
-  export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0
+  clear_provider_credentials
   export ALAYA_GARDEN_PROVIDER_KIND=local_heuristics
   mkdir -p "$work/history"
   local extra=()
@@ -228,21 +206,38 @@ run_diagnostic() {
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
   rtk node "$BIN" diagnostic-loop \
-    --work-root "$work" \
-    --dataset-revision "$dataset" \
-    --requested-keys "$key" \
-    --provider-route "$provider" \
-    --model "$model" \
-    --request-profile "$profile" \
-    --prompt-digest "$prompt" \
-    --schema-digest "$schema" \
-    --operator-digest "$operator" \
-    --mode cache-only \
-    --variant s --limit "$LIMIT" --offset "$OFFSET" \
-    --extraction-cache-root "$CACHE_ROOT" \
-    "${snapshot_args[@]}" \
-    --history-root "$work/history" \
-    "${extra[@]}"
+    --work-root "$work" --request-manifest "$request_file" \
+    --mode cache-only "${SNAPSHOT_ARGS[@]}" \
+    --history-root "$work/history" "${extra[@]}"
+}
+
+run_diagnostic() {
+  local dataset model profile prompt provider
+  { read -r dataset; read -r model; read -r profile; read -r prompt
+    read -r provider
+  } < <(load_identity)
+  local work="${WORK_ROOT:-$G2/diagnostic-${LIMIT}q-run}"
+  local qcache="$G2/query-factor-cache-${LIMIT}q.json"
+  # Sealed 100Q query cache is a superset; small windows may reuse it.
+  if [[ ! -f "$qcache" && -f "$G2/query-factor-cache-100q.json" ]]; then
+    qcache="$G2/query-factor-cache-100q.json"
+  fi
+  prepare_snapshot_args "$work"
+  reject_completed_recall_checkpoints "$work"
+  local request_file rc=0
+  request_file="$(mktemp)"
+  TEMP_REQUEST_FILE="$request_file"
+  build_canonical_request_manifest \
+    "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -f -- "$request_file"
+    TEMP_REQUEST_FILE=""
+    return "$rc"
+  fi
+  invoke_cache_only_diagnostic "$work" "$qcache" "$request_file" || rc=$?
+  rm -f -- "$request_file"
+  TEMP_REQUEST_FILE=""
+  return "$rc"
 }
 
 run_inspect() {

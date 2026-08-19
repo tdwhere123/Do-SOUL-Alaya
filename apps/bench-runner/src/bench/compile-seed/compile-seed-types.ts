@@ -1,5 +1,10 @@
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import type {
+  ProviderRetryClassification,
+  ProviderUsage
+} from "@do-soul/alaya-engine-gateway";
+import type { SignalExtractor } from "@do-soul/alaya-soul";
+import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
   CompileSeedBatchResult,
@@ -19,20 +24,9 @@ import type {
   SourceAssertionSupplementBinding
 } from "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 
-/**
- * The injectable `SignalExtractor` shape consumed by
- * `OfficialApiGardenProvider`. Declared structurally here so the bench does
- * not depend on a non-exported soul type; it matches the provider's
- * `extractor` constructor dependency.
- *
- * extractorMeta surfaces the retry observability the bench dump consumes —
- * retryCount and retryClassification let dumpSeedExtractionFailureDiagnostic
- * attribute a fallback to a specific terminal outcome of the retry loop. The
- * field is optional so unit-test stubs that do not exercise retries stay
- * minimal.
- */
-export interface BenchSignalExtractor {
-  extract(input: {
+/** Bench operation hooks extend Soul's transport-neutral consumer port. */
+export interface BenchSignalExtractor extends SignalExtractor {
+  extract(input: Parameters<SignalExtractor["extract"]>[0] & {
     readonly systemPrompt: string;
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
@@ -49,7 +43,7 @@ export interface BenchSignalExtractor {
     readonly maxOutputTokens?: number;
     /** Exact provider request field pre-registered in the authority receipt. */
     readonly outputTokenField?: "max_tokens" | "max_completion_tokens";
-  }): Promise<{
+  }): Promise<Awaited<ReturnType<SignalExtractor["extract"]>> & {
     readonly rawJson: string;
     readonly extractorMeta?: BenchSignalExtractorMeta;
     /** Keeps task-level backoff aware of earlier calls composed by the cache layer. */
@@ -64,13 +58,12 @@ export interface BenchSignalExtractor {
 export interface BenchProviderResponseMetadata {
   readonly finishReason: string | null;
   readonly maxOutputTokens?: number;
+  readonly completionContractVersion?: 1;
+  readonly completionWitness?: "message" | "done_sentinel" | "finish_reason" |
+    "profile_clean_eof" | "partition_composition";
 }
 
-export interface BenchProviderUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly totalTokens: number;
-}
+export type BenchProviderUsage = ProviderUsage;
 
 export type BenchTransportFailureKind =
   | "network_error"
@@ -101,17 +94,9 @@ export interface BenchTransportFailureAttempt {
   readonly attempt: number;
 }
 
-// invariant: closed enum mirrored from
-// packages/soul/src/garden/pi-mono-extractor.ts RetryClassification so the
-// dump envelope is consistent across the production and bench transports.
-export type BenchRetryClassification =
-  | "success_first_try"
-  | "success_after_retry"
-  | "failure_max_retries"
-  | "failure_non_retryable_4xx"
-  | "failure_non_retryable_response"
-  | "failure_timeout"
-  | "failure_aborted";
+// The gateway owns the closed retry outcome vocabulary consumed by the dump
+// and attempt ledger; bench policy only decides its operation-specific budgets.
+export type BenchRetryClassification = ProviderRetryClassification;
 
 export const BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS = [
   "failure_max_retries",

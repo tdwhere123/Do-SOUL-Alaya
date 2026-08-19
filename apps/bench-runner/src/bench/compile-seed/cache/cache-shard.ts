@@ -89,7 +89,8 @@ export function inspectCachedExtraction(
   if (cached.status !== "hit") return cached;
   return inspectCachedContent(
     cached.entry.raw_json,
-    cached.entry.response_metadata
+    cached.entry.response_metadata,
+    cached.entry.transport_provenance !== undefined
   );
 }
 
@@ -103,7 +104,10 @@ export function inspectCachedRawExtraction(
   if (cached.status !== "hit") return cached;
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
-    inspectCachedResponseMetadata(cached.entry.response_metadata);
+    inspectCachedResponseMetadata(
+      cached.entry.response_metadata,
+      cached.entry.transport_provenance !== undefined
+    );
     return {
       status: "hit",
       rawJson: cached.entry.raw_json,
@@ -172,11 +176,12 @@ export function writeCachedExtraction(
 
 function inspectCachedContent(
   rawJson: string,
-  responseMetadata: CachedExtractionResponseMetadata | undefined
+  responseMetadata: CachedExtractionResponseMetadata | undefined,
+  providerBacked: boolean
 ): CachedExtractionInspection {
   const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
   try {
-    const response = inspectCachedResponseMetadata(responseMetadata);
+    const response = inspectCachedResponseMetadata(responseMetadata, providerBacked);
     return {
       status: "hit",
       rawJson,
