@@ -27,7 +27,7 @@ describe("fill-query-factors process operator", () => {
     const cache = JSON.parse(await readFile(result.outputPath, "utf8"));
     expect(cache.entries[0]).toMatchObject({
       capture: { status: "formed" },
-      receipt: { query_producer_operator_id: "open_semantic_factor_query_compiler_v6" }
+      receipt: { query_producer_operator_id: "open_semantic_factor_query_compiler_v7" }
     });
     const request = JSON.parse(await readFile(result.requestPath, "utf8"));
     const body = JSON.parse(request.body);

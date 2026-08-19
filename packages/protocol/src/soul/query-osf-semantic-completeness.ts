@@ -12,7 +12,7 @@ export const QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID =
 export const QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID =
   "query_osf_semantic_completeness_v1" as const;
 export const QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v6" as const;
+  "open_semantic_factor_query_compiler_v7" as const;
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const SlotSchema = z.object({

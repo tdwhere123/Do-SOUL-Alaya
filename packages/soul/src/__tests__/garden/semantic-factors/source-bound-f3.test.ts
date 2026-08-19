@@ -29,7 +29,7 @@ describe("source-bound F3 seal", () => {
       .toBe(SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256);
     expect(seal.evidence_operator_id)
       .toBe("garden_source_bound_open_semantic_factor_v3");
-    expect(seal.query_operator_id).toBe("open_semantic_factor_query_compiler_v6");
+    expect(seal.query_operator_id).toBe("open_semantic_factor_query_compiler_v7");
     expect(seal.forbidden_writes).toContain("RelationAssertion");
     expect(seal.forbidden_writes).toContain("PathRelation");
   });

@@ -62,11 +62,11 @@ describe("canonical cache-only replay process", () => {
       evidence_prompt_sha256:
         "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a",
       query_prompt_sha256:
-        "c3bbc7867fa4bcb7258e97c3eb905d14b4d8e9c73a5f53d3a5c122daa4a7e14e",
+        "da13495a266e25890113ae8a1f5560c88fd26026d1432217592728482cd88c70",
       evidence_request_template_sha256:
         "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
       query_request_template_sha256:
-        "63fc3a8f49176784141251b719d3568c089184abe317f10e0cd0fd06dbbf84d6"
+        "92dea9f910b9d06abdc54af40444602bca23041b43eda4aa9a93c92a557e0aa2"
     });
     await expect(runReplayConsumer(
       prepared.requestPath,

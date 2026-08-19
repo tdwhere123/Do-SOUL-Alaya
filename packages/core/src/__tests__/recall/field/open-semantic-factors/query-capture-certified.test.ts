@@ -25,7 +25,7 @@ describe("certified recall query OSF capture", () => {
     const graph = completeGraph();
     const receipt = certifyQueryOsfSemanticCompleteness({
       query_text: QUERY, graph, obligation,
-      producer_operator_id: "open_semantic_factor_query_compiler_v6", sha256
+      producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
     })!;
     const capture = materializeOpenSemanticFactorFormation({
       source_kind: "query", source_text: QUERY,
@@ -68,7 +68,7 @@ describe("certified recall query OSF capture", () => {
 });
 
 class StatefulPort {
-  public readonly operator_id = "open_semantic_factor_query_compiler_v6";
+  public readonly operator_id = QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID;
   public calls = 0;
   public constructor(
     private readonly graph: ReturnType<typeof completeGraph>,

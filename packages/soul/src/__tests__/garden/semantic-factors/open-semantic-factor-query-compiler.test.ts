@@ -30,89 +30,12 @@ describe("open semantic factor query compiler", () => {
       graph: queryGraph(), semantic_completeness_receipt: expect.any(Object)
     });
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
-    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v6");
-    expect(extractor.extract).toHaveBeenCalledWith(expect.objectContaining({
-      systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({
-        schema_version: 3,
-        source_kind: "query",
-        source_text: QUERY,
-        semantic_completeness_obligation: QUERY_OBLIGATION
-      }),
-      responseSchemaRetryInstruction: expect.stringContaining("semantic_factor_graph"),
-      validateRawJson: expect.any(Function)
-    }));
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v7");
     const request = extractor.extract.mock.calls[0]?.[0];
-    const completeEnvelope =
-      '"schema_version":2,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]';
-    const variableShape =
-      '"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING';
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(completeEnvelope);
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(variableShape);
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "Preserve each predicate's semantic argument order"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "binding names need not match source evidence graphs"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "Place every WH phrase or other requested unknown"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "exact predicate argument position it asks for"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "Keep every explicit non-WH participant or constraint"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "belongs exclusively to one variable"
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      "any substring inside its surface"
-    );
-    expect(request?.responseSchemaRetryInstruction).toContain(
-      "Preserve each predicate's semantic argument order"
-    );
-    expect(request?.responseSchemaRetryInstruction).toContain(
-      "Place every WH phrase or other requested unknown"
-    );
-    expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
-    expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
-    const template = JSON.parse(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE) as {
-      semantic_completeness_obligation: Record<string, unknown>;
-    };
-    expect(template).toMatchObject({
-      schema_version: 3, source_kind: "query", source_text: "What did A give?",
-      semantic_completeness_obligation: {
-        operator_id: "query_fact_frame_osf_obligation_v1",
-        subject: { surface: "A", position: 0 },
-        value: { surface: "What", position: 1 },
-        arity: 2
-      }
-    });
-    expect(digest(JSON.stringify(template))).not.toBe(digest(JSON.stringify({
-      ...template,
-      semantic_completeness_obligation: {
-        ...template.semantic_completeness_obligation,
-        arity: 3
-      }
-    })));
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE).not.toBe(JSON.stringify({
-      schema_version: 1,
-      source_kind: "query",
-      source_text: "{source_text}"
-    }));
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
-      '"predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]'
-    );
-    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).not.toContain(
-      '"arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]'
-    );
-    expect(() => request?.validateRawJson?.(
-      JSON.stringify({ semantic_factor_graph: queryGraph() })
-    )).not.toThrow();
-    expect(() => request?.validateRawJson?.('{"signals":[]}'))
-      .toThrow(/query semantic factor graph missing or invalid/u);
+    assertCompilerRequest(extractor.extract, request);
+    assertPromptContract(request);
+    assertRequestTemplateContract();
+    assertResponseValidation(request);
   });
 
   it("fails closed for malformed, wrong-kind, or ungrounded graphs", async () => {
@@ -170,12 +93,12 @@ describe("open semantic factor query compiler", () => {
       .resolves.toMatchObject({ graph: g5CorrectedQueryGraph() });
   });
 
-  it("lets schema retry replace the unary G6 graph with the corrected graph", async () => {
+  it("lets schema retry replace the observed known-subject variable graph", async () => {
     const goodRaw = JSON.stringify({ semantic_factor_graph: g5CorrectedQueryGraph() });
     const extractor = {
       extract: vi.fn(async (input: Parameters<SignalExtractor["extract"]>[0]) => {
         expect(() => input.validateRawJson?.(JSON.stringify({
-          semantic_factor_graph: g6UnaryQueryGraph()
+          semantic_factor_graph: g7KnownSubjectVariableGraph()
         }))).toThrow(/query semantic factor graph missing or invalid/u);
         expect(() => input.validateRawJson?.(goodRaw)).not.toThrow();
         return { rawJson: goodRaw };
@@ -188,6 +111,102 @@ describe("open semantic factor query compiler", () => {
   });
 });
 
+type ExtractRequest = Parameters<SignalExtractor["extract"]>[0];
+
+function assertCompilerRequest(
+  extract: ReturnType<typeof vi.fn>,
+  request: ExtractRequest | undefined
+): void {
+  expect(extract).toHaveBeenCalledWith(expect.objectContaining({
+    systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
+    userPrompt: JSON.stringify({
+      schema_version: 4,
+      source_kind: "query",
+      source_text: QUERY,
+      semantic_completeness_obligation: QUERY_OBLIGATION,
+      required_graph_layout: {
+        schema_version: 1,
+        predicate: { node_kind: "factor", surface: "buy" },
+        arguments: [
+          { position: 0, node_kind: "factor", surface: "I", result: false },
+          { position: 1, node_kind: "variable", surface: "What", result: true }
+        ],
+        arity: 2,
+        result_variable_count: 1
+      }
+    }),
+    responseSchemaRetryInstruction: expect.stringContaining("semantic_factor_graph"),
+    validateRawJson: expect.any(Function)
+  }));
+  expect(request).toBeDefined();
+}
+
+function assertPromptContract(request: ExtractRequest | undefined): void {
+  const completeEnvelope =
+    '"schema_version":2,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]';
+  const requiredPhrases = [
+    completeEnvelope,
+    '"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING',
+    "Preserve each predicate's semantic argument order",
+    "binding names need not match source evidence graphs",
+    "Place every WH phrase or other requested unknown",
+    "exact predicate argument position it asks for",
+    "Keep every explicit non-WH participant or constraint",
+    "belongs exclusively to one variable",
+    "any substring inside its surface",
+    "Follow required_graph_layout mechanically",
+    "only an entry with result:true may appear in result_variable_ids"
+  ];
+  for (const phrase of requiredPhrases) {
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(phrase);
+  }
+  expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
+  expect(request?.responseSchemaRetryInstruction).toContain(
+    "Follow required_graph_layout mechanically"
+  );
+}
+
+function assertRequestTemplateContract(): void {
+  const template = JSON.parse(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE) as {
+    semantic_completeness_obligation: Record<string, unknown>;
+    required_graph_layout: Record<string, unknown>;
+  };
+  expect(template).toMatchObject({
+    schema_version: 4, source_kind: "query", source_text: "What did A give?",
+    semantic_completeness_obligation: {
+      operator_id: "query_fact_frame_osf_obligation_v1",
+      subject: { surface: "A", position: 0 },
+      value: { surface: "What", position: 1 }, arity: 2
+    },
+    required_graph_layout: {
+      schema_version: 1,
+      predicate: { node_kind: "factor", surface: "give" },
+      arguments: [
+        { position: 0, node_kind: "factor", surface: "A", result: false },
+        { position: 1, node_kind: "variable", surface: "What", result: true }
+      ],
+      arity: 2, result_variable_count: 1
+    }
+  });
+  expect(digest(JSON.stringify(template))).not.toBe(digest(JSON.stringify({
+    ...template,
+    semantic_completeness_obligation: {
+      ...template.semantic_completeness_obligation, arity: 3
+    }
+  })));
+}
+
+function assertResponseValidation(request: ExtractRequest | undefined): void {
+  expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+    '"predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]'
+  );
+  expect(() => request?.validateRawJson?.(
+    JSON.stringify({ semantic_factor_graph: queryGraph() })
+  )).not.toThrow();
+  expect(() => request?.validateRawJson?.('{"signals":[]}'))
+    .toThrow(/query semantic factor graph missing or invalid/u);
+}
+
 function responseExtractor(graph: unknown) {
   return {
     extract: vi.fn().mockResolvedValue({
@@ -196,17 +215,23 @@ function responseExtractor(graph: unknown) {
   };
 }
 
-function g6UnaryQueryGraph() {
+function g7KnownSubjectVariableGraph() {
   return {
     schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [factor("predicate", "graduate", "graduate")],
-    variables: [{ variable_id: "answer", surface: "What degree" }],
+    variables: [
+      { variable_id: "answer", surface: "What degree" },
+      { variable_id: "subject", surface: "I" }
+    ],
     result_variable_ids: ["answer"],
     propositions: [{
       proposition_id: "graduation-query",
       predicate_factor_id: "predicate",
-      arguments: [argument(0, "variable", "answer", "credential")]
+      arguments: [
+        argument(0, "variable", "subject", "agent"),
+        argument(1, "variable", "answer", "credential")
+      ]
     }]
   };
 }

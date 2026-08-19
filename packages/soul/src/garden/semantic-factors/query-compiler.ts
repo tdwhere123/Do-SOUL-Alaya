@@ -32,6 +32,7 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   "Place every WH phrase or other requested unknown as the structural variable in the exact predicate argument position it asks for; never append it as an extra argument or substitute it for a different participant.",
   "The full requested or WH phrase belongs exclusively to one variable; never emit a factor for that variable or any substring inside its surface.",
   "Keep every explicit non-WH participant or constraint in its original position-preserving factor argument.",
+  "Follow required_graph_layout mechanically: predicate and factor entries must be factors, variable entries must be variables, and only an entry with result:true may appear in result_variable_ids.",
   'Structure example only: {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
 
@@ -41,7 +42,7 @@ export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
   "Use exact contiguous source surfaces and omit character offsets; the runtime grounds surfaces.",
   "Represent every requested unknown as a structural variable and list its id in result_variable_ids.",
   "Keep dependent propositions together and preserve all explicit query constraints.",
-  "The supplied semantic completeness obligation is authoritative; satisfy its exact binary slots or return no usable graph.",
+  "The supplied semantic completeness obligation and required_graph_layout are authoritative; satisfy the exact binary layout or return no usable graph.",
   "Do not emit world ontology categories, fixed roles, answer-family labels, aliases, or gold-derived vocabulary.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ].join(" ");
@@ -104,11 +105,35 @@ export function buildOpenSemanticFactorQueryUserPrompt(
   obligation: Readonly<QueryFactFrameOsfObligation>
 ): string {
   return JSON.stringify({
-    schema_version: 3,
+    schema_version: 4,
     source_kind: "query",
     source_text: sourceText,
-    semantic_completeness_obligation: obligation
+    semantic_completeness_obligation: obligation,
+    required_graph_layout: requiredGraphLayout(obligation)
   });
+}
+
+function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) {
+  return {
+    schema_version: 1 as const,
+    predicate: { node_kind: "factor" as const, surface: obligation.predicate.surface },
+    arguments: [
+      {
+        position: obligation.subject.position,
+        node_kind: "factor" as const,
+        surface: obligation.subject.surface,
+        result: false as const
+      },
+      {
+        position: obligation.value.position,
+        node_kind: "variable" as const,
+        surface: obligation.value.surface,
+        result: true as const
+      }
+    ],
+    arity: obligation.arity,
+    result_variable_count: 1 as const
+  };
 }
 
 export function openSemanticFactorQueryRequestTemplatePreimage(): string {
