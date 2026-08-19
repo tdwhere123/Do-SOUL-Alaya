@@ -189,18 +189,23 @@ describe("pi-mono-extractor-contract", () => {
   });
 
   it("maps invalid JSON, timeout, and transport failures to typed extractor errors", async () => {
+    const invalidJsonComplete = vi.fn(async () => createAssistantMessage("not json"));
     const invalidJsonExtractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
-      // Both attempts return un-recoverable text so the retry budget is
-      // spent and the typed error escapes.
-      complete: vi.fn(async () => createAssistantMessage("not json")),
+      complete: invalidJsonComplete,
       getModel: vi.fn(() => createModel()),
       sleep: vi.fn(async () => undefined),
       random: vi.fn(() => 0.5)
     });
     await expect(invalidJsonExtractor.extract({ systemPrompt: "system", userPrompt: "turn" }))
-      .rejects.toMatchObject({ name: "SignalExtractorError", kind: "invalid_json" } satisfies Partial<SignalExtractorError>);
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "invalid_json",
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_response"
+      } satisfies Partial<SignalExtractorError>);
+    expect(invalidJsonComplete).toHaveBeenCalledTimes(1);
 
     const timeoutExtractor = createPiMonoExtractor({
       apiKey: "sk-test",

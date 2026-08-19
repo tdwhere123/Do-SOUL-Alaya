@@ -1,5 +1,13 @@
 export { ProviderChatCompletionError } from "./errors.js";
-export type { ProviderTransportFailureKind } from "./errors.js";
+export type {
+  ProviderResponseInspectionReason,
+  ProviderTransportFailureKind
+} from "./errors.js";
+export {
+  providerFailureIdentityFromBody,
+  safeProviderIdentityToken,
+  type ProviderFailureIdentity
+} from "./failure-identity.js";
 export {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
   fetchProviderChatCompletion

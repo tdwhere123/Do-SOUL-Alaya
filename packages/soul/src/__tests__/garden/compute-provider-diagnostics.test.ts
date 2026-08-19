@@ -75,7 +75,8 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
       extract: vi.fn(async () => {
         throw new SignalExtractorError(
           "invalid_json",
-          "Signal extractor returned no text content."
+          "Signal extractor returned no text content.",
+          { retryClassification: "failure_non_retryable_response" }
         );
       })
     };
@@ -104,6 +105,7 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
       kind: "invalid_json",
       name: "SignalExtractorError"
     });
+    expect(dump.retry_classification).toBe("failure_non_retryable_response");
     // No raw body was captured because the extractor threw before returning.
     expect(dump.response_body_prefix).toBeNull();
     expect(dump.response_body_total_chars).toBeNull();

@@ -8,6 +8,8 @@ import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
 import { computeExtractionFillAttemptCeiling } from
   "../../../bench/extraction/authority/receipt-limits.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -128,12 +130,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
     telemetry: {
       retrySuccesses: 0,
       rateLimitRetries: 0,
-      terminalRetryClassifications: {
-        failure_max_retries: 0,
-        failure_non_retryable_4xx: 0,
-        failure_timeout: 0,
-        failure_aborted: 0
-      },
+      terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
@@ -191,12 +188,7 @@ it("keeps the full predecessor closure when authorizing a same-root continuation
       telemetry: {
         retrySuccesses: 0,
         rateLimitRetries: 0,
-        terminalRetryClassifications: {
-          failure_max_retries: 0,
-          failure_non_retryable_4xx: 0,
-          failure_timeout: 0,
-          failure_aborted: 0
-        },
+        terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,

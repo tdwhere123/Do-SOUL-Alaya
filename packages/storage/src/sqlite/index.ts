@@ -5,6 +5,7 @@ export {
   getCurrentSchemaSummary,
   configureSqliteWriteQueuePort,
   getSqliteWriteQueuePort,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION,
   type InitDatabaseOptions
 } from "./db.js";
 export {

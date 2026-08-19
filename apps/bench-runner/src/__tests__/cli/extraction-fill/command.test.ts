@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
 import { ExtractionFillTaskError } from
   "../../../bench/extraction/fill/fill-pool.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -252,12 +254,7 @@ function completedFillResult() {
     rateLimitRetries: 0,
     adaptiveConcurrencyBackoffs: 0,
     adaptiveConcurrencyBackoffMs: 0,
-    terminalRetryClassifications: {
-      failure_max_retries: 0,
-      failure_non_retryable_4xx: 0,
-      failure_timeout: 0,
-      failure_aborted: 0
-    },
+    terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
     manifest: {}
   };
 }

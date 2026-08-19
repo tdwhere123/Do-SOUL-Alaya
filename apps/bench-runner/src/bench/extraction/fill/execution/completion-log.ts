@@ -21,6 +21,7 @@ export function renderFillCompletion(input: {
     `adaptive_backoff_ms=${input.retryTelemetry.adaptiveConcurrencyBackoffMs} ` +
     `terminal_max_retries=${input.retryTelemetry.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${input.retryTelemetry.terminalRetryClassifications.failure_non_retryable_4xx} ` +
+    `terminal_nonretryable_response=${input.retryTelemetry.terminalRetryClassifications.failure_non_retryable_response} ` +
     `terminal_timeouts=${input.retryTelemetry.terminalRetryClassifications.failure_timeout} ` +
     `${renderAuthorityTelemetry(input.authorityTelemetry)} ` +
     `coverage=${(input.completion.coverage * 100).toFixed(1)}% ` +

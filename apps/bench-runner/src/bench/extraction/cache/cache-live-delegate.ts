@@ -1,10 +1,11 @@
-import type {
-  BenchProviderUsage,
-  BenchRetryClassification,
-  BenchSignalExtractor,
-  BenchTerminalRetryClassification,
-  BenchTransportFailureAttempt,
-  CompileSeedExtractionStats
+import {
+  completeBenchTerminalRetryClassifications,
+  isBenchTerminalRetryClassification,
+  type BenchProviderUsage,
+  type BenchSignalExtractor,
+  type BenchTerminalRetryClassification,
+  type BenchTransportFailureAttempt,
+  type CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
 import { inspectExtractionRawJson } from "../content-closure.js";
 
@@ -163,8 +164,10 @@ function recordRetryFailure(stats: CompileSeedExtractionStats | undefined, cause
   if (meta === undefined) return;
   stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
   if (meta.retryClassification === undefined) return;
-  const totals = stats.terminalRetryClassifications ?? {};
-  totals[meta.retryClassification] = (totals[meta.retryClassification] ?? 0) + 1;
+  const totals = completeBenchTerminalRetryClassifications(
+    stats.terminalRetryClassifications
+  );
+  totals[meta.retryClassification] += 1;
   stats.terminalRetryClassifications = totals;
 }
 
@@ -207,7 +210,7 @@ function isBenchRetryFailure(value: unknown): value is {
     usage?: unknown;
     transportFailures?: unknown;
   };
-  const isTerminal = isTerminalRetryClassification(input.retryClassification);
+  const isTerminal = isBenchTerminalRetryClassification(input.retryClassification);
   const isPostCompose = input.postComposeFailure === true;
   return isNonNegativeSafeInteger(input.retryCount) && isNonNegativeSafeInteger(input.rateLimitRetries) &&
     (isTerminal !== isPostCompose) &&
@@ -216,13 +219,6 @@ function isBenchRetryFailure(value: unknown): value is {
     isOptionalNonNegativeSafeInteger(input.unknownRequestCount) &&
     isOptionalUsage(input.usage) &&
     (input.transportFailures === undefined || Array.isArray(input.transportFailures));
-}
-
-function isTerminalRetryClassification(value: unknown): value is BenchTerminalRetryClassification {
-  const classification = value as BenchRetryClassification;
-  return classification === "failure_max_retries" ||
-    classification === "failure_non_retryable_4xx" || classification === "failure_timeout" ||
-    classification === "failure_aborted";
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {

@@ -25,6 +25,7 @@ import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
 } from "../../../bench/extraction/fill/manifest/fill-root-guard.js";
+import { requireProviderBinding } from "../../../bench/provider/catalog.js";
 
 import {
   buildAuthorityQuestion,
@@ -34,6 +35,9 @@ import {
   EXTRACTION_FILL_VARIANT as VARIANT,
   registerExtractionFillHooks
 } from "./fixture.js";
+
+const MIMO = requireProviderBinding("mimo-v2.5");
+const MIMO_FAMILY_PROBE = `${MIMO.id}-family`;
 
 let cacheRoot: string;
 let dataDir: string;
@@ -115,12 +119,9 @@ describe("runExtractionFill", () => {
   });
 
   it("binds family config to the exact HTTP model, shard, and manifest", async () => {
-    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "deepseek-v4-flash-free");
-    vi.stubEnv(
-      "ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE",
-      "deepseek-v4-nonthinking-v1"
-    );
-    vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash");
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MIMO.id);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", MIMO.requestProfile);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", MIMO_FAMILY_PROBE);
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://opencode.ai/zen/v1");
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:ZEN_TEST_API_KEY");
     vi.stubEnv("ZEN_TEST_API_KEY", "test-only-key");
@@ -155,35 +156,35 @@ describe("runExtractionFill", () => {
     for (const [url, init] of fetchMock.mock.calls) {
       expect(String(url)).toBe("https://opencode.ai/zen/v1/chat/completions");
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        model: "deepseek-v4-flash-free",
+        model: MIMO.id,
         stream: true
       });
     }
     const shardDirs = readdirSync(cacheRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-    expectFirstShardModel(cacheRoot, shardDirs, "deepseek-v4-flash-free");
+    expectFirstShardModel(cacheRoot, shardDirs, MIMO.id);
     const answerTurn = inspectTurnContentKeySpace([
       buildAuthorityQuestion("key", "alpha", "decoy")
     ]).distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
     expect(answerTurn).toBeDefined();
     const exactKey = computeExtractionTurnCacheKey(
-      "deepseek-v4-flash-free",
-      "deepseek-v4-nonthinking-v1",
+      MIMO.id,
+      MIMO.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
       answerTurn!
     );
     const familyKey = computeExtractionTurnCacheKey(
-      "deepseek-v4-flash",
-      "deepseek-v4-nonthinking-v1",
+      MIMO_FAMILY_PROBE,
+      MIMO.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
       answerTurn!
     );
     expect(existsSync(cacheFilePath(cacheRoot, exactKey))).toBe(true);
     expect(existsSync(cacheFilePath(cacheRoot, familyKey))).toBe(false);
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
-      extraction_model: "deepseek-v4-flash-free",
-      model_family: "deepseek-v4-flash",
+      extraction_model: MIMO.id,
+      model_family: MIMO_FAMILY_PROBE,
       provider_url: "https://opencode.ai/zen/v1"
     });
   });

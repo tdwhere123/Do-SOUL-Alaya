@@ -1,5 +1,13 @@
 import { ProviderChatCompletionError } from "./errors.js";
-import { inspectProviderChatCompletionResponse } from "./inspect-response.js";
+import {
+  providerFailureIdentityFromBody,
+  readOptionalProviderFailureIdentity
+} from "./failure-identity.js";
+import {
+  inspectProviderChatCompletionResponse,
+  ProviderResponseInspectionError,
+  type ProviderResponseInspectionReason
+} from "./inspect-response.js";
 import {
   buildProviderChatRequestInit,
   providerChatCompletionsUrl
@@ -11,36 +19,44 @@ import type {
 
 export const DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS = 10_000;
 
+const INTERNAL_TIMEOUT = Object.freeze({ source: "timeout" as const });
+const CALLER_ABORT = Object.freeze({ source: "caller" as const });
+
 export async function fetchProviderChatCompletion(
   request: ProviderChatCompletionRequest
 ): Promise<ProviderChatCompletionResult> {
   const controller = new AbortController();
-  const onAbort = (): void => controller.abort();
+  const onAbort = (): void => {
+    controller.abort(CALLER_ABORT);
+  };
   bindAbort(request.abortSignal, onAbort, controller);
   const timer = startTimeout(request.timeoutMs, controller);
+  let knownStatus: number | null = null;
   try {
-    const response = await postChatCompletion(request, controller.signal);
-    const bodyText = await readBody(response);
-    if (!response.ok) {
-      const detail = compactProviderErrorDetail(bodyText);
-      throw new ProviderChatCompletionError(
-        `provider chat completion failed: HTTP ${response.status} ${response.statusText}` +
-          (detail.length === 0 ? "" : `: ${detail}`),
-        "http_error",
-        response.status
-      );
-    }
-    return inspectProviderChatCompletionResponse(
-      bodyText,
-      response.headers.get("content-type"),
-      response.status
+    return await settleUnlessAborted(
+      runProviderChatRequest(request, controller.signal, (status) => {
+        knownStatus = status;
+      }),
+      controller.signal
     );
   } catch (error) {
-    throw normalizeTransportError(error, request.abortSignal);
+    throw normalizeTransportError(error, request.abortSignal, controller.signal, knownStatus);
   } finally {
     if (timer !== null) clearTimeout(timer);
     request.abortSignal?.removeEventListener("abort", onAbort);
   }
+}
+
+async function runProviderChatRequest(
+  request: ProviderChatCompletionRequest,
+  signal: AbortSignal,
+  observeStatus: (status: number) => void
+): Promise<ProviderChatCompletionResult> {
+  const response = await postChatCompletion(request, signal);
+  observeStatus(response.status);
+  await throwIfHttpError(response);
+  const bodyText = await readBody(response);
+  return inspectBody(bodyText, response.headers.get("content-type"), response.status);
 }
 
 async function postChatCompletion(
@@ -48,9 +64,23 @@ async function postChatCompletion(
   signal: AbortSignal
 ): Promise<Response> {
   const fetchImpl = request.fetchImpl ?? fetch;
+  // RequestInit must not carry the caller abortSignal; timeout abort would then
+  // be indistinguishable from an operator abort.
   return await fetchImpl(
     providerChatCompletionsUrl(request.providerUrl),
     { ...buildProviderChatRequestInit(request), signal }
+  );
+}
+
+async function throwIfHttpError(response: Response): Promise<void> {
+  if (response.ok) return;
+  // Status is already known; diagnostic identity is optional and must not replace it.
+  const identity = await readOptionalProviderFailureIdentity(response);
+  throw new ProviderChatCompletionError(
+    `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
+    "http_error",
+    response.status,
+    identity === undefined ? undefined : { identity }
   );
 }
 
@@ -67,13 +97,34 @@ async function readBody(response: Response): Promise<string> {
   }
 }
 
+function inspectBody(
+  bodyText: string,
+  contentType: string | null,
+  httpStatus: number
+): ProviderChatCompletionResult {
+  try {
+    return inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus);
+  } catch (error) {
+    throw new ProviderChatCompletionError(
+      error instanceof Error ? error.message : "provider chat completion response inspect failed",
+      "response_parse_error",
+      httpStatus,
+      {
+        cause: error,
+        identity: providerFailureIdentityFromBody(bodyText),
+        inspectionReason: inspectionReasonOf(error)
+      }
+    );
+  }
+}
+
 function bindAbort(
   signal: AbortSignal | undefined,
   onAbort: () => void,
   controller: AbortController
 ): void {
   if (signal === undefined) return;
-  if (signal.aborted) controller.abort();
+  if (signal.aborted) onAbort();
   else signal.addEventListener("abort", onAbort);
 }
 
@@ -82,7 +133,7 @@ function startTimeout(
   controller: AbortController
 ): ReturnType<typeof setTimeout> | null {
   const resolvedMs = resolveProviderChatTimeoutMs(timeoutMs);
-  const timer = setTimeout(() => controller.abort(), resolvedMs);
+  const timer = setTimeout(() => controller.abort(INTERNAL_TIMEOUT), resolvedMs);
   timer.unref?.();
   return timer;
 }
@@ -93,17 +144,45 @@ function resolveProviderChatTimeoutMs(timeoutMs: number | undefined): number {
     : DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS;
 }
 
+async function settleUnlessAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    void work.catch(() => undefined);
+    throw abortCause(signal);
+  }
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(abortCause(signal));
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
+    ]);
+  } catch (error) {
+    if (signal.aborted) void work.catch(() => undefined);
+    throw error;
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+function abortCause(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
+}
+
 function normalizeTransportError(
   error: unknown,
-  abortSignal: AbortSignal | undefined
+  callerSignal: AbortSignal | undefined,
+  requestSignal: AbortSignal,
+  knownStatus: number | null
 ): Error {
-  if (error instanceof ProviderChatCompletionError) return error;
-  if (abortSignal?.aborted === true) {
-    return new ProviderChatCompletionError("provider chat completion aborted", "aborted", null, {
-      cause: error
-    });
+  if (callerSignal?.aborted === true || requestSignal.aborted) {
+    return toAbortedError(error, knownStatus);
   }
-  if (error instanceof Error && !isLikelyFetchFailure(error)) return error;
+  if (error instanceof ProviderChatCompletionError) return error;
   return new ProviderChatCompletionError(
     "provider chat completion transport failed",
     "network_error",
@@ -112,10 +191,18 @@ function normalizeTransportError(
   );
 }
 
-function isLikelyFetchFailure(error: Error): boolean {
-  return error.name === "TypeError" || error.name === "AbortError";
+function toAbortedError(cause: unknown, knownStatus: number | null): ProviderChatCompletionError {
+  if (cause instanceof ProviderChatCompletionError && cause.kind === "aborted") {
+    return cause;
+  }
+  return new ProviderChatCompletionError(
+    "provider chat completion aborted",
+    "aborted",
+    cause instanceof ProviderChatCompletionError ? cause.httpStatus : knownStatus,
+    { cause }
+  );
 }
 
-function compactProviderErrorDetail(bodyText: string): string {
-  return bodyText.replaceAll(/\s+/gu, " ").trim().slice(0, 240);
+function inspectionReasonOf(error: unknown): ProviderResponseInspectionReason {
+  return error instanceof ProviderResponseInspectionError ? error.reason : "parse";
 }

@@ -109,6 +109,7 @@ function renderResult(result: ExtractionFillResult): string {
     renderAuthorityTelemetry(result.authorityTelemetry) +
     `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
+    `terminal_nonretryable_response=${result.terminalRetryClassifications.failure_non_retryable_response} ` +
     `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
     `${coverage}\n`;
 }

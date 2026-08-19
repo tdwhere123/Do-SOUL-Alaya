@@ -142,6 +142,47 @@ describe("extraction attempt ledger legacy validation", () => {
   });
 });
 
+describe("extraction attempt ledger response-class telemetry", () => {
+  it("round-trips failure_non_retryable_response without relabeling max retries", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "7".repeat(64);
+    const cacheKey = key("c");
+    const ledger = openLedger(lineageDigest, 1);
+    ledger.reserveAttempt(cacheKey);
+    ledger.recordTransportOutcome(cacheKey, {
+      retryCount: 0,
+      rateLimitRetries: 0,
+      terminalRetryClassification: "failure_non_retryable_response",
+      transportFailures: [{
+        kind: "response_parse_error",
+        phase: "response_parse",
+        httpStatus: null,
+        fingerprint: key("c"),
+        attempt: 1
+      }]
+    });
+    ledger.abandonPendingShard(cacheKey);
+
+    expect(readLedger(lineageDigest).telemetry.terminalRetryClassifications).toMatchObject({
+      failure_non_retryable_response: 1,
+      failure_max_retries: 0
+    });
+    const persisted = JSON.parse(await readFile(
+      join(cacheRoot, `extraction-attempt-ledger.${lineageDigest}.json`),
+      "utf8"
+    )) as { telemetry: { terminal: Record<string, number> } };
+    expect(Object.keys(persisted.telemetry.terminal)).toEqual([
+      "failure_max_retries",
+      "failure_non_retryable_4xx",
+      "failure_timeout",
+      "failure_aborted",
+      "failure_non_retryable_response"
+    ]);
+    expect(persisted.telemetry.terminal.failure_non_retryable_response).toBe(1);
+    expect(persisted.telemetry.terminal.failure_max_retries).toBe(0);
+  });
+});
+
 describe("extraction attempt ledger transport mapping", () => {
   it("maps relative transport failures onto stable global attempt ordinals", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));

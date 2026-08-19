@@ -2,9 +2,9 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import {
-  seedBenchRunOnly,
-  seedBenchWorkspaceIfAbsent
-} from "../daemon-support.js";
+  prepareBenchWorkspaceBinding,
+  type BenchWorkspaceEnsurePort
+} from "./daemon-workspace-seed.js";
 import type {
   BenchDaemonHandle,
   BenchTokenMetrics,
@@ -17,7 +17,6 @@ type WorkspaceIdentity = { workspaceId: string; runId: string };
 interface BenchWorkspaceManagerInput {
   readonly dataDir: string;
   readonly activeContext: ActiveBenchContext;
-  readonly knownWorkspaceIds: readonly string[];
 }
 
 interface BenchWorkspaceBindings {
@@ -36,11 +35,11 @@ interface BenchWorkspaceBindings {
   readonly queryEdgeProposalKpiRows: (
     workspaceId: string
   ) => Promise<readonly EdgeProposalKpiEventRow[]>;
+  readonly workspaceService: BenchWorkspaceEnsurePort;
 }
 
 export function createBenchWorkspaceManager(input: BenchWorkspaceManagerInput) {
   const managedWorkspaceRoots = new Map<string, string>();
-  const knownWorkspaces = new Set(input.knownWorkspaceIds);
   return {
     createManagedWorkspaceRoot: async (workspaceId: string) =>
       await createManagedWorkspaceRoot(
@@ -54,7 +53,6 @@ export function createBenchWorkspaceManager(input: BenchWorkspaceManagerInput) {
       createAttachWorkspace({
         dataDir: input.dataDir,
         activeContext: input.activeContext,
-        knownWorkspaces,
         managedWorkspaceRoots,
         bindings
       })
@@ -102,7 +100,6 @@ async function cleanupManagedWorkspaceRoots(
 function createAttachWorkspace(input: {
   readonly dataDir: string;
   readonly activeContext: ActiveBenchContext;
-  readonly knownWorkspaces: Set<string>;
   readonly managedWorkspaceRoots: Map<string, string>;
   readonly bindings: BenchWorkspaceBindings;
 }): BenchDaemonHandle["attachWorkspace"] {
@@ -112,12 +109,13 @@ function createAttachWorkspace(input: {
       input.managedWorkspaceRoots,
       workspace.workspaceId
     );
-    await seedWorkspaceBinding(
-      input.dataDir,
-      input.knownWorkspaces,
-      workspace,
-      workspaceRoot
-    );
+    await prepareBenchWorkspaceBinding({
+      dataDir: input.dataDir,
+      workspaceId: workspace.workspaceId,
+      runId: workspace.runId,
+      workspaceRoot,
+      workspaceService: input.bindings.workspaceService
+    });
     const previous = snapshotWorkspaceIdentity(input.activeContext);
     bindActiveContext(input.activeContext, workspace);
     return buildBenchWorkspaceHandle(
@@ -128,25 +126,6 @@ function createAttachWorkspace(input: {
       previous
     );
   };
-}
-
-async function seedWorkspaceBinding(
-  dataDir: string,
-  knownWorkspaces: Set<string>,
-  workspace: WorkspaceIdentity,
-  workspaceRoot: string
-): Promise<void> {
-  if (!knownWorkspaces.has(workspace.workspaceId)) {
-    await seedBenchWorkspaceIfAbsent(
-      dataDir,
-      workspace.workspaceId,
-      workspace.runId,
-      workspaceRoot
-    );
-    knownWorkspaces.add(workspace.workspaceId);
-    return;
-  }
-  await seedBenchRunOnly(dataDir, workspace.workspaceId, workspace.runId);
 }
 
 function snapshotWorkspaceIdentity(

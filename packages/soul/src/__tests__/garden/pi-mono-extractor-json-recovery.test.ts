@@ -81,30 +81,28 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
     });
   });
 
-  it("throws invalid_json with failure_max_retries after the full retry budget", async () => {
+  it("throws invalid_json with failure_non_retryable_response on the first attempt", async () => {
+    const complete = vi.fn(async () => createAssistantMessage("entirely freeform prose"));
+    const sleep = vi.fn(async () => undefined);
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
-      complete: vi.fn(async () => createAssistantMessage("entirely freeform prose")),
+      complete,
       getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
+      sleep,
       random: vi.fn(() => 0.5)
     });
-    // Budget is 3 retries (4 total attempts) — retryCount on the thrown
-    // error reflects the FINAL failed attempt's index. retryClassification
-    // labels the terminal branch.
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
       .rejects.toMatchObject({
         name: "SignalExtractorError",
         kind: "invalid_json",
-        retryCount: 3,
-        retryClassification: "failure_max_retries"
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_response"
       } satisfies Partial<SignalExtractorError>);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 });
-
-// Phase A.3 instrument coverage: a single retry on recoverable failure
-// (empty body, parse error, HTTP 5xx, HTTP 429). Auth/4xx must NOT retry.
 
 function createModel(): PiMonoModel {
   return {

@@ -99,7 +99,7 @@ describe("snapshot selection digest binding", () => {
         questions
       },
       variant: manifest.variant
-    })).toThrow(/requires permanent ineligibility/u);
+    })).toThrow("legacy snapshot digest is not supported");
   });
 });
 

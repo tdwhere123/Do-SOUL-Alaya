@@ -13,8 +13,8 @@ const HTTP_CONFIG: CompileSeedExtractionConfig = {
 
 afterEach(() => vi.useRealTimers());
 
-describe("garden HTTP stream progress timeout", () => {
-  it("keeps an active SSE response alive beyond one idle window", async () => {
+describe("garden HTTP stream wall-clock timeout", () => {
+  it("enforces the total wall-clock budget even while an SSE body is making progress", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(streamingResponse());
     const pending = createGardenHttpExtractor(HTTP_CONFIG, {
@@ -27,13 +27,13 @@ describe("garden HTTP stream progress timeout", () => {
       timeoutMs: 20,
       retryMode: "disabled"
     });
-
-    await vi.advanceTimersByTimeAsync(60);
-
-    await expect(pending).resolves.toMatchObject({
-      rawJson: '{"signals":[]}',
-      extractorMeta: { retryClassification: "success_first_try" }
+    const rejection = expect(pending).rejects.toMatchObject({
+      benchRetry: { retryClassification: "failure_timeout" }
     });
+
+    await vi.advanceTimersByTimeAsync(20);
+
+    await rejection;
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

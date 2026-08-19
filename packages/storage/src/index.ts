@@ -12,6 +12,7 @@ export {
   createWorkerThreadSqliteWriteQueuePort,
   resolveSqliteWriteQueueWorkerUrl,
   ALAYA_SQLITE_WRITE_QUEUE_ENV,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION,
   installDefaultSqliteWriteQueue,
   isSqliteWriteQueueDisabled,
   prepareTemporalCandidate,

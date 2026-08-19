@@ -85,6 +85,7 @@ export async function prepareLongMemEvalRun(
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LongMemEvalRunContext> {
+  assertSnapshotProducerInvocationBeforeLoad(opts, recallWeightOverrides, process.env);
   const dataset = await loadRunDataset(opts);
   const questions = dataset.questions;
   const selectedQuestions = await selectManifestQuestions(opts, dataset);
@@ -130,6 +131,21 @@ export async function prepareLongMemEvalRun(
     diagnosticsSpool,
     ...(await resolveSeedDataDirRoot(opts))
   };
+}
+
+function assertSnapshotProducerInvocationBeforeLoad(
+  opts: LongMemEvalRunOptions,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  env: Readonly<Record<string, string | undefined>>
+): void {
+  if (opts.snapshotOut === undefined) return;
+  assertSnapshotProducerInvocationPolicy({
+    opts,
+    policyShape: opts.policyShape ?? "stress",
+    simulateReport: opts.simulateReport ?? "none",
+    recallWeightOverrides,
+    releaseEvidenceAuthority: null
+  }, env);
 }
 
 function resolvePreparationExecutionPolicy(

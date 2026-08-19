@@ -138,8 +138,7 @@ async function createBenchDaemonState(
     releaseActive: reserveBenchDaemonSlot(),
     workspaceManager: createBenchWorkspaceManager({
       dataDir,
-      activeContext,
-      knownWorkspaceIds: [defaultWorkspaceId]
+      activeContext
     })
   };
 }
@@ -190,6 +189,7 @@ async function bootBenchDaemon(
   });
   const attachWorkspace = state.workspaceManager.createAttachWorkspace({
     ...daemonOps,
+    workspaceService: resources.runtime.services.workspaceService,
     queryTokenMetrics: async (workspaceId: string) =>
       await queryTokenMetrics(state.dataDir, workspaceId),
     queryEdgeProposalKpiRows: async (workspaceId: string) =>

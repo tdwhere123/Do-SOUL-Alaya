@@ -1,19 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGardenHttpExtractor } from "../../../bench/compile-seed.js";
-import type {
-  BenchTransportFailureAttempt,
-  CompileSeedExtractionConfig
-} from "../../../bench/compile-seed/compile-seed-types.js";
+import type { BenchTransportFailureAttempt } from "../../../bench/compile-seed/compile-seed-types.js";
 import {
-  readBoundedGardenHttpErrorBody
-} from "../../../bench/compile-seed/http/garden-http-error-body.js";
-
-const HTTP_CONFIG: CompileSeedExtractionConfig = {
-  providerUrl: "https://provider.invalid/v1",
-  model: "deepseek-test",
-  requestProfile: "provider-default-v1",
-  apiKey: "secret-key"
-};
+  captureExtractorFailure,
+  captureTerminalFailure,
+  HTTP_CONFIG,
+  readBenchRetry,
+  readTransportFailures
+} from "./compile-seed-http-transport-failures-fixture.js";
 
 const SUCCESS = { choices: [{ message: { content: '{"signals":[]}' } }] };
 
@@ -76,26 +70,24 @@ describe("garden HTTP typed transport failures", () => {
     );
   });
 
-  it("distinguishes timeout and active-request abort", async () => {
-    const timeout = await captureTerminalFailure(
-      vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>(() => {})),
-      { timeoutMs: 10 }
+  it("maps mixed stream shape to a schema failure without raw payload", async () => {
+    const error = await captureTerminalFailure(
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        'data: {"choices":[{"delta":{"content":"secret-delta"}}]}\n\n' +
+        'data: {"choices":[{"message":{"content":"secret-message"}}]}\n\n' +
+        "data: [DONE]\n",
+        { headers: { "content-type": "text/event-stream" } }
+      ))
     );
-    const operator = new AbortController();
-    const abort = await captureTerminalFailure(
-      vi.fn<typeof fetch>().mockImplementation(() => {
-        queueMicrotask(() => operator.abort(new Error("secret abort reason")));
-        return new Promise<Response>(() => {});
-      }),
-      { abortSignal: operator.signal, timeoutMs: 60_000 }
-    );
+    const [failure] = readTransportFailures(error);
 
-    expect(readTransportFailures(timeout)).toMatchObject([
-      { kind: "timeout", phase: "request", attempt: 1 }
-    ]);
-    expect(readTransportFailures(abort)).toMatchObject([
-      { kind: "aborted", phase: "request", attempt: 1 }
-    ]);
+    expect(failure).toMatchObject({
+      kind: "response_schema_error",
+      phase: "response_schema",
+      httpStatus: null,
+      attempt: 1
+    });
+    expect(JSON.stringify(readBenchRetry(error))).not.toMatch(/secret-delta|secret-message/iu);
   });
 
   it("fingerprints provider code/type while ignoring raw error message changes", async () => {
@@ -126,23 +118,12 @@ describe("garden HTTP typed transport failures", () => {
     expect(JSON.stringify(first)).not.toMatch(/600003|provider_error|secret|message/iu);
   });
 
-  it("caps error-body streaming at 16 KiB and cancels the unread tail", async () => {
-    let cancelled = false;
-    const response = new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode("x".repeat(32 * 1024)));
-      },
-      cancel() {
-        cancelled = true;
-      }
-    }), { status: 400 });
+  it("changes the safe fingerprint when the provider body digest changes", async () => {
+    const first = await httpFailureFingerprint("secret provider body one");
+    const digestChanged = await httpFailureFingerprint("secret provider body two");
 
-    const body = await readBoundedGardenHttpErrorBody(
-      response, new Promise<never>(() => undefined)
-    );
-
-    expect(new TextEncoder().encode(body).byteLength).toBe(16 * 1024);
-    await vi.waitFor(() => expect(cancelled).toBe(true));
+    expect(first.fingerprint).not.toBe(digestChanged.fingerprint);
+    expect(JSON.stringify([first, digestChanged])).not.toMatch(/secret|provider body/iu);
   });
 
   it("keeps the HTTP status failure when its diagnostic body cannot be read", async () => {
@@ -162,17 +143,50 @@ describe("garden HTTP typed transport failures", () => {
     expect(JSON.stringify(readBenchRetry(error))).not.toContain("secret body stream failure");
   });
 
-  it("keeps a known HTTP 400 terminal when its diagnostic body stalls", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
-      new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 400 })
+  it.each([
+    {
+      kind: "response_parse_error" as const,
+      phase: "response_parse" as const,
+      fetch: () => jsonTextResponse("{secret-invalid-json")
+    },
+    {
+      kind: "empty_response" as const,
+      phase: "response_schema" as const,
+      fetch: () => jsonResponse({ choices: [{ message: { content: "" } }] })
+    }
+  ])("keeps default-mode $kind terminal after one fetch", async (scenario) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(scenario.fetch());
+    const error = await captureExtractorFailure(
+      createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: async () => undefined,
+        random: () => 0
+      })
     );
-    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
-      fetch: fetchMock,
-      sleep: async () => undefined,
-      random: () => 0
-    });
 
-    const error = await captureExtractorFailure(extractor, { timeoutMs: 10 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(readBenchRetry(error)).toMatchObject({
+      retryCount: 0,
+      retryClassification: "failure_non_retryable_response"
+    });
+    expect(readTransportFailures(error)).toMatchObject([{
+      kind: scenario.kind,
+      phase: scenario.phase,
+      attempt: 1
+    }]);
+  });
+
+  it("does not retry an immediate HTTP 400", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("secret provider body", { status: 400 })
+    );
+    const error = await captureExtractorFailure(
+      createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: async () => undefined,
+        random: () => 0
+      })
+    );
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(readBenchRetry(error)).toMatchObject({
@@ -183,6 +197,28 @@ describe("garden HTTP typed transport failures", () => {
       kind: "http_error",
       phase: "response_status",
       httpStatus: 400,
+      attempt: 1
+    }]);
+  });
+
+  it("retries an immediate HTTP 503", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(SUCCESS));
+    const result = await createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: async () => undefined,
+      random: () => 0
+    }).extract({ systemPrompt: "s", userPrompt: "u" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.extractorMeta).toMatchObject({
+      retryClassification: "success_after_retry"
+    });
+    expect(result.extractorMeta?.transportFailures).toMatchObject([{
+      kind: "http_error",
+      phase: "response_status",
+      httpStatus: 503,
       attempt: 1
     }]);
   });
@@ -283,45 +319,10 @@ function rejectingBodyResponse(): Response {
   } as unknown as Response;
 }
 
-async function captureTerminalFailure(
-  fetchImpl: typeof fetch,
-  input: { readonly timeoutMs?: number; readonly abortSignal?: AbortSignal } = {}
-): Promise<unknown> {
-  const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchImpl });
-  return captureExtractorFailure(extractor, { ...input, retryMode: "disabled" });
-}
-
-async function captureExtractorFailure(
-  extractor: ReturnType<typeof createGardenHttpExtractor>,
-  input: {
-    readonly timeoutMs?: number;
-    readonly abortSignal?: AbortSignal;
-    readonly retryMode?: "default" | "disabled";
-    readonly onTransportAttempt?: () => void | Promise<void>;
-  } = {}
-): Promise<unknown> {
-  try {
-    await extractor.extract({ systemPrompt: "s", userPrompt: "u", ...input });
-  } catch (error) {
-    return error;
-  }
-  throw new Error("expected extractor failure");
-}
-
-function readBenchRetry(error: unknown): unknown {
-  return (error as { readonly benchRetry?: unknown }).benchRetry;
-}
-
-function readTransportFailures(error: unknown): readonly BenchTransportFailureAttempt[] {
-  const benchRetry = readBenchRetry(error) as {
-    readonly transportFailures?: readonly BenchTransportFailureAttempt[];
-  } | undefined;
-  return benchRetry?.transportFailures ?? [];
-}
-
 async function httpFailureFingerprint(errorBody: unknown): Promise<BenchTransportFailureAttempt> {
+  const body = typeof errorBody === "string" ? errorBody : JSON.stringify({ error: errorBody });
   const failure = await captureTerminalFailure(
-    vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error: errorBody }), {
+    vi.fn<typeof fetch>().mockResolvedValue(new Response(body, {
       status: 400,
       headers: { "content-type": "application/json" }
     }))

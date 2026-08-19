@@ -3,6 +3,7 @@ import {
   SecurityPassthroughInitializationFailedPayloadSchema,
   SecurityPassthroughStatusChangedPayloadSchema,
   type EventLogEntry,
+  type SecurityPassthroughInitializationFailedPayload,
   type SecurityStatusContract
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "../runtime/event-publisher.js";
@@ -169,7 +170,7 @@ function parsePositiveIntegerLimit(
   return Math.floor(value);
 }
 
-type SecurityInitializationOperation = "create" | "list" | "get_by_id";
+type SecurityInitializationOperation = SecurityPassthroughInitializationFailedPayload["operation"];
 
 type ObservedSecurityStatus = Readonly<{
   posture: SecurityStatusContract["posture"];

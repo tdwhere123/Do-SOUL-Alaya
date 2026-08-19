@@ -25,7 +25,11 @@ describe("causal usage temporal path reader", () => {
       const restarted = await createCausalUsageTemporalPathReader({ base, usageRepo })
         .findByWorkspace("workspace-1", { asOf: AS_OF });
 
-      expect(first[0]?.plasticity_state.strength).toBeCloseTo(1 - Math.exp(-1), 10);
+      const usageStrength = 1 - Math.exp(-1);
+      expect(first[0]?.plasticity_state.strength).toBeCloseTo(
+        1 - (1 - path().plasticity_state.strength) * (1 - usageStrength),
+        10
+      );
       expect(restarted).toEqual(first);
     } finally {
       database.close();

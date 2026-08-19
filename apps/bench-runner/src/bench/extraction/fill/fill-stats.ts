@@ -1,6 +1,8 @@
-import type {
-  BenchTerminalRetryClassification,
-  CompileSeedExtractionStats
+import {
+  completeBenchTerminalRetryClassifications,
+  emptyBenchTerminalRetryClassifications,
+  type BenchTerminalRetryClassification,
+  type CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
 
 export interface FillRetryTelemetry {
@@ -26,7 +28,7 @@ export function newFillStats(): CompileSeedExtractionStats {
     rateLimitRetries: 0,
     adaptiveConcurrencyBackoffs: 0,
     adaptiveConcurrencyBackoffMs: 0,
-    terminalRetryClassifications: {},
+    terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
     factsProduced: 0,
     signalsDropped: 0,
     signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
@@ -49,12 +51,7 @@ export function readFillRetryTelemetry(
     rateLimitRetries: stats.rateLimitRetries ?? 0,
     adaptiveConcurrencyBackoffs: stats.adaptiveConcurrencyBackoffs ?? 0,
     adaptiveConcurrencyBackoffMs: stats.adaptiveConcurrencyBackoffMs ?? 0,
-    terminalRetryClassifications: {
-      failure_max_retries: terminal.failure_max_retries ?? 0,
-      failure_non_retryable_4xx: terminal.failure_non_retryable_4xx ?? 0,
-      failure_timeout: terminal.failure_timeout ?? 0,
-      failure_aborted: terminal.failure_aborted ?? 0
-    }
+    terminalRetryClassifications: completeBenchTerminalRetryClassifications(terminal)
   };
 }
 
@@ -63,5 +60,5 @@ export function countTerminalProviderFailures(
 ): number {
   const terminal = telemetry.terminalRetryClassifications;
   return terminal.failure_max_retries + terminal.failure_non_retryable_4xx +
-    terminal.failure_timeout;
+    terminal.failure_non_retryable_response + terminal.failure_timeout;
 }

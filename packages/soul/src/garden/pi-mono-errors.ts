@@ -14,6 +14,7 @@ export type RetryClassification =
   | "success_after_retry"
   | "failure_max_retries"
   | "failure_non_retryable_4xx"
+  | "failure_non_retryable_response"
   | "failure_timeout"
   | "failure_aborted";
 

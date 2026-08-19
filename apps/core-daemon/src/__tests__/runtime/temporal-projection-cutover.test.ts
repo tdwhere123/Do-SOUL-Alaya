@@ -13,7 +13,8 @@ import {
   initDatabase,
   inspectTemporalProjectionSelection,
   prepareTemporalCandidate,
-  selectTemporalProjection
+  selectTemporalProjection,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION
 } from "@do-soul/alaya-storage";
 import {
   cutOverTemporalProjection,
@@ -333,7 +334,7 @@ function seedLegacySource(filename: string): void {
     const markApplied = database.prepare(
       "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
     );
-    for (const migration of migrationsThrough(107)) {
+    for (const migration of migrationsThrough(TEMPORAL_OFFLINE_MIGRATION_VERSION - 1)) {
       database.transaction(() => {
         database.exec(migration.sql);
         markApplied.run(migration.version, FIXED_NOW);

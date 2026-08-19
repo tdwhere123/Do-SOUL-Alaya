@@ -321,6 +321,7 @@ export const SecurityPassthroughStatusChangedPayloadSchema = z
 
 export const SecurityPassthroughInitializationOperationSchema = z.enum([
   "create",
+  "ensure",
   "list",
   "get_by_id"
 ]);

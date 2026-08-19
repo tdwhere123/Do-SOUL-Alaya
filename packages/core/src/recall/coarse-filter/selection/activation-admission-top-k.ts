@@ -24,12 +24,15 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
   readonly allowSql: boolean;
 }>): Promise<readonly Readonly<MemoryEntry>[]> {
   const limit = params.config.precomputed_rank.max_candidates;
+  const eligible = params.eligible.filter((entry) =>
+    matchesPrecomputedRankFilter(entry, params.config)
+  );
   if (!params.allowSql || limit <= 0) {
-    return selectActivationAdmissionTopKFromWindow(params.eligible, limit);
+    return selectActivationAdmissionTopKFromWindow(eligible, limit);
   }
   const loadSql = params.memoryRepo.findRecallActivationTopK;
   if (loadSql === undefined) {
-    return selectActivationAdmissionTopKFromWindow(params.eligible, limit);
+    return selectActivationAdmissionTopKFromWindow(eligible, limit);
   }
   try {
     const rows = await loadSql.call(params.memoryRepo, {
@@ -48,7 +51,7 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
       limit
     );
   } catch {
-    return selectActivationAdmissionTopKFromWindow(params.eligible, limit);
+    return selectActivationAdmissionTopKFromWindow(eligible, limit);
   }
 }
 

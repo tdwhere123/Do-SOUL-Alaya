@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type {
-  BenchTerminalRetryClassification,
-  BenchTransportFailureKind,
-  BenchTransportFailurePhase
+import {
+  BENCH_ADDITIVE_TERMINAL_RETRY_CLASSIFICATIONS,
+  BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS,
+  BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
+  completeBenchTerminalRetryClassifications,
+  emptyBenchTerminalRetryClassifications,
+  type BenchTerminalRetryClassification,
+  type BenchTransportFailureKind,
+  type BenchTransportFailurePhase
 } from "../../../compile-seed/compile-seed-types.js";
 import type {
   ExtractionAttemptLedgerCacheIdentity,
@@ -79,9 +84,13 @@ export function readAttemptLedgerRecordEnvelope(path: string): {
     throw new Error(`extraction attempt ledger is unreadable: ${path}`, { cause });
   }
   const rawSha256 = createHash("sha256").update(raw).digest("hex");
-  if (isAttemptLedgerRecord(parsed)) return { record: parsed, rawSha256 };
+  if (isAttemptLedgerRecord(parsed)) {
+    return { record: withNormalizedTelemetry(parsed), rawSha256 };
+  }
   const migrated = migrateLegacyRecord(parsed);
-  if (migrated !== undefined) return { record: migrated, rawSha256 };
+  if (migrated !== undefined) {
+    return { record: withNormalizedTelemetry(migrated), rawSha256 };
+  }
   throw new Error(`extraction attempt ledger is invalid: ${path}`);
 }
 
@@ -118,7 +127,29 @@ export function persistAttemptLedgerRecordExclusive(
 }
 
 function serializeLedger(record: ExtractionAttemptLedgerRecord): Buffer {
-  return Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
+  return Buffer.from(`${JSON.stringify({
+    ...record,
+    telemetry: {
+      ...record.telemetry,
+      terminal: projectAttemptLedgerV5Terminal(record.telemetry.terminal)
+    }
+  })}\n`, "utf8");
+}
+
+export function projectAttemptLedgerV5Terminal(
+  terminal: Partial<Record<BenchTerminalRetryClassification, number>>
+): Record<string, number> {
+  // invariant: v5 persistence/canonical identity keeps the original four
+  // counters when an additive key is absent or zero.
+  const projected: Record<string, number> = {};
+  for (const key of BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS) {
+    projected[key] = terminal[key] ?? 0;
+  }
+  for (const key of BENCH_ADDITIVE_TERMINAL_RETRY_CLASSIFICATIONS) {
+    const value = terminal[key] ?? 0;
+    if (value !== 0) projected[key] = value;
+  }
+  return projected;
 }
 
 export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerRecord): void {
@@ -142,12 +173,7 @@ export function emptyAttemptTelemetry(): ExtractionAttemptTelemetryRecord {
   return {
     retry_successes: 0,
     rate_limit_retries: 0,
-    terminal: {
-      failure_max_retries: 0,
-      failure_non_retryable_4xx: 0,
-      failure_timeout: 0,
-      failure_aborted: 0
-    },
+    terminal: emptyBenchTerminalRetryClassifications(),
     input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
@@ -294,9 +320,30 @@ function isTelemetry(value: unknown): value is ExtractionAttemptTelemetryRecord 
     isNonNegativeSafeInteger(telemetry.output_tokens) &&
     isNonNegativeSafeInteger(telemetry.total_tokens) &&
     isNonNegativeSafeInteger(telemetry.usage_unavailable_requests) &&
-    hasExactKeys(terminal, [
-      "failure_max_retries", "failure_non_retryable_4xx", "failure_timeout", "failure_aborted"
-    ]) && Object.values(terminal).every(isNonNegativeSafeInteger);
+    isTerminalCounters(terminal);
+}
+
+function isTerminalCounters(terminal: unknown): boolean {
+  if (typeof terminal !== "object" || terminal === null || Array.isArray(terminal)) {
+    return false;
+  }
+  const keys = Object.keys(terminal);
+  const allowed = new Set<string>(BENCH_TERMINAL_RETRY_CLASSIFICATIONS);
+  return BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS.every((key) => keys.includes(key)) &&
+    keys.every((key) => allowed.has(key)) &&
+    Object.values(terminal).every(isNonNegativeSafeInteger);
+}
+
+function withNormalizedTelemetry(
+  record: ExtractionAttemptLedgerRecord
+): ExtractionAttemptLedgerRecord {
+  return {
+    ...record,
+    telemetry: {
+      ...record.telemetry,
+      terminal: completeBenchTerminalRetryClassifications(record.telemetry.terminal)
+    }
+  };
 }
 
 const FAILURE_KINDS = new Set<string>([

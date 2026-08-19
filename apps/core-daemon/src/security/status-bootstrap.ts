@@ -8,12 +8,19 @@ import {
   type RuntimeNotifier,
   type RunHotStateEventLogRepoPort,
   type RunHotStateRunRepoPort,
+  type WorkspaceCreationMutation,
   type WorkspaceEngineConfigRepoPort,
   type WorkspaceRepoPort,
   type WorkspaceRunRepoPort,
   type WorkspaceServiceDependencies,
   type ZeroDaySecurityLayer
 } from "@do-soul/alaya-core";
+import type {
+  SecurityPassthroughInitializationFailedPayload,
+  Workspace
+} from "@do-soul/alaya-protocol";
+
+export type WorkspaceEnsureMutation = (workspace: Workspace) => void;
 
 export interface SecurityStatusBootstrapDependencies {
   readonly workspaceRepo: WorkspaceRepoPort;
@@ -28,6 +35,8 @@ export interface SecurityStatusBootstrapDependencies {
   readonly bootstrappingPlanner?: WorkspaceServiceDependencies["bootstrappingPlanner"];
   readonly pathRelationRepo?: WorkspaceServiceDependencies["pathRelationRepo"];
   readonly bootstrappingRecordRepo?: WorkspaceServiceDependencies["bootstrappingRecordRepo"];
+  readonly workspaceCreationMutation?: WorkspaceCreationMutation;
+  readonly workspaceEnsureMutation?: WorkspaceEnsureMutation;
 }
 
 export interface SecurityStatusBootstrapServices {
@@ -57,13 +66,13 @@ export function createSecurityStatusBootstrapServices(
     engineConfigRepo: deps.engineConfigRepo,
     bootstrappingPlanner: deps.bootstrappingPlanner,
     pathRelationRepo: deps.pathRelationRepo,
-    bootstrappingRecordRepo: deps.bootstrappingRecordRepo
+    bootstrappingRecordRepo: deps.bootstrappingRecordRepo,
+    workspaceCreationMutation: deps.workspaceCreationMutation
   });
   const securityStatusService = new SecurityStatusService({
     zeroDayLayer: deps.zeroDayLayer,
     eventPublisher
   });
-
   return {
     eventPublisher,
     runHotStateService,
@@ -71,36 +80,47 @@ export function createSecurityStatusBootstrapServices(
     securityStatusService,
     workspaceService: withSecurityStatusWorkspaceService(
       rawWorkspaceService,
-      securityStatusService
+      securityStatusService,
+      deps.workspaceEnsureMutation
     )
   };
 }
+
+type SecurityWorkspaceInitOperation = SecurityPassthroughInitializationFailedPayload["operation"];
 
 export function withSecurityStatusWorkspaceService(
   workspaceService: WorkspaceService,
   securityStatusService: Pick<
     SecurityStatusService,
     "initializeWorkspace" | "recordInitializationFailure"
-  >
+  >,
+  workspaceEnsureMutation?: WorkspaceEnsureMutation
 ): WorkspaceService {
   return new Proxy(workspaceService, {
     get(target, property, receiver) {
       if (property === "create") {
         return async (input: unknown) => {
           const workspace = await target.create(input);
-          try {
-            await securityStatusService.initializeWorkspace(workspace.workspace_id);
-          } catch (error) {
-            if (error instanceof EventPublisherPropagationError) {
-              return workspace;
-            }
-            await recordInitializationFailureSafely(
-              securityStatusService,
-              workspace.workspace_id,
-              "create",
-              error
-            );
-          }
+          await initializeWorkspaceNonfatally(
+            securityStatusService,
+            workspace.workspace_id,
+            "create"
+          );
+          return workspace;
+        };
+      }
+
+      if (property === "ensureLocalWorkspace") {
+        return async (
+          input: Parameters<WorkspaceService["ensureLocalWorkspace"]>[0]
+        ) => {
+          const workspace = await target.ensureLocalWorkspace(input);
+          workspaceEnsureMutation?.(workspace);
+          await initializeWorkspaceNonfatally(
+            securityStatusService,
+            workspace.workspace_id,
+            "ensure"
+          );
           return workspace;
         };
       }
@@ -110,19 +130,11 @@ export function withSecurityStatusWorkspaceService(
           const workspaces = await target.list();
           await Promise.all(
             workspaces.map(async (workspace) => {
-              try {
-                await securityStatusService.initializeWorkspace(workspace.workspace_id);
-              } catch (error) {
-                if (error instanceof EventPublisherPropagationError) {
-                  return;
-                }
-                await recordInitializationFailureSafely(
-                  securityStatusService,
-                  workspace.workspace_id,
-                  "list",
-                  error
-                );
-              }
+              await initializeWorkspaceNonfatally(
+                securityStatusService,
+                workspace.workspace_id,
+                "list"
+              );
             })
           );
           return workspaces;
@@ -132,19 +144,11 @@ export function withSecurityStatusWorkspaceService(
       if (property === "getById") {
         return async (workspaceId: string) => {
           const workspace = await target.getById(workspaceId);
-          try {
-            await securityStatusService.initializeWorkspace(workspace.workspace_id);
-          } catch (error) {
-            if (error instanceof EventPublisherPropagationError) {
-              return workspace;
-            }
-            await recordInitializationFailureSafely(
-              securityStatusService,
-              workspace.workspace_id,
-              "get_by_id",
-              error
-            );
-          }
+          await initializeWorkspaceNonfatally(
+            securityStatusService,
+            workspace.workspace_id,
+            "get_by_id"
+          );
           return workspace;
         };
       }
@@ -160,10 +164,33 @@ export function withSecurityStatusWorkspaceService(
   });
 }
 
+async function initializeWorkspaceNonfatally(
+  securityStatusService: Pick<
+    SecurityStatusService,
+    "initializeWorkspace" | "recordInitializationFailure"
+  >,
+  workspaceId: string,
+  operation: SecurityWorkspaceInitOperation
+): Promise<void> {
+  try {
+    await securityStatusService.initializeWorkspace(workspaceId);
+  } catch (error) {
+    if (error instanceof EventPublisherPropagationError) {
+      return;
+    }
+    await recordInitializationFailureSafely(
+      securityStatusService,
+      workspaceId,
+      operation,
+      error
+    );
+  }
+}
+
 async function recordInitializationFailureSafely(
   securityStatusService: Pick<SecurityStatusService, "recordInitializationFailure">,
   workspaceId: string,
-  operation: "create" | "list" | "get_by_id",
+  operation: SecurityWorkspaceInitOperation,
   error: unknown
 ): Promise<void> {
   try {

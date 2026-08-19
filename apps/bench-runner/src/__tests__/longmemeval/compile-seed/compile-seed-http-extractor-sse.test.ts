@@ -174,7 +174,7 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     await expect(
       extractor.extract({ systemPrompt: "s", userPrompt: "t" })
     ).rejects.toThrow(/chunk is not valid JSON/i);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("throws on a truncated SSE stream (non-empty but unparseable) so it is never cached", async () => {
@@ -183,9 +183,8 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     // stall, so the wall-clock backstop does NOT fire). The malformed data
     // frame must fail before any valid prefix can be mistaken for a complete
     // response and written to the cache.
-    // A fresh Response per call: a content error has no HTTP status so the
-    // retry loop treats it as unknown-transport and retries; each attempt
-    // reads a fresh (unconsumed) body.
+    // A content error has no HTTP status; typed parse failures are terminal
+    // on the first attempt so poison bytes cannot be cached after retries.
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       makeSseResponse(
         'data: {"choices":[{"delta":{"content":"{\\"signals\\":[{\\"a"}}]}\n\n' +
@@ -211,15 +210,14 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect((thrown as Error).message).toContain(
       "garden extraction chat completion chunk is not valid JSON"
     );
-    // Terminal classification is a retryable content failure that exhausts
-    // retries (mirrors the no-content style), NOT a hang or silent success.
+    // Terminal classification is a typed parse failure: one attempt, never a
+    // hang or silent success, so the caching extractor cannot write rawJson.
     const benchRetry = (thrown as {
       benchRetry?: { retryCount: number; retryClassification: string };
     }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_max_retries");
-    // 4 = first attempt + BENCH_HTTP_MAX_RETRIES (3); each settles on the
-    // resolved poison bytes, never hangs.
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(benchRetry?.retryClassification).toBe("failure_non_retryable_response");
+    expect(benchRetry?.retryCount).toBe(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("retries when a non-empty signals array has no valid entries", async () => {
@@ -390,18 +388,26 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
     await rm(diagnosticDir, { recursive: true, force: true });
   });
 
-  it("dumps retry_classification=failure_non_retryable_4xx when a live extraction hits HTTP 401", async () => {
-    // The extractor delegate models a chronic 401 — the retry loop must
-    // bail on the first attempt and propagate the classification. The dump
-    // file captured under diagnosticDir then carries retry_classification
-    // so a dump reader can attribute the failure without re-running.
+  it.each([
+    {
+      classification: "failure_non_retryable_4xx" as const,
+      message: "garden extraction HTTP 401 unauthorized",
+      status: 401
+    },
+    {
+      classification: "failure_non_retryable_response" as const,
+      message: "garden extraction chat completion chunk is not valid JSON"
+    }
+  ])("dumps retry_classification=$classification from a live extraction failure", async (scenario) => {
     const failingDelegate: BenchSignalExtractor = {
       async extract() {
-        const err = new Error("garden extraction HTTP 401 unauthorized");
-        (err as { status?: number }).status = 401;
+        const err = new Error(scenario.message);
+        if ("status" in scenario) {
+          (err as { status?: number }).status = scenario.status;
+        }
         (err as { benchRetry?: unknown }).benchRetry = {
           retryCount: 0,
-          retryClassification: "failure_non_retryable_4xx"
+          retryClassification: scenario.classification
         };
         throw err;
       }
@@ -460,7 +466,7 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
       live_extraction_failures: number;
       last_extraction_source: string;
     };
-    expect(envelope.retry_classification).toBe("failure_non_retryable_4xx");
+    expect(envelope.retry_classification).toBe(scenario.classification);
     expect(envelope.retry_count).toBe(0);
     expect(envelope.live_extraction_failures).toBe(1);
     expect(envelope.last_extraction_source).toBe("live");

@@ -20,6 +20,7 @@ import {
   readSchemaMigrationLedger,
   RecallQualifiedEvidenceReader,
   SqliteSignalRepo,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { sha256File } from "../integrity.js";
@@ -51,7 +52,7 @@ export type {
   EvidenceSearchProjectionRebuildReport
 } from "./evidence-search-projection-rebuild-report.js";
 
-const FIRST_EVIDENCE_PROJECTION_SCHEMA_VERSION = 109;
+const FIRST_EVIDENCE_PROJECTION_SCHEMA_VERSION = 2;
 
 interface PlannedOwner {
   readonly owner: EvidenceProjectionVerifiedOwnerRow;
@@ -477,9 +478,9 @@ function renderRejectionMessage(rejected: readonly RejectedOwner[]): string {
 function assertEligibleWorkingSchema(workingDbPath: string): number {
   const sourceSchemaVersion = readSchemaMigrationLedger(workingDbPath).at(-1);
   if (sourceSchemaVersion === undefined ||
-      sourceSchemaVersion < FIRST_EVIDENCE_PROJECTION_SCHEMA_VERSION - 1) {
+      sourceSchemaVersion < TEMPORAL_OFFLINE_MIGRATION_VERSION) {
     throw new Error(
-      "derived evidence projection rebuild requires working schema 108 or newer"
+      `derived evidence projection rebuild requires working schema ${TEMPORAL_OFFLINE_MIGRATION_VERSION} or newer`
     );
   }
   return sourceSchemaVersion;

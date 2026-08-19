@@ -1,4 +1,11 @@
 import { createHash } from "node:crypto";
+import {
+  ProviderChatCompletionError,
+  providerFailureIdentityFromBody,
+  safeProviderIdentityToken,
+  type ProviderFailureIdentity,
+  type ProviderTransportFailureKind
+} from "@do-soul/alaya-engine-gateway";
 import type {
   BenchProviderUsage,
   BenchTransportFailureAttempt,
@@ -19,8 +26,14 @@ interface SafeFailureFingerprintInput {
 
 const FAILURE_INPUT = Symbol("gardenHttpFailureFingerprintInput");
 const FAILURE_USAGE = Symbol("gardenHttpFailureUsage");
-const MAX_FINGERPRINT_TOKEN_LENGTH = 128;
-const MAX_RAW_BODY_FINGERPRINT_BYTES = 16_384;
+
+const PROVIDER_FAILURE_PHASE: Record<ProviderTransportFailureKind, BenchTransportFailurePhase> = {
+  network_error: "request",
+  http_error: "response_status",
+  body_read_error: "response_body",
+  response_parse_error: "response_parse",
+  aborted: "request"
+};
 
 export function markGardenHttpFailure(
   cause: unknown,
@@ -28,54 +41,30 @@ export function markGardenHttpFailure(
     kind: BenchTransportFailureKind;
     phase: BenchTransportFailurePhase;
     httpStatus?: number | null;
+    identity?: ProviderFailureIdentity;
     rawBody?: string;
     usage?: BenchProviderUsage;
   }>
 ): Error {
   const error = cause instanceof Error ? cause : new Error("garden HTTP transport failed");
   if (readSafeFailureInput(error) !== undefined) return error;
-  const provider = descriptor.rawBody === undefined
-    ? { code: null, type: null }
-    : readProviderErrorIdentity(descriptor.rawBody);
-  const input: SafeFailureFingerprintInput = Object.freeze({
+  return writeFailureInput(error, {
     kind: descriptor.kind,
     phase: descriptor.phase,
     httpStatus: normalizeHttpStatus(descriptor.httpStatus),
-    errorName: safeToken(error.name),
-    errorCode: readErrorCode(error),
-    providerCode: provider.code,
-    providerType: provider.type,
-    rawBodyDigest: descriptor.rawBody === undefined || provider.code !== null || provider.type !== null
-      ? null
-      : digestBoundedRawBody(descriptor.rawBody)
-  });
-  Object.defineProperty(error, FAILURE_INPUT, { value: input, configurable: true });
-  if (descriptor.usage !== undefined) {
-    Object.defineProperty(error, FAILURE_USAGE, {
-      value: Object.freeze({ ...descriptor.usage }), configurable: true
-    });
-  }
-  return error;
+    ...resolveFailureIdentity(error, descriptor)
+  }, descriptor.usage);
 }
 
-export function overrideGardenHttpFailureKind(
-  cause: unknown,
-  kind: "timeout" | "aborted"
+export function mapGardenHttpAttemptFailure(
+  error: unknown,
+  knownStatus: number | null,
+  outcome: { readonly timedOut: boolean; readonly aborted: boolean }
 ): Error {
-  const error = cause instanceof Error ? cause : new Error("garden HTTP transport failed");
-  const prior = readSafeFailureInput(error);
-  const input: SafeFailureFingerprintInput = Object.freeze({
-    kind,
-    phase: prior?.phase ?? "request",
-    httpStatus: prior?.httpStatus ?? null,
-    errorName: prior?.errorName ?? safeToken(error.name),
-    errorCode: prior?.errorCode ?? readErrorCode(error),
-    providerCode: prior?.providerCode ?? null,
-    providerType: prior?.providerType ?? null,
-    rawBodyDigest: prior?.rawBodyDigest ?? null
-  });
-  Object.defineProperty(error, FAILURE_INPUT, { value: input, configurable: true });
-  return error;
+  const wrapped = error instanceof Error ? error : new Error("garden HTTP transport failed");
+  if (outcome.timedOut) return finalizeTimeoutOrAbort(wrapped, "timeout", knownStatus, true);
+  if (outcome.aborted) return finalizeTimeoutOrAbort(wrapped, "aborted", knownStatus, false);
+  return mapNonTimeoutFailure(wrapped);
 }
 
 export function toBenchTransportFailureAttempt(
@@ -114,33 +103,6 @@ export function aggregateGardenHttpAttemptUsage(
   };
 }
 
-function readGardenHttpFailureUsage(error: unknown): BenchProviderUsage | undefined {
-  if (typeof error !== "object" || error === null) return undefined;
-  return (error as { readonly [FAILURE_USAGE]?: BenchProviderUsage })[FAILURE_USAGE];
-}
-
-export function classifyResponseFailureKind(
-  error: unknown
-): "response_parse_error" | "response_schema_error" {
-  return error instanceof Error && /schema validation/i.test(error.message)
-    ? "response_schema_error"
-    : "response_parse_error";
-}
-
-export function settleGardenHttpAttemptFailure(
-  cause: unknown,
-  timedOut: boolean,
-  aborted: boolean
-): Error {
-  const error = cause instanceof Error ? cause : new Error("garden HTTP transport failed");
-  const statusAlreadyFailed = readSafeFailureInput(error)?.kind === "http_error";
-  const effectiveTimeout = timedOut && !statusAlreadyFailed;
-  (error as { benchAttemptTimedOut?: boolean }).benchAttemptTimedOut = effectiveTimeout;
-  if (effectiveTimeout) return overrideGardenHttpFailureKind(error, "timeout");
-  if (aborted) return overrideGardenHttpFailureKind(error, "aborted");
-  return error;
-}
-
 export function readGardenHttpAttemptTimedOut(error: unknown): boolean {
   return typeof error === "object" && error !== null &&
     (error as { readonly benchAttemptTimedOut?: unknown }).benchAttemptTimedOut === true;
@@ -152,50 +114,172 @@ export function readGardenHttpFailureKind(
   return readSafeFailureInput(error)?.kind;
 }
 
+export function readGardenHttpFailureHttpStatus(error: unknown): number | null {
+  return readSafeFailureInput(error)?.httpStatus ?? null;
+}
+
+function mapNonTimeoutFailure(error: Error): Error {
+  (error as { benchAttemptTimedOut?: boolean }).benchAttemptTimedOut = false;
+  if (readSafeFailureInput(error) !== undefined) return error;
+  if (error instanceof ProviderChatCompletionError) {
+    return markGardenHttpFailure(error, descriptorForProviderFailure(error));
+  }
+  return error;
+}
+
+function finalizeTimeoutOrAbort(
+  error: Error,
+  kind: "timeout" | "aborted",
+  knownStatus: number | null,
+  timedOut: boolean
+): Error {
+  const prior = readSafeFailureInput(error);
+  const marked = writeFailureInput(error, {
+    kind,
+    phase: prior?.phase ?? phaseFor(error),
+    httpStatus: prior?.httpStatus ?? readStatus(error) ?? knownStatus,
+    ...identityOf(error)
+  });
+  (marked as { benchAttemptTimedOut?: boolean }).benchAttemptTimedOut = timedOut;
+  return marked;
+}
+
+function descriptorForProviderFailure(
+  error: ProviderChatCompletionError
+): {
+  readonly kind: BenchTransportFailureKind;
+  readonly phase: BenchTransportFailurePhase;
+  readonly httpStatus?: number | null;
+  readonly identity: ProviderFailureIdentity;
+} {
+  const identity = {
+    providerCode: error.providerCode,
+    providerType: error.providerType,
+    bodyDigest: error.bodyDigest
+  };
+  if (error.kind === "response_parse_error") {
+    const kind = error.inspectionReason === "schema"
+      ? "response_schema_error"
+      : "response_parse_error";
+    return {
+      kind,
+      phase: kind === "response_schema_error" ? "response_schema" : "response_parse",
+      identity
+    };
+  }
+  return {
+    kind: error.kind,
+    phase: PROVIDER_FAILURE_PHASE[error.kind],
+    ...(error.kind === "http_error" ? { httpStatus: error.httpStatus } : {}),
+    identity
+  };
+}
+
+function resolveFailureIdentity(
+  error: Error,
+  descriptor: Readonly<{
+    identity?: ProviderFailureIdentity;
+    rawBody?: string;
+  }>
+): Pick<SafeFailureFingerprintInput, "providerCode" | "providerType" | "rawBodyDigest"> {
+  if (descriptor.identity !== undefined) {
+    return {
+      providerCode: descriptor.identity.providerCode,
+      providerType: descriptor.identity.providerType,
+      rawBodyDigest: descriptor.identity.bodyDigest
+    };
+  }
+  if (descriptor.rawBody !== undefined) {
+    const identity = providerFailureIdentityFromBody(descriptor.rawBody);
+    return {
+      providerCode: identity.providerCode,
+      providerType: identity.providerType,
+      rawBodyDigest: identity.bodyDigest
+    };
+  }
+  return identityOf(error);
+}
+
+function identityOf(
+  error: Error
+): Pick<SafeFailureFingerprintInput, "providerCode" | "providerType" | "rawBodyDigest"> {
+  const prior = readSafeFailureInput(error);
+  if (prior !== undefined) {
+    return {
+      providerCode: prior.providerCode,
+      providerType: prior.providerType,
+      rawBodyDigest: prior.rawBodyDigest
+    };
+  }
+  if (error instanceof ProviderChatCompletionError) {
+    return {
+      providerCode: error.providerCode,
+      providerType: error.providerType,
+      rawBodyDigest: error.bodyDigest
+    };
+  }
+  return { providerCode: null, providerType: null, rawBodyDigest: null };
+}
+
+function phaseFor(error: Error): BenchTransportFailurePhase {
+  if (error instanceof ProviderChatCompletionError) return PROVIDER_FAILURE_PHASE[error.kind];
+  return "request";
+}
+
+function readStatus(error: Error): number | null {
+  const prior = readSafeFailureInput(error)?.httpStatus;
+  if (prior !== null && prior !== undefined) return prior;
+  if (error instanceof ProviderChatCompletionError) return error.httpStatus;
+  return null;
+}
+
+function writeFailureInput(
+  error: Error,
+  patch: Omit<SafeFailureFingerprintInput, "errorName" | "errorCode"> & {
+    readonly errorName?: string | null;
+    readonly errorCode?: string | null;
+  },
+  usage?: BenchProviderUsage
+): Error {
+  const prior = readSafeFailureInput(error);
+  const input: SafeFailureFingerprintInput = Object.freeze({
+    kind: patch.kind,
+    phase: patch.phase,
+    httpStatus: normalizeHttpStatus(patch.httpStatus),
+    errorName: patch.errorName ?? prior?.errorName ?? safeProviderIdentityToken(error.name),
+    errorCode: patch.errorCode ?? prior?.errorCode ?? readErrorCode(error),
+    providerCode: patch.providerCode,
+    providerType: patch.providerType,
+    rawBodyDigest: patch.rawBodyDigest
+  });
+  Object.defineProperty(error, FAILURE_INPUT, { value: input, configurable: true });
+  if (usage !== undefined) {
+    Object.defineProperty(error, FAILURE_USAGE, {
+      value: Object.freeze({ ...usage }), configurable: true
+    });
+  }
+  return error;
+}
+
+function readGardenHttpFailureUsage(error: unknown): BenchProviderUsage | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  return (error as { readonly [FAILURE_USAGE]?: BenchProviderUsage })[FAILURE_USAGE];
+}
+
 function readSafeFailureInput(error: unknown): SafeFailureFingerprintInput | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   return (error as { readonly [FAILURE_INPUT]?: SafeFailureFingerprintInput })[FAILURE_INPUT];
 }
 
 function normalizeHttpStatus(value: number | null | undefined): number | null {
-  return Number.isInteger(value) && value !== undefined && value !== null &&
-    value >= 100 && value <= 599 ? value : null;
-}
-
-function readErrorCode(error: Error): string | null {
-  const code = (error as { readonly code?: unknown }).code;
-  return typeof code === "string" || typeof code === "number" ? safeToken(String(code)) : null;
-}
-
-function safeToken(value: string): string | null {
-  return /^[A-Za-z0-9_.:-]+$/.test(value) && value.length <= MAX_FINGERPRINT_TOKEN_LENGTH
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)
     ? value
     : null;
 }
 
-function readProviderErrorIdentity(rawBody: string): { code: string | null; type: string | null } {
-  try {
-    const parsed = JSON.parse(rawBody) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return { code: null, type: null };
-    const nested = (parsed as { readonly error?: unknown }).error;
-    const error = typeof nested === "object" && nested !== null ? nested : parsed;
-    return {
-      code: readIdentityField(error, "code"),
-      type: readIdentityField(error, "type")
-    };
-  } catch {
-    return { code: null, type: null };
-  }
-}
-
-function readIdentityField(value: object, key: "code" | "type"): string | null {
-  const candidate = (value as Record<string, unknown>)[key];
-  return typeof candidate === "string" || typeof candidate === "number"
-    ? safeToken(String(candidate))
+function readErrorCode(error: Error): string | null {
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" || typeof code === "number"
+    ? safeProviderIdentityToken(String(code))
     : null;
-}
-
-function digestBoundedRawBody(rawBody: string): string {
-  const bounded = Buffer.from(rawBody, "utf8").subarray(0, MAX_RAW_BODY_FINGERPRINT_BYTES);
-  return createHash("sha256").update(bounded).digest("hex");
 }

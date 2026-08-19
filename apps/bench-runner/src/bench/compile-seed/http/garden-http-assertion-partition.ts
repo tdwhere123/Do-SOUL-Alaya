@@ -3,11 +3,12 @@ import {
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import type {
-  BenchProviderUsage,
-  BenchSignalExtractor,
-  BenchTerminalRetryClassification,
-  BenchTransportFailureAttempt
+import {
+  isBenchTerminalRetryClassification,
+  type BenchProviderUsage,
+  type BenchSignalExtractor,
+  type BenchTerminalRetryClassification,
+  type BenchTransportFailureAttempt
 } from "../compile-seed-types.js";
 import {
   isOutputTokenTruncation,
@@ -339,14 +340,9 @@ function isFailureMeta(value: unknown): value is {
     readonly transportFailures?: unknown;
     readonly postComposeFailure?: unknown;
   };
-  const terminal = isTerminalClassification(meta.retryClassification);
+  const terminal = isBenchTerminalRetryClassification(meta.retryClassification);
   const postCompose = meta.postComposeFailure === true;
   return terminal !== postCompose &&
     Number.isSafeInteger(meta.rateLimitRetries) && Number(meta.rateLimitRetries) >= 0 &&
     Array.isArray(meta.transportFailures);
-}
-
-function isTerminalClassification(value: unknown): value is BenchTerminalRetryClassification {
-  return value === "failure_max_retries" || value === "failure_non_retryable_4xx" ||
-    value === "failure_timeout" || value === "failure_aborted";
 }

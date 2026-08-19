@@ -1,5 +1,24 @@
 import type { ProviderChatCompletionResult, ProviderUsage } from "./types.js";
 
+export type ProviderResponseInspectionReason = "parse" | "schema";
+
+export class ProviderResponseInspectionError extends Error {
+  public readonly reason: ProviderResponseInspectionReason;
+
+  public constructor(
+    message: string,
+    reason: ProviderResponseInspectionReason,
+    options?: { readonly cause?: unknown }
+  ) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ProviderResponseInspectionError";
+    this.reason = reason;
+  }
+}
+
+const MIXED_STREAM_MESSAGE =
+  "garden extraction chat completion stream mixes delta and message content";
+
 export function inspectProviderChatCompletionResponse(
   bodyText: string,
   contentType: string | null,
@@ -41,18 +60,14 @@ function inspectSse(bodyText: string): Omit<ProviderChatCompletionResult, "httpS
     const delta = readNestedString(choice, "delta", "content");
     const message = readNestedString(choice, "message", "content");
     if (delta !== undefined && message !== undefined && (delta !== message || mode === "delta")) {
-      throw new Error("garden extraction chat completion stream mixes delta and message content");
+      throwMixedStream();
     }
     if (delta !== undefined) {
-      if (mode === "message") {
-        throw new Error("garden extraction chat completion stream mixes delta and message content");
-      }
+      if (mode === "message") throwMixedStream();
       mode = "delta";
       text += delta;
     } else if (message !== undefined) {
-      if (mode === "delta") {
-        throw new Error("garden extraction chat completion stream mixes delta and message content");
-      }
+      if (mode === "delta") throwMixedStream();
       mode = "message";
       text = message;
     }
@@ -73,10 +88,15 @@ function parseObject(text: string, label: string): Record<string, unknown> {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error(`garden extraction chat completion ${label} is not valid JSON`, { cause: error });
+    throw new ProviderResponseInspectionError(
+      `garden extraction chat completion ${label} is not valid JSON`,
+      "parse",
+      { cause: error }
+    );
   }
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error(`provider ${label} is not an object`);
+  // Arrays are typeof object; a JSON array is a schema miss, not an empty completion.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new ProviderResponseInspectionError(`provider ${label} is not an object`, "schema");
   }
   return parsed as Record<string, unknown>;
 }
@@ -127,4 +147,8 @@ function stringOrNull(value: unknown): string | null {
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function throwMixedStream(): never {
+  throw new ProviderResponseInspectionError(MIXED_STREAM_MESSAGE, "schema");
 }

@@ -14,7 +14,7 @@ import {
   applyBenchFastPragmaIfRequested,
   closeBenchDaemonResources,
   makeDispatchCli,
-  seedBenchWorkspaceIfAbsent,
+  prepareBenchWorkspaceBinding,
   type BenchDaemonLaunchConfig
 } from "./daemon-support.js";
 import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.js";
@@ -62,7 +62,7 @@ export async function initializeBenchDaemon(
       input.defaultWorkspaceId,
       input.launch.embeddingMode === "env"
     );
-    await seedBenchDefaultWorkspace(input);
+    await seedBenchDefaultWorkspace(input, resources.runtime);
     logBenchPragmaApplication(input.dataDir);
     return resources;
   } catch (error) {
@@ -161,14 +161,17 @@ async function installBenchProfile(
 }
 
 async function seedBenchDefaultWorkspace(
-  input: BenchDaemonStartupInput
+  input: BenchDaemonStartupInput,
+  runtime: AlayaDaemonRuntime
 ): Promise<void> {
-  await seedBenchWorkspaceIfAbsent(
-    input.dataDir,
-    input.defaultWorkspaceId,
-    input.defaultRunId,
-    await input.createManagedWorkspaceRoot(input.defaultWorkspaceId)
-  );
+  const workspaceRoot = await input.createManagedWorkspaceRoot(input.defaultWorkspaceId);
+  await prepareBenchWorkspaceBinding({
+    dataDir: input.dataDir,
+    workspaceId: input.defaultWorkspaceId,
+    runId: input.defaultRunId,
+    workspaceRoot,
+    workspaceService: runtime.services.workspaceService
+  });
 }
 
 function logBenchPragmaApplication(dataDir: string): void {

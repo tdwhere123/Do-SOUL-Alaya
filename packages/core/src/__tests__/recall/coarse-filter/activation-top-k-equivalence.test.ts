@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, ScopeClass, StorageTier } from "@do-soul/alaya-protocol";
 import { SqliteMemoryEntryRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { compareMemoryEntriesForActivationAdmission } from "../../../recall/runtime/recall-service-helpers.js";
-import { selectActivationAdmissionTopKFromWindow } from
+import {
+  loadActivationAdmissionTopK,
+  selectActivationAdmissionTopKFromWindow
+} from
   "../../../recall/coarse-filter/selection/activation-admission-top-k.js";
 import {
   REAL_SQLITE_TEST_WORKSPACE_ID,
@@ -76,6 +79,39 @@ describe("SQL activation top-K vs HOT window lexical sort", () => {
     })).map((entry) => entry.object_id);
 
     expect(sqlTopK).toEqual(jsTopK);
+  });
+});
+
+describe("JS fallback activation-admission floor", () => {
+  it("applies min_activation_score when SQL top-K is disabled", async () => {
+    const low = createMemoryEntry({ object_id: "memory-low", activation_score: 0.1 });
+    const high = createMemoryEntry({ object_id: "memory-high", activation_score: 0.9 });
+
+    const selected = await loadActivationAdmissionTopK({
+      memoryRepo: { findByWorkspaceId: async () => [] },
+      workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
+      tier: StorageTier.HOT,
+      config: {
+        deterministic_match: {
+          scope_filter: null,
+          dimension_filter: null,
+          domain_tag_filter: null
+        },
+        precomputed_rank: {
+          max_candidates: 5,
+          min_activation_score: 0.5
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      eligible: [low, high],
+      excludeObjectIds: new Set(),
+      allowSql: false
+    });
+
+    expect(selected.map((entry) => entry.object_id)).toEqual(["memory-high"]);
   });
 });
 

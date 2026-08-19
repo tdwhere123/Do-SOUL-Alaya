@@ -7,35 +7,26 @@ import {
 
 
 describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
-  it("retries once after empty assistant text and surfaces retryCount=1 on success", async () => {
+  it("does not retry empty assistant text and labels failure_non_retryable_response", async () => {
     const sleep = vi.fn<(ms: number) => Promise<void>>(async () => undefined);
-    const random = vi.fn(() => 0.5);
-    const complete = vi
-      .fn<NonNullable<Parameters<typeof createPiMonoExtractor>[0]["complete"]>>()
-      // First call: empty text triggers readTextContent throw.
-      .mockImplementationOnce(async () => createAssistantMessage(""))
-      // Second call: clean JSON body.
-      .mockImplementationOnce(async () => createAssistantMessage('{"signals":[]}'));
+    const complete = vi.fn(async () => createAssistantMessage(""));
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete,
       getModel: vi.fn(() => createModel()),
       sleep,
-      random
+      random: vi.fn(() => 0.5)
     });
-    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
-    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
-    expect(result.extractorMeta).toEqual({
-      recoveryKind: "none",
-      retryCount: 1,
-      retryClassification: "success_after_retry"
-    });
-    expect(complete).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(1);
-    // Attempt 1 backoff window: 250-500ms (base) per computeJitterMs.
-    expect(sleep.mock.calls[0]![0]).toBeGreaterThanOrEqual(250);
-    expect(sleep.mock.calls[0]![0]).toBeLessThanOrEqual(500);
+    await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "invalid_json",
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_response"
+      } satisfies Partial<SignalExtractorError>);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("retries up to the budget on HTTP 5xx then surfaces failure_max_retries", async () => {
@@ -216,6 +207,31 @@ describe("pi-mono-extractor retry-with-jitter (Phase A.3)", () => {
   // failure_non_retryable_4xx so the bench dump and the
   // seed_extraction_path live_extraction_failures counter both observe a
   // single failed attempt, never a quadrupled quota burn.
+  it("does not status-retry an aborted failure that only carries diagnostic httpStatus", async () => {
+    const sleep = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => {
+      const error = new Error("provider chat completion aborted");
+      (error as { httpStatus?: number }).httpStatus = 503;
+      throw error;
+    });
+    const extractor = createPiMonoExtractor({
+      apiKey: "sk-test",
+      model: "gpt-4.1-mini",
+      complete,
+      getModel: vi.fn(() => createModel()),
+      sleep,
+      random: vi.fn(() => 0)
+    });
+    await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "timeout",
+        retryClassification: "failure_timeout"
+      } satisfies Partial<SignalExtractorError>);
+    expect(complete.mock.calls.length).toBeLessThan(4);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
   it("does NOT retry on HTTP 401 (auth) and surfaces retryCount=0", async () => {
     const sleep = vi.fn(async () => undefined);
     const complete = vi.fn(async () => {

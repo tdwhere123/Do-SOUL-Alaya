@@ -120,18 +120,68 @@ describe("shard extraction authority references", () => {
 
   it("enforces Product-B policy while hydrating compact merge provenance", async () => {
     const fixture = await authorityFixture();
-    const globalAuthority = await loadGlobalExtractionAuthority(fixture.root);
-    const referenceContents = renderShardExtractionAuthorityReference(fixture.reference);
-    const input = {
-      provenanceContents: JSON.stringify(fixture.compact),
-      referenceContents,
-      globalAuthority
-    };
 
-    expect(verifyShardRunProvenance(input).hydrated.extraction_cache)
+    expect((await verifyCompact(fixture, fixture.compact)).hydrated.extraction_cache)
       .toHaveProperty("content_closure_index");
+    expect((await verifyCompact(fixture, {
+      ...fixture.compact,
+      seed_capabilities: { facet_tags_enabled: false }
+    })).hydrated.seed_capabilities).toEqual({ facet_tags_enabled: false });
+  });
+
+  it("rejects compact merge when seed facet tags are enabled", async () => {
+    const fixture = await authorityFixture();
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      seed_capabilities: { facet_tags_enabled: true }
+    })).rejects.toThrow(/seed capabilities/u);
+  });
+
+  it("rejects compact merge when embedding supplement is off", async () => {
+    const fixture = await authorityFixture();
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      runtime: {
+        ...fixture.compact.runtime,
+        embedding_mode: "disabled",
+        embedding_supplement: { enabled: false as const }
+      }
+    })).rejects.toThrow(/bi-encoder identity/u);
+  });
+
+  it("rejects compact merge when the embedding model drifts", async () => {
+    const fixture = await authorityFixture();
+    const supplement = fixture.compact.runtime.embedding_supplement;
+    if (supplement?.enabled !== true || supplement.provider_kind !== "local_onnx") {
+      throw new Error("fixture requires product-default local ONNX identity");
+    }
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      runtime: {
+        ...fixture.compact.runtime,
+        embedding_provider_label: "local_onnx:Xenova/other",
+        embedding_supplement: {
+          ...supplement,
+          effective_model_id: "Xenova/other"
+        }
+      }
+    })).rejects.toThrow(/bi-encoder/u);
   });
 });
+
+async function verifyCompact(
+  fixture: Awaited<ReturnType<typeof authorityFixture>>,
+  compact: typeof fixture.compact
+) {
+  return verifyShardRunProvenance({
+    provenanceContents: JSON.stringify(compact),
+    referenceContents: renderShardExtractionAuthorityReference(fixture.reference),
+    globalAuthority: await loadGlobalExtractionAuthority(fixture.root)
+  });
+}
 
 async function authorityFixture() {
   const root = await mkdtemp(join(tmpdir(), "lme-global-authority-"));

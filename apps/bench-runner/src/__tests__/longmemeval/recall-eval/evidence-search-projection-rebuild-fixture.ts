@@ -68,7 +68,6 @@ export async function createSourceFixture(
   for (const owner of owners) seeded.push(await seedOwner(db, owner));
   if (mutate !== undefined && seeded[0] !== undefined) mutate(db, seeded[0]);
   const currentSchemaVersion = readLatestSchemaVersion(db);
-  downgradeProjectionSchema(db);
   db.close();
   return {
     root,
@@ -211,19 +210,6 @@ function insertMaterializationEvent(
     caused_by: "materialization_router",
     payload_json: payload
   });
-}
-
-function downgradeProjectionSchema(db: StorageDatabase): void {
-  db.connection.exec(`
-    DROP TRIGGER IF EXISTS evidence_search_projection_fts_ai;
-    DROP TRIGGER IF EXISTS evidence_search_projection_fts_ad;
-    DROP TRIGGER IF EXISTS evidence_search_projection_fts_au;
-    DROP TABLE IF EXISTS evidence_search_projection_fts;
-    DROP TABLE IF EXISTS evidence_search_projection_fts_trigram;
-    DROP TABLE IF EXISTS evidence_search_projections;
-    DROP TABLE IF EXISTS evidence_fact_frame_formations;
-    DELETE FROM schema_version WHERE version BETWEEN 109 AND 116;
-  `);
 }
 
 function readLatestSchemaVersion(db: StorageDatabase): number {

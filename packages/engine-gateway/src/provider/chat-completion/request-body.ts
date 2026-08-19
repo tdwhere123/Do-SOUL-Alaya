@@ -37,8 +37,7 @@ export function buildProviderChatRequestInit(
       "content-type": "application/json",
       authorization: `Bearer ${request.apiKey}`
     },
-    body: JSON.stringify(buildProviderChatRequestBody(request, stream)),
-    ...(request.abortSignal === undefined ? {} : { signal: request.abortSignal })
+    body: JSON.stringify(buildProviderChatRequestBody(request, stream))
   };
 }
 

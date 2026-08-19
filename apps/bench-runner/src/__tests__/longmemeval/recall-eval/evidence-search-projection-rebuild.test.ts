@@ -32,7 +32,7 @@ afterEach(async () => {
 });
 
 describe("receipt-v2 evidence search projection rebuild", () => {
-  it("migrates only the working copy and deterministically replaces every owner", async () => {
+  it("rebuilds only the working copy and deterministically replaces every owner", async () => {
     const fixture = await createSourceFixture([
       {
         signalId: "signal-assertions",

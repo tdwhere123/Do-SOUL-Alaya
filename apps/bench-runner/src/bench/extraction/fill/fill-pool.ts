@@ -3,10 +3,11 @@ import {
   GardenProviderError,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
-import type {
-  BenchSignalExtractor,
-  BenchTerminalRetryClassification,
-  CompileSeedExtractionStats
+import {
+  isBenchTerminalRetryClassification,
+  type BenchSignalExtractor,
+  type BenchTerminalRetryClassification,
+  type CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { createAdaptiveConcurrencyController } from "../adaptive-concurrency.js";
@@ -320,8 +321,7 @@ function readTerminalClassification(cause: unknown): FillTaskRetryClassification
   const retry = (cause as { readonly benchRetry?: unknown }).benchRetry;
   if (typeof retry !== "object" || retry === null) return "unknown";
   const value = (retry as { readonly retryClassification?: unknown }).retryClassification;
-  return value === "failure_max_retries" || value === "failure_non_retryable_4xx" ||
-    value === "failure_timeout" || value === "failure_aborted" ? value : "unknown";
+  return isBenchTerminalRetryClassification(value) ? value : "unknown";
 }
 
 function classifyProviderFailureReason(cause: unknown): string {
@@ -356,6 +356,7 @@ function isContinuableProviderFailure(cause: unknown): boolean {
   const classification = readTerminalClassification(cause);
   return classification === "failure_max_retries" ||
     classification === "failure_non_retryable_4xx" ||
+    classification === "failure_non_retryable_response" ||
     classification === "failure_timeout";
 }
 

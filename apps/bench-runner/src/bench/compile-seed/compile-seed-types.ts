@@ -109,13 +109,57 @@ export type BenchRetryClassification =
   | "success_after_retry"
   | "failure_max_retries"
   | "failure_non_retryable_4xx"
+  | "failure_non_retryable_response"
   | "failure_timeout"
   | "failure_aborted";
 
-export type BenchTerminalRetryClassification = Exclude<
-  BenchRetryClassification,
-  "success_first_try" | "success_after_retry"
->;
+export const BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS = [
+  "failure_max_retries",
+  "failure_non_retryable_4xx",
+  "failure_timeout",
+  "failure_aborted"
+] as const;
+
+export const BENCH_ADDITIVE_TERMINAL_RETRY_CLASSIFICATIONS = [
+  "failure_non_retryable_response"
+] as const;
+
+export const BENCH_TERMINAL_RETRY_CLASSIFICATIONS = [
+  ...BENCH_BASE_TERMINAL_RETRY_CLASSIFICATIONS,
+  ...BENCH_ADDITIVE_TERMINAL_RETRY_CLASSIFICATIONS
+] as const;
+
+export type BenchTerminalRetryClassification =
+  (typeof BENCH_TERMINAL_RETRY_CLASSIFICATIONS)[number];
+
+export function isBenchTerminalRetryClassification(
+  value: unknown
+): value is BenchTerminalRetryClassification {
+  return typeof value === "string" &&
+    (BENCH_TERMINAL_RETRY_CLASSIFICATIONS as readonly string[]).includes(value);
+}
+
+export function emptyBenchTerminalRetryClassifications():
+  Record<BenchTerminalRetryClassification, number> {
+  return {
+    failure_max_retries: 0,
+    failure_non_retryable_4xx: 0,
+    failure_timeout: 0,
+    failure_aborted: 0,
+    failure_non_retryable_response: 0
+  };
+}
+
+export function completeBenchTerminalRetryClassifications(
+  terminal: Partial<Record<BenchTerminalRetryClassification, number>> = {}
+): Record<BenchTerminalRetryClassification, number> {
+  const completed = emptyBenchTerminalRetryClassifications();
+  for (const key of BENCH_TERMINAL_RETRY_CLASSIFICATIONS) {
+    const value = terminal[key];
+    if (typeof value === "number") completed[key] = value;
+  }
+  return completed;
+}
 
 // invariant: BenchSignalExtractorMeta is structurally assignable to the
 // production SignalExtractorMeta in pi-mono-extractor.ts so the bench's

@@ -1,6 +1,6 @@
 {
   "name": "@do-soul/alaya-protocol",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "private": true,
   "description": "Zod schemas + JSON-schema export for the Do-SOUL Alaya MCP catalog (leaf \u2014 no internal deps).",
   "license": "MIT",

@@ -269,16 +269,7 @@ describe("SecurityStatusService", () => {
       }
     });
 
-    await (
-      service as {
-        recordInitializationFailure(
-          workspaceId: string,
-          operation: "create" | "list" | "get_by_id",
-          reason?: string | null,
-          errorCode?: string | null
-        ): Promise<void>;
-      }
-    ).recordInitializationFailure(
+    await service.recordInitializationFailure(
       "workspace-1",
       "create",
       "Zero-day policy store is offline",
@@ -304,6 +295,38 @@ describe("SecurityStatusService", () => {
     ]);
   });
 
+  it("publishes the ensure operation on an ensure-path initialization failure", async () => {
+    const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const service = new SecurityStatusService({
+      zeroDayLayer: new ZeroDaySecurityLayer({
+        loadPolicies: async () => [],
+        now: () => FIXED_NOW
+      }),
+      eventPublisher: {
+        publish: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+          publishedEvents.push(entry);
+          return {
+            ...entry,
+            event_id: `event-${publishedEvents.length}`,
+            created_at: FIXED_NOW,
+            revision: publishedEvents.length
+          };
+        })
+      }
+    });
+
+    await service.recordInitializationFailure(
+      "workspace-1",
+      "ensure",
+      "Zero-day policy store is offline",
+      "SyntaxError"
+    );
+
+    expect(publishedEvents[0]!.payload_json).toMatchObject({
+      operation: "ensure"
+    });
+  });
+
   it("records a degraded epoch timestamp, not a fresh now, when the status probe read fails", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
@@ -323,16 +346,7 @@ describe("SecurityStatusService", () => {
       }
     });
 
-    await (
-      service as {
-        recordInitializationFailure(
-          workspaceId: string,
-          operation: "create" | "list" | "get_by_id",
-          reason?: string | null,
-          errorCode?: string | null
-        ): Promise<void>;
-      }
-    ).recordInitializationFailure("workspace-1", "create", "init failed", "Error");
+    await service.recordInitializationFailure("workspace-1", "create", "init failed", "Error");
 
     expect(publishedEvents).toHaveLength(1);
     expect(publishedEvents[0]!.payload_json).toMatchObject({

@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-afterEach(() => {
-  vi.useRealTimers();
-});
+import { createHash } from "node:crypto";
 import {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
   fetchProviderChatCompletion,
   providerChatCompletionsUrl
 } from "../../provider/chat-completion/index.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const CHAT_REQUEST = {
+  providerUrl: "https://proxy.example/v1",
+  apiKey: "sk-test",
+  model: "mimo-v2.5",
+  systemPrompt: "sys",
+  userPrompt: "user"
+} as const;
 
 describe("provider chat completion", () => {
   it("posts a JSON chat completion with the selected profile", async () => {
@@ -95,22 +104,255 @@ describe("provider chat completion", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch
     });
     const expectation = expect(pending).rejects.toMatchObject({
-      name: "ProviderChatCompletionError"
+      name: "ProviderChatCompletionError",
+      kind: "aborted"
     });
     await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS);
     await expectation;
     vi.useRealTimers();
   });
 
+  it.each([429, 503] as const)(
+    "lets internal timeout win over a hanging HTTP %s diagnostic body",
+    async (status) => {
+      vi.useFakeTimers();
+      const caller = new AbortController();
+      let fetchSignal: AbortSignal | undefined;
+      const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        fetchSignal = init?.signal;
+        return Promise.resolve(hangingBodyResponse(status));
+      });
+
+      const pending = fetchProviderChatCompletion({
+        ...CHAT_REQUEST,
+        abortSignal: caller.signal,
+        timeoutMs: 20,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      });
+      const captured = pending.then(
+        () => {
+          throw new Error("expected provider timeout");
+        },
+        (error: unknown) => error
+      );
+      await vi.advanceTimersByTimeAsync(20);
+      const error = await captured;
+
+      expect(error).toMatchObject({
+        kind: "aborted",
+        httpStatus: status
+      });
+      expect(Object.hasOwn(error as object, "status")).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchSignal).toBeDefined();
+      expect(fetchSignal).not.toBe(caller.signal);
+      expect(caller.signal.aborted).toBe(false);
+      expect(fetchSignal?.aborted).toBe(true);
+    }
+  );
+
+  it("lets internal timeout win over a hanging 200 success body", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => hangingBodyResponse(200));
+    const pending = fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      timeoutMs: 20,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    const captured = expect(pending).rejects.toMatchObject({
+      kind: "aborted",
+      httpStatus: 200
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await captured;
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps caller abort over a hanging HTTP status body", async () => {
+    const caller = new AbortController();
+    let deliver: ((response: Response) => void) | undefined;
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => {
+      deliver = resolve;
+    }));
+    const pending = fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      abortSignal: caller.signal,
+      timeoutMs: 60_000,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    deliver?.(hangingBodyResponse(400));
+    await Promise.resolve();
+    caller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: "aborted", httpStatus: 400 });
+    expect(caller.signal.aborted).toBe(true);
+  });
+
   it("fails closed on a non-OK provider status", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 429 }));
-    await expect(fetchProviderChatCompletion({
+    const error = await fetchProviderChatCompletion({
       providerUrl: "https://proxy.example/v1",
       apiKey: "sk-test",
       model: "mimo-v2.5",
       systemPrompt: "sys",
       userPrompt: "user",
       fetchImpl: fetchImpl as unknown as typeof fetch
-    })).rejects.toMatchObject({ name: "ProviderChatCompletionError", httpStatus: 429 });
+    }).then(
+      () => {
+        throw new Error("expected provider failure");
+      },
+      (cause: unknown) => cause
+    );
+    expect(error).toMatchObject({
+      name: "ProviderChatCompletionError",
+      kind: "http_error",
+      httpStatus: 429,
+      status: 429
+    });
+    expect(Object.hasOwn(error as object, "status")).toBe(true);
+  });
+
+  it("classifies a rejected fetch as a network failure", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw Object.assign(new Error("connect failed"), { code: "ECONNRESET" });
+    });
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "network_error" });
+  });
+
+  it("classifies a successful-status body-read failure separately from HTTP status", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      text: vi.fn().mockRejectedValue(new Error("body failed"))
+    } as unknown as Response));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "body_read_error", httpStatus: 200 });
+  });
+
+  it("keeps HTTP status when the diagnostic error body cannot be read", async () => {
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { controller.error(new Error("body failed")); }
+    }), { status: 400 }));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "http_error", httpStatus: 400 });
+  });
+
+  it("classifies invalid JSON as a response parse failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{not-json", {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "response_parse_error", inspectionReason: "parse" });
+  });
+
+  it("classifies a JSON array as a schema inspection failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response("[]", {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "response_parse_error", inspectionReason: "schema" });
+  });
+
+  it("classifies a non-object JSON payload as a schema inspection failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response("null", {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "response_parse_error", inspectionReason: "schema" });
+  });
+
+  it("classifies mixed stream delta and message content as a schema inspection failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"a"}}]}\n\n' +
+      'data: {"choices":[{"message":{"content":"b"}}]}\n\n' +
+      "data: [DONE]\n",
+      { status: 200, headers: { "content-type": "text/event-stream" } }
+    ));
+    await expect(fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      mode: "sse",
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).rejects.toMatchObject({ kind: "response_parse_error", inspectionReason: "schema" });
+  });
+
+  it("exposes safe provider identity without retaining the raw error body", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 600003, type: "provider_error", message: "secret upstream message" }
+    }), { status: 400, headers: { "content-type": "application/json" } }));
+
+    const error = await fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    }).then(
+      () => {
+        throw new Error("expected provider failure");
+      },
+      (cause: unknown) => cause
+    );
+
+    expect(error).toMatchObject({
+      kind: "http_error",
+      httpStatus: 400,
+      providerCode: "600003",
+      providerType: "provider_error",
+      bodyDigest: null
+    });
+    expect(error).not.toHaveProperty("rawBody");
+    expect(JSON.stringify(error)).not.toMatch(/secret|rawBody|600003|provider_error/iu);
+    expect((error as Error).message).not.toMatch(/secret/iu);
+  });
+
+  it("digests a bounded error-body prefix and cancels the unread tail", async () => {
+    let cancelled = false;
+    const prefix = "x".repeat(16 * 1024);
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`${prefix}secret-tail`));
+      },
+      cancel() {
+        cancelled = true;
+      }
+    }), { status: 400 }));
+
+    const error = await fetchProviderChatCompletion({
+      ...CHAT_REQUEST,
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    }).then(
+      () => {
+        throw new Error("expected provider failure");
+      },
+      (cause: unknown) => cause
+    );
+
+    expect(error).toMatchObject({
+      kind: "http_error",
+      httpStatus: 400,
+      providerCode: null,
+      providerType: null,
+      bodyDigest: createHash("sha256").update(prefix, "utf8").digest("hex")
+    });
+    expect((error as Error).message).not.toMatch(/secret-tail/iu);
+    await vi.waitFor(() => expect(cancelled).toBe(true));
   });
 });
+
+function hangingBodyResponse(status: number): Response {
+  return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status });
+}

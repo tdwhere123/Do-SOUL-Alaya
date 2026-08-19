@@ -210,6 +210,22 @@ describe("extraction-fill cache validity", () => {
     )]));
     expect(logs.some((message) => message.includes("[extraction-fill] done"))).toBe(false);
   });
+
+  it("surfaces failure_non_retryable_response without counting it as max retries", async () => {
+    await writeDataset();
+    const error = new Error("unparseable content");
+    (error as { benchRetry?: unknown }).benchRetry = {
+      retryCount: 0,
+      retryClassification: "failure_non_retryable_response",
+      rateLimitRetries: 0
+    };
+    await expect(fill(async () => {
+      throw error;
+    })).rejects.toMatchObject({
+      name: "ExtractionFillTaskError",
+      retryClassification: "failure_non_retryable_response"
+    });
+  });
 });
 
 async function fill(extract: BenchSignalExtractor["extract"]) {

@@ -31,8 +31,4 @@ export {
 } from "./runtime/daemon-event-metrics.js";
 export { applyBenchFastPragmaIfRequested, optimizeBenchDb } from "./runtime/daemon-db-pragmas.js";
 export type { BenchFastPragmaResult } from "./runtime/daemon-db-pragmas.js";
-export {
-  seedBenchRunOnly,
-  seedBenchWorkspaceAndRun,
-  seedBenchWorkspaceIfAbsent
-} from "./workspace/daemon-workspace-seed.js";
+export { prepareBenchWorkspaceBinding } from "./workspace/daemon-workspace-seed.js";

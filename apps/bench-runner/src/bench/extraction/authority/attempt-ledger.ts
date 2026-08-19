@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { BenchTerminalRetryClassification } from "../../compile-seed/compile-seed-types.js";
+import {
+  completeBenchTerminalRetryClassifications,
+  type BenchTerminalRetryClassification
+} from "../../compile-seed/compile-seed-types.js";
 import {
   assertExtractionAttemptLedgerCacheIdentity, assertLedgerSuccessfulShard,
   readValidDeterministicLedgerShard, readValidLedgerShard,
@@ -15,6 +18,7 @@ import {
   emptyAttemptTelemetry,
   persistAttemptLedgerRecordExclusive,
   persistAttemptLedgerRecord,
+  projectAttemptLedgerV5Terminal,
   readAttemptLedgerRecord,
   readAttemptLedgerRecordEnvelope,
   type ExtractionAttemptLedgerRecord
@@ -402,7 +406,9 @@ function toSnapshot(
     telemetry: Object.freeze({
       retrySuccesses: record.telemetry.retry_successes,
       rateLimitRetries: record.telemetry.rate_limit_retries,
-      terminalRetryClassifications: Object.freeze({ ...record.telemetry.terminal }),
+      terminalRetryClassifications: Object.freeze(
+        completeBenchTerminalRetryClassifications(record.telemetry.terminal)
+      ),
       inputTokens: record.telemetry.input_tokens,
       outputTokens: record.telemetry.output_tokens,
       totalTokens: record.telemetry.total_tokens,
@@ -451,13 +457,7 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
     telemetry: {
       retry_successes: record.telemetry.retry_successes,
       rate_limit_retries: record.telemetry.rate_limit_retries,
-      terminal: {
-        failure_max_retries: record.telemetry.terminal.failure_max_retries,
-        failure_non_retryable_4xx:
-          record.telemetry.terminal.failure_non_retryable_4xx,
-        failure_timeout: record.telemetry.terminal.failure_timeout,
-        failure_aborted: record.telemetry.terminal.failure_aborted
-      },
+      terminal: projectAttemptLedgerV5Terminal(record.telemetry.terminal),
       input_tokens: record.telemetry.input_tokens,
       output_tokens: record.telemetry.output_tokens,
       total_tokens: record.telemetry.total_tokens,

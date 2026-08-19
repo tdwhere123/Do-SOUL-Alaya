@@ -32,6 +32,7 @@ export type {
   WorkspaceBootstrapReconcileResult,
   WorkspaceBootstrappingPlannerPort,
   WorkspaceBootstrappingRecordRepoPort,
+  WorkspaceCreationMutation,
   WorkspaceEngineConfigRepoPort,
   WorkspaceListPageOptions,
   WorkspacePathRelationRepoPort,
@@ -87,7 +88,8 @@ export class WorkspaceService {
       eventPublisher: dependencies.eventPublisher,
       bootstrappingPlanner: dependencies.bootstrappingPlanner,
       pathRelationRepo: dependencies.pathRelationRepo,
-      bootstrappingRecordRepo: dependencies.bootstrappingRecordRepo
+      bootstrappingRecordRepo: dependencies.bootstrappingRecordRepo,
+      workspaceCreationMutation: dependencies.workspaceCreationMutation
     });
   }
 

@@ -27,6 +27,10 @@ import {
 import { createBudgetProposalPort } from "../../../budget/wiring.js";
 import { parseZeroDayPoliciesJson } from "../../../security/zero-day-policies.js";
 import { createSecurityStatusBootstrapServices } from "../../../security/status-bootstrap.js";
+import {
+  createFieldProjectionWorkspaceBirthMutation,
+  createFieldProjectionWorkspaceEnsureMutation
+} from "./field-projection-workspace-bootstrap.js";
 import { createConfigService } from "../../../services/config/config-service.js";
 import { createEnvironmentStatusService } from "../../../services/status/environment-status-service.js";
 import {
@@ -110,6 +114,7 @@ export async function createDaemonServiceFoundation(input: DaemonServiceFoundati
 }
 
 async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundationInput) {
+  const now = () => new Date().toISOString();
   const environmentStatusService = createEnvironmentStatusService({
     toolNames: CORE_DAEMON_ENVIRONMENT_TOOLS,
     getDatabasePath: () => input.database.filename,
@@ -137,10 +142,12 @@ async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundatio
     engineConfigRepo: input.workspaceEngineConfigRepo,
     bootstrappingPlanner: new BootstrappingService({
       templates: defaultBootstrappingTemplates,
-      now: () => new Date().toISOString()
+      now
     }),
     pathRelationRepo: input.pathRelationRepo,
-    bootstrappingRecordRepo: input.bootstrappingRecordRepo
+    bootstrappingRecordRepo: input.bootstrappingRecordRepo,
+    workspaceCreationMutation: createFieldProjectionWorkspaceBirthMutation(input.fieldComposition),
+    workspaceEnsureMutation: createFieldProjectionWorkspaceEnsureMutation(input.fieldComposition, now)
   });
   return {
     environmentStatusService,

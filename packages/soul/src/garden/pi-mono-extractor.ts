@@ -100,13 +100,10 @@ export type PiMonoComplete = (
 export type PiMonoGetModel = (provider: "openai", modelId: string) => PiMonoModel | undefined;
 
 const DEFAULT_MAX_RETRIES = 0;
-// invariant: up to 3 retries with exponential jittered backoff on recoverable
-// failure modes (empty body / parse error / 5xx / 429 / unknown transport).
-// A single retry does not outlast empty-text / 5xx bursts on the official
-// chat path, and the extractor then silently degrades to the full-turn
-// fallback; three attempts with bounded backoff recover the transient burst
-// without multiplying quota. Timeouts retry exactly ONCE (see
-// retryBudgetForError) so a chronic slow path cannot multiply wall time.
+// invariant: up to 3 retries with jittered backoff on recoverable transport
+// (5xx / 429 / unknown). Empty or unparseable bodies are terminal on the
+// first attempt so they cannot be counted as exhausted retries. Timeouts
+// retry exactly ONCE so a chronic slow path cannot multiply wall time.
 const MAX_EXTRACTOR_RETRIES = 3;
 const MAX_EXTRACTOR_TIMEOUT_RETRIES = 1;
 // Jittered exponential backoff: attempt 1 sleeps 250-500ms, attempt 2 sleeps
@@ -263,7 +260,7 @@ async function handleExtractionFailure(
     return;
   }
   if (!isRetryableExtractorError(mapped, error)) {
-    throw withClassification(mapped, "failure_non_retryable_4xx");
+    throw withClassification(mapped, nonRetryableClassification(mapped));
   }
   await retryAfterBackoff(runtime, state, mapped);
 }
@@ -308,6 +305,12 @@ function buildExhaustedRetriesError(
     state.attempt
   );
   return withClassification(fallback, "failure_max_retries");
+}
+
+function nonRetryableClassification(error: SignalExtractorError): RetryClassification {
+  return error.kind === "invalid_json"
+    ? "failure_non_retryable_response"
+    : "failure_non_retryable_4xx";
 }
 
 function withClassification(
@@ -363,12 +366,9 @@ function mapExtractorTransportError(
   });
 }
 
-// Decide whether to spend the single retry budget on this failure.
-// RETRYABLE: empty/invalid JSON body (the dominant yunwu.ai
-// failure mode), transport failure with an HTTP 5xx or 429 status surfaced
-// in the cause chain or message. NOT RETRYABLE: timeout (caller already
-// chose the budget), auth/4xx other than 429 (will fail identically), or a
-// client-side abort (operator stopped the run).
+// RETRYABLE: transport 5xx / 429 or unknown transport. NOT RETRYABLE:
+// empty/invalid JSON (same bytes fail identically), timeout, auth/4xx
+// other than 429, or operator abort.
 function isRetryableExtractorError(
   mapped: SignalExtractorError,
   raw: unknown
@@ -377,7 +377,7 @@ function isRetryableExtractorError(
     return false;
   }
   if (mapped.kind === "invalid_json") {
-    return true;
+    return false;
   }
   // transport_failure: only retry on 5xx / 429.
   const status = extractStatusFromError(raw);

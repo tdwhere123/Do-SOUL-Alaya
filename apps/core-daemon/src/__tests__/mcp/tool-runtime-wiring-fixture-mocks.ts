@@ -184,26 +184,30 @@ vi.mock("@do-soul/alaya-core", async (importOriginal) => {
   };
 });
 
-vi.mock("@do-soul/alaya-engine-gateway", () => ({
-  APIConversationEngine: hoisted.apiConversationEngineCtor,
-  McpBridge: hoisted.bridgeCtor,
-  buildConversationToolDefs: (specs: readonly { readonly tool_id: string; readonly description: string }[]) =>
-    specs.map((spec) => ({
-      name: spec.tool_id,
-      description: spec.description,
-      parametersSchema: {}
-    })),
-  READ_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[0],
-  LIST_DIRECTORY_TOOL_SPEC: hoisted.conversationToolSpecs[1],
-  SEARCH_FILES_TOOL_SPEC: hoisted.conversationToolSpecs[2],
-  WRITE_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[3],
-  EXEC_SHELL_TOOL_SPEC: hoisted.conversationToolSpecs[4],
-  readFile: hoisted.readFile,
-  listDirectory: hoisted.listDirectory,
-  searchFiles: hoisted.searchFiles,
-  writeFile: hoisted.writeFile,
-  execShell: hoisted.execShell
-}));
+vi.mock("@do-soul/alaya-engine-gateway", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@do-soul/alaya-engine-gateway")>();
+  return {
+    ...actual,
+    APIConversationEngine: hoisted.apiConversationEngineCtor,
+    McpBridge: hoisted.bridgeCtor,
+    buildConversationToolDefs: (specs: readonly { readonly tool_id: string; readonly description: string }[]) =>
+      specs.map((spec) => ({
+        name: spec.tool_id,
+        description: spec.description,
+        parametersSchema: {}
+      })),
+    READ_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[0],
+    LIST_DIRECTORY_TOOL_SPEC: hoisted.conversationToolSpecs[1],
+    SEARCH_FILES_TOOL_SPEC: hoisted.conversationToolSpecs[2],
+    WRITE_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[3],
+    EXEC_SHELL_TOOL_SPEC: hoisted.conversationToolSpecs[4],
+    readFile: hoisted.readFile,
+    listDirectory: hoisted.listDirectory,
+    searchFiles: hoisted.searchFiles,
+    writeFile: hoisted.writeFile,
+    execShell: hoisted.execShell
+  };
+});
 
 vi.mock("@do-soul/alaya-soul", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@do-soul/alaya-soul");

@@ -2,7 +2,10 @@ import {
   assertSnapshotVersionMatch,
   type LongMemEvalSnapshotManifest
 } from "../materialize.js";
-import { readSchemaMigrationLedger } from "@do-soul/alaya-storage";
+import {
+  readSchemaMigrationLedger,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION
+} from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
 import type { WarmDerivedSnapshotReceipt } from
   "./warm-derived/warm-derived-snapshot-receipt.js";
@@ -68,9 +71,9 @@ function assertDerivedRebuildSource(input: {
       "[recall-eval] derived rebuild snapshot schema binding mismatch"
     );
   }
-  if (sourceVersion === undefined || sourceVersion < 108) {
+  if (sourceVersion === undefined || sourceVersion < TEMPORAL_OFFLINE_MIGRATION_VERSION) {
     throw new Error(
-      "[recall-eval] derived rebuild requires snapshot schema 108 or newer"
+      `[recall-eval] derived rebuild requires snapshot schema ${TEMPORAL_OFFLINE_MIGRATION_VERSION} or newer`
     );
   }
 }

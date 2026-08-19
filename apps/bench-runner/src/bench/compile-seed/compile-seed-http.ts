@@ -7,7 +7,6 @@ import type {
 } from "./compile-seed-types.js";
 import {
   fetchProviderChatCompletion,
-  ProviderChatCompletionError,
   type ProviderRequestProfile
 } from "@do-soul/alaya-engine-gateway";
 import { WallClockTimeoutError, withWallClockTimeout } from "@do-soul/alaya-soul";
@@ -37,10 +36,10 @@ import {
 } from "./http/garden-http-error.js";
 import {
   aggregateGardenHttpAttemptUsage,
+  mapGardenHttpAttemptFailure,
   markGardenHttpFailure,
   readGardenHttpAttemptTimedOut,
   readGardenHttpFailureKind,
-  settleGardenHttpAttemptFailure,
   toBenchTransportFailureAttempt
 } from "./http/garden-http-failure-attempt.js";
 import { buildGardenHttpAttemptResponse } from "./http/garden-http-response-validation.js";
@@ -140,7 +139,9 @@ async function extractGardenHttpRequest(
       validateGardenHttpRawJson(input, response.rawJson, response.usage);
       return response;
     },
-    isRateLimited: (error) => readStatusFromBenchError(error) === 429,
+    isRateLimited: (error) =>
+      readGardenHttpFailureKind(error) === "http_error" &&
+      readStatusFromBenchError(error) === 429,
     decideRetry: (error, attempt, counters, maxRetries) => {
       const shouldEscalateOutputTokens = allowOutputTokenEscalation &&
         isOutputTokenTruncation(error) &&
@@ -239,12 +240,21 @@ async function runGardenHttpAttempt(
   attempt: number
 ): Promise<GardenHttpAttemptResponse> {
   let attemptSettled = false;
+  let knownErrorStatus: number | null = null;
   const controller = new AbortController();
+  const attemptDeps = {
+    ...deps,
+    fetch: observeGardenHttpErrorStatus(deps.fetch, (status) => {
+      knownErrorStatus = status;
+    })
+  };
   try {
     const result = await withWallClockTimeout(
       async (signal) => {
         bindAttemptAbort(controller, signal);
-        const completePromise = fetchGardenHttpAttempt(config, apiKey, deps, input, signal);
+        const completePromise = fetchGardenHttpAttempt(
+          config, apiKey, attemptDeps, input, signal
+        );
         observeLateGardenHttpRejection(
           { attempt, controller, isAttemptSettled: () => attemptSettled },
           completePromise,
@@ -267,7 +277,11 @@ async function runGardenHttpAttempt(
       ? "default_envelope"
       : "caller_owned");
   } catch (error) {
-    throw settleGardenHttpFailure(mapProviderChatError(error), input);
+    const planTimedOut = isExtractionPlanDeadlineError(input.abortSignal?.reason);
+    throw mapGardenHttpAttemptFailure(error, knownErrorStatus, {
+      timedOut: error instanceof WallClockTimeoutError || planTimedOut,
+      aborted: input.abortSignal?.aborted === true && !planTimedOut
+    });
   } finally {
     attemptSettled = true;
     controller.abort();
@@ -311,25 +325,15 @@ function bindAttemptAbort(controller: AbortController, signal: AbortSignal): voi
   signal.addEventListener("abort", onAbort, { once: true });
 }
 
-function mapProviderChatError(error: unknown): unknown {
-  if (!(error instanceof ProviderChatCompletionError)) return error;
-  return markGardenHttpFailure(error, {
-    kind: error.kind === "http_error" ? "http_error" : "network_error",
-    phase: error.kind === "http_error" ? "response_status" : "request",
-    ...(error.httpStatus === null ? {} : { httpStatus: error.httpStatus })
-  });
-}
-
-function settleGardenHttpFailure(
-  error: unknown,
-  input: GardenHttpExtractInput
-): Error {
-  const planTimedOut = isExtractionPlanDeadlineError(input.abortSignal?.reason);
-  return settleGardenHttpAttemptFailure(
-    error,
-    error instanceof WallClockTimeoutError || planTimedOut,
-    input.abortSignal?.aborted === true && !planTimedOut
-  );
+function observeGardenHttpErrorStatus(
+  fetchImpl: typeof fetch,
+  observe: (status: number) => void
+): typeof fetch {
+  return (async (input, init) => {
+    const response = await fetchImpl(input, init);
+    if (!response.ok) observe(response.status);
+    return response;
+  }) as typeof fetch;
 }
 
 function buildGardenHttpSuccess(

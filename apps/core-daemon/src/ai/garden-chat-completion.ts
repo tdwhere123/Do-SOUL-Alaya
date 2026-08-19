@@ -1,7 +1,9 @@
 import {
   fetchProviderChatCompletion,
+  isRetryableProviderHttpStatus,
   ProviderChatCompletionError,
-  withProviderRetry
+  withProviderRetry,
+  type ProviderTransportFailureKind
 } from "@do-soul/alaya-engine-gateway";
 
 export interface GardenChatCompletionConfig {
@@ -36,24 +38,22 @@ async function requestGardenChatCompletionContentOnce(
   input: GardenChatCompletionRequest
 ): Promise<string> {
   const apiKey = requireGardenApiKey(input.config.apiKey);
-  try {
-    const result = await fetchProviderChatCompletion({
-      providerUrl: input.config.providerUrl,
-      apiKey,
-      model: input.config.model,
-      systemPrompt: input.systemPrompt,
-      userPrompt: input.userPrompt,
-      timeoutMs: input.timeoutMs,
-      mode: "json",
-      jsonObject: true
-    });
-    if (result.text.trim().length === 0) {
-      throw new Error(`${input.failureLabel} returned no content`);
-    }
-    return result.text;
-  } catch (error) {
+  const result = await fetchProviderChatCompletion({
+    providerUrl: input.config.providerUrl,
+    apiKey,
+    model: input.config.model,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    timeoutMs: input.timeoutMs,
+    mode: "json",
+    jsonObject: true
+  }).catch((error: unknown) => {
     throw mapGardenChatCompletionError(error, input.failureLabel, apiKey);
+  });
+  if (result.text.trim().length === 0) {
+    throw new Error(`${input.failureLabel} returned no content`);
   }
+  return result.text;
 }
 
 function mapGardenChatCompletionError(
@@ -69,7 +69,8 @@ function mapGardenChatCompletionError(
   }
   return new GardenChatCompletionTransportError(
     `${failureLabel} transport failed`,
-    redactSecretFromCause(error, apiKey)
+    redactSecretFromCause(error, apiKey),
+    error instanceof ProviderChatCompletionError ? error.kind : null
   );
 }
 
@@ -92,19 +93,23 @@ class GardenChatCompletionHttpError extends Error {
 }
 
 class GardenChatCompletionTransportError extends Error {
-  constructor(message: string, cause: unknown) {
+  readonly kind: ProviderTransportFailureKind | null;
+
+  constructor(message: string, cause: unknown, kind: ProviderTransportFailureKind | null) {
     super(message, { cause });
     this.name = "GardenChatCompletionTransportError";
+    this.kind = kind;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 function isRetryableGardenChatError(error: unknown): boolean {
   if (error instanceof GardenChatCompletionHttpError) {
-    return error.status === 429 || error.status >= 500;
+    return isRetryableProviderHttpStatus(error.status);
   }
-
-  return error instanceof GardenChatCompletionTransportError;
+  // Parse/schema/abort stay terminal; redaction replaces the provider error cause.
+  return error instanceof GardenChatCompletionTransportError &&
+    (error.kind === "network_error" || error.kind === "body_read_error");
 }
 
 function redactSecretFromCause(error: unknown, secret: string): unknown {
