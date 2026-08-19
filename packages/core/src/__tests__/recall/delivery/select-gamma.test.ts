@@ -1,4 +1,5 @@
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import {
   selectGammaMarginalGain
@@ -40,9 +41,7 @@ describe("Select_Gamma", () => {
   it("keeps quality nonnegative and coverage gains diminishing", () => {
     expect(selectGammaQuality({
       relevance: -1,
-      authority: 0.2,
-      temporal_fit: 0.2,
-      path_support: 0.2
+      temporal_fit: 0.2
     })).toBe(0);
     const weights = { lexical: 1, lineage: 1 };
     const first = { quality: 0.4, cover: { lexical: 1, lineage: 1 } };
@@ -116,6 +115,35 @@ describe("Select_Gamma", () => {
     expect(selected).toHaveLength(7);
   });
 
+  it("uses authority only after the primary objective is exactly tied", () => {
+    const binding = {
+      candidates: [
+        formulaCandidate("unverified-a", { quality: 1 }),
+        formulaCandidate("verified-z", {
+          quality: 1,
+          authority_tie_break: "verified_user_projection"
+        })
+      ],
+      max_selected: 1
+    } satisfies SelectGammaBinding;
+
+    expect(selectKeys(binding, ["unverified-a", "verified-z"], 2))
+      .toEqual(["verified-z"]);
+  });
+
+  it("keeps admission monotone when relevance increases", () => {
+    const selectedAt = (quality: number) => selectKeys({
+      candidates: [
+        formulaCandidate("target", { quality }),
+        formulaCandidate("peer", { quality: 0.7 })
+      ],
+      max_selected: 1
+    }, ["target", "peer"], 2);
+
+    expect(selectedAt(0.8)).toContain("target");
+    expect(selectedAt(1)).toContain("target");
+  });
+
   it("uses raw marginal gain when cardinality proves the token budget slack", () => {
     const binding = {
       candidates: [
@@ -130,7 +158,8 @@ describe("Select_Gamma", () => {
 
     expect(result.selected_candidate_keys).toEqual(["long-high-gain"]);
     expect(result.selection_receipt).toEqual({
-      schema_version: 1,
+      schema_version: 3,
+      objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
       ordering_basis: "raw_marginal_gain",
       witness: {
         kind: "static_top_k_token_bound",
@@ -237,17 +266,13 @@ describe("Select_Gamma", () => {
         formulaCandidate("stale", {
           quality: selectGammaQuality({
             relevance: 0.4,
-            authority: 0,
-            temporal_fit: 0.1,
-            path_support: 0
+            temporal_fit: 0.1
           })
         }),
         formulaCandidate("current", {
           quality: selectGammaQuality({
             relevance: 0.4,
-            authority: 0,
-            temporal_fit: 0.8,
-            path_support: 0
+            temporal_fit: 0.8
           })
         })
       ]
@@ -330,6 +355,8 @@ function formulaCandidate(
     readonly quality: number;
     readonly cover?: Readonly<Record<string, number>>;
     readonly token_cost?: number;
+    readonly authority_tie_break?:
+      "verified_user_assertion" | "verified_user_projection" | "unavailable";
   }>
 ) {
   return Object.freeze({
@@ -342,10 +369,9 @@ function formulaCandidate(
     lineage: { status: "unavailable" as const },
     token_cost: params.token_cost ?? 1,
     quality: params.quality,
+    authority_tie_break: params.authority_tie_break ?? "unavailable",
     quality_channels: {
-      authority: { status: "unavailable" as const },
-      temporal: { status: "unavailable" as const },
-      path: { status: "unavailable" as const }
+      temporal: { status: "unavailable" as const }
     },
     cover: params.cover ?? {}
   });

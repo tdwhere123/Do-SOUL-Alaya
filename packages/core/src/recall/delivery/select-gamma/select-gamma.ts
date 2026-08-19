@@ -1,4 +1,7 @@
-import { compareCodeUnits } from "@do-soul/alaya-protocol";
+import {
+  compareCodeUnits,
+  SELECT_GAMMA_OPERATOR_ID
+} from "@do-soul/alaya-protocol";
 import {
   acceptSelectGammaCoverage,
   selectGammaMarginalGain
@@ -131,6 +134,7 @@ function pickNext(
   let bestIndex = -1;
   let bestScore = Number.NEGATIVE_INFINITY;
   let bestGain = Number.NEGATIVE_INFINITY;
+  let bestAuthority = Number.NEGATIVE_INFINITY;
   let bestKey = "";
   for (let index = 0; index < remaining.length; index += 1) {
     const candidate = remaining[index]!;
@@ -138,15 +142,39 @@ function pickNext(
     const gain = selectGammaMarginalGain(candidate, covered, weights);
     const score = orderingBasis === "raw_marginal_gain"
       ? gain : gain / candidate.token_cost;
-    if (score > bestScore || (score === bestScore &&
-        compareCodeUnits(candidate.candidate_key, bestKey) < 0)) {
+    const authority = authorityTieBreakRank(candidate);
+    if (isPreferredCandidate(
+      score, authority, candidate.candidate_key,
+      bestScore, bestAuthority, bestKey
+    )) {
       bestScore = score;
       bestIndex = index;
+      bestAuthority = authority;
       bestKey = candidate.candidate_key;
       bestGain = gain;
     }
   }
   return bestIndex < 0 ? null : Object.freeze({ index: bestIndex, gain: bestGain });
+}
+
+function isPreferredCandidate(
+  score: number,
+  authority: number,
+  candidateKey: string,
+  bestScore: number,
+  bestAuthority: number,
+  bestKey: string
+): boolean {
+  return score > bestScore || (score === bestScore && (
+    authority > bestAuthority || (authority === bestAuthority &&
+      compareCodeUnits(candidateKey, bestKey) < 0)
+  ));
+}
+
+function authorityTieBreakRank(candidate: SelectGammaFormulaCandidate): number {
+  if (candidate.authority_tie_break === "verified_user_assertion") return 2;
+  if (candidate.authority_tie_break === "verified_user_projection") return 1;
+  return 0;
 }
 
 function rejectConstrainedCandidates(
@@ -255,7 +283,8 @@ function buildSelectionReceipt(
     token_budget: tokenBudget
   });
   return Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 3 as const,
+    objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
     ordering_basis: maxTokenCostSum <= tokenBudget
       ? "raw_marginal_gain" as const
       : "marginal_gain_per_token" as const,

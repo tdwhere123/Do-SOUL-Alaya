@@ -17,7 +17,9 @@ export const QUERY_CONDITION_OPERATOR_ID = "query_condition_v2";
 export const CAUSAL_USAGE_OPERATOR_ID = "causal_usage_v1";
 export const PROOF_EFFECT_OPERATOR_ID = "proof_effect_v1";
 export const PROOF_EFFECT_OPERATOR_VERSION = "1";
-export const SELECT_GAMMA_OPERATOR_ID = "select_gamma_v1";
+export const SELECT_GAMMA_OPERATOR_ID =
+  "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v3";
+export const SELECT_GAMMA_OPERATOR_VERSION = "3";
 export const RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID =
   "recall_field_selector_exchange_bound_v1";
 
@@ -31,7 +33,10 @@ export const FIELD_OPERATOR_MANIFEST: readonly FieldOperatorVersionEntry[] = Obj
   Object.freeze({ id: QUERY_CONDITION_OPERATOR_ID, version: "2" }),
   Object.freeze({ id: CAUSAL_USAGE_OPERATOR_ID, version: "1" }),
   Object.freeze({ id: PROOF_EFFECT_OPERATOR_ID, version: PROOF_EFFECT_OPERATOR_VERSION }),
-  Object.freeze({ id: SELECT_GAMMA_OPERATOR_ID, version: "1" }),
+  Object.freeze({
+    id: SELECT_GAMMA_OPERATOR_ID,
+    version: SELECT_GAMMA_OPERATOR_VERSION
+  }),
   Object.freeze({ id: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID, version: "1" })
 ]);
 

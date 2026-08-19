@@ -34,6 +34,7 @@ import { assertOpenSemanticCandidateActivations } from
   "./validation/open-semantic-candidate-activation-receipt.js";
 import { restoreCapturedPacketCandidates } from
   "./validation/packet-order.js";
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 
 export {
   createCapturedTokenEstimator,
@@ -97,8 +98,7 @@ function assertCoverageObjective(value: unknown): void {
   }
   const receipt = value as Record<string, unknown>;
   if (receipt.schema_version !== 1 ||
-      typeof receipt.operator_id !== "string" ||
-      receipt.operator_id.length === 0 ||
+      receipt.operator_id !== SELECT_GAMMA_OPERATOR_ID ||
       (receipt.mathematical_class !== null &&
         receipt.mathematical_class !== "monotone_submodular") ||
       (receipt.configuration_digest !== null &&

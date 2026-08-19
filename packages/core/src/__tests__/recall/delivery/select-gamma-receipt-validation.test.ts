@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { materializeSelectGammaAccumulator } from
   "../../../recall/delivery/fine-assessment-selection/gamma-delivery.js";
 import { createSelectionContext } from
@@ -18,6 +19,10 @@ import {
 describe("Select_Gamma receipt validation", () => {
   it.each([
     ["version", { schema_version: 0 }],
+    ["semantic", {
+      objective_semantic_id:
+        "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2"
+    }],
     ["basis", { ordering_basis: "marginal_gain_per_token" }],
     ["K", { witness: selectionWitness({ k: 2 }) }],
     ["upper bound", {
@@ -100,7 +105,8 @@ function fixture() {
   const walk: SelectGammaWalkResult = {
     selected_candidate_keys: [candidate.fusion.candidate_key],
     selection_receipt: {
-      schema_version: 1,
+      schema_version: 3,
+      objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
       ordering_basis: "raw_marginal_gain",
       witness: selectionWitness()
     },

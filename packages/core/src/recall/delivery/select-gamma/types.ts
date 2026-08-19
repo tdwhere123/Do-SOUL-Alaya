@@ -1,3 +1,5 @@
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
+
 export type SelectGammaRisk = "clear" | "blocked";
 export type SelectGammaAuthority = "clear" | "blocked";
 
@@ -9,10 +11,13 @@ export type SelectGammaEligibilityInput = Readonly<{
 
 export type SelectGammaQualityParts = Readonly<{
   readonly relevance: number;
-  readonly authority: number;
   readonly temporal_fit: number;
-  readonly path_support: number;
 }>;
+
+export type SelectGammaAuthorityTieBreak =
+  | "verified_user_assertion"
+  | "verified_user_projection"
+  | "unavailable";
 
 export type SelectGammaQualityChannel =
   | Readonly<{ readonly status: "available"; readonly value: number }>
@@ -35,10 +40,9 @@ export type SelectGammaFormulaCandidate = Readonly<{
   readonly lineage: SelectGammaIdentityChannel;
   readonly token_cost: number;
   readonly quality: number;
+  readonly authority_tie_break: SelectGammaAuthorityTieBreak;
   readonly quality_channels: Readonly<{
-    readonly authority: SelectGammaQualityChannel;
     readonly temporal: SelectGammaQualityChannel;
-    readonly path: SelectGammaQualityChannel;
   }>;
   readonly cover: Readonly<Record<string, number>>;
 }>;
@@ -66,7 +70,8 @@ export type SelectGammaRequest = Readonly<{
 export type SelectGammaCoverState = Map<string, number>;
 
 export type SelectGammaSelectionReceipt = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 3;
+  readonly objective_semantic_id: typeof SELECT_GAMMA_OPERATOR_ID;
   readonly ordering_basis: "raw_marginal_gain" | "marginal_gain_per_token";
   readonly witness: Readonly<{
     readonly kind: "static_top_k_token_bound";

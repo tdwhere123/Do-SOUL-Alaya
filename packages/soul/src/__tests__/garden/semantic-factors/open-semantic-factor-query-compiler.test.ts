@@ -36,6 +36,15 @@ describe("open semantic factor query compiler", () => {
       '"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING';
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(completeEnvelope);
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(variableShape);
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "Preserve each predicate's semantic argument order"
+    );
+    expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(
+      "binding names need not match source evidence graphs"
+    );
+    expect(request?.responseSchemaRetryInstruction).toContain(
+      "Preserve each predicate's semantic argument order"
+    );
     expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
     expect(request?.responseSchemaRetryInstruction).toContain(variableShape);
     expect(() => request?.validateRawJson?.(

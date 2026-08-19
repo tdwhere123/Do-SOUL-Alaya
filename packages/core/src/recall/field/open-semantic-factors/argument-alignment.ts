@@ -11,8 +11,14 @@ export type OpenSemanticFactorAlignmentOperator =
   | "exact_semantic_identity_v1"
   | "variable_binding_v1";
 
+export type OpenSemanticBindingAlignmentOperator =
+  | "exact_binding_identity_v1"
+  | "position_anchored_binding_group_v1";
+
 export type OpenSemanticFactorArgumentMapping = Readonly<{
   readonly binding_identity: string;
+  readonly evidence_binding_identity: string;
+  readonly binding_alignment_operator_id: OpenSemanticBindingAlignmentOperator;
   readonly query_position: number;
   readonly evidence_position: number;
   readonly query_reference_kind: OpenSemanticArgument["reference_kind"];
@@ -67,10 +73,8 @@ function searchArgumentAlignments(params: Readonly<{
     }));
     return;
   }
-  for (const evidenceArgument of params.evidence.arguments) {
-    if (params.usedEvidencePositions.has(evidenceArgument.position) ||
-        evidenceArgument.binding_identity !== queryArgument.binding_identity ||
-        evidenceArgument.reference_kind !== "factor") continue;
+  const candidates = selectEvidenceArguments(params, queryArgument);
+  for (const evidenceArgument of candidates) {
     const evidenceFactor = params.evidenceFactors.get(evidenceArgument.reference_id);
     if (evidenceFactor === undefined) continue;
     const mapped = mapArgument(
@@ -89,17 +93,31 @@ function searchArgumentAlignments(params: Readonly<{
       mappings: [...params.mappings, mapped.mapping]
     });
   }
-  if (queryArgument.reference_kind === "variable" &&
-      !params.evidence.arguments.some((argument) =>
-        argument.binding_identity === queryArgument.binding_identity &&
-        argument.reference_kind === "factor" &&
-        !params.usedEvidencePositions.has(argument.position))) {
+  if (queryArgument.reference_kind === "variable" && candidates.length === 0) {
     // Skip only answer slots with no evidence counterpart; do not drop mapped constraints.
     searchArgumentAlignments({
       ...params,
       queryIndex: params.queryIndex + 1
     });
   }
+}
+
+function selectEvidenceArguments(
+  params: Readonly<{
+    readonly evidence: Readonly<OpenSemanticProposition>;
+    readonly usedEvidencePositions: ReadonlySet<number>;
+  }>,
+  queryArgument: Readonly<OpenSemanticArgument>
+): readonly Readonly<OpenSemanticArgument>[] {
+  const factorArguments = params.evidence.arguments.filter((argument) =>
+    argument.reference_kind === "factor");
+  const positional = factorArguments.find((argument) =>
+    argument.position === queryArgument.position);
+  if (positional === undefined) return [];
+  const structurallyEligible = factorArguments.filter((argument) =>
+    argument.binding_identity === positional.binding_identity);
+  return structurallyEligible.filter((argument) =>
+    !params.usedEvidencePositions.has(argument.position));
 }
 
 function mapArgument(
@@ -143,6 +161,12 @@ function freezeArgumentMapping(
 ): OpenSemanticFactorArgumentMapping {
   return Object.freeze({
     binding_identity: queryArgument.binding_identity,
+    evidence_binding_identity: evidenceArgument.binding_identity,
+    binding_alignment_operator_id:
+      queryArgument.position === evidenceArgument.position &&
+        queryArgument.binding_identity === evidenceArgument.binding_identity
+        ? "exact_binding_identity_v1"
+        : "position_anchored_binding_group_v1",
     query_position: queryArgument.position,
     evidence_position: evidenceArgument.position,
     query_reference_kind: queryArgument.reference_kind,

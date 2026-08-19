@@ -14,6 +14,8 @@ import {
   FIELD_OPERATOR_MANIFEST,
   QUERY_CONDITION_OPERATOR_ID,
   RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
+  SELECT_GAMMA_OPERATOR_ID,
+  SELECT_GAMMA_OPERATOR_VERSION,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   fieldOperatorManifestDigest,
   hashAddressableSourceSpanId,
@@ -231,6 +233,32 @@ describe("field-contract identities", () => {
     }, sha256));
   });
 
+  it("binds the current Select_Gamma objective into the manifest digest", () => {
+    expect(SELECT_GAMMA_OPERATOR_ID).toBe(
+      "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v3"
+    );
+    expect(SELECT_GAMMA_OPERATOR_VERSION).toBe("3");
+    const selector = FIELD_OPERATOR_MANIFEST.find(({ id }) =>
+      id.startsWith("select_gamma")
+    );
+    expect(selector).toEqual({
+      id: SELECT_GAMMA_OPERATOR_ID,
+      version: SELECT_GAMMA_OPERATOR_VERSION
+    });
+    const legacy = FIELD_OPERATOR_MANIFEST.map((entry) =>
+      entry === selector
+        ? {
+            id:
+              "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2",
+            version: "2"
+          }
+        : entry
+    );
+
+    expect(fieldOperatorManifestDigest(sha256))
+      .not.toBe(hashOperatorManifestDigest(legacy, sha256));
+  });
+
   it("canonicalizes derivation job evidence order before hashing", () => {
     const first = hashDerivationJobId({
       purpose: "f3_semantic",
@@ -340,7 +368,7 @@ describe("field-contract identities", () => {
       QUERY_CONDITION_OPERATOR_ID,
       "causal_usage_v1",
       "proof_effect_v1",
-      "select_gamma_v1",
+      SELECT_GAMMA_OPERATOR_ID,
       RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID
     ]);
   });

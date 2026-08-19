@@ -71,15 +71,15 @@ describe("live Select_Gamma binding", () => {
     );
     const bound = binding.candidates[0]!;
 
-    expect(bound.quality_channels.authority.status).toBe("available");
+    expect(bound.authority_tie_break).toBe("verified_user_assertion");
     expect(bound.quality_channels.temporal.status).toBe("available");
-    expect(bound.quality_channels.path.status).toBe("available");
+    expect(bound.quality_channels).not.toHaveProperty("path");
     expect(Object.keys(bound.cover)).toEqual([]);
     expect(bound.source).toEqual({ status: "available", key: "source-1" });
     expect(bound.lineage).toEqual({ status: "available", key: "lineage-1" });
   });
 
-  it("covers only live slice, path, evidence, and F3 axes", () => {
+  it("covers only independently evidenced query-bound axes", () => {
     const candidate = withFlood(createCandidate("attributed"), {
       slice: true,
       path: true,
@@ -98,12 +98,108 @@ describe("live Select_Gamma binding", () => {
     ).candidates[0]!;
 
     expect(Object.keys(bound.cover).sort()).toEqual([
-      "evidence",
       "f3",
-      "path",
       "slice"
     ]);
     expect(bound.lineage).toEqual({ status: "available", key: "session-lineage" });
+  });
+
+  it("does not let an active path displace higher relevance under slack", () => {
+    const relevant = withFlood(createRankedCandidate("relevant", 1, 1), {});
+    const routed = withFlood(createRankedCandidate("routed", 2, 0.4), {
+      path: true
+    });
+    const result = selectCandidates({
+      workspace_id: relevant.entry.workspace_id,
+      orderedCandidates: [relevant, routed],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData({
+        pathInflowAvailability: "available",
+        pathInflowByTarget: { routed: [pathInflow("routed", 0.8)] }
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([relevant, routed])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["relevant"]);
+  });
+
+  it("does not let verified authority overpower higher relevance", () => {
+    const relevant = createRankedCandidate("relevant", 1, 1);
+    const verifiedBase = createRankedCandidate("verified", 2, 0.4);
+    const verified = {
+      ...verifiedBase,
+      evidenceSourceRole: "user" as const,
+      verifiedUserSupportSource: {
+        evidence_ref: "evidence-verified",
+        projection_kind: "atomic_assertion" as const
+      },
+      entry: {
+        ...verifiedBase.entry,
+        evidence_refs: ["evidence-verified"]
+      }
+    };
+    const result = selectCandidates({
+      workspace_id: relevant.entry.workspace_id,
+      orderedCandidates: [relevant, verified],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([relevant, verified])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["relevant"]);
+  });
+
+  it("declares no generic path role inside Select_Gamma", () => {
+    const candidate = withFlood(createCandidate("path-only"), { path: true });
+    const params = fixture(candidate, createSupplementaryData({
+      pathInflowAvailability: "available",
+      pathInflowByTarget: { "path-only": [pathInflow("path-only", 0.8)] }
+    }));
+    const bound = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    ).candidates[0]!;
+
+    expect(bound.quality_channels).not.toHaveProperty("path");
+    expect(bound.cover).not.toHaveProperty("path");
+  });
+
+  it("does not reward ordinary evidence without a query-bound receipt", () => {
+    const plain = withFlood(createRankedCandidate("a-plain", 1, 0.7), {});
+    const evidenceBase = createRankedCandidate("z-evidence", 2, 0.7);
+    const evidence = withFlood({
+      ...evidenceBase,
+      entry: {
+        ...evidenceBase.entry,
+        evidence_refs: ["ordinary-evidence"]
+      }
+    }, { evidence: true });
+    const supplementaryData = createSupplementaryData();
+    const params = {
+      ...fixture(plain, supplementaryData),
+      orderedCandidates: [plain, evidence]
+    };
+    const binding = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    );
+    const coverByObject = new Map(binding.candidates.map((candidate) => [
+      candidate.object_key,
+      candidate.cover
+    ]));
+
+    expect([...coverByObject.values()]).toEqual([{}, {}]);
+    const result = selectCandidates({
+      ...params,
+      config: tightBudget(1),
+      rankByCandidateKey: rankMap([plain, evidence])
+    });
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["a-plain"]);
   });
 
   it("does not let lineage or gist displace a higher-quality candidate", () => {
@@ -142,7 +238,7 @@ describe("live Select_Gamma binding", () => {
       .toEqual(["weak-slice"]);
   });
 
-  it("marks missing authority, temporal, and path channels unavailable", () => {
+  it("marks missing temporal quality unavailable", () => {
     const candidate = createCandidate("unbound");
     const params = fixture(candidate, createSupplementaryData({
       pathInflowAvailability: "unavailable"
@@ -153,10 +249,9 @@ describe("live Select_Gamma binding", () => {
     ).candidates[0]!;
 
     expect(bound.quality_channels).toMatchObject({
-      authority: { status: "unavailable" },
-      temporal: { status: "unavailable" },
-      path: { status: "unavailable" }
+      temporal: { status: "unavailable" }
     });
+    expect(bound.authority_tie_break).toBe("unavailable");
   });
 
   it("does not reward unverified authority", () => {
@@ -171,7 +266,7 @@ describe("live Select_Gamma binding", () => {
       createSelectionContext(params)
     ).candidates[0]!;
 
-    expect(bound.quality_channels.authority).toEqual({ status: "unavailable" });
+    expect(bound.authority_tie_break).toBe("unavailable");
     expect(Object.keys(bound.cover)).not.toContain("authority:unverified");
   });
 
@@ -374,5 +469,18 @@ function observedOpenSemanticActivation() {
     solution_count: 1,
     proposition_match_count: 1,
     receipt_digest: `sha256:${"e".repeat(64)}` as const
+  };
+}
+
+function pathInflow(targetObjectId: string, weight: number) {
+  return {
+    pathId: `path-${targetObjectId}`,
+    relationKind: "answers_with",
+    seedObjectId: "seed-1",
+    targetObjectId,
+    seedAnchor: { kind: "object" as const, object_id: "seed-1" },
+    targetAnchor: { kind: "object" as const, object_id: targetObjectId },
+    pathSourceVersion: "v1",
+    weight
   };
 }

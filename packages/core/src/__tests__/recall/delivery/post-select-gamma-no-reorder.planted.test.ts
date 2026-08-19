@@ -13,7 +13,7 @@ import {
 } from "../fine-assessment-selection-fixtures.js";
 
 describe("post-Select_Gamma order is final", () => {
-  it("keeps delivery order as Gamma admission, not fused, coverage, or head-drop", () => {
+  it("keeps delivery order as Gamma admission without post reorder or head-drop", () => {
     const plant = plantDivergentOrders();
     const result = selectFineAssessmentCandidates({
       ...FIELD_PINS,
@@ -26,13 +26,10 @@ describe("post-Select_Gamma order is final", () => {
     });
 
     const delivered = result.candidates.map((candidate) => candidate.object_id);
-    expect(delivered).toEqual(["cheap-gamma", "coverage-head", "fused-head"]);
+    expect(delivered).toEqual(["coverage-head", "fused-head", "cheap-gamma"]);
     expect(delivered).toEqual(gammaAdmittedIds(result, plant.candidates));
     expect(orderBy(plant.candidates, (candidate) => candidate.fusion.fused_score))
       .not.toEqual(delivered);
-    expect(orderBy(plant.candidates, (candidate) =>
-      plant.coverage.get(candidate.fusion.candidate_key) ?? 0
-    )).not.toEqual(delivered);
     expect(orderBy(plant.candidates, (candidate) =>
       -(plant.headDropRanks.get(candidate.fusion.candidate_key) ?? 0)
     )).not.toEqual(delivered);

@@ -17,6 +17,7 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   'Each variable is {"variable_id":LOCAL_ID,"surface":EXACT_SUBSTRING}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
   "A variable surface is the exact query phrase that stands for an unknown, never a predicted answer.",
   "Every variable referenced by a proposition must appear in variables, and every result_variable_ids entry must reference one of those variables.",
+  "Preserve each predicate's semantic argument order; relation-local binding names need not match source evidence graphs.",
   'Structure example only: {"semantic_factor_graph":{"schema_version":1,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"buy","semantic_identity":"buy"}],"variables":[{"variable_id":"answer","surface":"What"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"item","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
 

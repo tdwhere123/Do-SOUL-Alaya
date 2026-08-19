@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { selectFineAssessmentCandidates } from
   "../../../recall/delivery/fine-assessment-selection.js";
@@ -9,6 +10,8 @@ import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "../../../recall/delivery/selection-boundary/selection-boundary-replay.js";
+import { validateSelectionBoundary } from
+  "../../../recall/delivery/selection-boundary/selection-boundary-restore.js";
 import {
   createConfig,
   createRankedCandidate,
@@ -24,13 +27,33 @@ describe("Select_Gamma boundary objective", () => {
     expect(boundary.expected.pre_projection.schema_version).toBe(2);
     expect(boundary.expected.coverage_objective).toEqual({
       schema_version: 1,
-      operator_id: "select_gamma_v1",
+      operator_id: SELECT_GAMMA_OPERATOR_ID,
       mathematical_class: "monotone_submodular",
       configuration_digest: null
     });
     expect(boundary.expected.visible_result_sha256)
       .toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(boundary.expected).not.toHaveProperty("visible_result");
+  });
+
+  it("rejects a legacy persisted objective semantic", () => {
+    const { boundary } = captureBoundary();
+    const legacy = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        coverage_objective: {
+          ...boundary.expected.coverage_objective,
+          operator_id:
+            "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2"
+        }
+      }
+    } as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(legacy))
+      .toThrow(/coverage_objective.*invalid/u);
+    expect(() => replayFineAssessmentSelectionBoundary(legacy))
+      .toThrow(/coverage_objective.*invalid/u);
   });
 
   it("carries Gamma authority exclusions into boundary diagnostics", () => {

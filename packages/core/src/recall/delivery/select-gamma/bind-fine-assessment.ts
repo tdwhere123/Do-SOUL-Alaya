@@ -73,7 +73,7 @@ function formulaCandidates(
 ): readonly SelectGammaFormulaCandidate[] {
   return Object.freeze(candidates.map((candidate) => {
     const observation = buildCandidateSelectorObservation(candidate, context);
-    const channels = qualityChannels(candidate, context, observation);
+    const channels = qualityChannels(candidate, context);
     return Object.freeze({
       workspace_id: candidate.entry.workspace_id,
       candidate_key: candidate.fusion.candidate_key,
@@ -85,10 +85,9 @@ function formulaCandidates(
       token_cost: Math.max(1, estimateCandidateTokens(candidate, context)),
       quality: selectGammaQuality({
         relevance: relevanceQuality(candidate, context),
-        authority: channelValue(channels.authority),
-        temporal_fit: channelValue(channels.temporal),
-        path_support: channelValue(channels.path)
+        temporal_fit: channelValue(channels.temporal)
       }),
+      authority_tie_break: authorityTieBreak(observation.evidence.authority),
       quality_channels: channels,
       cover: candidateCover(candidate, context)
     });
@@ -97,22 +96,20 @@ function formulaCandidates(
 
 function qualityChannels(
   candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext,
-  observation: ReturnType<typeof buildCandidateSelectorObservation>
+  context: FineAssessmentSelectionContext
 ) {
   return Object.freeze({
-    authority: authorityQuality(observation.evidence.authority),
-    temporal: temporalQuality(candidate, context),
-    path: pathQuality(observation.path)
+    temporal: temporalQuality(candidate, context)
   });
 }
 
-function authorityQuality(
+function authorityTieBreak(
   authority: ReturnType<typeof buildCandidateSelectorObservation>["evidence"]["authority"]
-): SelectGammaQualityChannel {
-  const value = authority === "verified_user_assertion" ? 1
-    : authority === "verified_user_projection" ? 0.75 : null;
-  return value === null ? unavailableQuality() : availableQuality(value);
+) {
+  return authority === "verified_user_assertion" ||
+    authority === "verified_user_projection"
+    ? authority
+    : "unavailable" as const;
 }
 
 function relevanceQuality(
@@ -139,17 +136,6 @@ function temporalQuality(
   return availableQuality(overlaps ? 1 : 0);
 }
 
-function pathQuality(
-  path: ReturnType<typeof buildCandidateSelectorObservation>["path"]
-): SelectGammaQualityChannel {
-  if (path.status !== "complete" && path.status !== "none") {
-    return unavailableQuality();
-  }
-  const conductance = path.receipts.flatMap(({ edge_conductance }) =>
-    edge_conductance === null ? [] : [edge_conductance]);
-  return availableQuality(conductance.length === 0 ? 0 : Math.max(...conductance));
-}
-
 function candidateCover(
   candidate: FineAssessmentCandidate,
   context: FineAssessmentSelectionContext
@@ -167,8 +153,6 @@ function attributedCoverFeatures(
   const flood = candidate.fusion.flood_potential;
   return Object.freeze([
     ...(flood?.slice_status === "active" ? ["slice"] : []),
-    ...(flood?.path_status === "active" ? ["path"] : []),
-    ...(flood?.evidence_status === "active" ? ["evidence"] : []),
     ...(openSemanticCover(candidate, context) ? ["f3"] : [])
   ]);
 }

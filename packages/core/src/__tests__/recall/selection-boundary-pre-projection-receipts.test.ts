@@ -1,5 +1,8 @@
 import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
-import { MemoryDimension } from "@do-soul/alaya-protocol";
+import {
+  MemoryDimension,
+  SELECT_GAMMA_OPERATOR_ID
+} from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -114,7 +117,8 @@ describe("selection boundary pre-projection decision receipts", () => {
     });
 
     expect(boundary.expected.pre_projection.selection_receipt).toEqual({
-      schema_version: 1,
+      schema_version: 3,
+      objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
       ordering_basis: "raw_marginal_gain",
       witness: {
         kind: "static_top_k_token_bound",
@@ -125,6 +129,33 @@ describe("selection boundary pre-projection decision receipts", () => {
       }
     });
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+  });
+
+  it("rejects the legacy Select_Gamma objective semantic on validation and replay", () => {
+    const boundary = captureBoundary({ candidates: rankedCandidates(2) });
+    const { objective_semantic_id: _semantic, ...receipt } =
+      boundary.expected.pre_projection.selection_receipt as unknown as
+        Record<string, unknown>;
+    const legacy = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: {
+          ...boundary.expected.pre_projection,
+          selection_receipt: {
+            ...receipt,
+            schema_version: 2,
+            objective_semantic_id:
+              "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2"
+          }
+        }
+      }
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => validateSelectionBoundary(legacy))
+      .toThrow(/Select_Gamma selection receipt.*invalid/u);
+    expect(() => replayFineAssessmentSelectionBoundary(legacy))
+      .toThrow(/Select_Gamma selection receipt.*invalid/u);
   });
 
   it("rejects outer v2 boundaries as legacy and non-authoritative", () => {

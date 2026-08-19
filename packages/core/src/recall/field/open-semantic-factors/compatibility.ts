@@ -19,12 +19,13 @@ import {
 import { compareText } from "../../../shared/compare-text.js";
 
 export type {
+  OpenSemanticBindingAlignmentOperator,
   OpenSemanticFactorAlignmentOperator,
   OpenSemanticFactorArgumentMapping
 } from "./argument-alignment.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID =
-  "open_semantic_factor_compatibility_v1";
+  "open_semantic_factor_compatibility_v3";
 
 export type OpenSemanticPropositionMatch = Readonly<{
   readonly query_proposition_id: string;

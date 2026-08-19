@@ -210,6 +210,35 @@ describe("field-contract receipts", () => {
     }, sha256)).toThrow(/canonical operator manifest/u);
   });
 
+  it("rejects a self-certified v2 Select_Gamma manifest", () => {
+    const canonical = generationReceipt();
+    const operators = canonical.operator_versions.map(([id, version]) =>
+      id.startsWith("select_gamma")
+        ? [
+            "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2",
+            "2"
+          ] as const
+        : [id, version] as const
+    );
+    const entries = operators.map(([id, version]) => ({ id, version }));
+    const digest = hashOperatorManifestDigest(entries, sha256);
+    const generationId = hashGenerationId({
+      operators: entries,
+      operator_manifest_digest: digest,
+      field_schema_version: canonical.field_schema_version,
+      input_event_frontier: canonical.input_event_frontier,
+      governance_frontier: canonical.governance_frontier
+    }, sha256);
+
+    expect(() => verifyFieldProjectionGeneration({
+      ...canonical,
+      identity: generationId,
+      generation_id: generationId,
+      operator_manifest_digest: digest,
+      operator_versions: operators
+    }, sha256)).toThrow(/canonical operator manifest/u);
+  });
+
   it("keeps proof-carrying effect decisions in the closed action set", () => {
     const witnesses = [
       { receipt_id: "receipt-2", kind: "actor_authority",

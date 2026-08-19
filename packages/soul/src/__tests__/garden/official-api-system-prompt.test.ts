@@ -61,6 +61,13 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"binding_identity":OPEN_NAME');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Do not emit character spans");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("not a fixed role list");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "preserve the predicate's semantic argument order"
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("or a cross-graph identity");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "same name for repeated parallel values"
+    );
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       `response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}`

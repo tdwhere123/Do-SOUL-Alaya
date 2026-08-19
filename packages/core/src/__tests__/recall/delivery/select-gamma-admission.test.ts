@@ -168,10 +168,9 @@ function candidate(
     lineage: constraints.lineage === undefined
       ? { status: "unavailable" as const }
       : { status: "available" as const, key: constraints.lineage },
+    authority_tie_break: "unavailable" as const,
     quality_channels: {
-      authority: { status: "unavailable" as const },
-      temporal: { status: "unavailable" as const },
-      path: { status: "unavailable" as const }
+      temporal: { status: "unavailable" as const }
     }
   });
 }

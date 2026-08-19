@@ -15,6 +15,11 @@ const CompositionStatusSchema = z.enum([
 
 const ArgumentMappingSchema = z.object({
   binding_identity: IdSchema,
+  evidence_binding_identity: IdSchema,
+  binding_alignment_operator_id: z.enum([
+    "exact_binding_identity_v1",
+    "position_anchored_binding_group_v1"
+  ]),
   query_position: CountSchema,
   evidence_position: CountSchema,
   query_reference_kind: z.enum(["factor", "variable"]),
@@ -39,7 +44,7 @@ const PropositionMatchSchema = z.object({
 
 const CompatibilityReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_factor_compatibility_v1"),
+  operator_id: z.literal("open_semantic_factor_compatibility_v3"),
   status: z.enum([
     "compatible",
     "incompatible",

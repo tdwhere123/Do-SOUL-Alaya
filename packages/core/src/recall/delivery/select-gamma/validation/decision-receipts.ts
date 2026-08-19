@@ -1,3 +1,4 @@
+import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import type {
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
@@ -54,7 +55,9 @@ export function isValidSelectGammaSelectionReceipt(
 ): value is SelectGammaSelectionReceipt {
   if (!record(value) || !record(value.witness)) return false;
   const witness = value.witness;
-  if (!hasExactKeys(value, ["schema_version", "ordering_basis", "witness"]) ||
+  if (!hasExactKeys(value, [
+    "schema_version", "objective_semantic_id", "ordering_basis", "witness"
+  ]) ||
       !hasExactKeys(witness, [
         "kind",
         "eligible_candidate_count",
@@ -69,7 +72,8 @@ export function isValidSelectGammaSelectionReceipt(
       !nonNegativeFinite(witness.token_budget)) return false;
   const expectedBasis = witness.top_k_token_cost_upper_bound <= witness.token_budget
     ? "raw_marginal_gain" : "marginal_gain_per_token";
-  return value.schema_version === 1 &&
+  return value.schema_version === 3 &&
+    value.objective_semantic_id === SELECT_GAMMA_OPERATOR_ID &&
     witness.kind === "static_top_k_token_bound" &&
     value.ordering_basis === expectedBasis;
 }
