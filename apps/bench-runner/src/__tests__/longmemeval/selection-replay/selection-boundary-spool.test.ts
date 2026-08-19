@@ -129,7 +129,7 @@ describe("LongMemEval selection-boundary spool", () => {
     ]);
   });
 
-  it("round-trips a real schema-v2 capture with a 2 MiB record", async () => {
+  it("round-trips a real schema-v4 capture with a 2 MiB record", async () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();
     const realSpoolModule = await import(
@@ -143,14 +143,14 @@ describe("LongMemEval selection-boundary spool", () => {
     spools.push(spool);
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-v2.ndjson.gz");
-    const boundaryV2 = largeCapturedBoundaryV2();
+    const boundaryV4 = largeCapturedBoundaryV4();
     const capture = spool.beginQuestion("question-v2");
-    capture.observer(boundaryV2);
+    capture.observer(boundaryV4);
     await capture.commit();
     expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(2 * 1024 * 1024);
     await spool.writeGzipArtifact(artifactPath);
 
-    expect(boundaryV2.schema_version).toBe(2);
+    expect(boundaryV4.schema_version).toBe(4);
     await expect(
       realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
     ).resolves.toMatchObject({ recordCount: 1, questionCount: 1 });
@@ -166,7 +166,7 @@ describe("LongMemEval selection-boundary spool", () => {
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-unicode.ndjson.gz");
     const candidate = createRankedCandidate("candidate-unicode", 1, 0.9);
-    const boundaryV2 = capturedBoundaryV2([{
+    const boundaryV4 = capturedBoundaryV4([{
       ...candidate,
       entry: {
         ...candidate.entry,
@@ -174,7 +174,7 @@ describe("LongMemEval selection-boundary spool", () => {
       }
     }]);
     const encoded = `${JSON.stringify(
-      record("question-unicode", 0, true, boundaryV2)
+      record("question-unicode", 0, true, boundaryV4)
     )}\n`;
 
     expect(encoded).toContain("\u2028");
@@ -203,7 +203,7 @@ describe("LongMemEval selection-boundary spool", () => {
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-truncated.ndjson.gz");
     const capture = spool.beginQuestion("question-truncated");
-    capture.observer(largeCapturedBoundaryV2());
+    capture.observer(largeCapturedBoundaryV4());
     await capture.commit();
     expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(1024 * 1024);
     await truncate(rawSpoolPath(spool), 1024 * 1024);
@@ -376,7 +376,7 @@ function boundary(seed: string): FineAssessmentSelectionBoundaryCase {
   } as unknown as FineAssessmentSelectionBoundaryCase;
 }
 
-function capturedBoundaryV2(
+function capturedBoundaryV4(
   candidates = [
     createRankedCandidate("candidate-1", 1, 0.9),
     createRankedCandidate("candidate-2", 2, 0.8)
@@ -407,9 +407,9 @@ function capturedBoundaryV2(
   return captured;
 }
 
-function largeCapturedBoundaryV2(): FineAssessmentSelectionBoundaryCase {
+function largeCapturedBoundaryV4(): FineAssessmentSelectionBoundaryCase {
   const content = "x".repeat(60 * 1024);
-  return capturedBoundaryV2(Array.from({ length: 36 }, (_, index) => {
+  return capturedBoundaryV4(Array.from({ length: 36 }, (_, index) => {
     const candidate = createRankedCandidate(
       `candidate-${index + 1}`,
       index + 1,

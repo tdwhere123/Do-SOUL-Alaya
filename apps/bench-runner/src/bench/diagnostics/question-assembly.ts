@@ -95,6 +95,8 @@ export function assembleQuestionDiagnostic(
       parts.diagnostics?.queryFactFrameExtraction ?? null,
     query_open_semantic_factor_formation:
       parts.diagnostics?.queryOpenSemanticFactorFormation ?? null,
+    query_open_semantic_factor_completeness_receipt:
+      parts.diagnostics?.queryOpenSemanticFactorCompletenessReceipt ?? null,
     open_semantic_factor_compatibility_trace:
       parts.diagnostics?.openSemanticFactorCompatibilityTrace ?? null,
     open_semantic_factor_composition:

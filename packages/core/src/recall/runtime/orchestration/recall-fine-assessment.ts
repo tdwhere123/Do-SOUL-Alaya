@@ -170,10 +170,10 @@ function buildCoarseAssessmentParams(
     policy: prepared.policy,
     queryProbes: prepared.queryProbes,
     queryEntityExtraction: prepared.queryEntityExtraction,
-    querySemanticFactorFormationProposal:
-      params.querySemanticFactorFormationProposal,
     querySemanticFactorFormationCapture:
       params.querySemanticFactorFormationCapture,
+    querySemanticFactorCompletenessReceipt:
+      params.querySemanticFactorCompletenessReceipt,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),

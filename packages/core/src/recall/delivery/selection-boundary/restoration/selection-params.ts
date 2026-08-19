@@ -17,6 +17,9 @@ import { throwSelectionBoundaryFidelityMismatch } from
   "../validation/fidelity-error.js";
 import { restoreCapturedPacketCandidates } from
   "../validation/packet-order.js";
+import { certifyQueryOsfSemanticCompleteness } from "@do-soul/alaya-protocol";
+import { deriveQueryFactFrameOsfObligation } from
+  "../../../field/open-semantic-factors/query-obligation.js";
 
 export function restoreSelectionParams(
   input: FineAssessmentSelectionBoundaryInput
@@ -72,6 +75,7 @@ function requireRestoredPin(value: string | undefined, label: string): string {
 export function restoreSupplementaryData(
   data: SerializedRecallSupplementaryData
 ): RecallSupplementaryData {
+  verifyRestoredQuerySemanticCompleteness(data);
   const {
     evidenceSemanticActivationsByCandidateKey,
     openSemanticFactorCandidateActivationsByCandidateKey,
@@ -105,6 +109,38 @@ export function restoreSupplementaryData(
       keyActivationByOwnerIdentity: new Map(keyActivationByOwnerIdentity)
     })
   };
+}
+
+function verifyRestoredQuerySemanticCompleteness(
+  data: SerializedRecallSupplementaryData
+): void {
+  const formation = data.queryOpenSemanticFactorFormation;
+  const receipt = data.queryOpenSemanticFactorCompletenessReceipt;
+  if (formation === undefined || formation.status !== "formed") {
+    if (receipt !== undefined) completenessMismatch();
+    return;
+  }
+  const queryText = data.queryProbes.normalized_query;
+  const factFrameCapture = data.queryFactFrameExtraction;
+  if (queryText === null || factFrameCapture === undefined || formation.graph === null ||
+      receipt === undefined) completenessMismatch();
+  const obligation = deriveQueryFactFrameOsfObligation({
+    query_text: queryText, fact_frame_capture: factFrameCapture
+  });
+  if (obligation === null) completenessMismatch();
+  const expected = certifyQueryOsfSemanticCompleteness({
+    query_text: queryText, graph: formation.graph, obligation,
+    producer_operator_id: formation.producer_operator_id ?? "", sha256: hashContent
+  });
+  if (expected === null || JSON.stringify(expected) !== JSON.stringify(receipt)) {
+    completenessMismatch();
+  }
+}
+
+function completenessMismatch(): never {
+  throwSelectionBoundaryFidelityMismatch(
+    "query open semantic factor completeness receipt mismatch"
+  );
 }
 
 export function createCapturedTokenEstimator(

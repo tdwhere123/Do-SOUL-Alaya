@@ -47,17 +47,8 @@ const binding = await fillQuerySemanticFactorSources({
   provider_url: config.providerUrl,
   transport: resolveExtractionTransportRoute(config),
   concurrency: 8,
-  compile: async (sourceText) => {
-    try {
-      return await provider.extractOpenSemanticFactors("query", sourceText);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stdout.write(
-        `[query-factor-cache] unavailable after compiler failure: ${message}\n`
-      );
-      return null;
-    }
-  },
+  compile: async (sourceText, obligation) =>
+    await provider.extractCertifiedQueryOpenSemanticFactors(sourceText, obligation),
   log: (message) => {
     process.stdout.write(`${message}\n`);
   }

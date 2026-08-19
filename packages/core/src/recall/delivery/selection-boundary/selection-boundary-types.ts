@@ -149,7 +149,7 @@ export type FineAssessmentSelectionBoundaryExpected = Readonly<{
 }>;
 
 export type FineAssessmentSelectionBoundaryCase = Readonly<{
-  readonly schema_version: 3;
+  readonly schema_version: 4;
   readonly input: FineAssessmentSelectionBoundaryInput;
   readonly expected: FineAssessmentSelectionBoundaryExpected;
 }>;

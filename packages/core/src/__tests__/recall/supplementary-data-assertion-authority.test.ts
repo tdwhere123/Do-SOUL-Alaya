@@ -1,22 +1,29 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX } from "@do-soul/alaya-protocol";
+import {
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+  VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
+  certifyQueryOsfSemanticCompleteness
+} from "@do-soul/alaya-protocol";
+import { RuleBasedQueryFactFrameExtractor } from
+  "../../shared/query-fact-frame-extraction-rules.js";
 import { materializeOpenSemanticFactorFormation } from
   "../../semantic/open-semantic-factor-formation.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import {
   collectWith,
+  binaryUseEvidenceSemanticGraph,
+  binaryUseQuerySemanticGraph,
   createEvidenceCapsule,
   emptyGraphSupportPort,
   evidenceId,
-  evidenceSemanticGraph,
-  querySemanticGraph,
   semanticProposal
 } from "./supplementary-data-test-fixtures.js";
 
 describe("collectSupplementaryData assertion authority", () => {
   it("traces persisted evidence and query factors without changing ranking", async () => {
-    const evidenceText = "I used Atlas for research.";
-    const queryText = "What do I use for research?";
+    const evidenceText = "I used Atlas.";
+    const queryText = "What did I use?";
     const evidence = createEvidenceCapsule({
       gist: `User: ${evidenceText}`,
       excerpt: evidenceText
@@ -29,16 +36,31 @@ describe("collectSupplementaryData assertion authority", () => {
     const evidenceFormation = materializeOpenSemanticFactorFormation({
       source_kind: "evidence",
       source_text: evidenceText,
-      proposal: semanticProposal(evidenceText, evidenceSemanticGraph())
+      proposal: semanticProposal(evidenceText, binaryUseEvidenceSemanticGraph())
     });
 
     const result = await collectWith({
       candidates: [candidate],
       graphSupportPort: emptyGraphSupportPort(),
       queryText,
+      queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
       openSemanticFactorExtractionPort: {
         operator_id: "test_open_semantic_factor_v1",
-        extract: async () => querySemanticGraph()
+        extract: async () => null,
+        extractCertifiedQuery: async (sourceText, obligation) => {
+          const graph = binaryUseQuerySemanticGraph();
+          const receipt = certifyQueryOsfSemanticCompleteness({
+            query_text: sourceText, graph, obligation,
+            producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+            sha256: (value) => createHash("sha256").update(value, "utf8").digest("hex")
+          });
+          return receipt === null ? null : {
+            schema_version: 1,
+            producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+            graph,
+            semantic_completeness_receipt: receipt
+          };
+        }
       },
       evidenceSearchPort: {
         searchByKeyword: async () => [],
@@ -53,6 +75,11 @@ describe("collectSupplementaryData assertion authority", () => {
     });
 
     expect(result.queryOpenSemanticFactorFormation).toMatchObject({ status: "formed" });
+    expect(result.queryOpenSemanticFactorCompletenessReceipt).toMatchObject({
+      operator_id: "query_osf_semantic_completeness_v1",
+      subject: { surface: "I", position: 0 },
+      value: { surface: "What", position: 1 }
+    });
     expect(result.openSemanticFactorCompatibilityTrace).toMatchObject({
       observed_evidence_count: 1,
       entries: [{

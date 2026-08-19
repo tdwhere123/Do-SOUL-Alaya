@@ -3,7 +3,7 @@ import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
 import type {
   SoulMemorySearchResponse,
   OpenSemanticFactorFormationCapture,
-  OpenSemanticFactorFormationProposal
+  QueryOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
 import type {
   AlayaDaemonRuntime,
@@ -81,8 +81,8 @@ export interface BenchRecallOptions {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
   readonly referenceTime?: string;
-  readonly querySemanticFactorFormationProposal?: Readonly<OpenSemanticFactorFormationProposal>;
   readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;

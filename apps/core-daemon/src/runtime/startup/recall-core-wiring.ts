@@ -11,6 +11,7 @@ import type { CreateRecallMaterializationWiringInput } from "../recall-materiali
 import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 import type { RelationProjectionAdmissionMode } from "../recall-materialization/relation-projection/mode.js";
+import type { QueryFactFrameOsfObligation } from "@do-soul/alaya-protocol";
 
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -126,7 +127,13 @@ function buildRecallServiceInput(
         await gardenComputeRuntime.officialGardenProvider.extractOpenSemanticFactors(
           sourceKind,
           sourceText
-        )
+        ),
+      extractCertifiedQuery: async (
+        sourceText: string,
+        obligation: Readonly<QueryFactFrameOsfObligation>
+      ) =>
+        await gardenComputeRuntime.officialGardenProvider
+          .extractCertifiedQueryOpenSemanticFactors(sourceText, obligation)
     }
   };
 }

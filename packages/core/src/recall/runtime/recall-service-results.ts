@@ -123,6 +123,9 @@ export interface RecallSupplementaryData {
   readonly queryOpenSemanticFactorFormation?: Readonly<
     import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
   >;
+  readonly queryOpenSemanticFactorCompletenessReceipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
+  >;
   readonly semanticFactorFormationsByEvidenceId?: Readonly<Record<
     string,
     Readonly<import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture>

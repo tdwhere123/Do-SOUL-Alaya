@@ -3,7 +3,9 @@ import {
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
+  type CertifiedQueryOsfGraph,
   type OpenSemanticFactorGraphProposal,
+  type QueryFactFrameOsfObligation,
   readErrorMessage,
   type CandidateMemorySignal,
   type ConversationMessage
@@ -113,6 +115,10 @@ export interface GardenComputeProvider {
     sourceKind: "evidence" | "query",
     sourceText: string
   ): Promise<Readonly<OpenSemanticFactorGraphProposal> | null>;
+  extractCertifiedQueryOpenSemanticFactors?(
+    sourceText: string,
+    obligation: Readonly<QueryFactFrameOsfObligation>
+  ): Promise<Readonly<CertifiedQueryOsfGraph> | null>;
 }
 
 type GardenProviderErrorKind = "auth" | "network" | "provider_failure" | "invalid_response";
@@ -263,14 +269,20 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   }
 
   public async extractOpenSemanticFactors(
-    sourceKind: "evidence" | "query",
-    sourceText: string
+    _sourceKind: "evidence" | "query",
+    _sourceText: string
   ): Promise<Readonly<OpenSemanticFactorGraphProposal> | null> {
-    if (sourceKind !== "query") return null;
+    return null;
+  }
+
+  public async extractCertifiedQueryOpenSemanticFactors(
+    sourceText: string,
+    obligation: Readonly<QueryFactFrameOsfObligation>
+  ): Promise<Readonly<CertifiedQueryOsfGraph> | null> {
     if (this.queryCompiler === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
-    return await this.queryCompiler.compile(sourceText);
+    return await this.queryCompiler.compile(sourceText, obligation);
   }
 
   private buildSignalFromDraft(

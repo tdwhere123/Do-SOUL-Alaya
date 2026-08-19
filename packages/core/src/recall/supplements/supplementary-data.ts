@@ -16,8 +16,10 @@ import { captureRecallQueryEntities } from
   "../field/query-entity-attribution-producer.js";
 import { collectQueryFieldAttribution } from
   "./query/query-field-attribution.js";
-import { captureRecallQueryOpenSemanticFactors } from
+import { captureCertifiedRecallQueryOpenSemanticFactors } from
   "../field/open-semantic-factors/query-capture.js";
+import { deriveQueryFactFrameOsfObligation } from
+  "../field/open-semantic-factors/query-obligation.js";
 import {
   freezeSupplementaryData,
   type CollectSupplementaryDataParams
@@ -111,7 +113,7 @@ async function captureQuerySupplementInputs(
     });
   // Closed-vocab FACET_VOCABULARY has no memory-side Key partner.
   const querySoughtFacets = Object.freeze([] as const);
-  const queryFieldAttribution = collectQueryFieldAttribution({
+  const queryFieldAttribution = await collectQueryFieldAttribution({
     queryText: params.queryText,
     queryDemand: compileRecallQueryDemand(params.queryProbes),
     entityCapture: queryEntityExtraction,
@@ -123,11 +125,30 @@ async function captureQuerySupplementInputs(
       error: toErrorMessage(error)
     })
   });
-  const querySemanticFactorFormation = captureRecallQueryOpenSemanticFactors({
+  const querySemanticFactorFormation = captureCertifiedQueryFormation(
+    params, queryFieldAttribution.factFrameCapture
+  );
+  return {
+    queryEntityExtraction,
+    querySoughtFacets,
+    queryFieldAttribution,
+    querySemanticFactorFormation
+  };
+}
+
+function captureCertifiedQueryFormation(
+  params: CollectSupplementaryDataParams,
+  factFrameCapture: Awaited<ReturnType<typeof collectQueryFieldAttribution>>["factFrameCapture"]
+) {
+  const obligation = params.queryText === null ? null : deriveQueryFactFrameOsfObligation({
+    query_text: params.queryText, fact_frame_capture: factFrameCapture
+  });
+  return captureCertifiedRecallQueryOpenSemanticFactors({
     query_text: params.queryText,
+    obligation,
     port: params.dependencies.openSemanticFactorExtractionPort,
-    prepared_proposal: params.querySemanticFactorFormationProposal,
     prepared_capture: params.querySemanticFactorFormationCapture,
+    prepared_receipt: params.querySemanticFactorCompletenessReceipt,
     on_failure: (error) => params.warn("query open semantic factor extraction failed", {
       workspace_id: params.workspaceId,
       operation: "query_open_semantic_factor_extraction",
@@ -135,12 +156,6 @@ async function captureQuerySupplementInputs(
       error: toErrorMessage(error)
     })
   });
-  return {
-    queryEntityExtraction,
-    querySoughtFacets,
-    queryFieldAttribution,
-    querySemanticFactorFormation
-  };
 }
 
 async function collectGraphMetrics(

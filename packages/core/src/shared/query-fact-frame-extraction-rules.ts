@@ -25,7 +25,19 @@ export const RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID =
 
 type SubjectSpan = Readonly<{
   readonly text: string;
+  readonly startIndex: number;
   readonly nextIndex: number;
+}>;
+
+export type RuleBasedBinaryQueryLayout = Readonly<{
+  readonly value: Readonly<{ surface: string; source_span: readonly [number, number] }>;
+  readonly subject: Readonly<{ surface: string; source_span: readonly [number, number] }>;
+  readonly predicate: Readonly<{ surface: string; source_span: readonly [number, number] }>;
+}>;
+
+type QueryFactFrameParseTrace = Readonly<{
+  readonly frame: Readonly<AssociativeFactFrame>;
+  readonly binaryLayout: RuleBasedBinaryQueryLayout | null;
 }>;
 
 export class RuleBasedQueryFactFrameExtractor
@@ -37,12 +49,18 @@ implements QueryFactFrameExtractionPort {
     options?: Readonly<{ readonly maxFrames?: number }>
   ): Promise<readonly Readonly<AssociativeFactFrame>[]> {
     if ((options?.maxFrames ?? 1) <= 0) return Object.freeze([]);
-    const frame = parseInterrogativeFactFrame(query);
-    return frame === null ? Object.freeze([]) : Object.freeze([frame]);
+    const trace = parseInterrogativeFactFrameTrace(query);
+    return trace === null ? Object.freeze([]) : Object.freeze([trace.frame]);
   }
 }
 
-function parseInterrogativeFactFrame(query: string): Readonly<AssociativeFactFrame> | null {
+export function traceRuleBasedQueryFactFrame(
+  query: string
+): QueryFactFrameParseTrace | null {
+  return parseInterrogativeFactFrameTrace(query);
+}
+
+function parseInterrogativeFactFrameTrace(query: string): QueryFactFrameParseTrace | null {
   const tokens = tokenizeFactFrameSource(query);
   if (tokens.length < 3 || !WH_WORDS.has(tokens[0]!.normalized)) return null;
   const auxiliaryIndex = tokens.findIndex(
@@ -51,17 +69,20 @@ function parseInterrogativeFactFrame(query: string): Readonly<AssociativeFactFra
   if (auxiliaryIndex < 1 || auxiliaryIndex > MAX_VALUE_PREFIX_TOKENS) return null;
   const value = sliceFactFrameTokens(query, tokens, 0, auxiliaryIndex);
   const auxiliary = tokens[auxiliaryIndex]!.normalized;
-  return BE_AUXILIARIES.has(auxiliary)
-    ? parseCopularFrame(query, tokens, auxiliaryIndex + 1, value)
-    : parseDoSupportFrame(query, tokens, auxiliaryIndex + 1, value);
+  if (!BE_AUXILIARIES.has(auxiliary)) {
+    return parseDoSupportFrame(query, tokens, auxiliaryIndex + 1, value, auxiliaryIndex);
+  }
+  const parsed = parseCopularFrame(query, tokens, auxiliaryIndex + 1, value);
+  return parsed === null ? null : { frame: parsed, binaryLayout: null };
 }
 
 function parseDoSupportFrame(
   query: string,
   tokens: readonly FactFrameSourceToken[],
   bodyStart: number,
-  value: string
-): Readonly<AssociativeFactFrame> | null {
+  value: string,
+  auxiliaryIndex: number
+): QueryFactFrameParseTrace | null {
   const subject = takeSubject(query, tokens, bodyStart);
   if (subject === null) return null;
   const relationIndex = skipPreRelationQualifiers(tokens, subject.nextIndex);
@@ -71,12 +92,52 @@ function parseDoSupportFrame(
     (token) => slot("qualifier", token.text)
   );
   if (qualifiers.length > MAX_QUALIFIER_TOKENS) return null;
-  return frame([
+  const parsed = frame([
     slot("value", value),
     slot("subject", subject.text),
     ...qualifiers,
     slot("relation", relation.text)
   ]);
+  if (parsed === null) return null;
+  return {
+    frame: parsed,
+    binaryLayout: binaryLayout(query, tokens, auxiliaryIndex, subject, relationIndex)
+  };
+}
+
+function binaryLayout(
+  query: string,
+  tokens: readonly FactFrameSourceToken[],
+  auxiliaryIndex: number,
+  subject: SubjectSpan,
+  relationIndex: number
+): RuleBasedBinaryQueryLayout | null {
+  const tail = tokens.slice(relationIndex + 1);
+  const valueTokens = tokens.slice(0, auxiliaryIndex);
+  if (valueTokens.filter((token) => WH_WORDS.has(token.normalized)).length !== 1 ||
+      valueTokens.some((token) => token.normalized === "and" || token.normalized === "or") ||
+      relationIndex !== subject.nextIndex ||
+      (tail.length > 0 &&
+       (tail.length !== 1 || !TERMINAL_COMPLEMENT_MARKERS.has(tail[0]!.normalized)))) {
+    return null;
+  }
+  const valueStart = tokens[0]!;
+  const valueEnd = tokens[auxiliaryIndex - 1]!;
+  const subjectStart = tokens[subject.startIndex]!;
+  const subjectEnd = tokens[subject.nextIndex - 1]!;
+  const predicate = tokens[relationIndex]!;
+  return Object.freeze({
+    value: span(query, valueStart.start, valueEnd.end),
+    subject: span(query, subjectStart.start, subjectEnd.end),
+    predicate: span(query, predicate.start, predicate.end)
+  });
+}
+
+function span(query: string, start: number, end: number) {
+  return Object.freeze({
+    surface: query.slice(start, end),
+    source_span: Object.freeze([start, end] as const)
+  });
 }
 
 function parseCopularFrame(
@@ -132,7 +193,7 @@ function takeSubject(
   if (first === undefined || !isSubjectToken(first)) return null;
   if (SUBJECT_PRONOUNS.has(first.normalized) ||
       POSSESSIVE_DETERMINERS.has(first.normalized)) {
-    return Object.freeze({ text: first.text, nextIndex: start + 1 });
+    return Object.freeze({ text: first.text, startIndex: start, nextIndex: start + 1 });
   }
   if (SUBJECT_DETERMINERS.has(first.normalized)) {
     return takeDeterminerSubject(query, tokens, start);
@@ -144,6 +205,7 @@ function takeSubject(
   }
   return Object.freeze({
     text: sliceFactFrameTokens(query, tokens, start, end),
+    startIndex: start,
     nextIndex: end
   });
 }
@@ -161,6 +223,7 @@ function takeDeterminerSubject(
   if (end === start + 1) return null;
   return Object.freeze({
     text: sliceFactFrameTokens(query, tokens, start, end),
+    startIndex: start,
     nextIndex: end
   });
 }
@@ -241,6 +304,9 @@ const MAX_VALUE_PREFIX_TOKENS = 4;
 const MAX_SUBJECT_TOKENS = 4;
 const MAX_RELATION_TOKENS = 3;
 const MAX_QUALIFIER_TOKENS = 3;
+const TERMINAL_COMPLEMENT_MARKERS: ReadonlySet<string> = new Set([
+  "with", "about"
+]);
 const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
   text: "", normalized: "", start: 0, end: 0
 });

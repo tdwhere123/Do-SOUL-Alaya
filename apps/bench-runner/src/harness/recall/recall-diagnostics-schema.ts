@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
+import {
+  QueryOsfSemanticCompletenessReceiptSchema,
+  RecallOriginPlaneSchema
+} from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
 import { refuseRetiredLocalCrossEncoderTreatment } from
   "../strict-treatment-config.js";
@@ -342,6 +345,8 @@ export const BenchRecallDiagnosticsSchema = z
       RecallQueryFactFrameExtractionCaptureSchema.optional(),
     query_open_semantic_factor_formation:
       OpenSemanticFactorFormationCaptureSchema.optional(),
+    query_open_semantic_factor_completeness_receipt:
+      QueryOsfSemanticCompletenessReceiptSchema.optional(),
     open_semantic_factor_compatibility_trace:
       OpenSemanticFactorCompatibilityTraceSchema.optional(),
     open_semantic_factor_composition:

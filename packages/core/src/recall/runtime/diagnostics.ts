@@ -32,7 +32,10 @@ import type { RecallRetrievalFieldRefinementReceipt } from
   "../field/refinement/field-refinement-receipt.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
-import type { OpenSemanticFactorFormationCapture } from
+import type {
+  OpenSemanticFactorFormationCapture,
+  QueryOsfSemanticCompletenessReceipt
+} from
   "@do-soul/alaya-protocol";
 import type { OpenSemanticFactorCompatibilityTrace } from
   "../field/open-semantic-factors/compatibility-trace.js";
@@ -48,6 +51,9 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly queryFactFrameExtraction?: Readonly<RecallQueryFactFrameExtractionCapture>;
   readonly queryOpenSemanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly queryOpenSemanticFactorCompletenessReceipt?: Readonly<
+    QueryOsfSemanticCompletenessReceipt
+  >;
   readonly openSemanticFactorCompatibilityTrace?: Readonly<
     OpenSemanticFactorCompatibilityTrace
   >;
@@ -147,6 +153,10 @@ function buildOptionalQueryDiagnosticFields(
         query_open_semantic_factor_formation:
           params.queryOpenSemanticFactorFormation
       }),
+    ...(params.queryOpenSemanticFactorCompletenessReceipt === undefined
+      ? {}
+      : { query_open_semantic_factor_completeness_receipt:
+          params.queryOpenSemanticFactorCompletenessReceipt }),
     ...(params.openSemanticFactorCompatibilityTrace === undefined
       ? {}
       : {

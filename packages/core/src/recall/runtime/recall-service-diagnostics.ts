@@ -152,6 +152,9 @@ export interface RecallDiagnostics {
   readonly query_open_semantic_factor_formation?: Readonly<
     import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
   >;
+  readonly query_open_semantic_factor_completeness_receipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
+  >;
   readonly open_semantic_factor_compatibility_trace?: Readonly<
     import("../field/open-semantic-factors/compatibility-trace.js")
       .OpenSemanticFactorCompatibilityTrace

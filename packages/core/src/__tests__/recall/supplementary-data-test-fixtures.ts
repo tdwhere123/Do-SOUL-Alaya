@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import {
   EvidenceCapsuleSchema,
   buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash
+  formatVerifiedUserAssertionSourceHash,
+  type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import { vi } from "vitest";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
@@ -106,13 +107,48 @@ export function emptyGraphSupportPort(): NonNullable<
 
 export function semanticProposal(
   sourceText: string,
-  graph: ReturnType<typeof evidenceSemanticGraph>
+  graph: Readonly<OpenSemanticFactorGraphProposal>
 ) {
   return {
     schema_version: 1 as const,
     producer_operator_id: "test_open_semantic_factor_v1",
     source_text: sourceText,
     graph
+  };
+}
+
+export function binaryUseEvidenceSemanticGraph() {
+  return binaryUseGraph("evidence", "used", "Atlas");
+}
+
+export function binaryUseQuerySemanticGraph() {
+  return binaryUseGraph("query", "use", "What");
+}
+
+function binaryUseGraph(
+  sourceKind: "evidence" | "query",
+  predicateSurface: string,
+  objectSurface: string
+) {
+  const query = sourceKind === "query";
+  return {
+    schema_version: 2 as const,
+    source_kind: sourceKind,
+    factors: [
+      factor("actor", "I", 0, 0, "speaker"),
+      factor("predicate", predicateSurface, 0, 0, "use"),
+      ...(query ? [] : [factor("object", objectSurface, 0, 0, "atlas")])
+    ],
+    variables: query ? [{ variable_id: "answer", surface: objectSurface }] : [],
+    result_variable_ids: query ? ["answer"] : [],
+    propositions: [{
+      proposition_id: "use-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        semanticArgument(0, "factor", "actor"),
+        semanticArgument(1, query ? "variable" : "factor", query ? "answer" : "object")
+      ]
+    }]
   };
 }
 

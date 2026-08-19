@@ -82,7 +82,7 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
   }).strict()
 ]);
 const QuerySemanticFactorCacheIdentitySchema = z.object({
-  schema_version: z.union([z.literal(1), z.literal(2)]),
+  schema_version: z.literal(3),
   cache_content_sha256: PrefixedSha256Schema,
   compiler_operator_id: z.string().min(1),
   system_prompt_sha256: PrefixedSha256Schema,

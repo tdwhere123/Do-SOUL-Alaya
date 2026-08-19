@@ -363,6 +363,10 @@ export interface NarrowRecallDiagnostics {
     NonNullable<BenchRecallDiagnostics["query_fact_frame_extraction"]> | null;
   readonly queryOpenSemanticFactorFormation:
     NonNullable<BenchRecallDiagnostics["query_open_semantic_factor_formation"]> | null;
+  readonly queryOpenSemanticFactorCompletenessReceipt:
+    NonNullable<BenchRecallDiagnostics[
+      "query_open_semantic_factor_completeness_receipt"
+    ]> | null;
   readonly openSemanticFactorCompatibilityTrace:
     NonNullable<BenchRecallDiagnostics["open_semantic_factor_compatibility_trace"]> | null;
   readonly openSemanticFactorComposition:

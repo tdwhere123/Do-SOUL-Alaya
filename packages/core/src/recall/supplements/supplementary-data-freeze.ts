@@ -11,7 +11,7 @@ import { parseQueryTimeWindow } from "../scoring/temporal-fusion-scoring.js";
 import type { EvidenceAndGovernanceSupplement } from "./evidence/evidence-governance-supplement.js";
 import type { RoutingKeySupplement } from "./routing-key-supplement.js";
 import { collectQueryFieldAttribution } from "./query/query-field-attribution.js";
-import { captureRecallQueryOpenSemanticFactors } from
+import { captureCertifiedRecallQueryOpenSemanticFactors } from
   "../field/open-semantic-factors/query-capture.js";
 import { materializeOpenSemanticFactorCompatibilityTrace } from
   "../field/open-semantic-factors/compatibility-trace.js";
@@ -49,11 +49,11 @@ export interface CollectSupplementaryDataParams {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
-  readonly querySemanticFactorFormationProposal?: Readonly<
-    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationProposal
-  >;
   readonly querySemanticFactorFormationCapture?: Readonly<
     import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   >;
   readonly policy: Readonly<RecallPolicy>;
   readonly coarseFtsRanks: Readonly<Record<string, number>>;
@@ -92,20 +92,20 @@ export function freezeSupplementaryData(
   querySoughtFacets: readonly string[],
   queryFieldAttribution: Awaited<ReturnType<typeof collectQueryFieldAttribution>>,
   querySemanticFactorFormation: Awaited<
-    ReturnType<typeof captureRecallQueryOpenSemanticFactors>
+    ReturnType<typeof captureCertifiedRecallQueryOpenSemanticFactors>
   >
 ): RecallSupplementaryData {
   const queryTimeWindow = resolveQueryTimeWindow(params);
   const openSemanticFactorCompatibilityTrace =
     materializeOpenSemanticFactorCompatibilityTrace({
-      query_capture: querySemanticFactorFormation,
+      query_capture: querySemanticFactorFormation.formation,
       evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
       unavailable_evidence_ids:
         evidenceAndGovernance.semanticFactorFormationUnavailableEvidenceIds
     });
   const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
     trace: openSemanticFactorCompatibilityTrace,
-    query_capture: querySemanticFactorFormation
+    query_capture: querySemanticFactorFormation.formation
   });
   return Object.freeze({
     queryProbes: params.queryProbes,
@@ -113,7 +113,10 @@ export function freezeSupplementaryData(
     ...(queryFieldAttribution.attribution === undefined
       ? {}
       : { queryFieldAttribution: queryFieldAttribution.attribution }),
-    queryOpenSemanticFactorFormation: querySemanticFactorFormation,
+    queryOpenSemanticFactorFormation: querySemanticFactorFormation.formation,
+    ...(querySemanticFactorFormation.receipt === null ? {} : {
+      queryOpenSemanticFactorCompletenessReceipt: querySemanticFactorFormation.receipt
+    }),
     semanticFactorFormationsByEvidenceId:
       evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
     openSemanticFactorCompatibilityTrace,
@@ -121,7 +124,7 @@ export function freezeSupplementaryData(
     openSemanticFactorActivation: materializeOpenSemanticFactorActivation({
       composition: openSemanticFactorComposition,
       trace: openSemanticFactorCompatibilityTrace,
-      query_capture: querySemanticFactorFormation
+      query_capture: querySemanticFactorFormation.formation
     }),
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,

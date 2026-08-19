@@ -8,7 +8,9 @@ import {
 } from "@do-soul/alaya-soul";
 import type {
   CandidateMemorySignal,
+  CertifiedQueryOsfGraph,
   OpenSemanticFactorGraphProposal,
+  QueryFactFrameOsfObligation,
   RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 
@@ -131,6 +133,15 @@ export class GardenComputeProviderResolver implements GardenComputeProvider {
       }
       throw error;
     }
+  }
+
+  public async extractCertifiedQueryOpenSemanticFactors(
+    sourceText: string,
+    obligation: Readonly<QueryFactFrameOsfObligation>
+  ): Promise<Readonly<CertifiedQueryOsfGraph> | null> {
+    const provider = await this.getProvider();
+    if (provider.extractCertifiedQueryOpenSemanticFactors === undefined) return null;
+    return await provider.extractCertifiedQueryOpenSemanticFactors(sourceText, obligation);
   }
 
   private activateProvider(cacheKey: string, provider: GardenComputeProvider): GardenComputeProvider {

@@ -106,7 +106,7 @@ export interface RecallEvalRuntimeAttribution {
     question_id_digest: string;
   }>;
   readonly query_semantic_factor_cache?: Readonly<{
-    schema_version: 1 | 2;
+    schema_version: 3;
     cache_content_sha256: string;
     compiler_operator_id: string;
     system_prompt_sha256: string;

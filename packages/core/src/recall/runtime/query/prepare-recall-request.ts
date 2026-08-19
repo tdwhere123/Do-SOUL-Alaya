@@ -4,6 +4,12 @@ import { resolvePreparedAnswerShapePlan } from "../../query/recall-answer-shape-
 import { compileRecallQueryProbes } from "../../query/recall-query-probes.js";
 import { extendQueryProbesWithOpenSemanticFactors } from
   "../../query/query-factor-expanded-terms.js";
+import { captureRecallQueryFactFrames } from
+  "../../field/query-attribution/query-fact-frame-attribution-producer.js";
+import { deriveQueryFactFrameOsfObligation } from
+  "../../field/open-semantic-factors/query-obligation.js";
+import { captureCertifiedRecallQueryOpenSemanticFactors } from
+  "../../field/open-semantic-factors/query-capture.js";
 import { captureRecallQueryEntities } from
   "../../field/query-entity-attribution-producer.js";
 import { createRecallRetrievalFieldBundle } from
@@ -30,7 +36,11 @@ export async function prepareRecallRequest(
   params: RecallExecutionParams,
   time: PreparedRecallRequest["time"]
 ): Promise<PreparedRecallRequest> {
-  const seed = prepareQuerySeed(context, params, time);
+  const queryText = normalizeQueryText(params.taskSurface.display_name);
+  const semanticCapture = await certifyPreparedSemanticCapture(
+    context, params, queryText
+  );
+  const seed = prepareQuerySeed(context, params, time, queryText, semanticCapture);
   const captured = capturePreparedRequestCondition({
     workspaceId: params.workspaceId,
     explicitAsOf: params.referenceTime,
@@ -40,9 +50,23 @@ export async function prepareRecallRequest(
     sha256: context.sha256,
     time,
     session: context.fieldQuerySession,
-    semanticCapture: params.querySemanticFactorFormationCapture
+    semanticCapture
   });
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
+  return await loadPinnedPreparedRequest({
+    context, params, time, seed, captured, releaseProjectionPin
+  });
+}
+
+async function loadPinnedPreparedRequest(input: Readonly<{
+  context: RecallExecutionContext;
+  params: RecallExecutionParams;
+  time: PreparedRecallRequest["time"];
+  seed: ReturnType<typeof prepareQuerySeed>;
+  captured: ReturnType<typeof capturePreparedRequestCondition>;
+  releaseProjectionPin: () => void;
+}>): Promise<PreparedRecallRequest> {
+  const { context, params, time, seed, captured, releaseProjectionPin } = input;
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
     projectionPinLease = startProjectionPinLeaseGuard({
@@ -78,23 +102,30 @@ export async function prepareRecallRequest(
       releaseProjectionPin
     });
   } catch (error) {
-    try {
-      finishProjectionPinCleanup([
-        () => {
-          projectionPinLease?.stop();
-        },
-        releaseProjectionPin
-      ], context.warn);
-    } catch (cleanupError) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new AggregateError(
-        [error, cleanupError],
-        `recall preparation failed: ${message}`,
-        { cause: error }
-      );
-    }
-    throw error;
+    cleanupFailedPreparation({ context, projectionPinLease,
+      releaseProjectionPin, error });
   }
+}
+
+function cleanupFailedPreparation(input: Readonly<{
+  context: RecallExecutionContext;
+  projectionPinLease: ProjectionPinLeaseGuard | null;
+  releaseProjectionPin: () => void;
+  error: unknown;
+}>): never {
+  try {
+    finishProjectionPinCleanup([
+      () => input.projectionPinLease?.stop(), input.releaseProjectionPin
+    ], input.context.warn);
+  } catch (cleanupError) {
+    const message = input.error instanceof Error
+      ? input.error.message : String(input.error);
+    throw new AggregateError(
+      [input.error, cleanupError], `recall preparation failed: ${message}`,
+      { cause: input.error }
+    );
+  }
+  throw input.error;
 }
 
 function projectionPinReleaseHandle(
@@ -113,7 +144,11 @@ function projectionPinReleaseHandle(
 function prepareQuerySeed(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  time: PreparedRecallRequest["time"]
+  time: PreparedRecallRequest["time"],
+  queryText: string | null,
+  semanticCapture: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  > | undefined
 ) {
   const policy = resolvePolicy({
     strategy: params.strategy,
@@ -123,10 +158,8 @@ function prepareQuerySeed(
       context.buildDefaultPolicy(strategy, taskSurfaceRef, time.capturedAt),
     defaultPolicyDecorator: context.dependencies.defaultPolicyDecorator
   });
-  const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = extendQueryProbesWithOpenSemanticFactors(
-    compileRecallQueryProbes(queryText),
-    params.querySemanticFactorFormationCapture
+    compileRecallQueryProbes(queryText), semanticCapture
   );
   return Object.freeze({
     policy,
@@ -136,6 +169,28 @@ function prepareQuerySeed(
     answerShapePlan: resolvePreparedAnswerShapePlan(queryProbes),
     retrievalFieldBundle: createRetrievalBundle(context, params, policy, queryText)
   });
+}
+
+async function certifyPreparedSemanticCapture(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  queryText: string | null
+) {
+  if (queryText === null || params.querySemanticFactorFormationCapture === undefined ||
+      params.querySemanticFactorCompletenessReceipt === undefined) return undefined;
+  const factFrameCapture = await captureRecallQueryFactFrames({
+    query_text: queryText,
+    port: context.dependencies.queryFactFrameExtractionPort
+  });
+  const obligation = deriveQueryFactFrameOsfObligation({
+    query_text: queryText, fact_frame_capture: factFrameCapture
+  });
+  const certified = await captureCertifiedRecallQueryOpenSemanticFactors({
+    query_text: queryText, obligation,
+    prepared_capture: params.querySemanticFactorFormationCapture,
+    prepared_receipt: params.querySemanticFactorCompletenessReceipt
+  });
+  return certified.receipt === null ? undefined : certified.formation;
 }
 
 async function loadPreparationInputs(

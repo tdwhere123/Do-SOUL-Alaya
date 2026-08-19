@@ -241,6 +241,7 @@ export { canonicalProjectionPinTime, projectionPinExpiry } from
 export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";
+export * from "./recall/field/open-semantic-factors/query-obligation.js";
 export * from "./recall/rerank/relevance-upper-bound-receipt.js";
 export * from "./recall/field/query-entity-attribution-producer.js";
 export * from "./recall/field/safe-dominance.js";

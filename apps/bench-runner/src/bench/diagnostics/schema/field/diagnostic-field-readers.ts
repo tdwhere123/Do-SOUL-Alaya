@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { QueryOsfSemanticCompletenessReceiptSchema } from "@do-soul/alaya-protocol";
 import { RecallAnswerShapePlanSchema } from
   "../../../../harness/recall/answer-trace-schema.js";
 import { RecallQueryConditionParitySchema } from
@@ -20,6 +21,7 @@ type DiagnosticFields = Pick<NarrowRecallDiagnostics,
   | "queryProbes" | "retrievalFieldCaptures" | "retrievalFieldRefinementReceipts"
   | "fieldRefinementStopCertificate" | "queryCondition" | "queryEntityExtraction"
   | "queryFactFrameExtraction" | "queryOpenSemanticFactorFormation"
+  | "queryOpenSemanticFactorCompletenessReceipt"
   | "openSemanticFactorCompatibilityTrace" | "openSemanticFactorComposition"
   | "openSemanticFactorActivation" | "answerShapePlan" | "querySoughtFacets">;
 
@@ -64,6 +66,10 @@ function diagnosticFieldReaders() {
       RecallQueryFactFrameExtractionCaptureSchema),
     queryOpenSemanticFactorFormation: schemaReader("query_open_semantic_factor_formation",
       OpenSemanticFactorFormationCaptureSchema),
+    queryOpenSemanticFactorCompletenessReceipt: schemaReader(
+      "query_open_semantic_factor_completeness_receipt",
+      QueryOsfSemanticCompletenessReceiptSchema
+    ),
     openSemanticFactorCompatibilityTrace: schemaReader("open_semantic_factor_compatibility_trace",
       OpenSemanticFactorCompatibilityTraceSchema),
     openSemanticFactorComposition: schemaReader("open_semantic_factor_composition",

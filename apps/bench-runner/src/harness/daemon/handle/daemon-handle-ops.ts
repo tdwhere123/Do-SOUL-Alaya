@@ -174,12 +174,13 @@ function createBenchRecallOperation(
       ...(opts.selectionBoundaryObserver === undefined
         ? {}
         : { selectionBoundaryObserver: opts.selectionBoundaryObserver }),
-      ...(opts.querySemanticFactorFormationProposal === undefined
-        ? {}
-        : { querySemanticFactorFormationProposal: opts.querySemanticFactorFormationProposal }),
       ...(opts.querySemanticFactorFormationCapture === undefined
         ? {}
         : { querySemanticFactorFormationCapture: opts.querySemanticFactorFormationCapture }),
+      ...(opts.querySemanticFactorCompletenessReceipt === undefined
+        ? {}
+        : { querySemanticFactorCompletenessReceipt:
+            opts.querySemanticFactorCompletenessReceipt }),
       activeConstraintsCap: null
     });
     const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);

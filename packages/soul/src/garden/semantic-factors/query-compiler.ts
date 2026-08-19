@@ -1,6 +1,16 @@
-import type { OpenSemanticFactorGraphProposal } from "@do-soul/alaya-protocol";
+import { createHash } from "node:crypto";
+import type {
+  OpenSemanticFactorGraphProposal,
+  CertifiedQueryOsfGraph,
+  QueryFactFrameOsfObligation
+} from "@do-soul/alaya-protocol";
 import {
+  QueryFactFrameOsfObligationSchema,
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+  QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+  queryFactFrameOsfObligationPreimage,
   OpenSemanticFactorGraphProposalSchema,
+  certifyQueryOsfSemanticCompleteness,
   groundOpenSemanticFactorGraph
 } from "@do-soul/alaya-protocol";
 import type { SignalExtractor } from "../pi-mono-extractor.js";
@@ -9,9 +19,9 @@ import { OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS } from
   "../official-api/system-prompt.js";
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v5";
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID;
 export const OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE =
-  buildOpenSemanticFactorQueryUserPrompt("{source_text}");
+  openSemanticFactorQueryRequestTemplatePreimage();
 
 const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   'Return strict JSON only with exactly {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[...],"variables":[...],"result_variable_ids":[...],"propositions":[...]}} and no markdown.',
@@ -31,13 +41,17 @@ export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
   "Use exact contiguous source surfaces and omit character offsets; the runtime grounds surfaces.",
   "Represent every requested unknown as a structural variable and list its id in result_variable_ids.",
   "Keep dependent propositions together and preserve all explicit query constraints.",
+  "The supplied semantic completeness obligation is authoritative; satisfy its exact binary slots or return no usable graph.",
   "Do not emit world ontology categories, fixed roles, answer-family labels, aliases, or gold-derived vocabulary.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ].join(" ");
 
 export interface OpenSemanticFactorQueryCompiler {
   readonly operator_id: typeof OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID;
-  compile(sourceText: string): Promise<Readonly<OpenSemanticFactorGraphProposal> | null>;
+  compile(
+    sourceText: string,
+    obligation: Readonly<QueryFactFrameOsfObligation>
+  ): Promise<Readonly<CertifiedQueryOsfGraph> | null>;
 }
 
 export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
@@ -49,13 +63,15 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
   const wallClockBudgetMs = input.wallClockBudgetMs ?? timeoutMs + 30_000;
   return {
     operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
-    compile: async (sourceText) => {
+    compile: async (sourceText, obligationInput) => {
       const normalized = sourceText.trim();
       if (normalized.length === 0) return null;
+      const obligation = QueryFactFrameOsfObligationSchema.safeParse(obligationInput);
+      if (!obligation.success) return null;
       const response = await withWallClockTimeout(
         (abortSignal) => input.extractor.extract({
           systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
-          userPrompt: buildOpenSemanticFactorQueryUserPrompt(normalized),
+          userPrompt: buildOpenSemanticFactorQueryUserPrompt(normalized, obligation.data),
           timeoutMs,
           abortSignal,
           responseSchemaRetryInstruction: [
@@ -63,35 +79,79 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
             OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT
           ].join(" "),
           validateRawJson: (rawJson) =>
-            assertOpenSemanticFactorQueryResponse(rawJson, normalized)
+            assertOpenSemanticFactorQueryResponse(rawJson, normalized, obligation.data)
         }),
         { budgetMs: wallClockBudgetMs }
       );
       const parsed = parseOpenSemanticFactorQueryResponse(response.rawJson);
-      if (parsed === null || groundOpenSemanticFactorGraph(parsed, normalized) === null) {
-        return null;
-      }
-      return parsed;
+      if (parsed === null || groundOpenSemanticFactorGraph(parsed, normalized) === null) return null;
+      const receipt = certifyQueryOsfSemanticCompleteness({
+        query_text: normalized, graph: parsed, obligation: obligation.data,
+        producer_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID, sha256
+      });
+      return receipt === null ? null : Object.freeze({
+        schema_version: 1 as const,
+        producer_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+        graph: parsed,
+        semantic_completeness_receipt: receipt
+      });
     }
   };
 }
 
-export function buildOpenSemanticFactorQueryUserPrompt(sourceText: string): string {
+export function buildOpenSemanticFactorQueryUserPrompt(
+  sourceText: string,
+  obligation: Readonly<QueryFactFrameOsfObligation>
+): string {
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     source_kind: "query",
-    source_text: sourceText
+    source_text: sourceText,
+    semantic_completeness_obligation: obligation
   });
+}
+
+export function openSemanticFactorQueryRequestTemplatePreimage(): string {
+  const sourceText = "What did A give?";
+  const body = {
+    schema_version: 1 as const,
+    operator_id: QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+    query_digest: prefixedSha256(sourceText),
+    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v1",
+    fact_frame_capture_digest: prefixedSha256(`capture:${sourceText}`),
+    predicate: { surface: "give", source_span: [11, 15] as [number, number], position: 0 },
+    subject: { surface: "A", source_span: [9, 10] as [number, number], position: 0 },
+    value: { surface: "What", source_span: [0, 4] as [number, number], position: 1 },
+    arity: 2 as const
+  };
+  const obligation = QueryFactFrameOsfObligationSchema.parse({
+    ...body,
+    obligation_digest: prefixedSha256(queryFactFrameOsfObligationPreimage(body))
+  });
+  return buildOpenSemanticFactorQueryUserPrompt(sourceText, obligation);
 }
 
 function assertOpenSemanticFactorQueryResponse(
   rawJson: string,
-  sourceText: string
+  sourceText: string,
+  obligation: Readonly<QueryFactFrameOsfObligation>
 ): void {
   const parsed = parseOpenSemanticFactorQueryResponse(rawJson);
-  if (parsed === null || groundOpenSemanticFactorGraph(parsed, sourceText) === null) {
+  if (parsed === null || groundOpenSemanticFactorGraph(parsed, sourceText) === null ||
+      certifyQueryOsfSemanticCompleteness({
+        query_text: sourceText, graph: parsed, obligation,
+        producer_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID, sha256
+      }) === null) {
     throw new Error("query semantic factor graph missing or invalid");
   }
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function prefixedSha256(value: string): `sha256:${string}` {
+  return `sha256:${sha256(value)}`;
 }
 
 export function parseOpenSemanticFactorQueryResponse(

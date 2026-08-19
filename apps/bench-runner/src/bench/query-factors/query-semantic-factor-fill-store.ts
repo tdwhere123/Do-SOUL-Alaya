@@ -2,13 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { OpenSemanticFactorFormationCaptureSchema } from "@do-soul/alaya-protocol";
+import {
+  OpenSemanticFactorFormationCaptureSchema,
+  QueryOsfSemanticCompletenessReceiptSchema
+} from "@do-soul/alaya-protocol";
 import type { ExtractionTransportProvenance } from
   "../extraction/transport-route.js";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const FillIdentitySchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   compiler_operator_id: z.string().min(1),
   system_prompt_sha256: Sha256Schema,
   request_template_sha256: Sha256Schema,
@@ -21,11 +24,12 @@ const TransportSchema = z.object({
   model: z.string().min(1)
 }).strict();
 const FillShardSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   fill_identity_sha256: Sha256Schema,
   source_text: z.string().min(1),
   source_sha256: Sha256Schema,
   capture: OpenSemanticFactorFormationCaptureSchema,
+  receipt: QueryOsfSemanticCompletenessReceiptSchema.nullable(),
   transport: TransportSchema
 }).strict();
 
@@ -41,6 +45,7 @@ export async function openQuerySemanticFactorFillStore(input: Readonly<{
     source_text: string;
     source_sha256: string;
     capture: QuerySemanticFactorFillShard["capture"];
+    receipt: QuerySemanticFactorFillShard["receipt"];
     transport: ExtractionTransportProvenance;
   }>): Promise<QuerySemanticFactorFillShard>;
 }>> {
@@ -81,16 +86,18 @@ async function putShard(
     source_text: string;
     source_sha256: string;
     capture: QuerySemanticFactorFillShard["capture"];
+    receipt: QuerySemanticFactorFillShard["receipt"];
     transport: ExtractionTransportProvenance;
   }>
 ): Promise<QuerySemanticFactorFillShard> {
   const path = shardPath(shardRoot, input.source_text);
   const shard = FillShardSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     fill_identity_sha256: identityDigest,
     source_text: input.source_text,
     source_sha256: input.source_sha256,
     capture: input.capture,
+    receipt: input.receipt,
     transport: input.transport
   });
   try {

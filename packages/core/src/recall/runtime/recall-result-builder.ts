@@ -44,6 +44,8 @@ export function buildRecallResult(
         assessment.supplementaryData.queryFactFrameExtraction,
       queryOpenSemanticFactorFormation:
         assessment.supplementaryData.queryOpenSemanticFactorFormation,
+      queryOpenSemanticFactorCompletenessReceipt:
+        assessment.supplementaryData.queryOpenSemanticFactorCompletenessReceipt,
       openSemanticFactorCompatibilityTrace:
         assessment.supplementaryData.openSemanticFactorCompatibilityTrace,
       openSemanticFactorComposition:
