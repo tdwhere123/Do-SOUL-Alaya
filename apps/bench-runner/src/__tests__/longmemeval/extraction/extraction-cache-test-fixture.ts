@@ -3,9 +3,42 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 const TEST_EXTRACTION_PROVIDER_URL = "https://provider.invalid/v1";
+
+export const TEST_PROVIDER_COMPLETION_METADATA = Object.freeze({
+  finishReason: "stop" as const,
+  completionContractVersion: 1 as const,
+  completionWitness: "message" as const
+});
+
+export const TEST_CACHED_PROVIDER_COMPLETION_METADATA = Object.freeze({
+  finish_reason: "stop" as const,
+  completion_contract_version: 1 as const,
+  completion_witness: "message" as const
+});
+
+export function providerBackedExtractionResult<Extras extends object = Record<never, never>>(
+  rawJson: string,
+  extras?: Extras
+) {
+  const responseMetadata = (extras as {
+    readonly responseMetadata?: Readonly<Record<string, unknown>>;
+  } | undefined)?.responseMetadata;
+  return {
+    ...extras,
+    rawJson,
+    responseMetadata: { ...responseMetadata, ...TEST_PROVIDER_COMPLETION_METADATA }
+  };
+}
+
+export function testExtractionTransportProvenance(model: string) {
+  return {
+    provider_url_sha256: `sha256:${"a".repeat(64)}`,
+    model
+  };
+}
 
 export function writeExtractionCacheTestManifest(input: {
   readonly cacheRoot: string;

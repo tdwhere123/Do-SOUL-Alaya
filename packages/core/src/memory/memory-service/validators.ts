@@ -16,27 +16,6 @@ import type { MemoryEntryUpdateFields } from "./types.js";
 
 export { isPromiseLike } from "../../shared/promise-utils.js";
 
-const MEMORY_UPDATE_FIELD_NAMES = [
-  "content",
-  "domain_tags",
-  "evidence_refs",
-  "storage_tier",
-  "last_used_at",
-  "last_hit_at",
-  "projection_schema_version",
-  "event_time_start",
-  "event_time_end",
-  "valid_from",
-  "valid_to",
-  "time_precision",
-  "time_source",
-  "preference_subject",
-  "preference_predicate",
-  "preference_object",
-  "preference_category",
-  "preference_polarity"
-] as const satisfies readonly (keyof MemoryEntryUpdateFields)[];
-
 export function parseMemoryEntry(value: MemoryEntry): MemoryEntry {
   try {
     return MemoryEntrySchema.parse(value);
@@ -135,7 +114,7 @@ function parseMutableUpdateFields(fields: MemoryEntryUpdateFields): MemoryEntryU
 }
 
 function assertHasUpdateField(fields: MemoryEntryUpdateFields): void {
-  if (MEMORY_UPDATE_FIELD_NAMES.some((fieldName) => fields[fieldName] !== undefined)) {
+  if (toUpdatedFieldNames(fields).length > 0) {
     return;
   }
 
@@ -170,7 +149,9 @@ export function assertStringArray(value: readonly string[], field: "domain_tags"
 }
 
 export function toUpdatedFieldNames(fields: MemoryEntryUpdateFields): string[] {
-  return MEMORY_UPDATE_FIELD_NAMES.filter((fieldName) => fields[fieldName] !== undefined);
+  return Object.entries(fields).flatMap(([fieldName, value]) =>
+    value === undefined ? [] : [fieldName]
+  );
 }
 
 export function ensureAllowedLifecycleTransition(

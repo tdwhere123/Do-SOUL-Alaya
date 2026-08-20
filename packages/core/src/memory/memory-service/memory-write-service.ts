@@ -11,6 +11,7 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import { scheduleAuditedAsyncSideEffect } from "../../runtime/async-side-effect-auditor.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
+import { appendMemoryEventLogSynchronously } from "./memory-audit-append.js";
 import type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
@@ -24,8 +25,8 @@ import type {
   MemoryEntryReadPort,
   MemoryEntryWritePort
 } from "./types.js";
+import type { MemoryObjectKeyWriter } from "../object-keys/write-service.js";
 import {
-  isPromiseLike,
   parseMemoryEntry,
   parseReason,
   parseStorageTier,
@@ -42,6 +43,7 @@ export interface MemoryWriteServiceDependencies {
   readonly dynamicsService?: MemoryServiceDynamicsPort;
   readonly greenService?: MemoryServiceGreenPort;
   readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
+  readonly objectKeyWriter?: MemoryObjectKeyWriter;
   readonly generateObjectId: () => string;
   readonly now: () => string;
 }
@@ -122,6 +124,7 @@ export class MemoryWriteService {
       eventInput
     );
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+    this.persistObjectKeys(created);
 
     if (
       created.evidence_refs.length > 0 &&
@@ -207,14 +210,11 @@ export class MemoryWriteService {
   private appendCreatedEventSynchronously(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
   ): EventLogEntry {
-    const event = this.dependencies.eventLogRepo.append(eventInput);
-    if (isPromiseLike(event)) {
-      throw new CoreError(
-        "CONFLICT",
-        "Memory create transaction requires a synchronous EventLog append port."
-      );
-    }
-    return event;
+    return appendMemoryEventLogSynchronously(
+      this.dependencies.eventLogRepo,
+      eventInput,
+      "Memory create transaction requires a synchronous EventLog append port."
+    );
   }
 
   public async update(
@@ -308,6 +308,7 @@ export class MemoryWriteService {
     });
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
+    this.persistObjectKeys(updated);
     if (
       parsedFields.evidence_refs !== undefined &&
       shouldRevokeGreenForEvidenceRewrite(existing.evidence_refs, parsedFields.evidence_refs)
@@ -365,5 +366,11 @@ export class MemoryWriteService {
     if (firstMissing !== undefined) {
       throw new CoreError("VALIDATION", `Evidence reference not found: ${firstMissing.evidenceRef}`);
     }
+  }
+
+  private persistObjectKeys(
+    memory: Pick<MemoryEntry, "object_id" | "workspace_id" | "content" | "evidence_refs">
+  ): void {
+    this.dependencies.objectKeyWriter?.materializeForMemory(memory);
   }
 }

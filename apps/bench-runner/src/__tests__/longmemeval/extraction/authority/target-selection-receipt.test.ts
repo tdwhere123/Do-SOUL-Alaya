@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../../../bench/extraction/cache-audit/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelection,
@@ -11,9 +11,9 @@ import {
   createSameRootContinuationTargetSelectionReceipt,
   readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection
-} from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../../bench/extraction/authority/target-selection/receipt.js";
 import type { ExtractionAuthorityObservation } from
-  "../../../../longmemeval/extraction/authority/receipt.js";
+  "../../../../bench/extraction/authority/receipt.js";
 
 const roots: string[] = [];
 
@@ -118,7 +118,37 @@ it("limits target selection to the canonical LongMemEval-S 100Q and 500Q windows
   })).toBe(false);
 });
 
-it("carries the selected root forward only across a revision-only continuation", () => {
+it("allows a revision-only successor while resuming the canonical 500Q expansion", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const receipt = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const expanded = expansionObservation();
+
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: expanded
+  })).not.toThrow();
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: {
+      ...expanded,
+      extraction: { ...expanded.extraction, model: "semantic-drift" }
+    }
+  })).toThrow(/logical identity drifted/u);
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: { ...expanded, dataset: { ...expanded.dataset, windowLimit: 100 } }
+  })).toThrow(/identity drifted/u);
+});
+
+it("carries the selected root across a revision continuation without semantic drift", () => {
   const parent = createTemporaryRoot();
   const cacheRoot = join(parent, "cache");
   const predecessor = createFreshRetiredSourceRebuildTargetSelection({
@@ -166,8 +196,68 @@ it("carries the selected root forward only across a revision-only continuation",
       ...successorObservation,
       extraction: { ...successorObservation.extraction, model: "semantic-drift" }
     }
-  })).toThrow(/revision-only successor/u);
+  })).toThrow(/logical identity drifted/u);
 });
+
+it("carries the selected root across a same-revision output-cap continuation", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const predecessor = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const continuedObservation = {
+    ...initialObservation(),
+    extraction: {
+      ...initialObservation().extraction,
+      manifestSha256: "7".repeat(64),
+      rawContentClosureSha256: "6".repeat(64)
+    },
+    inventory: {
+      expectedTurns: 10,
+      validTurns: 4,
+      missingTurns: 6,
+      invalidTurns: 0,
+      orphanTurns: 0
+    }
+  };
+
+  const successor = createSameRootContinuationTargetSelectionReceipt({
+    predecessor,
+    predecessorAuthorityReceiptDigest: "5".repeat(64),
+    observation: continuedObservation
+  });
+
+  expect(successor.target_root).toEqual(predecessor.target_root);
+  expect(successor.final_identity.revision).toBe(predecessor.final_identity.revision);
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt: successor,
+    cacheRoot,
+    observation: continuedObservation
+  })).not.toThrow();
+});
+
+function expansionObservation(): ExtractionAuthorityObservation {
+  const initial = initialObservation();
+  return {
+    ...initial,
+    revision: `git-worktree-v1:${"9".repeat(40)}:${"8".repeat(64)}`,
+    dataset: { ...initial.dataset, windowLimit: 500 },
+    extraction: {
+      ...initial.extraction,
+      manifestSha256: "7".repeat(64),
+      rawContentClosureSha256: "6".repeat(64)
+    },
+    inventory: {
+      expectedTurns: 50,
+      validTurns: 13,
+      missingTurns: 37,
+      invalidTurns: 0,
+      orphanTurns: 0
+    }
+  };
+}
 
 function createTemporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-"));
@@ -210,17 +300,21 @@ function initialObservation(): ExtractionAuthorityObservation {
 
 function rebuildAuditReceipt(overrides: Partial<{ model: string }> = {}) {
   const finalIdentity = {
-    datasetRevision: "f".repeat(64),
-    model: overrides.model ?? "gpt-5.4-mini",
-    modelFamily: "gpt-5.4-mini",
-    requestProfile: "provider-default-v1",
-    providerUrl: "https://example.test/v1",
-    systemPromptSha256: "1".repeat(64),
-    cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-    rawClosureSha256: "2".repeat(64),
-    parserSemanticsSha256: "3".repeat(64),
-    formationSemanticsSha256: "4".repeat(64),
-    temporalSchemaRevision: "5".repeat(64)
+    raw: {
+      datasetRevision: "f".repeat(64),
+      model: overrides.model ?? "gpt-5.4-mini",
+      requestProfile: "provider-default-v1",
+      providerUrl: "https://example.test/v1",
+      systemPromptSha256: "1".repeat(64),
+      cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+      rawClosureSha256: "2".repeat(64)
+    },
+    projection: {
+      modelFamily: "gpt-5.4-mini",
+      parserSemanticsSha256: "3".repeat(64),
+      formationSemanticsSha256: "4".repeat(64),
+      temporalSchemaRevision: "5".repeat(64)
+    }
   };
   return buildExtractionCacheAuditReceipt({
     createdAt: "2026-07-17T00:00:00.000Z",
@@ -229,21 +323,29 @@ function rebuildAuditReceipt(overrides: Partial<{ model: string }> = {}) {
     rawInventorySha256: "7".repeat(64),
     occurrenceIndexSha256: "8".repeat(64),
     decision: {
-      action: "rebuild",
       sourceRoot: "/source-cache",
-      reasons: ["model_mismatch"],
-      source: { ...finalIdentity, model: "old-model" },
-      final: finalIdentity,
-      replay: {
-        occurrenceCount: 10,
-        accountedOccurrences: 10,
-        elementCount: 10,
-        accountedElements: 10,
-        admitted: 10,
-        deferred: 0,
-        rejected: 0,
-        invalid: 0,
-        ledgerSha256: "9".repeat(64)
+      raw: {
+        action: "rebuild",
+        reasons: ["model_mismatch"],
+        source: { ...finalIdentity.raw, model: "old-model" },
+        final: finalIdentity.raw
+      },
+      projection: {
+        action: "replay",
+        reasons: ["raw_cache_rebuild"],
+        source: finalIdentity.projection,
+        final: finalIdentity.projection,
+        replay: {
+          occurrenceCount: 10,
+          accountedOccurrences: 10,
+          elementCount: 10,
+          accountedElements: 10,
+          admitted: 10,
+          deferred: 0,
+          rejected: 0,
+          invalid: 0,
+          ledgerSha256: "9".repeat(64)
+        }
       }
     }
   });

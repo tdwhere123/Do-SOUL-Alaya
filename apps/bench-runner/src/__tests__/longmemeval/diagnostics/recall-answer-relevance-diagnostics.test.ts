@@ -3,7 +3,7 @@ import {
   BenchRecallDiagnosticsSchema,
   parseBenchRecallDiagnosticsForRun
 } from "../../../harness/recall/recall-diagnostics-schema.js";
-import { buildQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
+import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
 
 const fusionStreams = [
   "lexical_fts",
@@ -21,8 +21,7 @@ const fusionStreams = [
   "entity_seed",
   "path_expansion",
   "temporal_recency",
-  "workspace_activation",
-  "facet_overlap"
+  "workspace_activation"
 ] as const;
 
 const baseCandidate = {
@@ -84,6 +83,14 @@ const baseDiagnostics = {
   }
 };
 
+const activeEvidenceEmbedding = {
+  evidence_embedding_status: "returned",
+  evidence_embedding_expected_count: 1,
+  evidence_embedding_scored_count: 1,
+  evidence_embedding_inference_calls: 1,
+  evidence_embedding_failure_class: null
+} as const;
+
 describe("answer relevance candidate diagnostics", () => {
   it("accepts bounded score and positive rank in the strict candidate schema", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
@@ -108,7 +115,7 @@ describe("answer relevance candidate diagnostics", () => {
     }).success).toBe(false);
   });
 
-  it("fails the treatment run when a non-empty pool did not return every score", () => {
+  it("rejects the retired cross-encoder treatment before interpreting its diagnostics", () => {
     expect(() => parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
       answer_rerank_status: "failed",
@@ -116,67 +123,19 @@ describe("answer relevance candidate diagnostics", () => {
       answer_rerank_failure_class: "service_error",
       candidates: [baseCandidate]
     }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /cross-encoder treatment activation failed/u
-    );
-
-    expect(() => parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: 1,
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /expected 1 scores but received 0/u
+      /local cross-encoder reranking is retired/u
     );
   });
 
-  it("accepts complete scoring and only permits empty-pool inapplicability", () => {
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "returned",
-      answer_rerank_expected_count: 1,
-      answer_rerank_scored_count: 1,
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "1" }).answer_rerank_status).toBe(
-      "returned"
-    );
-
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      total_scanned: 0,
-      candidate_pool_count: 0,
-      pre_budget_count: 0,
-      delivered_count: 0,
-      answer_rerank_status: "not_applicable",
-      candidates: []
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" }).answer_rerank_status).toBe(
-      "not_applicable"
-    );
-
-    expect(parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      query_probes: { ...baseDiagnostics.query_probes, normalized_query: null },
-      answer_rerank_status: "not_applicable",
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" }).answer_rerank_status).toBe(
-      "not_applicable"
-    );
-
-    expect(() => parseBenchRecallDiagnosticsForRun({
-      ...baseDiagnostics,
-      answer_rerank_status: "not_applicable",
-      candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true" })).toThrow(
-      /non-empty query and candidate pool/u
-    );
-
+  it("rejects observed reranking in current run diagnostics", () => {
     expect(() => parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
       answer_rerank_status: "returned",
       answer_rerank_expected_count: 1,
       answer_rerank_scored_count: 1,
       candidates: [baseCandidate]
-    }, { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false" })).toThrow(
-      /cross-encoder control activation failed/u
+    })).toThrow(
+      /retired cross-encoder reranking was observed/u
     );
   });
 
@@ -220,6 +179,7 @@ describe("answer relevance candidate diagnostics", () => {
 
     expect(parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
+      ...activeEvidenceEmbedding,
       embedding_provider_status: "provider_returned",
       embedding_workspace_scan_cap: 10_000,
       embedding_workspace_scanned_count: 1,
@@ -237,6 +197,7 @@ describe("answer relevance candidate diagnostics", () => {
 
     expect(parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
+      ...activeEvidenceEmbedding,
       embedding_provider_status: "provider_returned",
       candidates: [{
         ...baseCandidate,

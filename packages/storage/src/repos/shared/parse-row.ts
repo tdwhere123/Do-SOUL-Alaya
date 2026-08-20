@@ -49,6 +49,14 @@ export function readRecord(value: unknown, label: string): Record<string, unknow
   return value as Record<string, unknown>;
 }
 
+export function readStringField(record: Record<string, unknown>, field: string): string {
+  const value = record[field];
+  if (typeof value !== "string") {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
+}
+
 export function readNonEmptyStringField(record: Record<string, unknown>, field: string): string {
   const value = record[field];
   if (typeof value !== "string") {
@@ -93,3 +101,63 @@ export function readBufferField(record: Record<string, unknown>, field: string):
 
   return value;
 }
+
+export function readNullableStringField(
+  record: Record<string, unknown>,
+  field: string
+): string | null {
+  const value = record[field];
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
+}
+
+export function readIntegerField(record: Record<string, unknown>, field: string): number {
+  const value = record[field];
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
+}
+
+export function readFiniteNumberField(record: Record<string, unknown>, field: string): number {
+  const value = record[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
+}
+
+export function readJsonColumn(record: Record<string, unknown>, field: string): unknown {
+  const value = record[field];
+  if (typeof value !== "string") {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to parse ${field} JSON.`, error);
+  }
+}
+
+export function readNullableJsonColumn(record: Record<string, unknown>, field: string): unknown {
+  if (record[field] === null) {
+    return null;
+  }
+  return readJsonColumn(record, field);
+}
+
+export interface CountRow {
+  readonly total: number;
+}
+
+export const CountRowParser: RowParser<CountRow> = {
+  parse(value: unknown): CountRow {
+    const record = readRecord(value, "count row");
+    return { total: readNonNegativeIntField(record, "total") };
+  }
+};

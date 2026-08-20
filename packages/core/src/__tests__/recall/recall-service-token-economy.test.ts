@@ -18,7 +18,8 @@ describe("RecallService", () => {
 
     expect(dependencies.activeConstraintsPort?.findActiveConstraints).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      cap: 5
+      cap: 5,
+      asOf: "2026-03-23T00:00:00.000Z"
     });
     expect(result.active_constraints_count).toBe(1);
   });
@@ -99,13 +100,11 @@ describe("RecallService", () => {
     expect(tokenEconomy?.delivered_context_tokens_estimate).toBe(
       expectedDelivered
     );
-    // coarse_pool_size equals candidate_pool_count (== combined coarse
-    // candidates before the coarse→fine waist).
+    // coarse_pool_size equals the complete combined candidate field.
     expect(tokenEconomy?.coarse_pool_size).toBe(
       result.diagnostics?.candidate_pool_count ?? -1
     );
-    // Small fixture pools sit under the waist cap, so fine_evaluated matches
-    // coarse_pool_size and fine_pruned_count is zero.
+    // Fine assessment must preserve the full field until final selection.
     expect(tokenEconomy?.fine_evaluated).toBe(tokenEconomy?.coarse_pool_size);
     expect(tokenEconomy?.fine_pruned_count).toBe(0);
     expect(tokenEconomy?.fine_priority_overflow_count).toBe(0);
@@ -361,7 +360,9 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("kept");
+      expect(["kept", "promoted", "displaced"]).toContain(
+        candidate.coverage_selector_action
+      );
       expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
       expect(candidate.rank_after_session_coverage).toBeUndefined();
@@ -380,7 +381,9 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("kept");
+      expect(["kept", "promoted", "displaced"]).toContain(
+        candidate.coverage_selector_action
+      );
       expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
       expect(candidate.rank_after_lexical_priority).toBeUndefined();

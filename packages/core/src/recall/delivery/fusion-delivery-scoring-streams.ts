@@ -7,6 +7,8 @@ import {
   normalizeGraphSupport
 } from "../runtime/recall-service-helpers.js";
 import { normalizeEvidenceText } from "../scoring/query-evidence-scoring.js";
+import { resolveRecallCandidateSemanticActivation } from
+  "../scoring/activation/candidate-semantic-activation-context.js";
 import { scorePreferenceProfileAlignment } from "../scoring/preference-fusion-scoring.js";
 import {
   parseQueryTimeWindow,
@@ -20,15 +22,37 @@ export function scoreRecallFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   if (candidate.objectKind === "synthesis_capsule") {
     return scoreSynthesisCapsuleFusionStream(candidate, stream, supplementaryData);
   }
-  if (candidate.originPlane === "global") {
-    return scoreGlobalFusionStream(candidate, stream, supplementaryData, nowIso);
+  if (candidate.objectKind === "evidence_capsule") {
+    if (stream === "evidence_fts") {
+      return clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0);
+    }
+    if (stream === "embedding_similarity") {
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
+    }
+    return 0;
   }
-  return scoreWorkspaceLocalFusionStream(candidate, stream, supplementaryData, nowIso);
+  if (candidate.originPlane === "global") {
+    return scoreGlobalFusionStream(
+      candidate,
+      stream,
+      supplementaryData,
+      nowIso,
+      candidateKey
+    );
+  }
+  return scoreWorkspaceLocalFusionStream(
+    candidate,
+    stream,
+    supplementaryData,
+    nowIso,
+    candidateKey
+  );
 }
 function scoreSynthesisCapsuleFusionStream(
   candidate: RecallFusionCandidateInput,
@@ -58,7 +82,8 @@ function scoreGlobalFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   switch (stream) {
     case "subject_alignment":
@@ -68,7 +93,7 @@ function scoreGlobalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
     case "temporal_recency":
       return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
@@ -82,7 +107,8 @@ function scoreWorkspaceLocalFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  candidateKey?: string
 ): number {
   const objectId = candidate.entry.object_id;
   switch (stream) {
@@ -109,7 +135,7 @@ function scoreWorkspaceLocalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
+      return resolveSemanticFusionActivation(candidate, supplementaryData, candidateKey);
     case "graph_expansion":
       return clamp01(Math.max(
         supplementaryData.graphExpansionScores[objectId] ?? 0,
@@ -123,26 +149,19 @@ function scoreWorkspaceLocalFusionStream(
       return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
       return normalizeActivationScore(candidate.entry.activation_score);
-    case "facet_overlap":
-      return scoreFacetOverlap(candidate.entry, supplementaryData.querySoughtFacets);
   }
 }
 
-function scoreFacetOverlap(
-  entry: Readonly<MemoryEntry>,
-  querySoughtFacets: readonly string[] | undefined
+function resolveSemanticFusionActivation(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  candidateKey?: string
 ): number {
-  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return 0;
-  }
-  const sought = new Set(querySoughtFacets);
-  const matched = new Set<string>();
-  for (const tag of entry.facet_tags ?? []) {
-    if (sought.has(tag.facet)) {
-      matched.add(tag.facet);
-    }
-  }
-  return clamp01(matched.size);
+  return resolveRecallCandidateSemanticActivation(
+    candidate,
+    supplementaryData,
+    candidateKey
+  ).score ?? 0;
 }
 
 function scoreEvidenceStructuralAgreement(

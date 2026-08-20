@@ -1,2 +1,0 @@
--- INTENTIONAL_NOOP_MIGRATION: engine_bindings.api_key ciphertext backfill runs
--- in the storage data-migration hook for version 104 (machine-bound AES-256-GCM).

@@ -5,13 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildRecallEvalRuntimeAttribution,
   prepareRecallEvalDataDir
-} from "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
-import { resolveLocalArtifactTreeSha256 } from "../../../longmemeval/provenance/embedding/local-onnx.js";
-import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/materialize.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { buildEffectiveRecallConfigIdentity } from "../../../longmemeval/provenance/effective-recall-config.js";
+} from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import { resolveLocalArtifactTreeSha256 } from "../../../bench/provenance/embedding/local-onnx.js";
+import type { LongMemEvalSnapshotManifest } from "../../../bench/snapshot/materialize.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { buildEffectiveRecallConfigIdentity } from "../../../bench/provenance/effective-recall-config.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 
 function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
   const extractionClosure = syntheticExtractionClosure({
@@ -94,6 +94,7 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
         gate_sha256: "e".repeat(64),
         gate_contract_path: "/tmp/frozen-contract.json",
         worktree_state_sha256: "f".repeat(64),
+        worktree_state_algorithm: "sha256-head-lf",
         worktree_clean: true,
         executed_dist: {
           algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -250,16 +251,11 @@ describe("prepareRecallEvalDataDir", () => {
     const root = await mkdtemp(join(tmpdir(), "recall-eval-onnx-attribution-"));
     retainedRoots.push(root);
     await mkdir(join(root, "Xenova", "test"), { recursive: true });
-    await mkdir(join(root, "Xenova", "reranker"), { recursive: true });
     await writeFile(join(root, "Xenova", "test", "model.onnx"), "fixture-model", "utf8");
-    await writeFile(join(root, "Xenova", "reranker", "model.onnx"), "reranker", "utf8");
     const env = {
       ALAYA_RECALL_EVAL_EMBEDDING: "env",
       ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/test",
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: root,
-      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: root,
-      ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
       ALAYA_BENCH_GATE_SHA256: "e".repeat(64),
       ALAYA_BENCH_WORKTREE_STATE_SHA256: "f".repeat(64)
     };
@@ -279,12 +275,7 @@ describe("prepareRecallEvalDataDir", () => {
       gate_eligible: true,
       embedding_provider_label: "local_onnx:Xenova/test",
       onnx_model_artifact_sha256: sha,
-      answer_rerank: {
-        enabled: true,
-        provider_kind: "local_onnx_cross_encoder",
-        effective_model_id: "Xenova/reranker",
-        model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
-      },
+      answer_rerank: { enabled: false },
       snapshot_binding: {
         producer_recall_pipeline_version: "test",
         consumer_recall_pipeline_version: "fusion-evidence-first-v3",
@@ -370,26 +361,24 @@ describe("prepareRecallEvalDataDir", () => {
           onnx_model_artifact_sha256: undefined,
           embedding_supplement: { enabled: false as const },
           answer_rerank: { enabled: false as const },
-          paired_env: { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false" }
+          paired_env: {}
         }
       }
     };
-    const arms = [
-      { bi: false, cross: false },
-      { bi: true, cross: false },
-      { bi: false, cross: true },
-      { bi: true, cross: true }
-    ] as const;
+    const arms = [{ bi: false }, { bi: true }] as const;
     for (const arm of arms) {
       const attribution = await buildRecallEvalRuntimeAttribution(disabledProducer, {
         ...env,
-        ALAYA_RECALL_EVAL_EMBEDDING: arm.bi ? "env" : "disabled",
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: arm.cross ? "true" : "false"
+        ALAYA_RECALL_EVAL_EMBEDDING: arm.bi ? "env" : "disabled"
       });
       expect(attribution.gate_eligible).toBe(true);
       expect(attribution.embedding_supplement.enabled).toBe(arm.bi);
-      expect(attribution.answer_rerank.enabled).toBe(arm.cross);
+      expect(attribution.answer_rerank.enabled).toBe(false);
     }
+    await expect(buildRecallEvalRuntimeAttribution(disabledProducer, {
+      ...env,
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
+    })).rejects.toThrow(/cross-encoder reranking is retired/u);
 
     await expect(buildRecallEvalRuntimeAttribution({
       ...disabledProducer,
@@ -406,5 +395,15 @@ describe("prepareRecallEvalDataDir", () => {
       ...env,
       ALAYA_LOCAL_ONNX_THREADS: "65"
     })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
+  });
+
+  it("marks a derived evidence projection rebuild as non-promotable", async () => {
+    const attribution = await buildRecallEvalRuntimeAttribution(
+      attributedManifest("a".repeat(64)),
+      { ALAYA_RECALL_EVAL_EMBEDDING: "disabled" },
+      { nonPromotableDerivedRebuild: true }
+    );
+
+    expect(attribution.gate_eligible).toBe(false);
   });
 });

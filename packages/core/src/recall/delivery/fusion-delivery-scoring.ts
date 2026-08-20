@@ -1,7 +1,9 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
-  compareMemoryEntries,
-  isWorkspaceMemoryCandidate
+  compareMemorySemanticIdentity,
+  isWorkspaceMemoryCandidate,
+  normalizeDriftSensitiveRankingScore,
+  normalizeRecallRankingScore
 } from "../runtime/recall-service-helpers.js";
 import {
   resolveRrfFusionWeights
@@ -16,7 +18,6 @@ import {
 } from "../scoring/integrated-flood-scoring.js";
 import {
   activeFusionStreams,
-  facetOverlapCountFor,
   RECALL_FUSION_DEFAULT_WEIGHTS
 } from "./fusion-delivery-streams.js";
 import type {
@@ -76,7 +77,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   });
   const prelim = buildPreliminaryFusionCandidates(streamSnapshots, params.supplementaryData, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
-  return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey, params.supplementaryData);
+  return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey);
 }
 
 // invariant: path suppression changes the fused scalar before rank is derived.
@@ -107,7 +108,8 @@ export function applyPathSuppressionToFusionScores(
     if (delta !== 0) {
       return delta;
     }
-    return left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
+    return left.breakdown.fused_rank - right.breakdown.fused_rank ||
+      left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
   });
   const suppressedRankByKey = new Map(
     ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
@@ -149,18 +151,49 @@ function buildFusionRanksForStream(
   nowIso: string
 ): ReadonlyMap<string, number> {
   const scored = candidates
-    .map(({ candidateKey, candidate }) => Object.freeze({
-      candidateKey,
-      entry: candidate.entry,
-      score: scoreRecallFusionStream(candidate, stream, supplementaryData, nowIso)
-    }))
+    .map(({ candidateKey, candidate }) => {
+      const rawScore = scoreRecallFusionStream(
+        candidate,
+        stream,
+        supplementaryData,
+        nowIso,
+        candidateKey
+      );
+      return Object.freeze({
+        candidateKey,
+        candidate,
+        score: stream === "workspace_activation" || stream === "existing_score"
+          ? normalizeDriftSensitiveRankingScore(rawScore)
+          : normalizeRecallRankingScore(rawScore)
+      });
+    })
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) =>
       right.score === left.score
-        ? compareMemoryEntries(left.entry, right.entry)
+        ? compareFusionCandidateSemanticIdentity(left.candidate, right.candidate) ||
+          left.candidateKey.localeCompare(right.candidateKey)
         : right.score - left.score
     );
-  return Object.freeze(new Map(scored.map((candidate, index) => [candidate.candidateKey, index + 1] as const)));
+  return buildFusionCompetitionRanks(scored);
+}
+
+function buildFusionCompetitionRanks(
+  scored: readonly Readonly<{
+    readonly candidateKey: string;
+    readonly score: number;
+  }>[]
+): ReadonlyMap<string, number> {
+  const ranks = new Map<string, number>();
+  let previousScore: number | undefined;
+  let rank = 0;
+  for (const [index, candidate] of scored.entries()) {
+    if (candidate.score !== previousScore) {
+      rank = index + 1;
+      previousScore = candidate.score;
+    }
+    ranks.set(candidate.candidateKey, rank);
+  }
+  return Object.freeze(ranks);
 }
 
 function buildPreliminaryFusionCandidates(
@@ -193,11 +226,13 @@ function buildPreliminaryFusionCandidate(
     objectKind: candidate.objectKind ?? "memory_entry",
     originPlane: candidate.originPlane ?? "workspace_local",
     entry: candidate.entry,
+    ...(candidate.evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity: candidate.evidenceSourceIdentity }),
     effectiveScore: candidate.effectiveScore,
     perStreamRank,
     contributions,
     fusedScore: fused.score,
-    facetOverlapCount: facetOverlapCountFor(candidate.entry, supplementaryData.querySoughtFacets),
     floodPotential: fused.diagnostics,
     ...(axisRank !== undefined ? { axisRank } : {}),
     ...(axisRa !== undefined ? { axisRa } : {})
@@ -243,15 +278,15 @@ function buildFusedRankByCandidateKey(
     if (fusionDelta !== 0) {
       return fusionDelta;
     }
-    return left.candidateKey.localeCompare(right.candidateKey);
+    return compareFusionCandidateSemanticIdentity(left, right) ||
+      left.candidateKey.localeCompare(right.candidateKey);
   });
   return new Map(ranked.map((candidate, index) => [candidate.candidateKey, index + 1] as const));
 }
 
 function finalizeRecallFusionDetails(
   prelim: readonly PreliminaryFusionCandidate[],
-  fusedRankByCandidateKey: ReadonlyMap<string, number>,
-  _supplementaryData: RecallSupplementaryData
+  fusedRankByCandidateKey: ReadonlyMap<string, number>
 ): ReadonlyMap<string, RecallFusionBreakdown> {
   const fuelCoverage = buildFloodFuelCoverageSummary(
     prelim.map((candidate) => candidate.floodPotential).filter((row) => row !== undefined)
@@ -265,7 +300,6 @@ function finalizeRecallFusionDetails(
           object_id: candidate.objectId,
           object_kind: candidate.objectKind,
           origin_plane: candidate.originPlane,
-          facet_overlap: candidate.facetOverlapCount,
           per_stream_rank: candidate.perStreamRank,
           fused_rank: fusedRankByCandidateKey.get(candidate.candidateKey) ?? Number.MAX_SAFE_INTEGER,
           fused_score: candidate.fusedScore,
@@ -289,7 +323,16 @@ export function compareFusedRecallCandidates(
   if (fusionDelta !== 0) {
     return fusionDelta;
   }
-  return left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
+  return compareFusionCandidateSemanticIdentity(left, right) ||
+    left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
+}
+
+function compareFusionCandidateSemanticIdentity(
+  left: Readonly<Pick<RecallFusionCandidateInput, "entry" | "evidenceSourceIdentity">>,
+  right: Readonly<Pick<RecallFusionCandidateInput, "entry" | "evidenceSourceIdentity">>
+): number {
+  return compareMemorySemanticIdentity(left.entry, right.entry) ||
+    (left.evidenceSourceIdentity ?? "").localeCompare(right.evidenceSourceIdentity ?? "");
 }
 
 export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
@@ -298,7 +341,6 @@ export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<Reca
     object_id: objectId,
     object_kind: "memory_entry",
     origin_plane: "workspace_local",
-    facet_overlap: 0,
     per_stream_rank: Object.freeze(buildEmptyFusionStreamRanks()) as RecallFusionStreamRanks,
     fused_rank: Number.MAX_SAFE_INTEGER,
     fused_score: 0,

@@ -130,7 +130,7 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
         parsed.delivery_id,
         parsed.usage_state,
         parsed.trust_mode ?? null,
-        JSON.stringify(parsed.used_object_ids),
+        JSON.stringify(parsed.used_objects ?? parsed.used_object_ids),
         JSON.stringify(parsed.per_anchor_usage ?? []),
         parsed.reason,
         parsed.reported_at,
@@ -196,7 +196,10 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
 }
 
 function parseDeliveryRow(row: DeliveryRow): Readonly<ContextDeliveryRecord> {
-  const deliveredPayload = parseDeliveredObjectPayload(row.delivered_object_ids_json);
+  const deliveredPayload = parseObjectIdentityPayload(
+    row.delivered_object_ids_json,
+    "Trust delivery"
+  );
   return deepFreeze(
     ContextDeliveryRecordSchema.parse({
       delivery_id: row.delivery_id,
@@ -214,13 +217,20 @@ function parseDeliveryRow(row: DeliveryRow): Readonly<ContextDeliveryRecord> {
 }
 
 function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
+  const usedPayload = parseObjectIdentityPayload(
+    row.used_object_ids_json,
+    "Trust usage"
+  );
   const perAnchorUsage = parseJsonPerAnchorUsageArray(row.per_anchor_usage_json);
   return deepFreeze(
     UsageProofRecordSchema.parse({
       delivery_id: row.delivery_id,
       usage_state: row.usage_state,
       ...(row.trust_mode === null ? {} : { trust_mode: row.trust_mode }),
-      used_object_ids: parseJsonStringArray(row.used_object_ids_json),
+      used_object_ids: usedPayload.ids,
+      ...(usedPayload.objects === undefined
+        ? {}
+        : { used_objects: usedPayload.objects }),
       ...(perAnchorUsage.length === 0 ? {} : { per_anchor_usage: perAnchorUsage }),
       reason: row.reason,
       reported_at: row.reported_at,
@@ -229,19 +239,16 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
   );
 }
 
-// invariant: delivered_object_ids_json is the single stored column and the
-// single source of truth. `ids` is ALWAYS a derived projection — never write
-// the two independently. A legacy string array (rows written before
-// delivered_objects existed) carries no kind and degrades to ids-only; those
-// rows predate synthesis-in-recall, so the bare-id scope check is exactly
-// correct for them, not a weakening.
-function parseDeliveredObjectPayload(value: string): {
+// invariant: each legacy `*_object_ids_json` column stores either the original
+// string array or the authoritative kind-qualified identities. IDs are derived
+// from identities so same-id cross-kind records cannot drift across columns.
+function parseObjectIdentityPayload(value: string, label: string): {
   readonly ids: readonly string[];
   readonly objects?: readonly SoulContextObjectIdentity[];
 } {
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) {
-    throw new StorageError("VALIDATION_FAILED", "Trust delivery delivered object payload must be an array.");
+    throw new StorageError("VALIDATION_FAILED", `${label} object payload must be an array.`);
   }
   if (parsed.every((item) => typeof item === "string")) {
     return {

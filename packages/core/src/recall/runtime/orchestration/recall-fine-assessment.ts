@@ -1,40 +1,33 @@
-import { withEmbeddingSimilarityScores } from "../../coarse-filter/coarse-candidates.js";
+import { withEmbeddingSimilarityScores } from
+  "../../coarse-filter/embedding/embedding-similarity-supplement.js";
 import {
   deliverFineAssessment,
   prepareFineAssessment,
-  prepareFineAssessmentWaist,
-  type FineAssessParams,
-  type FineAssessmentWaistParams
+  type FineAssessParams
 } from "../../delivery/fine-assessment.js";
-import type { FineAssessmentPruneResult } from
-  "../../delivery/fine-assessment-prune.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
-import type {
-  FineAssessmentPreparation,
-  FineAssessmentResult,
-  PreparedRecallRequest,
-  RecallExecutionContext,
-  RecallExecutionParams
+import {
+  capturesRecallAnswerFeatures,
+  type FineAssessmentPreparation,
+  type FineAssessmentResult,
+  type PreparedRecallRequest,
+  type RecallExecutionContext,
+  type RecallExecutionParams
 } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
+import { attributeEvidenceSemanticActivations } from
+  "./evidence-semantic-candidates.js";
+import { attributeOpenSemanticFactorActivations } from
+  "../../field/open-semantic-factors/candidate-attribution.js";
 import {
-  asTimedSpan,
-  instantTimedResult,
   measureAsync,
   measureSync,
-  type TimedResult,
-  type TimedSpan
+  type TimedResult
 } from "./recall-phase-latency.js";
-import { recallFinalAuthorityMaxHeadDrop } from
-  "../../../config/recall-env-access.js";
 
-export type LegacyInitialAssessment = Readonly<{
-  readonly assessment: FineAssessmentResult;
+export type CollectedFineAssessmentData = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly waist: FineAssessmentPruneResult;
-  readonly assessmentSpans: readonly TimedSpan[];
-  readonly deliverySpans: readonly TimedSpan[];
 }>;
 
 type RerankResult = Readonly<{
@@ -42,108 +35,34 @@ type RerankResult = Readonly<{
   readonly applied: boolean;
 }>;
 
-export type CollectedFineAssessmentData = Readonly<{
-  readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly waist: FineAssessmentPruneResult;
-}>;
-
-export function prepareRecallFineAssessmentWaist(
-  context: RecallExecutionContext,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): FineAssessmentPruneResult {
-  return prepareFineAssessmentWaist(
-    buildFineAssessmentWaistParams(context, prepared, coarse)
-  );
-}
-
 export function collectTimedSupplementaryData(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  waist: FineAssessmentPruneResult = prepareRecallFineAssessmentWaist(
-    context, prepared, coarse
-  )
+  coarse: CoarseStageResult
 ): Promise<TimedResult<CollectedFineAssessmentData>> {
   return measureAsync(async () => {
     const supplementaryData = await collectCoarseFilterSupplementaryData(
-      buildCoarseAssessmentParams(context, params, prepared, coarse, waist.survivors)
-    );
-    return Object.freeze({ supplementaryData, waist });
-  });
-}
-
-export async function collectInitialLegacyAssessment(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  waist: FineAssessmentPruneResult
-): Promise<LegacyInitialAssessment> {
-  const collected = await collectTimedSupplementaryData(
-    context, params, prepared, coarse, waist
-  );
-  const fineParams = buildFineAssessParams(
-    context, params, prepared, collected.value.supplementaryData, collected.value.waist.survivors
-  );
-  const preparation = measureSync(() => prepareFineAssessment(
-    fineParams,
-    collected.value.waist
-  ));
-  const delivery = measureSync(() => deliverFineAssessment(fineParams, preparation.value));
-  return Object.freeze({
-    assessment: delivery.value,
-    supplementaryData: collected.value.supplementaryData,
-    waist: collected.value.waist,
-    assessmentSpans: Object.freeze([asTimedSpan(collected), asTimedSpan(preparation)]),
-    deliverySpans: Object.freeze([asTimedSpan(delivery)])
-  });
-}
-
-function preparationFromAssessment(
-  assessment: FineAssessmentResult
-): FineAssessmentPreparation {
-  return Object.freeze({
-    candidates: assessment.preparedCandidates,
-    prunedCandidates: assessment.prunedCandidates,
-    coarsePoolSize: assessment.coarsePoolSize,
-    fineEvaluated: assessment.fineEvaluated,
-    finePrunedCount: assessment.finePrunedCount,
-    finePriorityOverflowCount: assessment.finePriorityOverflowCount
-  });
-}
-
-export function prepareLegacyReassessment(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  initial: LegacyInitialAssessment,
-  embeddingData: EmbeddingAssessmentData
-): Readonly<{
-  readonly preparedCandidates: FineAssessmentPreparation;
-  readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly reassessmentRequired: boolean;
-}> {
-  const supplementaryData = withEmbeddingSimilarityScores(
-    initial.supplementaryData,
-    embeddingData.supplement.similarityHintsByObjectId,
-    coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores
-  );
-  const reassessmentRequired = needsEmbeddingReassessment(embeddingData, coarse);
-  return Object.freeze({
-    supplementaryData,
-    reassessmentRequired,
-    preparedCandidates: reassessmentRequired
-      ? prepareFineAssessment(
-        buildFineAssessParams(
-          context, params, prepared, supplementaryData, initial.waist.survivors
-        ),
-        initial.waist
+      buildCoarseAssessmentParams(
+        context,
+        params,
+        prepared,
+        coarse,
+        coarse.combinedCoarseCandidates
       )
-      : preparationFromAssessment(initial.assessment)
+    );
+    return Object.freeze({
+      supplementaryData: Object.freeze({
+        ...supplementaryData,
+        openSemanticFactorCandidateActivationsByCandidateKey:
+          supplementaryData.openSemanticFactorActivation === undefined
+            ? new Map()
+            : attributeOpenSemanticFactorActivations({
+              candidates: coarse.combinedCoarseCandidates,
+              activation: supplementaryData.openSemanticFactorActivation
+            })
+      })
+    });
   });
 }
 
@@ -162,16 +81,33 @@ export function prepareSnapshotAssessment(
     base.supplementaryData,
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores
+    embeddingData.poolRescoreScores,
+    attributedEvidenceActivations(base.supplementaryData, embeddingData),
+    embeddingData.retrievalFieldSeal,
+    embeddingData.retrievalFieldRefinementReceipts
   );
   return Object.freeze({
     supplementaryData,
-    preparedCandidates: prepareFineAssessment(
-      buildFineAssessParams(
-        context, params, prepared, supplementaryData, base.waist.survivors
-      ),
-      base.waist
-    )
+    preparedCandidates: prepareFineAssessment(buildFineAssessParams(
+      context,
+      params,
+      prepared,
+      supplementaryData,
+      coarse.combinedCoarseCandidates
+    ))
+  });
+}
+
+function attributedEvidenceActivations(
+  supplementaryData: FineAssessParams["supplementaryData"],
+  embeddingData: EmbeddingAssessmentData
+) {
+  const activations = embeddingData.evidenceScoring.activationsByCandidateKey;
+  if (activations.size === 0) return new Map();
+  return attributeEvidenceSemanticActivations({
+    activations,
+    evidenceDocumentsByMemoryId:
+      supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {}
   });
 }
 
@@ -180,12 +116,8 @@ export function deliverOrReuseAssessment(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   preparedCandidates: FineAssessmentPreparation,
-  rerank: RerankResult,
-  reusableAssessment?: FineAssessmentResult
+  rerank: RerankResult
 ): TimedResult<FineAssessmentResult> {
-  if (!rerank.applied && reusableAssessment !== undefined) {
-    return instantTimedResult(reusableAssessment);
-  }
   return measureSync(() => deliverFineAssessment(
     buildFineAssessParams(
       context, params, prepared, rerank.supplementaryData, preparedCandidates.candidates
@@ -202,6 +134,7 @@ function buildFineAssessParams(
   candidates: FineAssessParams["candidates"]
 ): FineAssessParams {
   return {
+    workspace_id: params.workspaceId,
     candidates,
     policy: prepared.policy,
     winnerMemoryIds: prepared.winnerMemoryIds,
@@ -209,8 +142,12 @@ function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features",
-    finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop()
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
+    answerShapePlan: prepared.answerShapePlan,
+    selectionBoundaryObserver: params.selectionBoundaryObserver,
+    generation_id: prepared.queryCondition.generation_id,
+    condition_digest: prepared.queryCondition.identity
   };
 }
 
@@ -219,12 +156,12 @@ function buildCoarseAssessmentParams(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  candidates: FineAssessmentWaistParams["candidates"]
+  candidates: FineAssessParams["candidates"]
 ): Parameters<typeof collectCoarseFilterSupplementaryData>[0] {
   return {
     dependencies: context.dependencies,
     warn: context.warn,
-    now: () => prepared.referenceTime,
+    referenceTime: prepared.referenceTime,
     coarseFilter: Object.freeze({ ...coarse.coarseFilter, candidates }),
     workspaceId: params.workspaceId,
     pathProjectionAsOf: prepared.temporalProjectionAsOf,
@@ -232,43 +169,14 @@ function buildCoarseAssessmentParams(
     queryText: prepared.queryText,
     policy: prepared.policy,
     queryProbes: prepared.queryProbes,
+    queryEntityExtraction: prepared.queryEntityExtraction,
+    querySemanticFactorFormationCapture:
+      params.querySemanticFactorFormationCapture,
+    querySemanticFactorCompletenessReceipt:
+      params.querySemanticFactorCompletenessReceipt,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    degradationReasons: context.degradationReasons
   };
-}
-
-function buildFineAssessmentWaistParams(
-  context: RecallExecutionContext,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Parameters<typeof prepareFineAssessmentWaist>[0] {
-  const snapshotScores = coarse.embeddingCoarseInjection.requestScoreSnapshot
-    ?.poolScoresByObjectId ?? {};
-  return {
-    candidates: coarse.combinedCoarseCandidates,
-    policy: prepared.policy,
-    winnerMemoryIds: prepared.winnerMemoryIds,
-    supplementaryData: {
-      ftsRanks: coarse.coarseFilter.ftsRanks,
-      trigramFtsRanks: coarse.coarseFilter.trigramFtsRanks,
-      synthesisFtsRanks: coarse.coarseFilter.synthesisFtsRanks,
-      evidenceFtsRanks: coarse.coarseFilter.evidenceFtsRanks,
-      structuralScores: coarse.coarseFilter.structuralScores,
-      embeddingSimilarityScores: Object.freeze({
-        ...snapshotScores,
-        ...coarse.embeddingCoarseInjection.similarityScores
-      })
-    },
-    warn: context.warn
-  };
-}
-
-function needsEmbeddingReassessment(
-  embeddingData: EmbeddingAssessmentData,
-  coarse: CoarseStageResult
-): boolean {
-  return Object.keys(embeddingData.supplement.similarityHintsByObjectId).length > 0 ||
-    coarse.embeddingCoarseInjection.candidates.length > 0 ||
-    Object.keys(embeddingData.poolRescoreScores).length > 0;
 }

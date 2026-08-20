@@ -1,5 +1,10 @@
 # Recall lever A/B — FTS-family fusion damp (2026-06-22)
 
+> **Historical lever writeup, not a current recipe.** The damp was
+> landed then reverted. Do not revive correlated-FTS damp, or any
+> other weight/cap retune, against the current matrix. Recall target
+> vs live: [`docs/handbook/recall.md`](../handbook/recall.md).
+
 > **STATUS: LANDED THEN REVERTED.** Landed as `202f2b77`, reverted after the
 > post-land confirmation bench (below) showed the lever does **not** reproduce
 > on the current `main`: it is net-neutral on real questions (+1) and **−1.0pp**

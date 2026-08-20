@@ -1,4 +1,4 @@
-import { DEFAULT_DAEMON_HOST } from "./daemon-defaults.js";
+import { DEFAULT_DAEMON_HOST } from "./daemon/support/daemon-defaults.js";
 
 type DaemonHostEnvLike = {
   DAEMON_HOST?: string;
@@ -19,6 +19,20 @@ function isLoopbackHost(host: string): boolean {
     return true;
   }
   return /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+export function warnIfRemoteDaemonListening(
+  envLike: DaemonHostEnvLike,
+  host: string,
+  warn: (message: string) => void
+): void {
+  if (!isRemoteDaemonOptInEnabled(envLike) || isLoopbackHost(host)) {
+    return;
+  }
+
+  warn(
+    `[daemon] SECURITY: remote bind enabled on ${host}. A single ALAYA_REQUEST_TOKEN is break-glass only and is not sufficient for multi-host exposure; prefer loopback (127.0.0.1). Desktop originless bypass is disabled.`
+  );
 }
 
 export function resolveDaemonHostFromEnv(envLike: DaemonHostEnvLike): string {

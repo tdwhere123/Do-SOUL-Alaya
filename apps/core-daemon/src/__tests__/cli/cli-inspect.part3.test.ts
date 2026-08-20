@@ -11,7 +11,7 @@ import {
   openUrlWithSpawn,
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
-} from "../../cli/inspect.js";
+} from "../../cli/inspect/inspect.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -152,7 +152,8 @@ describe("cli inspect", () => {
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
-    expect(stdoutChunks.join("")).toContain("?workspaceId=local_efcd2c3483725c97#token=");
+    expect(stdoutChunks.join("")).toContain("?workspaceId=local_efcd2c3483725c97&launch=");
+    expect(stdoutChunks.join("")).not.toContain("#token=");
   });
 
   it("resolves the auto-selected workspace through the daemon /workspaces HTTP contract", async () => {
@@ -199,7 +200,8 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces"]);
-      expect(stdoutChunks.join("")).toContain("?workspaceId=ws-http#token=");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=ws-http&launch=");
+      expect(stdoutChunks.join("")).not.toContain("#token=");
     } finally {
       daemon.restore();
     }

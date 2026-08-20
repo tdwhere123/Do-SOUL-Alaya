@@ -14,21 +14,17 @@ import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   readLongMemEvalDiagnosticsSidecar
-} from "../../../longmemeval/archive/archive-evidence.js";
-import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/archive/archive-evidence.js";
+import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../bench/provenance/evidence-manifest.js";
 
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 
-import { QaChatError } from "../../../longmemeval/qa/qa-chat.js";
+import { QaChatError } from "../../../bench/qa/qa-chat.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-
-import { runLongMemEvalMultiturn } from "../../../longmemeval/multiturn.js";
-
-import { runLongMemEvalCrossQuestion } from "../../../longmemeval/crossquestion.js";
+} from "../../../bench/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,
@@ -97,6 +93,7 @@ describe("LongMemEval runner", () => {
         JSON.stringify({
           name: variant,
           sha256: datasetSha,
+          size_bytes: Buffer.byteLength(datasetRaw, "utf8"),
           question_count: 2,
           first_pinned_at: "2026-05-14T00:00:00Z",
           pinned_by_commit: "test"
@@ -205,7 +202,7 @@ describe("LongMemEval runner", () => {
 
       // Slug format must match SLUG_PATTERN
       expect(result.slug).toMatch(
-        /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}-policy-chat-report-mixed$/
+        /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}-policy-chat-report-mixed(?:-wt-[0-9a-f]{64})?$/
       );
 
       // harness_mode must reflect the real MCP chain, never direct_db_seed.

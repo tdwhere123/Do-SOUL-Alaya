@@ -15,6 +15,8 @@ import { collectSupplementaryData } from "../../supplements/supplementary-data.j
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
+  RecallDegradationReason,
+  RecallEvidenceProjectionMatchReceipt,
   RecallGraphExpansionDiagnostics,
   RecallResult,
   RecallServiceDependencies,
@@ -23,15 +25,25 @@ import type {
   TokenEstimator
 } from "../recall-service-types.js";
 import type { GraphExpansionCandidateSourceDiagnostic } from "../../expansion/graph-expansion.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../../field/query-entity-attribution-producer.js";
 
 export type CoarseFilterResult = Readonly<{
   readonly total_scanned: number;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly retrievalFieldTruncation: Readonly<{
+    readonly session_event_index: boolean;
+    readonly explicit_pointer: boolean;
+  }>;
   readonly ftsRanks: Readonly<Record<string, number>>;
   readonly trigramFtsRanks: Readonly<Record<string, number>>;
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly evidenceProjectionMatchesByRef: Readonly<Record<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;
@@ -53,6 +65,7 @@ export type CoarseFilterOptions = Readonly<{
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
 }>;
 
 export type CoarseFilterRunner = (
@@ -71,17 +84,25 @@ export type MergeCoarseFiltersFn = (
 export type AssessCoarseFilterParams = Readonly<{
   readonly dependencies: RecallServiceDependencies;
   readonly warn: RecallServiceWarnPort;
-  readonly now: () => string;
+  readonly referenceTime: string;
   readonly coarseFilter: CoarseFilterResult;
   readonly workspaceId: string;
   readonly pathProjectionAsOf?: string;
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
+  >;
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;
   readonly captureAnswerFeatures?: boolean;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }>;
 
 export type AssessCoarseFilterResult = Readonly<{
@@ -100,17 +121,28 @@ export async function collectCoarseFilterSupplementaryData(
     candidates: params.coarseFilter.candidates
       .filter(isWorkspaceMemoryCandidate)
       .map((candidate) => candidate.entry),
+    routingKeyOwnerIds: params.coarseFilter.candidates.map(
+      (candidate) => candidate.entry.object_id
+    ),
+    referenceTime: params.referenceTime,
     workspaceId: params.workspaceId,
     pathProjectionAsOf: params.pathProjectionAsOf,
     runId: params.runId,
     queryText: params.queryText,
     queryProbes: params.queryProbes,
+    queryEntityExtraction: params.queryEntityExtraction,
+    querySemanticFactorFormationCapture:
+      params.querySemanticFactorFormationCapture,
+    querySemanticFactorCompletenessReceipt:
+      params.querySemanticFactorCompletenessReceipt,
     policy: params.policy,
     coarseFtsRanks: params.coarseFilter.ftsRanks,
     coarseTrigramFtsRanks: params.coarseFilter.trigramFtsRanks,
     coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
     coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
     coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
+    coarseEvidenceProjectionMatchesByRef:
+      params.coarseFilter.evidenceProjectionMatchesByRef,
     coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
     coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
     coarseStructuralScores: params.coarseFilter.structuralScores,
@@ -118,7 +150,8 @@ export async function collectCoarseFilterSupplementaryData(
     coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
     coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
     coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores,
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    degradationReasons: params.degradationReasons
   });
 }
 
@@ -127,12 +160,13 @@ export function runCoarseFineAssessment(
   supplementaryData: RecallSupplementaryData
 ): ReturnType<typeof fineAssess> {
   return fineAssess({
+    workspace_id: params.workspaceId,
     candidates: params.coarseFilter.candidates,
     policy: params.policy,
     winnerMemoryIds: params.winnerMemoryIds,
     supplementaryData,
     tokenEstimator: params.tokenEstimator,
-    now: params.now,
+    now: () => params.referenceTime,
     warn: params.warn,
     captureAnswerFeatures: params.captureAnswerFeatures
   });

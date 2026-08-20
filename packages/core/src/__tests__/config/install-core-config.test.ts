@@ -8,32 +8,23 @@ import {
 } from "../../config/index.js";
 
 const RECALL_ENV_FIXTURE = Object.freeze({
-  ALAYA_RECALL_FACET_SLICE: "slice",
   ALAYA_RECALL_CONF_RHO_PATH: "0.11",
   ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
-  ALAYA_RECALL_CONF_W_PATH: "0.33",
-  ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44",
-  ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
+      ALAYA_RECALL_CONF_W_PATH: "0.33",
+      ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
   ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
-  ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "true",
   ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
   ALAYA_RECALL_PROJECTIONS: "off",
-  ALAYA_RECALL_LEXICAL_DECORR: "decorr",
-  ALAYA_RECALL_INTENT_V2: "yes",
-  ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms",
-  ALAYA_RECALL_SESSION_ROUTE: "yes",
-  ALAYA_RECALL_SEMANTIC_CUSTOM: "semantic-custom"
+  ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms"
 });
 
 const EXPECTED_RECALL_ENV = Object.freeze({
   ...RECALL_ENV_FIXTURE,
-  ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
-  ALAYA_RECALL_PROJECTIONS: "off",
-  ALAYA_RECALL_INTENT_V2: "on",
-  ALAYA_RECALL_SESSION_ROUTE: "on"
+  ALAYA_RECALL_PROJECTIONS: "off"
 });
 
 const RETIRED_RECALL_ENV_NAMES = Object.freeze([
+  "ALAYA_RECALL_CONF_EVIDENCE_BETA",
   "ALAYA_RECALL_EMBED_POOL_RESCORE",
   "ALAYA_RECALL_QUERY_HYDE_JSON",
   "ALAYA_RECALL_COMPOSE",
@@ -50,7 +41,17 @@ const RETIRED_RECALL_ENV_NAMES = Object.freeze([
   "ALAYA_RECALL_DELIVERY_WINDOW",
   "ALAYA_RECALL_NOW_ISO",
   "ALAYA_RECALL_TEMPORAL_WINDOW",
-  "ALAYA_RECALL_FACET_OVERLAP"
+  "ALAYA_RECALL_FACET_OVERLAP",
+  "ALAYA_RECALL_FACET_SLICE",
+  "ALAYA_RECALL_LEXICAL_DECORR",
+  "ALAYA_RECALL_INTENT_V2",
+  "ALAYA_RECALL_SESSION_ROUTE",
+  "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY",
+  "ALAYA_RECALL_CONF_H1_MAX_PRODUCT",
+  "ALAYA_RECALL_ANCHOR_LANE",
+  "ALAYA_RECALL_SUBQUERY",
+  "ALAYA_RECALL_SEMANTIC_ANCHOR_LANE",
+  "ALAYA_RECALL_SEMANTIC_SUBQUERY"
 ]);
 
 describe("installCoreConfigFromProcessEnv", () => {
@@ -89,7 +90,7 @@ describe("installCoreConfigFromProcessEnv", () => {
 });
 
 describe("core config environment contract", () => {
-  it("enumerates exact keys and discovers supported dynamic prefixes", () => {
+  it("enumerates exact keys and ignores unread semantic prefixes", () => {
     const keys = resolveCoreConfigEnvironmentKeys({
       ...RECALL_ENV_FIXTURE,
       ALAYA_RECALL_SEMANTIC_LATE_BOUND: "0.5",
@@ -105,6 +106,7 @@ describe("core config environment contract", () => {
     ]) {
       expect(keys, name).toContain(name);
     }
+    expect(keys).not.toContain("ALAYA_RECALL_SEMANTIC_LATE_BOUND");
     expect(keys).not.toContain("ALAYA_UNRELATED_RUNTIME_SETTING");
   });
 });
@@ -134,20 +136,22 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
     expect(config).not.toHaveProperty("queryHydeJson");
   });
 
-  it("captures slice compatibility as default off", () => {
-    expect(parseRecallRuntimeConfigFromEnv({})).toMatchObject({
-      confSliceCompatibility: false
+  it("does not expose retired ranking-authority flags", () => {
+    const config = parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44",
+      ALAYA_RECALL_FACET_SLICE: "on",
+      ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true",
+      ALAYA_RECALL_INTENT_V2: "on",
+      ALAYA_RECALL_SESSION_ROUTE: "on",
+      ALAYA_RECALL_LEXICAL_DECORR: "on"
     });
-  });
-
-  it("accepts only explicit true spellings for slice compatibility", () => {
-    const parse = (value: string): boolean => parseRecallRuntimeConfigFromEnv({
-      ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: value
-    }).confSliceCompatibility;
-
-    expect(["on", "1", "true"].map(parse)).toEqual([true, true, true]);
-    expect(["off", "0", "false", "yes", "unexpected"].map(parse)).toEqual([
-      false, false, false, false, false
-    ]);
+    expect(config).not.toHaveProperty("confEvidenceBeta");
+    expect(config).not.toHaveProperty("facetSlice");
+    expect(config).not.toHaveProperty("confSliceCompatibility");
+    expect(config).not.toHaveProperty("confH1MaxProduct");
+    expect(config).not.toHaveProperty("intentV2");
+    expect(config).not.toHaveProperty("sessionRoute");
+    expect(config).not.toHaveProperty("lexicalDecorr");
   });
 });

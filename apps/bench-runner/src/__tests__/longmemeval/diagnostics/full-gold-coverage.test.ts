@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLongMemEvalFullGoldCoverage } from "../../../longmemeval/diagnostics.js";
+import { buildLongMemEvalFullGoldCoverage } from "../../../bench/diagnostics.js";
+import { buildLongMemEvalDetailedGoldCoverage } from
+  "../../../bench/diagnostics/diagnostics-full-gold-coverage.js";
 import {
   buildGoldDiagnostic as buildGold,
   buildQuestionDiagnosticFixture
@@ -113,5 +115,32 @@ describe("buildLongMemEvalFullGoldCoverage", () => {
     expect(coverage.gold_bearing_questions).toBe(0);
     expect(coverage.full_gold_at_5).toBe(0);
     expect(coverage.pool_recall_at_100).toBe(0);
+  });
+
+  it("keeps all-object coverage flat and adds a memory-only view", () => {
+    const question = buildQuestion("q-mixed-kind", [
+      buildGold({
+        object_id: "memory-gold",
+        object_kind: "memory_entry",
+        final_rank: 1
+      }),
+      buildGold({
+        object_id: "evidence-gold",
+        object_kind: "evidence_capsule",
+        final_rank: 8
+      })
+    ]);
+
+    const detailed = buildLongMemEvalDetailedGoldCoverage([question]);
+
+    expect(detailed).not.toHaveProperty("all_objects");
+    expect(detailed.full_gold_at_5).toBe(0);
+    expect(detailed.gold_coverage_at_5).toBe(0.5);
+    expect(detailed.memory_only).toMatchObject({
+      gold_bearing_questions: 1,
+      full_gold_at_5: 1,
+      gold_coverage_at_5: 1
+    });
+    expect(detailed.memory_only).not.toHaveProperty("memory_only");
   });
 });

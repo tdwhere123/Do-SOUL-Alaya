@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
-import { readRecallDiagnostics } from "../../../longmemeval/diagnostics/schema/diagnostics-private.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
-import { compareCandidateManifestations } from "../../../longmemeval/diagnostics/candidate-manifestation-order.js";
-import { verifyPromotionCandidatePoolClosure } from "../../../longmemeval/promotion/verifiers/candidate-pool-verifier.js";
-import { verifyPromotionGoldEvidence } from "../../../longmemeval/promotion/verifiers/gold-verifier.js";
+import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { readRecallDiagnostics } from "../../../bench/diagnostics/schema/diagnostics-private.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+import { compareCandidateManifestations } from "../../../bench/diagnostics/candidate-manifestation-order.js";
 
 describe("fine-assessment pruned evidence", () => {
   it("defines a deterministic total manifestation order", () => {
@@ -205,39 +203,6 @@ describe("fine-assessment pruned evidence", () => {
       }]
     });
     expect(row.gold[0]?.miss_taxonomy).not.toBe("fine_assessment_drop");
-    expect(() => verifyPromotionGoldEvidence({
-      question: row,
-      expectedGold: ["gold-a"],
-      scorable: true
-    })).not.toThrow();
-  });
-
-  it("promotes all-scored and all-pruned cross-plane alias groups independently", () => {
-    const allScored = buildQuestionDiagnostic(questionInput(recallResult({
-      candidate_pool_count: 2,
-      candidates: [
-        scoredCandidate("gold-a"),
-        scoredCandidate("gold-a", null, "global")
-      ],
-      fine_assessment_pruned_candidates: []
-    })));
-    const allPruned = buildQuestionDiagnostic(questionInput(recallResult({
-      candidate_pool_count: 2,
-      fine_pruned_count: 2,
-      candidates: [],
-      fine_assessment_pruned_candidates: [
-        prunedCandidate("gold-a", 0),
-        prunedCandidate("gold-a", 1, "memory_entry", "global")
-      ]
-    })));
-
-    for (const question of [allScored, allPruned]) {
-      expect(() => verifyPromotionGoldEvidence({
-        question,
-        expectedGold: ["gold-a"],
-        scorable: true
-      })).not.toThrow();
-    }
   });
 
   it.each([false, true])(
@@ -252,21 +217,9 @@ describe("fine-assessment pruned evidence", () => {
         fine_assessment_pruned_candidates: []
       });
       const live = readRecallDiagnostics(recall, "disabled");
-      const row = buildQuestionDiagnostic({
-        ...questionInput(recall),
-        deliveredResults: [{ object_id: "gold-a", rank: 1, relevance_score: 1 }],
-        hitAt1: true,
-        hitAt5: true,
-        hitAt10: true
-      });
 
       expect(live?.candidatesByObjectIdentity.get("memory_entry:gold-a")?.candidateKey)
         .toBe("global:memory_entry:gold-a");
-      expect(() => verifyPromotionGoldEvidence({
-        question: row,
-        expectedGold: ["gold-a"],
-        scorable: true
-      })).not.toThrow();
     }
   );
 
@@ -282,32 +235,11 @@ describe("fine-assessment pruned evidence", () => {
         fine_assessment_pruned_candidates: []
       });
       const live = readRecallDiagnostics(recall, "disabled");
-      const row = buildQuestionDiagnostic(questionInput(recall));
-      const promoted = verifyPromotionCandidatePoolClosure(row);
 
       expect(live?.candidatesByObjectIdentity.get("memory_entry:gold-a")?.candidateKey)
         .toBe("workspace_local:memory_entry:gold-a");
-      expect(promoted.scoredByIdentity.get("memory_entry:gold-a")?.candidate_key)
-        .toBe("workspace_local:memory_entry:gold-a");
     }
   );
-
-  it("independently rejects a forged promotion candidate prefix", () => {
-    const valid = buildQuestionDiagnostic(questionInput(recallResult({
-      candidates: [scoredCandidate("gold-a")],
-      fine_assessment_pruned_candidates: []
-    })));
-    const forged = structuredClone(valid);
-    Object.assign(forged.candidates[0]!, {
-      candidate_key: "global:memory_entry:gold-a"
-    });
-
-    expect(() => verifyPromotionGoldEvidence({
-      question: forged,
-      expectedGold: ["gold-a"],
-      scorable: true
-    })).toThrow(/candidate pool closure/u);
-  });
 
   it("classifies exact gold identity pruned at the fine waist", () => {
     const row = buildQuestionDiagnostic(questionInput(recallResult({
@@ -331,36 +263,6 @@ describe("fine-assessment pruned evidence", () => {
       }]
     });
     expect(LongMemEvalQuestionDiagnosticSchema.parse(row)).toEqual(row);
-  });
-
-  it("independently rejects a forged complete closure during promotion", () => {
-    const valid = buildQuestionDiagnostic({
-      ...questionInput(recallResult({
-        candidates: [scoredCandidate("gold-a", 1)],
-        fine_assessment_pruned_candidates: []
-      })),
-      deliveredResults: [{ object_id: "gold-a", rank: 1, relevance_score: 1 }],
-      hitAt1: true,
-      hitAt5: true,
-      hitAt10: true
-    });
-    expect(verifyPromotionGoldEvidence({
-      question: valid,
-      expectedGold: ["gold-a"],
-      scorable: true
-    })).toEqual({ hitAt1: true, hitAt5: true, hitAt10: true });
-
-    const forged = LongMemEvalQuestionDiagnosticSchema.parse({
-      ...valid,
-      candidate_pool_count: 2,
-      candidate_pool_complete: true,
-      cohort_ledger: { ...valid.cohort_ledger!, candidate_pool_complete: true }
-    });
-    expect(() => verifyPromotionGoldEvidence({
-      question: forged,
-      expectedGold: ["gold-a"],
-      scorable: true
-    })).toThrow(/candidate pool closure/u);
   });
 });
 

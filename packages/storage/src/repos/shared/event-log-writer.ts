@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventLogEntrySchema, type EventLogEntry } from "@do-soul/alaya-protocol";
 import type { SqliteConnection } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { EVENT_LOG_APPEND_SYNC_SQL } from "../runtime/event-log/append-sql.js";
 
 export type EventLogDraftInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -28,20 +29,7 @@ export function getEventLogWriter(connection: SqliteConnection): EventLogWriter 
   }
 
   const writer: EventLogWriter = {
-    appendStatement: connection.prepare(`
-      INSERT INTO event_log (
-        event_id,
-        event_type,
-        entity_type,
-        entity_id,
-        workspace_id,
-        run_id,
-        caused_by,
-        revision,
-        payload_json,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `),
+    appendStatement: connection.prepare(EVENT_LOG_APPEND_SYNC_SQL),
     nextRevisionStatement: connection.prepare(`
       SELECT MAX(revision) AS max_revision
       FROM event_log

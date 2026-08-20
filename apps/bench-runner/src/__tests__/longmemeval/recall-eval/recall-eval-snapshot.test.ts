@@ -8,7 +8,7 @@ import { runLongMemEval } from "../../../longmemeval/runner.js";
 import {
   snapshotManifestPath,
   snapshotSidecarPath
-} from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

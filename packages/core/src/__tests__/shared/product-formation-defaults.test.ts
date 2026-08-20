@@ -6,8 +6,7 @@ import {
   resolveProductFormationOptIn,
   resolveProductGardenProviderKind,
   resolveProductMaterializationConfidenceFloor,
-  resolveProductPathRelationCounterTtlMs,
-  resolveProductPathRelationThreshold
+  resolveProductPathRelationCounterTtlMs
 } from "../../shared/product-formation/defaults.js";
 
 describe("product formation defaults", () => {
@@ -22,8 +21,7 @@ describe("product formation defaults", () => {
       materializationConfidenceFloor: 0.5,
       edgeProducerLlmEnabled: false,
       edgeClassifyHostWorker: true,
-      pathRelationCounterTtlMs: 86_400_000,
-      pathRelationCoUsageThreshold: 3
+      pathRelationCounterTtlMs: 86_400_000
     });
     expect(resolveProductFormationEnabled(undefined)).toBe(true);
     expect(resolveProductFormationEnabled("")).toBe(true);
@@ -42,8 +40,6 @@ describe("product formation defaults", () => {
     expect(resolveProductMaterializationConfidenceFloor("invalid")).toBe(0.5);
     expect(resolveProductPathRelationCounterTtlMs(undefined)).toBe(86_400_000);
     expect(resolveProductPathRelationCounterTtlMs("86400000")).toBe(86_400_000);
-    expect(resolveProductPathRelationThreshold(undefined)).toBe(3);
-    expect(resolveProductPathRelationThreshold("3")).toBe(3);
   });
 
   it("uses host work without a secret and official compute with one", () => {

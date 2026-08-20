@@ -1,0 +1,456 @@
+import { describe, expect, it, vi } from "vitest";
+import { hashMemoryContent } from "../../embedding-recall/helpers.js";
+import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
+import { createProvider } from "./embedding-recall-test-helpers.js";
+
+describe("EmbeddingRecallService evidence document cache", () => {
+  it("keeps query and document inference accounting separate across repeated scoring", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => vectorFor(text))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "query-id"
+    });
+    const candidates = Array.from({ length: 31 }, (_, index) => ({
+      candidateKey: `evidence:${index}`,
+      evidenceObjectId: `object-${index}`,
+      documentIdentity: "owner",
+      content: `document ${index}`
+    }));
+
+    const first = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates
+    });
+    const second = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates
+    });
+
+    expect(embedTexts.mock.calls.map(([texts]) => texts.length)).toEqual([1, 31]);
+    expect(first.inferenceCalls).toBe(2);
+    expect(second.inferenceCalls).toBe(0);
+    expect([...second.activationsByCandidateKey])
+      .toEqual([...first.activationsByCandidateKey]);
+  });
+
+  it("does not reuse a query vector as the document vector for identical text", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => vectorFor(text))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "query-id"
+    });
+
+    await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "same text",
+      preparedQuery: null,
+      candidates: [{
+        candidateKey: "evidence:1",
+        evidenceObjectId: "object-1",
+        documentIdentity: "owner",
+        content: "same text"
+      }]
+    });
+
+    expect(embedTexts.mock.calls.map(([texts]) => texts)).toEqual([
+      ["same text"],
+      ["same text"]
+    ]);
+  });
+
+  it("keeps candidate keys aligned with document vectors in non-sorted order", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => text === "query"
+        ? new Float32Array([1, 0])
+        : text === "alpha"
+          ? new Float32Array([1, 0])
+          : new Float32Array([0, 1]))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [
+        {
+          candidateKey: "evidence:beta",
+          evidenceObjectId: "beta",
+          documentIdentity: "gist",
+          content: "beta"
+        },
+        {
+          candidateKey: "evidence:alpha",
+          evidenceObjectId: "alpha",
+          documentIdentity: "gist",
+          content: "alpha"
+        }
+      ]
+    });
+
+    expect([...activationScores(result)]).toEqual([
+      ["evidence:beta", 0],
+      ["evidence:alpha", 1]
+    ]);
+  });
+
+  it("attributes the strongest linked document score to one candidate", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => text === "query" || text === "strong"
+        ? new Float32Array([1, 0])
+        : new Float32Array([0, 1]))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [
+        {
+          candidateKey: "memory:1",
+          evidenceObjectId: "evidence-weak",
+          documentIdentity: "evidence-weak",
+          content: "weak"
+        },
+        {
+          candidateKey: "memory:1",
+          evidenceObjectId: "evidence-strong",
+          documentIdentity: "evidence-strong",
+          content: "strong"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({ expectedCount: 2, scoredCount: 2 });
+    expect([...activationScores(result)]).toEqual([["memory:1", 1]]);
+    expect(readWinningDocuments(result).get("memory:1")).toEqual({
+      score: 1,
+      evidenceObjectId: "evidence-strong",
+      documentIdentity: "evidence-strong",
+      contentHash: hashMemoryContent("strong")
+    });
+    expect(result.activationsByCandidateKey.get("memory:1")).toEqual({
+      schema_version: 1,
+      operator_id: "evidence_document_max_v1",
+      state: "observed",
+      score: 1,
+      winner: {
+        score: 1,
+        evidenceObjectId: "evidence-strong",
+        documentIdentity: "evidence-strong",
+        contentHash: hashMemoryContent("strong")
+      },
+      observations: [{
+        score: 1,
+        evidenceObjectId: "evidence-strong",
+        documentIdentity: "evidence-strong",
+        contentHash: hashMemoryContent("strong")
+      }, {
+        score: 0,
+        evidenceObjectId: "evidence-weak",
+        documentIdentity: "evidence-weak",
+        contentHash: hashMemoryContent("weak")
+      }],
+      observation_completeness: "complete",
+      missing_channel_policy: "no_op"
+    });
+    expect(result.fieldChannelCapture?.channel).toMatchObject({
+      channel_id: "evidence_semantic",
+      status: "complete",
+      depth: 1,
+      unseen_upper_bound: 0
+    });
+    expect(result.fieldChannelCapture?.channel.observations).toEqual([{
+      observation_id: "evidence_semantic:memory:1:evidence-strong:evidence-strong",
+      candidate_key: "memory:1",
+      rank: 1
+    }]);
+  });
+
+  it("collapses duplicate document identities to their strongest observation", async () => {
+    const result = await scoreEqualCandidates([
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "owner",
+        content: "duplicate-a"
+      },
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "owner",
+        content: "duplicate-b"
+      }
+    ]);
+
+    expect(result.activationsByCandidateKey.get("memory:1")?.observations).toEqual([{
+      score: 1,
+      evidenceObjectId: "evidence-1",
+      documentIdentity: "owner",
+      contentHash: hashMemoryContent("duplicate-a")
+    }]);
+  });
+
+  it("chooses the same attributed document on equal scores in either input order", async () => {
+    const candidates = [
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "fact-key:z",
+        content: "equal-z"
+      },
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "fact-key:a",
+        content: "equal-a"
+      }
+    ] as const;
+
+    const forward = await scoreEqualCandidates(candidates);
+    const reverse = await scoreEqualCandidates([...candidates].reverse());
+    const expected = {
+      score: 1,
+      evidenceObjectId: "evidence-1",
+      documentIdentity: "fact-key:a",
+      contentHash: hashMemoryContent("equal-a")
+    };
+
+    expect(readWinningDocuments(forward).get("memory:1")).toEqual(expected);
+    expect(readWinningDocuments(reverse).get("memory:1")).toEqual(expected);
+  });
+
+  it("persists linked documents under evidence identity while scoring memory identity", async () => {
+    const upsertMany = vi.fn(async () => undefined);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      evidenceDocumentEmbeddingRepo: {
+        findByDocuments: vi.fn(async () => []),
+        upsertMany
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async (texts: readonly string[]) =>
+          texts.map(() => new Float32Array([1, 0])))
+      }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [{
+        candidateKey: "workspace_local:memory_entry:memory-1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "gist",
+        content: "grounded evidence"
+      }]
+    });
+
+    expect([...activationScores(result)]).toEqual([
+      ["workspace_local:memory_entry:memory-1", 1]
+    ]);
+    expect(upsertMany).toHaveBeenCalledWith([
+      expect.objectContaining({
+        ownerObjectId: "evidence-1",
+        documentIdentity: "gist"
+      })
+    ]);
+  });
+
+  it("fails open on a document batch error and retries it on the next request", async () => {
+    let call = 0;
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+      call += 1;
+      if (call === 2) throw new Error("transient document failure");
+      return texts.map((text) => vectorFor(text));
+    });
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+    const request = {
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [{
+        candidateKey: "evidence:1",
+        evidenceObjectId: "object-1",
+        documentIdentity: "owner",
+        content: "document"
+      }]
+    } as const;
+
+    const failed = await service.scoreEvidenceCandidates(request);
+    const retried = await service.scoreEvidenceCandidates(request);
+
+    expect(failed).toMatchObject({
+      status: "failed",
+      scoredCount: 0,
+      inferenceCalls: 2
+    });
+    expect(failed.activationsByCandidateKey.size).toBe(0);
+    expect(failed.fieldChannelCapture?.channel).toMatchObject({
+      channel_id: "evidence_semantic",
+      status: "unavailable",
+      depth: 0,
+      observations: []
+    });
+    expect(retried).toMatchObject({ status: "returned", scoredCount: 1 });
+    expect(embedTexts).toHaveBeenCalledTimes(3);
+  });
+
+  it("counts a synchronous document provider failure after a prepared query", async () => {
+    const embedTexts = vi.fn(() => {
+      throw new Error("synchronous document failure");
+    });
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: {
+        queryId: "prepared-query",
+        cacheHit: true,
+        getSnapshot: () => ({
+          status: "ready",
+          embedding: new Float32Array([1, 0])
+        })
+      },
+      candidates: [{
+        candidateKey: "evidence:1",
+        evidenceObjectId: "object-1",
+        documentIdentity: "owner",
+        content: "document"
+      }]
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      scoredCount: 0,
+      inferenceCalls: 1,
+      failureClass: "candidate_embedding_failed"
+    });
+    expect(result.activationsByCandidateKey.size).toBe(0);
+  });
+});
+
+function vectorFor(text: string): Float32Array {
+  const first = text.charCodeAt(0) || 1;
+  const last = text.charCodeAt(text.length - 1) || 1;
+  return new Float32Array([first, last]);
+}
+
+type ExpectedWinningDocument = Readonly<{
+  score: number;
+  evidenceObjectId: string;
+  documentIdentity: string;
+  contentHash?: string;
+}>;
+
+function readWinningDocuments(
+  result: unknown
+): ReadonlyMap<string, ExpectedWinningDocument> {
+  const activations = (result as {
+    readonly activationsByCandidateKey: ReadonlyMap<string, Readonly<{
+      readonly winner: ExpectedWinningDocument;
+    }>>;
+  }).activationsByCandidateKey;
+  return new Map([...activations].map(([candidateKey, receipt]) =>
+    [candidateKey, receipt.winner] as const
+  ));
+}
+
+function activationScores(
+  result: Readonly<{ readonly activationsByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<{ readonly score: number }>
+  > }>
+): ReadonlyMap<string, number> {
+  return new Map([...result.activationsByCandidateKey].map(
+    ([candidateKey, receipt]) => [candidateKey, receipt.score] as const
+  ));
+}
+
+async function scoreEqualCandidates(
+  candidates: readonly Readonly<{
+    candidateKey: string;
+    evidenceObjectId: string;
+    documentIdentity: string;
+    content: string;
+  }>[]
+) {
+  const service = new EmbeddingRecallService({
+    embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+    provider: createProvider({
+      embedTexts: vi.fn(async (texts: readonly string[]) =>
+        texts.map(() => new Float32Array([1, 0])))
+    }),
+    eventLogRepo: {
+      append: vi.fn(),
+      queryByEntity: vi.fn(async () => [])
+    }
+  });
+  return await service.scoreEvidenceCandidates({
+    workspaceId: "workspace-1",
+    runId: null,
+    queryText: "query",
+    preparedQuery: null,
+    candidates
+  });
+}

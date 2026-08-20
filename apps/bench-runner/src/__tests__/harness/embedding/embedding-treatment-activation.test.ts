@@ -13,7 +13,7 @@ import {
   createBenchDaemonLaunchConfig,
   resolveBenchDaemonManagedEnvKeys
 } from "../../../harness/daemon/daemon-environment.js";
-import { recallEvalEmbeddingMode } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-runtime.js";
+import { recallEvalEmbeddingMode } from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {
@@ -63,11 +63,96 @@ describe("embedding treatment activation", () => {
     }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" })).not.toThrow();
   });
 
+  it("rejects an enabled cell when evidence candidate scoring failed", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "failed",
+      evidence_embedding_expected_count: 4,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 1,
+      evidence_embedding_failure_class: "candidate_embedding_failed",
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
+      .toThrow(/evidence embedding treatment activation failed/u);
+  });
+
+  it("rejects an enabled cell when evidence candidate scoring is incomplete", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 4,
+      evidence_embedding_scored_count: 3,
+      evidence_embedding_inference_calls: 1,
+      evidence_embedding_failure_class: null,
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
+      .toThrow(/evidence embedding treatment activation failed/u);
+  });
+
+  it("accepts fully scored evidence embeddings served without inference calls", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 4,
+      evidence_embedding_scored_count: 4,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null,
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" })).not.toThrow();
+  });
+
+  it.each([
+    ["missing", {}],
+    ["not requested", {
+      evidence_embedding_status: "not_requested",
+      evidence_embedding_expected_count: 0,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null
+    }]
+  ])("rejects %s evidence telemetry in an enabled cell", (_label, evidence) => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }],
+      ...evidence
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
+      .toThrow(/evidence embedding treatment activation failed/u);
+  });
+
+  it("accepts explicit not-applicable evidence telemetry in an enabled cell", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "not_applicable",
+      evidence_embedding_expected_count: 0,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null,
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" })).not.toThrow();
+  });
+
+  it("rejects evidence candidate scoring in a disabled control cell", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_not_requested",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 1,
+      evidence_embedding_scored_count: 1,
+      evidence_embedding_inference_calls: 1,
+      evidence_embedding_failure_class: null,
+      candidates: [{ score_factors: {} }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" }))
+      .toThrow(/control activation failed/u);
+  });
+
   it.each([
     ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
-    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "false"]
+    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"]
   ] as const)("requires diagnostics for explicit %s=%s", (name, value) => {
     const env = { [name]: value };
     expect(requiresEmbeddingTreatmentDiagnostics(env)).toBe(true);
@@ -78,6 +163,15 @@ describe("embedding treatment activation", () => {
   it("does not require treatment diagnostics without an override", () => {
     expect(requiresEmbeddingTreatmentDiagnostics({})).toBe(false);
     expect(() => assertEmbeddingTreatmentDiagnosticsPresent(undefined, {})).not.toThrow();
+  });
+
+  it("rejects the retired local cross-encoder treatment", () => {
+    expect(() => requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true"
+    })).toThrow(/local cross-encoder reranking is retired/u);
+    expect(requiresEmbeddingTreatmentDiagnostics({
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+    })).toBe(false);
   });
 
   it.each([

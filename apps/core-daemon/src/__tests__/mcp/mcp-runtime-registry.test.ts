@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDaemonMcpRuntimeClientInfo,
   createDaemonMcpRuntimeRegistry
-} from "../../mcp/mcp-runtime-registry.js";
+} from "../../mcp/catalog/mcp-runtime-registry.js";
 import { createDeferred } from "../support/deferred.js";
 
 describe("daemon MCP runtime registry", () => {

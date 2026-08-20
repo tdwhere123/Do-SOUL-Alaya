@@ -7,11 +7,11 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCompileSeedRunner,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   cacheFilePath,
-  computeCacheKey
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  computeSourceTurnCacheKey
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   buildCompileSeedDaemon,
@@ -298,11 +298,11 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
   }
 
   function writeShard(rawJson: string): void {
-    const cacheKey = computeCacheKey(
+    const cacheKey = computeSourceTurnCacheKey(
       MODEL,
       REQUEST_PROFILE,
       OFFICIAL_API_SYSTEM_PROMPT,
-      TURN
+      { turnContent: TURN }
     );
     const filePath = cacheFilePath(cacheRoot, cacheKey);
     mkdirSync(dirname(filePath), { recursive: true });

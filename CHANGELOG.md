@@ -3,6 +3,10 @@
 All notable changes to Do-SOUL Alaya are recorded here. Per-release detail
 lives under `docs/archive/v0.3-historical/<version>/`; this file is the chronological index.
 
+Current recall algorithm (UGAF target vs live degenerate projection) is
+`docs/handbook/recall.md`. Do not treat a historical release section
+below as the live ranking recipe.
+
 ## v0.3.11 — 2026-06-04 (implementation complete; 500q KPI gate pending)
 
 **Status:** implementation complete. The LongMemEval / LoCoMo 500q KPI gate is

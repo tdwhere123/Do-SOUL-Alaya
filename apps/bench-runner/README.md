@@ -4,9 +4,9 @@ Daemon-attached benchmark runner for Do-SOUL Alaya.
 
 ## Role
 
-`apps/bench-runner` owns executable benchmark harnesses for self-bench,
-LongMemEval-S, and live strict-real history archives. It attaches to the
-daemon/runtime surface and keeps `@do-soul/alaya-eval` schema-focused.
+`apps/bench-runner` owns executable benchmark harnesses for LongMemEval-S
+and LoCoMo. It attaches to the daemon/runtime surface and keeps
+`@do-soul/alaya-eval` schema-focused.
 
 ## Dependency Direction
 
@@ -16,9 +16,9 @@ packages must not depend on the bench runner.
 
 ## Key Entry Points
 
-- `src/index.ts` exports bench runner APIs.
-- `src/longmemeval/` owns LongMemEval-S harness code.
-- `src/self/` owns self-bench runner code.
+- `src/longmemeval/` owns LongMemEval-S harness and campaign machinery.
+- `src/locomo/` owns the LoCoMo10 runner.
+- `src/longmemeval/provider/` is the model-neutral extraction catalog.
 - `bin/alaya-bench-runner.mjs` is the package CLI entrypoint.
 
 ## Commands

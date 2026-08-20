@@ -47,14 +47,14 @@ function createSlot(overrides: Partial<Slot> = {}): Slot {
 }
 
 describe("SqliteSlotRepo", () => {
-  it("applies migration 010 and creates slots table", async () => {
+  it("creates the slots table", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 10 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(10);
+    expect(migration?.version).toBe(8);
   });
 
   it("creates and finds a slot by id", async () => {

@@ -51,7 +51,7 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 
-import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool-catalog.js";
+import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool/tool-catalog.js";
 
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 
@@ -59,7 +59,7 @@ import { registerAlayaCliCommands } from "../../cli/register.js";
 
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
 
-import { createAlayaMcpServer } from "../../mcp/mcp-server.js";
+import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
 import {
   PRIMARY_MEMORY_ID,
@@ -108,12 +108,13 @@ describe("P5 v0.1 release loop E2E", () => {
 
     const runtime = await createAlayaDaemonRuntime();
     runtime.startBackgroundServices();
+    let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
         workspaceId: "workspace-1",
         runId: "run-1",
-        agentTarget: "codex",
+        agentTarget: activeAgentTarget,
         sessionId: "p5-release-loop-session",
         surfaceId: "p5-release-loop"
       })
@@ -268,6 +269,7 @@ describe("P5 v0.1 release loop E2E", () => {
       transcript.push({ step: "soul.propose_memory_update", evidence: proposal });
       expect(proposal.status).toBe("created");
 
+      activeAgentTarget = "cli";
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",

@@ -2,49 +2,170 @@ import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { wrapRelationAssertionStorageError } from "../relation-assertion-repo-support.js";
+import {
+  isCompatibleProjectionIdentity,
+  type ProjectionIdentity
+} from "../../../sqlite/projection-identity.js";
 import type { RelationAssertionProjectionGeneration } from "./projection-types.js";
 
-type ExistingGeneration = Readonly<{
-  readonly projection_count: number;
-  readonly projection_digest: string;
+type StoredGeneration = ProjectionIdentity & Readonly<{
+  readonly generation: string;
+  readonly as_of: string;
+  readonly history_digest: string;
 }>;
+
+export function markProjectionRefreshRequired(db: StorageDatabase): void {
+  try {
+    const updated = db.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_refresh_required = 1
+      WHERE state_id = 1
+    `).run();
+    if (updated.changes !== 1) {
+      throw new StorageError(
+        "CONFLICT",
+        "Temporal schema state is missing during projection invalidation."
+      );
+    }
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw wrapRelationAssertionStorageError("invalidate relation projection", error);
+  }
+}
 
 export function writeProjectionGeneration(
   db: StorageDatabase,
   generation: RelationAssertionProjectionGeneration,
   options: { readonly activate: boolean }
-): void {
+): string {
   const projections = generation.projections.map((projection) =>
     PathRelationSchema.parse(projection)
   );
   try {
-    ensureProjectionGeneration(db, generation, projections);
-    if (options.activate) activateProjectionGeneration(db, generation, projections.length);
+    const schemaOperator = readSchemaHistoryDigest(db);
+    if (!options.activate && generation.historyDigest !== schemaOperator) {
+      throw new StorageError(
+        "CONFLICT",
+        "Historical projection witness does not match the live schema operator."
+      );
+    }
+    const resolvedGeneration = resolveProjectionGeneration(db, generation, projections);
+    if (options.activate) {
+      activateProjectionGeneration(db, {
+        ...generation,
+        generation: resolvedGeneration
+      }, projections.length);
+    }
+    pruneUnreadableProjectionHistories(db, readSchemaHistoryDigest(db));
+    return resolvedGeneration;
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw wrapRelationAssertionStorageError("replace active relation projection", error);
   }
 }
 
-function ensureProjectionGeneration(
+function readSchemaHistoryDigest(db: StorageDatabase): string {
+  const row = db.connection.prepare(`
+    SELECT history_digest
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get() as Readonly<{ readonly history_digest: string }> | undefined;
+  if (row === undefined) {
+    throw new StorageError("CONFLICT", "Temporal schema state is missing.");
+  }
+  return row.history_digest;
+}
+
+function pruneUnreadableProjectionHistories(
+  db: StorageDatabase,
+  currentHistoryDigest: string
+): void {
+  // Readers reject generations from any superseded assertion history.
+  db.connection.prepare(`
+    DELETE FROM temporal_projection_generations
+    WHERE history_digest <> ?
+      AND generation <> (
+        SELECT active_projection_generation
+        FROM temporal_schema_state
+        WHERE state_id = 1
+      )
+  `).run(currentHistoryDigest);
+}
+
+function resolveProjectionGeneration(
   db: StorageDatabase,
   generation: RelationAssertionProjectionGeneration,
   projections: readonly Readonly<PathRelation>[]
-): void {
-  const existing = db.connection.prepare(`
-    SELECT projection_count, projection_digest
+): string {
+  const incoming = incomingIdentity(generation, projections);
+  const byBindKey = findVerifiedBindKey(db, generation.asOf, generation.historyDigest);
+  if (byBindKey !== undefined) {
+    assertCompatibleStoredGeneration(byBindKey, generation, incoming);
+    return byBindKey.generation;
+  }
+  const byId = findGenerationById(db, generation.generation);
+  if (byId !== undefined) {
+    if (byId.as_of !== generation.asOf || byId.history_digest !== generation.historyDigest) {
+      throw new StorageError(
+        "CONFLICT",
+        `Projection generation ${generation.generation} already exists with a different as-of or history.`
+      );
+    }
+    assertCompatibleStoredGeneration(byId, generation, incoming);
+    return byId.generation;
+  }
+  insertProjectionGeneration(db, generation, projections);
+  return generation.generation;
+}
+
+function findVerifiedBindKey(
+  db: StorageDatabase,
+  asOf: string,
+  historyDigest: string
+): StoredGeneration | undefined {
+  return db.connection.prepare(`
+    SELECT generation, as_of, history_digest, projection_count, projection_digest,
+           assertion_schema_generation, assertion_event_contract_generation,
+           projection_schema_generation, projection_policy_id, projection_policy_sha256
+    FROM temporal_projection_generations
+    WHERE as_of = ? AND history_digest = ? AND status = 'verified'
+  `).get(asOf, historyDigest) as StoredGeneration | undefined;
+}
+
+function findGenerationById(
+  db: StorageDatabase,
+  generation: string
+): StoredGeneration | undefined {
+  return db.connection.prepare(`
+    SELECT generation, as_of, history_digest, projection_count, projection_digest,
+           assertion_schema_generation, assertion_event_contract_generation,
+           projection_schema_generation, projection_policy_id, projection_policy_sha256
     FROM temporal_projection_generations
     WHERE generation = ?
-    LIMIT 1
-  `).get(generation.generation) as ExistingGeneration | undefined;
-  if (existing === undefined) {
-    insertProjectionGeneration(db, generation, projections);
-    return;
-  }
-  if (
-    existing.projection_count !== projections.length ||
-    existing.projection_digest !== generation.projectionDigest
-  ) {
+  `).get(generation) as StoredGeneration | undefined;
+}
+
+function incomingIdentity(
+  generation: RelationAssertionProjectionGeneration,
+  projections: readonly Readonly<PathRelation>[]
+): ProjectionIdentity {
+  return {
+    projection_count: projections.length,
+    projection_digest: generation.projectionDigest,
+    assertion_schema_generation: generation.assertionSchemaGeneration,
+    assertion_event_contract_generation: generation.assertionEventContractGeneration,
+    projection_schema_generation: generation.projectionSchemaGeneration,
+    projection_policy_id: generation.projectionPolicyId,
+    projection_policy_sha256: generation.projectionPolicySha256
+  };
+}
+
+function assertCompatibleStoredGeneration(
+  existing: StoredGeneration,
+  generation: RelationAssertionProjectionGeneration,
+  incoming: ProjectionIdentity
+): void {
+  if (!isCompatibleProjectionIdentity(existing, incoming)) {
     throw new StorageError(
       "CONFLICT",
       `Projection generation ${generation.generation} already exists with a different digest.`
@@ -112,7 +233,8 @@ function activateProjectionGeneration(
     SET assertion_schema_generation = ?, assertion_event_contract_generation = ?,
         projection_schema_generation = ?, active_projection_generation = ?, active_as_of = ?,
         projection_policy_id = ?, projection_policy_sha256 = ?, history_digest = ?,
-        projection_count = ?, projection_digest = ?, status = 'ready', updated_at = ?
+        projection_count = ?, projection_digest = ?, status = 'ready',
+        projection_refresh_required = 0, updated_at = ?
     WHERE state_id = 1
   `).run(
     generation.assertionSchemaGeneration,

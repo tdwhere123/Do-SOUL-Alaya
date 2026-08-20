@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../../conversation/task-surface-builder.js";
 import { parseRecallPolicy } from "../../shared/recall-policy.js";
+import { classifyPathIndexReadFailure } from "./legacy-path-index-unbound-error.js";
 import {
   applyManifestationBiasEntries,
   collectManifestationAnchorMemoryObjectIds,
@@ -40,6 +41,7 @@ import {
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
+  RecallEvidenceProjectionMatchReceipt,
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -86,6 +88,7 @@ export function resolvePolicy(params: Readonly<{
 
 export async function loadActiveConstraints(params: Readonly<{
   readonly activeConstraintsPort?: RecallServiceDependencies["activeConstraintsPort"];
+  readonly warn: RecallServiceWarnPort;
   readonly workspaceId: string;
   readonly cap: number | null;
   readonly asOf?: string;
@@ -100,11 +103,28 @@ export async function loadActiveConstraints(params: Readonly<{
       total_count: 0
     });
   }
-  return port.findActiveConstraints({
-    workspaceId: params.workspaceId,
-    cap: params.cap,
-    asOf: params.asOf
-  });
+  try {
+    return await port.findActiveConstraints({
+      workspaceId: params.workspaceId,
+      cap: params.cap,
+      asOf: params.asOf
+    });
+  } catch (error) {
+    // An unbound or missing as-of index is an absent constraint projection, not a store fault.
+    if (classifyPathIndexReadFailure(error) === "index_unbound") {
+      params.warn("active constraints lookup skipped", {
+        workspace_id: params.workspaceId,
+        operation: "active_constraints",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+      return Object.freeze({
+        constraints: Object.freeze([]),
+        total_count: 0
+      });
+    }
+    throw error;
+  }
 }
 
 export async function applyManifestationBiasSidecar(params: Readonly<{
@@ -237,6 +257,12 @@ export function mergeCoarseFilters(
   return Object.freeze({
     total_scanned: current.total_scanned + next.total_scanned,
     candidates: Object.freeze([...current.candidates, ...nextCandidates]),
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: current.retrievalFieldTruncation.session_event_index ||
+        next.retrievalFieldTruncation.session_event_index,
+      explicit_pointer: current.retrievalFieldTruncation.explicit_pointer ||
+        next.retrievalFieldTruncation.explicit_pointer
+    }),
     ftsRanks: mergeReadonlyRecords(current.ftsRanks, next.ftsRanks),
     trigramFtsRanks: mergeReadonlyRecords(current.trigramFtsRanks, next.trigramFtsRanks),
     synthesisFtsRanks: mergeReadonlyRecords(current.synthesisFtsRanks, next.synthesisFtsRanks),
@@ -244,6 +270,10 @@ export function mergeCoarseFilters(
     evidenceFtsRanksPerRef: mergeReadonlyRecords(
       current.evidenceFtsRanksPerRef,
       next.evidenceFtsRanksPerRef
+    ),
+    evidenceProjectionMatchesByRef: mergeProjectionMatchRecords(
+      current.evidenceProjectionMatchesByRef,
+      next.evidenceProjectionMatchesByRef
     ),
     sourceProximityScores: mergeReadonlyRecords(
       current.sourceProximityScores,
@@ -265,6 +295,17 @@ export function mergeCoarseFilters(
     ),
     degradation_reason: degradationReason
   });
+}
+
+function mergeProjectionMatchRecords(
+  left: Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>>,
+  right: Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>>
+): Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>> {
+  const refs = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return Object.freeze(Object.fromEntries([...refs].map((ref) => [
+    ref,
+    Object.freeze([...(left[ref] ?? []), ...(right[ref] ?? [])])
+  ])));
 }
 
 export async function appendWeightTransferTelemetry(params: Readonly<{

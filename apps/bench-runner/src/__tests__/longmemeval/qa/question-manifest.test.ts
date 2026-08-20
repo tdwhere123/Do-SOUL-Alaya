@@ -7,7 +7,7 @@ import {
   computeQuestionIdDigest,
   createStratifiedQuestionManifest,
   parseQuestionManifest
-} from "../../../longmemeval/selection/question-manifest.js";
+} from "../../../bench/selection/question-manifest.js";
 
 const DATASET_SHA = "a".repeat(64);
 

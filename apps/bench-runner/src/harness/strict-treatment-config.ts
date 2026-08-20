@@ -18,6 +18,17 @@ export function readOptionalTreatmentBoolean(
   throw new Error(`${key} must be true, false, 1, or 0`);
 }
 
+export function refuseRetiredLocalCrossEncoderTreatment(
+  env: Readonly<Record<string, string | undefined>>
+): void {
+  if (readOptionalTreatmentBoolean(
+    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
+    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
+  ) === true) {
+    throw new Error("local cross-encoder reranking is retired");
+  }
+}
+
 export function readOptionalOnnxThreadCount(raw: string | undefined): number | null {
   if (raw === undefined || raw.trim().length === 0) return null;
   if (!/^\d+$/u.test(raw)) {

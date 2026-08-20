@@ -2,49 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { expectFrozenPropertyWriteThrows } from "../support/frozen-mutation.js";
 import {
   EvidenceHealthState,
-  MemoryGovernanceEventType,
   TransitionCausedBy,
   type EvidenceCapsule,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { EvidenceService, type EvidenceCapsuleInput } from "../../memory/evidence-service.js";
-
-function createEvidenceInput(overrides: Partial<EvidenceCapsuleInput> = {}): EvidenceCapsuleInput {
-  return {
-    created_by: "user_action",
-    evidence_kind: "tool_output",
-    semantic_anchor: {
-      topic: "build",
-      keywords: ["pnpm", "build"],
-      summary: "Build output"
-    },
-    event_anchor: {
-      event_type: "engine.response.received",
-      event_id: "evt_1",
-      occurred_at: "2026-03-20T00:00:00.000Z"
-    },
-    physical_anchor: {
-      file_path: "packages/core/src/memory/evidence-service.ts",
-      line_range: { start: 1, end: 20 },
-      symbol_name: "EvidenceService",
-      artifact_ref: null
-    },
-    evidence_health_state: EvidenceHealthState.VERIFIED,
-    gist: "Evidence gist",
-    excerpt: "Evidence excerpt",
-    source_hash: "sha256:abc",
-    run_id: "run-1",
-    workspace_id: "workspace-1",
-    surface_id: null,
-    ...overrides
-  };
-}
+import { EvidenceService } from "../../memory/evidence-service.js";
+import { createEvidenceInput } from "./evidence-service-fixture.js";
 
 describe("EvidenceService", () => {
   it("writes soul.evidence.created before persistence and runtime notification", async () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
+    const create = vi.fn(async (capsule: EvidenceCapsule) => {
+      order.push("repo_create");
+      store.set(capsule.object_id, Object.freeze({ ...capsule }));
+      return store.get(capsule.object_id)!;
+    });
 
     const service = new EvidenceService({
       now: () => "2026-03-20T01:00:00.000Z",
@@ -62,11 +36,7 @@ describe("EvidenceService", () => {
         })
       },
       evidenceCapsuleRepo: {
-        create: vi.fn(async (capsule) => {
-          order.push("repo_create");
-          store.set(capsule.object_id, Object.freeze({ ...capsule }));
-          return store.get(capsule.object_id)!;
-        }),
+        create,
         deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -85,10 +55,25 @@ describe("EvidenceService", () => {
       }
     });
 
-    const created = await service.create(createEvidenceInput());
+    const projection = {
+      projection_id: 1,
+      projection_kind: "user_assertion" as const,
+      content: "I bought my bookshelf from IKEA."
+    };
+    const created = await service.create(createEvidenceInput(), [projection]);
 
-    expect(order).toEqual(["event_log", "repo_create", "notify"]);
+    expect(order).toEqual(["event_log", "repo_create", "event_log", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
+    expect(create).toHaveBeenCalledWith(
+      expect.any(Object),
+      [projection],
+      expect.objectContaining({ status: "unavailable" }),
+      expect.objectContaining({ status: "unavailable", graph: null })
+    );
+    expect(appendedEvents[1]).toMatchObject({
+      event_type: "soul.field.source_record.admitted",
+      entity_type: "source_record"
+    });
     expect(appendedEvents[0]).toMatchObject({
       event_type: "soul.evidence.created",
       entity_type: "evidence_capsule",
@@ -101,76 +86,6 @@ describe("EvidenceService", () => {
         workspace_id: "workspace-1",
         run_id: "run-1"
       }
-    });
-  });
-
-  it("writes soul.evidence.deleted before deleting created evidence and notifying", async () => {
-    const order: string[] = [];
-    const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
-    const existing: EvidenceCapsule = Object.freeze({
-      object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-      object_kind: "evidence_capsule",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: "2026-03-20T01:00:00.000Z",
-      updated_at: "2026-03-20T01:00:00.000Z",
-      ...createEvidenceInput()
-    });
-
-    const service = new EvidenceService({
-      now: () => "2026-03-20T01:05:00.000Z",
-      eventLogRepo: {
-        append: vi.fn(async (event) => {
-          order.push("event_log");
-          appendedEvents.push(event);
-          return {
-            event_id: "event-compensated-delete",
-            created_at: "2026-03-20T01:05:00.000Z",
-            revision: 0,
-            ...event
-          };
-        })
-      },
-      evidenceCapsuleRepo: {
-        create: vi.fn(async () => {
-          throw new Error("not used");
-        }),
-        deleteById: vi.fn(async () => {
-          order.push("repo_delete");
-        }),
-        findById: vi.fn(async () => existing),
-        findByRunId: vi.fn(async () => []),
-        findByWorkspaceId: vi.fn(async () => []),
-        findByHealth: vi.fn(async () => []),
-        updateHealth: vi.fn(async () => {
-          throw new Error("not used");
-        })
-      },
-      runtimeNotifier: {
-        notifyEntry: vi.fn(async () => {
-          order.push("notify");
-        })
-      }
-    });
-
-    await service.deleteCreatedEvidence(existing.object_id);
-
-    expect(order).toEqual(["event_log", "repo_delete", "notify"]);
-    expect(appendedEvents[0]).toMatchObject({
-      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
-      entity_type: "evidence_capsule",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      payload_json: expect.objectContaining({
-        object_id: existing.object_id,
-        object_kind: "evidence_capsule",
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        from_state: "active",
-        to_state: "deleted",
-        reason_code: "memory_materialization_failed_after_evidence_creation"
-      })
     });
   });
 

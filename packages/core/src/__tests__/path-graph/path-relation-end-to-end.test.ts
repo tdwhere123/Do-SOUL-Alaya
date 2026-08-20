@@ -27,8 +27,14 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { PathRelationProposalService } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import {
+  CO_RECALLED_SEED_PROFILE,
+  PathRelationProposalService
+} from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -43,8 +49,8 @@ const MEM_QUERY_HIT = "00000000-0000-4000-8000-000000000001";
 const MEM_LINKED = "00000000-0000-4000-8000-000000000002";
 const WS = "workspace-1";
 
-describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () => {
-  it("writes PathRelation after 3 onCoUsage events and surfaces a path_expansion candidate", async () => {
+describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", () => {
+  it("writes PathRelation from submitCandidate and surfaces a path_expansion candidate", async () => {
     const { database, memoryEntryRepo, pathRelationRepo, coUsageCounterRepo } =
       await createRealStorage();
 
@@ -81,13 +87,20 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       },
       counterStore: coUsageCounterRepo,
       eventPublisher: eventPublisher as never,
-      threshold: 3,
       generateId: () => "11111111-1111-4111-8111-aaaaaaaaaaaa",
       now: () => "2026-05-16T00:00:00.000Z"
     });
-    await proposalService.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
-    await proposalService.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
-    await proposalService.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+    expect(await proposalService.submitCandidate({
+      workspaceId: WS,
+      sourceAnchor: { kind: "object", object_id: MEM_QUERY_HIT },
+      targetAnchor: { kind: "object", object_id: MEM_LINKED },
+      relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+      initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+      governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+      evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+      recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+      recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude
+    })).toBe("applied");
 
     const persistedPaths = await pathRelationRepo.findByAnchors(WS, [
       { kind: "object", object_id: MEM_QUERY_HIT }
@@ -109,6 +122,8 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     }));
 
     const deps: RecallServiceDependencies = {
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
       now: () => "2026-05-16T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {
@@ -222,6 +237,8 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
       }
     };
     const recallService = new RecallService({
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
       now: () => "2026-05-16T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {
@@ -259,10 +276,7 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     databases.delete(database);
   });
 
-  it("preserves sub-threshold co-usage counts across a simulated daemon restart", async () => {
-    // The core purpose of the durable counter: a count accrued under one
-    // daemon process must survive into a fresh service rebuilt against the
-    // same database after the prior in-memory state is discarded.
+  it("keeps a minted PathRelation visible after a simulated daemon restart", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "alaya-co-usage-"));
     const filename = join(tmpDir, "co-usage.db");
 
@@ -296,7 +310,6 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
         },
         counterStore: coUsageCounterRepo,
         eventPublisher: eventPublisher as never,
-        threshold: 3,
         generateId: () => "33333333-3333-4333-8333-aaaaaaaaaaaa",
         now: () => "2026-05-16T00:00:00.000Z"
       });
@@ -314,21 +327,35 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
         default_engine_binding: null,
         workspace_state: WorkspaceState.ACTIVE
       });
-      // Two sub-threshold observations under the first process.
-      await first.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
-      await first.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+      expect(await first.service.submitCandidate({
+        workspaceId: WS,
+        sourceAnchor: { kind: "object", object_id: MEM_QUERY_HIT },
+        targetAnchor: { kind: "object", object_id: MEM_LINKED },
+        relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+        initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+        governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+        evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+        recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+        recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude
+      })).toBe("applied");
       const beforeRestart = await first.pathRelationRepo.findByAnchors(WS, [
         { kind: "object", object_id: MEM_QUERY_HIT }
       ]);
-      expect(beforeRestart).toHaveLength(0);
-      // Discard in-memory state (close the connection, drop the service).
+      expect(beforeRestart).toHaveLength(1);
       first.database.close();
 
-      // Fresh service + DB connection: the prior count (2) is read back from
-      // the durable table, so a single further co-usage reaches the K=3
-      // threshold and a PathRelation is minted.
       const second = buildSession();
-      await second.service.onCoUsage([MEM_QUERY_HIT, MEM_LINKED], WS);
+      expect(await second.service.submitCandidate({
+        workspaceId: WS,
+        sourceAnchor: { kind: "object", object_id: MEM_QUERY_HIT },
+        targetAnchor: { kind: "object", object_id: MEM_LINKED },
+        relationKind: CO_RECALLED_SEED_PROFILE.relationKind,
+        initialStrength: CO_RECALLED_SEED_PROFILE.initialStrength,
+        governanceClass: CO_RECALLED_SEED_PROFILE.governanceClass,
+        evidenceBasis: CO_RECALLED_SEED_PROFILE.evidenceBasis,
+        recallBiasSign: CO_RECALLED_SEED_PROFILE.recallBiasSign,
+        recallBiasMagnitude: CO_RECALLED_SEED_PROFILE.recallBiasMagnitude
+      })).toBe("already_present");
       const afterRestart = await second.pathRelationRepo.findByAnchors(WS, [
         { kind: "object", object_id: MEM_QUERY_HIT }
       ]);

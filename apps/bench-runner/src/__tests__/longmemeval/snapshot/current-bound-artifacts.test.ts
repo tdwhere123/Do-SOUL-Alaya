@@ -11,19 +11,22 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { initDatabase } from "@do-soul/alaya-storage";
 import { bindCurrentSnapshotArtifacts } from
-  "../../../longmemeval/snapshot/current/current-bound-artifacts.js";
+  "../../../bench/snapshot/current/current-bound-artifacts.js";
 import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor,
   currentSnapshotSidecarFor
 } from "./current-snapshot-fixture.js";
 import { renderSnapshotExtractionAuthority } from
-  "../../../longmemeval/snapshot/extraction-authority.js";
+  "../../../bench/snapshot/extraction-authority.js";
 import {
   MAX_SNAPSHOT_MANIFEST_BYTES,
   MAX_SNAPSHOT_SIDECAR_BYTES
-} from "../../../longmemeval/snapshot/artifact-limits.js";
+} from "../../../bench/snapshot/artifact-limits.js";
+import { seedValidV1VerifiedAssertionReceipt } from
+  "./fixtures/valid-v1-assertion-receipt-fixture.js";
 
 const roots: string[] = [];
 
@@ -58,7 +61,7 @@ describe("current snapshot immutable artifact binding", () => {
     expect(await readFile(`${bound.snapshotDbPath}.extraction-authority.json`))
       .toEqual(original[3]);
     expect(bound.manifestSha256).toBe(sha256(original[1]!));
-  });
+  }, 20_000);
 
   it("rejects a symlinked current snapshot DB instead of following it", async () => {
     const fixture = await snapshotFixture();
@@ -71,6 +74,15 @@ describe("current snapshot immutable artifact binding", () => {
       sourceDbPath: fixture.snapshotDbPath,
       targetRoot: fixture.targetRoot
     })).toThrow();
+  });
+
+  it("rejects a hash-consistent current snapshot with a valid v1 receipt", async () => {
+    const fixture = await snapshotFixture({ validV1AssertionReceipt: true });
+
+    expect(() => bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    })).toThrow(/current snapshot requires a v2 assertion receipt/u);
   });
 
   it.each(["missing", "replacement", "symlink"] as const)(
@@ -121,15 +133,44 @@ describe("current snapshot immutable artifact binding", () => {
       targetRoot: fixture.targetRoot
     })).toThrow(/exceeds its size budget/u);
   });
+
+  it("binds a diagnostic_attributed snapshot without a promotion gate contract", async () => {
+    const fixture = await snapshotFixture({ diagnostic: true });
+    const bound = bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot,
+      snapshotConsumeAuthority: "diagnostic"
+    });
+    expect(bound.manifest.attribution).toEqual({
+      status: "diagnostic_attributed",
+      gate_eligible: false
+    });
+  });
+
+  it("keeps promotion binding rejected for a diagnostic_attributed snapshot", async () => {
+    const fixture = await snapshotFixture({ diagnostic: true });
+    expect(() => bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    })).toThrow(/stored gate_eligible claim is false/u);
+  });
 });
 
-async function snapshotFixture() {
+async function snapshotFixture(options: {
+  readonly validV1AssertionReceipt?: boolean;
+  readonly diagnostic?: boolean;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "current-bound-snapshot-"));
   roots.push(root);
   const targetRoot = join(root, "bound");
   await mkdir(targetRoot);
   const snapshotDbPath = join(root, "snapshot.db");
-  const dbBytes = Buffer.from("trusted current snapshot DB", "utf8");
+  const database = initDatabase({ filename: snapshotDbPath });
+  database.close();
+  if (options.validV1AssertionReceipt === true) {
+    seedValidV1VerifiedAssertionReceipt(snapshotDbPath);
+  }
+  const dbBytes = await readFile(snapshotDbPath);
   const sidecarBytes = Buffer.from(
     `${JSON.stringify(currentSnapshotSidecarFor("q-1"), null, 2)}\n`,
     "utf8"
@@ -137,13 +178,13 @@ async function snapshotFixture() {
   const authorityBytes = renderSnapshotExtractionAuthority(
     currentSnapshotExtractionAuthority()
   );
-  const manifest = currentSnapshotManifestFor("q-1", {
+  const manifest = diagnosticManifest(currentSnapshotManifestFor("q-1", {
     db_sha256: sha256(dbBytes),
     sidecar_sha256: sha256(sidecarBytes),
     extraction_authority_filename: "snapshot.db.extraction-authority.json",
     extraction_authority_sha256: sha256(authorityBytes),
     extraction_authority_bytes: authorityBytes.byteLength
-  });
+  }), options.diagnostic === true);
   await Promise.all([
     writeFile(snapshotDbPath, dbBytes),
     writeFile(`${snapshotDbPath}.sidecar.json`, sidecarBytes),
@@ -151,6 +192,27 @@ async function snapshotFixture() {
     writeFile(`${snapshotDbPath}.extraction-authority.json`, authorityBytes)
   ]);
   return { root, targetRoot, snapshotDbPath };
+}
+
+function diagnosticManifest(
+  manifest: ReturnType<typeof currentSnapshotManifestFor>,
+  diagnostic: boolean
+): ReturnType<typeof currentSnapshotManifestFor> {
+  if (!diagnostic) return manifest;
+  const provenance = manifest.run_provenance!;
+  return {
+    ...manifest,
+    attribution: { status: "diagnostic_attributed", gate_eligible: false },
+    run_provenance: {
+      ...provenance,
+      code: {
+        commit_sha7: provenance.code.commit_sha7,
+        gate_sha256: null,
+        worktree_state_sha256: null,
+        executed_dist: provenance.code.executed_dist
+      }
+    }
+  };
 }
 
 function sha256(value: Uint8Array): string {

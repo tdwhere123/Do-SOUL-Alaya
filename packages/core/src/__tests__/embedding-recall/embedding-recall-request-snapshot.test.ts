@@ -41,6 +41,28 @@ describe("EmbeddingRecallService request score snapshot", () => {
     ]);
     expect(Object.keys(snapshot.poolScoresByObjectId).sort()).toEqual(["pool-cold", "pool-hot"]);
     expect(snapshot.poolScoresByObjectId[fixture.stale.object_id]).toBeUndefined();
+    const poolCapture = snapshot.fieldChannelCaptures?.find(({ channel }) =>
+      channel.channel_id === "object_embedding_pool");
+    const workspaceCapture = snapshot.fieldChannelCaptures?.find(({ channel }) =>
+      channel.channel_id === "object_embedding_workspace");
+    expect(poolCapture?.channel).toMatchObject({
+      status: "complete",
+      depth: 2,
+      unseen_upper_bound: 0
+    });
+    expect(poolCapture?.channel.observations.map(({ candidate_key, rank }) => ({
+      candidate_key,
+      rank
+    }))).toEqual([
+      { candidate_key: "workspace_local:memory_entry:pool-hot", rank: 1 },
+      { candidate_key: "workspace_local:memory_entry:pool-cold", rank: 2 }
+    ]);
+    expect(workspaceCapture?.channel).toMatchObject({
+      status: "truncated",
+      depth: 0,
+      observations: [],
+      unseen_upper_bound: 1
+    });
   });
 
   it("normalizes one query once while scoring multiple records", async () => {
@@ -282,9 +304,16 @@ describe("EmbeddingRecallService request score snapshot", () => {
       maxSupplement: 1
     });
 
-    expect(snapshot.degradedReason).toBeNull();
+    expect(snapshot.degradedReason).toBe("no_stored_vectors");
     expect(snapshot.workspaceNeighbors.query_embedding_status).toBe("provider_not_requested");
-    expect(append).not.toHaveBeenCalled();
+    expect(append.mock.calls.map(([entry]) => entry.event_type)).toEqual([
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED
+    ]);
+    expect(append.mock.calls[0]?.[0].payload_json).toEqual(
+      expect.objectContaining({
+        degradation_reason: "no_stored_vectors"
+      })
+    );
   });
 
   it("does not invoke an unavailable provider and records supplement degradation", async () => {
@@ -327,6 +356,45 @@ describe("EmbeddingRecallService request score snapshot", () => {
     expect(append.mock.calls.map(([entry]) => entry.event_type)).toEqual([
       ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED
     ]);
+  });
+
+  it("skips workspace blob hydrate when maxNeighbors <= 0 and only loads pool via listByObjectIds", async () => {
+    const memory = createMemoryEntry({ object_id: "pool-only", content: "Pool only." });
+    const listByWorkspace = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: "workspace-neighbor",
+        content_hash: "sha256:neighbor",
+        embedding: new Float32Array([0, 1])
+      })
+    ]);
+    const listByObjectIds = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: memory.object_id,
+        content_hash: hashMemoryContent(memory.content),
+        embedding: new Float32Array([1, 0])
+      })
+    ]);
+    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByWorkspace, listByObjectIds },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
+    });
+
+    const snapshot = await service.prepareRecallEmbeddingSnapshot({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "pool only query",
+      poolMemories: [memory],
+      maxNeighbors: 0
+    });
+
+    expect(listByWorkspace).not.toHaveBeenCalled();
+    expect(listByObjectIds).toHaveBeenCalledOnce();
+    expect(listByObjectIds).toHaveBeenCalledWith("workspace-1", [memory.object_id]);
+    expect(snapshot.poolScoresByObjectId[memory.object_id]).toBeCloseTo(1, 7);
+    expect(snapshot.workspaceNeighbors.hits).toEqual([]);
+    expect(snapshot.workspaceNeighbors.workspace_scan_requested).toBeUndefined();
   });
 });
 

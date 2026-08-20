@@ -5,12 +5,12 @@ import {
   classifyReplayGoldDeliveryMissTaxonomy,
   resolveCoreDeliveryRank,
   toDeliveryMissCandidateInput
-} from "../../../longmemeval/diagnostics/miss/diagnostics-delivery-bridge.js";
+} from "../../../bench/diagnostics/miss/diagnostics-delivery-bridge.js";
 import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
   LongMemEvalReplayCandidate
-} from "../../../longmemeval/diagnostics/schema/diagnostics-types.js";
+} from "../../../bench/diagnostics/schema/diagnostics-types.js";
 
 function sampleCandidate(
   overrides: Partial<CandidateDiagnostic> = {}
@@ -129,15 +129,6 @@ describe("diagnostics-delivery-bridge", () => {
         sampleCandidate({ budgetDropReason: "unknown_reason" })
       ).droppedReason
     ).toBeNull();
-  });
-
-  it("preserves embedding-head dominance through the diagnostic bridge", () => {
-    const roundTripped = JSON.parse(JSON.stringify(sampleCandidate({
-      budgetDropReason: "embedding_head_dominance"
-    }))) as CandidateDiagnostic;
-    expect(
-      toDeliveryMissCandidateInput(roundTripped).droppedReason
-    ).toBe("embedding_head_dominance");
   });
 
   it("uses fusion-stage ranks only for core delivery rank", () => {
@@ -279,7 +270,7 @@ function sampleReplayCandidate(
 describe("FullGoldDeliveryContributionSchema", () => {
   it("accepts analyze output shape from buildLongMemEvalFullGoldCoverage", async () => {
     const { buildLongMemEvalFullGoldCoverage } = await import(
-      "../../../longmemeval/diagnostics.js"
+      "../../../bench/diagnostics.js"
     );
     const { buildGoldDiagnostic, buildQuestionDiagnosticFixture } = await import(
       "./gold-diagnostic-fixture.js"

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtractionOccurrenceIndex,
   hashExtractionOccurrenceIndex
-} from "../../../longmemeval/extraction/cache-audit/occurrence-index.js";
+} from "../../../bench/extraction/cache-audit/occurrence-index.js";
 import { computeTrustedRoleCorpusDigest } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 
 const model = "gpt-5.4-mini";
 const prompt = "Extraction cache parser formation prompt";
@@ -21,7 +21,7 @@ describe("extraction occurrence index", () => {
     });
 
     expect(occurrences).toHaveLength(2);
-    expect(occurrences[0]?.cacheKey).toBe(occurrences[1]?.cacheKey);
+    expect(occurrences[0]?.cacheKeys).toEqual(occurrences[1]?.cacheKeys);
     expect(occurrences.map((occurrence) => occurrence.sourceObservedAt)).toEqual([
       "2025-01-01T00:00:00.000Z",
       "2025-02-01T00:00:00.000Z"

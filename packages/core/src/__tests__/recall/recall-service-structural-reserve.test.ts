@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, SynthesisStatus, type MemoryEntry, type PathAnchorRef, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
@@ -86,14 +88,16 @@ const buildStructuralService = (params: {
         })),
         { object_id: "memory-gold", normalized_rank: 0.04 }
       ];
-      return new RecallService({
+      const scopedKeywordSearch = vi.fn(async (_workspaceId: string, query: string) =>
+        query.toLowerCase().includes("materializationrouter") ? withinObjectIdRows : []
+      );
+      return createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
           searchByKeyword: vi.fn(async () => lexicalRows),
-          searchByKeywordWithinObjectIds: vi.fn(async (_workspaceId: string, query: string) =>
-            query.toLowerCase().includes("materializationrouter") ? withinObjectIdRows : []
-          )
+          searchByKeywordWithinObjectIds: scopedKeywordSearch,
+          searchByKeywordWithinTier: scopedKeywordSearch
         },
         pathExpansionPort: { findByAnchors: params.findByAnchors },
         entityExtractionPort: {
@@ -185,10 +189,7 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
             (goldContributions?.trigram_fts ?? 0) +
             (goldContributions?.evidence_fts ?? 0)
         );
-      expect(goldDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
-
-      expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-gold");
-      expect(goldDiagnostic?.final_rank).toBeNull();
+      expect(goldDiagnostic?.fused_rank ?? 0).toBeGreaterThan(5);
       expect(goldDiagnostic?.rank_after_feature_rerank).toBe(goldDiagnostic?.fused_rank);
       expect(goldDiagnostic?.rank_after_lexical_priority).toBeUndefined();
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
@@ -198,7 +199,6 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
         (candidate) => candidate.object_id === delivered[0]?.object_id
       );
       expect(headDiagnostic?.admission_planes).toContain("lexical");
-      expect(headDiagnostic?.final_rank).toBe(headDiagnostic?.fused_rank);
     });
 
 it("delivers a structural candidate when fusion ranks it inside the budget", async () => {
@@ -287,7 +287,7 @@ it("does not deliver source-less synthesis rows when no structural candidate is 
       );
       const { dependencies } = createDependencies(memories);
       const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildCompositionSynthesis);
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,

@@ -2,14 +2,14 @@ import {
   makeShardDiagnostics,
   makeShardKpi
 } from "../../cli/merge/cli-merge-validations-fixture.js";
-import type { LongMemEvalRunProvenance } from "../../../longmemeval/provenance/run.js";
+import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { computeQuestionIdDigest } from "../../../longmemeval/selection/question-manifest.js";
-import { computeCohortAssignmentDigest } from "../../../longmemeval/selection/contract.js";
+import { computeQuestionIdDigest } from "../../../bench/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../../bench/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from "../../cli/merge/cli-merge-dataset-fixture.js";
 
 const DATASET_SHA = MERGE_TEST_DATASET_SHA256;
@@ -46,6 +46,7 @@ export function makeShardProvenance(
       gate_sha256: "a".repeat(64),
       gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "b".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf",
       worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -142,6 +143,9 @@ export function makeRangeDiagnostics(offset: number, limit: number) {
   return makeShardDiagnostics({
     questions: Array.from({ length: limit }, (_, index) => ({
       question_id: `q-${offset + index + 1}`,
+      gold_memory_ids: ["gold"],
+      gold_evidence_ids: [],
+      gold_object_ids: ["gold"],
       candidate_pool_complete: true,
       cohort_ledger: answerableCohortLedger(),
       candidates: []

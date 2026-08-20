@@ -12,8 +12,8 @@ import {
   type OfficialApiSignalDraft
 } from "../official-api-signal-parser.js";
 import {
-  normalizeSourceObservedAt,
-  selectObservedTemporalProjection
+  inspectObservedTemporalProjection,
+  normalizeSourceObservedAt
 } from "../temporal/observed-projection.js";
 import { buildOfficialCandidateSignal } from "./signal-payload.js";
 import {
@@ -22,9 +22,11 @@ import {
 } from "./source-grounding.js";
 import { buildOfficialApiSourceCorpus } from "../grounding/source-locator.js";
 import { assessOfficialApiSourceTrust } from "./source-trust.js";
+import { inspectOfficialApiSemanticFactorGraphProjection } from
+  "./semantic-factor-projection.js";
 
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
-export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v2";
+export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v9";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
@@ -46,6 +48,7 @@ export interface OfficialApiSignalFormationAuditInput {
   readonly created_at: string;
   readonly source_observed_at?: string;
   readonly require_source_observed_at?: boolean;
+  readonly require_semantic_factor_graph?: boolean;
   readonly signal_id_for: (index: number) => string;
 }
 
@@ -54,6 +57,10 @@ export interface OfficialApiSignalFormationAuditEntry {
   readonly disposition: OfficialApiSignalAuditDisposition;
   readonly stage: OfficialApiSignalAuditStage;
   readonly reason: string;
+  readonly semantic_factor_graph_projection?:
+    OfficialApiSignalDraft["semantic_factor_graph_projection"];
+  readonly object_kind_projection?: OfficialApiSignalDraft["object_kind_projection"];
+  readonly temporal_projection_audit?: OfficialApiSignalDraft["temporal_projection_audit"];
   readonly signal?: CandidateMemorySignal;
 }
 
@@ -130,8 +137,8 @@ function auditSalvagedEntries(
   const entries = elements.map((element, index) => {
     const candidate = parseSalvageElement(element);
     if (candidate === null) return invalidEntry(index, "parse", "salvage_element_unparseable");
-    const draft = parseOfficialApiSignalEntry(candidate);
-    if (draft === null) return invalidEntry(index, "parse", "entry_schema_invalid");
+    const draft = parseAuditSignalEntry(candidate, input);
+    if (draft === null) return invalidParsedEntry(candidate, index, input);
     if (admittedToParser >= OFFICIAL_API_SIGNAL_LIMIT) {
       return deferredEntry(index, "parse", "signal_limit_exceeded");
     }
@@ -156,13 +163,59 @@ function auditCandidate(
   input: OfficialApiSignalFormationAuditInput,
   timing: AuditTiming
 ): OfficialApiSignalFormationAuditEntry {
-  const draft = parseOfficialApiSignalEntry(candidate);
+  const draft = parseAuditSignalEntry(candidate, input);
   return draft === null
-    ? invalidEntry(index, "parse", "entry_schema_invalid")
+    ? invalidParsedEntry(candidate, index, input)
     : auditDraft(draft, index, input, timing);
 }
 
+function parseAuditSignalEntry(
+  candidate: unknown,
+  input: OfficialApiSignalFormationAuditInput
+): OfficialApiSignalDraft | null {
+  return parseOfficialApiSignalEntry(candidate, {
+    requireSemanticFactorGraph: input.require_semantic_factor_graph === true
+  });
+}
+
+function invalidParsedEntry(
+  candidate: unknown,
+  index: number,
+  input: OfficialApiSignalFormationAuditInput
+): OfficialApiSignalFormationAuditEntry {
+  if (input.require_semantic_factor_graph !== true || !isRecord(candidate)) {
+    return invalidEntry(index, "parse", "entry_schema_invalid");
+  }
+  const projection = inspectOfficialApiSemanticFactorGraphProjection(
+    candidate.semantic_factor_graph
+  );
+  return projection.graph === undefined
+    ? {
+      ...invalidEntry(index, "parse", "semantic_factor_graph_required"),
+      semantic_factor_graph_projection: projection.audit
+    }
+    : invalidEntry(index, "parse", "entry_schema_invalid");
+}
+
 function auditDraft(
+  draft: OfficialApiSignalDraft,
+  index: number,
+  input: OfficialApiSignalFormationAuditInput,
+  timing: AuditTiming
+): OfficialApiSignalFormationAuditEntry {
+  const entry = auditDraftCore(draft, index, input, timing);
+  return {
+    ...entry,
+    ...(draft.semantic_factor_graph_projection === undefined ? {} : {
+      semantic_factor_graph_projection: draft.semantic_factor_graph_projection
+    }),
+    ...(draft.object_kind_projection === undefined ? {} : {
+      object_kind_projection: draft.object_kind_projection
+    })
+  };
+}
+
+function auditDraftCore(
   draft: OfficialApiSignalDraft,
   index: number,
   input: OfficialApiSignalFormationAuditInput,
@@ -193,12 +246,7 @@ function auditDraft(
     : buildOfficialApiSourceCorpus(normalizedTurnContent, input.turn_messages!);
   const grounding = groundOfficialApiDraft(draft, groundingSourceText);
   if (grounding.status === "rejected") {
-    return {
-      index,
-      disposition: "rejected",
-      stage: "grounding",
-      reason: grounding.audit.reasons[0] ?? "source_assertion_rejected"
-    };
+    return rejectedGroundingEntry(index, grounding);
   }
   return formGroundedDraft(
     grounding.draft,
@@ -208,6 +256,24 @@ function auditDraft(
     timing.sourceObservedAt!,
     timing.createdAt!
   );
+}
+
+function rejectedGroundingEntry(
+  index: number,
+  grounding: Extract<ReturnType<typeof groundOfficialApiDraft>, { readonly status: "rejected" }>
+): OfficialApiSignalFormationAuditEntry {
+  return {
+    index,
+    disposition: "rejected",
+    stage: "grounding",
+    reason: grounding.audit.reasons[0] ?? "source_assertion_rejected",
+    ...(grounding.draft.semantic_factor_graph_projection === undefined
+      ? {}
+      : {
+        semantic_factor_graph_projection:
+          grounding.draft.semantic_factor_graph_projection
+      })
+  };
 }
 
 function timingFailure(
@@ -234,28 +300,43 @@ function formGroundedDraft(
   createdAt: string
 ): OfficialApiSignalFormationAuditEntry {
   try {
+    const temporalSelection = inspectObservedTemporalProjection(
+      draft.matched_text,
+      draft.temporal_projection,
+      sourceObservedAt,
+      draft.temporal_projection_audit
+    );
     const signal = CandidateMemorySignalSchema.parse(buildOfficialCandidateSignal({
       draft,
       workspaceId: input.workspace_id,
       runId: input.run_id,
       surfaceId: input.surface_id,
       normalizedTurnContent: input.turn_content.trim(),
+      turnMessages: input.turn_messages ?? [],
       groundingSourceText: draft.source_locator === undefined
         ? input.turn_content.trim()
         : buildOfficialApiSourceCorpus(input.turn_content.trim(), input.turn_messages!),
       confidence: clampConfidence(draft.confidence),
-      temporalProjection: selectObservedTemporalProjection(
-        draft.matched_text,
-        draft.temporal_projection,
-        sourceObservedAt
-      ),
+      temporalProjection: temporalSelection.projection,
+      temporalProjectionAudit: temporalSelection.audit,
       distilledFact: draft.distilled_fact,
       providerKind: GardenProviderKind.OFFICIAL_API,
       signalId: input.signal_id_for(index),
       createdAt,
+      sourceObservedAt: sourceObservedAt ?? createdAt,
       sourceGrounding
     }));
-    return { index, disposition: "admitted", stage: "formation", reason: "formed", signal };
+    return {
+      index,
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      temporal_projection_audit: temporalSelection.audit,
+      ...(draft.semantic_factor_graph_projection === undefined
+        ? {}
+        : { semantic_factor_graph_projection: draft.semantic_factor_graph_projection }),
+      signal
+    };
   } catch {
     return invalidEntry(index, "formation", "candidate_signal_invalid");
   }
@@ -268,6 +349,10 @@ function resolveAuditTiming(input: OfficialApiSignalFormationAuditInput): AuditT
     sourceObservedAt,
     sourceObservationInvalid: input.source_observed_at !== undefined && sourceObservedAt === undefined
   };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function invalidEnvelope(

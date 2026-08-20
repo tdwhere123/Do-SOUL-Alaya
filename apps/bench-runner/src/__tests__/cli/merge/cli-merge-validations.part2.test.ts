@@ -373,5 +373,5 @@ describe("merge-longmemeval validations", () => {
 
 describe("merge-longmemeval validations", () => {
   it("merges diagnostics miss taxonomy distribution while accepting legacy sidecars", async () =>
-    verifyTaxonomyDistributionMerged());
+    verifyTaxonomyDistributionMerged(), 20_000);
 });

@@ -1,58 +1,77 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
+import { getCoreConfig, installCoreConfigFromProcessEnv, parseSourceRefRobust } from "@do-soul/alaya-core";
 import {
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
   type AlayaDaemonServer,
   type DaemonStartupStepRecord
-} from "./runtime/daemon-runtime-types.js";
-import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
-import { startCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
-import { validateDaemonEnv } from "./runtime/daemon-env.js";
-import { createDaemonRepositories } from "./runtime/daemon-repositories.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/support/config-files.js";
+import { startCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+import { validateDaemonEnv } from "./runtime/daemon/support/daemon-env.js";
+import { createDaemonRepositories } from "./runtime/daemon/wiring/daemon-repositories.js";
 import {
   createWarnLogger,
   installUnhandledRejectionHandler
-} from "./runtime/daemon-runtime-helpers.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 import {
   createRequestProtection,
   listServerHardConstraints,
   loadConfigEnv,
+  readConfigEnvValue,
   recordStartupStep,
   resolveDatabasePath
-} from "./runtime/daemon-runtime-support.js";
-import { createDaemonServiceFoundation } from "./runtime/daemon-service-foundation.js";
-import { resolveCoreDaemonFilesDirectory } from "./runtime/files-data-dir.js";
-import { finalizeDaemonRuntimeFromWiring } from "./runtime/finalize-daemon-runtime-wiring.js";
-import { createGardenRuntimeWiring } from "./runtime/garden-runtime-wiring.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-support.js";
+import { createDaemonServiceFoundation } from "./runtime/daemon/wiring/daemon-service-foundation.js";
+import { resolveCoreDaemonFilesDirectory } from "./runtime/daemon/support/files-data-dir.js";
+import { finalizeDaemonRuntimeFromWiring } from "./runtime/daemon/lifecycle/finalize-daemon-runtime-wiring.js";
+import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
 import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
-import type { RecallReadWorkerClient } from "./runtime/recall-read-worker-client.js";
-import { createRuntimeNotifier } from "./runtime/runtime-notifier.js";
+import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
+import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
+import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "./runtime/config/daemon-config-environment.js";
+import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
+import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
 export type {
   AlayaDaemonListenOptions,
   AlayaDaemonRuntime,
   AlayaDaemonRuntimeServices,
   AlayaDaemonServer,
-  DaemonStartupStepRecord
-} from "./runtime/daemon-runtime-types.js";
-export { startCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
+  DaemonStartupStepRecord,
+  EffectiveReconciliationBasis,
+  ReconciliationBasisStatus
+} from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+export type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
+export type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
+export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+export {
+  resolveEffectiveEmbeddingPosture,
+  type EffectiveEmbeddingPosture
+} from "./ai/daemon-embedding-runtime-config.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
-export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
+export interface AlayaDaemonRuntimeOptions {
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+  readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
+}
+
+export async function createAlayaDaemonRuntime(
+  options: AlayaDaemonRuntimeOptions = {}
+): Promise<AlayaDaemonRuntime> {
   const bootstrap = await createRuntimeBootstrapContext();
   let recallReadWorkerClient: RecallReadWorkerClient | null = null;
   try {
-    const repositories = createDaemonRepositoryWiring(bootstrap);
+    const repositories = createDaemonRepositoryWiring(bootstrap, options);
     const foundation = await createDaemonFoundationWiring(bootstrap, repositories);
     const recallAndCore = await createRecallAndCoreWiring({
       bootstrap,
@@ -60,7 +79,8 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
       foundation,
       registerRecallReadWorker: (client) => {
         recallReadWorkerClient = client;
-      }
+      },
+      relationProjectionAdmissionMode: options.relationProjectionAdmissionMode
     });
     const runtime = await createGardenAndFinalRuntime(
       bootstrap,
@@ -100,12 +120,18 @@ async function createRuntimeBootstrapContext() {
   });
   // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
+  warnLogger.info("effective recall runtime", {
+    projections_enabled: getCoreConfig().recall.projectionsEnabled,
+    source_ref_robust: parseSourceRefRobust(
+      readConfigEnvValue(configEnvResult, DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
+    )
+  });
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
-  let database: ReturnType<typeof openDaemonDatabase>;
+  let database: Awaited<ReturnType<typeof openDaemonDatabase>>;
   try {
-    database = openDaemonDatabase(dbPath);
+    database = await openDaemonDatabase(dbPath);
   } catch (error) {
     await temporalRuntimeLease.release();
     throw error;
@@ -126,10 +152,16 @@ async function createRuntimeBootstrapContext() {
   };
 }
 
-function createDaemonRepositoryWiring(bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>) {
+function createDaemonRepositoryWiring(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  options: AlayaDaemonRuntimeOptions
+) {
   const repositories = createDaemonRepositories({
     database: bootstrap.database,
-    warn: bootstrap.warnLogger.warn
+    warn: bootstrap.warnLogger.warn,
+    ...(options.fieldProjectionAdmissionMode === undefined
+      ? {}
+      : { fieldProjectionAdmissionMode: options.fieldProjectionAdmissionMode })
   });
   recordStartupStep(bootstrap.startupSteps, "repositories");
   return repositories;
@@ -150,6 +182,7 @@ async function createDaemonFoundationWiring(
     eventLogRepo: repositories.eventLogRepo,
     workspaceEngineConfigRepo: repositories.workspaceEngineConfigRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    softAssociationPathRepo: repositories.softAssociationPathRepo,
     bootstrappingRecordRepo: repositories.bootstrappingRecordRepo,
     configRepo: repositories.configRepo,
     trustStateRepo: repositories.trustStateRepo,
@@ -172,7 +205,8 @@ async function createDaemonFoundationWiring(
     crossCuttingPermissionRepo: repositories.crossCuttingPermissionRepo,
     surfaceIdentityRepo: repositories.surfaceIdentityRepo,
     surfaceAnchorRepo: repositories.surfaceAnchorRepo,
-    projectMappingAnchorRepo: repositories.projectMappingAnchorRepo
+    projectMappingAnchorRepo: repositories.projectMappingAnchorRepo,
+    fieldComposition: repositories.fieldComposition
   });
 }
 
@@ -204,6 +238,7 @@ async function buildGardenWiring(
     pathRelationRepo: repositories.pathRelationRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
+    relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
     configService: runtimeWiring.coreWiring.configService,
     officialGardenProvider: runtimeWiring.coreWiring.officialGardenProvider,
     localHeuristicsProvider: runtimeWiring.coreWiring.localHeuristicsProvider,
@@ -295,10 +330,14 @@ function buildFinalizeSurfaceRuntimeInput(
     memoryEntryRepo: repositories.memoryEntryRepo,
     evidenceService: foundation.evidenceService,
     pathRelationProposalService: runtimeWiring.recallWiring.pathRelationProposalService,
+    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
+    relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
+    relationProjectionCheckpoint: runtimeWiring.recallWiring.relationProjectionCheckpoint,
     signalService: runtimeWiring.recallWiring.signalService,
     graphExploreService: foundation.graphExploreService,
     edgeProposalService: foundation.edgeProposalService,
-    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort
+    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort,
+    fieldComposition: repositories.fieldComposition
   };
 }
 
@@ -357,6 +396,7 @@ function buildFinalizeOperationsRuntimeInput(
     slotService: foundation.slotService,
     arbitrationService: foundation.arbitrationService,
     recallUtilizationService: runtimeWiring.recallWiring.recallUtilizationService,
+    reconciliationBasisStatus: runtimeWiring.recallWiring.reconciliationBasisStatus,
     singleUsedAnchorEmitter: runtimeWiring.recallWiring.singleUsedAnchorEmitter,
     deliveryAnchorReader: runtimeWiring.recallWiring.deliveryAnchorReader,
     taskSurfaceBuilder: foundation.taskSurfaceBuilder,

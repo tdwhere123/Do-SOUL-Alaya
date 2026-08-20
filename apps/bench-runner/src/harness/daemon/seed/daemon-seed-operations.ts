@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import {
   CandidateMemorySignalSchema,
   ScopeClass,
   SignalSource,
   type CandidateMemorySignal,
   type SoulEmitCandidateSignalResponse,
-  type SoulProposeMemoryUpdateResponse,
-  type SoulReviewMemoryProposalResponse
+  type SoulProposeMemoryUpdateResponse
 } from "@do-soul/alaya-protocol";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
-import { initDatabase, SqliteMemoryHqRepo } from "@do-soul/alaya-storage";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -28,6 +25,7 @@ import type {
   CompileSeedBatchResult,
   CompileSeedSignalDrop,
   SeededMemoryResult,
+  SeededObjectResult,
   SeededSynthesisResult
 } from "../daemon-types.js";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
@@ -37,11 +35,13 @@ import {
   projectCompileRawPayload
 } from "../../seeding/compile-raw-payload.js";
 import { attachCompileSourceGrounding } from "../../seeding/source-grounding.js";
+import {
+  buildBenchSourceEvidenceFallback
+} from "./daemon-source-evidence-fallback.js";
+import { persistBenchAnswerHq } from "./daemon-seed-answer-hq.js";
 
 export {
-  accrueAnswersWithCoRelevance,
-  accrueCoherenceCoRecall,
-  accrueSessionCoRecall
+  accrueAnswersWithCoRelevance
 } from "../runtime/daemon-edge-accrual.js";
 
 type AcceptedSeedMemory = { readonly proposalId: string };
@@ -62,7 +62,6 @@ type BenchSignalReceiveResult = {
     readonly created_objects: readonly BenchSignalMaterializedObject[];
   } | null;
 };
-const BENCH_ANSWER_HQ_MAX = 5;
 
 export async function acceptSeededMemory(
   input: CreateBenchSeedOpsInput,
@@ -83,19 +82,13 @@ export async function acceptSeededMemory(
     );
   }
 
-  const reviewResponse = await input.callMcpTool<SoulReviewMemoryProposalResponse>(
-    "soul.review_memory_proposal",
-    {
-      proposal_id: proposeResponse.proposal_id,
-      verdict: "accept",
-      reason: "bench seed auto-accept",
-      reviewer_identity: input.reviewerIdentity,
-      reviewer_token: input.reviewerToken
-    }
-  );
+  const reviewResponse = await input.reviewMemoryProposal({
+    proposalId: proposeResponse.proposal_id,
+    reason: "bench seed auto-accept"
+  });
   if (reviewResponse.resolution_state !== "accepted") {
     throw new Error(
-      `soul.review_memory_proposal returned unexpected state=${reviewResponse.resolution_state}`
+      `alaya review accept returned unexpected state=${reviewResponse.resolution_state}`
     );
   }
   return { proposalId: proposeResponse.proposal_id };
@@ -107,16 +100,11 @@ async function materializeAndAcceptSeed(
   evidenceRef: string
 ): Promise<MaterializedAcceptedSeed> {
   const materialized = await input.readMaterializedObjects(signalId);
-  let accepted: AcceptedSeedMemory;
-  try {
-    accepted = await acceptSeededMemory(input, materialized.memoryId, evidenceRef);
-  } catch (error) {
-    throw createUnscoredMaterializedSeedError({
-      memoryId: materialized.memoryId,
-      evidenceRef,
-      cause: error
-    });
-  }
+  const accepted = await protectMaterializedSeed(
+    materialized.memoryId,
+    evidenceRef,
+    () => acceptSeededMemory(input, materialized.memoryId, evidenceRef)
+  );
   return {
     memoryId: materialized.memoryId,
     proposalId: accepted.proposalId,
@@ -131,9 +119,11 @@ function clippedDistilledFact(value: string): string {
 }
 
 function buildSignalRawPayload(
+  input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
   safeExcerpt: string,
-  safeDistilledFact: string
+  safeDistilledFact: string,
+  signalId?: string
 ): Record<string, unknown> {
   const tokenEconomy = benchTokenEconomyPayload({
     fullTurnContent: safeExcerpt,
@@ -147,7 +137,11 @@ function buildSignalRawPayload(
     ...proposedPayload,
     extraction_provider: signalInput.extractionProvider,
     ...tokenEconomy
-  }, signalInput, safeExcerpt);
+  }, signalInput, {
+    workspaceId: input.activeContext.workspaceId,
+    runId: input.activeContext.runId,
+    ...(signalId === undefined ? {} : { signalId })
+  });
 }
 
 export async function proposeMemory(
@@ -215,7 +209,7 @@ export async function proposeMemoryFromSignal(
       confidence: signalInput.confidence,
       evidence_refs: [signalInput.evidenceRef],
       ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
-      raw_payload: buildSignalRawPayload(signalInput, clip.safe, safeDistilledFact)
+      raw_payload: buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact)
     }
   );
   if (signalResponse.status !== "emitted") {
@@ -236,6 +230,7 @@ function seededMemoryResult(
   clip: ReturnType<typeof clipSeedContent>
 ): SeededMemoryResult {
   return {
+    kind: "memory_entry",
     memoryId: accepted.memoryId,
     signalId,
     proposalId: accepted.proposalId,
@@ -246,16 +241,35 @@ function seededMemoryResult(
 }
 
 type CompileSeedResult =
-  | { readonly kind: "seeded"; readonly result: SeededMemoryResult }
-  | { readonly kind: "dropped"; readonly drop: CompileSeedSignalDrop };
+  | {
+      readonly kind: "seeded";
+      readonly result: SeededObjectResult;
+      readonly createdEvidence: boolean;
+    }
+  | {
+      readonly kind: "dropped";
+      readonly drop: CompileSeedSignalDrop;
+      readonly createdEvidence: boolean;
+    };
 
 function buildCompileSignal(
   input: CreateBenchSeedOpsInput,
   signalInput: BenchSignalSeedInput,
+  signalId: string,
   rawPayload: Record<string, unknown>
 ): CandidateMemorySignal {
+  const observedAt = signalInput.sourceObservedAt ?? new Date().toISOString();
+  const sourceObservation = signalInput.sourceObservedAt === undefined
+    ? {}
+    : {
+        source_observation: {
+          observed_at: signalInput.sourceObservedAt,
+          authority: "trusted_host_event" as const,
+          source_event_id: signalInput.evidenceRef
+        }
+      };
   const candidate = {
-    signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+    signal_id: signalId,
     workspace_id: input.activeContext.workspaceId,
     run_id: input.activeContext.runId,
     surface_id: signalInput.surfaceId ?? null,
@@ -268,7 +282,8 @@ function buildCompileSignal(
     evidence_refs: [signalInput.evidenceRef],
     ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
     raw_payload: rawPayload,
-    created_at: signalInput.sourceObservedAt ?? new Date().toISOString()
+    ...sourceObservation,
+    created_at: observedAt
   };
   try {
     return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse(candidate));
@@ -284,7 +299,8 @@ function buildCompileSignal(
 function droppedCompileSignal(
   signalId: string,
   triageResult: string,
-  routingReason: string
+  routingReason: string,
+  createdEvidence: boolean
 ): CompileSeedResult {
   process.stderr.write(
     `[bench compile-seed] signal ${signalId} ` +
@@ -293,6 +309,7 @@ function droppedCompileSignal(
   );
   return {
     kind: "dropped",
+    createdEvidence,
     drop: {
       reason: "candidate_absent",
       detail: `triage=${triageResult} routing=${routingReason}`
@@ -306,36 +323,83 @@ async function seedOneCompileSignal(
 ): Promise<CompileSeedResult> {
   const clip = clipSeedContent(signalInput.turnContent);
   const safeDistilledFact = clippedDistilledFact(signalInput.distilledFact);
-  const signal = buildCompileSignal(
-    input,
-    signalInput,
-    buildSignalRawPayload(signalInput, clip.safe, safeDistilledFact)
-  );
+  const fallback = signalInput.evidenceFallbackReason !== undefined
+    ? buildBenchSourceEvidenceFallback(input, signalInput)
+    : null;
+  const signalId = `bench_signal_${randomUUID().replace(/-/gu, "")}`;
+  const signal = fallback?.signal ?? buildCompileSignal(
+      input,
+      signalInput,
+      signalId,
+      buildSignalRawPayload(input, signalInput, clip.safe, safeDistilledFact, signalId)
+    );
   const received = (await input.activeRuntime.services.signalService.receiveSignal(
     signal
   )) as BenchSignalReceiveResult;
+  return resolveReceivedCompileSignal(
+    input,
+    signalInput,
+    fallback,
+    clip,
+    received
+  );
+}
+
+async function resolveReceivedCompileSignal(
+  input: CreateBenchSeedOpsInput,
+  signalInput: BenchSignalSeedInput,
+  fallback: ReturnType<typeof buildBenchSourceEvidenceFallback> | null,
+  clip: ReturnType<typeof clipSeedContent>,
+  received: BenchSignalReceiveResult
+): Promise<CompileSeedResult> {
   const createdObjects: readonly BenchSignalMaterializedObject[] =
     received.materialization?.created_objects ?? [];
   const memoryObject = createdObjects.find((obj) => obj.object_kind === "memory_entry");
-  if (memoryObject === undefined) {
-    return droppedCompileSignal(
-      received.signal.signal_id,
-      received.triage_result,
-      received.materialization?.routing_reason ?? "n/a"
-    );
-  }
-
   const evidenceObject = createdObjects.find(
     (obj) => obj.object_kind === "evidence_capsule"
   );
-  const accepted = await acceptCompileSeededMemory(
-    input,
+  if (memoryObject === undefined) {
+    if (fallback !== null && evidenceObject !== undefined) {
+      return {
+        kind: "seeded",
+        createdEvidence: true,
+        result: {
+          kind: "evidence_capsule",
+          evidenceId: evidenceObject.object_id,
+          signalId: received.signal.signal_id,
+          truncated: fallback.truncated,
+          charsClipped: fallback.charsClipped
+        }
+      };
+    }
+    return droppedCompileSignal(
+      received.signal.signal_id,
+      received.triage_result,
+      received.materialization?.routing_reason ?? "n/a",
+      evidenceObject !== undefined
+    );
+  }
+
+  const accepted = await protectMaterializedSeed(
     memoryObject.object_id,
-    signalInput.evidenceRef
+    signalInput.evidenceRef,
+    () => acceptSeededMemory(input, memoryObject.object_id, signalInput.evidenceRef)
   );
-  await persistBenchAnswerHq(input, memoryObject.object_id, signalInput);
+  if (evidenceObject !== undefined) {
+    await protectMaterializedSeed(
+      memoryObject.object_id,
+      signalInput.evidenceRef,
+      () => persistBenchAnswerHq(
+        input,
+        memoryObject.object_id,
+        evidenceObject.object_id,
+        signalInput
+      )
+    );
+  }
   return {
     kind: "seeded",
+    createdEvidence: evidenceObject !== undefined,
     result: seededMemoryResult(
       received.signal.signal_id,
       {
@@ -348,65 +412,13 @@ async function seedOneCompileSignal(
   };
 }
 
-async function persistBenchAnswerHq(
-  input: CreateBenchSeedOpsInput,
+async function protectMaterializedSeed<T>(
   memoryId: string,
-  signalInput: BenchSignalSeedInput
-): Promise<void> {
-  const hqs = collectBenchAnswerHqs(signalInput);
-  if (hqs.length === 0) return;
-  const repo = new SqliteMemoryHqRepo(
-    initDatabase({ filename: join(input.dataDir, "alaya.db") })
-  );
-  const existing = (await repo.getHqByObjectIds([memoryId])).get(memoryId) ?? [];
-  const merged = [...new Set([...existing, ...hqs])].slice(0, BENCH_ANSWER_HQ_MAX);
-  const now = new Date().toISOString();
-  await repo.upsert({
-    object_id: memoryId,
-    workspace_id: input.activeContext.workspaceId,
-    hqs: merged,
-    created_at: now,
-    updated_at: now
-  });
-}
-
-function collectBenchAnswerHqs(signalInput: BenchSignalSeedInput): readonly string[] {
-  const values = new Set<string>();
-  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hqs")) {
-    addBenchAnswerHq(values, raw);
-  }
-  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hypothetical_questions")) {
-    addBenchAnswerHq(values, raw);
-  }
-  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hypotheticalQuestions")) {
-    addBenchAnswerHq(values, raw);
-  }
-  addBenchAnswerHq(values, signalInput.distilledFact);
-  return [...values].slice(0, BENCH_ANSWER_HQ_MAX);
-}
-
-function readStringArrayField(
-  rawPayload: Readonly<Record<string, unknown>> | undefined,
-  key: string
-): readonly string[] {
-  const value = rawPayload?.[key];
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function addBenchAnswerHq(values: Set<string>, value: string): void {
-  const normalized = value.trim().replace(/\s+/gu, " ");
-  if (normalized.length > 0) {
-    values.add(normalized);
-  }
-}
-
-async function acceptCompileSeededMemory(
-  input: CreateBenchSeedOpsInput,
-  memoryId: string,
-  evidenceRef: string
-): Promise<AcceptedSeedMemory> {
+  evidenceRef: string,
+  operation: () => Promise<T>
+): Promise<T> {
   try {
-    return await acceptSeededMemory(input, memoryId, evidenceRef);
+    return await operation();
   } catch (error) {
     throw createUnscoredMaterializedSeedError({ memoryId, evidenceRef, cause: error });
   }
@@ -417,19 +429,21 @@ export async function proposeMemoriesFromCompileSignals(
   inputs: readonly BenchSignalSeedInput[]
 ): Promise<CompileSeedBatchResult> {
   if (inputs.length === 0) {
-    return { seeds: [], dropped: [] };
+    return { seeds: [], dropped: [], createdEvidence: false };
   }
-  const seeds: SeededMemoryResult[] = [];
+  const seeds: SeededObjectResult[] = [];
   const dropped: CompileSeedSignalDrop[] = [];
+  let createdEvidence = false;
   for (const signalInput of inputs) {
     const result = await seedCompileSignalSafely(input, signalInput);
+    createdEvidence ||= result.createdEvidence;
     if (result.kind === "dropped") {
       dropped.push(result.drop);
     } else {
       seeds.push(result.result);
     }
   }
-  return { seeds, dropped };
+  return { seeds, dropped, createdEvidence };
 }
 
 async function seedCompileSignalSafely(
@@ -448,7 +462,11 @@ async function seedCompileSignalSafely(
         `threw before memory_entry creation — isolated per-signal, turn batch ` +
         `continues: ${detail}\n`
     );
-    return { kind: "dropped", drop: { reason: "materialization_drop", detail } };
+    return {
+      kind: "dropped",
+      createdEvidence: false,
+      drop: { reason: "materialization_drop", detail }
+    };
   }
 }
 

@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { AppConfigService } from "../../services/config-service.js";
+import type { AppConfigService } from "../../services/config/config-service.js";
 import { implementPort, type LooseStub } from "./implement-port.js";
 
 export function appConfigServiceStub(overrides: LooseStub<AppConfigService> = {}): AppConfigService {

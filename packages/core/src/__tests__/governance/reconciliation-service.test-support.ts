@@ -120,7 +120,8 @@ export function createDeps(
 export const baseInput = {
   workspaceId: "workspace-1",
   runId: "run-1",
-  signalId: "signal-1"
+  signalId: "signal-1",
+  incomingDimension: MemoryDimension.FACT
 } as const;
 
 export function drive(
@@ -128,6 +129,7 @@ export function drive(
   input: {
     incomingContent: string;
     incomingDomainTags: readonly string[];
+    incomingDimension?: Parameters<ReconciliationService["runWithDecision"]>[0]["incomingDimension"];
     incomingProjectionFields?: Parameters<ReconciliationService["runWithDecision"]>[0]["incomingProjectionFields"];
   },
   options: { evidenceRefForVerdict?: (kind: string) => string } = {}

@@ -6,6 +6,8 @@ export type RelativeWeekday =
 
 export type RelativeTemporalTerm =
   | { readonly kind: "offset"; readonly unit: RelativeTemporalUnit; readonly amount: number }
+  | { readonly kind: "lookback"; readonly unit: RelativeTemporalUnit; readonly amount: number }
+  | { readonly kind: "named_month"; readonly month0: number }
   | { readonly kind: "season"; readonly season: SeasonName; readonly yearOffset: number }
   | { readonly kind: "weekday"; readonly weekday: RelativeWeekday; readonly weekOffset: number };
 
@@ -20,6 +22,11 @@ const DAY_MS = 86_400_000;
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
   seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12
+};
+
+const MONTH_INDEX: Readonly<Record<string, number>> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
 };
 
 const WEEKDAY_INDEX: Readonly<Record<RelativeWeekday, number>> = {
@@ -55,6 +62,8 @@ export function parseRelativeTemporalTerm(raw: string): RelativeTemporalTerm | n
   const normalized = raw.trim().replace(/\s+/gu, " ").toLowerCase();
   return FIXED_RELATIVE_TERMS.get(normalized)
     ?? parseAgoTerm(normalized)
+    ?? parseLookbackTerm(normalized)
+    ?? parseNamedMonthTerm(normalized)
     ?? parseSeasonTerm(normalized)
     ?? parseWeekdayTerm(normalized);
 }
@@ -64,6 +73,12 @@ export function resolveRelativeTemporalWindow(
   anchorMs: number,
   offsetMinutes = 0
 ): TemporalWindow {
+  if (term.kind === "lookback") {
+    return lookbackWindow(term.unit, term.amount, anchorMs, offsetMinutes);
+  }
+  if (term.kind === "named_month") {
+    return namedMonthWindow(term.month0, anchorMs, offsetMinutes);
+  }
   if (term.kind === "season") {
     return seasonWindow(term.season, anchorMs, term.yearOffset, offsetMinutes);
   }
@@ -84,7 +99,7 @@ export function resolveRelativeTemporalWindow(
 
 function parseAgoTerm(normalized: string): RelativeTemporalTerm | null {
   const match =
-    /^(\d{1,3}|[a-z]+) (days?|weeks?|months?|years?) ago$/u.exec(normalized) ??
+    /^((?:a )?couple of|an?|\d{1,3}|[a-z]+) (days?|weeks?|months?|years?) ago$/u.exec(normalized) ??
     /^(\d{1,3})(天|周|个月|年)前$/u.exec(normalized);
   if (match === null) {
     return null;
@@ -94,10 +109,30 @@ function parseAgoTerm(normalized: string): RelativeTemporalTerm | null {
   return unit === null || amount === null ? null : unitOffset(unit, -amount);
 }
 
+function parseLookbackTerm(normalized: string): RelativeTemporalTerm | null {
+  const match = /^(?:past|last) ((?:a )?couple of|an?|\d{1,3}|[a-z]+) (days?|weeks?|months?|years?)$/u
+    .exec(normalized);
+  if (match === null) return null;
+  const unit = agoUnit(match[2]!);
+  const amount = parseRelativeCount(match[1]!);
+  return unit === null || amount === null || amount < 1
+    ? null
+    : { kind: "lookback", unit, amount };
+}
+
+function parseNamedMonthTerm(normalized: string): RelativeTemporalTerm | null {
+  const match = /^(?:in (?:the month of )?|(?:the )?month of )([a-z]+)$/u.exec(normalized);
+  if (match === null) return null;
+  const month0 = MONTH_INDEX[match[1]!.slice(0, 3)];
+  return month0 === undefined ? null : { kind: "named_month", month0 };
+}
+
 function parseRelativeCount(token: string): number | null {
   if (/^\d{1,3}$/u.test(token)) {
     return Number(token);
   }
+  if (token === "a" || token === "an") return 1;
+  if (token === "couple of" || token === "a couple of") return 2;
   return NUMBER_WORDS[token] ?? null;
 }
 
@@ -175,6 +210,50 @@ function yearOffsetWindow(anchorMs: number, amount: number, offsetMinutes: numbe
     startMs: civilMidnightMs(year, 0, 1, offsetMinutes),
     endMs: civilMidnightMs(year + 1, 0, 1, offsetMinutes) - 1,
     precision: "year"
+  };
+}
+
+function lookbackWindow(
+  unit: RelativeTemporalUnit,
+  amount: number,
+  anchorMs: number,
+  offsetMinutes: number
+): TemporalWindow {
+  const anchor = civilDate(anchorMs, offsetMinutes);
+  const endMs = civilMidnightMs(
+    anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() + 1, offsetMinutes
+  ) - 1;
+  const startMs = lookbackStartMs(unit, amount, anchor, offsetMinutes);
+  return { startMs, endMs, precision: "range" };
+}
+
+function lookbackStartMs(
+  unit: RelativeTemporalUnit,
+  amount: number,
+  anchor: Date,
+  offsetMinutes: number
+): number {
+  const year = anchor.getUTCFullYear();
+  const month = anchor.getUTCMonth();
+  const day = anchor.getUTCDate();
+  if (unit === "day") return civilMidnightMs(year, month, day - amount + 1, offsetMinutes);
+  if (unit === "month") return civilMidnightMs(year, month - amount + 1, 1, offsetMinutes);
+  if (unit === "year") return civilMidnightMs(year - amount + 1, 0, 1, offsetMinutes);
+  const weekday = (anchor.getUTCDay() + 6) % 7;
+  return civilMidnightMs(year, month, day - weekday - (amount - 1) * 7, offsetMinutes);
+}
+
+function namedMonthWindow(
+  month0: number,
+  anchorMs: number,
+  offsetMinutes: number
+): TemporalWindow {
+  const anchor = civilDate(anchorMs, offsetMinutes);
+  const year = anchor.getUTCFullYear() - (month0 > anchor.getUTCMonth() ? 1 : 0);
+  return {
+    startMs: civilMidnightMs(year, month0, 1, offsetMinutes),
+    endMs: civilMidnightMs(year, month0 + 1, 1, offsetMinutes) - 1,
+    precision: "month"
   };
 }
 

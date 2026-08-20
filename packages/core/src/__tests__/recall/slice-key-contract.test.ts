@@ -1,22 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createSelectedSliceKeyV1,
-  intersectSelectedSliceKeysV1,
-  normalizeSelectedSliceKeysV1,
-  SELECTED_SLICE_KEY_V1_SEED_DIMENSIONS,
-  type SelectedSliceKeyInputV1,
-  type SelectedSliceKeyProvenanceKindV1
+  createSelectedSliceKeyV2,
+  intersectSelectedSliceKeysV2,
+  normalizeSelectedSliceKeysV2,
+  SELECTED_SLICE_KEY_V2_SEED_DIMENSIONS,
+  type SelectedSliceKeyInputV2,
+  type SelectedSliceKeyProvenanceKindV2
 } from "../../recall/flood/slice-key-contract.js";
 
 function keyInput(
-  provenanceKind: SelectedSliceKeyProvenanceKindV1,
-  overrides: Partial<SelectedSliceKeyInputV1> = {}
-): SelectedSliceKeyInputV1 {
+  provenanceKind: SelectedSliceKeyProvenanceKindV2,
+  overrides: Partial<SelectedSliceKeyInputV2> = {}
+): SelectedSliceKeyInputV2 {
+  const query = provenanceKind === "query_probe";
   return {
     workspace_id: "workspace-A",
+    owner_id: query ? null : "memory-1",
     dimension: "entity",
     value: "Ada Lovelace",
+    authority: query ? "derived_query" : "grounded",
+    reliability: 1,
+    independence_group: query ? "query:workspace-A" : "memory:memory-1",
     provenance: { kind: provenanceKind, source_ref: `ref:${provenanceKind}` },
     source_version: "version-1",
     freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 },
@@ -24,20 +29,28 @@ function keyInput(
   };
 }
 
-describe("SelectedSliceKeyV1", () => {
+describe("SelectedSliceKeyV2", () => {
   it("separates rebuild identity from routing identity", () => {
-    const eventTime = createSelectedSliceKeyV1({
+    const eventTime = createSelectedSliceKeyV2({
       workspace_id: "workspace-A",
+      owner_id: "memory-1",
       dimension: "time",
       value: "  CAFE\u0301  ",
+      authority: "grounded",
+      reliability: 1,
+      independence_group: "memory:memory-1",
       provenance: { kind: "event_time", source_ref: "memory-1:event-time" },
       source_version: "projection-7",
       freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
     });
-    const timeConcern = createSelectedSliceKeyV1({
+    const timeConcern = createSelectedSliceKeyV2({
       workspace_id: "workspace-A",
+      owner_id: null,
       dimension: "time",
       value: "caf\u00e9",
+      authority: "derived_path",
+      reliability: 1,
+      independence_group: "path:path-2",
       provenance: { kind: "time_concern", source_ref: "path-2:window" },
       source_version: "path-4",
       freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
@@ -48,10 +61,14 @@ describe("SelectedSliceKeyV1", () => {
     expect(eventTime.key_id).not.toBe(timeConcern.key_id);
     expect(JSON.parse(eventTime.match_id)).toEqual(["workspace-A", "time", "caf\u00e9"]);
     expect(JSON.parse(eventTime.key_id)).toEqual([
-      1,
+      2,
       "workspace-A",
+      "memory-1",
       "time",
       "caf\u00e9",
+      "grounded",
+      1,
+      "memory:memory-1",
       "event_time",
       "memory-1:event-time",
       "projection-7"
@@ -69,49 +86,49 @@ describe("SelectedSliceKeyV1", () => {
       }),
       keyInput("canonical_entity", { freshness: { state: "fresh", as_of_ms: -1 } })
     ]) {
-      expect(() => createSelectedSliceKeyV1(invalid)).toThrow();
+      expect(() => createSelectedSliceKeyV2(invalid)).toThrow();
     }
 
     expect(() =>
-      createSelectedSliceKeyV1({
+      createSelectedSliceKeyV2({
         ...keyInput("canonical_entity"),
-        provenance: { kind: "unknown" as SelectedSliceKeyProvenanceKindV1, source_ref: "x" }
+        provenance: { kind: "unknown" as SelectedSliceKeyProvenanceKindV2, source_ref: "x" }
       })
     ).toThrow(/provenance\.kind/);
   });
 
   it("does not collapse typed event-time into semantic facet provenance", () => {
     expect(() =>
-      createSelectedSliceKeyV1(keyInput("event_time", { dimension: "semantic" }))
+      createSelectedSliceKeyV2(keyInput("event_time", { dimension: "semantic" }))
     ).toThrow(/event_time.*time/);
     expect(() =>
-      createSelectedSliceKeyV1(keyInput("facet_tag", { dimension: "time" }))
+      createSelectedSliceKeyV2(keyInput("facet_tag", { dimension: "time" }))
     ).toThrow(/facet_tag.*semantic/);
 
     expect(
-      createSelectedSliceKeyV1(keyInput("event_time", { dimension: "time" })).provenance.kind
+      createSelectedSliceKeyV2(keyInput("event_time", { dimension: "time" })).provenance.kind
     ).toBe("event_time");
   });
 
-  it("keeps v1 producers typed without closing future routing dimensions", () => {
-    expect(SELECTED_SLICE_KEY_V1_SEED_DIMENSIONS).toEqual([
+  it("keeps v2 producers typed without closing future routing dimensions", () => {
+    expect(SELECTED_SLICE_KEY_V2_SEED_DIMENSIONS).toEqual([
       "time",
       "space",
       "entity",
       "semantic"
     ]);
-    const extended = createSelectedSliceKeyV1(
+    const extended = createSelectedSliceKeyV2(
       keyInput("query_probe", { dimension: "future-routing-axis" })
     );
     expect(extended.dimension).toBe("future-routing-axis");
   });
 
   it("tracks staleness without making freshness part of rebuild identity", () => {
-    const fresh = createSelectedSliceKeyV1(keyInput("canonical_entity"));
-    const stale = createSelectedSliceKeyV1(
+    const fresh = createSelectedSliceKeyV2(keyInput("canonical_entity"));
+    const stale = createSelectedSliceKeyV2(
       keyInput("canonical_entity", { freshness: { state: "stale", as_of_ms: 1_730_000_000_000 } })
     );
-    const newerSource = createSelectedSliceKeyV1(
+    const newerSource = createSelectedSliceKeyV2(
       keyInput("canonical_entity", { source_version: "version-2" })
     );
 
@@ -127,8 +144,8 @@ describe("SelectedSliceKeyV1", () => {
     });
     const entityDuplicate = { ...entity };
     const query = keyInput("query_probe", { workspace_id: "workspace:A", value: "b:c" });
-    const first = normalizeSelectedSliceKeysV1([query, entityDuplicate, entity]);
-    const second = normalizeSelectedSliceKeysV1([entity, query, entityDuplicate]);
+    const first = normalizeSelectedSliceKeysV2([query, entityDuplicate, entity]);
+    const second = normalizeSelectedSliceKeysV2([entity, query, entityDuplicate]);
 
     expect(first.map((key) => key.key_id)).toEqual(second.map((key) => key.key_id));
     expect(first).toHaveLength(2);
@@ -150,8 +167,8 @@ describe("SelectedSliceKeyV1", () => {
       freshness: { state: "stale", as_of_ms: 1_730_000_000_000 }
     });
 
-    const forward = normalizeSelectedSliceKeysV1([older, newer, tiedStale]);
-    const reverse = normalizeSelectedSliceKeysV1([tiedStale, newer, older]);
+    const forward = normalizeSelectedSliceKeysV2([older, newer, tiedStale]);
+    const reverse = normalizeSelectedSliceKeysV2([tiedStale, newer, older]);
     expect(forward).toEqual(reverse);
     expect(forward).toHaveLength(1);
     expect(forward[0]?.freshness).toEqual({
@@ -161,13 +178,13 @@ describe("SelectedSliceKeyV1", () => {
   });
 
   it("intersects by match identity while retaining each source instance", () => {
-    const query = [createSelectedSliceKeyV1(keyInput("query_probe"))];
-    const source = [createSelectedSliceKeyV1(keyInput("canonical_entity"))];
-    const target = [createSelectedSliceKeyV1(keyInput("object_anchor"))];
-    const offWorkspace = createSelectedSliceKeyV1(
+    const query = [createSelectedSliceKeyV2(keyInput("query_probe"))];
+    const source = [createSelectedSliceKeyV2(keyInput("canonical_entity"))];
+    const target = [createSelectedSliceKeyV2(keyInput("object_anchor"))];
+    const offWorkspace = createSelectedSliceKeyV2(
       keyInput("object_anchor", { workspace_id: "workspace-B" })
     );
-    const matches = intersectSelectedSliceKeysV1(query, source, [...target, offWorkspace]);
+    const matches = intersectSelectedSliceKeysV2(query, source, [...target, offWorkspace]);
 
     expect(matches).toHaveLength(1);
     expect(matches[0]?.query_keys.map((key) => key.provenance.kind)).toEqual(["query_probe"]);

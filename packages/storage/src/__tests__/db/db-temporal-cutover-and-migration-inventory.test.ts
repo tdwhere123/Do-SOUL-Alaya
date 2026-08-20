@@ -38,7 +38,7 @@ describe("temporal cutover startup gate", () => {
   });
 
   it("refuses a complete pre-temporal source before a runtime open can mutate it", () => {
-    seedMigrationsThrough(context.filename, 107);
+    seedMigrationsThrough(context.filename, 6);
     const before = readFileSha256(context.filename);
 
     expect(() => initDatabase({ filename: context.filename })).toThrow(
@@ -46,14 +46,15 @@ describe("temporal cutover startup gate", () => {
     );
 
     expect(readFileSha256(context.filename)).toBe(before);
-    expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(107);
+    expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(6);
   }, 30_000);
 
   it("fresh bootstrap records a verified empty temporal generation", () => {
     const database = initDatabase({ filename: context.filename });
     try {
       const state = database.connection.prepare(`
-        SELECT active_projection_generation, projection_count, status
+        SELECT active_projection_generation, projection_count, status,
+               projection_refresh_required
         FROM temporal_schema_state
         WHERE state_id = 1
       `).get() as {
@@ -62,11 +63,12 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(108);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(8);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,
-        status: "ready"
+        status: "ready",
+        projection_refresh_required: 0
       });
     } finally {
       database.close();
@@ -151,10 +153,10 @@ describe("SQLite migration inventory guardrail", () => {
   });
 });
 
-const INTENTIONAL_MIGRATION_GAPS = new Set([70, 75]);
+const INTENTIONAL_MIGRATION_GAPS = new Set<number>([]);
 const INTENTIONAL_NOOP_MIGRATIONS = new Set([
-  "074-claim-kind-expanded.sql",
-  "104-engine-bindings-api-key-encrypt.sql",
+  "007-temporal-bootstrap.sql",
+  "008-temporal-verified-bind-key.sql"
 ]);
 
 function readMigrationInventory(): {

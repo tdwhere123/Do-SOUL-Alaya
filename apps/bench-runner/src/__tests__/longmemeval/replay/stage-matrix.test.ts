@@ -112,6 +112,47 @@ describe("LongMemEval stage matrix replay", () => {
       .toThrow(/candidate identity key/u);
   });
 
+  it("does not match a synthesis candidate to memory gold with the same raw id", () => {
+    const row = cohortRow({ id: "q-cross-kind", goldIds: ["shared-id"] });
+    const memory = candidate("shared-id", {
+      fused_rank: 6, rank_after_fusion: 6, feature: 6,
+      coverage: 6, selection_order: 6, final_rank: 6
+    });
+    const synthesis = {
+      ...candidate("shared-id", {
+        fused_rank: 1, rank_after_fusion: 1, feature: 1,
+        coverage: 1, selection_order: 1, final_rank: 1
+      }),
+      object_kind: "synthesis_capsule",
+      candidate_key: "workspace_local:synthesis_capsule:shared-id"
+    };
+    const diagnostic = {
+      ...question("q-cross-kind", [synthesis, memory], row),
+      gold: [{ object_id: "shared-id", object_kind: "memory_entry" }]
+    };
+
+    const matrix = buildStageMatrix(contract([diagnostic], [row]));
+
+    expect(matrix.questions[0].best_gold_rank.final_rank).toBe(6);
+    expect(matrix.questions[0].any_gold_at_k.final_rank["5"]).toBe(false);
+  });
+
+  it("defaults legacy kindless gold identity to memory_entry", () => {
+    const row = cohortRow({ id: "q-legacy-kind", goldIds: ["legacy-id"] });
+    const diagnostic = {
+      ...question("q-legacy-kind", [candidate("legacy-id", {
+        fused_rank: 1, rank_after_fusion: 1, feature: 1,
+        coverage: 1, selection_order: 1, final_rank: 1
+      })], row),
+      gold: [{ object_id: "legacy-id" }]
+    };
+
+    const matrix = buildStageMatrix(contract([diagnostic], [row]));
+
+    expect(matrix.questions[0].best_gold_rank.final_rank).toBe(1);
+    expect(matrix.questions[0].any_gold_at_k.final_rank["5"]).toBe(true);
+  });
+
   it("uses the explicit stage order and computes K ceilings for any gold", () => {
     const row = cohortRow({ id: "q-multi", goldIds: ["gold-a", "gold-b"], retrieval: "hit_at_5" });
     const candidates = [

@@ -26,6 +26,7 @@
     "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@hono/node-server": "^1.13.8",
-    "hono": "^4.12.28"
+    "hono": "^4.12.28",
+    "zod": "^4.4.3"
   }
 }

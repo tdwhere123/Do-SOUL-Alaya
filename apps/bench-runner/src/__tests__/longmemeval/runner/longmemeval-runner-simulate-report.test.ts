@@ -9,17 +9,14 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 
-import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../longmemeval/archive/archive-evidence.js";
+import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../bench/archive/archive-evidence.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-
-import { runLongMemEvalMultiturn } from "../../../longmemeval/multiturn.js";
-
-import { runLongMemEvalCrossQuestion } from "../../../longmemeval/crossquestion.js";
+} from "../../../bench/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,
@@ -34,6 +31,13 @@ import {
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 let tmpDir: string;
+
+function memoryGold(...objectIds: readonly string[]) {
+  return objectIds.map((objectId) => ({
+    objectId,
+    objectKind: "memory_entry" as const
+  }));
+}
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
@@ -64,7 +68,7 @@ describe("LongMemEval runner", () => {
         simulateReport: "none",
         deliveryId: "delivery-1",
         results: delivered,
-        goldMemoryIds: ["gold-delivered"],
+        goldObjectIdentities: memoryGold("gold-delivered"),
         turnIndex: 3,
         questionText: "Which memory was used?"
       }).reportInput
@@ -74,7 +78,7 @@ describe("LongMemEval runner", () => {
       simulateReport: "gold-only",
       deliveryId: "delivery-2",
       results: delivered,
-      goldMemoryIds: ["gold-delivered", "gold-not-delivered"],
+      goldObjectIdentities: memoryGold("gold-delivered", "gold-not-delivered"),
       turnIndex: 3,
       questionText: "Which memory was used?"
     });
@@ -90,7 +94,7 @@ describe("LongMemEval runner", () => {
       simulateReport: "mixed",
       deliveryId: "delivery-3",
       results: delivered,
-      goldMemoryIds: ["gold-not-delivered"],
+      goldObjectIdentities: memoryGold("gold-not-delivered"),
       turnIndex: 4,
       questionText: "Which fallback was used?"
     });
@@ -106,7 +110,7 @@ describe("LongMemEval runner", () => {
           object_kind: "synthesis_capsule"
         }
       ],
-      goldMemoryIds: ["gold-delivered"],
+      goldObjectIdentities: memoryGold("gold-delivered"),
       turnIndex: 4,
       questionText: "Which memory was used?"
     });
@@ -122,7 +126,7 @@ describe("LongMemEval runner", () => {
           object_kind: "synthesis_capsule"
         }
       ],
-      goldMemoryIds: ["other-gold"],
+      goldObjectIdentities: memoryGold("other-gold"),
       turnIndex: 4,
       questionText: "Which fallback was used?"
     });
@@ -138,7 +142,7 @@ describe("LongMemEval runner", () => {
           object_kind: "synthesis_capsule"
         }
       ],
-      goldMemoryIds: ["other-gold"],
+      goldObjectIdentities: memoryGold("other-gold"),
       turnIndex: 4,
       questionText: "Which fallback was used?"
     });
@@ -149,7 +153,7 @@ describe("LongMemEval runner", () => {
       simulateReport: "gold-only",
       deliveryId: "delivery-4",
       results: delivered,
-      goldMemoryIds: ["gold-not-delivered"],
+      goldObjectIdentities: memoryGold("gold-not-delivered"),
       turnIndex: 5,
       questionText: "Was gold delivered?"
     });
@@ -163,7 +167,7 @@ describe("LongMemEval runner", () => {
       simulateReport: "always-used",
       deliveryId: "delivery-5",
       results: [],
-      goldMemoryIds: ["gold-not-delivered"],
+      goldObjectIdentities: memoryGold("gold-not-delivered"),
       turnIndex: 6,
       questionText: "No results?"
     });
@@ -177,20 +181,58 @@ describe("LongMemEval runner", () => {
     });
   });
 
+  it("reports evidence gold by kind without matching a same-id memory", () => {
+    const report = buildLongMemEvalReportContextUsage({
+      simulateReport: "gold-only",
+      deliveryId: "delivery-evidence",
+      results: [
+        { object_id: "shared-id", object_kind: "memory_entry" },
+        { object_id: "shared-id", object_kind: "evidence_capsule" }
+      ],
+      goldObjectIdentities: [{
+        objectId: "shared-id",
+        objectKind: "evidence_capsule"
+      }],
+      turnIndex: 1,
+      questionText: "What did the source say?"
+    });
+
+    expect(report.reportInput?.usedObjectIds).toEqual(["shared-id"]);
+    expect(report.reportInput?.deliveredObjects).toEqual([
+      {
+        objectId: "shared-id",
+        objectKind: "memory_entry",
+        usageStatus: "skipped"
+      },
+      {
+        objectId: "shared-id",
+        objectKind: "evidence_capsule",
+        usageStatus: "used"
+      }
+    ]);
+  });
+
   it("uses a pre-report recall before the scored recall for simulate_report warm modes", async () => {
     const recall = vi
       .fn()
       .mockResolvedValueOnce(buildRecallResult("delivery-pre", ["gold", "decoy"]))
       .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["decoy", "gold"]));
     const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+    const selectionBoundaryObserver = vi.fn(
+      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
+    );
 
     const result = await runLongMemEvalRecallCycle({
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
-      recallOptions: { maxResults: 10, conflictAwareness: true },
+      recallOptions: {
+        maxResults: 10,
+        conflictAwareness: true,
+        selectionBoundaryObserver
+      },
       referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "mixed",
-      goldMemoryIds: ["gold"],
+      goldObjectIdentities: memoryGold("gold"),
       turnIndex: 7,
       questionText: "Which memory was used?"
     });
@@ -200,6 +242,12 @@ describe("LongMemEval runner", () => {
       maxResults: 10,
       conflictAwareness: true,
       referenceTime: "2026-03-04T05:06:07.000Z"
+    });
+    expect(recall).toHaveBeenNthCalledWith(2, "Which memory was used?", {
+      maxResults: 10,
+      conflictAwareness: true,
+      referenceTime: "2026-03-04T05:06:07.000Z",
+      selectionBoundaryObserver
     });
     expect(reportContextUsage).toHaveBeenCalledTimes(1);
     expect(reportContextUsage).toHaveBeenCalledWith(
@@ -222,19 +270,32 @@ describe("LongMemEval runner", () => {
       .fn()
       .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["gold"]));
     const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+    const selectionBoundaryObserver = vi.fn(
+      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
+    );
 
     const result = await runLongMemEvalRecallCycle({
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
-      recallOptions: { maxResults: 10, conflictAwareness: true },
+      recallOptions: {
+        maxResults: 10,
+        conflictAwareness: true,
+        selectionBoundaryObserver
+      },
       referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "none",
-      goldMemoryIds: ["gold"],
+      goldObjectIdentities: memoryGold("gold"),
       turnIndex: 8,
       questionText: "Which memory was used?"
     });
 
     expect(recall).toHaveBeenCalledTimes(1);
+    expect(recall).toHaveBeenCalledWith("Which memory was used?", {
+      maxResults: 10,
+      conflictAwareness: true,
+      referenceTime: "2026-03-04T05:06:07.000Z",
+      selectionBoundaryObserver
+    });
     expect(reportContextUsage).not.toHaveBeenCalled();
     expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
     expect(result.reportUsageStats.reportsAttempted).toBe(0);
@@ -257,7 +318,7 @@ describe("LongMemEval runner", () => {
         recallOptions: { maxResults: 10, conflictAwareness: true },
         referenceTime: "2026-03-04T05:06:07.000Z",
         simulateReport,
-        goldMemoryIds: ["gold"],
+        goldObjectIdentities: memoryGold("gold"),
         turnIndex: 9,
         questionText: "Which memory was used?"
       });

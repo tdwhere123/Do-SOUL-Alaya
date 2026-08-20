@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { registerMemoryRoutes } from "../../routes/memory/memories.js";
+import { registerMemoryRoutes } from "../../routes/memory/entries/memories.js";
 import { memoryRouteServices } from "../support/route-service-stubs.js";
 
 type MemoryRouteFixture = {

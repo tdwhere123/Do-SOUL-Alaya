@@ -1,12 +1,17 @@
-import { isTemporalProjectionSelected } from "@do-soul/alaya-storage";
-import { createDaemonRepositories } from "../daemon-repositories.js";
-import { createDaemonServiceFoundation } from "../daemon-service-foundation.js";
-import { createDaemonCoreServices } from "../daemon-service-wiring.js";
-import type { DaemonStartupStepRecord } from "../daemon-runtime-types.js";
-import { recordStartupStep } from "../daemon-runtime-support.js";
-import { createRecallMaterializationWiring } from "../recall-materialization-wiring.js";
-import type { CreateRecallMaterializationWiringInput } from "../recall-materialization-wiring-types.js";
-import type { RecallReadWorkerClient } from "../recall-read-worker-client.js";
+import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
+import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
+import {
+  createDaemonCoreServices,
+  createGardenComputeRuntime
+} from "../daemon/wiring/daemon-service-wiring.js";
+import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime-types.js";
+import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
+import { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
+import type { CreateRecallMaterializationWiringInput } from "../recall-materialization/recall-materialization-wiring-types.js";
+import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
+import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
+import type { RelationProjectionAdmissionMode } from "../recall-materialization/relation-projection/mode.js";
+import type { QueryFactFrameOsfObligation } from "@do-soul/alaya-protocol";
 
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -23,18 +28,25 @@ type RecallCoreStartupInput = Readonly<{
   readonly repositories: Repositories;
   readonly foundation: Foundation;
   readonly registerRecallReadWorker: (client: RecallReadWorkerClient | null) => void;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
 }>;
 
 export async function createRecallAndCoreWiring(input: RecallCoreStartupInput) {
+  const gardenComputeRuntime = await createGardenComputeRuntime({
+    rawConfigService: input.foundation.rawConfigService
+  });
   const recallWiring = await createRecallMaterializationWiring({
     ...buildRecallRuntimeInput(input),
     ...buildRecallPersistenceInput(input),
-    ...buildRecallServiceInput(input)
+    ...buildRecallServiceInput(input, gardenComputeRuntime)
   });
   input.registerRecallReadWorker(recallWiring.recallReadWorkerClient);
   input.foundation.pathRelationProposalServiceRef.current =
     recallWiring.pathRelationProposalService;
-  const coreWiring = await createDaemonCoreServices(buildCoreServiceInput(input, recallWiring));
+  const coreWiring = await createDaemonCoreServices(
+    buildCoreServiceInput(input, recallWiring),
+    gardenComputeRuntime
+  );
   recordStartupStep(input.bootstrap.startupSteps, "core-services");
   return { recallWiring, coreWiring };
 }
@@ -43,7 +55,10 @@ function buildRecallRuntimeInput(input: RecallCoreStartupInput) {
   const { bootstrap, foundation, repositories } = input;
   return {
     database: bootstrap.database,
-    temporalProjectionSelected: isTemporalProjectionSelected(bootstrap.database),
+    pathReadBind: resolveRecallPathReadBind({
+      database: bootstrap.database
+    }),
+    relationProjectionAdmissionMode: input.relationProjectionAdmissionMode,
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,
@@ -59,6 +74,7 @@ function buildRecallPersistenceInput(input: RecallCoreStartupInput) {
   return {
     memoryEntryRepo: repositories.memoryEntryRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    softAssociationPathRepo: repositories.softAssociationPathRepo,
     relationAssertionRepo: repositories.relationAssertionRepo,
     claimFormRepo: repositories.claimFormRepo,
     coUsageCounterRepo: repositories.coUsageCounterRepo,
@@ -77,7 +93,10 @@ function buildRecallPersistenceInput(input: RecallCoreStartupInput) {
   };
 }
 
-function buildRecallServiceInput(input: RecallCoreStartupInput) {
+function buildRecallServiceInput(
+  input: RecallCoreStartupInput,
+  gardenComputeRuntime: Awaited<ReturnType<typeof createGardenComputeRuntime>>
+) {
   const { foundation, repositories } = input;
   return {
     manifestationBudgetConfigProvider: foundation.manifestationBudgetConfigProvider,
@@ -96,7 +115,26 @@ function buildRecallServiceInput(input: RecallCoreStartupInput) {
     enqueueEnrichPending: repositories.enqueueEnrichPending,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
     recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
-    evidenceService: foundation.evidenceService
+    evidenceService: foundation.evidenceService,
+    fieldQuerySession: repositories.fieldComposition.querySession,
+    fieldComposition: repositories.fieldComposition,
+    openSemanticFactorExtractionPort: {
+      operator_id: gardenComputeRuntime.officialGardenProvider.operator_id,
+      extract: async (
+        sourceKind: "evidence" | "query",
+        sourceText: string
+      ) =>
+        await gardenComputeRuntime.officialGardenProvider.extractOpenSemanticFactors(
+          sourceKind,
+          sourceText
+        ),
+      extractCertifiedQuery: async (
+        sourceText: string,
+        obligation: Readonly<QueryFactFrameOsfObligation>
+      ) =>
+        await gardenComputeRuntime.officialGardenProvider
+          .extractCertifiedQueryOpenSemanticFactors(sourceText, obligation)
+    }
   };
 }
 

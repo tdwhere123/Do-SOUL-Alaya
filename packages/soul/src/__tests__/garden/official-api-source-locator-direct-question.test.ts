@@ -3,6 +3,29 @@ import { buildOfficialApiSourceAssertions } from "../../garden/grounding/source-
 
 describe("official API source locator direct-question boundary", () => {
   it.each([
+    "Trunk based Development",
+    "Bach unaccompanied cello sheet music adapted for violin",
+    "Continue writing please"
+  ])("does not publish a bare topic or search phrase: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+  });
+
+  it.each([
+    "Alice moved to Berlin.",
+    "Alice moved to Berlin",
+    "Alice called Bob",
+    "Dad gave me pearl earrings.",
+    "Max is a Golden Retriever.",
+    "The headlining act I saw gave me useful advice",
+    "Financial accounting describes the financial condition of the business",
+    "Consistent sizing takes the guesswork out of shopping",
+    "While watching horror movies, I often get anxious",
+    "Rocky's doing alright"
+  ])("keeps a named-subject declaration: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([source]);
+  });
+
+  it.each([
     "Do you have recommendations for a collar brand or type that suits a Golden Retriever?",
     "By the way, do you know whether Max is a Golden Retriever?",
     "I am getting Max a collar, do you know whether Max is a Golden Retriever?",
@@ -21,6 +44,35 @@ describe("official API source locator direct-question boundary", () => {
     expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
       "I'm thinking of visiting my sister Emily in Denver"
     ]);
+  });
+
+  it("publishes a self-contained declaration before a bounded conversational tail question", () => {
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "The play I attended was actually a production of The Glass Menagerie"
+    ]);
+  });
+
+  it.each([
+    "Can I reserve a hotel, have you heard of it?",
+    "What movie should I watch, have you heard of it?",
+    "I was wondering whether I should reserve a hotel, have you heard of it?",
+    "I am curious whether I should reserve a hotel, have you heard of it?",
+    "I need to know whether I should reserve a hotel, have you heard of it?",
+    "I would like to know whether I should reserve a hotel, have you heard of it?",
+    "Tell me a hotel, have you heard of it?",
+    "Please tell me a hotel, have you heard of it?",
+    "The best hotel, have you heard of it?",
+    "My hotel, have you heard of it?",
+    "The book I read, have you heard of it?",
+    "The place I went, have you heard of it?",
+    "The hotel you recommend is good, have you heard of it?",
+    "The book you suggest is interesting, have you heard of it?",
+    "The book was any good, have you heard of it?",
+    "The book was good at all, have you heard of it?",
+    "The book was a good read or not, have you heard of it?"
+  ])("does not mistake a direct question for a conversational tail declaration: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
   });
 
   it("does not publish a typed prefix when a bare comma would expand it back to the question", () => {

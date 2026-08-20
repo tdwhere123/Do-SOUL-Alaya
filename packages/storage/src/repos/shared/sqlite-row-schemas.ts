@@ -1,7 +1,8 @@
-import type { StrongRef } from "@do-soul/alaya-protocol";
+import type { FtsLaneRankRow, StrongRef } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import {
   readBufferField,
+  readFiniteNumberField,
   readNonEmptyStringField,
   readPositiveIntField,
   readRecord,
@@ -132,5 +133,15 @@ export const MemoryEmbeddingMetadataRowParser: RowParser<MemoryEmbeddingMetadata
       created_at: readNonEmptyStringField(record, "created_at"),
       updated_at: readNonEmptyStringField(record, "updated_at")
     };
+  }
+};
+
+export const FtsLaneRankRowParser: RowParser<FtsLaneRankRow> = {
+  parse(value: unknown): FtsLaneRankRow {
+    const record = readRecord(value, "fts lane rank row");
+    return Object.freeze({
+      object_id: readNonEmptyStringField(record, "object_id"),
+      raw_rank: readFiniteNumberField(record, "raw_rank")
+    });
   }
 };

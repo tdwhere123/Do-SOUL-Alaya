@@ -29,6 +29,7 @@ import {
 } from "./reconciliation-service-internal.js";
 
 export {
+  compareCandidateContent,
   AUDIT_DROPPED_CONTENT_MAX_CHARS,
   RECONCILE_LEASE_TTL_MS,
   createRuleOnlyReconciliationDecisionPort
@@ -69,12 +70,18 @@ function buildProjectionMergeFields(
     return {};
   }
   const fields: MutableProjectionMergeFields = {};
-  for (const key of PROJECTION_FIELD_KEYS) {
+  for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
     if (existing[key] === undefined || existing[key] === null) {
       const value = incoming[key];
       if (value !== undefined && value !== null) {
         fields[key] = value as never;
       }
+    }
+  }
+  if (!hasPreferenceProjection(existing)) {
+    for (const key of PREFERENCE_PROJECTION_FIELD_KEYS) {
+      const value = incoming[key];
+      if (value !== undefined && value !== null) fields[key] = value as never;
     }
   }
   return fields;
@@ -87,10 +94,15 @@ function buildProjectionReplacementFields(
     return {};
   }
   const fields: MutableProjectionMergeFields = {};
-  for (const key of PROJECTION_FIELD_KEYS) {
+  for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
     const value = incoming[key];
     if (value !== undefined) {
       fields[key] = value as never;
+    }
+  }
+  if (hasPreferenceProjection(incoming)) {
+    for (const key of PREFERENCE_PROJECTION_FIELD_KEYS) {
+      fields[key] = (incoming[key] ?? null) as never;
     }
   }
   return fields;
@@ -142,7 +154,7 @@ type MutableProjectionMergeFields = {
   -readonly [K in keyof ReconciliationMemoryProjectionFields]?: ReconciliationMemoryProjectionFields[K];
 };
 
-const PROJECTION_FIELD_KEYS = [
+const INDEPENDENT_PROJECTION_FIELD_KEYS = [
   "projection_schema_version",
   "event_time_start",
   "event_time_end",
@@ -150,13 +162,29 @@ const PROJECTION_FIELD_KEYS = [
   "valid_to",
   "time_precision",
   "time_source",
+  "canonical_entities"
+] as const;
+
+const PREFERENCE_PROJECTION_FIELD_KEYS = [
   "preference_subject",
   "preference_predicate",
   "preference_object",
   "preference_category",
-  "preference_polarity",
-  "canonical_entities"
+  "preference_polarity"
 ] as const;
+
+const PROJECTION_FIELD_KEYS = [
+  ...INDEPENDENT_PROJECTION_FIELD_KEYS,
+  ...PREFERENCE_PROJECTION_FIELD_KEYS
+] as const;
+
+function hasPreferenceProjection(
+  value: Readonly<MemoryEntry> | ReconciliationMemoryProjectionFields
+): boolean {
+  return PREFERENCE_PROJECTION_FIELD_KEYS.some(
+    (key) => value[key] !== undefined && value[key] !== null
+  );
+}
 
 export class ReconciliationService {
   private readonly mutex: KeyedMutex;
@@ -251,8 +279,7 @@ export class ReconciliationService {
         input.incomingContent.trim(),
         input.incomingDomainTags,
         incomingEvidenceRef,
-        input.incomingProjectionFields,
-        input.incomingFacetTags
+        input.incomingProjectionFields
       );
       if (applied) {
         return decision;
@@ -289,8 +316,7 @@ export class ReconciliationService {
     incomingContent: string,
     incomingDomainTags: readonly string[],
     incomingEvidenceRef: string | undefined,
-    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined,
-    incomingFacetTags: MemoryEntry["facet_tags"] | undefined
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
   ): Promise<boolean> {
     const existing = await this.findUpdateTarget(workspaceId, targetObjectId);
     if (existing === null) {
@@ -301,8 +327,7 @@ export class ReconciliationService {
       incomingContent,
       incomingDomainTags,
       incomingEvidenceRef,
-      incomingProjectionFields,
-      incomingFacetTags
+      incomingProjectionFields
     );
 
     try {
@@ -326,13 +351,11 @@ export class ReconciliationService {
     incomingContent: string,
     incomingDomainTags: readonly string[],
     incomingEvidenceRef: string | undefined,
-    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined,
-    incomingFacetTags: MemoryEntry["facet_tags"] | undefined
+    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
   ): {
     readonly content: string;
     readonly domain_tags: readonly string[];
     readonly evidence_refs?: readonly string[];
-    readonly facet_tags?: MemoryEntry["facet_tags"];
   } & Partial<ReconciliationMemoryProjectionFields> {
     const fields = {
       content: incomingContent,
@@ -341,7 +364,6 @@ export class ReconciliationService {
       content: string;
       domain_tags: readonly string[];
       evidence_refs?: readonly string[];
-      facet_tags?: MemoryEntry["facet_tags"];
     } & Partial<ReconciliationMemoryProjectionFields>;
     if (incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0) {
       fields.evidence_refs = existing.evidence_refs.includes(incomingEvidenceRef)
@@ -349,10 +371,6 @@ export class ReconciliationService {
         : [...existing.evidence_refs, incomingEvidenceRef];
     }
     Object.assign(fields, buildProjectionReplacementFields(incomingProjectionFields));
-    // content-derived: refresh on the same UPDATE that rewrites content; merge/match leave it untouched.
-    if (incomingFacetTags !== undefined) {
-      fields.facet_tags = incomingFacetTags;
-    }
     return fields;
   }
 

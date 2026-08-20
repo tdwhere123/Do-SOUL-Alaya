@@ -24,15 +24,15 @@ import {
   validateWorkspaceGitBindingInput,
   type GitBindingValidationOptions,
   type WorkspaceGitBindingRepo
-} from "./workspace-git-binding.js";
+} from "./git-binding/workspace-git-binding.js";
 export type {
   GitBindingStatusResult,
   GitBindingValidationErrorCode,
   GitBindingValidationOptions,
   GitBindingValidationResult,
   WorkspaceGitBindingRepo
-} from "./workspace-git-binding.js";
-export { getWorkspaceGitBindingStatus } from "./workspace-git-binding.js";
+} from "./git-binding/workspace-git-binding.js";
+export { getWorkspaceGitBindingStatus } from "./git-binding/workspace-git-binding.js";
 
 export interface WorkspaceRouteServices {
   readonly workspaceService: WorkspaceService;

@@ -159,7 +159,7 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
           anchor: parsedAnchor,
           event: storedEvent
         };
-      })();
+      }).immediate();
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create surface anchor ${parsedAnchor.object_id}.`, error);
     }
@@ -244,7 +244,7 @@ export class SqliteSurfaceAnchorRepo implements SurfaceAnchorRepo {
         }
 
         return storedEvent;
-      })();
+      }).immediate();
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;

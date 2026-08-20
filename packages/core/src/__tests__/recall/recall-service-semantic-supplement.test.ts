@@ -26,6 +26,7 @@ it("does not invoke embedding supplement work under the default policy", async (
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
@@ -75,6 +76,34 @@ it("preserves the legacy query-embedding receiver", async () => {
     expect(result.handle).toBe(preparedQuery);
   });
 
+it("reports no_stored_vectors from the legacy hasStoredVectors precheck", async () => {
+    const basePolicy = new RecallService(createDependencies([]).dependencies)
+      .buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const eligibleMemory = createMemoryEntry({ object_id: "memory-lexical" });
+    const result = await prepareEmbeddingSupplementQuery({
+      dependencies: {
+        embeddingRecallService: {
+          hasStoredVectors: vi.fn(async () => false),
+          prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused"))
+        }
+      },
+      config: overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: true, max_supplement: 1, embedding_enabled: true }
+        }
+      }),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      localEligibleCandidates: [{ entry: eligibleMemory }],
+      lexicalFallbackCount: 1
+    });
+
+    expect(result.handle).toBeNull();
+    expect(result.degradedReason).toBe("no_stored_vectors");
+  });
+
 it("keeps the lexical baseline when a non-decisive semantic supplement joins the pool", async () => {
     const memories = [
       createMemoryEntry({
@@ -107,6 +136,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -149,7 +179,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       expect.objectContaining({
         workspaceId: "workspace-1",
         maxSupplement: 5,
-        baseCandidateIds: ["memory-lexical"],
+        baseCandidateIds: ["memory-lexical", "memory-semantic"],
         eligibleMemories: expect.arrayContaining([
           expect.objectContaining({ object_id: "memory-lexical" }),
           expect.objectContaining({ object_id: "memory-semantic" })
@@ -161,7 +191,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
 
 // Decisive embedding match out-ranks strong lexical with near-zero embedding similarity
 // via the lightweight deep head (family vote is weight-1; emb is not a fitted ×12 ballot).
-  it("rebuilds budget state after the embedding head chooses the delivered set", async () => {
+  it("rebuilds budget state after the semantic answer head chooses final order", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-first-lexical",
@@ -182,6 +212,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
     ]);
     const preparedQuery = createPreparedQueryHandle("prepared-query-budget-state");
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -229,13 +260,28 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "packet_trace"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "memory-first-lexical",
-      "memory-second-semantic"
+      "memory-second-semantic",
+      "memory-first-lexical"
     ]);
+    expect(result.diagnostics?.packet_plan_trace).toMatchObject({
+      baseline_candidate_keys: [
+        "workspace_local:memory_entry:memory-second-semantic",
+        "workspace_local:memory_entry:memory-first-lexical"
+      ],
+      actual_candidate_keys: [
+        "workspace_local:memory_entry:memory-second-semantic",
+        "workspace_local:memory_entry:memory-first-lexical"
+      ],
+      decision: {
+        status: "no_op",
+        reason: "select_gamma_identity"
+      }
+    });
     expect(result.candidates[0]?.budget_state).toMatchObject({
       token_estimate: result.candidates[0]?.token_estimate,
       remaining_entries: 1,
@@ -279,6 +325,7 @@ it("allows an embedding-boosted supplement to replace a weaker lexical candidate
       })
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -356,6 +403,7 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
@@ -375,7 +423,7 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       }
     });
 
-    await service.recall({
+    const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
@@ -388,6 +436,8 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
         expect.objectContaining({ object_id: "memory-lexical" })
       ])
     });
+    expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
+    expect(result.diagnostics?.provider_degradation_reason).toBe("no_stored_vectors");
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
     expect(querySupplement).not.toHaveBeenCalled();
@@ -431,6 +481,7 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
       similarityHintsByObjectId: Object.freeze({})
     }));
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,

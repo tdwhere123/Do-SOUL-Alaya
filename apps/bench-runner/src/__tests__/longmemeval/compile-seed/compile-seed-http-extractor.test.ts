@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider,
+  parseOfficialApiSignals
+} from "@do-soul/alaya-soul";
+import { DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS } from "@do-soul/alaya-engine-gateway";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -17,10 +23,13 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
+import { EXTRACTION_REQUEST_TIMEOUT_MS } from
+  "../../../bench/compile-seed/compile-seed-http.js";
 import {
   buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG
+  CREDENTIALLED_CONFIG,
+  signalsEnvelope
 } from "./compile-seed-fixture.js";
 
 describe("createGardenHttpExtractor retry policy", () => {
@@ -38,7 +47,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
   }
 
-  it("adds disabled thinking only for the explicit non-thinking profile", async () => {
+  it("preserves the compatibility profile wire contract", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
     );
@@ -51,10 +60,51 @@ describe("createGardenHttpExtractor retry policy", () => {
     await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.reasoning_effort).toBe("none");
+    expect(body.enable_thinking).toBe(false);
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
-  it("leaves thinking absent for the provider-default profile", async () => {
+  it("sends through the physical route without changing logical cache identity", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const extractor = createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      transportProviderUrl: "https://physical.example/v1",
+      transportModel: "provider-model-alias"
+    }, { fetch: fetchMock });
+
+    await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://physical.example/v1/chat/completions"
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).model)
+      .toBe("provider-model-alias");
+  });
+
+  it("remaps the MiMo display model and requires the MiMo request profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    await expect(createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "Mimo-V2.5",
+      requestProfile: "provider-default-v1"
+    }, { fetch: fetchMock }).extract({ systemPrompt: "system", userPrompt: "turn" }))
+      .rejects.toThrow(/mimo-v2.5-nonthinking-v1/u);
+
+    await createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "Mimo-V2.5",
+      requestProfile: "mimo-v2.5-nonthinking-v1"
+    }, { fetch: fetchMock }).extract({ systemPrompt: "system", userPrompt: "turn" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).model).toBe("mimo-v2.5");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).enable_thinking).toBe(false);
+  });
+
+  it("leaves reasoning controls absent for the provider-default profile", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
     );
@@ -66,6 +116,8 @@ describe("createGardenHttpExtractor retry policy", () => {
     await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("enable_thinking");
     expect(body).not.toHaveProperty("thinking");
   });
 
@@ -143,6 +195,240 @@ describe("createGardenHttpExtractor retry policy", () => {
     // 4 = first attempt + 3 retries.
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries caller semantic validation before returning raw JSON", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: (rawJson) => {
+        if (rawJson.includes('"legacy"')) {
+          throw new Error("semantic_factor_graph_invalid_arguments_too_few");
+        }
+      }
+    });
+
+    expect(result.extractorMeta).toMatchObject({
+      retryCount: 1,
+      retryClassification: "success_after_retry"
+    });
+    expect(result.extractorMeta?.transportFailures).toEqual([expect.objectContaining({
+      attempt: 1,
+      kind: "response_schema_error",
+      phase: "response_schema"
+    })]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(firstRequest.messages.at(-1)?.content).not.toContain("Schema correction");
+    expect(secondRequest.messages.at(-1)?.content).toContain(
+      "Every semantic_factor_graph proposition must have at least one argument"
+    );
+  });
+
+  it("tells a graphless retry to emit a valid graph or an explicit empty envelope", async () => {
+    const invalidResponse = JSON.stringify({
+      signals: [{ object_kind: "episode", padding: "x".repeat(32_768) }]
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: invalidResponse } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    await extractor.extract({
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: JSON.stringify({
+        source_assertions: [{ assertion_id: 1, text: "User: durable assertion" }]
+      }),
+      validateRawJson: (rawJson) => {
+        if (rawJson.includes('"object_kind"')) {
+          throw new Error(
+            "signals array contained no valid open semantic factor entries " +
+              "(rejections=semantic_factor_graph_required:1)"
+          );
+        }
+      }
+    });
+
+    const retryRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    const initialRequest = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(initialRequest.messages.at(-1)?.content).not.toContain(
+      '"previous_invalid_response"'
+    );
+    expect(initialRequest.messages[0]?.content)
+      .toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(retryRequest.messages[0]?.content).toContain(
+      'Only two response forms are valid'
+    );
+    expect(retryRequest.messages[0]?.content)
+      .toContain(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
+    expect(retryRequest.messages.at(-1)?.content).toContain(
+      'Only two response forms are valid'
+    );
+    expect(retryRequest.messages.at(-1)?.content).not.toContain(
+      '"previous_invalid_response"'
+    );
+    expect(retryRequest.messages.at(-1)?.content.length).toBeLessThan(2_000);
+  });
+
+  it("uses caller-owned schema correction for a non-signal response contract", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"not_graph":{}}' } }]
+      }))
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"semantic_factor_graph":{}}' } }]
+      }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "query",
+      responseSchemaRetryInstruction: "Return only the semantic_factor_graph envelope.",
+      validateRawJson: (rawJson) => {
+        if (!rawJson.includes('"semantic_factor_graph"')) throw new Error("query graph invalid");
+      }
+    });
+
+    const retry = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      readonly messages: readonly { readonly content: string }[];
+    };
+    expect(retry.messages.at(-1)?.content).toContain(
+      "Return only the semantic_factor_graph envelope."
+    );
+  });
+
+  it("caps repeated response-schema failures at two correction retries", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => makeJsonResponse({
+      choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+    }));
+    const sleep = vi.fn(async () => undefined);
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: () => {
+        throw new Error("semantic factor graph is invalid");
+      }
+    })).rejects.toMatchObject({
+      benchRetry: {
+        retryCount: 2,
+        retryClassification: "failure_max_retries"
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves schema correction retries after a transient transport failure", async () => {
+    const invalid = () => makeJsonResponse({
+      choices: [{ message: { content: '{"signals":[],"legacy":true}' } }]
+    });
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+      .mockResolvedValueOnce(invalid())
+      .mockResolvedValueOnce(invalid())
+      .mockResolvedValueOnce(makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }]
+      }));
+    let schemaFailures = 0;
+    const result = await createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    }).extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      validateRawJson: () => {
+        schemaFailures += 1;
+        if (schemaFailures <= 2) throw new Error("semantic factor graph is invalid");
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.extractorMeta).toMatchObject({
+      retryCount: 3,
+      retryClassification: "success_after_retry",
+      rateLimitRetries: 1
+    });
+  });
+
+  it("lets the canonical validator salvage content before default envelope parsing", async () => {
+    const canonical = signalsEnvelope([{
+      distilled: "The operator prefers dark mode.",
+      matched: "I prefer dark mode"
+    }]);
+    const content = `${canonical}\n{"trailing_wrapper":true}`;
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(makeJsonResponse({
+      choices: [{ message: { content } }]
+    }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    const result = await extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      retryMode: "disabled",
+      validateRawJson: (rawJson) => {
+        expect(parseOfficialApiSignals(rawJson)).toHaveLength(1);
+      }
+    });
+
+    expect(result.rawJson).toBe(content);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps strict envelope validation when no canonical validator is supplied", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(makeJsonResponse({
+      choices: [{ message: { content: '{"not_signals":[]}' } }]
+    }));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    await expect(extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      retryMode: "disabled"
+    })).rejects.toThrow(/signals array missing/u);
   });
 
   it("does NOT retry on HTTP 401 (auth) and surfaces failure_non_retryable_4xx", async () => {
@@ -260,46 +546,80 @@ describe("createGardenHttpExtractor retry policy", () => {
   // operator-supplied timeoutMs is large enough that without the wall-clock
   // tick the test would time out.
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
-  it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
-    // Fetch that resolves only when the abort signal fires. timeoutMs=20ms
-    // ensures the per-attempt timer triggers fast; the goal is to prove the
-    // abort path WIRES through to the fetch signal and exits the await.
-    // First attempt times out, then second attempt times out — exhausts the
-    // 1-timeout-retry budget and surfaces failure_timeout.
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
-      (_input, init) =>
-        new Promise<Response>((_, reject) => {
-          const signal = (init as RequestInit | undefined)?.signal as
-            | AbortSignal
-            | undefined;
-          signal?.addEventListener("abort", () => {
-            reject(new Error("The user aborted a request."));
-          });
-        })
-    );
-    const sleep = vi.fn(async () => undefined);
-    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
-      fetch: fetchMock,
-      sleep,
-      random: () => 0
-    });
-    let thrown: unknown = null;
+  it("does not abort a compile-seed fetch at the 10s provider default", async () => {
+    vi.useFakeTimers();
     try {
-      await extractor.extract({
+      let aborted = false;
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal;
+            signal?.addEventListener("abort", () => {
+              aborted = true;
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            });
+          })
+      );
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
         systemPrompt: "s",
         userPrompt: "t",
-        timeoutMs: 20
+        retryMode: "disabled"
       });
-    } catch (error) {
-      thrown = error;
+      await vi.advanceTimersByTimeAsync(DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS);
+      expect(aborted).toBe(false);
+
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+      await vi.advanceTimersByTimeAsync(
+        EXTRACTION_REQUEST_TIMEOUT_MS - DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS
+      );
+      await rejection;
+      expect(aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(thrown).toBeInstanceOf(Error);
-    const benchRetry = (thrown as {
-      benchRetry?: { retryCount: number; retryClassification: string };
-    }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_timeout");
-    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES).
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts a hanging fetch via AbortController so timeout retry classification fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal as
+              | AbortSignal
+              | undefined;
+            signal?.addEventListener("abort", () => {
+              reject(new Error("The user aborted a request."));
+            });
+          })
+      );
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        timeoutMs: 60_000
+      });
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      await rejection;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // invariant: root-cause regression. The previous test's fetch rejects when
@@ -313,34 +633,32 @@ describe("createGardenHttpExtractor retry policy", () => {
   // failure_timeout within budget.
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
   it("settles a never-resolving fetch that ignores its abort signal via the timeout backstop", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      // Never settles and never reads the signal — the stalled-socket shape.
-      .mockImplementation(() => new Promise<Response>(() => {}));
-    const sleep = vi.fn(async () => undefined);
-    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
-      fetch: fetchMock,
-      sleep,
-      random: () => 0
-    });
-    let thrown: unknown = null;
+    vi.useFakeTimers();
     try {
-      await extractor.extract({
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        // Never settles and never reads the signal — the stalled-socket shape.
+        .mockImplementation(() => new Promise<Response>(() => {}));
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+        fetch: fetchMock,
+        sleep: vi.fn(async () => undefined),
+        random: () => 0
+      });
+      const pending = extractor.extract({
         systemPrompt: "s",
         userPrompt: "t",
-        timeoutMs: 20
+        timeoutMs: 60_000
       });
-    } catch (error) {
-      thrown = error;
+      const rejection = expect(pending).rejects.toMatchObject({
+        benchRetry: { retryClassification: "failure_timeout" }
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      await rejection;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(thrown).toBeInstanceOf(Error);
-    const benchRetry = (thrown as {
-      benchRetry?: { retryCount: number; retryClassification: string };
-    }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_timeout");
-    // 2 = first attempt + 1 timeout retry (BENCH_HTTP_MAX_TIMEOUT_RETRIES);
-    // each attempt is forced to settle by the backstop rather than hanging.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // invariant: an operator abort (input.abortSignal) must settle the attempt

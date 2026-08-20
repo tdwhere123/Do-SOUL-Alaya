@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildLongMemEvalSidecarKey,
   deriveLongMemEvalGoldMemoryIds,

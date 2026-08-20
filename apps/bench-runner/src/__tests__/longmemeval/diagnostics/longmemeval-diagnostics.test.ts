@@ -6,7 +6,7 @@ import {
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalMissTaxonomySchema,
   LongMemEvalQuestionDiagnosticSchema
-} from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 import {
   buildLongMemEvalQualityMetrics,
@@ -17,7 +17,7 @@ import {
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 
 const emptyQueryProbes = {
   object_ids: [],
@@ -416,12 +416,12 @@ describe("LongMemEval recall diagnostics", () => {
             omega: 1,
             Flood: 0.2,
             lambda: 0.15,
-            beta: 0,
+            beta: 1,
             final_score: 0.23,
             slice_status: "active",
             path_status: "active",
             evidence_status: "active",
-            e_direct_status: "inactive:beta_disabled",
+            e_direct_status: "active",
             fuel_verified: true
           },
           flood_fuel_coverage: {

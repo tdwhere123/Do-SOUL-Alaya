@@ -20,7 +20,6 @@ import {
 import {
   addSemanticSupplementCandidates
 } from "./coarse-filter-semantic.js";
-import { classifyRecallIntent, extractRecallAnchors } from "../query/recall-query-plan.js";
 import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
   resolveSourceProximityAdmissionLimit,
@@ -33,6 +32,18 @@ import {
   type GraphExpansionCandidateSourceDiagnostic
 } from "../expansion/graph-expansion.js";
 import type { RecallGraphExpansionDiagnostics } from "../runtime/recall-service-types.js";
+import type { RecallEvidenceProjectionMatchReceipt } from
+  "../runtime/recall-service-results.js";
+import {
+  addTemporalWindowCandidates,
+  type TemporalWindowCandidateBudget
+} from
+  "./temporal/temporal-window-candidates.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
+import { RECALL_TOTAL_CANDIDATE_CAP } from "../../shared/recall-policy.js";
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
@@ -51,12 +62,20 @@ export interface CoarseFilterState {
   readonly trigramFtsRanks: Map<string, number>;
   readonly evidenceFtsRanks: Map<string, number>;
   readonly evidenceFtsRanksPerRef: Map<string, number>;
+  readonly evidenceProjectionMatchesByRef: Map<
+    string,
+    RecallEvidenceProjectionMatchReceipt[]
+  >;
   readonly sourceProximityScores: Map<string, number>;
   readonly structuralScores: Map<string, number>;
   readonly graphExpansionScores: Map<string, number>;
   readonly entitySeedScores: Map<string, number>;
   readonly pathExpansionScores: Map<string, number>;
   readonly pathSuppressionScores: Map<string, number>;
+  readonly retrievalFieldTruncation: {
+    session_event_index: boolean;
+    explicit_pointer: boolean;
+  };
   readonly addCandidate: AddCoarseCandidate;
 }
 
@@ -76,6 +95,10 @@ export function createCoarseFilterState(params: Readonly<{
     trigramFtsRanks: new Map<string, number>(),
     evidenceFtsRanks: new Map<string, number>(),
     evidenceFtsRanksPerRef: new Map<string, number>(),
+    evidenceProjectionMatchesByRef: new Map<
+      string,
+      RecallEvidenceProjectionMatchReceipt[]
+    >(),
     sourceProximityScores: new Map<string, number>(),
     structuralScores: new Map<string, number>(),
     graphExpansionScores: new Map<string, number>(),
@@ -83,8 +106,13 @@ export function createCoarseFilterState(params: Readonly<{
     pathExpansionScores: new Map<string, number>(),
     pathSuppressionScores: new Map<string, number>()
   };
+  const retrievalFieldTruncation = {
+    session_event_index: false,
+    explicit_pointer: false
+  };
   return Object.freeze({
     ...state,
+    retrievalFieldTruncation,
     addCandidate: createCoarseCandidateAdder({
       ...state,
       winnerMemoryIds: params.winnerMemoryIds,
@@ -106,7 +134,12 @@ export function admitInitialCoarseCandidates(params: Readonly<{
   for (const entry of params.rankedMatches) {
     params.state.addCandidate(entry, "activation", 0, "activation");
   }
-  addObjectProbeCandidates(params.tierMemories, params.queryProbes, params.state.addCandidate);
+  addObjectProbeCandidates(
+    params.tierMemories,
+    params.queryProbes,
+    params.state.addCandidate,
+    () => { params.state.retrievalFieldTruncation.explicit_pointer = true; }
+  );
 }
 
 export async function admitDynamicCoarseCandidates(params: Readonly<{
@@ -120,13 +153,26 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly tierScopedSearchEligible: boolean;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
   await admitSemanticAndContentCandidates(params);
   const sourceCohortKeys = await admitSourceProximityCandidates(params);
   const graphExpansionSeedIds = await collectGraphExpansionSeedIds(params);
   const graphResult = await admitPathAndGraphExpansionCandidates(params, graphExpansionSeedIds);
+  await addTemporalWindowCandidates({
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    queryProbes: params.queryProbes,
+    referenceTime: params.referenceTime,
+    budget: params.temporalCandidateBudget,
+    memoryRepo: params.context.dependencies.memoryRepo,
+    addCandidate: params.state.addCandidate
+  });
   await collectNegativePathSuppressions({
     workspaceId: params.workspaceId,
     byId: params.byId,
@@ -164,6 +210,7 @@ export function buildCoarseFilterRunResult(params: Readonly<{
     trigramFtsRanks: params.state.trigramFtsRanks,
     evidenceFtsRanks: params.state.evidenceFtsRanks,
     evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef,
     sourceProximityScores: params.state.sourceProximityScores,
     sourceCohortKeys: params.dynamic.sourceCohortKeys,
     structuralScores: params.state.structuralScores,
@@ -172,14 +219,21 @@ export function buildCoarseFilterRunResult(params: Readonly<{
     graphExpansionCandidateSources: params.dynamic.graphExpansionCandidateSources,
     entitySeedScores: params.state.entitySeedScores,
     pathExpansionScores: params.state.pathExpansionScores,
-    pathSuppressionScores: params.state.pathSuppressionScores
+    pathSuppressionScores: params.state.pathSuppressionScores,
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: params.state.retrievalFieldTruncation.session_event_index ||
+        params.state.drafts.size > RECALL_TOTAL_CANDIDATE_CAP,
+      explicit_pointer: params.state.retrievalFieldTruncation.explicit_pointer ||
+        params.state.drafts.size > RECALL_TOTAL_CANDIDATE_CAP
+    })
   });
 }
 
 function addObjectProbeCandidates(
   tierMemories: readonly Readonly<MemoryEntry>[],
   queryProbes: Readonly<RecallQueryProbes>,
-  addCandidate: AddCoarseCandidate
+  addCandidate: AddCoarseCandidate,
+  onTruncated: () => void
 ): void {
   const scoredCandidates = tierMemories
     .map((entry) => Object.freeze({ entry, score: scoreObjectProbeMatch(entry, queryProbes) }))
@@ -192,6 +246,7 @@ function addObjectProbeCandidates(
         ? compareMemoryEntries(left.entry, right.entry)
       : right.score - left.score
   );
+  if (scoredCandidates.length > DYNAMIC_RECALL_PLANE_CAP) onTruncated();
   for (const candidate of objectProbeCandidates) {
     addCandidate(candidate.entry, "object_probe", candidate.score, "object_probe");
   }
@@ -208,14 +263,14 @@ async function admitSemanticAndContentCandidates(
     queryProbes: params.queryProbes,
     tier: params.tier,
     tierScopedSearchEligible: params.tierScopedSearchEligible,
-    anchors: extractRecallAnchors(params.queryProbes),
-    intent: classifyRecallIntent(params.queryProbes),
     byId: params.byId,
     addCandidate: params.state.addCandidate,
     ftsRanks: params.state.ftsRanks,
     trigramFtsRanks: params.state.trigramFtsRanks,
     evidenceFtsRanks: params.state.evidenceFtsRanks,
-    evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef
+    evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef,
+    retrievalFieldBundle: params.retrievalFieldBundle
   });
   addContentDerivedExpansionCandidates({
     tierMemories: params.tierMemories,
@@ -223,7 +278,10 @@ async function admitSemanticAndContentCandidates(
     queryProbes: params.queryProbes,
     addCandidate: params.state.addCandidate,
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
-    dynamicRecallCohortRadius: DYNAMIC_RECALL_COHORT_RADIUS
+    dynamicRecallCohortRadius: DYNAMIC_RECALL_COHORT_RADIUS,
+    onSessionSurfaceCohortTruncated: () => {
+      params.state.retrievalFieldTruncation.session_event_index = true;
+    }
   });
 }
 
@@ -247,18 +305,18 @@ async function collectGraphExpansionSeedIds(
 ): Promise<readonly string[]> {
   const entityDerivedSeeds = await collectEntityDerivedSeeds({
     workspaceId: params.workspaceId,
-    queryText: params.queryText,
+    queryEntityExtraction: params.queryEntityExtraction,
     byId: params.byId,
     addCandidate: params.state.addCandidate,
     lexicalFtsRanks: params.state.ftsRanks,
-    entityExtractionPort: params.context.dependencies.entityExtractionPort,
     memoryRepo: params.context.dependencies.memoryRepo,
     warn: params.context.warn,
     entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
     entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
     entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
     entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
-    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH
+    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
+    degradationReasons: params.context.degradationReasons
   });
   return entityDerivedSeeds
     .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)

@@ -4,7 +4,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { createGraphHealthService } from "../../services/graph-health-service.js";
+import { createGraphHealthService } from "../../services/status/graph-health-service.js";
 
 describe("GraphHealthService", () => {
   it("counts path relations by kind and reports the latest path event", async () => {
@@ -28,6 +28,7 @@ describe("GraphHealthService", () => {
           createRelation("contradicts", "retired")
         ])
       },
+      softAssociationPathRepo: emptySoftAssociationPathRepo(),
       eventLogRepo
     });
 
@@ -78,6 +79,7 @@ describe("GraphHealthService", () => {
           createRelation("supports", "active")
         ])
       },
+      softAssociationPathRepo: emptySoftAssociationPathRepo(),
       eventLogRepo
     });
 
@@ -105,6 +107,7 @@ describe("GraphHealthService", () => {
       pathRelationRepo: {
         findByWorkspace: vi.fn(async () => [])
       },
+      softAssociationPathRepo: emptySoftAssociationPathRepo(),
       eventLogRepo: {
         queryByWorkspaceAndType: vi.fn(async () => [])
       }
@@ -131,6 +134,7 @@ describe("GraphHealthService", () => {
           createRelation("recalls", "retired")
         ])
       },
+      softAssociationPathRepo: emptySoftAssociationPathRepo(),
       eventLogRepo: {
         queryByWorkspaceAndType: vi.fn(async () => [])
       }
@@ -146,7 +150,78 @@ describe("GraphHealthService", () => {
       warnings: ["path_relations_empty"]
     });
   });
+
+  it("does not let an inactive legacy identity hide an active soft association", async () => {
+    const service = createGraphHealthService({
+      pathRelationRepo: {
+        findByWorkspace: vi.fn(async () => [
+          createIdentifiedRelation("legacy-dormant", "dormant", "object-a", "object-b")
+        ])
+      },
+      softAssociationPathRepo: {
+        findActiveByWorkspace: vi.fn(async () => [
+          createIdentifiedRelation("soft-active", "active", "object-a", "object-b")
+        ])
+      },
+      eventLogRepo: {
+        queryByWorkspaceAndType: vi.fn(async () => [])
+      }
+    });
+
+    const snapshot = await service.getStatus("workspace-1");
+
+    expect(snapshot.path_relations_total).toBe(1);
+    expect(snapshot.path_relations_by_kind).toEqual({ co_recalled: 1 });
+  });
+
+  it("counts an active authoritative and soft identity collision once", async () => {
+    const service = createGraphHealthService({
+      pathRelationRepo: {
+        findByWorkspace: vi.fn(async () => [
+          createIdentifiedRelation("legacy-active", "active", "object-a", "object-b")
+        ])
+      },
+      softAssociationPathRepo: {
+        findActiveByWorkspace: vi.fn(async () => [
+          createIdentifiedRelation("soft-active", "active", "object-b", "object-a")
+        ])
+      },
+      eventLogRepo: {
+        queryByWorkspaceAndType: vi.fn(async () => [])
+      }
+    });
+
+    const snapshot = await service.getStatus("workspace-1");
+
+    expect(snapshot.path_relations_total).toBe(1);
+    expect(snapshot.path_relations_by_kind).toEqual({ co_recalled: 1 });
+  });
 });
+
+function emptySoftAssociationPathRepo() {
+  return {
+    findActiveByWorkspace: vi.fn(async () => [] as readonly Readonly<PathRelation>[])
+  };
+}
+
+function createIdentifiedRelation(
+  pathId: string,
+  status: "active" | "dormant" | "retired",
+  sourceObjectId: string,
+  targetObjectId: string
+): Readonly<PathRelation> {
+  return {
+    path_id: pathId,
+    workspace_id: "workspace-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: sourceObjectId },
+      target_anchor: { kind: "object", object_id: targetObjectId }
+    },
+    constitution: { relation_kind: "co_recalled" },
+    effect_vector: { recall_bias: 0.1 },
+    lifecycle: { status, retirement_rule: "manual" }
+  } as Readonly<PathRelation>;
+}
 
 function createRelation(
   relationKind: string,

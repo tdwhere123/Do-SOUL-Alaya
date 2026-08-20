@@ -2,8 +2,8 @@ import { access, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import type { AlayaCliContext } from "../bridge.js";
-import type { AlayaConfigPaths } from "../config-files.js";
-import { writePrivateTextAtomic } from "../../services/private-file-service.js";
+import type { AlayaConfigPaths } from "../support/config-files.js";
+import { writePrivateTextAtomic } from "../../services/support/private-file-service.js";
 import type {
   KeychainAvailabilityResult,
   KeychainReadResult,

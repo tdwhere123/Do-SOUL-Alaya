@@ -7,8 +7,8 @@ import { LocalHeuristics } from "@do-soul/alaya-soul";
 import {
   buildGardenComputeRoutingProviders,
   createConflictDetectionLlmPort
-} from "../../runtime/garden-compute-support.js";
-import { GardenComputeProviderResolver } from "../../services/garden-compute-provider-resolver.js";
+} from "../../runtime/garden-wiring/garden-compute-support.js";
+import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
 
 const originalConflictProviderUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL;
 const originalConflictApiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY;
@@ -49,9 +49,18 @@ describe("createConflictDetectionLlmPort", () => {
     expect(unref).toHaveBeenCalled();
   });
 
-  it("uses the default conflict model when the model env var is blank", async () => {
+  it("skips conflict LLM when the model env var is missing or blank", () => {
     configureConflictLlmEnv();
     process.env.ALAYA_CONFLICT_LLM_MODEL = "   ";
+    expect(createConflictDetectionLlmPort()).toBeNull();
+
+    delete process.env.ALAYA_CONFLICT_LLM_MODEL;
+    expect(createConflictDetectionLlmPort()).toBeNull();
+  });
+
+  it("forwards the configured conflict model when the env var is set", async () => {
+    configureConflictLlmEnv();
+    process.env.ALAYA_CONFLICT_LLM_MODEL = "conflict-test-model";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: "none" } }]
     }), {
@@ -61,8 +70,18 @@ describe("createConflictDetectionLlmPort", () => {
     const port = createConflictDetectionLlmPort();
 
     await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
-    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as { readonly model?: string };
-    expect(body.model).toBe("gpt-5.4-mini");
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      model: "conflict-test-model",
+      temperature: 0,
+      max_tokens: 8,
+      messages: [
+        { role: "system", content: "Reply with exactly one word." },
+        { role: "user", content: expect.stringContaining("MEMORY_A (new)") }
+      ]
+    });
+    expect(body).not.toHaveProperty("response_format");
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   it("rejects transport failures instead of returning a no-conflict verdict", async () => {
@@ -77,7 +96,7 @@ describe("createConflictDetectionLlmPort", () => {
 
   it("rejects non-OK responses instead of returning a no-conflict verdict", async () => {
     configureConflictLlmEnv();
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("provider down", {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("provider down", {
       status: 503,
       statusText: "Service Unavailable"
     }));
@@ -86,6 +105,7 @@ describe("createConflictDetectionLlmPort", () => {
     await expect(port?.classifyPair(createPairInput())).rejects.toThrow(
       "Conflict detection LLM HTTP 503 Service Unavailable"
     );
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 });
 

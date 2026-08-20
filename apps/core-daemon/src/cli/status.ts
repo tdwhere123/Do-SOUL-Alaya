@@ -1,6 +1,6 @@
 import type { SourceGroundingDeferStats, TrustSummary } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
-import type { RecallUtilizationService, RecallUtilizationStats } from "../services/recall-utilization-service.js";
+import type { RecallUtilizationService, RecallUtilizationStats } from "../services/status/recall-utilization-service.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "./bridge.js";
 import { projectSourceGroundingDeferStats } from "./source-grounding-defers/projection.js";
 
@@ -112,14 +112,18 @@ function writeRecallStatsSummary(stream: NodeJS.WritableStream, stats: RecallUti
   const window = `${stats.window.since ?? "(open)"} → ${stats.window.until ?? "(now)"}`;
   stream.write(`recall stats (workspace ${stats.window.workspace_id}, ${window}):\n`);
   stream.write(
-    `  recall: total=${stats.recall.total} unique_runs=${stats.recall.unique_runs} null_run=${stats.recall.null_run} miss=${stats.recall.miss_count}/${stats.recall.total} (${formatRatio(stats.recall.miss_ratio)}) p50_pointers=${stats.recall.p50_pointer_count} p50_latency_ms=${stats.recall.p50_latency_ms}\n`
+    `  recall: total=${stats.recall.total} unique_runs=${stats.recall.unique_runs} null_run=${stats.recall.null_run} miss=${stats.recall.miss_count}/${stats.recall.total} (${formatRatio(stats.recall.miss_ratio)}) p50_pointers=${stats.recall.p50_pointer_count} p50_ms=${formatLatencyMs(stats.recall.p50_latency_ms)} p95_ms=${formatLatencyMs(stats.recall.p95_latency_ms)} p99_ms=${formatLatencyMs(stats.recall.p99_latency_ms)}\n`
   );
   stream.write(
-    `  embedding: queries=${stats.embedding.total_queries} returned=${stats.embedding.returned_candidate_count} p50_ms=${stats.embedding.p50_latency_ms} p95_ms=${stats.embedding.p95_latency_ms} p99_ms=${stats.embedding.p99_latency_ms}\n`
+    `  embedding: queries=${stats.embedding.total_queries} returned=${stats.embedding.returned_candidate_count} p50_ms=${formatLatencyMs(stats.embedding.p50_latency_ms)} p95_ms=${formatLatencyMs(stats.embedding.p95_latency_ms)} p99_ms=${formatLatencyMs(stats.embedding.p99_latency_ms)}\n`
   );
   stream.write(
     `  usage:  total=${stats.usage.total} used=${stats.usage.used} skipped=${stats.usage.skipped} not_applicable=${stats.usage.not_applicable} used_ratio=${formatRatio(stats.usage.used_ratio)} follow_through=${formatRatio(stats.usage.follow_through_ratio)}\n`
   );
+}
+
+function formatLatencyMs(value: number | null): string {
+  return value === null ? "n/a" : String(value);
 }
 
 function formatRatio(value: number): string {

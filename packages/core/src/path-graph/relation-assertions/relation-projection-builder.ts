@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import type {
-  RelationAssertion,
-  RelationAssertionResolution
+import {
+  EMPTY_RELATION_HISTORY_DIGEST,
+  type RelationAssertion,
+  type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "./legacy-empty-history-digest.js";
 import {
   buildTemporalPathProjection,
   TEMPORAL_RELATION_PROJECTION_POLICY_ID,
@@ -11,15 +13,24 @@ import {
 } from "./relation-projection-policy.js";
 import type { RelationAssertionProjectionResult } from "./relation-assertion-service-types.js";
 
-const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v1";
-const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v1";
+const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
+const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
 const PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
+
+type RelationHistoryOperatorOptions = Readonly<{
+  readonly activate: boolean;
+  readonly currentHistoryDigest: string | null;
+}>;
 
 export function buildRelationProjection(
   assertions: readonly Readonly<RelationAssertion>[],
   resolutions: readonly Readonly<RelationAssertionResolution>[],
   asOf: string,
-  permittedTimelessPolicyIds: ReadonlySet<string>
+  permittedTimelessPolicyIds: ReadonlySet<string>,
+  history: RelationHistoryOperatorOptions = {
+    activate: true,
+    currentHistoryDigest: null
+  }
 ): RelationAssertionProjectionResult {
   const projections = buildActiveRelationProjections(
     assertions,
@@ -27,7 +38,7 @@ export function buildRelationProjection(
     asOf,
     permittedTimelessPolicyIds
   );
-  const historyDigest = buildRelationHistoryDigest(assertions, resolutions);
+  const historyDigest = buildRelationHistoryDigest(assertions, resolutions, history);
   const projectionDigest = sha256RelationAssertionValue(stableStringify(projections));
   return {
     activeProjectionCount: projections.length,
@@ -80,6 +91,26 @@ function groupResolutionsByAssertion(
 
 function buildRelationHistoryDigest(
   assertions: readonly Readonly<RelationAssertion>[],
+  resolutions: readonly Readonly<RelationAssertionResolution>[],
+  history: RelationHistoryOperatorOptions
+): string {
+  if (assertions.length !== 0 || resolutions.length !== 0) {
+    return hashStructuredRelationHistory(assertions, resolutions);
+  }
+  if (history.activate) return EMPTY_RELATION_HISTORY_DIGEST;
+  const current = history.currentHistoryDigest;
+  // Historical empty rebuild must not retarget a live compatible empty operator; canonical DBs must not mint the private identity.
+  if (
+    current === EMPTY_RELATION_HISTORY_DIGEST ||
+    current === LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST
+  ) {
+    return current;
+  }
+  return EMPTY_RELATION_HISTORY_DIGEST;
+}
+
+function hashStructuredRelationHistory(
+  assertions: readonly Readonly<RelationAssertion>[],
   resolutions: readonly Readonly<RelationAssertionResolution>[]
 ): string {
   return sha256RelationAssertionValue(stableStringify({
@@ -87,7 +118,8 @@ function buildRelationHistoryDigest(
       assertion_id: assertion.assertion_id,
       admission_event_id: assertion.admission_event_id,
       workspace_id: assertion.workspace_id,
-      evidence_ids: assertion.evidence_ids,
+      evidence_receipts: assertion.evidence_receipts,
+      formation_receipt: assertion.formation_receipt,
       anchors: assertion.anchors,
       relation_kind: assertion.relation_kind,
       validity: assertion.validity,

@@ -1,23 +1,27 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { LongMemEvalQuestion } from
+  "../../../longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from
-  "../../../longmemeval/compile-seed.js";
+  "../../../bench/compile-seed.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
-  "../../../longmemeval/extraction/authority/inspection.js";
+  "../../../bench/extraction/authority/inspection.js";
 import { createExtractionRepairScope } from
-  "../../../longmemeval/extraction/authority/repair/repair-scope.js";
+  "../../../bench/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../longmemeval/extraction/authority/receipt-limits.js";
+  "../../../bench/extraction/authority/receipt-limits.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import { runExtractionFill } from
-  "../../../longmemeval/extraction/extraction-fill.js";
+  "../../../bench/extraction/extraction-fill.js";
 import {
-  buildExtractionFillQuestion,
+  buildGroundedSignalResponse,
+  buildAuthorityQuestion as buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -29,6 +33,52 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 });
 
 describe("strict JSON repair authority runtime", () => {
+  it("repairs one key without reading its valid sibling from the same source turn", async () => {
+    vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
+    vi.stubEnv("REPAIR_TEST_KEY", "test-key");
+    await writeFixtureDataset([singleSessionBatchedQuestion("q001")]);
+    await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
+      log: () => undefined
+    });
+    const [invalidPath, preservedPath] = shardPaths();
+    mutateRawJson(invalidPath!, '{"signals":[{"signal_kind":"potential_preference"}');
+    const preservedBefore = readFileSync(preservedPath!, "utf8");
+    const receiptPath = await writeRepairReceipt();
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt),
+        { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
+      );
+    });
+
+    const result = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledOnce();
+    expect(readFileSync(preservedPath!, "utf8")).toBe(preservedBefore);
+    expect(result).toMatchObject({
+      cacheHits: 0,
+      newlyExtracted: 1,
+      coverage: 1,
+      manifest: { expected_turns: 2, cached_turns: 2 }
+    });
+  });
+
   it("overwrites only the bound invalid shard and preserves the valid sibling", async () => {
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
     vi.stubEnv("REPAIR_TEST_KEY", "test-key");
@@ -40,7 +90,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [mutatedPath, untouchedPath] = shardPaths();
@@ -49,10 +101,10 @@ describe("strict JSON repair authority runtime", () => {
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return {
-        rawJson: '{"signals":[]}',
-        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 }
-      };
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt),
+        { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
+      );
     });
 
     const result = await runExtractionFill({
@@ -106,7 +158,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath, preservedPath] = shardPaths();
@@ -138,7 +192,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();
@@ -179,7 +235,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();
@@ -216,7 +274,9 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const [invalidPath] = shardPaths();
@@ -310,4 +370,25 @@ function providerTimeoutFailure(): Error {
       }]
     }
   });
+}
+
+function singleSessionBatchedQuestion(id: string): LongMemEvalQuestion {
+  const content = Array.from(
+    { length: 9 },
+    (_, index) => `I recorded durable detail number ${index + 1}.`
+  ).join(" ");
+  return {
+    question_id: id,
+    question_type: "single_session",
+    question: `What about ${id}?`,
+    answer: `answer ${id}`,
+    question_date: "2026-01-01",
+    haystack_session_ids: [`s-${id}`],
+    haystack_dates: ["2025-12-01"],
+    haystack_sessions: [[
+      { role: "user", content, has_answer: true },
+      { role: "assistant", content: "Acknowledged." }
+    ]],
+    answer_session_ids: [`s-${id}`]
+  };
 }

@@ -118,9 +118,30 @@ const ObjectKindDeliverySchema = z
   .object({
     memory_entry: z.number().int().nonnegative(),
     synthesis_capsule: z.number().int().nonnegative(),
+    evidence_capsule: z.number().int().nonnegative().default(0),
     total_delivered: z.number().int().nonnegative()
   })
-  .strict();
+  .strict()
+  .superRefine(validateObjectKindDelivery);
+
+function validateObjectKindDelivery(
+  value: {
+    readonly memory_entry: number;
+    readonly synthesis_capsule: number;
+    readonly evidence_capsule: number;
+    readonly total_delivered: number;
+  },
+  context: z.RefinementCtx
+): void {
+  const observed =
+    value.memory_entry + value.synthesis_capsule + value.evidence_capsule;
+  if (observed === value.total_delivered) return;
+  context.addIssue({
+    code: "custom",
+    path: ["total_delivered"],
+    message: "object-kind delivery conservation failed"
+  });
+}
 
 // @anchor longmemeval-gold-facet-separation: per-miss, is the gold's dimension
 // disjoint from its top-5 distractors' (could a dimension pre-filter separate it).

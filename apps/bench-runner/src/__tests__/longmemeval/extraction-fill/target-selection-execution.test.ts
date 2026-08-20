@@ -1,15 +1,22 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
+  symlinkSync, writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../../bench/extraction/cache-audit/receipt.js";
 import { createExtractionAuthorityReceipt, type ExtractionAuthorityObservation } from
-  "../../../longmemeval/extraction/authority/receipt.js";
+  "../../../bench/extraction/authority/receipt.js";
 import { createFreshExtractionTargetSelection } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
+import { assertExtractionTargetSelectionRootBinding } from
+  "../../../bench/extraction/authority/target-selection/receipt.js";
+import { acquireExtractionCacheWriteLease } from
+  "../../../bench/extraction/fill/manifest/fill-root-guard.js";
 import { createExtractionExecutionAuthority } from
-  "../../../longmemeval/extraction/fill/execution-authority.js";
+  "../../../bench/extraction/fill/execution-authority.js";
 
 const roots: string[] = [];
 
@@ -53,6 +60,47 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
   expect(readdirSync(cacheRoot)).toEqual([]);
 });
 
+it("rejects a copied lease and marker after the selected root inode changes", () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-leased-root-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({
+    cacheRoot,
+    auditReceipt: rebuildAuditReceipt(),
+    observation: observation()
+  });
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  const movedRoot = join(parent, "moved-cache");
+  renameSync(cacheRoot, movedRoot);
+  mkdirSync(cacheRoot);
+  cpSync(join(movedRoot, ".alaya-extraction-target-root.json"),
+    join(cacheRoot, ".alaya-extraction-target-root.json"));
+  cpSync(join(movedRoot, ".extraction-fill.lock"),
+    join(cacheRoot, ".extraction-fill.lock"), { recursive: true });
+
+  expect(() => assertExtractionTargetSelectionRootBinding(selection, cacheRoot, lease))
+    .toThrow(/target root changed/u);
+});
+
+it("rejects a symlinked selected-root marker", () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-marker-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({
+    cacheRoot,
+    auditReceipt: rebuildAuditReceipt(),
+    observation: observation()
+  });
+  const marker = join(cacheRoot, ".alaya-extraction-target-root.json");
+  const outside = join(parent, "outside-marker.json");
+  writeFileSync(outside, readFileSync(marker));
+  rmSync(marker);
+  symlinkSync(outside, marker);
+
+  expect(() => assertExtractionTargetSelectionRootBinding(selection, cacheRoot))
+    .toThrow(/target root changed/u);
+});
+
 function observation(): ExtractionAuthorityObservation {
   return {
     revision: `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`,
@@ -88,17 +136,21 @@ function observation(): ExtractionAuthorityObservation {
 
 function rebuildAuditReceipt() {
   const finalIdentity = {
-    datasetRevision: "f".repeat(64),
-    model: "gpt-5.4-mini",
-    modelFamily: "gpt-5.4-mini",
-    requestProfile: "provider-default-v1",
-    providerUrl: "https://example.test/v1",
-    systemPromptSha256: "1".repeat(64),
-    cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-    rawClosureSha256: "2".repeat(64),
-    parserSemanticsSha256: "3".repeat(64),
-    formationSemanticsSha256: "4".repeat(64),
-    temporalSchemaRevision: "5".repeat(64)
+    raw: {
+      datasetRevision: "f".repeat(64),
+      model: "gpt-5.4-mini",
+      requestProfile: "provider-default-v1",
+      providerUrl: "https://example.test/v1",
+      systemPromptSha256: "1".repeat(64),
+      cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+      rawClosureSha256: "2".repeat(64)
+    },
+    projection: {
+      modelFamily: "gpt-5.4-mini",
+      parserSemanticsSha256: "3".repeat(64),
+      formationSemanticsSha256: "4".repeat(64),
+      temporalSchemaRevision: "5".repeat(64)
+    }
   };
   return buildExtractionCacheAuditReceipt({
     createdAt: "2026-07-17T00:00:00.000Z",
@@ -107,21 +159,29 @@ function rebuildAuditReceipt() {
     rawInventorySha256: "7".repeat(64),
     occurrenceIndexSha256: "8".repeat(64),
     decision: {
-      action: "rebuild",
       sourceRoot: "/source-cache",
-      reasons: ["model_mismatch"],
-      source: { ...finalIdentity, model: "old-model" },
-      final: finalIdentity,
-      replay: {
-        occurrenceCount: 10,
-        accountedOccurrences: 10,
-        elementCount: 10,
-        accountedElements: 10,
-        admitted: 10,
-        deferred: 0,
-        rejected: 0,
-        invalid: 0,
-        ledgerSha256: "9".repeat(64)
+      raw: {
+        action: "rebuild",
+        reasons: ["model_mismatch"],
+        source: { ...finalIdentity.raw, model: "old-model" },
+        final: finalIdentity.raw
+      },
+      projection: {
+        action: "replay",
+        reasons: ["raw_cache_rebuild"],
+        source: finalIdentity.projection,
+        final: finalIdentity.projection,
+        replay: {
+          occurrenceCount: 10,
+          accountedOccurrences: 10,
+          elementCount: 10,
+          accountedElements: 10,
+          admitted: 10,
+          deferred: 0,
+          rejected: 0,
+          invalid: 0,
+          ledgerSha256: "9".repeat(64)
+        }
       }
     }
   });

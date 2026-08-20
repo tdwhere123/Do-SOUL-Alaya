@@ -2,6 +2,7 @@ import type {
   EventLogEntry,
   MemoryEntry,
   MemoryEntryMutableFields,
+  MemoryProposalOperation,
   PathRelation,
   Proposal,
   ProposalResolutionState,
@@ -26,6 +27,7 @@ export interface ProposalCreateInput {
   // (apps/core-daemon/src/routes/proposals.ts), and `'bankruptcy_dossier'`
   // for the budget bankruptcy path (budget-wiring.ts).
   readonly target_object_kind: string;
+  readonly proposal_operation?: MemoryProposalOperation | null;
   readonly proposed_change_summary?: string;
   readonly proposed_changes?: MemoryEntryMutableFields | null;
   readonly proposed_path_relation?: PathRelationProposalPayload | null;
@@ -61,6 +63,7 @@ export interface ScopedProposal {
   readonly workspace_id: string;
   readonly run_id: string | null;
   readonly target_object_kind: string;
+  readonly proposal_operation: MemoryProposalOperation | null;
   // Null until the proposal is reviewed; carries the explicit
   // reviewer identity once review_memory_proposal completes.
   readonly reviewer_identity: string | null;
@@ -78,6 +81,7 @@ export interface PendingProposalSummary {
   readonly proposal_id: string;
   readonly target_object_id: string;
   readonly target_object_kind: string;
+  readonly proposal_operation: MemoryProposalOperation | null;
   readonly created_at: string;
   readonly proposed_change_summary: string;
   readonly proposed_changes: Readonly<MemoryEntryMutableFields> | null;
@@ -127,6 +131,11 @@ export interface UpdatePendingResolutionOptions {
   // connection and return their EventLog drafts. No async work, network I/O, or
   // fire-and-forget side effects belong here.
   readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
+}
+
+export interface TransactionBoundProposalMutation {
+  readonly transactionScope: object;
+  apply(storedReviewEvents: readonly EventLogEntry[]): readonly ProposalResolutionEventInput[];
 }
 
 export interface AcceptedMemoryUpdateInput {
@@ -181,6 +190,7 @@ export interface CreateProposalWithEventsOptions {
 }
 
 export interface ProposalRepo {
+  readonly transactionScope: object;
   create(input: ProposalCreateInput): Promise<Readonly<Proposal>>;
   createProposalWithEvents(
     input: ProposalCreateInput,
@@ -246,6 +256,16 @@ export interface ProposalRepo {
     state: ProposalResolutionState,
     updatedAt: string,
     events: readonly ProposalResolutionEventInput[],
+    options?: UpdatePendingResolutionOptions
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>>;
+  acceptPendingPrivacyEraseWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    mutation: TransactionBoundProposalMutation,
     options?: UpdatePendingResolutionOptions
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;

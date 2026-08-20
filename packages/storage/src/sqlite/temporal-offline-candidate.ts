@@ -164,11 +164,12 @@ function assertCandidateOutputsAreNew(paths: NormalizedPaths): void {
 }
 
 function assertLegacySourceSchema(schemaVersions: readonly number[]): void {
-  const maxVersion = schemaVersions.at(-1);
-  if (maxVersion !== TEMPORAL_OFFLINE_MIGRATION_VERSION - 1) {
+  const expected = currentKnownMigrationVersions()
+    .filter((version) => version < TEMPORAL_OFFLINE_MIGRATION_VERSION);
+  if (!sameVersions(schemaVersions, expected)) {
     throw new StorageError(
       "CONFLICT",
-      `Temporal offline candidate expects a legacy schema ending at ${TEMPORAL_OFFLINE_MIGRATION_VERSION - 1}, got ${maxVersion ?? "none"}.`
+      "Temporal offline candidate requires the complete known pre-temporal migration ledger."
     );
   }
 }
@@ -226,9 +227,14 @@ function assertCandidateSchema(
   sourceSchemaVersions: readonly number[],
   candidateSchemaVersions: readonly number[]
 ): void {
-  const expected = [...sourceSchemaVersions, TEMPORAL_OFFLINE_MIGRATION_VERSION];
-  if (JSON.stringify(candidateSchemaVersions) !== JSON.stringify(expected)) {
-    throw new StorageError("CONFLICT", "Temporal candidate schema ledger does not exactly extend the legacy source.");
+  const pendingKnownVersions = currentKnownMigrationVersions()
+    .filter((version) => version >= TEMPORAL_OFFLINE_MIGRATION_VERSION);
+  const expected = [...sourceSchemaVersions, ...pendingKnownVersions];
+  if (!sameVersions(candidateSchemaVersions, expected)) {
+    throw new StorageError(
+      "CONFLICT",
+      "Temporal candidate schema ledger does not exactly extend the legacy source through every known migration."
+    );
   }
 }
 
@@ -257,6 +263,18 @@ function quarantineIdentity(quarantine: LegacyPathRelationQuarantine): Readonly<
 
 function currentKnownMigrationVersion(): number {
   return computeKnownMaxVersion(listMigrationFiles(resolveMigrationsDirectory()));
+}
+
+function currentKnownMigrationVersions(): readonly number[] {
+  return Object.freeze(
+    listMigrationFiles(resolveMigrationsDirectory())
+      .map((fileName) => Number.parseInt(fileName, 10))
+  );
+}
+
+function sameVersions(actual: readonly number[], expected: readonly number[]): boolean {
+  return actual.length === expected.length &&
+    actual.every((version, index) => version === expected[index]);
 }
 
 function readFileSet(filename: string): readonly TemporalCandidateFileDigest[] {

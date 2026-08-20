@@ -62,6 +62,17 @@ export interface QueryTimeWindow {
   readonly endMs: number;
 }
 
+export function parseTemporalQueryTermWindow(
+  term: string,
+  nowIso?: string
+): QueryTimeWindow | null {
+  const offsetMinutes = nowIso === undefined ? 0 : parseFixedOffsetMinutes(nowIso) ?? 0;
+  const absolute = parseAbsoluteTemporalWindow(term, offsetMinutes);
+  if (absolute !== null) return { startMs: absolute.startMs, endMs: absolute.endMs };
+  const anchorMs = nowIso === undefined ? null : parseOptionalTime(nowIso);
+  return anchorMs === null ? null : parseRelativeDateWindow(term, anchorMs, offsetMinutes);
+}
+
 const QUERY_WINDOW_DECAY_DAYS = 90;
 
 // Object-time facet: distance to the question's asked-about window, independent of distance-to-now.

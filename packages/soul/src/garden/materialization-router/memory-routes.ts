@@ -13,7 +13,6 @@ import {
   buildDistilledFact,
   buildEnrichmentIntent,
   buildEvidenceInput,
-  buildFacetTagsProjection,
   buildMemoryInput
 } from "./inputs.js";
 import {
@@ -23,6 +22,7 @@ import {
   readPartialFailureCreatedObjects
 } from "./materialization-results.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
+import { createSignalEvidence } from "./evidence/create-signal-evidence.js";
 
 type MemoryEntryMaterialization = {
   readonly evidence: MaterializationCreatedObject;
@@ -157,32 +157,26 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     await this.preflightSignalRefFallback(signal);
 
     const createdObjects: MaterializationCreatedObject[] = [];
-    const evidence = await this.dependencies.evidenceService.create(
-      buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
-        context
-      })
+    const evidenceInput = buildEvidenceInput(signal, undefined, {
+      fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+      context
+    });
+    const evidence = await createSignalEvidence(
+      this.dependencies.evidenceService,
+      signal,
+      evidenceInput
     );
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
     let memory: MemoryMaterializationCreatedObject;
     try {
       memory = await this.dependencies.memoryService.create(
-        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
+        buildMemoryInput(signal, [evidence.object_id], this.enrichmentIntent(signal))
       );
     } catch (error) {
-      try {
-        await this.dependencies.evidenceService.deleteCreatedEvidence(evidence.object_id);
-      } catch (compensationError) {
-        throw new MaterializationPartialFailureError(
-          readErrorMessage(compensationError, "Evidence compensation failed after memory materialization failed"),
-          createdObjects,
-          { cause: compensationError }
-        );
-      }
       throw new MaterializationPartialFailureError(
         readErrorMessage(error, "Memory materialization failed after evidence creation"),
-        [],
+        createdObjects,
         { cause: error }
       );
     }
@@ -252,21 +246,16 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     context: MaterializationContext
   ) {
     const incomingContent = buildDistilledFact(signal);
-    const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
-      incomingContent,
-      this.dependencies.deriveFacetTags === true
-    );
+    const incomingMemory = buildMemoryInput(signal, [], this.enrichmentIntent(signal));
     return await port.runWithDecision(
       {
         workspaceId: signal.workspace_id,
         runId: signal.run_id,
         signalId: signal.signal_id,
         incomingContent,
+        incomingDimension: incomingMemory.dimension,
         incomingDomainTags: signal.domain_tags,
-        incomingProjectionFields: readReconciliationProjectionFields(
-          buildMemoryInput(signal, [], this.enrichmentIntent(signal))
-        ),
-        ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
+        incomingProjectionFields: readReconciliationProjectionFields(incomingMemory)
       },
       async (verdict) => await this.applyReconciledVerdict(signal, verdict, state, context)
     );
@@ -287,7 +276,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     }
     await this.preflightSignalRefFallback(signal);
     state.appendedMemory = await this.dependencies.memoryService.create(
-      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal), this.dependencies.deriveFacetTags === true)
+      buildMemoryInput(signal, [evidenceRef], this.enrichmentIntent(signal))
     );
     state.createdObjects.push({
       object_kind: state.appendedMemory.object_kind,
@@ -304,7 +293,9 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     if (state.evidenceId !== undefined) {
       return state.evidenceId;
     }
-    const evidence = await this.dependencies.evidenceService.create(
+    const evidence = await createSignalEvidence(
+      this.dependencies.evidenceService,
+      signal,
       buildEvidenceInput(signal, undefined, {
         fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
         context

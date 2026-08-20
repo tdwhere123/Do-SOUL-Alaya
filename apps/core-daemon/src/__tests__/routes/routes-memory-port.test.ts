@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { AcceptedBy } from "@do-soul/alaya-protocol";
-import { registerMemoryRoutes } from "../../routes/memory/memories.js";
-import { registerRecallRoutes } from "../../routes/memory/recall.js";
-import { registerEvidenceRoutes } from "../../routes/memory/evidence.js";
-import { registerClaimRoutes } from "../../routes/governance/claims.js";
-import { registerSynthesisRoutes } from "../../routes/memory/syntheses.js";
+import { registerMemoryRoutes } from "../../routes/memory/entries/memories.js";
+import { registerRecallRoutes } from "../../routes/memory/recall/recall.js";
+import { registerEvidenceRoutes } from "../../routes/memory/entries/evidence.js";
+import { registerClaimRoutes } from "../../routes/governance/matrix/claims.js";
+import { registerSynthesisRoutes } from "../../routes/memory/entries/syntheses.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
-import { registerProposalRoutes } from "../../routes/governance/proposals.js";
-import { registerGlobalMemoryRoutes } from "../../routes/memory/global-memory.js";
+import { registerProposalRoutes } from "../../routes/governance/proposals/proposals.js";
+import { registerGlobalMemoryRoutes } from "../../routes/memory/entries/global-memory.js";
 import { registerSignalRoutes } from "../../routes/workspace/signals.js";
 import {
   claimRouteServices,

@@ -3,9 +3,9 @@ import {
   buildFilterUserPrompt,
   parseFilterSelection,
   selectRelevantMemories
-} from "../../../longmemeval/qa/qa-llm-filter.js";
-import type { QaChatFn } from "../../../longmemeval/qa/qa-chat.js";
-import type { QaDeliveredCandidate } from "../../../longmemeval/qa/qa-harness.js";
+} from "../../../bench/qa/qa-llm-filter.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
+import type { QaDeliveredCandidate } from "../../../bench/qa/qa-harness.js";
 
 const CANDS: readonly QaDeliveredCandidate[] = [
   { objectId: "a", content: "user enjoys Adobe Premiere", eventDate: "2023/05/04" },

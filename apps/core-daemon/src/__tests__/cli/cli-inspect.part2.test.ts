@@ -11,7 +11,7 @@ import {
   openUrlWithSpawn,
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
-} from "../../cli/inspect.js";
+} from "../../cli/inspect/inspect.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -334,22 +334,24 @@ describe("cli inspect", () => {
   });
 
   it("prefers Windows browser bridge candidates when running in WSL", () => {
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1&launch=launch-code";
     expect(
-      openCommandCandidates("http://127.0.0.1:5174/?workspaceId=ws-1#token=t", {
+      openCommandCandidates(launchUrl, {
         os: "linux",
         env: { WSL_DISTRO_NAME: "Ubuntu" }
       })
     ).toEqual([
-      ["wslview", ["http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]],
-      ["cmd.exe", ["/c", "start", "", "http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]],
-      ["xdg-open", ["http://127.0.0.1:5174/?workspaceId=ws-1#token=t"]]
+      ["wslview", [launchUrl]],
+      ["cmd.exe", ["/c", "start", "", launchUrl]],
+      ["xdg-open", [launchUrl]]
     ]);
   });
 
   it("falls back to the next browser opener when the first command is missing", async () => {
     const attempts: string[] = [];
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1&launch=launch-code";
 
-    await openUrlWithSpawn("http://127.0.0.1:5174/?workspaceId=ws-1#token=t", {
+    await openUrlWithSpawn(launchUrl, {
       env: { WSL_INTEROP: "/run/WSL/1_interop" },
       os: "linux",
       spawnBrowser: (command) => {
@@ -373,6 +375,7 @@ describe("cli inspect", () => {
     const env = buildInspectorChildEnv({
       port: 5175,
       token: "b".repeat(64),
+      launchCode: "d".repeat(32),
       workspaceId: "ws-1",
       inspectorEntryPath: "/tmp/inspector.js",
       env: {
@@ -388,6 +391,7 @@ describe("cli inspect", () => {
       ALAYA_DAEMON_URL: "http://127.0.0.1:3000",
       ALAYA_REQUEST_TOKEN: "daemon-request-token",
       ALAYA_INSPECTOR_TOKEN: "b".repeat(64),
+      ALAYA_INSPECTOR_LAUNCH_CODE: "d".repeat(32),
       ALAYA_INSPECTOR_PORT: "5175",
       ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1"
     });

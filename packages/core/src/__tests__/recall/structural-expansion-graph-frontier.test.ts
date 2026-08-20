@@ -10,6 +10,7 @@ import {
   createMemoryEntry,
   createPathRelation
 } from "./recall-service-test-fixtures.js";
+import { LegacyPathIndexUnboundError } from "../../recall/runtime/legacy-path-index-unbound-error.js";
 
 type CandidateView = Readonly<{
   readonly id: string;
@@ -154,6 +155,73 @@ describe("batched entity-seed graph frontier", () => {
     ]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[1]).toMatchObject({ seed_count: 1 });
+    expect(degradationReasons).toEqual(new Set(["graph_expansion_failed"]));
+  });
+
+  it("does not record graph_expansion_failed for an unbound legacy path index", async () => {
+    const entries = ["seed-a", "neighbor-a"].map((object_id) => createMemoryEntry({ object_id }));
+    const warn = vi.fn();
+    const degradationReasons = new Set<"graph_expansion_failed">();
+    const findByAnchors = vi.fn<PathReader>(async () => {
+      throw new LegacyPathIndexUnboundError();
+    });
+
+    await expandGraphFrontiersBySeed({
+      ...traversalParams(entries, findByAnchors),
+      seedEntries: entries.slice(0, 1),
+      warn,
+      degradationReasons,
+      onCandidate: () => undefined
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(degradationReasons.size).toBe(0);
+  });
+
+  it("does not record graph_expansion_failed for a missing historical projection generation", async () => {
+    const entries = ["seed-a", "neighbor-a"].map((object_id) => createMemoryEntry({ object_id }));
+    const warn = vi.fn();
+    const degradationReasons = new Set<"graph_expansion_failed">();
+    const missing = new Error(
+      "No verified temporal projection exists for as-of 2023-05-30T23:40:00.000Z; rebuild it before recall."
+    );
+    missing.name = "TemporalProjectionGenerationMissingError";
+    const findByAnchors = vi.fn<PathReader>(async () => {
+      throw missing;
+    });
+
+    await expandGraphFrontiersBySeed({
+      ...traversalParams(entries, findByAnchors),
+      seedEntries: entries.slice(0, 1),
+      pathProjectionAsOf: "2023-05-30T23:40:00.000Z",
+      warn,
+      degradationReasons,
+      onCandidate: () => undefined
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(degradationReasons.size).toBe(0);
+  });
+
+  it("still degrades a storage fault during graph expansion", async () => {
+    const entries = ["seed-a", "neighbor-a"].map((object_id) => createMemoryEntry({ object_id }));
+    const warn = vi.fn();
+    const degradationReasons = new Set<"graph_expansion_failed">();
+    const storageFault = new Error("database disk image is malformed");
+    storageFault.name = "SqliteError";
+    const findByAnchors = vi.fn<PathReader>(async () => {
+      throw storageFault;
+    });
+
+    await expandGraphFrontiersBySeed({
+      ...traversalParams(entries, findByAnchors),
+      seedEntries: entries.slice(0, 1),
+      warn,
+      degradationReasons,
+      onCandidate: () => undefined
+    });
+
+    expect(warn).toHaveBeenCalled();
     expect(degradationReasons).toEqual(new Set(["graph_expansion_failed"]));
   });
 });

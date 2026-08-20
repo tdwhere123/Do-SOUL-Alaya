@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  parseOfficialApiSignals
 } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
@@ -19,19 +20,19 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
-// invariant: yunwu.ai + gpt-5.4-mini answers chat/completions content ONLY as
-// an SSE delta stream (`stream:true`); a non-stream request returns an empty
+// Some OpenAI-compatible providers answer chat/completions only as an SSE delta
+// stream; a non-stream request can return an empty
 // `data: [DONE]\n\n` body. The extractor sends `stream:true` and parses the
 // SSE body; a compliant provider's plain JSON body must still work
-// (back-compat). The body read stays under the same wall-clock backstop as the
-// fetch so a mid-stream stalled socket settles as a timeout, not a hang.
+// (back-compat). Response headers and body chunks refresh the inactivity
+// backstop so an active stream stays alive while a stalled socket still settles.
 describe("createGardenHttpExtractor — SSE streaming body parse", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
@@ -173,7 +174,7 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     await expect(
       extractor.extract({ systemPrompt: "s", userPrompt: "t" })
     ).rejects.toThrow(/chunk is not valid JSON/i);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("throws on a truncated SSE stream (non-empty but unparseable) so it is never cached", async () => {
@@ -182,9 +183,8 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     // stall, so the wall-clock backstop does NOT fire). The malformed data
     // frame must fail before any valid prefix can be mistaken for a complete
     // response and written to the cache.
-    // A fresh Response per call: a content error has no HTTP status so the
-    // retry loop treats it as unknown-transport and retries; each attempt
-    // reads a fresh (unconsumed) body.
+    // A content error has no HTTP status; typed parse failures are terminal
+    // on the first attempt so poison bytes cannot be cached after retries.
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       makeSseResponse(
         'data: {"choices":[{"delta":{"content":"{\\"signals\\":[{\\"a"}}]}\n\n' +
@@ -210,15 +210,14 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect((thrown as Error).message).toContain(
       "garden extraction chat completion chunk is not valid JSON"
     );
-    // Terminal classification is a retryable content failure that exhausts
-    // retries (mirrors the no-content style), NOT a hang or silent success.
+    // Terminal classification is a typed parse failure: one attempt, never a
+    // hang or silent success, so the caching extractor cannot write rawJson.
     const benchRetry = (thrown as {
       benchRetry?: { retryCount: number; retryClassification: string };
     }).benchRetry;
-    expect(benchRetry?.retryClassification).toBe("failure_max_retries");
-    // 4 = first attempt + BENCH_HTTP_MAX_RETRIES (3); each settles on the
-    // resolved poison bytes, never hangs.
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(benchRetry?.retryClassification).toBe("failure_non_retryable_response");
+    expect(benchRetry?.retryCount).toBe(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("retries when a non-empty signals array has no valid entries", async () => {
@@ -235,7 +234,13 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
       random: () => 0
     });
 
-    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    const result = await extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      validateRawJson: (rawJson) => {
+        parseOfficialApiSignals(rawJson);
+      }
+    });
 
     expect(result.rawJson).toBe('{"signals":[]}');
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
@@ -261,6 +266,38 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
       userPrompt: "t"
     });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("uses the latest cumulative message.content frame", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"message":{"content":"{\\"signals\\":"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const result = await createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock
+    }).extract({ systemPrompt: "s", userPrompt: "t" });
+
+    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+  });
+
+  it("rejects a stream that mixes delta and full-message content", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    await expect(extractor.extract({
+      systemPrompt: "s",
+      userPrompt: "t",
+      retryMode: "disabled"
+    })).rejects.toThrow(/mixes delta and message content/iu);
   });
 
   it("still extracts a compliant plain-JSON body (application/json back-compat)", async () => {
@@ -351,18 +388,26 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
     await rm(diagnosticDir, { recursive: true, force: true });
   });
 
-  it("dumps retry_classification=failure_non_retryable_4xx when a live extraction hits HTTP 401", async () => {
-    // The extractor delegate models a chronic 401 — the retry loop must
-    // bail on the first attempt and propagate the classification. The dump
-    // file captured under diagnosticDir then carries retry_classification
-    // so a dump reader can attribute the failure without re-running.
+  it.each([
+    {
+      classification: "failure_non_retryable_4xx" as const,
+      message: "garden extraction HTTP 401 unauthorized",
+      status: 401
+    },
+    {
+      classification: "failure_non_retryable_response" as const,
+      message: "garden extraction chat completion chunk is not valid JSON"
+    }
+  ])("dumps retry_classification=$classification from a live extraction failure", async (scenario) => {
     const failingDelegate: BenchSignalExtractor = {
       async extract() {
-        const err = new Error("garden extraction HTTP 401 unauthorized");
-        (err as { status?: number }).status = 401;
+        const err = new Error(scenario.message);
+        if ("status" in scenario) {
+          (err as { status?: number }).status = scenario.status;
+        }
         (err as { benchRetry?: unknown }).benchRetry = {
           retryCount: 0,
-          retryClassification: "failure_non_retryable_4xx"
+          retryClassification: scenario.classification
         };
         throw err;
       }
@@ -395,7 +440,7 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
     await expect(
       runner.seedTurn({
         daemon,
-        turnContent: "the user prefers tea over coffee",
+        turnContent: "I prefer tea over coffee.",
         evidenceRefBase: "evidence-1",
         seedIndex: 0,
         workspaceId: "ws-test",
@@ -421,7 +466,7 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
       live_extraction_failures: number;
       last_extraction_source: string;
     };
-    expect(envelope.retry_classification).toBe("failure_non_retryable_4xx");
+    expect(envelope.retry_classification).toBe(scenario.classification);
     expect(envelope.retry_count).toBe(0);
     expect(envelope.live_extraction_failures).toBe(1);
     expect(envelope.last_extraction_source).toBe("live");

@@ -176,7 +176,7 @@ export class SqliteSurfaceIdentityRepo implements SurfaceIdentityRepo {
           identity: parsedIdentity,
           event: storedEvent
         };
-      })();
+      }).immediate();
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -299,7 +299,7 @@ export class SqliteSurfaceIdentityRepo implements SurfaceIdentityRepo {
           identity: parseSurfaceIdentityRow(row),
           event: storedEvent
         };
-      })();
+      }).immediate();
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;

@@ -24,7 +24,7 @@
 // the inner fetch ignores the abort. abort() is still called (so abort-aware
 // fetches cancel cleanly and free the socket); the race is the safety net for
 // the transport phases where the abort cannot terminate the stall.
-// see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.raceFetchAgainstBackstop
+// see also: packages/core/src/embedding-recall/transport-backstop.ts raceAgainstTransportBackstop
 
 import { AlayaError } from "@do-soul/alaya-protocol";
 
@@ -132,7 +132,7 @@ interface WallClockTimeoutState {
  * promise resolves or rejects — no timer leak even on synchronous throw.
  *
  * see also: packages/soul/src/garden/compute-provider.ts requestSignals
- * see also: apps/bench-runner/src/longmemeval/compile-seed.ts createGardenHttpExtractor
+ * see also: apps/bench-runner/src/bench/compile-seed/compile-seed-http.ts runGardenHttpAttempt
  */
 export async function withWallClockTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,

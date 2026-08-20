@@ -7,31 +7,37 @@ import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
-} from "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+} from "../../../../bench/extraction/authority/attempt-ledger.js";
 import { persistContinuationAuthority } from
   "../../../../cli/extraction-authority/continuation.js";
 import { createSameRootExtractionContinuation } from
-  "../../../../longmemeval/extraction/authority/continuation/continuation.js";
+  "../../../../bench/extraction/authority/continuation/continuation.js";
 import {
   createExtractionAuthorityReceipt,
   type ExtractionAuthorityObservation
-} from "../../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../../bench/extraction/authority/receipt.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../../bench/extraction/authority/receipt-limits.js";
 import { createExtractionPreservedValidClosure } from
-  "../../../../longmemeval/extraction/authority/repair/preserved-valid-closure.js";
+  "../../../../bench/extraction/authority/repair/preserved-valid-closure.js";
 import {
   createFreshRetiredSourceRebuildTargetSelection,
   createSameRootContinuationTargetSelectionReceipt
-} from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../../bench/extraction/authority/target-selection/receipt.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionKeySetSha256,
   computeExtractionRawJsonSha256
-} from "../../../../longmemeval/extraction/content-closure.js";
+} from "../../../../bench/extraction/content-closure.js";
+import { buildExtractionTransportProvenance } from
+  "../../../../bench/extraction/transport-route.js";
+import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
+  "../extraction-cache-test-fixture.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
@@ -59,6 +65,54 @@ export function createContinuationScenario() {
     originalLedgerBytes: readFileSync(predecessorLedgerPath),
     manifestPath,
     startingManifestBytes: readFileSync(manifestPath)
+  };
+}
+
+export function createAuthorityRenewalScenario(
+  outputTokenCap = 1_024,
+  maximumInputTokens = 300,
+  transportProviderUrl?: string
+) {
+  const predecessor = createPredecessorArtifacts();
+  const successorObservation = observation({
+    revision: predecessor.predecessorObservation.revision,
+    manifestSha256: predecessor.manifestSha256,
+    rawContentClosureSha256: predecessor.preservedValidClosure.content_closure_sha256,
+    validTurns: 1,
+    missingTurns: 1,
+    transportProviderUrl
+  });
+  const successorSelection = predecessor.predecessorSelection;
+  const inspection = continuationInspection(
+    successorObservation, predecessor.preservedValidClosure
+  );
+  const continuation = createSameRootExtractionContinuation({
+    cacheRoot: predecessor.cacheRoot,
+    predecessor: predecessor.predecessorReceipt,
+    predecessorLedger: predecessor.predecessorLedger,
+    targetSelection: successorSelection,
+    inspection
+  });
+  const successorReceipt = createReceipt({
+    observation: successorObservation,
+    targetSelectionDigest: successorSelection.receipt_digest,
+    continuation,
+    outputTokenCap,
+    maximumInputTokens
+  });
+  return {
+    ...predecessor,
+    successorObservation,
+    successorSelection,
+    inspection,
+    continuation,
+    successorReceipt,
+    outputPath: join(predecessor.cacheRoot, "..", "renewed-authority.json"),
+    prepared: {
+      predecessor: predecessor.predecessorReceipt,
+      predecessorLedger: predecessor.predecessorLedger,
+      evidence: continuation
+    }
   };
 }
 
@@ -176,7 +230,7 @@ export function spendLegacySuccessor(scenario: ContinuationScenario): void {
     lineageDigest: scenario.successorReceipt.lineage_digest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   recordFailedAttempt(ledger, secondKey, "8".repeat(64));
@@ -215,7 +269,8 @@ function persistGrandchild(
     predecessor: scenario.successorReceipt,
     predecessorLedger,
     targetSelection: selection,
-    inspection
+    inspection,
+    predecessorBaseInspection: scenario.inspection
   });
   const receipt = createReceipt({
     observation: observationValue,
@@ -237,7 +292,7 @@ export function addFailedPredecessorAttempt(scenario: ContinuationScenario): voi
     lineageDigest: scenario.predecessorReceipt.lineage_digest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   recordFailedAttempt(ledger, secondKey, "7".repeat(64));
@@ -249,7 +304,7 @@ function seedSuccessfulPredecessor(cacheRoot: string, lineageDigest: string): vo
     lineageDigest,
     cacheIdentity: { model, requestProfile },
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
   ledger.reserveAttempt(firstKey);
@@ -285,6 +340,7 @@ export function observation(overrides: {
   readonly rawContentClosureSha256?: string | null;
   readonly validTurns?: number;
   readonly missingTurns?: number;
+  readonly transportProviderUrl?: string;
 } = {}): ExtractionAuthorityObservation {
   return {
     revision: overrides.revision ?? `git-worktree-v1:${"a".repeat(40)}:${"b".repeat(64)}`,
@@ -313,6 +369,12 @@ export function observation(overrides: {
       manifestSha256: overrides.manifestSha256 ?? null,
       rawContentClosureSha256: overrides.rawContentClosureSha256 ?? null
     },
+    ...(overrides.transportProviderUrl === undefined ? {} : {
+      transport: {
+        providerUrl: overrides.transportProviderUrl,
+        model: "provider-model-alias"
+      }
+    }),
     inventory: {
       expectedTurns: 2,
       validTurns: overrides.validTurns ?? 0,
@@ -339,10 +401,12 @@ function continuationInspection(
   };
 }
 
-function createReceipt(input: {
+export function createReceipt(input: {
   readonly observation: ExtractionAuthorityObservation;
   readonly targetSelectionDigest: string;
   readonly continuation?: Parameters<typeof createExtractionAuthorityReceipt>[0]["continuation"];
+  readonly outputTokenCap?: number;
+  readonly maximumInputTokens?: number;
 }) {
   return createExtractionAuthorityReceipt({
     action: "fill",
@@ -350,14 +414,14 @@ function createReceipt(input: {
     targetSelectionDigest: input.targetSelectionDigest,
     cumulativeLimits: {
       startingMissing: 2,
-      maximumAttempts: 10,
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
       successfulShardCeiling: 2
     },
-    outputTokenCap: { field: "max_tokens", value: 512 },
+    outputTokenCap: { field: "max_tokens", value: input.outputTokenCap ?? 512 },
     priceEstimate: {
       inputUsdPerMillion: 1,
       outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
+      maximumInputTokensPerAttempt: input.maximumInputTokens ?? 300
     },
     diskFloorBytes: 0,
     inspection: {
@@ -408,6 +472,10 @@ function writeShard(cacheRoot: string, cacheKey: string): void {
     model,
     request_profile: requestProfile,
     cache_key: cacheKey,
-    raw_json: rawJson
+    raw_json: rawJson,
+    transport_provenance: buildExtractionTransportProvenance({
+      providerUrl: "https://example.test/v1", model
+    }),
+    response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
   }), "utf8");
 }

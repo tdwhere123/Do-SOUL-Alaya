@@ -1,5 +1,5 @@
 import { SignalExtractorError } from "./pi-mono-errors.js";
-import type { PiMonoAssistantMessage, PiMonoContext, PiMonoGetModel, PiMonoModel, PiMonoStreamOptions } from "./pi-mono-extractor.js";
+import type { PiMonoAssistantMessage, PiMonoGetModel, PiMonoModel } from "./pi-mono-extractor.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 8_192;
@@ -50,80 +50,6 @@ function createOpenAiCompatibleModel(modelId: string): PiMonoModel {
     contextWindow: DEFAULT_CONTEXT_WINDOW,
     maxTokens: DEFAULT_MAX_TOKENS
   };
-}
-
-// OpenAI-compatible POST to {baseUrl}/chat/completions. Non-ok throws an Error
-// carrying .status so the retry loop classifies 4xx vs 5xx/429.
-export async function fetchComplete(
-  model: PiMonoModel,
-  context: PiMonoContext,
-  options?: PiMonoStreamOptions
-): Promise<PiMonoAssistantMessage> {
-  const baseUrl = model.baseUrl.replace(/\/+$/u, "");
-  const body: Record<string, unknown> = {
-    model: model.id,
-    temperature: options?.temperature ?? 0,
-    messages: [
-      { role: "system", content: context.systemPrompt },
-      ...context.messages.map((message) => ({
-        role: message.role,
-        content: message.content
-      }))
-    ]
-  };
-  const shaped = options?.onPayload?.(body, model) ?? body;
-  const controller = new AbortController();
-  const onAbort = (): void => controller.abort();
-  if (options?.signal !== undefined) {
-    if (options.signal.aborted) {
-      controller.abort();
-    } else {
-      options.signal.addEventListener("abort", onAbort);
-    }
-  }
-  const timer =
-    options?.timeoutMs === undefined
-      ? null
-      : setTimeout(() => controller.abort(), options.timeoutMs);
-  timer?.unref?.();
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(options?.apiKey === undefined
-          ? {}
-          : { authorization: `Bearer ${options.apiKey}` })
-      },
-      body: JSON.stringify(shaped),
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      const error = new Error(
-        `Signal extractor request failed: HTTP ${response.status} ${response.statusText}`
-      );
-      (error as { status?: number }).status = response.status;
-      throw error;
-    }
-    const payload = (await response.json()) as {
-      readonly choices?: readonly {
-        readonly message?: { readonly content?: unknown };
-      }[];
-    };
-    const content = payload.choices?.[0]?.message?.content;
-    return {
-      content: [
-        { type: "text", text: typeof content === "string" ? content : "" }
-      ]
-    };
-  } finally {
-    if (timer !== null) {
-      clearTimeout(timer);
-    }
-    if (options?.signal !== undefined) {
-      options.signal.removeEventListener("abort", onAbort);
-    }
-  }
 }
 
 export function requestJsonPayload(payload: unknown): unknown {

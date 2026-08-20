@@ -23,8 +23,9 @@ import { readErrorMessage } from "@do-soul/alaya-protocol";
 
 type CjkSegmenter = { cut(input: string): readonly string[] };
 type CjkSegmenterLoader = () => Promise<CjkSegmenter | null>;
+export type CjkSegmentationStatus = "uninitialized" | "loading" | "ready" | "unavailable";
 
-const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK";
+export const CJK_SEGMENTATION_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_FALLBACK";
 const CJK_SEGMENTATION_FALLBACK_WARNING_MESSAGE =
   "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback";
 const CJK_SEGMENTATION_COLD_FALLBACK_WARNING_CODE = "ALAYA_CORE_CJK_SEGMENTATION_COLD_FALLBACK";
@@ -127,6 +128,10 @@ async function ensureSegmenter(): Promise<CjkSegmenter | null> {
 export async function warmCjkSegmentation(): Promise<boolean> {
   const segmenter = await ensureSegmenter();
   return segmenter !== null;
+}
+
+export function readCjkSegmentationStatus(): CjkSegmentationStatus {
+  return jiebaState.kind;
 }
 
 /**

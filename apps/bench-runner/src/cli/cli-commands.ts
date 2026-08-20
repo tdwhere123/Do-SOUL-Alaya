@@ -6,28 +6,24 @@ import {
   type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
 import { fetchLongMemEval } from "../longmemeval/ingestion/fetch.js";
-import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
-import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
-import { runLiveBench } from "../live/runner.js";
 import {
+  isLongMemEvalSnapshotMaterializationResult,
   runLongMemEval,
   type LongMemEvalQaRunOption,
-  type LongMemEvalRunResult
+  type LongMemEvalRunOptions,
+  type LongMemEvalRunResult,
+  type LongMemEvalSnapshotMaterializationResult
 } from "../longmemeval/runner.js";
 import {
   createGardenChatFn,
   resolveQaChatConfig,
   resolveQaJudgeChatConfig
-} from "../longmemeval/qa/qa-chat.js";
-import { runSelfBench } from "../self/runner.js";
+} from "../bench/qa/qa-chat.js";
 import { fetchLocomo } from "../locomo/fetch.js";
 import { runLocomo } from "../locomo/runner.js";
-import { runControlledReplay } from "../controlled-replay/runner.js";
-import { exitCodeForVerdicts, pct } from "./result-format.js";
+import { pct } from "./result-format.js";
 import { exitCodeForReleaseHardGates } from "./release-hard-gate-exit.js";
 import type { ParsedFlags } from "./cli-options.js";
-import { verifyLongMemEvalExpansionContractInput } from
-  "./promotion/expansion-input.js";
 
 const QaByTypeSchema = z.record(
   z.string(),
@@ -60,14 +56,13 @@ export async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
 
 export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   try {
-    const expansionCapability = opts.promotionContract === undefined
-      ? undefined
-      : await verifyLongMemEvalExpansionContractInput(opts.promotionContract);
     const qaOption = buildLongMemEvalQaOption(opts);
     process.stdout.write(renderLongMemEvalStart(opts, qaOption));
-    const result = await runLongMemEval(buildLongMemEvalRunOptions(
-      opts, qaOption, expansionCapability
-    ));
+    const result = await runLongMemEval(buildLongMemEvalRunOptions(opts, qaOption));
+    if (isLongMemEvalSnapshotMaterializationResult(result)) {
+      process.stdout.write(renderLongMemEvalSnapshotMaterializationResult(result));
+      return 0;
+    }
     process.stdout.write(renderLongMemEvalResult(result));
     return exitCodeForBenchmarkResult(
       result.payload,
@@ -109,16 +104,18 @@ function renderLongMemEvalStart(
     (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
     (qaOption !== undefined ? " qa=on" : "") +
     (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+    (opts.snapshotOut !== undefined ? " mode=snapshot-materialize" : "") +
+    (opts.materializeQuestionDbs ? " mode=question-db-materialize" : "") +
+    (opts.expectedReconciliationBasis === undefined
+      ? ""
+      : ` expected_reconciliation_basis=${opts.expectedReconciliationBasis}`) +
     "...\n";
 }
 
 function buildLongMemEvalRunOptions(
   opts: ParsedFlags,
-  qaOption: LongMemEvalQaRunOption | undefined,
-  expansionCapability?: Awaited<ReturnType<
-    typeof verifyLongMemEvalExpansionContractInput
-  >>
-): Parameters<typeof runLongMemEval>[0] {
+  qaOption: LongMemEvalQaRunOption | undefined
+): LongMemEvalRunOptions {
   return {
     variant: opts.variant,
     limit: opts.limit,
@@ -134,17 +131,19 @@ function buildLongMemEvalRunOptions(
     ...(qaOption === undefined ? {} : { qa: qaOption }),
     ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
+    ...(opts.materializeQuestionDbs ? { materializeQuestionDbs: true } : {}),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.extractionCacheRoot === undefined ? {} : { extractionCacheRoot: opts.extractionCacheRoot }),
     ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
-    ...(expansionCapability === undefined ? {} : { expansionCapability }),
-    ...(opts.promotionContract === undefined
+    ...(opts.expectedReconciliationBasis === undefined
       ? {}
-      : { promotionContractPath: opts.promotionContract })
+      : { expectedReconciliationBasis: opts.expectedReconciliationBasis })
   };
 }
 
-function renderLongMemEvalResult(result: LongMemEvalRunResult): string {
+function renderLongMemEvalResult(
+  result: LongMemEvalRunResult
+): string {
   const kpi = result.payload.kpi;
   return `Done. Slug: ${result.slug}\n` +
     `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
@@ -154,6 +153,14 @@ function renderLongMemEvalResult(result: LongMemEvalRunResult): string {
     renderLongMemEvalQaMetrics(kpi.qa_metrics) +
     `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
     `  KPI: ${result.kpiPath}\n`;
+}
+
+function renderLongMemEvalSnapshotMaterializationResult(
+  result: LongMemEvalSnapshotMaterializationResult
+): string {
+  return `Done. Snapshot materialize only (scores come from native A/B).\n` +
+    `  Snapshot: ${result.snapshotPath}\n` +
+    `  Materialized questions: ${result.questionCount}\n`;
 }
 
 function renderFullGoldCoverage(
@@ -190,98 +197,6 @@ function parseQaByType(value: unknown): Readonly<Record<string, { readonly corre
 function applyBenchEdgePlaneFlag(opts: ParsedFlags): void {
   if (opts.edgePlane) {
     process.env.ALAYA_BENCH_RUN_EDGE_PLANE = "true";
-  }
-}
-
-export async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise<number> {
-  try {
-    applyBenchEdgePlaneFlag(opts);
-    process.stdout.write(
-      `Running LongMemEval multi-turn ${opts.variant}` +
-        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
-        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
-        ` rounds=${opts.rounds ?? 3}` +
-        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
-        "...\n"
-    );
-    const result = await runLongMemEvalMultiturn({
-      variant: opts.variant,
-      limit: opts.limit,
-      offset: opts.offset,
-      rounds: opts.rounds,
-      historyRoot: opts.historyRoot,
-      dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind,
-      ...(opts.pinnedMetaRoot === undefined ? {} : {
-        pinnedMetaRoot: opts.pinnedMetaRoot
-      }),
-      ...(opts.extractionCacheRoot === undefined ? {} : {
-        extractionCacheRoot: opts.extractionCacheRoot
-      })
-    });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        `  round1=${pct(kpi.r_at_5_round_1 ?? kpi.r_at_5)} roundN=${pct(kpi.r_at_5_round_n ?? kpi.r_at_5)}\n` +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n`
-    );
-    return exitCodeForBenchmarkResult(
-      result.payload,
-      result.evidenceContext ?? undefined
-    );
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner longmemeval-multiturn: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
-
-export async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Promise<number> {
-  try {
-    applyBenchEdgePlaneFlag(opts);
-    process.stdout.write(
-      `Running LongMemEval cross-question ${opts.variant}` +
-        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
-        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
-        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
-        "...\n"
-    );
-    const result = await runLongMemEvalCrossQuestion({
-      variant: opts.variant,
-      limit: opts.limit,
-      offset: opts.offset,
-      historyRoot: opts.historyRoot,
-      dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind,
-      ...(opts.pinnedMetaRoot === undefined ? {} : {
-        pinnedMetaRoot: opts.pinnedMetaRoot
-      }),
-      ...(opts.extractionCacheRoot === undefined ? {} : {
-        extractionCacheRoot: opts.extractionCacheRoot
-      })
-    });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        `  first_half=${pct(kpi.r_at_5_first_half ?? kpi.r_at_5)} last_half=${pct(kpi.r_at_5_last_half ?? kpi.r_at_5)}\n` +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n`
-    );
-    return exitCodeForBenchmarkResult(
-      result.payload,
-      result.evidenceContext ?? undefined
-    );
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner longmemeval-crossquestion: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
   }
 }
 
@@ -349,78 +264,6 @@ export async function runLocomoCommand(opts: ParsedFlags): Promise<number> {
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner locomo: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
-
-export async function runSelfCommand(opts: ParsedFlags): Promise<number> {
-  try {
-    process.stdout.write("Running self-bench (8 synthetic scenarios)...\n");
-    const result = await runSelfBench({ historyRoot: opts.historyRoot });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n`
-    );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner self: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
-
-export async function runLiveCommand(opts: ParsedFlags): Promise<number> {
-  try {
-    process.stdout.write("Archiving live strict-real check into bench-history...\n");
-    const result = await runLiveBench({
-      historyRoot: opts.historyRoot,
-      sourcePath: opts.source
-    });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n` +
-        `  Live gates: ${result.liveGatesPath}\n`
-    );
-    if (result.status === "fail") return 1;
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner live: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
-
-export async function runControlledReplayCommand(opts: ParsedFlags): Promise<number> {
-  try {
-    process.stdout.write("Running controlled replay...\n");
-    const result = await runControlledReplay({ historyRoot: opts.historyRoot });
-    const failedGateIds = result.archive.native_health_gates.gates
-      .filter((gate) => !gate.passed)
-      .map((gate) => gate.id);
-    process.stdout.write(
-      `Controlled replay complete. Slug: ${result.slug}\n` +
-        `  Native health: ${result.archive.native_health_gates.verdict}\n` +
-        `  Archive: ${result.archivePath}\n`
-    );
-    if (failedGateIds.length > 0) {
-      process.stderr.write(
-        `controlled-replay native health gates failed: ${failedGateIds.join(", ")}\n`
-      );
-      return 1;
-    }
-    return 0;
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner controlled-replay: ${err instanceof Error ? err.message : String(err)}\n`
     );
     return 2;
   }

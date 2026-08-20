@@ -6,7 +6,7 @@ import {
   buildExtractionCacheAuditReceipt,
   readExtractionCacheAuditReceipt,
   writeExtractionCacheAuditReceipt
-} from "../../../longmemeval/extraction/cache-audit/receipt.js";
+} from "../../../bench/extraction/cache-audit/receipt.js";
 
 const roots: string[] = [];
 
@@ -18,7 +18,7 @@ describe("extraction cache audit receipt", () => {
   it("binds the decision to source bytes, inventory, occurrences, and replay", () => {
     const receipt = buildExtractionCacheAuditReceipt(fixture());
 
-    expect(receipt.kind).toBe("longmemeval_extraction_cache_compatibility_decision");
+    expect(receipt.kind).toBe("longmemeval_extraction_cache_projection_decision");
     expect(receipt.decision_digest).toMatch(/^[a-f0-9]{64}$/u);
     expect(readExtractionCacheAuditReceiptBytes(JSON.stringify(receipt))).toEqual(receipt);
   });
@@ -53,7 +53,13 @@ describe("extraction cache audit receipt", () => {
     const receipt = buildExtractionCacheAuditReceipt(fixture());
     writeFileSync(path, JSON.stringify({
       ...receipt,
-      decision: { ...receipt.decision, replay: { ledgerSha256: "3".repeat(64) } }
+      decision: {
+        ...receipt.decision,
+        projection: {
+          ...receipt.decision.projection,
+          replay: { ledgerSha256: "3".repeat(64) }
+        }
+      }
     }), "utf8");
 
     expect(() => readExtractionCacheAuditReceipt(path)).toThrow(/shape/u);
@@ -70,12 +76,18 @@ function readExtractionCacheAuditReceiptBytes(bytes: string) {
 
 function fixture() {
   const identity = {
-    datasetRevision: "a".repeat(64), model: "gpt-5.4-mini", modelFamily: "gpt-5.4",
-    requestProfile: "provider-default-v1", providerUrl: "https://provider.example/v1",
-    systemPromptSha256: "b".repeat(64),
-    cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-    rawClosureSha256: "c".repeat(64), parserSemanticsSha256: "d".repeat(64),
-    formationSemanticsSha256: "e".repeat(64), temporalSchemaRevision: "relation-assertion-v1"
+    raw: {
+      datasetRevision: "a".repeat(64), model: "gpt-5.4-mini",
+      requestProfile: "provider-default-v1", providerUrl: "https://provider.example/v1",
+      systemPromptSha256: "b".repeat(64),
+      cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+      rawClosureSha256: "c".repeat(64)
+    },
+    projection: {
+      modelFamily: "gpt-5.4", parserSemanticsSha256: "d".repeat(64),
+      formationSemanticsSha256: "e".repeat(64),
+      temporalSchemaRevision: "relation-assertion-v1"
+    }
   };
   return {
     createdAt: "2026-07-17T00:00:00.000Z",
@@ -84,12 +96,19 @@ function fixture() {
     rawInventorySha256: "1".repeat(64),
     occurrenceIndexSha256: "2".repeat(64),
     decision: {
-      action: "reuse" as const,
       sourceRoot: "/cache/canonical",
-      reasons: [], source: identity, final: identity,
-      replay: {
-        occurrenceCount: 2, accountedOccurrences: 2, elementCount: 2, accountedElements: 2,
-        admitted: 1, deferred: 1, rejected: 0, invalid: 0, ledgerSha256: "3".repeat(64)
+      raw: {
+        action: "reuse" as const,
+        reasons: [], source: identity.raw, final: identity.raw
+      },
+      projection: {
+        action: "reuse" as const,
+        reasons: [], source: identity.projection, final: identity.projection,
+        replay: {
+          occurrenceCount: 2, accountedOccurrences: 2, elementCount: 2,
+          accountedElements: 2, admitted: 1, deferred: 1, rejected: 0,
+          invalid: 0, ledgerSha256: "3".repeat(64)
+        }
       }
     }
   };

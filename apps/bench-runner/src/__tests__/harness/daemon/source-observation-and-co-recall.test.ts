@@ -17,8 +17,6 @@ import {
   GardenRole,
   GardenTaskKind,
   SignalSource,
-  isPathRecallEligible,
-  mapRelationKindToGraphEdgeType,
   type GardenClaimTaskResponse
 } from "@do-soul/alaya-protocol";
 
@@ -35,8 +33,6 @@ import {
   resolveBenchReviewerCredentials
 } from "../../../harness/daemon/daemon-support.js";
 
-import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../../../harness/embedding/co-recall-warmup.js";
-
 import {
   BenchRecallDiagnosticsSchema,
   type BenchRecallDiagnostics
@@ -45,7 +41,7 @@ import {
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 
 const handles: BenchDaemonHandle[] = [];
 
@@ -80,37 +76,6 @@ function readDerivesFromPathRelation(
           AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
     )
     .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
-}
-
-interface CoRecalledPathRow {
-  readonly source_object_id: string;
-  readonly target_object_id: string;
-  readonly recall_bias: number;
-  readonly lifecycle_status: string;
-  readonly governance_class: string;
-}
-
-// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
-// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
-// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
-// the durable row, not from a re-import of the predicate.
-// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
-function readCoRecalledPathRelations(
-  db: BenchDatabase,
-  workspaceId: string
-): readonly CoRecalledPathRow[] {
-  return db.connection
-    .prepare(
-      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
-              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
-              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
-              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
-              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
-         FROM path_relations
-        WHERE workspace_id = ?
-          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
-    )
-    .all(workspaceId) as readonly CoRecalledPathRow[];
 }
 
 function edgeProposalCount(
@@ -255,96 +220,4 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     60_000
   );
 
-  it(
-    "accrueSessionCoRecall EARNS sparse recall-eligible co_recalled paths through the production counter gate",
-    async () => {
-      const workspaceId = "harness-co-recall-ws";
-      const daemon = await startBenchDaemon({
-        workspaceId,
-        runId: "harness-co-recall-run"
-      });
-      handles.push(daemon);
-
-      // Seed five same-session members in seed order. Pair selection is
-      // positional (adjacent in seed order); NO gold/answer knowledge is
-      // consulted (the test never marks any member as the answer).
-      const seeded = [];
-      for (let i = 0; i < 5; i += 1) {
-        seeded.push(
-          await daemon.proposeMemory(
-            `Session member ${i}: ledger detail number ${i}.`,
-            `co-recall-m${i}`,
-            { objectKind: "fact" }
-          )
-        );
-      }
-      const members = seeded.map((s) => s.memoryId);
-
-      const summary = await daemon.accrueSessionCoRecall(members);
-
-      // EARNED: pairs reached the production co_usage_threshold and minted.
-      // SPARSE: at most BENCH_CO_RECALL_WARMUP_PAIR_CAP (3) pairs are observed,
-      // FAR below a same-session hub's N-1=4 spokes or a clique's C(5,2)=10
-      // edges. This is the sparseness contract.
-      expect(summary.pairsObserved).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
-      expect(summary.minted).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
-      expect(summary.belowThreshold).toBe(0);
-      expect(summary.minted).toBeLessThan(members.length - 1);
-
-      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-      const coRecalled = readCoRecalledPathRelations(db, workspaceId);
-
-      // NONZERO and SPARSE recalls-tier co_recalled paths earned (one per
-      // settled pair), not a saturated hub.
-      expect(coRecalled.length).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
-      expect(coRecalled.length).toBeLessThan(members.length - 1);
-
-      // The earned edges are the adjacent member pairs (chain), normalized to
-      // (low, high) to match the production counter key.
-      const sortedPair = (a: string, b: string): [string, string] =>
-        a < b ? [a, b] : [b, a];
-      const expectedPairs = new Set(
-        [0, 1, 2].map((i) => {
-          const [low, high] = sortedPair(members[i]!, members[i + 1]!);
-          return `${low}\0${high}`;
-        })
-      );
-      const earnedPairs = new Set(
-        coRecalled.map((row) => `${row.source_object_id}\0${row.target_object_id}`)
-      );
-      expect(earnedPairs).toEqual(expectedPairs);
-
-      for (const row of coRecalled) {
-        // Recall-eligibility at the born band: active lifecycle AND
-        // recall_bias > 0 — no plasticity reinforcement required.
-        expect(row.recall_bias).toBeGreaterThan(0);
-        expect(
-          isPathRecallEligible({
-            lifecycle: { status: row.lifecycle_status as "active" },
-            effect_vector: { recall_bias: row.recall_bias }
-          } as Parameters<typeof isPathRecallEligible>[0])
-        ).toBe(true);
-        // invariant: earned co_recalled is born at attention_only (the
-        // auto-build associative band), gating only the suppression lane.
-        expect(row.governance_class).toBe("attention_only");
-      }
-
-      // graph health groups by raw relation_kind; the runner folds each kind
-      // into its graph edge_type (mapRelationKindToGraphEdgeType) before
-      // summing recalls_edge_count. co_recalled folds into the "recalls" tier,
-      // so recalls_edge_count > 0.
-      // see also: apps/bench-runner/src/longmemeval/runner.ts
-      //   readLongMemEvalReportSideEffectSnapshot
-      const status =
-        await daemon.runtime.services.graphHealthService.getStatus(workspaceId);
-      let recallsCount = 0;
-      for (const [kind, count] of Object.entries(status.path_relations_by_kind)) {
-        if (mapRelationKindToGraphEdgeType(kind) === "recalls") {
-          recallsCount += count;
-        }
-      }
-      expect(recallsCount).toBe(BENCH_CO_RECALL_WARMUP_PAIR_CAP);
-    },
-    60_000
-  );
 });

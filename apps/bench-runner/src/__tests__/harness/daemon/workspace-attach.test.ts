@@ -1,6 +1,12 @@
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { MemorySearchResult } from "@do-soul/alaya-protocol";
+import {
+  WorkspaceRunEventType,
+  type MemorySearchResult
+} from "@do-soul/alaya-protocol";
+import { initDatabase } from "@do-soul/alaya-storage";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
@@ -27,6 +33,14 @@ describe("BenchDaemon attachWorkspace contract", () => {
         runId: "attach-default-run"
       });
       handles.push(daemon);
+
+      const emptyRecall = await daemon.recall("default workspace empty probe", {
+        maxResults: 5
+      });
+      expect(emptyRecall.results).toEqual([]);
+      const birth = readWorkspaceBirthProof(daemon.dataDir, "attach-default-ws");
+      expect(birth.createdCount).toBe(1);
+      expect(birth.activeGenerationId).toEqual(expect.stringMatching(/\S/u));
 
       const runtimeBefore = daemon.runtime;
       const dataDirBefore = daemon.dataDir;
@@ -232,4 +246,57 @@ describe("BenchDaemon attachWorkspace contract", () => {
     },
     120_000
   );
+
+  it(
+    "restarts against a restored dataDir with the default workspace already present",
+    async () => {
+      const dataDirRoot = await mkdtemp(join(tmpdir(), "bench-restored-default-"));
+      let active: BenchDaemonHandle | undefined;
+      try {
+        active = await startBenchDaemon({
+          dataDirRoot,
+          workspaceId: "restored-default-ws",
+          runId: "restored-default-run"
+        });
+        await active.shutdown();
+        active = undefined;
+
+        active = await startBenchDaemon({
+          dataDirRoot,
+          workspaceId: "restored-default-ws",
+          runId: "restored-default-run"
+        });
+        expect(active.dataDir).toBe(dataDirRoot);
+        const birth = readWorkspaceBirthProof(dataDirRoot, "restored-default-ws");
+        expect(birth.createdCount).toBe(1);
+        expect(birth.activeGenerationId).toEqual(expect.stringMatching(/\S/u));
+      } finally {
+        await active?.shutdown().catch(() => undefined);
+        await rm(dataDirRoot, { recursive: true, force: true });
+      }
+    },
+    120_000
+  );
 });
+
+function readWorkspaceBirthProof(dataDir: string, workspaceId: string): {
+  readonly createdCount: number;
+  readonly activeGenerationId: string | null;
+} {
+  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const createdCount = (database.connection.prepare(`
+    SELECT COUNT(*) AS n FROM event_log
+    WHERE event_type = ? AND workspace_id = ?
+  `).get(WorkspaceRunEventType.WORKSPACE_CREATED, workspaceId) as {
+    readonly n: number;
+  }).n;
+  const pointer = database.connection.prepare(`
+    SELECT active_generation_id AS id
+    FROM projection_generation_pointer
+    WHERE workspace_id = ?
+  `).get(workspaceId) as { readonly id: string } | undefined;
+  return {
+    createdCount,
+    activeGenerationId: pointer?.id ?? null
+  };
+}

@@ -12,8 +12,8 @@ import {
   RECALL_EVAL_ARCHIVE_MARKER,
   isRecallEvalArchive,
   selectFullRunBaseline
-} from "../../../longmemeval/lifecycle/recall-eval/recall-eval-archive-impl.js";
-import { assembleRecallEvalKpi } from "../../../longmemeval/recall-eval-kpi.js";
+} from "../../../bench/lifecycle/recall-eval/recall-eval-archive-impl.js";
+import { assembleRecallEvalKpi } from "../../../bench/recall-eval-kpi.js";
 import { buildPublicPayload } from "./archive-fixture.js";
 
 // @anchor recall-eval-archive-isolation — a fast-loop recall-eval archive
@@ -114,6 +114,7 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     expect(payload.dataset.checksum_source).toBe(
       `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
     );
+    expect(payload.kpi.full_gold_coverage?.memory_only).toBeDefined();
   });
 
   it("marks a recall-eval archive and leaves a full run unmarked", () => {

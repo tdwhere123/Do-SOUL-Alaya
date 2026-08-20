@@ -52,6 +52,18 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(client.modelId).toContain("MiniLM");
   });
 
+  it("warmup loads the pipeline without embedding texts", async () => {
+    const { extractor, calls } = stubExtractor([[dimRow(1)]]);
+    const loader = vi.fn(async () => extractor);
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: loader });
+    await client.warmup();
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([]);
+    await client.embedTexts(["probe"], { timeoutMs: 5_000 });
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+  });
+
   it("stays available across a successful embedTexts call", async () => {
     const client = new LocalOnnxEmbeddingClient({
       pipelineLoader: async () => stubExtractor([[dimRow(11)]]).extractor

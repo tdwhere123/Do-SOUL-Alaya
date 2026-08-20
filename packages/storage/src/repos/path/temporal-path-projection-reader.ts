@@ -1,10 +1,24 @@
 import {
   serializePathAnchorRef,
+  timeConcernWindowDigestsMatch,
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { RelationAssertionRepo } from "./relation-assertion-repo.js";
+
+const TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME =
+  "TemporalProjectionGenerationMissingError";
+
+export class TemporalProjectionGenerationMissingError extends StorageError {
+  public constructor(asOf: string) {
+    super(
+      "NOT_FOUND",
+      `No verified temporal projection exists for as-of ${asOf}; rebuild it before recall.`
+    );
+    this.name = TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME;
+  }
+}
 
 export interface TemporalProjectionReadOptions {
   readonly asOf?: string;
@@ -45,12 +59,12 @@ export class SqliteTemporalPathProjectionReader {
     windowDigests: readonly string[],
     options: TemporalProjectionReadOptions = {}
   ): Promise<readonly Readonly<PathRelation>[]> {
-    const requested = new Set(windowDigests);
-    if (requested.size === 0) return Object.freeze([]);
+    if (windowDigests.length === 0) return Object.freeze([]);
     const paths = await this.readProjection(workspaceId, options.asOf);
     return Object.freeze(paths.filter((path) =>
       [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-        anchor.kind === "time_concern" && requested.has(anchor.window_digest)
+        anchor.kind === "time_concern" && windowDigests.some((digest) =>
+          timeConcernWindowDigestsMatch(anchor.window_digest, digest))
       )
     ));
   }
@@ -67,10 +81,8 @@ export class SqliteTemporalPathProjectionReader {
     }
     const projection = await this.relationAssertions.findProjectionByWorkspaceAtAsOf(workspaceId, asOf);
     if (projection === null) {
-      throw new StorageError(
-        "CONFLICT",
-        `No verified temporal projection exists for as-of ${asOf}; rebuild it before recall.`
-      );
+      // Exact as_of is the generation key; a later verified cache must not stand in.
+      throw new TemporalProjectionGenerationMissingError(asOf);
     }
     return projection;
   }

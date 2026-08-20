@@ -57,6 +57,7 @@ describe("RecallService", () => {
         ];
         const { dependencies } = createDependencies(memories);
         const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
           ...dependencies
           // entityExtractionPort intentionally unwired
         });
@@ -124,6 +125,7 @@ describe("RecallService", () => {
         });
 
         const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
           ...dependencies,
           memoryRepo: {
             ...dependencies.memoryRepo,
@@ -212,6 +214,7 @@ describe("RecallService", () => {
         });
 
         const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
           ...dependencies,
           memoryRepo: {
             ...dependencies.memoryRepo,
@@ -311,6 +314,7 @@ describe("RecallService", () => {
         });
 
         const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
           ...dependencies,
           memoryRepo: {
             ...dependencies.memoryRepo,
@@ -389,6 +393,7 @@ describe("RecallService", () => {
         });
 
         const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
           ...dependencies,
           memoryRepo: {
             ...dependencies.memoryRepo,

@@ -4,7 +4,7 @@ import {
   assertSelectionCohortBinding,
   createLongMemEvalSelectionContract,
   selectionContractIdentity
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 
 const DATASET_SHA = "a".repeat(64);
 

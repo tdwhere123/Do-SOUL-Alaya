@@ -7,64 +7,83 @@ import type {
   PathAnchorRef,
   PathRelation,
   ProjectMappingAnchor,
+  ScopeClass,
   SoulActiveConstraint,
-  SoulRecallTokenizerHint,
   Slot,
   StorageTier as StorageTierType,
   SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingNeighborHit,
   EmbeddingRecallRequestScoreSnapshot,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
+  EvidenceCandidateScoringResult,
+  ScoreEvidenceCandidatesParams,
   MaterializeEmbeddingSupplementFromSnapshotParams,
   PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
 } from "../../embedding-recall/embedding-recall-service.js";
-import type {
-  ManifestationBiasSidecarEntry
-} from "../../manifestation/manifestation-resolver.js";
+import type { ManifestationBiasSidecarEntry } from "../../manifestation/manifestation-resolver.js";
 import type {
   GlobalMemoryRecallCachePort,
   GlobalMemoryRecallPort
 } from "./global-memory-recall-port.js";
 import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox.js";
+import type { RecallRoutingKeyProjectionPort } from "./routing-key-projection-port.js";
+import type {
+  KeywordSearchBatchQuery,
+  KeywordSearchFieldResult,
+  KeywordSearchLaneScope,
+  KeywordSearchResult,
+  RecallEvidenceSearchMatch,
+  RecallQualifiedEvidence
+} from "./recall-search-port-types.js";
+import type {
+  RecallActivationTopKQuery,
+  RecallEventTimeWindowQuery,
+  RecallMemoryListPageOptions,
+  RecallTierWindowCursor,
+  RecallTierWindowResult
+} from "./recall-memory-window-port.js";
+import type {
+  RecallEvidenceSourceAnchor,
+  RecallServiceWarnPort,
+  RecallTemporalProjectionReadOptions
+} from "./recall-service-port-types.js";
 
-export interface KeywordSearchResult {
-  readonly object_id: string;
-  readonly normalized_rank: number;
-  // Trigram-lane ordinal score, present only for substring/CJK trigram hits; feeds trigram_fts. Absent for exact/porter-only hits.
-  readonly trigram_rank?: number;
-}
-
-export interface KeywordSearchBatchQuery {
-  readonly queryText: string;
-  readonly limit: number;
-}
-
-export interface RecallMemoryListPageOptions {
-  readonly limit: number;
-  readonly offset: number;
-}
-
-export interface RecallTierWindowCursor {
-  readonly created_at: string;
-  readonly object_id: string;
-}
-
-export interface RecallTierWindowResult {
-  readonly memories: readonly Readonly<MemoryEntry>[];
-  readonly next_cursor: Readonly<RecallTierWindowCursor> | null;
-  readonly truncated: boolean;
-}
-
-export interface RecallEvidenceSourceAnchor {
-  readonly evidence_object_id: string;
-  readonly artifact_ref: string;
-}
+export type {
+  KeywordSearchBatchQuery,
+  KeywordSearchFieldRefinementLevel,
+  KeywordSearchFieldResult,
+  KeywordSearchLaneId,
+  KeywordSearchLaneObservation,
+  KeywordSearchLaneReceipt,
+  KeywordSearchLaneScope,
+  KeywordSearchLaneStatus,
+  KeywordSearchResult,
+  RecallEvidenceSearchMatch,
+  RecallEvidenceSearchProjectionIdentity,
+  RecallQualifiedEvidence
+} from "./recall-search-port-types.js";
+export type {
+  RecallActivationTopKQuery,
+  RecallEventTimeWindowQuery,
+  RecallMemoryListPageOptions,
+  RecallTierWindowCursor,
+  RecallTierWindowResult
+} from "./recall-memory-window-port.js";
+export type {
+  RecallEvidenceSourceAnchor,
+  RecallServiceWarnPort,
+  RecallTemporalProjectionReadOptions,
+  TokenEstimator
+} from "./recall-service-port-types.js";
+export {
+  makeTokenEstimator,
+  readWithTemporalProjection
+} from "./recall-service-port-helpers.js";
 
 export interface RecallServiceMemoryRepoPort {
   findByWorkspaceId(
@@ -78,9 +97,22 @@ export interface RecallServiceMemoryRepoPort {
     readonly limit: number;
     readonly cursor?: Readonly<RecallTierWindowCursor>;
   }>): Promise<Readonly<RecallTierWindowResult>>;
+  findRecallActivationTopK?(
+    query: Readonly<RecallActivationTopKQuery>
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByEventTimeWindow?(
+    query: Readonly<RecallEventTimeWindowQuery>
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByDimension(workspaceId: string, dimension: MemoryDimensionType): Promise<readonly Readonly<MemoryEntry>[]>;
   findByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<readonly Readonly<MemoryEntry>[]>;
   searchByKeyword?(workspaceId: string, queryText: string, limit: number): Promise<readonly KeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope?: Readonly<KeywordSearchLaneScope>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,
     queryText: string,
@@ -112,11 +144,23 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     tier: StorageTierType
   ): Promise<readonly KeywordSearchResult[]>;
+  searchByAnchorField?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope?: Readonly<KeywordSearchLaneScope>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
   // Admits memories whose distilled content lost keywords but whose EvidenceCapsule.gist still matches. see also: 068-evidence-capsule-fts.sql.
   findByEvidenceRefs?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findBoundEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]>;
   // Optional id-batch lookup; the embedding coarse-injection path resolves cosine neighbors into MemoryEntry candidates.
   findByIds?(
     workspaceId: string,
@@ -129,17 +173,31 @@ export interface RecallServiceEvidenceSearchPort {
   searchByKeyword(
     workspaceId: string,
     queryText: string,
-    limit: number
+    limit: number,
+    refinementDepths?: readonly number[]
   ): Promise<readonly KeywordSearchResult[]>;
-  /** Result batch at index i corresponds to the query at index i. */
-  searchManyByKeyword?(
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
+  searchManyByKeywordField?(
     workspaceId: string,
     queries: readonly Readonly<KeywordSearchBatchQuery>[]
-  ): Promise<readonly (readonly KeywordSearchResult[])[]>;
+  ): Promise<readonly Readonly<KeywordSearchFieldResult>[]>;
   findByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findRecallQualifiedByIds?(
+    workspaceId: string,
+    matches: readonly RecallEvidenceSearchMatch[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
+  findRecallQualifiedFactKeysByIds?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
   findSourceAnchorsByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
@@ -151,8 +209,19 @@ export interface RecallServiceSynthesisSearchPort {
   searchByKeyword(
     workspaceId: string,
     queryText: string,
-    limit: number
+    limit: number,
+    refinementDepths?: readonly number[]
   ): Promise<readonly KeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<KeywordSearchFieldResult>>;
+  searchManyByKeywordField?(
+    workspaceId: string,
+    queries: readonly Readonly<KeywordSearchBatchQuery>[]
+  ): Promise<readonly Readonly<KeywordSearchFieldResult>[]>;
   findByIds(
     workspaceId: string,
     objectIds: readonly string[]
@@ -218,10 +287,6 @@ export interface RecallServiceClaimResolverPort {
   }>[]>;
 }
 
-export interface RecallTemporalProjectionReadOptions {
-  readonly asOf?: string;
-}
-
 /** Optional port: strongest direction-eligible PathPlasticityState.strength per memory (value in [0,1]); missing entry = no plasticity boost. Reads precomputed PathRelation rows; recall does not compute paths itself. */
 export interface RecallServicePathPlasticityPort {
   getStrengthByMemoryId(
@@ -242,18 +307,6 @@ export interface RecallServicePathExpansionPort {
     windowDigests: readonly string[],
     options?: RecallTemporalProjectionReadOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
-}
-
-/**
- * Keeps the current-projection call shape compatible with legacy two-argument
- * readers while making an explicit historical projection opt-in.
- */
-export function readWithTemporalProjection<T>(
-  asOf: string | undefined,
-  readCurrent: () => Promise<T>,
-  readHistorical: (options: RecallTemporalProjectionReadOptions) => Promise<T>
-): Promise<T> {
-  return asOf === undefined ? readCurrent() : readHistorical({ asOf });
 }
 
 export interface RecallServiceActiveConstraintsPort {
@@ -277,36 +330,10 @@ export interface RecallServiceManifestationSidecarPort {
   }>): Promise<readonly Readonly<ManifestationBiasSidecarEntry>[]>;
 }
 
-export interface TokenEstimator {
-  estimate(text: string): number;
-}
-
-export function makeTokenEstimator(opts: {
-  readonly hint?: SoulRecallTokenizerHint | null;
-} = {}): TokenEstimator {
-  const charsPerToken = resolveCharsPerToken(opts.hint ?? null);
-
-  return Object.freeze({
-    estimate(text: string): number {
-      return Math.ceil(text.length / charsPerToken);
-    }
-  });
-}
-
-function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
-  switch (hint) {
-    case "cl100k":
-      // Conservative chars/token heuristic, not a native tokenizer.
-      return 3.6;
-    case "o200k":
-      return 3.2;
-    case "approx_chars_per_token":
-    case null:
-      return 4;
-  }
-}
-
 export interface RecallServiceEmbeddingRecallPort {
+  scoreEvidenceCandidates?(
+    params: ScoreEvidenceCandidatesParams
+  ): Promise<Readonly<EvidenceCandidateScoringResult>>;
   prepareRecallEmbeddingSnapshot?(
     params: PrepareRecallEmbeddingSnapshotParams
   ): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot>>;
@@ -381,13 +408,6 @@ export interface RecallServiceEmbeddingRecallPort {
   }): Promise<ReadonlyMap<string, number>>;
 }
 
-export interface RecallServiceAnswerRerankPort {
-  score(
-    query: string,
-    passages: readonly string[]
-  ): Promise<readonly number[]>;
-}
-
 export interface RecallServiceDependencies {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
   readonly slotRepo: RecallServiceSlotRepoPort;
@@ -399,11 +419,11 @@ export interface RecallServiceDependencies {
   readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
-  readonly answerRerankService?: RecallServiceAnswerRerankPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
+  readonly routingKeyProjectionPort?: RecallRoutingKeyProjectionPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   // Optional decorator over every buildDefaultPolicy output; the daemon injects runtime-driven scoring_weight_overrides. Must return a valid RecallPolicy; identity is the safe default.
@@ -412,6 +432,11 @@ export interface RecallServiceDependencies {
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
   // see also: shared/entity-extraction-port.ts, shared/entity-extraction-rules.ts RuleBasedEntityExtractor.
   readonly entityExtractionPort?: import("../../shared/entity-extraction-port.js").EntityExtractionPort;
+  // Optional read-only structured query parser; absent means relation demand is unavailable.
+  readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js").QueryFactFrameExtractionPort;
+  readonly openSemanticFactorExtractionPort?: import(
+    "../../semantic/open-semantic-factor-extraction-port.js"
+  ).OpenSemanticFactorExtractionPort;
   // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora. Default off.
   readonly robustSourceRefParsing?: boolean;
   readonly generateRuntimeId?: () => string;
@@ -419,8 +444,4 @@ export interface RecallServiceDependencies {
   readonly warn?: RecallServiceWarnPort;
   // Unexpected recall auxiliary failures (not graceful degradations) land here.
   readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
-}
-
-export interface RecallServiceWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
 }

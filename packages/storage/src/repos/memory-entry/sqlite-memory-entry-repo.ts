@@ -26,7 +26,12 @@ import {
   searchByKeywordWithinTier,
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
+import {
+  searchByAnchorField,
+  searchByKeywordField
+} from "./search/field-search.js";
 import { searchByAnchorWithinTier } from "./recall/tier-anchor-search-workflow.js";
+import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -42,6 +47,7 @@ import {
   updateScopedMemoryEntry,
   type MemoryEntryUpdateWorkflowHost
 } from "./update-workflows.js";
+import { findRecallActivationTopK } from "./recall/activation-top-k-query.js";
 import {
   type AutonomousTombstoneInput,
   type MemoryEntryKeywordSearchResult,
@@ -49,7 +55,8 @@ import {
   type MemoryEntryRepoDiagnosticSink,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
-  type MemoryEntryRepoUpdateFields
+  type MemoryEntryRepoUpdateFields,
+  type RecallActivationTopKQuery
 } from "./types.js";
 
 // invariant: workflow-host contracts are implemented directly so statement
@@ -88,7 +95,7 @@ export class SqliteMemoryEntryRepo
   public get searchByKeywordStatement(): SqliteAllStatement {
     return this.workflowStatementHolder.active().searchByKeywordStatement;
   }
-  // see also: packages/storage/src/migrations/077-memory-content-fts-dual.sql
+  // see also: packages/storage/src/migrations/003-memory-fts-and-garden.sql
   public get searchByKeywordPorterStatement(): SqliteAllStatement {
     return this.workflowStatementHolder.active().searchByKeywordPorterStatement;
   }
@@ -153,6 +160,12 @@ export class SqliteMemoryEntryRepo
     return createMemoryEntry.call(this, entry);
   }
 
+  public async findRecallActivationTopK(
+    query: RecallActivationTopKQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return findRecallActivationTopK(this.workflowStatementHolder.active(), query);
+  }
+
   public createWithinTransaction(
     entry: MemoryEntry,
     callbacks: {
@@ -179,6 +192,25 @@ export class SqliteMemoryEntryRepo
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
     return searchByKeyword.call(this, workspaceId, queryText, limit);
+  }
+
+  public async searchByKeywordField(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
+    refinementDepths: readonly number[] = []
+  ) {
+    try {
+      return await searchByKeywordField.call(
+        this, workspaceId, queryText, limit, scope, refinementDepths
+      );
+    } catch (error) {
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search memory field for workspace ${workspaceId}.`
+      );
+    }
   }
 
   public async searchByKeywordWithinObjectIds(
@@ -220,6 +252,26 @@ export class SqliteMemoryEntryRepo
       limit,
       objectIds
     );
+  }
+
+  public async searchByAnchorField(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
+    refinementDepths: readonly number[] = []
+  ) {
+    try {
+      return await searchByAnchorField.call(
+        this, workspaceId, anchorTokens, optionalTokens, limit, scope, refinementDepths
+      );
+    } catch (error) {
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search memory anchor field for workspace ${workspaceId}.`
+      );
+    }
   }
 
   public async searchByAnchorWithinTier(

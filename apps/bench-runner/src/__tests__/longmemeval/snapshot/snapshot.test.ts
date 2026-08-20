@@ -21,8 +21,8 @@ import {
   writeSnapshotSidecar,
   type LongMemEvalSnapshotManifest,
   type SnapshotExtractionProvenanceV3
-} from "../../../longmemeval/snapshot/materialize.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/snapshot/materialize.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
 // copy, version binding, and sidecar/manifest round-trip. Uses a freshly
@@ -130,6 +130,23 @@ describe("snapshot plumbing", () => {
     expect(row?.k).toBe("v");
     copy.close();
   }, 30_000);
+
+  it("refuses to freeze a projection that remained dirty across reopen", () => {
+    const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);
+    freshMigratedDb(liveDbPath);
+    const live = initDatabase({ filename: liveDbPath });
+    live.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_refresh_required = 1
+      WHERE state_id = 1
+    `).run();
+    live.close();
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+
+    expect(() => checkpointAndCopyBenchDb(liveDbPath, snapshotDbPath))
+      .toThrow(/requires a refresh/u);
+    expect(existsSync(snapshotDbPath)).toBe(false);
+  });
 
   it("refuses to copy a live DB when a reader blocks the WAL checkpoint", () => {
     const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);

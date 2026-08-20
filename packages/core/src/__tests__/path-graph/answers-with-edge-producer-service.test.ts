@@ -2,26 +2,78 @@ import { describe, expect, it } from "vitest";
 import {
   AnswersWithEdgeProducerService,
   type AnswerCoRelevancePairSourcePort,
-  type AnswersWithEdgeMintPort
+  type AnswerCoRelevancePairWitness,
+  type AnswersWithRelationAssertionPort
 } from "../../path-graph/producers/answers-with-edge-producer-service.js";
 import { HqAnswerOverlapPairSource } from "../../path-graph/producers/hq-answer-overlap.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import type {
+  RelationAssertionAdmissionRequest,
+  RelationAssertionAdmissionResult
+} from "../../path-graph/relation-assertions/relation-assertion-service-types.js";
+
+const OBSERVED_AT = "2026-07-17T01:00:00.000Z";
 
 function pairSourceOf(pairs: readonly string[]): AnswerCoRelevancePairSourcePort {
-  return { answerCoRelevantPairKeys: async () => new Set(pairs) };
+  return { answerCoRelevantPairs: async () => pairs.map(pairWitness) };
 }
 
-function recordingMintPort(outcome: PathMintOutcome = "applied"): {
-  readonly port: AnswersWithEdgeMintPort;
-  readonly calls: SubmitCandidateInput[];
+function pairWitness(key: string): AnswerCoRelevancePairWitness {
+  const [left, right] = key.split("|") as [string, string];
+  const evidenceReceipts = [left, right].map((objectId) => ({
+    evidence_id: `evidence-${objectId}`,
+    source_event_anchor: {
+      event_type: "soul.signal.emitted",
+      event_id: `event-${objectId}`,
+      occurred_at: OBSERVED_AT
+    }
+  }));
+  const decision = { shared_token_count: 3, shared_token_sha256: "d".repeat(64) };
+  return {
+    pair: [left, right],
+    evidenceReceipts,
+    formationReceipt: {
+      operator_id: "hq_answer_overlap_v1",
+      operator_sha256: "a".repeat(64),
+      parameters: { bar: 3 },
+      parameter_sha256: "b".repeat(64),
+      source_observations: [left, right].map((objectId) => ({
+        source_kind: "memory_hq_observation",
+        source_id: `observation-${objectId}`,
+        source_sha256: "c".repeat(64)
+      })),
+      decision,
+      decision_sha256: "e".repeat(64)
+    },
+    validFrom: OBSERVED_AT
+  };
+}
+
+function recordingAssertionPort(status: RelationAssertionAdmissionResult["status"] = "admitted"): {
+  readonly port: AnswersWithRelationAssertionPort;
+  readonly calls: RelationAssertionAdmissionRequest[];
 } {
-  const calls: SubmitCandidateInput[] = [];
+  const calls: RelationAssertionAdmissionRequest[] = [];
   return {
     calls,
     port: {
-      submitCandidate: async (input) => {
+      admit: async (input) => {
         calls.push(input);
-        return outcome;
+        return {
+          status,
+          assertion: {
+            assertion_id: "assertion-1",
+            workspace_id: input.workspaceId,
+            admission_event_id: "admission-event-1",
+            evidence_receipts: input.evidenceReceipts,
+            formation_receipt: input.formationReceipt,
+            anchors: input.anchors,
+            relation_kind: input.relationKind,
+            validity: input.validity,
+            admitted_at: OBSERVED_AT
+          },
+          activeProjectionCount: 1,
+          projectionGeneration: "projection-1"
+        };
       }
     }
   };
@@ -36,8 +88,11 @@ const OBJECTS = [
 
 describe("AnswersWithEdgeProducerService", () => {
   it("returns empty for fewer than two objects", async () => {
-    const mint = recordingMintPort();
-    const producer = new AnswersWithEdgeProducerService({ pairSource: pairSourceOf(["a|b"]), mintPort: mint.port });
+    const assertion = recordingAssertionPort();
+    const producer = new AnswersWithEdgeProducerService({
+      pairSource: pairSourceOf(["a|b"]),
+      assertionPort: assertion.port
+    });
     const result = await producer.crystallize({
       workspaceId: "ws",
       runId: null,
@@ -46,13 +101,16 @@ describe("AnswersWithEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    expect(result).toEqual({ coRelevantPairs: 0, keptPairs: 0, minted: 0 });
-    expect(mint.calls).toHaveLength(0);
+    expect(result).toEqual({ coRelevantPairs: 0, keptPairs: 0, admitted: 0 });
+    expect(assertion.calls).toHaveLength(0);
   });
 
-  it("mints an answers_with edge with the seed-profile band and object anchors", async () => {
-    const mint = recordingMintPort();
-    const producer = new AnswersWithEdgeProducerService({ pairSource: pairSourceOf(["a|c"]), mintPort: mint.port });
+  it("admits an evidence-grounded answers_with assertion", async () => {
+    const assertion = recordingAssertionPort();
+    const producer = new AnswersWithEdgeProducerService({
+      pairSource: pairSourceOf(["a|c"]),
+      assertionPort: assertion.port
+    });
     const result = await producer.crystallize({
       workspaceId: "ws",
       runId: "run-1",
@@ -61,24 +119,27 @@ describe("AnswersWithEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    expect(result.minted).toBe(1);
-    expect(mint.calls).toHaveLength(1);
-    const call = mint.calls[0]!;
-    expect(call.relationKind).toBe("answers_with");
-    expect(call.governanceClass).toBe("recall_allowed");
-    expect(call.initialStrength).toBe(0.5);
-    expect(call.evidenceBasis).toEqual(["hq_answer_overlap"]);
-    expect(call.recallBiasSign).toBe(1);
-    expect(call.sourceAnchor).toEqual({ kind: "object", object_id: "a" });
-    expect(call.targetAnchor).toEqual({ kind: "object", object_id: "c" });
-    expect(call.runId).toBe("run-1");
+    expect(result.admitted).toBe(1);
+    expect(assertion.calls).toHaveLength(1);
+    expect(assertion.calls[0]).toMatchObject({
+      relationKind: "answers_with",
+      causedBy: "answers_with_edge_producer",
+      validity: { kind: "open", valid_from: OBSERVED_AT },
+      evidenceReceipts: [{ evidence_id: "evidence-a" }, { evidence_id: "evidence-c" }],
+      formationReceipt: { operator_id: "hq_answer_overlap_v1", parameters: { bar: 3 } },
+      anchors: {
+        source_anchor: { kind: "object", object_id: "a" },
+        target_anchor: { kind: "object", object_id: "c" }
+      },
+      runId: "run-1"
+    });
   });
 
   it("drops same-session pairs when crossSessionOnly", async () => {
-    const mint = recordingMintPort();
+    const assertion = recordingAssertionPort();
     const producer = new AnswersWithEdgeProducerService({
       pairSource: pairSourceOf(["a|b", "c|d", "a|c"]),
-      mintPort: mint.port
+      assertionPort: assertion.port
     });
     const result = await producer.crystallize({
       workspaceId: "ws",
@@ -89,19 +150,17 @@ describe("AnswersWithEdgeProducerService", () => {
       crossSessionOnly: true
     });
     expect(result.keptPairs).toBe(1);
-    expect(mint.calls.map((c) =>
-      `${c.sourceAnchor.kind === "object" ? c.sourceAnchor.object_id : ""}|${c.targetAnchor.kind === "object" ? c.targetAnchor.object_id : ""}`
-    )).toEqual(["a|c"]);
+    expect(assertion.calls.map((call) => `${call.anchors.source_anchor.kind === "object" ? call.anchors.source_anchor.object_id : ""}|${call.anchors.target_anchor.kind === "object" ? call.anchors.target_anchor.object_id : ""}`)).toEqual(["a|c"]);
   });
 
   it("caps partners per node", async () => {
-    const mint = recordingMintPort();
+    const assertion = recordingAssertionPort();
     const objects = ["a", "b", "c", "d"].map((id, index) => ({
       objectId: id, sessionId: id, formationKey: `formation:${index}`
     }));
     const producer = new AnswersWithEdgeProducerService({
       pairSource: pairSourceOf(["a|b", "a|c", "a|d", "b|c", "b|d", "c|d"]),
-      mintPort: mint.port
+      assertionPort: assertion.port
     });
     const result = await producer.crystallize({
       workspaceId: "ws",
@@ -113,14 +172,14 @@ describe("AnswersWithEdgeProducerService", () => {
     });
     expect(result.coRelevantPairs).toBe(6);
     expect(result.keptPairs).toBeLessThan(6);
-    expect(result.keptPairs).toBe(mint.calls.length);
+    expect(result.keptPairs).toBe(assertion.calls.length);
   });
 
-  it("fails open to empty when the pair source throws", async () => {
-    const mint = recordingMintPort();
+  it("fails closed to empty when the pair source throws", async () => {
+    const assertion = recordingAssertionPort();
     const producer = new AnswersWithEdgeProducerService({
-      pairSource: { answerCoRelevantPairKeys: async () => { throw new Error("hq store down"); } },
-      mintPort: mint.port
+      pairSource: { answerCoRelevantPairs: async () => { throw new Error("hq store down"); } },
+      assertionPort: assertion.port
     });
     const result = await producer.crystallize({
       workspaceId: "ws",
@@ -130,25 +189,47 @@ describe("AnswersWithEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    expect(result).toEqual({ coRelevantPairs: 0, keptPairs: 0, minted: 0 });
-    expect(mint.calls).toHaveLength(0);
+    expect(result).toEqual({ coRelevantPairs: 0, keptPairs: 0, admitted: 0 });
+    expect(assertion.calls).toHaveLength(0);
   });
 
-  it("crystallizes over a real memory_hq pair source (HQ read -> overlap -> mint)", async () => {
-    const mint = recordingMintPort();
+  it("surfaces pair-source failures when strict proof is required", async () => {
+    const assertion = recordingAssertionPort();
+    const producer = new AnswersWithEdgeProducerService({
+      pairSource: { answerCoRelevantPairs: async () => { throw new Error("hq store down"); } },
+      assertionPort: assertion.port,
+      failOnPairSourceError: true
+    });
+
+    await expect(producer.crystallize({
+      workspaceId: "ws",
+      runId: null,
+      objects: OBJECTS,
+      bar: 3,
+      capPerNode: 3,
+      crossSessionOnly: true
+    })).rejects.toThrow(/hq store down/u);
+    expect(assertion.calls).toHaveLength(0);
+  });
+
+  it("forms a witness over immutable HQ observations", async () => {
+    const assertion = recordingAssertionPort();
     const hqRepo = {
-      getHqByObjectIds: async (objectIds: readonly string[]) => {
-        const all = new Map<string, readonly string[]>([
-          ["a", ["What database does the user prefer for analytics?"]],
-          ["c", ["Which analytics database did the user choose?"]],
-          ["d", ["What hiking trail is the user's favorite?"]]
-        ]);
+      getObservationsByObjectIds: async (objectIds: readonly string[]) => {
+        const all = new Map(["a", "c", "d"].map((id) => [id, {
+          ...observation(id),
+          hqs: id === "a"
+            ? ["What database does the user prefer for analytics?"]
+            : id === "c"
+              ? ["Which analytics database did the user choose?"]
+              : ["What hiking trail is the user's favorite?"]
+        }]));
         return new Map([...all].filter(([id]) => objectIds.includes(id)));
       }
     };
     const producer = new AnswersWithEdgeProducerService({
       pairSource: new HqAnswerOverlapPairSource(hqRepo),
-      mintPort: mint.port
+      assertionPort: assertion.port
     });
     const result = await producer.crystallize({
       workspaceId: "ws",
@@ -158,8 +239,19 @@ describe("AnswersWithEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    // a (s1) and c (s2) share 3 content tokens cross-session; d shares too few.
-    expect(result.minted).toBe(1);
-    expect(mint.calls[0]!.relationKind).toBe("answers_with");
+    expect(result.admitted).toBe(1);
+    expect(assertion.calls[0]!.formationReceipt.source_observations).toHaveLength(2);
   });
 });
+
+function observation(objectId: string) {
+  return {
+    observation_id: `observation-${objectId}`,
+    object_id: objectId,
+    workspace_id: "ws",
+    hqs: [] as readonly string[],
+    evidence_receipt: pairWitness(`${objectId}|z`).evidenceReceipts[0]!,
+    hq_content_sha256: "f".repeat(64),
+    observation_sha256: "e".repeat(64)
+  };
+}

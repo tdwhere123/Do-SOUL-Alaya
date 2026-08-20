@@ -12,7 +12,7 @@ export interface RuntimeQuestionMeasurementPrimitiveLedger {
     readonly object_ids: readonly string[];
   };
   readonly extraction_materialization: {
-    readonly status: "memory_emitted" | "drop" | "unknown";
+    readonly status: "memory_emitted" | "evidence_preserved" | "drop" | "unknown";
     readonly emitted_memory_count: number;
     readonly reason: "candidate_absent" | "materialization_drop" | null;
   };

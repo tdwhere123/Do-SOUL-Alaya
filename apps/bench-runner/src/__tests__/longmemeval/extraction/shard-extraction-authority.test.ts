@@ -18,17 +18,20 @@ import {
   buildShardExtractionAuthorityReference,
   loadGlobalExtractionAuthority,
   renderShardExtractionAuthorityReference
-} from "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
+} from "../../../bench/provenance/contract/extraction-authority-reference.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary,
   renderSnapshotExtractionAuthority
-} from "../../../longmemeval/snapshot/extraction-authority.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+} from "../../../bench/snapshot/extraction-authority.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 import { verifyShardRunProvenance } from
   "../../../cli/merge/shard/shard-provenance-verifier.js";
-import { canonicalProductRecallProvenanceConfig } from "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
-import { resolveMergedRequestedConcurrency } from "../../../longmemeval/provenance/shard-aggregate.js";
+import {
+  buildEffectiveRecallConfigIdentity,
+  readRecallEvalMaxResults
+} from "../../../bench/provenance/effective-recall-config.js";
+import { resolveMergedRequestedConcurrency } from "../../../bench/provenance/shard-aggregate.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) =>
@@ -117,25 +120,68 @@ describe("shard extraction authority references", () => {
 
   it("enforces Product-B policy while hydrating compact merge provenance", async () => {
     const fixture = await authorityFixture();
-    const globalAuthority = await loadGlobalExtractionAuthority(fixture.root);
-    const referenceContents = renderShardExtractionAuthorityReference(fixture.reference);
-    const input = {
-      provenanceContents: JSON.stringify(fixture.compact),
-      referenceContents,
-      globalAuthority
-    };
 
-    expect(verifyShardRunProvenance(input).hydrated.extraction_cache)
+    expect((await verifyCompact(fixture, fixture.compact)).hydrated.extraction_cache)
       .toHaveProperty("content_closure_index");
-    expect(() => verifyShardRunProvenance({
-      ...input,
-      provenanceContents: JSON.stringify({
-        ...fixture.compact,
-        seed_capabilities: { facet_tags_enabled: true }
-      })
-    })).toThrow(/product-default/u);
+    expect((await verifyCompact(fixture, {
+      ...fixture.compact,
+      seed_capabilities: { facet_tags_enabled: false }
+    })).hydrated.seed_capabilities).toEqual({ facet_tags_enabled: false });
+  });
+
+  it("rejects compact merge when seed facet tags are enabled", async () => {
+    const fixture = await authorityFixture();
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      seed_capabilities: { facet_tags_enabled: true }
+    })).rejects.toThrow(/seed capabilities/u);
+  });
+
+  it("rejects compact merge when embedding supplement is off", async () => {
+    const fixture = await authorityFixture();
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      runtime: {
+        ...fixture.compact.runtime,
+        embedding_mode: "disabled",
+        embedding_supplement: { enabled: false as const }
+      }
+    })).rejects.toThrow(/bi-encoder identity/u);
+  });
+
+  it("rejects compact merge when the embedding model drifts", async () => {
+    const fixture = await authorityFixture();
+    const supplement = fixture.compact.runtime.embedding_supplement;
+    if (supplement?.enabled !== true || supplement.provider_kind !== "local_onnx") {
+      throw new Error("fixture requires product-default local ONNX identity");
+    }
+
+    await expect(verifyCompact(fixture, {
+      ...fixture.compact,
+      runtime: {
+        ...fixture.compact.runtime,
+        embedding_provider_label: "local_onnx:Xenova/other",
+        embedding_supplement: {
+          ...supplement,
+          effective_model_id: "Xenova/other"
+        }
+      }
+    })).rejects.toThrow(/bi-encoder/u);
   });
 });
+
+async function verifyCompact(
+  fixture: Awaited<ReturnType<typeof authorityFixture>>,
+  compact: typeof fixture.compact
+) {
+  return verifyShardRunProvenance({
+    provenanceContents: JSON.stringify(compact),
+    referenceContents: renderShardExtractionAuthorityReference(fixture.reference),
+    globalAuthority: await loadGlobalExtractionAuthority(fixture.root)
+  });
+}
 
 async function authorityFixture() {
   const root = await mkdtemp(join(tmpdir(), "lme-global-authority-"));
@@ -150,7 +196,13 @@ async function authorityFixture() {
       gate_sha256: promotion.contract_sha256
     },
     runtime: productRuntime(),
-    recall_config: canonicalProductRecallProvenanceConfig(),
+    recall_config: Object.freeze({
+      conf_slice_compatibility: false,
+      ...buildEffectiveRecallConfigIdentity({}, {
+        maxResults: readRecallEvalMaxResults(undefined),
+        conflictAwareness: true
+      })
+    }),
     seed_capabilities: { facet_tags_enabled: false }
   };
   const cache = expansionCache(base.extraction_cache!);
@@ -316,7 +368,7 @@ function buildFanout(
 function promotionIdentity(datasetSha256: string) {
   return {
     contract_sha256: "5".repeat(64),
-    policy_version: "longmemeval-product-default-v1" as const,
+    policy_version: "longmemeval-product-default-v2" as const,
     code: {
       commit_sha: "8".repeat(40),
       commit_sha7: "8".repeat(7),

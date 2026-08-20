@@ -151,6 +151,38 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
       }).success
     ).toBe(false);
     expect(
+      SoulProposeMemoryUpdateRequestSchema.parse({
+        operation: "privacy_erase",
+        target_object_id: "source-record-1",
+        reason: "user_requested_deletion"
+      })
+    ).toEqual({
+      operation: "privacy_erase",
+      target_object_id: "source-record-1",
+      reason: "user_requested_deletion"
+    });
+    expect(
+      SoulProposeMemoryUpdateRequestSchema.safeParse({
+        operation: "privacy_erase",
+        target_object_id: "source-record-1",
+        reason: "sensitive free-form deletion request"
+      }).success
+    ).toBe(false);
+    expect(
+      SoulProposeMemoryUpdateRequestSchema.safeParse({
+        operation: "privacy_erase",
+        target_object_id: "source-record-1",
+        proposed_changes: { content: "must not be overloaded" },
+        reason: "invalid mixed operation"
+      }).success
+    ).toBe(false);
+    expect(
+      SoulProposeMemoryUpdateRequestSchema.safeParse({
+        target_object_id: "memory-1",
+        reason: "missing update payload"
+      }).success
+    ).toBe(false);
+    expect(
       SoulProposeMemoryUpdateRequestSchema.safeParse({
         target_object_id: "memory-1",
         proposed_changes: { content: "Use pnpm." },

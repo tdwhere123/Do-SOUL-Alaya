@@ -26,9 +26,9 @@ vi.mock("../../runtime/app.js", () => ({
   createApp: hoisted.createApp
 }));
 
-vi.mock("../../runtime/daemon-runtime-support.js", async () => {
+vi.mock("../../runtime/daemon/lifecycle/daemon-runtime-support.js", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
-    "../../runtime/daemon-runtime-support.js"
+    "../../runtime/daemon/lifecycle/daemon-runtime-support.js"
   );
   const loadConfigEnvDefault = actual["loadConfigEnv"] as (
     envPath: string
@@ -76,15 +76,15 @@ vi.mock("../../budget/wiring.js", () => ({
   createBudgetProposalPort: vi.fn(() => ({}))
 }));
 
-vi.mock("../../runtime/files-data-dir.js", () => ({
+vi.mock("../../runtime/daemon/support/files-data-dir.js", () => ({
   resolveCoreDaemonFilesDirectory: vi.fn(() => "/tmp/alaya-files")
 }));
 
-vi.mock("../../garden/orphan-query.js", () => ({
+vi.mock("../../garden/support/orphan-query.js", () => ({
   findOrphanedMemoriesForWorkspace: vi.fn(async () => [])
 }));
 
-vi.mock("../../services/config-service.js", () => ({
+vi.mock("../../services/config/config-service.js", () => ({
   createConfigService: vi.fn(() => {
     const getRuntimeGardenComputeConfig = vi.fn(async () => {
       const envValues = await readMockConfigEnv();
@@ -130,11 +130,11 @@ vi.mock("../../services/config-service.js", () => ({
   })
 }));
 
-vi.mock("../../services/environment-status-service.js", () => ({
+vi.mock("../../services/status/environment-status-service.js", () => ({
   createEnvironmentStatusService: hoisted.createEnvironmentStatusService
 }));
 
-vi.mock("../../services/soul-approval-service.js", () => ({
+vi.mock("../../services/soul/soul-approval-service.js", () => ({
   createSoulApprovalService: vi.fn(() => ({}))
 }));
 
@@ -144,7 +144,7 @@ vi.mock("../../handoff/gap-adapter.js", () => ({
   })
 }));
 
-vi.mock("../../mcp/mcp-runtime-registry.js", () => ({
+vi.mock("../../mcp/catalog/mcp-runtime-registry.js", () => ({
   createDaemonMcpRuntimeRegistry: vi.fn((input?: { serverConfigs?: Record<string, unknown> }) => {
     const configuredServerNames = new Set(Object.keys(input?.serverConfigs ?? {}));
     const isConfigured = (serverName: string) => configuredServerNames.has(serverName);
@@ -170,28 +170,44 @@ vi.mock("@do-soul/alaya-storage", async () => {
   return buildToolRuntimeWiringStorageMocks({ actual, hoisted });
 });
 
-vi.mock("@do-soul/alaya-core", () => buildToolRuntimeWiringCoreMocks({ hoisted }));
+vi.mock("@do-soul/alaya-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@do-soul/alaya-core")>();
+  return {
+    ...actual,
+    ...buildToolRuntimeWiringCoreMocks({ hoisted }),
+    fieldContractSha256: actual.fieldContractSha256,
+    activateEmptyGeneration: actual.activateEmptyGeneration,
+    createInMemoryFieldQuerySession: actual.createInMemoryFieldQuerySession,
+    createInMemoryFieldStores: actual.createInMemoryFieldStores,
+    createProjectionGenerationReceipt: actual.createProjectionGenerationReceipt,
+    SEALED_EMPTY_FRONTIER: actual.SEALED_EMPTY_FRONTIER
+  };
+});
 
-vi.mock("@do-soul/alaya-engine-gateway", () => ({
-  APIConversationEngine: hoisted.apiConversationEngineCtor,
-  McpBridge: hoisted.bridgeCtor,
-  buildConversationToolDefs: (specs: readonly { readonly tool_id: string; readonly description: string }[]) =>
-    specs.map((spec) => ({
-      name: spec.tool_id,
-      description: spec.description,
-      parametersSchema: {}
-    })),
-  READ_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[0],
-  LIST_DIRECTORY_TOOL_SPEC: hoisted.conversationToolSpecs[1],
-  SEARCH_FILES_TOOL_SPEC: hoisted.conversationToolSpecs[2],
-  WRITE_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[3],
-  EXEC_SHELL_TOOL_SPEC: hoisted.conversationToolSpecs[4],
-  readFile: hoisted.readFile,
-  listDirectory: hoisted.listDirectory,
-  searchFiles: hoisted.searchFiles,
-  writeFile: hoisted.writeFile,
-  execShell: hoisted.execShell
-}));
+vi.mock("@do-soul/alaya-engine-gateway", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@do-soul/alaya-engine-gateway")>();
+  return {
+    ...actual,
+    APIConversationEngine: hoisted.apiConversationEngineCtor,
+    McpBridge: hoisted.bridgeCtor,
+    buildConversationToolDefs: (specs: readonly { readonly tool_id: string; readonly description: string }[]) =>
+      specs.map((spec) => ({
+        name: spec.tool_id,
+        description: spec.description,
+        parametersSchema: {}
+      })),
+    READ_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[0],
+    LIST_DIRECTORY_TOOL_SPEC: hoisted.conversationToolSpecs[1],
+    SEARCH_FILES_TOOL_SPEC: hoisted.conversationToolSpecs[2],
+    WRITE_FILE_TOOL_SPEC: hoisted.conversationToolSpecs[3],
+    EXEC_SHELL_TOOL_SPEC: hoisted.conversationToolSpecs[4],
+    readFile: hoisted.readFile,
+    listDirectory: hoisted.listDirectory,
+    searchFiles: hoisted.searchFiles,
+    writeFile: hoisted.writeFile,
+    execShell: hoisted.execShell
+  };
+});
 
 vi.mock("@do-soul/alaya-soul", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@do-soul/alaya-soul");

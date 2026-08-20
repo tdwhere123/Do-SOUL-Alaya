@@ -7,7 +7,7 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics } from "../../../harness/token/token-economy.js";
 import type { BenchTokenMetrics } from "../../../harness/daemon.js";
-import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 import { buildMergedFullGoldCoverage } from "../merge-full-gold.js";
 import {
@@ -29,7 +29,7 @@ import { buildMergedSelectionContract } from "../merged/merged-selection-contrac
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 import { buildMergedRates, type MergedRates } from "../merged/merged-rates.js";
 
 export interface MergedLongMemEvalBuild {
@@ -181,6 +181,7 @@ interface MergeShardAggregate {
   providerPendingTotal: number;
   providerFailedTotal: number;
   providerNotRequestedTotal: number;
+  providerUnusableTotal: number;
   providerReturnedHitAt5: number;
   hasProviderRates: boolean;
   hasReturnedSubsetRAt5: boolean;
@@ -211,6 +212,7 @@ function createMergeShardAggregate(): MergeShardAggregate {
     providerPendingTotal: 0,
     providerFailedTotal: 0,
     providerNotRequestedTotal: 0,
+    providerUnusableTotal: 0,
     providerReturnedHitAt5: 0,
     hasProviderRates: false,
     hasReturnedSubsetRAt5: false,
@@ -275,6 +277,9 @@ function addShardProviderTotals(
   aggregate.providerNotRequestedTotal += Math.round(
     (shard.kpi.provider_not_requested_rate ?? 0) * shard.evaluated_count
   );
+  aggregate.providerUnusableTotal += Math.round(
+    (shard.kpi.query_embedding_unusable_rate ?? 0) * shard.evaluated_count
+  );
   if (shard.kpi.r_at_5_with_embedding_returned !== undefined) {
     aggregate.hasReturnedSubsetRAt5 = true;
     aggregate.providerReturnedHitAt5 += Math.round(
@@ -288,7 +293,8 @@ function hasProviderRateFields(shard: KpiPayload): boolean {
     shard.kpi.provider_returned_rate !== undefined ||
     shard.kpi.provider_pending_rate !== undefined ||
     shard.kpi.provider_failed_rate !== undefined ||
-    shard.kpi.provider_not_requested_rate !== undefined
+    shard.kpi.provider_not_requested_rate !== undefined ||
+    shard.kpi.query_embedding_unusable_rate !== undefined
   );
 }
 
@@ -414,6 +420,10 @@ function providerKpiFields(
           provider_failed_rate: ratio(aggregate.providerFailedTotal, aggregate.evaluatedTotal),
           provider_not_requested_rate: ratio(
             aggregate.providerNotRequestedTotal,
+            aggregate.evaluatedTotal
+          ),
+          query_embedding_unusable_rate: ratio(
+            aggregate.providerUnusableTotal,
             aggregate.evaluatedTotal
           )
         }

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Hono } from "hono";
+import { z } from "zod";
 import {
   diffKpis,
   listEntries,
@@ -9,6 +10,19 @@ import {
   type BenchName,
   type KpiPayload
 } from "@do-soul/alaya-eval";
+
+const ExpansionDiagnosticsSchema = z
+  .object({
+    scored_recall_evidence: z
+      .object({
+        delivered_result_count: z.number().finite().optional(),
+        path_expansion_plane_count: z.number().finite().optional(),
+        graph_expansion_plane_count: z.number().finite().optional()
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
 
 export interface BenchSummaryOptions {
   readonly historyRoot: string;
@@ -266,32 +280,37 @@ async function readExpansionShares(
   readonly pathExpansionShare: number | null;
   readonly graphExpansionShare: number | null;
 }> {
+  let raw: string;
   try {
-    const raw = await readFile(
+    raw = await readFile(
       path.join(historyRoot, benchName, slug, "longmemeval-diagnostics.json"),
       "utf8"
     );
-    const parsed = JSON.parse(raw) as {
-      readonly scored_recall_evidence?: {
-        readonly delivered_result_count?: unknown;
-        readonly path_expansion_plane_count?: unknown;
-        readonly graph_expansion_plane_count?: unknown;
-      };
-    };
-    const evidence = parsed.scored_recall_evidence;
-    const delivered = readNumber(evidence?.delivered_result_count);
-    if (delivered === null || delivered <= 0) {
+  } catch (error) {
+    if (isEnoent(error)) {
       return { pathExpansionShare: null, graphExpansionShare: null };
     }
-    const pathCount = readNumber(evidence?.path_expansion_plane_count);
-    const graphCount = readNumber(evidence?.graph_expansion_plane_count);
-    return {
-      pathExpansionShare: pathCount === null ? null : pathCount / delivered,
-      graphExpansionShare: graphCount === null ? null : graphCount / delivered
-    };
-  } catch {
+    throw error;
+  }
+  const parsed = ExpansionDiagnosticsSchema.parse(JSON.parse(raw));
+  const evidence = parsed.scored_recall_evidence;
+  const delivered = readNumber(evidence?.delivered_result_count);
+  if (delivered === null || delivered <= 0) {
     return { pathExpansionShare: null, graphExpansionShare: null };
   }
+  const pathCount = readNumber(evidence?.path_expansion_plane_count);
+  const graphCount = readNumber(evidence?.graph_expansion_plane_count);
+  return {
+    pathExpansionShare: pathCount === null ? null : pathCount / delivered,
+    graphExpansionShare: graphCount === null ? null : graphCount / delivered
+  };
+}
+
+function isEnoent(error: unknown): boolean {
+  return error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT";
 }
 
 function readNumber(value: unknown): number | null {

@@ -1,20 +1,24 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import {
+  isHistoryEntrySlug,
+  KpiPayloadSchema,
+  type KpiPayload
+} from "@do-soul/alaya-eval";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
-  "../../../longmemeval/archive/archive-evidence.js";
+  "../../../bench/archive/archive-evidence.js";
 import {
   resolveBenchDiagnosticsArtifactRoot
-} from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
 import { streamDiagnosticsGzipQuestions } from
-  "../../../longmemeval/diagnostics/artifacts/artifact-gzip-reader.js";
+  "../../../bench/diagnostics/artifacts/artifact-gzip-reader.js";
 import { streamDiagnosticsJsonQuestions } from
-  "../../../longmemeval/diagnostics/artifacts/artifact-json-stream.js";
+  "../../../bench/diagnostics/artifacts/artifact-json-stream.js";
 import type {
   LongMemEvalDiagnosticsSidecar,
   LongMemEvalQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+} from "../../../bench/diagnostics.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import { resolveShardPointerPath } from "../../merge-shared.js";
 import {
   bindVerifiedShardDiagnostics,
@@ -27,7 +31,7 @@ import {
   type ContainedArtifactFile
 } from "../contained-artifact-path.js";
 import type { LoadedGlobalExtractionAuthority } from
-  "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
+  "../../../bench/provenance/contract/extraction-authority-reference.js";
 
 export interface ReadShardPayloadResult {
   readonly payload: KpiPayload;
@@ -66,7 +70,7 @@ export async function readShardPayloadPlan(
     shardRoot,
     path.relative(shardRoot, pointerPath)
   );
-  if (typeof pointer.slug !== "string" || !CANONICAL_SLUG.test(pointer.slug)) {
+  if (typeof pointer.slug !== "string" || !isHistoryEntrySlug(pointer.slug)) {
     throw new Error(
       `shard ${shardRoot} ${path.basename(pointerPath)} missing slug`
     );
@@ -337,8 +341,6 @@ async function readContainedJson<T>(root: string, reference: string): Promise<T>
 }
 
 const MAX_INLINE_DIAGNOSTICS_BYTES = 64 * 1024 * 1024;
-const CANONICAL_SLUG = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/u;
-
 async function* questionsFromArray(
   questions: readonly LongMemEvalQuestionDiagnostic[]
 ): AsyncGenerator<LongMemEvalQuestionDiagnostic> {

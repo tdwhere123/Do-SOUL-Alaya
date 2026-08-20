@@ -4,6 +4,7 @@ export const DEFAULT_QUERY_TIMEOUT_MS = 2500;
 export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
 export const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;
+export const DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE = 4096;
 export const MAX_QUERY_EMBEDDING_CACHE_SIZE = 4096;
 export const DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS = 5;
 export const MAX_EMBEDDING_REQUEST_ATTEMPTS = 5;
@@ -14,6 +15,8 @@ export const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 export const EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS = 2_000;
 export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 export const EMBEDDING_WORKSPACE_SCAN_CAP = 5_000;
+export const NO_STORED_VECTORS_DEGRADATION_REASON = "no_stored_vectors";
+export const EVIDENCE_DOCUMENT_MAX_OPERATOR_ID = "evidence_document_max_v1";
 
 export function resolveEmbeddingWorkspaceScanCap(): number {
   const configured = getCoreConfig().embedding.workspaceScanCap;

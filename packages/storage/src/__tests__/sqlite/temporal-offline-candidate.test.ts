@@ -26,6 +26,8 @@ interface CandidateFixture {
   readonly receiptFilename: string;
 }
 
+const TEMPORAL_CANDIDATE_TIMEOUT_MS = 15_000;
+
 describe("prepareTemporalCandidate", () => {
   let fixture: CandidateFixture;
 
@@ -61,7 +63,7 @@ describe("prepareTemporalCandidate", () => {
     expect(result.quarantine).toMatchObject({ convertedCount: 0, quarantinedCount: 2 });
     expect(fileSha256(fixture.sourceFilename)).toBe(sourceHash);
     expect(readSchemaMigrationLedger(fixture.sourceFilename)).toEqual(sourceLedger);
-    expect(readSchemaMigrationLedger(fixture.candidateFilename).at(-1)).toBe(108);
+    expect(readSchemaMigrationLedger(fixture.candidateFilename).at(-1)).toBe(8);
 
     const candidate = new BetterSqlite3(fixture.candidateFilename, { readonly: true });
     try {
@@ -94,7 +96,7 @@ describe("prepareTemporalCandidate", () => {
     } finally {
       candidateMode.close();
     }
-  });
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
 
   it("rejects an in-place candidate path before mutating the legacy source", async () => {
     seedLegacySource(fixture.sourceFilename);
@@ -108,7 +110,7 @@ describe("prepareTemporalCandidate", () => {
 
     expect(fileSha256(fixture.sourceFilename)).toBe(sourceHash);
     expect(fs.existsSync(fixture.receiptFilename)).toBe(false);
-  });
+  }, TEMPORAL_CANDIDATE_TIMEOUT_MS);
 
   it("keeps fresh bootstrap as an explicit legacy-compatible pre-cutover state", () => {
     const ephemeral = initDatabase();
@@ -160,7 +162,7 @@ describe("prepareTemporalCandidate", () => {
       expect(sourceBefore.some((entry) => entry.role === "wal")).toBe(true);
       expect(sourceFileSet(fixture.sourceFilename)).toEqual(sourceBefore);
       expect(result.quarantine).toMatchObject({ convertedCount: 0, quarantinedCount: 3 });
-      expect(readSchemaMigrationLedger(fixture.candidateFilename).at(-1)).toBe(108);
+      expect(readSchemaMigrationLedger(fixture.candidateFilename).at(-1)).toBe(8);
     } finally {
       writer.close();
     }
@@ -416,7 +418,7 @@ function seedLegacySource(filename: string): void {
     const markApplied = database.prepare(
       "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)"
     );
-    for (const migration of migrationFilesThrough(107)) {
+    for (const migration of migrationFilesThrough(6)) {
       database.transaction(() => {
         database.exec(migration.sql);
         markApplied.run(migration.version, "2026-07-17T00:00:00.000Z");

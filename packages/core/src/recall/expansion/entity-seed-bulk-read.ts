@@ -1,5 +1,10 @@
+import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
-import type { RecallServiceDependencies, RecallServiceWarnPort } from "../runtime/recall-service-types.js";
+import type {
+  RecallDegradationReason,
+  RecallServiceDependencies,
+  RecallServiceWarnPort
+} from "../runtime/recall-service-types.js";
 import {
   loadIndexAlignedSearchBatches,
   type IndexAlignedBatchFailure
@@ -17,6 +22,7 @@ type LoadEntitySeedHitBatchesParams = Readonly<{
   readonly candidateIds: readonly string[];
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
   readonly warn: RecallServiceWarnPort;
+  readonly degradationReasons?: Set<RecallDegradationReason>;
 }>;
 export async function loadEntitySeedHitBatches(
   params: LoadEntitySeedHitBatchesParams
@@ -65,6 +71,7 @@ async function loadScalarHits(
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
+    recordEntitySeedLookupFailure(params);
     return [];
   }
 }
@@ -101,6 +108,7 @@ function warnBulkFailure(
       errorMessage: failure.errorMessage
     }
   );
+  if (!hasScalar) recordEntitySeedLookupFailure(params);
 }
 
 function warnNoSearchPort(params: LoadEntitySeedHitBatchesParams): void {
@@ -110,4 +118,9 @@ function warnNoSearchPort(params: LoadEntitySeedHitBatchesParams): void {
     expected_count: params.lookups.length,
     actual_count: 0
   });
+  recordEntitySeedLookupFailure(params);
+}
+
+function recordEntitySeedLookupFailure(params: LoadEntitySeedHitBatchesParams): void {
+  recordRecallDegradation(params, "entity_seed_lookup_failed");
 }

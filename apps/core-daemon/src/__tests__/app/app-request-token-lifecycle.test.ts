@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../runtime/app.js";
-import { createRequestProtection } from "../../runtime/daemon-runtime-support.js";
+import { createRequestProtection } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 
 describe("daemon request token lifecycle", () => {
   it("keeps an explicit token stable across restarts and rotates it by configuration", async () => {

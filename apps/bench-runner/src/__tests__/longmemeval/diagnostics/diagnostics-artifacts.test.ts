@@ -11,12 +11,12 @@ import {
   writeExternalDiagnosticsArtifact,
   writeExternalGzipDiagnosticsArtifact,
   writeExternalGzipDiagnosticsSidecarArtifact
-} from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   renderDiagnosticsSidecar,
   type LongMemEvalDiagnosticsSidecar
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 
 const roots: string[] = [];
 
@@ -268,11 +268,13 @@ function validDiagnosticsSidecar(
       provider_pending: 0,
       provider_failed: 0,
       provider_not_requested: 0,
+      query_embedding_unusable: 0,
       unknown: 0,
       provider_returned_rate: 1,
       provider_pending_rate: 0,
       provider_failed_rate: 0,
       provider_not_requested_rate: 0,
+      query_embedding_unusable_rate: 0,
       unknown_rate: 0
     },
     questions: [question]

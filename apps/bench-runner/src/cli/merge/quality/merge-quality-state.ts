@@ -1,6 +1,6 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
-import { buildPerPlaneRecallCoverage, ratio } from "../../../longmemeval/diagnostics/quality/diagnostics-quality-helpers.js";
-import { createEmptyMissTaxonomyDistribution } from "../../../longmemeval/diagnostics/miss/diagnostics-miss-taxonomy.js";
+import { buildPerPlaneRecallCoverage, ratio } from "../../../bench/diagnostics/quality/diagnostics-quality-helpers.js";
+import { createEmptyMissTaxonomyDistribution } from "../../../bench/diagnostics/miss/diagnostics-miss-taxonomy.js";
 import {
   accumulateMeasurementAccounting,
   buildMeasurementAccounting,
@@ -84,7 +84,12 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
     planeHitAt5Counts: new Map(),
     goldRankBuckets: emptyRankTally(),
     topDistractorBreakdown: emptyDistractorTally(),
-    objectKindDelivery: { memory_entry: 0, synthesis_capsule: 0, total_delivered: 0 },
+    objectKindDelivery: {
+      memory_entry: 0,
+      synthesis_capsule: 0,
+      evidence_capsule: 0,
+      total_delivered: 0
+    },
     goldFacetSeparation: { separable: 0, overlapping: 0, indeterminate: 0 },
     goldDimensionCounts: {},
     perGoldRankBuckets: {

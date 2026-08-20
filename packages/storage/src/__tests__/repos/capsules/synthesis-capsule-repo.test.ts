@@ -15,6 +15,7 @@ import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import { removeTempDirectorySync } from "../../temp-directory.js";
+import { StorageError } from "../../../shared/errors.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -243,12 +244,60 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     );
 
     const hits = await repo.searchByKeyword!("workspace-1", "deployment credentials", 10);
+    const field = await repo.searchByKeywordField(
+      "workspace-1", "deployment credentials", 10
+    );
+    expect(field.matches).toEqual(hits);
+    await expect(repo.searchManyByKeywordField("workspace-1", [
+      { queryText: "deployment credentials", limit: 10 },
+      { queryText: "missing phrase", limit: 10 }
+    ])).resolves.toEqual([
+      field,
+      expect.objectContaining({ matches: [] })
+    ]);
     expect(hits.map((hit) => hit.object_id)).toContain(
       "1a000000-0000-4000-8000-000000000001"
     );
     expect(hits.map((hit) => hit.object_id)).not.toContain(
       "1a000000-0000-4000-8000-000000000002"
     );
+  });
+
+  it("materializes synthesis refinement levels without widening base matches", async () => {
+    const { repo } = await createRepo();
+    for (const objectId of [
+      "1a000000-0000-4000-8000-000000000011",
+      "1a000000-0000-4000-8000-000000000012"
+    ]) {
+      await repo.create(createSynthesisCapsule({
+        object_id: objectId,
+        summary: "Identical synthesis refinement witness."
+      }));
+    }
+
+    const field = await repo.searchByKeywordField(
+      "workspace-1", "identical", 1, [2]
+    );
+    const basePorter = field.lanes.find(({ lane }) => lane === "porter")!;
+    const deeper = field.refinement_levels?.[0];
+    const deepPorter = deeper?.lanes.find(({ lane }) => lane === "porter");
+
+    expect(field.matches).toHaveLength(1);
+    expect(deeper?.matches).toHaveLength(2);
+    expect(deepPorter?.observations.slice(0, 1).map(({ source_id }) => source_id))
+      .toEqual(basePorter.observations.map(({ source_id }) => source_id));
+    expect(basePorter.observations[0]?.normalized_rank).toBe(1);
+    expect(deepPorter?.observations[0]?.normalized_rank).toBe(0.75);
+  });
+
+  it("maps invalid synthesis refinement depths to a validation storage error", async () => {
+    const { repo } = await createRepo();
+
+    await expect(repo.searchByKeywordField("workspace-1", "identical", 1, [1]))
+      .rejects.toMatchObject({
+        name: "StorageError",
+        code: "VALIDATION_FAILED"
+      } satisfies Partial<StorageError>);
   });
 
   it("recalls a Chinese synthesis summary via the trigram lane (CJK-blind to porter)", async () => {

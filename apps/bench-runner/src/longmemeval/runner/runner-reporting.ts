@@ -8,9 +8,14 @@ import type {
   BenchReportContextUsageInput
 } from "../../harness/daemon.js";
 import type { BenchSimulateReportMode } from "@do-soul/alaya-eval";
-import type { LongMemEvalReportSideEffectSnapshot } from "../diagnostics.js";
+import type { LongMemEvalReportSideEffectSnapshot } from "../../bench/diagnostics.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../../shared/monotonic.js";
-import { isLongMemEvalGoldEligibleResult } from "./runner-scoring.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../../bench/diagnostics/gold-object-identities.js";
+import {
+  buildLongMemEvalSidecarKey,
+  resolveLongMemEvalGoldObjectKind
+} from "./runner-scoring.js";
 
 export interface LongMemEvalReportSimulationStats {
   readonly reportsAttempted: number;
@@ -35,7 +40,7 @@ interface LongMemEvalRecallCycleInput {
   readonly recallOptions: BenchRecallOptions;
   readonly referenceTime: string;
   readonly simulateReport: BenchSimulateReportMode;
-  readonly goldMemoryIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly turnIndex: number;
   readonly questionText: string;
 }
@@ -54,15 +59,19 @@ async function runReportedRecallCycle(
   input: LongMemEvalRecallCycleInput,
   recallOptions: BenchRecallOptions
 ): Promise<LongMemEvalRecallCycleResult> {
+  const {
+    selectionBoundaryObserver: _selectionBoundaryObserver,
+    ...preReportRecallOptions
+  } = recallOptions;
   const preReportRecallResult = await input.daemon.recall(
     input.query,
-    recallOptions
+    preReportRecallOptions
   );
   const reportUsage = buildLongMemEvalReportContextUsage({
     simulateReport: input.simulateReport,
     deliveryId: preReportRecallResult.delivery_id,
     results: preReportRecallResult.results,
-    goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities: input.goldObjectIdentities,
     turnIndex: input.turnIndex,
     questionText: input.questionText
   });
@@ -137,17 +146,17 @@ interface LongMemEvalReportContextUsageInput {
   readonly simulateReport: BenchSimulateReportMode;
   readonly deliveryId: string;
   readonly results: readonly LongMemEvalDeliveredResult[];
-  readonly goldMemoryIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly turnIndex: number;
   readonly questionText: string;
 }
 
 interface ReportUsageCandidates {
   readonly deliveredResults: readonly LongMemEvalDeliveredResult[];
-  readonly deliveredMemoryResults: readonly LongMemEvalDeliveredResult[];
-  readonly deliveredMemoryIds: ReadonlySet<string>;
-  readonly goldIds: ReadonlySet<string>;
-  readonly deliveredGoldIds: readonly string[];
+  readonly eligibleDeliveredResults: readonly LongMemEvalDeliveredResult[];
+  readonly eligibleDeliveredIdentityKeys: ReadonlySet<string>;
+  readonly goldIdentityKeys: ReadonlySet<string>;
+  readonly deliveredGoldResults: readonly LongMemEvalDeliveredResult[];
 }
 
 interface LongMemEvalReportContextUsage {
@@ -157,32 +166,32 @@ interface LongMemEvalReportContextUsage {
 
 // Returns null for simulate modes that do not report context usage (the caller
 // then short-circuits to an empty report).
-function selectReportedUsedObjectIds(
+function selectReportedUsedObjects(
   simulateReport: BenchSimulateReportMode,
-  deliveredMemoryResults: readonly LongMemEvalDeliveredResult[],
-  deliveredGoldIds: readonly string[],
-  goldIds: ReadonlySet<string>
-): string[] | null {
+  eligibleDeliveredResults: readonly LongMemEvalDeliveredResult[],
+  deliveredGoldResults: readonly LongMemEvalDeliveredResult[],
+  goldIdentityKeys: ReadonlySet<string>
+): LongMemEvalDeliveredResult[] | null {
   if (simulateReport === "gold-only") {
-    return [...deliveredGoldIds];
+    return [...deliveredGoldResults];
   }
   if (simulateReport === "mixed") {
-    if (deliveredGoldIds.length > 0) {
-      const firstNonGold = deliveredMemoryResults.find(
-        (result) => !goldIds.has(result.object_id)
+    if (deliveredGoldResults.length > 0) {
+      const firstNonGold = eligibleDeliveredResults.find(
+        (result) => !goldIdentityKeys.has(requireEligibleIdentityKey(result))
       );
       return firstNonGold === undefined
-        ? [...deliveredGoldIds]
-        : [...deliveredGoldIds, firstNonGold.object_id];
+        ? [...deliveredGoldResults]
+        : [...deliveredGoldResults, firstNonGold];
     }
-    return deliveredMemoryResults[0] === undefined
+    return eligibleDeliveredResults[0] === undefined
       ? []
-      : [deliveredMemoryResults[0].object_id];
+      : [eligibleDeliveredResults[0]];
   }
   if (simulateReport === "always-used") {
-    return deliveredMemoryResults[0] === undefined
+    return eligibleDeliveredResults[0] === undefined
       ? []
-      : [deliveredMemoryResults[0].object_id];
+      : [eligibleDeliveredResults[0]];
   }
   return null;
 }
@@ -191,24 +200,27 @@ function buildReportInput(input: {
   readonly simulateReport: BenchSimulateReportMode;
   readonly deliveryId: string;
   readonly deliveredResults: readonly LongMemEvalDeliveredResult[];
-  readonly safeUsedObjectIds: readonly string[];
+  readonly safeUsedObjects: readonly LongMemEvalDeliveredResult[];
   readonly turnIndex: number;
   readonly questionText: string;
 }): BenchReportContextUsageInput {
-  const usedSet = new Set(input.safeUsedObjectIds);
-  const usageState = input.safeUsedObjectIds.length > 0 ? "used" : "skipped";
+  const usedIdentityKeys = new Set(
+    input.safeUsedObjects.map(requireEligibleIdentityKey)
+  );
+  const usedObjectIds = input.safeUsedObjects.map((result) => result.object_id);
+  const usageState = usedObjectIds.length > 0 ? "used" : "skipped";
   return {
     deliveryId: input.deliveryId,
     usageState,
-    ...(input.safeUsedObjectIds.length === 0
+    ...(usedObjectIds.length === 0
       ? {}
-      : { usedObjectIds: [...input.safeUsedObjectIds] }),
+      : { usedObjectIds }),
     deliveredObjects: input.deliveredResults.map((result) => ({
       objectId: result.object_id,
       objectKind: result.object_kind ?? "memory_entry",
       usageStatus:
-        isLongMemEvalGoldEligibleResult(result) &&
-        usedSet.has(result.object_id)
+        eligibleIdentityKey(result) !== null &&
+        usedIdentityKeys.has(requireEligibleIdentityKey(result))
           ? "used"
           : "skipped"
     })),
@@ -232,36 +244,41 @@ export function buildLongMemEvalReportContextUsage(
   input: LongMemEvalReportContextUsageInput
 ): LongMemEvalReportContextUsage {
   const candidates = collectReportUsageCandidates(input);
-  const usedObjectIds = selectReportedUsedObjectIds(
+  const usedObjects = selectReportedUsedObjects(
     input.simulateReport,
-    candidates.deliveredMemoryResults,
-    candidates.deliveredGoldIds,
-    candidates.goldIds
+    candidates.eligibleDeliveredResults,
+    candidates.deliveredGoldResults,
+    candidates.goldIdentityKeys
   );
-  if (usedObjectIds === null) {
+  if (usedObjects === null) {
     return buildNoReportContextUsage();
   }
-  return buildReportedContextUsage(input, candidates, usedObjectIds);
+  return buildReportedContextUsage(input, candidates, usedObjects);
 }
 
 function collectReportUsageCandidates(
   input: LongMemEvalReportContextUsageInput
 ): ReportUsageCandidates {
   const deliveredResults = input.results.slice(0, 10);
-  const deliveredMemoryResults = deliveredResults.filter(isLongMemEvalGoldEligibleResult);
-  const deliveredMemoryIds = new Set(
-    deliveredMemoryResults.map((result) => result.object_id)
+  const eligibleDeliveredResults = deliveredResults.filter(
+    (result) => eligibleIdentityKey(result) !== null
   );
-  const goldIds = new Set(input.goldMemoryIds);
-  const deliveredGoldIds = deliveredMemoryResults
-    .map((result) => result.object_id)
-    .filter((objectId) => goldIds.has(objectId));
+  const eligibleDeliveredIdentityKeys = new Set(
+    eligibleDeliveredResults.map(requireEligibleIdentityKey)
+  );
+  const goldIdentityKeys = new Set(
+    input.goldObjectIdentities.map((identity) =>
+      buildLongMemEvalSidecarKey(identity.objectKind, identity.objectId))
+  );
+  const deliveredGoldResults = eligibleDeliveredResults.filter((result) =>
+    goldIdentityKeys.has(requireEligibleIdentityKey(result))
+  );
   return {
     deliveredResults,
-    deliveredMemoryResults,
-    deliveredMemoryIds,
-    goldIds,
-    deliveredGoldIds
+    eligibleDeliveredResults,
+    eligibleDeliveredIdentityKeys,
+    goldIdentityKeys,
+    deliveredGoldResults
   };
 }
 
@@ -280,17 +297,17 @@ function buildNoReportContextUsage(): LongMemEvalReportContextUsage {
 function buildReportedContextUsage(
   input: LongMemEvalReportContextUsageInput,
   candidates: ReportUsageCandidates,
-  usedObjectIds: readonly string[]
+  usedObjects: readonly LongMemEvalDeliveredResult[]
 ): LongMemEvalReportContextUsage {
-  const safeUsedObjectIds = usedObjectIds.filter((objectId) =>
-    candidates.deliveredMemoryIds.has(objectId)
+  const safeUsedObjects = usedObjects.filter((result) =>
+    candidates.eligibleDeliveredIdentityKeys.has(requireEligibleIdentityKey(result))
   );
-  const usageState = safeUsedObjectIds.length > 0 ? "used" : "skipped";
+  const usageState = safeUsedObjects.length > 0 ? "used" : "skipped";
   const reportInput = buildReportInput({
     simulateReport: input.simulateReport,
     deliveryId: input.deliveryId,
     deliveredResults: candidates.deliveredResults,
-    safeUsedObjectIds,
+    safeUsedObjects,
     turnIndex: input.turnIndex,
     questionText: input.questionText
   });
@@ -301,9 +318,24 @@ function buildReportedContextUsage(
       reportsAttempted: 1,
       reportsUsed: usageState === "used" ? 1 : 0,
       reportsSkipped: usageState === "skipped" ? 1 : 0,
-      usedObjectCount: safeUsedObjectIds.length
+      usedObjectCount: safeUsedObjects.length
     }
   };
+}
+
+function eligibleIdentityKey(result: LongMemEvalDeliveredResult): string | null {
+  const objectKind = resolveLongMemEvalGoldObjectKind(result.object_kind);
+  return objectKind === null
+    ? null
+    : buildLongMemEvalSidecarKey(objectKind, result.object_id);
+}
+
+function requireEligibleIdentityKey(result: LongMemEvalDeliveredResult): string {
+  const key = eligibleIdentityKey(result);
+  if (key === null) {
+    throw new Error("ineligible LongMemEval object reached report selection");
+  }
+  return key;
 }
 
 function truncateExcerpt(value: string): string {

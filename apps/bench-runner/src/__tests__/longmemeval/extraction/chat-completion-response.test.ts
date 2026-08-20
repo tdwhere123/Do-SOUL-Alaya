@@ -3,7 +3,7 @@ import {
   extractContentFromChatCompletionBody,
   inspectChatCompletionResponse
 } from
-  "../../../longmemeval/extraction/chat-completion-response.js";
+  "../../../bench/extraction/chat-completion-response.js";
 
 describe("extractContentFromChatCompletionBody", () => {
   it("concatenates delta content across data frames up to done", () => {
@@ -83,6 +83,27 @@ describe("extractContentFromChatCompletionBody", () => {
       "data: [DONE]\n\n";
     expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
       "x"
+    );
+  });
+
+  it("uses the latest cumulative content from repeated dual-field frames", () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":"x"},"message":{"content":"x"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":"xy"},"message":{"content":"xy"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "xy"
+    );
+  });
+
+  it("treats empty content frames as neutral", () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":""}}]}\n\n' +
+      'data: {"choices":[{"message":{"content":"ok"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":""},"message":{"content":""}}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
+      "ok"
     );
   });
 

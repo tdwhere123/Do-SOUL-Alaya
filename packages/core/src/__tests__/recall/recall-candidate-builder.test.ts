@@ -143,6 +143,7 @@ describe("recall-candidate-builder", () => {
 
     expect(candidate.entry.content.length).toBeLessThanOrEqual(601);
     expect(candidate.entry.content.endsWith("…")).toBe(true);
+    expect(candidate.answerRerankText).toBe(longSummary);
 
     // A short summary is delivered verbatim — no spurious ellipsis.
     const shortCandidate = buildSynthesisCoarseRecallCandidate({

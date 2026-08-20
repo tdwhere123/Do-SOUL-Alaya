@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { newFillStats } from
-  "../../../longmemeval/extraction/fill/fill-stats.js";
+  "../../../bench/extraction/fill/fill-stats.js";
 import { resolveFullFillStatus } from
-  "../../../longmemeval/extraction/fill/policy/full-fill-completion.js";
+  "../../../bench/extraction/fill/policy/full-fill-completion.js";
 import { countIntentionalSkippedTurns } from
-  "../../../longmemeval/extraction/fill/policy/cache-key-allowlist.js";
+  "../../../bench/extraction/fill/policy/cache-key-allowlist.js";
 import type { PreparedExtractionFill } from
-  "../../../longmemeval/extraction/fill/fill-preparation.js";
+  "../../../bench/extraction/fill/fill-preparation.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 describe("full fill completion with an intentional allowlist remainder", () => {
   it("accepts the observed 87 missing as 77 skipped plus 10 terminal failures", () => {
@@ -54,10 +56,8 @@ function input(values: {
   readonly intentionalSkippedTurns: number;
 }) {
   const terminal = {
-    failure_max_retries: values.terminalFailures,
-    failure_non_retryable_4xx: 0,
-    failure_timeout: 0,
-    failure_aborted: 0
+    ...emptyBenchTerminalRetryClassifications(),
+    failure_max_retries: values.terminalFailures
   };
   return {
     prepared: { requestedTurns: 23_807 } as PreparedExtractionFill,

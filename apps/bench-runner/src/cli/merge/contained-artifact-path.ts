@@ -1,6 +1,10 @@
 import { constants } from "node:fs";
 import { open, realpath, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import {
+  isContainedPath,
+  resolveOpenedDescriptorPath
+} from "../../bench/fs/opened-contained-path.js";
 
 export interface ContainedArtifactFile {
   readonly handle: FileHandle;
@@ -23,7 +27,7 @@ export async function openContainedArtifact(
 ): Promise<ContainedArtifactFile | null> {
   assertSafeArtifactReference(reference);
   const candidate = path.resolve(root, reference);
-  if (!isContained(root, candidate)) {
+  if (!isContainedPath(root, candidate)) {
     throw new Error(`merge refused: artifact escapes declared root '${reference}'`);
   }
   if (typeof constants.O_NOFOLLOW !== "number") {
@@ -46,8 +50,8 @@ export async function openContainedArtifact(
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error(`merge refused: artifact is not a file '${reference}'`);
-    const openedPath = await resolveOpenedPath(handle);
-    if (!isContained(realRoot, openedPath)) {
+    const openedPath = await resolveOpenedArtifactPath(handle);
+    if (!isContainedPath(realRoot, openedPath)) {
       throw new Error(`merge refused: artifact resolves outside declared root '${reference}'`);
     }
     return containedFile(handle, info.size, reference);
@@ -89,20 +93,11 @@ function containedFile(
   };
 }
 
-async function resolveOpenedPath(handle: FileHandle): Promise<string> {
-  let lastError: unknown;
-  for (const descriptorRoot of ["/proc/self/fd", "/dev/fd"]) {
-    try {
-      return await realpath(path.join(descriptorRoot, String(handle.fd)));
-    } catch (error) {
-      lastError = error;
-    }
+async function resolveOpenedArtifactPath(handle: FileHandle): Promise<string> {
+  try {
+    return await resolveOpenedDescriptorPath(handle);
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`merge refused: cannot validate opened artifact descriptor: ${message}`);
   }
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`merge refused: cannot validate opened artifact descriptor: ${message}`);
-}
-
-function isContained(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), candidate);
-  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
 }

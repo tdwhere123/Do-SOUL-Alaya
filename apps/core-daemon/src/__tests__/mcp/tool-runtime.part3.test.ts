@@ -14,13 +14,13 @@ import type {
   ToolSpec
 } from "@do-soul/alaya-protocol";
 
-import { createExternalConversationToolExecutor } from "../../mcp/mcp-catalog.js";
+import { createExternalConversationToolExecutor } from "../../mcp/catalog/mcp-catalog.js";
 
 import {
   executeConversationTool,
   handleConversationToolUse,
   registerConversationToolSpecs
-} from "../../mcp/tool-runtime.js";
+} from "../../mcp/tool-runtime/tool-runtime.js";
 
 import {
   cleanupToolRuntimeTempDirs,
@@ -339,7 +339,7 @@ describe("tool-runtime relative path handling", () => {
 
   it("rejects executeConversationToolOrThrow for confirmation-required builtins without receipt", async () => {
     const workspaceDir = await createWorkspace();
-    const { executeConversationToolOrThrow } = await import("../../mcp/tool-runtime.js");
+    const { executeConversationToolOrThrow } = await import("../../mcp/tool-runtime/tool-runtime.js");
 
     await expect(
       executeConversationToolOrThrow(

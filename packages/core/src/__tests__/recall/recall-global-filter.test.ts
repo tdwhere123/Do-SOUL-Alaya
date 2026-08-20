@@ -14,6 +14,9 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { requireAt } from "../helpers/defined.js";
 
 function createTaskSurface(): TaskObjectSurface {
@@ -103,6 +106,11 @@ function createDependencies(
 
   return {
     dependencies: {
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        "workspace-1"
+      ),
       now: () => "2026-03-29T00:00:00.000Z",
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {
@@ -334,8 +342,10 @@ describe("RecallService global project-mapping filter", () => {
     const advisory = result.candidates.find((candidate) => candidate.object_id === "global-suggested");
     const acceptedFactors = accepted?.score_factors;
     const advisoryFactors = advisory?.score_factors;
-    expect(accepted?.relevance_score).toBeGreaterThan(advisory?.relevance_score ?? 0);
+    expect(accepted?.relevance_score).toBe(advisory?.relevance_score);
     expect((acceptedFactors?.base_weight ?? 0) - (advisoryFactors?.base_weight ?? 0)).toBeCloseTo(0.18);
+    expect(acceptedFactors?.weighted_activation ?? 0)
+      .toBeGreaterThan(advisoryFactors?.weighted_activation ?? 0);
     expect(accepted?.score_factors?.relevance).toBe(accepted?.relevance_score);
     expect(advisory?.score_factors?.relevance).toBe(advisory?.relevance_score);
     expect(accepted?.is_advisory).toBe(false);

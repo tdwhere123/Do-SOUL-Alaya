@@ -10,12 +10,12 @@ import {
   selectExpansionSeedDrafts,
   type CoarseCandidateDraft
 } from "../coarse-filter/coarse-candidates.js";
+import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
   directionEligiblePathExpansionTargets,
   firstTimeConcernSeedId,
   isPathExcludedFromRecall,
-  normalizeTimeConcernWindowDigest,
   pathAnchorFacetKey,
   pathMatchesTimeConcernWindowDigest,
   pathRelationMemoryIds,
@@ -23,33 +23,24 @@ import {
   scorePathRelationSuppression,
   uniqueStrings
 } from "./path-relations.js";
+import { resolveTimeConcernQueryDigests } from "./time-concern-query-digests.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import type {
-  RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
-
-type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  entityConfidence?: number,
-  pathFlowScore?: number
-) => boolean;
 
 export async function addPathExpansionCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
   readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
@@ -104,7 +95,7 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
@@ -116,7 +107,10 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   if (findByTimeConcernWindowDigests === undefined || params.queryProbes.date_terms.length === 0) {
     return 0;
   }
-  const windowDigests = collectTimeConcernWindowDigests(params.queryProbes);
+  const windowDigests = resolveTimeConcernQueryDigests(
+    params.queryProbes.date_terms,
+    params.pathProjectionAsOf
+  );
   if (windowDigests.length === 0) {
     return 0;
   }
@@ -180,14 +174,16 @@ async function loadSeededPathExpansionPaths(
       (options) => pathExpansionPort.findByAnchors(workspaceId, anchors, options)
     );
   } catch (error) {
-    recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
-    warn(warningMessage, {
-      workspace_id: workspaceId,
-      seed_count: seeds.length,
-      operation: "path_expansion_seed_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
+    if (classifyPathIndexReadFailure(error) !== "index_unbound") {
+      recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
+      warn(warningMessage, {
+        workspace_id: workspaceId,
+        seed_count: seeds.length,
+        operation: "path_expansion_seed_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+    }
     return [];
   }
 }
@@ -234,9 +230,14 @@ function admitPathExpansionTargets(
       "path_expansion",
       edgeStrength,
       "path_expansion",
-      buildMemoryPathExpansionSource(path, target.seedId, target.targetId),
-      undefined,
-      pathFlow
+      {
+        pathExpansionSource: buildMemoryPathExpansionSource(
+          path,
+          target.seedId,
+          target.targetId
+        ),
+        pathFlowScore: pathFlow
+      }
     );
     added += 1;
     if (added >= params.dynamicRecallPlaneCap) {
@@ -262,16 +263,6 @@ function buildMemoryPathExpansionSource(
   });
 }
 
-function collectTimeConcernWindowDigests(
-  queryProbes: Readonly<RecallQueryProbes>
-): readonly string[] {
-  return uniqueStrings(
-    queryProbes.date_terms
-      .map((term) => normalizeTimeConcernWindowDigest(term))
-      .filter((term) => term.length > 0)
-  );
-}
-
 async function loadTimeConcernPathExpansionPaths(
   params: Parameters<typeof addTimeConcernPathExpansionCandidates>[0],
   windowDigests: readonly string[]
@@ -285,14 +276,16 @@ async function loadTimeConcernPathExpansionPaths(
       (options) => reader.call(port, params.workspaceId, windowDigests, options)
     );
   } catch (error) {
-    params.warn("time concern path expansion lookup failed", {
-      workspace_id: params.workspaceId,
-      window_digest_count: windowDigests.length,
-      operation: "time_concern_path_expansion_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    recordRecallDegradation(params, "path_expansion_failed");
+    if (classifyPathIndexReadFailure(error) !== "index_unbound") {
+      params.warn("time concern path expansion lookup failed", {
+        workspace_id: params.workspaceId,
+        window_digest_count: windowDigests.length,
+        operation: "time_concern_path_expansion_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+      recordRecallDegradation(params, "path_expansion_failed");
+    }
     return [];
   }
 }
@@ -332,15 +325,17 @@ function admitTimeConcernPathTargets(
       "path_expansion",
       scorePathRelationExpansion(path),
       "time_concern",
-      Object.freeze({
-        path_id: path.path_id,
-        seed_id: firstTimeConcernSeedId(path, windowDigests),
-        seed_kind: "time_concern",
-        target_object_id: targetId,
-        source_channel: "time_concern",
-        relation_kind: path.constitution.relation_kind,
-        facet_key: pathAnchorFacetKey(path)
-      })
+      {
+        pathExpansionSource: Object.freeze({
+          path_id: path.path_id,
+          seed_id: firstTimeConcernSeedId(path, windowDigests),
+          seed_kind: "time_concern",
+          target_object_id: targetId,
+          source_channel: "time_concern",
+          relation_kind: path.constitution.relation_kind,
+          facet_key: pathAnchorFacetKey(path)
+        })
+      }
     );
     added += 1;
     if (added >= params.dynamicRecallPlaneCap) {

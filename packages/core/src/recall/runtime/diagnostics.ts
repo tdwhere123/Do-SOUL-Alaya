@@ -1,6 +1,11 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
+import { normalizeEmbeddingProviderDegradationReason } from "../embedding-mcp-degradation.js";
 import type { PreparedEmbeddingQueryHandle } from "../../embedding-recall/embedding-recall-service.js";
+import type {
+  EvidenceCandidateScoringResult
+} from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type {
   RecallCandidateDiagnostic,
   RecallAnswerRerankDiagnostics,
@@ -14,16 +19,72 @@ import type {
 } from "./recall-service-types.js";
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
+import type { QueryConditionParityView } from "./query-condition-parity.js";
+import type { RecallPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
+import type { RecallFiniteFieldChannelCapture } from
+  "../field/finite-field-capture.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallQueryFactFrameExtractionCapture } from
+  "../field/query-attribution/query-fact-frame-attribution-producer.js";
+import type { RecallRetrievalFieldRefinementReceipt } from
+  "../field/refinement/field-refinement-receipt.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
+import type {
+  OpenSemanticFactorFormationCapture,
+  QueryOsfSemanticCompletenessReceipt
+} from
+  "@do-soul/alaya-protocol";
+import type { OpenSemanticFactorCompatibilityTrace } from
+  "../field/open-semantic-factors/compatibility-trace.js";
+import type { OpenSemanticFactorCompositionReceipt } from
+  "../field/open-semantic-factors/composition.js";
+import type { OpenSemanticFactorActivationReceipt } from
+  "../field/open-semantic-factors/activation.js";
+import type { PinnedProjectionCandidateSelection } from
+  "../field/retrieval/projection/pinned-projection-selection.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly queryFactFrameExtraction?: Readonly<RecallQueryFactFrameExtractionCapture>;
+  readonly queryOpenSemanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly queryOpenSemanticFactorCompletenessReceipt?: Readonly<
+    QueryOsfSemanticCompletenessReceipt
+  >;
+  readonly openSemanticFactorCompatibilityTrace?: Readonly<
+    OpenSemanticFactorCompatibilityTrace
+  >;
+  readonly openSemanticFactorComposition?: Readonly<
+    OpenSemanticFactorCompositionReceipt
+  >;
+  readonly openSemanticFactorActivation?: Readonly<
+    OpenSemanticFactorActivationReceipt
+  >;
+  readonly retrievalFieldCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
+  readonly retrievalFieldRefinementReceipts?:
+    readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
+  readonly fieldRefinementStopCertificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
+  readonly queryCondition?: QueryConditionParityView;
+  readonly fieldProjectionTrace?: Readonly<
+    PinnedProjectionCandidateSelection & {
+      readonly generation_id: string;
+      readonly condition_digest: string;
+    }
+  >;
+  readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
   readonly candidatePoolCount: number;
   readonly preBudgetCount: number;
   readonly deliveredCount: number;
+  readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
+  readonly evidenceEmbeddingScoring?: Readonly<EvidenceCandidateScoringResult>;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly degradationReasons?: readonly RecallDegradationReason[];
@@ -42,13 +103,18 @@ export function buildRecallDiagnostics(
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),
+    ...buildOptionalQueryDiagnosticFields(params),
     query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
     total_scanned: params.totalScanned,
     candidate_pool_count: params.candidatePoolCount,
     pre_budget_count: params.preBudgetCount,
     delivered_count: params.deliveredCount,
+    ...(params.packetPlanTrace === undefined
+      ? {}
+      : { packet_plan_trace: params.packetPlanTrace }),
     embedding_provider_status: params.embeddingProviderStatus,
     embedding_supplement_status: params.embeddingSupplementStatus,
+    ...buildEvidenceEmbeddingDiagnostics(params.evidenceEmbeddingScoring),
     provider_degradation_reason: params.providerDegradationReason,
     ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
     ...buildDegradationDiagnostics(params.degradationReasons),
@@ -69,6 +135,96 @@ export function buildRecallDiagnostics(
       ? {}
       : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
+}
+
+function buildOptionalQueryDiagnosticFields(
+  params: BuildRecallDiagnosticsParams
+): Partial<RecallDiagnostics> {
+  return {
+    ...(params.queryEntityExtraction === undefined
+      ? {}
+      : { query_entity_extraction: params.queryEntityExtraction }),
+    ...(params.queryFactFrameExtraction === undefined
+      ? {}
+      : { query_fact_frame_extraction: params.queryFactFrameExtraction }),
+    ...(params.queryOpenSemanticFactorFormation === undefined
+      ? {}
+      : {
+        query_open_semantic_factor_formation:
+          params.queryOpenSemanticFactorFormation
+      }),
+    ...(params.queryOpenSemanticFactorCompletenessReceipt === undefined
+      ? {}
+      : { query_open_semantic_factor_completeness_receipt:
+          params.queryOpenSemanticFactorCompletenessReceipt }),
+    ...(params.openSemanticFactorCompatibilityTrace === undefined
+      ? {}
+      : {
+        open_semantic_factor_compatibility_trace:
+          params.openSemanticFactorCompatibilityTrace
+      }),
+    ...(params.openSemanticFactorComposition === undefined
+      ? {}
+      : {
+        open_semantic_factor_composition:
+          params.openSemanticFactorComposition
+      }),
+    ...(params.openSemanticFactorActivation === undefined
+      ? {}
+      : {
+        open_semantic_factor_activation:
+          params.openSemanticFactorActivation
+      }),
+    ...(params.retrievalFieldCaptures === undefined
+      ? {}
+      : { retrieval_field_captures: Object.freeze([...params.retrievalFieldCaptures]) }),
+    ...(params.retrievalFieldRefinementReceipts === undefined
+      ? {}
+      : {
+        retrieval_field_refinement_receipts:
+          Object.freeze([...params.retrievalFieldRefinementReceipts])
+      }),
+    ...(params.fieldRefinementStopCertificate === undefined
+      ? {}
+      : {
+        field_refinement_stop_certificate:
+          params.fieldRefinementStopCertificate
+      }),
+    ...(params.queryCondition === undefined
+      ? {}
+      : { query_condition: params.queryCondition }),
+    ...(params.fieldProjectionTrace === undefined
+      ? {}
+      : { field_projection_trace: params.fieldProjectionTrace }),
+    ...(params.answerShapePlan === undefined
+      ? {}
+      : { answer_shape_plan: params.answerShapePlan })
+  };
+}
+
+function buildEvidenceEmbeddingDiagnostics(
+  scoring: Readonly<EvidenceCandidateScoringResult> | undefined
+): Pick<
+  RecallDiagnostics,
+  | "evidence_embedding_status"
+  | "evidence_embedding_expected_count"
+  | "evidence_embedding_scored_count"
+  | "evidence_embedding_inference_calls"
+  | "evidence_embedding_latency_ms"
+  | "evidence_embedding_failure_class"
+  | "evidence_embedding_selection_receipt"
+> {
+  return {
+    evidence_embedding_status: scoring?.status ?? "not_requested",
+    evidence_embedding_expected_count: scoring?.expectedCount ?? 0,
+    evidence_embedding_scored_count: scoring?.scoredCount ?? 0,
+    evidence_embedding_inference_calls: scoring?.inferenceCalls ?? 0,
+    evidence_embedding_latency_ms: scoring?.latencyMs ?? 0,
+    evidence_embedding_failure_class: scoring?.failureClass ?? null,
+    ...(scoring?.selectionReceipt === undefined
+      ? {}
+      : { evidence_embedding_selection_receipt: scoring.selectionReceipt })
+  };
 }
 
 function buildDegradationDiagnostics(
@@ -176,7 +332,6 @@ function freezeFusionBreakdown(
       object_id: candidate.object_id,
       object_kind: candidate.object_kind,
       origin_plane: candidate.origin_plane,
-      facet_overlap: candidate.facet_overlap,
       per_stream_rank: candidate.per_stream_rank,
       fused_rank: candidate.fused_rank,
       fused_score: candidate.fused_score,
@@ -283,6 +438,9 @@ export function resolveEmbeddingProviderStatus(
   preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null,
   degradedReason: string | null
 ): RecallEmbeddingProviderStatus {
+  if (degradedReason === "query_embedding_unusable") {
+    return "query_embedding_unusable";
+  }
   if (degradedReason !== null) {
     return "provider_failed";
   }
@@ -327,15 +485,4 @@ export function resolveEmbeddingProviderDegradationReason(
   return null;
 }
 
-export function normalizeEmbeddingProviderDegradationReason(reason: string): string | null {
-  const normalized = reason.trim().toLowerCase();
-  if (
-    normalized === "query_embedding_failed" ||
-    normalized === "provider_unavailable" ||
-    normalized === "local_vector_lookup_failed" ||
-    normalized === "query_embedding_pending"
-  ) {
-    return normalized;
-  }
-  return "provider_unavailable";
-}
+export { normalizeEmbeddingProviderDegradationReason };

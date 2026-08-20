@@ -61,6 +61,7 @@ describe("RecallService embedding-on coarse injection", () => {
           })
     } satisfies RecallServiceEmbeddingRecallPort;
     return new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo,
       embeddingRecallService
@@ -227,6 +228,7 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
       collectWorkspaceNeighbors
     } satisfies RecallServiceEmbeddingRecallPort;
     return new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds },
       embeddingRecallService
@@ -342,6 +344,7 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
       collectWorkspaceNeighborsWithMetadata: input.collectWorkspaceNeighborsWithMetadata
     } satisfies RecallServiceEmbeddingRecallPort;
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds: input.findByIds },
       embeddingRecallService

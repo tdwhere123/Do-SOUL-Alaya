@@ -1,14 +1,19 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { EmbeddingRecallSupplementResult } from "../../embedding-recall/embedding-recall-service.js";
+import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers.js";
+import {
+  clamp01,
+  compareMemoryEntries,
+  compareMemoryEntriesForActivationAdmission
+} from "../runtime/recall-service-helpers.js";
 import type {
+  CoarseRecallCandidate,
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
-  RecallServiceWarnPort,
-  RecallSupplementaryData
+  RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
+import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/mint/numeric-aliases.js";
+import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/mint/temporal-aliases.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
 export { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";
@@ -34,6 +39,12 @@ export const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
 
 export interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
+  readonly objectKind?: RecallCandidate["object_kind"];
+  readonly answerRerankText?: string;
+  readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
+  readonly evidenceSourceRole?: CoarseRecallCandidate["evidenceSourceRole"];
+  readonly verifiedUserSupportSource?: CoarseRecallCandidate["verifiedUserSupportSource"];
   readonly admissionPlanes: readonly RecallAdmissionPlane[];
   readonly firstAdmissionPlane: RecallAdmissionPlane;
   readonly sourceChannels: readonly string[];
@@ -64,49 +75,15 @@ export interface SourceProximitySeedScoreDiagnostic {
   readonly droppedBelowThreshold: boolean;
 }
 
-export function withEmbeddingSimilarityScores(
-  supplementaryData: RecallSupplementaryData,
-  hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
-  injectedSimilarityScores: Readonly<Record<string, number>>,
-  poolRescoreScores: Readonly<Record<string, number>> = {}
-): RecallSupplementaryData {
-  const merged = new Map<string, number>();
-  for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
-    mergeObservedEmbeddingScore(merged, objectId, hint.normalized_similarity);
-  }
-  for (const [objectId, rawScore] of Object.entries(injectedSimilarityScores)) {
-    mergeObservedEmbeddingScore(merged, objectId, rawScore);
-  }
-  for (const [objectId, rawScore] of Object.entries(poolRescoreScores)) {
-    mergeObservedEmbeddingScore(merged, objectId, rawScore);
-  }
-  if (merged.size === 0) {
-    return supplementaryData;
-  }
-
-  return Object.freeze({
-    ...supplementaryData,
-    embeddingSimilarityScores: Object.freeze(Object.fromEntries(merged))
-  });
-}
-
-function mergeObservedEmbeddingScore(
-  scores: Map<string, number>,
-  objectId: string,
-  rawScore: number
-): void {
-  if (!Number.isFinite(rawScore)) return;
-  const score = clamp01(rawScore);
-  scores.set(objectId, Math.max(scores.get(objectId) ?? 0, score));
-}
-
 // Deterministic OR-query of expanded lexical terms (morphology + synonym
 // variants). Returns null when there is nothing to expand so callers can skip
 // the extra FTS pass. see also: packages/core/src/recall/recall-query-probes.ts:expandLexicalTerms.
 export function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbes>): string | null {
-  const expanded = uniqueStrings(
-    queryProbes.expanded_terms.slice(0, 16).map((term) => term.trim()).filter((term) => term.length > 0)
-  );
+  const expanded = uniqueStrings([
+    ...queryProbes.expanded_terms.slice(0, 16),
+    ...complementaryTemporalAliasSurfaces(queryProbes.normalized_query ?? ""),
+    ...complementaryNumericAliasSurfaces(queryProbes.normalized_query ?? "")
+  ].map((term) => term.trim()).filter((term) => term.length > 0));
   return expanded.length === 0 ? null : expanded.join(" ");
 }
 
@@ -320,6 +297,7 @@ export function selectPreferredExpansionSeedEntries(
   // see also: packages/core/src/recall/coarse-candidates.ts:isWeakEntityOnlyDraft,
   // packages/core/src/recall/coarse-candidates.ts:selectExpansionSeedDrafts.
   return rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft)
     .filter((draft) => !isWeakEntityOnlyDraft(draft))
     // semantic_supplement candidates carry no structural anchor and must not
     // seed graph_expansion; they would expand from an unrelated neighbor.
@@ -335,7 +313,8 @@ export function selectPreferredExpansionSeedEntries(
 export function selectExpansionSeedDrafts(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<CoarseCandidateDraft>[] {
-  const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
+  const ranked = rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft);
   // invariant: a draft whose ONLY non-activation admission is entity_seed,
   // and whose strongest observed entity confidence is below the floor, must
   // not seed graph_expansion. Mirrors the confidence gate in
@@ -359,6 +338,10 @@ export function selectExpansionSeedDrafts(
     ...preferred,
     ...survivors.filter((draft) => !preferredIds.has(draft.entry.object_id))
   ].slice(0, DYNAMIC_RECALL_SEED_CAP);
+}
+
+function isMemoryDraft(draft: Readonly<CoarseCandidateDraft>): boolean {
+  return (draft.objectKind ?? "memory_entry") === "memory_entry";
 }
 
 // anchor: entity-only graph_expansion floor. A draft is "weak entity-only"
@@ -392,6 +375,7 @@ export function selectSourceProximitySeedDrafts(
     session_surface_cohort: 0
   };
   const seeds = rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft)
     .map((draft) => {
       const diagnostic = scoreSourceProximitySeedDraftWithDiagnostics(draft);
       if (diagnostic.floorApplied !== "none") {
@@ -408,7 +392,7 @@ export function selectSourceProximitySeedDrafts(
       if (strengthDelta !== 0) {
         return strengthDelta;
       }
-      return compareMemoryEntries(left.draft.entry, right.draft.entry);
+      return compareMemoryEntriesForActivationAdmission(left.draft.entry, right.draft.entry);
     })
     .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP);
 

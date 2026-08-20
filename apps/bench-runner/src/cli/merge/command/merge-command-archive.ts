@@ -2,7 +2,6 @@ import {
   benchArchiveDiscriminator,
   buildDiffVsPrevious,
   diffKpis,
-  entrySlug,
   readLatest,
   renderFindings,
   renderReport,
@@ -21,16 +20,16 @@ import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
-} from "../../../longmemeval/archive/archive-evidence.js";
+} from "../../../bench/archive/archive-evidence.js";
 import {
   type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalQueryEmbeddingCacheSummary
-} from "../../../longmemeval/diagnostics.js";
-import { resolveBenchDiagnosticsArtifactRoot } from "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../bench/diagnostics.js";
+import { resolveBenchDiagnosticsArtifactRoot } from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
-} from "../../../longmemeval/selection/cohort-ledger.js";
+} from "../../../bench/selection/cohort-ledger.js";
 import {
   buildMergedEvidenceManifest
 } from "../merged/merged-evidence-manifest.js";
@@ -38,16 +37,16 @@ import {
   buildMergedRunProvenanceSidecars,
   resolveMergedRequestedConcurrency,
   type MergedRunProvenanceSidecars
-} from "../../../longmemeval/provenance/shard-aggregate.js";
-import type { LoadedGlobalExtractionAuthority } from "../../../longmemeval/provenance/contract/extraction-authority-reference.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
-import { buildBenchmarkMeasurementAttribution } from "../../../longmemeval/measurement/attribution.js";
-import { assertMeasurementCohortBinding } from "../../../longmemeval/measurement/cohort-binding.js";
-import { prepareDiagnosticsArtifactStagingPath } from "../../../longmemeval/measurement/artifact-transaction.js";
+} from "../../../bench/provenance/shard-aggregate.js";
+import type { LoadedGlobalExtractionAuthority } from "../../../bench/provenance/contract/extraction-authority-reference.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { buildBenchmarkMeasurementAttribution } from "../../../bench/measurement/attribution.js";
+import { assertMeasurementCohortBinding } from "../../../bench/measurement/cohort-binding.js";
+import { prepareDiagnosticsArtifactStagingPath } from "../../../bench/measurement/artifact-transaction.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
-} from "../../../longmemeval/extraction/seed-fuel/seed-extraction-release-blocker.js";
+} from "../../../bench/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import {
   aggregateEmbeddingVectorCache,
   aggregateQueryEmbeddingCache,
@@ -62,11 +61,16 @@ import { hasVerifiedShardEvidence } from "../shard/shard-evidence-verifier.js";
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
 import { publishMergedArchive } from "../archive-publisher.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
+import {
+  composeArchiveHistorySlug,
+  resolveArchiveGitState,
+  type ArchiveGitIdentityInput
+} from "../../../bench/provenance/identity/archive-git-identity.js";
 
 type ShardDiagnostics = ShardArchiveRef["diagnostics"];
 type PreviousKpiPayload = Awaited<ReturnType<typeof readLatest>>;
@@ -88,7 +92,7 @@ export async function writeMergedLongMemEvalArchive(input: {
   readonly requestedConcurrency?: number;
   readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
-}): Promise<WrittenMergedLongMemEvalArchive> {
+} & ArchiveGitIdentityInput): Promise<WrittenMergedLongMemEvalArchive> {
   const trustedRequestedConcurrency = resolveMergedRequestedConcurrency({
     requestedConcurrency: input.requestedConcurrency,
     shardCount: input.shardArchiveRefs.length,
@@ -101,11 +105,16 @@ export async function writeMergedLongMemEvalArchive(input: {
     withCacheReadiness(input.build.payload, shardDiagnostics),
     input.build
   );
-  const slug = entrySlug(
-    input.build.runAt,
-    input.build.commitSha7,
-    benchArchiveDiscriminator(input.build.policyShape, input.build.simulateReport)
-  );
+  // Merge sidecar provenance is shard-sourced; merge-time git is measured once for the slug.
+  const recorded = await resolveArchiveGitState(input);
+  const slug = composeArchiveHistorySlug({
+    runAt: input.build.runAt,
+    commitSha7: input.build.commitSha7,
+    policyDiscriminator: benchArchiveDiscriminator(
+      input.build.policyShape, input.build.simulateReport
+    ),
+    recorded
+  });
   const archive = await buildMergedArchiveSidecars({
     layout,
     historyRoot: input.historyRoot,

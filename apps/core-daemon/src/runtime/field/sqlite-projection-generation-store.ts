@@ -1,0 +1,103 @@
+import type {
+  FieldProjectionGeneration,
+  ProjectionGenerationPointer
+} from "@do-soul/alaya-protocol";
+import {
+  parseProjectionGenerationArtifacts,
+  type ProjectionGenerationArtifacts,
+  type ProjectionGenerationLifecycleStore
+} from "@do-soul/alaya-core";
+import {
+  generationFromRow,
+  generationToRow,
+  type FieldProjectionGenerationRepo
+} from "@do-soul/alaya-storage";
+
+export function createSqliteProjectionGenerationStore(
+  repo: FieldProjectionGenerationRepo
+): ProjectionGenerationLifecycleStore {
+  const cache = createLastArtifactsCache();
+  return Object.freeze({
+    snapshot: (generation: FieldProjectionGeneration) =>
+      generationFromRow(repo.insert(generationToRow(generation))),
+    verify: (generation: FieldProjectionGeneration) => generationFromRow(repo.persistStatus(
+      generation.workspace_id,
+      generation.generation_id,
+      "verified"
+    )),
+    activatePointer: (pointer: ProjectionGenerationPointer) => repo.activatePointer(pointer),
+    putArtifacts: (workspaceId: string, artifacts: ProjectionGenerationArtifacts) =>
+      cache.remember(workspaceId, persistArtifacts(repo, workspaceId, artifacts)),
+    readArtifacts: (workspaceId: string, generationId: string) => {
+      const hit = cache.read(workspaceId, generationId);
+      if (hit !== undefined) return hit;
+      const loaded = readArtifacts(repo, workspaceId, generationId);
+      return loaded === null ? null : cache.remember(workspaceId, loaded);
+    }
+  });
+}
+
+function createLastArtifactsCache() {
+  let cached: Readonly<{
+    readonly key: string;
+    readonly artifacts: ProjectionGenerationArtifacts;
+  }> | null = null;
+  const keyOf = (workspaceId: string, generationId: string) => `${workspaceId}\0${generationId}`;
+  return {
+    read(workspaceId: string, generationId: string) {
+      const key = keyOf(workspaceId, generationId);
+      return cached?.key === key ? cached.artifacts : undefined;
+    },
+    remember(workspaceId: string, artifacts: ProjectionGenerationArtifacts) {
+      cached = { key: keyOf(workspaceId, artifacts.generation_id), artifacts };
+      return artifacts;
+    }
+  };
+}
+
+function persistArtifacts(
+  repo: FieldProjectionGenerationRepo,
+  workspaceId: string,
+  artifacts: ProjectionGenerationArtifacts
+): ProjectionGenerationArtifacts {
+  const generation = requireGeneration(repo, workspaceId, artifacts.generation_id);
+  const persisted = repo.putArtifacts({
+    workspace_id: workspaceId,
+    generation_id: artifacts.generation_id,
+    artifact_digest: artifacts.artifact_digest,
+    artifacts_json: JSON.stringify(artifacts),
+    recorded_at: generation.recorded_at
+  });
+  return parseArtifacts(persisted.artifacts_json, artifacts.generation_id, persisted.artifact_digest);
+}
+
+function readArtifacts(
+  repo: FieldProjectionGenerationRepo,
+  workspaceId: string,
+  generationId: string
+): ProjectionGenerationArtifacts | null {
+  const row = repo.readArtifacts(workspaceId, generationId);
+  return row === null ? null : parseArtifacts(
+    row.artifacts_json,
+    generationId,
+    row.artifact_digest
+  );
+}
+
+function parseArtifacts(
+  json: string,
+  generationId: string,
+  digest: string
+): ProjectionGenerationArtifacts {
+  return parseProjectionGenerationArtifacts(JSON.parse(json), generationId, digest);
+}
+
+function requireGeneration(
+  repo: FieldProjectionGenerationRepo,
+  workspaceId: string,
+  generationId: string
+): FieldProjectionGeneration {
+  const row = repo.readPinned(workspaceId, generationId);
+  if (row === null) throw new Error("projection generation is missing");
+  return generationFromRow(row);
+}

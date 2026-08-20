@@ -1,6 +1,9 @@
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type {
+  CandidateMemorySignal,
+  ConversationMessage
+} from "@do-soul/alaya-protocol";
 import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
-import { buildGardenTaskEvidenceFallbackSignalId } from "../task-signal-id.js";
+import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-id.js";
 import {
   receivedEvidenceCapsule,
   type PostTurnSignalReceiver
@@ -12,6 +15,7 @@ export interface PostTurnEvidenceFinalizationInput {
   readonly runId: string;
   readonly createdAt: string;
   readonly turnContent: string;
+  readonly turnMessages: readonly ConversationMessage[];
   readonly sourceObservation: CandidateMemorySignal["source_observation"];
   readonly candidates: readonly CandidateMemorySignal[];
   readonly signalReceiver: PostTurnSignalReceiver;
@@ -34,7 +38,8 @@ async function receiveCandidateSignals(
 ): Promise<{ signalIds: string[]; createdEvidence: boolean }> {
   const signalIds: string[] = [];
   let createdEvidence = false;
-  for (const signal of input.candidates) {
+  for (const candidate of input.candidates) {
+    const signal = bindSourceObservation(candidate, input.sourceObservation);
     await input.beforeReceive?.();
     const received = await input.signalReceiver.receiveSignal(signal);
     signalIds.push(received.signal.signal_id);
@@ -42,6 +47,15 @@ async function receiveCandidateSignals(
       await input.signalReceiver.hasCreatedEvidence(received);
   }
   return { signalIds, createdEvidence };
+}
+
+function bindSourceObservation(
+  signal: CandidateMemorySignal,
+  sourceObservation: CandidateMemorySignal["source_observation"]
+): CandidateMemorySignal {
+  return sourceObservation === null
+    ? signal
+    : { ...signal, source_observation: sourceObservation };
 }
 
 async function receiveEvidenceFallback(
@@ -56,7 +70,8 @@ async function receiveEvidenceFallback(
     runId: input.runId,
     surfaceId: null,
     createdAt: input.createdAt,
-    sourceObservation: input.sourceObservation
+    sourceObservation: input.sourceObservation,
+    turnMessages: input.turnMessages
   });
   if (signal === null) {
     throw new Error(`Garden task ${input.taskId} evidence fallback source content was empty.`);

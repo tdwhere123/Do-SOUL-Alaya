@@ -3,17 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../longmemeval/extraction/cache-audit/receipt.js";
+  "../../../bench/extraction/cache-audit/receipt.js";
 import { runSelectExtractionTargetCommand } from
   "../../../cli/target-selection/command.js";
 import { readExtractionTargetSelectionReceipt } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
 import type { ExtractionAuthorityReceipt } from
-  "../../../longmemeval/extraction/authority/receipt.js";
+  "../../../bench/extraction/authority/receipt.js";
 import type { ExtractionContinuationChildClaim } from
-  "../../../longmemeval/extraction/authority/continuation/child-claim.js";
+  "../../../bench/extraction/authority/continuation/child-claim.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
 
@@ -348,17 +348,21 @@ function inspection() {
 
 function rebuildAuditReceipt() {
   const finalIdentity = {
-    datasetRevision: "e".repeat(64),
-    model: "gpt-5.4-mini",
-    modelFamily: "gpt-5.4-mini",
-    requestProfile: "provider-default-v1",
-    providerUrl: "https://example.test/v1",
-    systemPromptSha256: "f".repeat(64),
-    cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-    rawClosureSha256: "2".repeat(64),
-    parserSemanticsSha256: "3".repeat(64),
-    formationSemanticsSha256: "4".repeat(64),
-    temporalSchemaRevision: "5".repeat(64)
+    raw: {
+      datasetRevision: "e".repeat(64),
+      model: "gpt-5.4-mini",
+      requestProfile: "provider-default-v1",
+      providerUrl: "https://example.test/v1",
+      systemPromptSha256: "f".repeat(64),
+      cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+      rawClosureSha256: "2".repeat(64)
+    },
+    projection: {
+      modelFamily: "gpt-5.4-mini",
+      parserSemanticsSha256: "3".repeat(64),
+      formationSemanticsSha256: "4".repeat(64),
+      temporalSchemaRevision: "5".repeat(64)
+    }
   };
   return buildExtractionCacheAuditReceipt({
     createdAt: "2026-07-17T00:00:00.000Z",
@@ -367,21 +371,29 @@ function rebuildAuditReceipt() {
     rawInventorySha256: "7".repeat(64),
     occurrenceIndexSha256: "8".repeat(64),
     decision: {
-      action: "rebuild",
       sourceRoot: "/source-cache",
-      reasons: ["model_mismatch"],
-      source: { ...finalIdentity, model: "old-model" },
-      final: finalIdentity,
-      replay: {
-        occurrenceCount: 10,
-        accountedOccurrences: 10,
-        elementCount: 10,
-        accountedElements: 10,
-        admitted: 10,
-        deferred: 0,
-        rejected: 0,
-        invalid: 0,
-        ledgerSha256: "9".repeat(64)
+      raw: {
+        action: "rebuild",
+        reasons: ["model_mismatch"],
+        source: { ...finalIdentity.raw, model: "old-model" },
+        final: finalIdentity.raw
+      },
+      projection: {
+        action: "replay",
+        reasons: ["raw_cache_rebuild"],
+        source: finalIdentity.projection,
+        final: finalIdentity.projection,
+        replay: {
+          occurrenceCount: 10,
+          accountedOccurrences: 10,
+          elementCount: 10,
+          accountedElements: 10,
+          admitted: 10,
+          deferred: 0,
+          rejected: 0,
+          invalid: 0,
+          ledgerSha256: "9".repeat(64)
+        }
       }
     }
   });

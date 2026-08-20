@@ -1,0 +1,148 @@
+import {
+  GardenClaimTaskResponseSchema,
+  GardenCompleteTaskResponseSchema,
+  GardenListPendingTasksResponseSchema,
+  GardenTaskKind,
+  type CandidateMemorySignal,
+  type EdgeClassifyVerdict,
+  type GardenClaimTaskRequest,
+  type GardenListPendingTasksRequest,
+  type GardenRoleValue
+} from "@do-soul/alaya-protocol";
+import type { GardenTaskOperations } from "../tool/tool-handler-operations.js";
+import type {
+  GardenTaskCompletionResult,
+  GardenTaskEventInput,
+  GardenTaskRow
+} from "@do-soul/alaya-storage";
+import {
+  GardenTaskUnavailableError,
+  mapGardenMcpWorkerRole,
+  toGardenClaimTaskPayload,
+  toGardenTaskSnapshot,
+  toSilentAlreadyClaimed,
+  type WarnPort
+} from "./garden-task-handler-support.js";
+import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
+import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
+
+export interface GardenTaskToolCallContext {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly agentTarget: string;
+}
+
+export interface GardenTaskHandlerDependencies {
+  readonly gardenTaskRepo?: {
+    findById(taskId: string): GardenTaskRow | null;
+    peekPending(
+      role: GardenRoleValue,
+      workspace_id?: string,
+      limit?: number
+    ): readonly GardenTaskRow[];
+    claimAtomic(
+      taskId: string,
+      claimedBy: string,
+      claimedAt: string,
+      workspace_id?: string
+    ): Promise<"claimed" | "already-claimed">;
+    completeWithEvents(
+      taskId: string,
+      result: GardenTaskCompletionResult,
+      events: readonly GardenTaskEventInput[],
+      claimedBy: string
+    ): Promise<void>;
+    beginCompletionAttempt(
+      taskId: string,
+      claimedBy: string,
+      completionClaimedBy: string,
+      claimedAt: string,
+      completionEnvelopeJson?: string | null
+    ): boolean;
+    refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
+    releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
+    countByKind?(
+      kind: string,
+      staleBeforeIso: string,
+      workspace_id?: string
+    ): { readonly kind: string; readonly pending: number; readonly stale: number };
+  };
+  readonly signalService: {
+    receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
+      readonly signal: Readonly<CandidateMemorySignal>;
+    }>>;
+  };
+  readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
+  readonly edgeVerdictApplier?: {
+    applyVerdict(input: {
+      readonly workspaceId: string;
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+      readonly verdict: EdgeClassifyVerdict;
+    }): Promise<string | null>;
+  };
+}
+
+export function createGardenTaskHandlers(params: Readonly<{
+  readonly deps: GardenTaskHandlerDependencies;
+  readonly now: () => string;
+  readonly warn: WarnPort;
+  readonly generateId: () => string;
+}>): GardenTaskOperations {
+  const completion = createGardenTaskCompletionHandler(params);
+  return {
+    listPendingGardenTasks: createListPendingGardenTasks(params.deps),
+    claimGardenTask: createClaimGardenTaskHandler(params),
+    completeGardenTask: async (request, context) =>
+      GardenCompleteTaskResponseSchema.parse(await completion.completeGardenTask(request, context))
+  };
+}
+
+function createListPendingGardenTasks(deps: GardenTaskHandlerDependencies) {
+  return async function listPendingGardenTasks(
+    request: GardenListPendingTasksRequest,
+    context: GardenTaskToolCallContext
+  ) {
+    if (deps.gardenTaskRepo === undefined) {
+      throw new GardenTaskUnavailableError("Garden task queue is not available.");
+    }
+    const rows = deps.gardenTaskRepo.peekPending(
+      mapGardenMcpWorkerRole(request.role),
+      context.workspaceId,
+      request.limit
+    );
+    return GardenListPendingTasksResponseSchema.parse({ tasks: rows.map(toGardenTaskSnapshot) });
+  };
+}
+
+function createClaimGardenTaskHandler(params: Readonly<{
+  readonly deps: GardenTaskHandlerDependencies;
+  readonly now: () => string;
+}>) {
+  return async function claimGardenTask(
+    request: GardenClaimTaskRequest,
+    context: GardenTaskToolCallContext
+  ) {
+    const repo = params.deps.gardenTaskRepo;
+    if (repo === undefined) {
+      throw new GardenTaskUnavailableError("Garden task queue is not available.");
+    }
+    const claimResult = await repo.claimAtomic(
+      request.task_id,
+      context.agentTarget,
+      params.now(),
+      context.workspaceId
+    );
+    const row = repo.findById(request.task_id);
+    if (row === null || row.workspace_id !== context.workspaceId) {
+      return toSilentAlreadyClaimed(request.task_id);
+    }
+    if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {
+      return toSilentAlreadyClaimed(request.task_id);
+    }
+    return GardenClaimTaskResponseSchema.parse({
+      status: claimResult === "claimed" ? "claimed" : "already_claimed",
+      ...toGardenClaimTaskPayload(row)
+    });
+  };
+}

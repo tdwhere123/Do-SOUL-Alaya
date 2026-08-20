@@ -1,5 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
+import { ExtractionFillTaskError } from
+  "../../../bench/extraction/fill/fill-pool.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -7,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   })
 }));
 
-vi.mock("../../../longmemeval/extraction/extraction-fill.js", () => ({
+vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.fallbackRun
 }));
 
@@ -63,6 +67,35 @@ it("routes a bare extraction-fill command through the cache-only runtime", async
   expect(stderr).not.toHaveBeenCalled();
 });
 
+it("renders a bounded cause summary for a terminal fill failure", async () => {
+  const signalSource = new FakeSignalSource();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const run = vi.fn(async () => {
+    throw new ExtractionFillTaskError({
+      retryClassification: "unknown",
+      retrySuccesses: 0,
+      rateLimitRetries: 0,
+      processedTurns: 6,
+      requestedTurns: 13_998,
+      cause: new Error("semantic graph validation failed")
+    });
+  });
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command(
+    { variant: "longmemeval_s" } as ParsedFlags,
+    { runExtractionFill: run, signalSource }
+  );
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining(
+    "cause=Error"
+  ));
+});
+
 it("rejects a predecessor receipt without its child extraction authority", async () => {
   const signalSource = new FakeSignalSource();
   const run = vi.fn(async () => completedFillResult());
@@ -107,6 +140,28 @@ it("loads the R3 approval file before handing the fill to the runtime gate", asy
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ r3SpendApproval: approval }));
 });
 
+it("fail-closes when an R3 spend path is set but the reader dep is missing", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/fixture/extraction-authority.json",
+    r3SpendApproval: "/fixture/r3-spend-approval.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(2);
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(
+    expect.stringMatching(/R3 spend approval reader is unavailable/u)
+  );
+});
+
 it("passes an explicit extraction initial concurrency to the fill runtime", async () => {
   const signalSource = new FakeSignalSource();
   const run = vi.fn(async () => completedFillResult());
@@ -125,6 +180,25 @@ it("passes an explicit extraction initial concurrency to the fill runtime", asyn
   expect(run).toHaveBeenCalledWith(expect.objectContaining({
     concurrency: 32,
     initialConcurrency: 8
+  }));
+});
+
+it("passes explicit provider task failure isolation to the fill runtime", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_s",
+    tolerateProviderTaskFailures: true
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(0);
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({
+    tolerateProviderTaskFailures: true
   }));
 });
 
@@ -180,12 +254,7 @@ function completedFillResult() {
     rateLimitRetries: 0,
     adaptiveConcurrencyBackoffs: 0,
     adaptiveConcurrencyBackoffMs: 0,
-    terminalRetryClassifications: {
-      failure_max_retries: 0,
-      failure_non_retryable_4xx: 0,
-      failure_timeout: 0,
-      failure_aborted: 0
-    },
+    terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
     manifest: {}
   };
 }

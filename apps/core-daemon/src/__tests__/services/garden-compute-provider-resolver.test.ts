@@ -4,7 +4,7 @@ import {
   GardenProviderKind,
   type GardenComputeProvider
 } from "@do-soul/alaya-soul";
-import { GardenComputeProviderResolver } from "../../services/garden-compute-provider-resolver.js";
+import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
 
 describe("GardenComputeProviderResolver", () => {
   it("caches the provider for an unchanged runtime config", async () => {
@@ -122,7 +122,127 @@ describe("GardenComputeProviderResolver", () => {
     });
     expect(resolver.provider_kind).toBe(GardenProviderKind.OFFICIAL_API);
   });
+
+  it("caches query graph compilation until provider identity is invalidated", async () => {
+    const graph = queryGraph();
+    const provider: GardenComputeProvider = {
+      ...createProvider("query-provider"),
+      extractOpenSemanticFactors: vi.fn(async () => graph)
+    };
+    const resolver = new GardenComputeProviderResolver({
+      configReader: createConfigReader(createOfficialConfig()),
+      secretReader: vi.fn(() => "sk-one"),
+      makeProvider: vi.fn(() => provider)
+    });
+
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .resolves.toEqual(graph);
+    await resolver.extractOpenSemanticFactors("query", "What did I buy?");
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(1);
+
+    resolver.invalidate();
+    await resolver.extractOpenSemanticFactors("query", "What did I buy?");
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(2);
+  });
+
+  it("negative-caches query compilation failures until provider identity is invalidated", async () => {
+    const failure = new Error("provider unavailable");
+    const provider: GardenComputeProvider = {
+      ...createProvider("failing-query-provider"),
+      extractOpenSemanticFactors: vi.fn(async () => { throw failure; })
+    };
+    const resolver = new GardenComputeProviderResolver({
+      configReader: createConfigReader(createOfficialConfig()),
+      secretReader: vi.fn(() => "sk-one"),
+      makeProvider: vi.fn(() => provider)
+    });
+
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .rejects.toBe(failure);
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .rejects.toBe(failure);
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(1);
+
+    resolver.invalidate();
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .rejects.toBe(failure);
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off provider availability failures across queries and retries after the cooldown", async () => {
+    let now = 1_000;
+    const failure = Object.assign(new Error("provider timed out"), {
+      name: "SignalExtractorError",
+      kind: "timeout"
+    });
+    const provider: GardenComputeProvider = {
+      ...createProvider("timed-out-query-provider"),
+      extractOpenSemanticFactors: vi.fn(async () => { throw failure; })
+    };
+    const resolver = new GardenComputeProviderResolver({
+      configReader: createConfigReader(createOfficialConfig()),
+      secretReader: vi.fn(() => "sk-one"),
+      makeProvider: vi.fn(() => provider),
+      now: () => now,
+      semanticFactorFailureTtlMs: 500
+    });
+
+    await expect(resolver.extractOpenSemanticFactors("query", "first query")).rejects.toBe(failure);
+    await expect(resolver.extractOpenSemanticFactors("query", "different query")).rejects.toBe(failure);
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(1);
+
+    now += 501;
+    await expect(resolver.extractOpenSemanticFactors("query", "different query")).rejects.toBe(failure);
+    expect(provider.extractOpenSemanticFactors).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse query graphs after provider identity changes", async () => {
+    let config = createOfficialConfig({ provider_url: "https://one.example.test/v1" });
+    const makeProvider = vi.fn(({ endpoint }: { readonly endpoint: string | null }) => ({
+      ...createProvider(endpoint ?? "default"),
+      extractOpenSemanticFactors: vi.fn(async () => ({
+        ...queryGraph(),
+        factors: [{ factor_id: "predicate", surface: endpoint ?? "default", semantic_identity: "buy" }]
+      }))
+    }));
+    const resolver = new GardenComputeProviderResolver({
+      configReader: { getRuntimeGardenComputeConfig: async () => config },
+      secretReader: vi.fn(() => "sk-one"),
+      makeProvider
+    });
+
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .resolves.toMatchObject({ factors: [{ surface: "https://one.example.test/v1" }] });
+    config = createOfficialConfig({ provider_url: "https://two.example.test/v1" });
+    await expect(resolver.extractOpenSemanticFactors("query", "What did I buy?"))
+      .resolves.toMatchObject({ factors: [{ surface: "https://two.example.test/v1" }] });
+    expect(makeProvider).toHaveBeenCalledTimes(2);
+  });
 });
+
+function queryGraph() {
+  return {
+    schema_version: 1 as const,
+    source_kind: "query" as const,
+    factors: [{
+      factor_id: "predicate",
+      surface: "buy",
+      semantic_identity: "buy"
+    }],
+    variables: [{ variable_id: "answer", surface: "What" }],
+    result_variable_ids: ["answer"],
+    propositions: [{
+      proposition_id: "purchase-query",
+      predicate_factor_id: "predicate",
+      arguments: [{
+        position: 0,
+        binding_identity: "item",
+        reference_kind: "variable" as const,
+        reference_id: "answer"
+      }]
+    }]
+  };
+}
 
 function createConfigReader(config: RuntimeGardenComputeConfig): {
   getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;

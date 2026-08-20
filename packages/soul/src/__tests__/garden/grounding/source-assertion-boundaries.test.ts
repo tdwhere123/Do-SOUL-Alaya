@@ -179,6 +179,9 @@ describe("source assertion boundaries", () => {
     ["I quit my job, which she later said wasn't what happened.", "I quit my job"],
     ["I quit my job, which was a lie.", "I quit my job"],
     ["I quit my job, which turned out to be a misunderstanding.", "I quit my job"],
+    ["I quit my job, which was a nice surprise, but that was a lie.", "I quit my job"],
+    ["I redeemed a coupon, which was a pleasant surprise until I realized I never did.", "I redeemed a coupon"],
+    ["I redeemed a coupon, which was a great surprise because it turned out to be fake.", "I redeemed a coupon"],
     ["I almost quit; which I didn't.", "I almost quit"],
     ["I almost quit — which I didn't.", "I almost quit"],
     ["I almost quit (which I didn't).", "I almost quit"]
@@ -193,6 +196,9 @@ describe("source assertion boundaries", () => {
     ["I quit my job, which I didn't regret.", "I quit my job"],
     ["I quit my job, which I never did regret.", "I quit my job"],
     ["I chose the blue dress, which was wrong for the occasion.", "I chose the blue dress"],
+    ["I quit my job, which was a nice surprise, but that was a lie.", "I quit my job"],
+    ["I redeemed a coupon, which was a pleasant surprise until I realized I never did.", "I redeemed a coupon"],
+    ["I redeemed a coupon, which was a great surprise because it turned out to be fake.", "I redeemed a coupon"],
     [
       "I redeemed a coupon last Sunday, which surprised me because I had forgotten it was fake.",
       "I redeemed a coupon last Sunday"

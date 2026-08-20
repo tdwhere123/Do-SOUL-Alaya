@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../../cli/index.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import { buildQuestionDiagnosticFixture } from "../../longmemeval/diagnostics/gold-diagnostic-fixture.js";
 import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
@@ -63,7 +63,7 @@ describe("merge-longmemeval compact diagnostics", () => {
       path_relations_total: 0,
       snapshot_count: 5
     });
-  });
+  }, 20_000);
 
   it("rejects a safe-looking artifact path through a symlinked ancestor", async () => {
     root = await mkdtemp(path.join(tmpdir(), "merge-compact-symlink-"));

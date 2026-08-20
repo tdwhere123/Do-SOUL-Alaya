@@ -14,6 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { readJsonColumn, readRecord, type RowParser } from "../shared/parse-row.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import type { MemoryEntryRepoDynamicsUpdateFields, MemoryEntryRepoUpdateFields } from "./types.js";
 
@@ -120,7 +121,12 @@ export function parseMemoryEntry(value: MemoryEntry): Readonly<MemoryEntry> {
   }
 }
 
-export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> {
+export const MemoryEntryRowParser: RowParser<Readonly<MemoryEntry>> = {
+  parse: parseMemoryEntryRow
+};
+
+export function parseMemoryEntryRow(value: unknown): Readonly<MemoryEntry> {
+  const row = readRecord(value, "memory entry row");
   try {
     return deepFreeze(
       MemoryEntrySchema.parse({
@@ -136,8 +142,8 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
         formation_kind: row.formation_kind,
         scope_class: row.scope_class,
         content: row.content,
-        domain_tags: JSON.parse(row.domain_tags),
-        evidence_refs: JSON.parse(row.evidence_refs),
+        domain_tags: readJsonColumn(row, "domain_tags"),
+        evidence_refs: readJsonColumn(row, "evidence_refs"),
         workspace_id: row.workspace_id,
         run_id: row.run_id,
         surface_id: row.surface_id,
@@ -167,13 +173,11 @@ export function parseMemoryEntryRow(row: MemoryEntryRow): Readonly<MemoryEntry> 
   }
 }
 
-function buildProjectionVersionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
-  return row.projection_schema_version === null
-    ? {}
-    : { projection_schema_version: row.projection_schema_version as MemoryEntry["projection_schema_version"] };
+function buildProjectionVersionFromRow(row: Record<string, unknown>): Record<string, unknown> {
+  return row.projection_schema_version === null ? {} : { projection_schema_version: row.projection_schema_version };
 }
 
-function buildTemporalProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+function buildTemporalProjectionFromRow(row: Record<string, unknown>): Record<string, unknown> {
   if (
     row.event_time_start === null &&
     row.event_time_end === null &&
@@ -189,26 +193,26 @@ function buildTemporalProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntr
     event_time_end: row.event_time_end,
     valid_from: row.valid_from,
     valid_to: row.valid_to,
-    time_precision: row.time_precision as MemoryEntry["time_precision"],
-    time_source: row.time_source as MemoryEntry["time_source"]
+    time_precision: row.time_precision,
+    time_source: row.time_source
   };
 }
 
-function buildFacetTagsFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+function buildFacetTagsFromRow(row: Record<string, unknown>): Record<string, unknown> {
   if (row.facet_tags === null) {
     return {};
   }
-  return { facet_tags: JSON.parse(row.facet_tags) as MemoryEntry["facet_tags"] };
+  return { facet_tags: readJsonColumn(row, "facet_tags") };
 }
 
-function buildCanonicalEntitiesFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+function buildCanonicalEntitiesFromRow(row: Record<string, unknown>): Record<string, unknown> {
   if (row.canonical_entities === null) {
     return {};
   }
-  return { canonical_entities: JSON.parse(row.canonical_entities) as MemoryEntry["canonical_entities"] };
+  return { canonical_entities: readJsonColumn(row, "canonical_entities") };
 }
 
-function buildPreferenceProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEntry> {
+function buildPreferenceProjectionFromRow(row: Record<string, unknown>): Record<string, unknown> {
   if (
     row.preference_subject === null &&
     row.preference_predicate === null &&
@@ -223,7 +227,7 @@ function buildPreferenceProjectionFromRow(row: MemoryEntryRow): Partial<MemoryEn
     preference_predicate: row.preference_predicate,
     preference_object: row.preference_object,
     preference_category: row.preference_category,
-    preference_polarity: row.preference_polarity as MemoryEntry["preference_polarity"]
+    preference_polarity: row.preference_polarity
   };
 }
 

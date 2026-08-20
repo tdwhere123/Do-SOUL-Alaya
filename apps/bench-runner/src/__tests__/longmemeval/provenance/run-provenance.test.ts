@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertRecordedRunCodeIdentity,
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   LONGMEMEVAL_RUN_PROVENANCE_FILENAME
-} from "../../../longmemeval/provenance/run.js";
+} from "../../../bench/provenance/run.js";
 import {
   buildFixtureRunProvenanceSidecar,
   createRunProvenanceFixture,
@@ -14,9 +15,9 @@ import {
 const roots = registerRunProvenanceRootCleanup();
 
 describe("LongMemEval run provenance", () => {
-  it("archives the validated manifest identity, sequential protocol, and slice switch", async () => {
+  it("archives the validated manifest identity and sequential protocol", async () => {
     const fixture = await createRunProvenanceFixture(roots);
-    const { provenance, manifest, crossEncoderCacheRoot } = fixture;
+    const { provenance, manifest } = fixture;
 
     expect(LONGMEMEVAL_RUN_PROVENANCE_FILENAME).toBe("longmemeval-run-provenance.json");
     expect(provenance.execution).toEqual({
@@ -26,13 +27,15 @@ describe("LongMemEval run provenance", () => {
       limit: null,
       evaluated_count: 1
     });
-    expect(provenance.recall_config.conf_slice_compatibility).toBe(true);
+    expect(provenance.recall_config.conf_slice_compatibility).toBe(false);
     expect(provenance.recall_config.schema_version).toBe(2);
-    expect(provenance.seed_capabilities).toEqual({ facet_tags_enabled: true });
+    expect(provenance.seed_capabilities).toBeUndefined();
     expect(provenance.code).toEqual({
       commit_sha7: "05d98df",
       gate_sha256: null,
-      worktree_state_sha256: null,
+      worktree_state_sha256: "c".repeat(64),
+      worktree_state_algorithm: "sha256-worktree-state-v3",
+      worktree_clean: false,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
         sha256: "2".repeat(64),
@@ -81,32 +84,31 @@ describe("LongMemEval run provenance", () => {
         effective_schema_version: 1,
         d2q_input: "raw_content"
       },
-      answer_rerank: {
-        enabled: true,
-        provider_kind: "local_onnx_cross_encoder",
-        effective_model_id: "Xenova/reranker",
-        model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
-      },
+      answer_rerank: { enabled: false },
+      reconciliation_basis: "rule_only",
+      cjk_segmentation: expect.objectContaining({
+        core_status: expect.stringMatching(/^(?:uninitialized|loading|ready|unavailable)$/u),
+        storage_status: expect.stringMatching(/^(?:uninitialized|loading|ready|unavailable)$/u),
+        warnings: expect.any(Array)
+      }),
       paired_env: {
-        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
         ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
         ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
         ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "cached-family",
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
-        ALAYA_LOCAL_ONNX_THREADS: "2",
-        OFFICIAL_API_GARDEN_MODEL: "cached-model",
-        ALAYA_RECALL_ANSWERS_WITH: "1",
-        ALAYA_RECALL_FACET_TAGS: "1",
-        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
-        ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
         ALAYA_CONFLICT_DETECTION_ENABLED: "0",
-        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"
+        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
+        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
+        ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
+        ALAYA_LOCAL_ONNX_THREADS: "2",
+        ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
+        ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset",
+        ALAYA_RECALL_ANSWERS_WITH: "1",
+        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
+        OFFICIAL_API_GARDEN_MODEL: "cached-model"
       }
     });
     expect(provenance.runtime.paired_env).not.toHaveProperty("ALAYA_RECALL_AUTH_HEADER");
     expect(provenance.runtime.paired_env).not.toHaveProperty("ALAYA_EXP_SIGNED_URL");
-    expect(JSON.stringify(provenance.runtime.paired_env)).not.toContain(crossEncoderCacheRoot);
     expect(provenance.question_manifest).toMatchObject({
       schema_version: 1,
       variant: "longmemeval_s",
@@ -136,10 +138,15 @@ describe("LongMemEval run provenance", () => {
     const legacyRuntime = { ...provenance.runtime };
     delete (legacyRuntime as { answer_rerank?: unknown }).answer_rerank;
     delete (legacyRuntime as { embedding_supplement?: unknown }).embedding_supplement;
+    delete (legacyRuntime as { reconciliation_basis?: unknown }).reconciliation_basis;
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       runtime: legacyRuntime
     }).success).toBe(true);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      runtime: { ...provenance.runtime, reconciliation_basis: "hybrid" }
+    }).success).toBe(false);
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       runtime: {
@@ -178,6 +185,20 @@ describe("LongMemEval run provenance", () => {
     }).success).toBe(false);
 
     expect(isLongMemEvalRunProvenanceGateEligible(provenance)).toBe(false);
+    expect(() => assertRecordedRunCodeIdentity(provenance.code)).not.toThrow();
+    expect(() => assertRecordedRunCodeIdentity({
+      ...provenance.code,
+      worktree_state_sha256: null
+    })).toThrow(/worktree and executed-dist identity/u);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      code: {
+        commit_sha7: provenance.code.commit_sha7,
+        gate_sha256: null,
+        worktree_state_sha256: null,
+        executed_dist: provenance.code.executed_dist
+      }
+    }).success).toBe(true);
     const currentProvenance = LongMemEvalRunProvenanceSchema.parse({
       ...provenance,
       code: {
@@ -186,10 +207,20 @@ describe("LongMemEval run provenance", () => {
         gate_contract_path: "/tmp/frozen-contract.json",
         gate_sha256: "d".repeat(64),
         worktree_state_sha256: "1".repeat(64),
+        worktree_state_algorithm: "sha256-head-lf",
         worktree_clean: true
       }
     });
     expect(isLongMemEvalRunProvenanceGateEligible(currentProvenance)).toBe(true);
+    const { worktree_state_algorithm: _algorithm, ...legacyCode } = currentProvenance.code;
+    const legacyWithoutAlgorithm = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      code: legacyCode
+    });
+    expect(legacyWithoutAlgorithm.code.worktree_state_algorithm).toBeUndefined();
+    expect(isLongMemEvalRunProvenanceGateEligible(legacyWithoutAlgorithm)).toBe(false);
+    expect(() => assertRecordedRunCodeIdentity(legacyWithoutAlgorithm.code))
+      .toThrow(/algorithm/u);
     const currentCache = currentProvenance.extraction_cache;
     if (currentCache?.schema_version !== 3) {
       throw new Error("current provenance fixture must use extraction schema v3");
@@ -280,8 +311,13 @@ describe("LongMemEval run provenance", () => {
     expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       runtime: {
-          ...currentProvenance.runtime,
-        answer_rerank: { enabled: false }
+        ...currentProvenance.runtime,
+        answer_rerank: {
+          enabled: true,
+          provider_kind: "local_onnx_cross_encoder",
+          effective_model_id: "historical-reranker",
+          model_artifact_sha256: "3".repeat(64)
+        }
       }
     })).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({

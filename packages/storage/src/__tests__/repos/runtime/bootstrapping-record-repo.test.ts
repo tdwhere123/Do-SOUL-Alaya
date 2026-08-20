@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("SqliteBootstrappingRecordRepo", () => {
-  it("persists bootstrapping records and exposes migration 046", async () => {
+  it("persists bootstrapping records", async () => {
     const { database, repo, workspaceRepo } = createRepo();
     const record = createBootstrappingRecord();
     await createWorkspace(workspaceRepo, record.workspace_id);
@@ -23,10 +23,10 @@ describe("SqliteBootstrappingRecordRepo", () => {
     expect(repo.findByWorkspace(record.workspace_id)).toEqual(record);
 
     const appliedVersion = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 46 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(appliedVersion).toEqual({ version: 46 });
+    expect(appliedVersion).toEqual({ version: 8 });
   });
 
   it("returns null when a workspace has no bootstrapping record", async () => {

@@ -80,7 +80,10 @@ interface BenchDaemonState {
   readonly activeContext: { workspaceId: string; runId: string };
   readonly embeddingMode: NonNullable<BenchDaemonOptions["embeddingMode"]>;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
+  readonly expectedReconciliationBasis: BenchDaemonOptions["expectedReconciliationBasis"];
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
+  readonly relationProjectionAdmissionMode: BenchDaemonOptions["relationProjectionAdmissionMode"];
+  readonly fieldProjectionAdmissionMode: BenchDaemonOptions["fieldProjectionAdmissionMode"];
   readonly dataDir: string;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
   readonly managedEnvKeys: readonly string[];
@@ -98,6 +101,9 @@ async function createBenchDaemonState(
   const defaultRunId = opts.runId ?? "bench-run-1";
   const activeContext = { workspaceId: defaultWorkspaceId, runId: defaultRunId };
   const recallWeightOverrides = opts.recallWeightOverrides;
+  const relationProjectionAdmissionMode = opts.relationProjectionAdmissionMode;
+  const fieldProjectionAdmissionMode = opts.fieldProjectionAdmissionMode;
+  const expectedReconciliationBasis = opts.expectedReconciliationBasis;
   const dataDir = opts.dataDirRoot ??
     preparedLaunch?.dataDir ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
   const embeddingMode = opts.embeddingMode ?? preparedLaunch?.embeddingMode ?? "disabled";
@@ -120,7 +126,10 @@ async function createBenchDaemonState(
     activeContext,
     embeddingMode,
     embeddingProviderKind,
+    expectedReconciliationBasis,
     recallWeightOverrides,
+    relationProjectionAdmissionMode,
+    fieldProjectionAdmissionMode,
     dataDir,
     savedEnv,
     managedEnvKeys,
@@ -129,8 +138,7 @@ async function createBenchDaemonState(
     releaseActive: reserveBenchDaemonSlot(),
     workspaceManager: createBenchWorkspaceManager({
       dataDir,
-      activeContext,
-      knownWorkspaceIds: [defaultWorkspaceId]
+      activeContext
     })
   };
 }
@@ -154,6 +162,9 @@ async function bootBenchDaemon(
     defaultRunId: state.defaultRunId,
     activeContext: state.activeContext,
     launch: state.launch,
+    expectedReconciliationBasis: state.expectedReconciliationBasis,
+    relationProjectionAdmissionMode: state.relationProjectionAdmissionMode,
+    fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,
     configDirectory: state.configDirectory,
     managedEnvKeys: state.managedEnvKeys,
     createManagedWorkspaceRoot: state.workspaceManager.createManagedWorkspaceRoot
@@ -164,6 +175,7 @@ async function bootBenchDaemon(
     activeRuntime: resources.runtime,
     activeServer: resources.server,
     activeMcpClient: resources.mcpClient,
+    dispatchCli: resources.dispatchCli,
     recallWeightOverrides: state.recallWeightOverrides,
     embeddingMode: state.embeddingMode,
     embeddingProviderKind: state.embeddingProviderKind,
@@ -177,6 +189,7 @@ async function bootBenchDaemon(
   });
   const attachWorkspace = state.workspaceManager.createAttachWorkspace({
     ...daemonOps,
+    workspaceService: resources.runtime.services.workspaceService,
     queryTokenMetrics: async (workspaceId: string) =>
       await queryTokenMetrics(state.dataDir, workspaceId),
     queryEdgeProposalKpiRows: async (workspaceId: string) =>

@@ -3,17 +3,18 @@ import type { GardenTaskRow } from "@do-soul/alaya-storage";
 import { finalizePostTurnEvidence } from "../../garden/post-turn-extract/evidence-finalizer.js";
 import {
   buildPostTurnContent,
+  buildPostTurnConversationMessages,
   parsePostTurnExtractTaskPayload,
   type PostTurnExtractTaskPayload
 } from "../../garden/post-turn-extract/task-payload.js";
 import {
   GardenTaskUnavailableError,
   GardenTaskValidationError
-} from "../garden-task-handler-support.js";
+} from "../garden-task/garden-task-handler-support.js";
 import type {
   GardenTaskHandlerDependencies,
   GardenTaskToolCallContext
-} from "../garden-task-handlers.js";
+} from "../garden-task/garden-task-handlers.js";
 
 interface CandidateSignalEmissionParams {
   readonly deps: GardenTaskHandlerDependencies;
@@ -74,6 +75,7 @@ async function finalizeExternalPostTurnEvidence(
     runId: payload.run_id,
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
+    turnMessages: buildPostTurnConversationMessages(payload),
     sourceObservation: payload.source_observation,
     candidates,
     signalReceiver: receiver,

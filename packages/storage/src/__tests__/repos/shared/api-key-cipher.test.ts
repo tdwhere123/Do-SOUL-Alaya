@@ -1,4 +1,4 @@
-import fs, { statSync } from "node:fs";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,13 +11,32 @@ import {
   isEncryptedApiKeyAtRest
 } from "../../../repos/shared/api-key-cipher.js";
 
-// __setApiKeyCipherKeyMaterialForTests is process-global; vitest runs storage
-// tests in a single worker thread so overrides do not race across files.
+const APP_SALT = "do-soul-alaya:engine-binding-api-key:v1";
+const temporaryRoots: string[] = [];
+const hostLinuxMachineId = readHostLinuxMachineId();
+
 afterEach(() => {
   __setApiKeyCipherKeyMaterialForTests(null);
   __setMachineKeyIdPathForTests(null);
   __setPlatformMachineIdForTests(undefined);
+  vi.unstubAllEnvs();
+  while (temporaryRoots.length > 0) {
+    fs.rmSync(temporaryRoots.pop()!, { recursive: true, force: true });
+  }
 });
+
+function readHostLinuxMachineId(): string | null {
+  if (process.platform !== "linux") return null;
+  for (const filePath of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+    try {
+      const machineId = fs.readFileSync(filePath, "utf8").trim();
+      if (machineId.length > 0) return machineId;
+    } catch {
+      // Match the production fallback to the next platform machine-id path.
+    }
+  }
+  return null;
+}
 
 describe("api-key-cipher", () => {
   it("round-trips api keys and hides plaintext at rest", () => {
@@ -51,62 +70,30 @@ describe("api-key-cipher", () => {
     );
   });
 
-  it("reads Linux machine-id when present", () => {
+  it.runIf(hostLinuxMachineId !== null)("reads Linux machine-id when present", () => {
     vi.stubEnv("VITEST", "");
     vi.stubEnv("NODE_ENV", "production");
-    const existsSync = vi.spyOn(fs, "existsSync").mockImplementation((filePath) => {
-      return filePath === "/etc/machine-id";
-    });
-    const readFileSync = vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
-      if (filePath === "/etc/machine-id") {
-        return "linux-machine-id\n";
-      }
-      throw new Error(`unexpected read: ${String(filePath)}`);
-    });
 
     const encrypted = encryptApiKeyAtRest("sk-live-secret-value");
-    __setApiKeyCipherKeyMaterialForTests(null);
-    existsSync.mockImplementation((filePath) => filePath === "/etc/machine-id");
-    readFileSync.mockImplementation((filePath) => {
-      if (filePath === "/etc/machine-id") {
-        return "linux-machine-id\n";
-      }
-      throw new Error(`unexpected read: ${String(filePath)}`);
-    });
+    if (hostLinuxMachineId === null) throw new Error("Linux machine-id fixture is unavailable");
+    __setApiKeyCipherKeyMaterialForTests(
+      `${hostLinuxMachineId}:${os.userInfo().username}:${APP_SALT}`
+    );
 
     expect(decryptApiKeyAtRest(encrypted)).toBe("sk-live-secret-value");
-
-    existsSync.mockRestore();
-    readFileSync.mockRestore();
-    vi.unstubAllEnvs();
   });
 
   it("creates a durable machine-key-id when platform ids are missing", () => {
     vi.stubEnv("VITEST", "");
     vi.stubEnv("NODE_ENV", "production");
     __setPlatformMachineIdForTests(null);
-    const durablePath = path.join(os.tmpdir(), `alaya-machine-key-${process.pid}.id`);
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-machine-key-"));
+    temporaryRoots.push(temporaryRoot);
+    const durablePath = path.join(temporaryRoot, "machine-key-id");
     __setMachineKeyIdPathForTests(durablePath);
-    fs.rmSync(durablePath, { force: true });
-
-    const existsSync = vi.spyOn(fs, "existsSync").mockImplementation((filePath) => {
-      if (filePath === durablePath) {
-        try {
-          statSync(filePath);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      return false;
-    });
 
     const encrypted = encryptApiKeyAtRest("sk-live-secret-value");
     expect(fs.readFileSync(durablePath, "utf8").trim().length).toBeGreaterThan(0);
     expect(decryptApiKeyAtRest(encrypted)).toBe("sk-live-secret-value");
-
-    existsSync.mockRestore();
-    fs.rmSync(durablePath, { force: true });
-    vi.unstubAllEnvs();
   });
 });

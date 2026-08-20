@@ -20,7 +20,9 @@ interface RecallStatsRecall {
   readonly null_run: number;
   readonly miss_ratio: number;
   readonly p50_pointer_count: number;
-  readonly p50_latency_ms: number;
+  readonly p50_latency_ms: number | null;
+  readonly p95_latency_ms: number | null;
+  readonly p99_latency_ms: number | null;
 }
 
 interface RecallStatsUsage {
@@ -34,9 +36,9 @@ interface RecallStatsUsage {
 interface RecallStatsEmbedding {
   readonly total_queries: number;
   readonly returned_candidate_count: number;
-  readonly p50_latency_ms: number;
-  readonly p95_latency_ms: number;
-  readonly p99_latency_ms: number;
+  readonly p50_latency_ms: number | null;
+  readonly p95_latency_ms: number | null;
+  readonly p99_latency_ms: number | null;
   readonly latency_buckets: readonly Readonly<{ readonly label: string; readonly count: number }>[];
 }
 
@@ -199,9 +201,24 @@ function DetailGrid({ stats, t }: { readonly stats: RecallStats; readonly t: Ret
   return (
     <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
       <DetailRow label={t("recall:detail.p50Pointer")} value={String(stats.recall.p50_pointer_count)} />
-      <DetailRow label={t("recall:detail.p50Latency")} value={`${stats.recall.p50_latency_ms} ms`} />
+      <DetailRow
+        label={t("recall:detail.p50Latency")}
+        value={formatLatencyTripletMs(
+          stats.recall.p50_latency_ms,
+          stats.recall.p95_latency_ms,
+          stats.recall.p99_latency_ms
+        )}
+      />
       <DetailRow label={t("recall:detail.embeddingQueries")} value={String(stats.embedding.total_queries)} hint={t("recall:detail.embeddingReturned", { count: String(stats.embedding.returned_candidate_count) })} />
-      <DetailRow label={t("recall:detail.embeddingLatency")} value={`p50 ${stats.embedding.p50_latency_ms} / p95 ${stats.embedding.p95_latency_ms} / p99 ${stats.embedding.p99_latency_ms} ms`} hint={formatLatencyBuckets(stats.embedding.latency_buckets)} />
+      <DetailRow
+        label={t("recall:detail.embeddingLatency")}
+        value={formatLatencyTripletMs(
+          stats.embedding.p50_latency_ms,
+          stats.embedding.p95_latency_ms,
+          stats.embedding.p99_latency_ms
+        )}
+        hint={formatLatencyBuckets(stats.embedding.latency_buckets)}
+      />
       <DetailRow label={t("recall:detail.nullRun")} value={String(stats.recall.null_run)} />
       <DetailRow label={t("recall:detail.usageTotal")} value={`${stats.usage.used} / ${stats.usage.skipped} / ${stats.usage.not_applicable}`} hint={t("recall:detail.usageHint")} />
     </section>
@@ -292,6 +309,18 @@ async function fetchRecallStats(
 function formatRatio(ratio: number): string {
   if (!Number.isFinite(ratio) || Number.isNaN(ratio)) return "—";
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+function formatLatencyMs(value: number | null): string {
+  return value === null ? "n/a" : String(value);
+}
+
+function formatLatencyTripletMs(
+  p50: number | null,
+  p95: number | null,
+  p99: number | null
+): string {
+  return `p50 ${formatLatencyMs(p50)} / p95 ${formatLatencyMs(p95)} / p99 ${formatLatencyMs(p99)} ms`;
 }
 
 function formatLatencyBuckets(

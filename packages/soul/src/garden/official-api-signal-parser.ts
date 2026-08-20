@@ -1,23 +1,41 @@
 import { z } from "zod";
-import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  AssociativeFactFrameSchema,
+  OpenSemanticFactorGraphProposalSchema,
+  type AssociativeFactFrame,
+  type CandidateMemorySignal,
+  type OpenSemanticFactorGraphProposal
+} from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import {
+  inspectOfficialApiTemporalProjection,
   parseOfficialApiTemporalProjection,
+  type OfficialApiTemporalProjectionAudit,
   type OfficialApiTemporalProjectionDraft
 } from "./temporal/observed-projection.js";
 import {
   OfficialApiSourceLocatorSchema,
   type OfficialApiSourceLocator
 } from "./grounding/source-locator.js";
+import {
+  inspectOfficialApiSemanticFactorGraphProjection,
+  type OfficialApiSemanticFactorGraphProjectionAudit
+} from "./official-api/semantic-factor-projection.js";
+import { salvageRawSignalElements } from "./official-api/raw-signal-envelope.js";
+import {
+  projectOfficialApiObjectKind,
+  type OfficialApiObjectKindProjection
+} from "./official-api/object-kind-contract.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
-// invariant: extraction-cache reuse binds this parser behavior explicitly rather than
-// inferring compatibility from raw cache identity alone. source_locator is additive
-// and independently versioned, so locator absence keeps legacy v1 output unchanged.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v2";
-const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
+export {
+  OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
+} from "./official-api/object-kind-contract.js";
+// Raw cache identity and parser projection identity evolve independently.
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v10";
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
+const CANONICAL_CONFIDENCE_PATTERN = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u;
 const UnknownRecordSchema = z.record(z.string(), z.unknown()).readonly();
 const OfficialApiSignalsEnvelopeSchema = z.object({
   signals: z.array(z.unknown()).readonly()
@@ -27,17 +45,13 @@ const RequiredTrimmedStringSchema = z.preprocess(normalizeStringValue, z.string(
 const OptionalTrimmedStringSchema = z
   .preprocess(normalizeStringValue, z.string().min(1).nullable())
   .transform((value) => value ?? null);
-const OfficialApiSignalKindSchema = z.preprocess(
-  normalizeStringValue,
-  z.union([
-    z.literal(SignalKind.POTENTIAL_CLAIM),
-    z.literal(SignalKind.POTENTIAL_SYNTHESIS),
-    z.literal(SignalKind.POTENTIAL_HANDOFF),
-    z.literal(SignalKind.POTENTIAL_EVIDENCE_ANCHOR),
-    z.literal(SignalKind.POTENTIAL_CONFLICT),
-    z.literal(SignalKind.POTENTIAL_PREFERENCE)
-  ])
-);
+const OfficialApiConfidenceSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim();
+  return CANONICAL_CONFIDENCE_PATTERN.test(normalized)
+    ? Number(normalized)
+    : value;
+}, z.number().min(0).max(1));
 const StringArraySchema = z
   .preprocess((value) => (Array.isArray(value) ? value : []), z.array(OptionalTrimmedStringSchema))
   .transform((values) => {
@@ -85,6 +99,12 @@ const OfficialApiTemporalProjectionSchema = z.preprocess(
     (value) => value === null || (typeof value === "object" && value !== null)
   )
 );
+const OptionalAssociativeFactFrameSchema = z.preprocess((value) => {
+  const parsed = AssociativeFactFrameSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}, AssociativeFactFrameSchema.optional());
+const OptionalOpenSemanticFactorGraphSchema =
+  OpenSemanticFactorGraphProposalSchema.optional();
 const PreferencePolarityValueSchema = z.union([
   z.literal("positive"),
   z.literal("negative"),
@@ -122,23 +142,42 @@ const OfficialApiPreferenceProfileSchema = z
     };
     return Object.keys(draft).length === 0 ? null : Object.freeze(draft);
   });
-const OfficialApiSignalEntrySchema = z.object({
-  signal_kind: OfficialApiSignalKindSchema,
-  object_kind: RequiredTrimmedStringSchema,
-  confidence: z.number(),
+const OfficialApiSignalEntrySharedShape = {
+  confidence: OfficialApiConfidenceSchema,
   matched_text: RequiredTrimmedStringSchema,
   evidence_refs: StringArraySchema,
   source_memory_refs: StringArraySchema,
   canonical_entities: CanonicalEntitiesArraySchema,
   distilled_fact: OptionalTrimmedStringSchema,
   reason: OptionalTrimmedStringSchema,
-  // Optional only for legacy extraction-cache replay; a declared locator must parse strictly.
+  // A declared locator is strict; absence means the whole source assertion is grounded.
   source_locator: OfficialApiSourceLocatorSchema.optional(),
   temporal_projection: OfficialApiTemporalProjectionSchema,
-  preference_profile: OfficialApiPreferenceProfileSchema
+  preference_profile: OfficialApiPreferenceProfileSchema,
+  fact_frame: OptionalAssociativeFactFrameSchema,
+  semantic_factor_graph: OptionalOpenSemanticFactorGraphSchema
+} as const;
+const OpenOfficialApiSignalEntrySchema = z.object({
+  signal_kind: RequiredTrimmedStringSchema.optional(),
+  object_kind: RequiredTrimmedStringSchema.optional(),
+  ...OfficialApiSignalEntrySharedShape
 }).loose().readonly();
 
 export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
+export type {
+  OfficialApiSemanticFactorGraphProjectionAudit,
+  OfficialApiSemanticFactorGraphProjectionReason
+} from "./official-api/semantic-factor-projection.js";
+export {
+  parseOfficialApiSemanticFactorGraphProjectionAudit
+} from "./official-api/semantic-factor-projection.js";
+export {
+  inspectRawOfficialApiSignalElements,
+  salvageRawSignalElements
+} from "./official-api/raw-signal-envelope.js";
+export type {
+  RawOfficialApiSignalElementInspection
+} from "./official-api/raw-signal-envelope.js";
 
 export interface OfficialApiPreferenceProfileDraft {
   readonly preference_subject?: string;
@@ -156,6 +195,7 @@ export interface OfficialApiPreferenceProfileDraft {
 export interface OfficialApiSignalDraft {
   readonly signal_kind: CandidateMemorySignal["signal_kind"];
   readonly object_kind: string;
+  readonly object_kind_projection?: OfficialApiObjectKindProjection;
   readonly confidence: number;
   readonly matched_text: string;
   readonly evidence_refs: readonly string[];
@@ -165,14 +205,40 @@ export interface OfficialApiSignalDraft {
   readonly reason?: string;
   readonly source_locator?: OfficialApiSourceLocator;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
+  readonly temporal_projection_audit?: OfficialApiTemporalProjectionAudit;
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
+  readonly fact_frame?: AssociativeFactFrame;
+  readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
+  readonly semantic_factor_graph_projection?:
+    OfficialApiSemanticFactorGraphProjectionAudit;
 }
+
+export interface OfficialApiSignalParseOptions {
+  readonly requireSemanticFactorGraph?: boolean;
+}
+
+type OfficialApiSignalEntryRejection =
+  | "signal_entry_invalid"
+  | "semantic_factor_graph_required";
+type OfficialApiSignalEntryInspection = Readonly<
+  | {
+      readonly draft: OfficialApiSignalDraft;
+      readonly rejection: null;
+    }
+  | {
+      readonly draft: null;
+      readonly rejection: OfficialApiSignalEntryRejection;
+    }
+>;
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
 // through this exact production parse instead of a divergent bench-only
 // copy.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-export function parseOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+export function parseOfficialApiSignals(
+  content: string,
+  options: OfficialApiSignalParseOptions = {}
+): readonly OfficialApiSignalDraft[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -186,7 +252,7 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
     // element. This is the array-level analogue of the per-entry drop policy
     // applied below after a successful parse — a sibling's corruption is not
     // allowed to abort the turn's good signals.
-    return salvageOfficialApiSignals(content);
+    return salvageOfficialApiSignals(content, options);
   }
   // invariant: a malformed *envelope* (response is not an object, or has no
   // signals array) is a genuine total failure of the extraction call, so it
@@ -200,14 +266,14 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   }
 
   const drafts: OfficialApiSignalDraft[] = [];
+  const rejections: OfficialApiSignalEntryRejection[] = [];
   for (const candidate of envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT)) {
-    const draft = parseOfficialApiSignalEntry(candidate);
-    if (draft !== null) {
-      drafts.push(draft);
-    }
+    const inspected = inspectOfficialApiSignalEntry(candidate, options);
+    if (inspected.draft === null) rejections.push(inspected.rejection);
+    else drafts.push(inspected.draft);
   }
   if (envelope.signals.length > 0 && drafts.length === 0) {
-    throw new Error("signals array contained no valid entries");
+    throw noValidOpenEntriesError(rejections);
   }
   return Object.freeze(drafts);
 }
@@ -221,7 +287,10 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
 // (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
 // degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
 // see also: salvageRawSignalElements (string-aware balanced-brace walk).
-function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
+function salvageOfficialApiSignals(
+  content: string,
+  options: OfficialApiSignalParseOptions
+): readonly OfficialApiSignalDraft[] {
   const drafts: OfficialApiSignalDraft[] = [];
   for (const element of salvageRawSignalElements(content)) {
     if (drafts.length >= OFFICIAL_API_SIGNAL_LIMIT) {
@@ -238,7 +307,7 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
     if (!UnknownRecordSchema.safeParse(candidate).success) {
       continue;
     }
-    const draft = parseOfficialApiSignalEntry(candidate);
+    const draft = parseOfficialApiSignalEntry(candidate, options);
     if (draft !== null) {
       drafts.push(draft);
     }
@@ -249,119 +318,72 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
   return Object.freeze(drafts);
 }
 
-export interface RawOfficialApiSignalElementInspection {
-  readonly elements: readonly string[];
-  readonly truncated_final_element: boolean;
-}
-
-// Walk the `signals` array region of an envelope and return each top-level
-// `{...}` element as an independent substring. String-aware (braces inside a
-// JSON string literal do not change depth; `\` escapes the next char) so a
-// `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
-// element (the array ends before its closing `}`) is dropped — only complete
-// balanced elements are returned. Returns [] when no `signals` array region
-// is found; the production parsing path treats that as a hard failure.
-//
-// The inspection preserves the dropped-final-element fact so offline audit
-// tooling can account for it without changing production parse behavior.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-//   countRawEnvelopeSignals
-export function inspectRawOfficialApiSignalElements(content: string): RawOfficialApiSignalElementInspection {
-  const signalsKeyIndex = findSignalsArrayStart(content);
-  if (signalsKeyIndex < 0) {
-    return { elements: [], truncated_final_element: false };
-  }
-  const elements: string[] = [];
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let elementStart = -1;
-  for (let i = signalsKeyIndex; i < content.length; i += 1) {
-    const ch = content[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0) {
-        elementStart = i;
-      }
-      depth += 1;
-    } else if (ch === "}") {
-      if (depth > 0) {
-        depth -= 1;
-        if (depth === 0 && elementStart >= 0) {
-          elements.push(content.slice(elementStart, i + 1));
-          elementStart = -1;
-        }
-      }
-    } else if (ch === "]" && depth === 0) {
-      // Closing the signals array at top level — no in-flight element.
-      break;
-    }
-  }
-  return {
-    elements,
-    truncated_final_element: depth > 0 && elementStart >= 0
-  };
-}
-
-// Exported so the LongMemEval bench seed path can count the RAW salvageable
-// element population (lastTurnRawSignalCount) when the strict envelope parse
-// fails — otherwise the dropped corrupt entries would vanish from the
-// parse-drop attribution instead of landing in parseDropped.
-export function salvageRawSignalElements(content: string): readonly string[] {
-  return inspectRawOfficialApiSignalElements(content).elements;
-}
-
-// Find the index of the `[` that opens the `signals` array, scanning past the
-// `"signals"` key. String-aware so a `"signals"` substring inside an earlier
-// string value is not mistaken for the key. Returns -1 when not found.
-function findSignalsArrayStart(content: string): number {
-  const keyMatch = /"signals"\s*:\s*\[/u.exec(content);
-  if (keyMatch === null) {
-    return -1;
-  }
-  // Position the walk at the `[` so the first `{` after it starts element 0.
-  return keyMatch.index + keyMatch[0].length - 1;
-}
-
 // Parse one entry of the official-API {"signals":[...]} envelope. Returns
 // null — instead of throwing — when the entry is malformed (hallucinated
 // signal_kind, missing object_kind / matched_text / confidence, or a
 // non-object element), so one bad fact is dropped while the rest survive.
-export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
-  const parsed = OfficialApiSignalEntrySchema.safeParse(candidate);
-  if (!parsed.success) {
-    return null;
-  }
-  const record = parsed.data;
+export function parseOfficialApiSignalEntry(
+  candidate: unknown,
+  options: OfficialApiSignalParseOptions = {}
+): OfficialApiSignalDraft | null {
+  return inspectOfficialApiSignalEntry(candidate, options).draft;
+}
 
+function inspectOfficialApiSignalEntry(
+  candidate: unknown,
+  options: OfficialApiSignalParseOptions
+): OfficialApiSignalEntryInspection {
+  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+    return { draft: null, rejection: "signal_entry_invalid" };
+  }
+  const semanticProjection = inspectOfficialApiSemanticFactorGraphProjection(
+    (candidate as Record<string, unknown>).semantic_factor_graph
+  );
+  if (options.requireSemanticFactorGraph === true && semanticProjection.graph === undefined) {
+    return { draft: null, rejection: "semantic_factor_graph_required" };
+  }
+  const temporalProjection = inspectOfficialApiTemporalProjection(
+    (candidate as Record<string, unknown>).temporal_projection
+  );
+  const parsed = OpenOfficialApiSignalEntrySchema.safeParse({
+    ...(candidate as Record<string, unknown>),
+    temporal_projection: temporalProjection.projection,
+    semantic_factor_graph: semanticProjection.graph
+  });
+  if (!parsed.success) {
+    return { draft: null, rejection: "signal_entry_invalid" };
+  }
+  const objectKindProjection = projectOfficialApiObjectKind(parsed.data.object_kind ?? undefined);
+  return {
+    draft: buildOfficialApiSignalDraft(Object.freeze({
+      ...parsed.data,
+      signal_kind: objectKindProjection.signalKind,
+      object_kind: objectKindProjection.objectKind
+    }), semanticProjection.audit, temporalProjection.audit, objectKindProjection.audit),
+    rejection: null
+  };
+}
+
+function buildOfficialApiSignalDraft(
+  record: z.infer<typeof OpenOfficialApiSignalEntrySchema> & {
+    readonly signal_kind: CandidateMemorySignal["signal_kind"];
+    readonly object_kind: string;
+  },
+  semanticFactorGraphProjection: OfficialApiSemanticFactorGraphProjectionAudit | undefined,
+  temporalProjectionAudit: OfficialApiTemporalProjectionAudit,
+  objectKindProjection: OfficialApiObjectKindProjection | undefined
+): OfficialApiSignalDraft {
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
-  // distilled_fact is the resolved one-assertion fact materialization
-  // stores as memory_entry content. A model that omits it (or sends a
-  // non-string / empty value) leaves the field ABSENT so
-  // materialization-router/inputs.ts buildDistilledFact degrades honestly to
-  // its rule distiller — never fake one from matched_text. The clamp
-  // shares DISTILLED_FACT_MAX_CHARS so the provider and materialization
-  // agree on one budget.
+  // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
   const clampedDistilledFact =
     record.distilled_fact === null ? null : record.distilled_fact.slice(0, DISTILLED_FACT_MAX_CHARS);
   const clampedReason = record.reason === null ? null : record.reason.slice(0, MAX_OFFICIAL_API_REASON_CHARS);
   return Object.freeze({
     signal_kind: record.signal_kind,
-    object_kind: record.object_kind.slice(0, MAX_OFFICIAL_API_OBJECT_KIND_CHARS),
+    object_kind: record.object_kind,
+    ...(objectKindProjection === undefined ? {} : {
+      object_kind_projection: objectKindProjection
+    }),
     confidence: record.confidence,
     matched_text: clampedMatchedText,
     evidence_refs: record.evidence_refs,
@@ -371,8 +393,33 @@ export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSign
     ...(clampedReason === null ? {} : { reason: clampedReason }),
     ...(record.source_locator === undefined ? {} : { source_locator: record.source_locator }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
-    ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile })
+    temporal_projection_audit: temporalProjectionAudit,
+    ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile }),
+    ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame }),
+    ...(record.semantic_factor_graph === undefined
+      ? {}
+      : { semantic_factor_graph: record.semantic_factor_graph }),
+    ...(semanticFactorGraphProjection === undefined
+      ? {}
+      : { semantic_factor_graph_projection: semanticFactorGraphProjection })
   });
+}
+
+function noValidOpenEntriesError(
+  rejections: readonly OfficialApiSignalEntryRejection[]
+): Error {
+  const counts = new Map<OfficialApiSignalEntryRejection, number>();
+  for (const rejection of rejections) {
+    counts.set(rejection, (counts.get(rejection) ?? 0) + 1);
+  }
+  const summary = [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(",");
+  return new Error(
+    "signals array contained no valid open semantic factor entries " +
+      `(rejections=${summary})`
+  );
 }
 
 function normalizePreferenceProfileInput(value: unknown): unknown {

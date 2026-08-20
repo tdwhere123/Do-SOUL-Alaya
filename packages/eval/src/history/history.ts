@@ -39,6 +39,7 @@ import {
   type HistorySidecar,
   type WriteEntryOptions
 } from "./history-entry-write.js";
+import { isHistoryEntrySlug } from "./history-slug.js";
 
 export {
   HistoryEntryCommittedError,
@@ -64,6 +65,23 @@ export interface HistoryEntry {
   readonly reportPath: string;
   readonly findingsPath: string;
   readonly sidecarPaths: Readonly<Record<string, string>>;
+}
+
+export function joinSlugDiscriminators(
+  ...parts: Array<string | undefined>
+): string | undefined {
+  const present = parts.filter((part): part is string =>
+    typeof part === "string" && part.length > 0
+  );
+  if (present.length === 0) return undefined;
+  const joined = present.join("-");
+  if (!SLUG_DISCRIMINATOR_PATTERN.test(joined) ||
+      present.some((part) => !SLUG_DISCRIMINATOR_PATTERN.test(part))) {
+    throw new Error(
+      `invalid slug discriminator: '${joined}' must use lowercase letters, digits, and hyphens`
+    );
+  }
+  return joined;
 }
 
 export function entrySlug(
@@ -103,8 +121,7 @@ export function benchArchiveDiscriminator(
   return `${policySlug}-${simulateReportSlug(simulateReport)}`;
 }
 
-const SLUG_DISCRIMINATOR_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
-const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/;
+const SLUG_DISCRIMINATOR_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,190}[a-z0-9])?$/;
 
 /**
  * @anchor write-entry-atomic — stage in a sibling .tmp- directory
@@ -154,7 +171,7 @@ export async function reconcileHistoryEntryPointers(
 // @anchor write-entry-tmp-filter: staging directories created by
 // writeEntry must never surface as "slugs" to readers. Pattern matches
 // `.tmp-<slug>-<mkdtemp-suffix>`. listEntries also skips any directory
-// whose name does not match the canonical SLUG_PATTERN; that is a
+// whose name does not match the canonical history entry slug; that is a
 // silent skip by design (a future archive may carry sidecar dirs like
 // `evidence/` or `datasets/` at the bench root that are not slugs).
 const STAGING_PREFIX = HISTORY_STAGING_PREFIX;
@@ -170,7 +187,7 @@ export async function listEntries(
     for (const entry of entries) {
       if (entry === LATEST_BASELINE_FILENAME) continue;
       if (entry.startsWith(STAGING_PREFIX)) continue;
-      if (!SLUG_PATTERN.test(entry)) continue;
+      if (!isHistoryEntrySlug(entry)) continue;
       const fullPath = path.join(benchRoot, entry);
       const st = await stat(fullPath).catch(() => null);
       if (st !== null && st.isDirectory()) slugs.push(entry);
@@ -360,7 +377,7 @@ async function readLatestPointerSlug(
     return null;
   } catch (error) {
     if (isNotFound(error)) return null;
-    return null;
+    throw error;
   }
 }
 

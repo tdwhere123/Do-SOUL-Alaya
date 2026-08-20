@@ -10,3 +10,6 @@ process.env.ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST = "0";
 process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT = mkdtempSync(
   join(tmpdir(), "alaya-bench-vitest-cache-")
 );
+// Mock-extractor suites still resolve a complete cache identity. Keep that
+// identity explicit and non-routable after production stopped guessing a URL.
+process.env.OFFICIAL_API_GARDEN_PROVIDER_URL = "https://fixture-provider.invalid/v1";

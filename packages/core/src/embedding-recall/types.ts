@@ -3,6 +3,8 @@ import type {
   HealthJournalRecordPort,
   MemoryEntry
 } from "@do-soul/alaya-protocol";
+import type { RecallFiniteFieldChannelCapture } from
+  "../recall/field/finite-field-capture.js";
 
 export interface EmbeddingVectorRecord {
   readonly object_id: string;
@@ -38,6 +40,12 @@ export interface EmbeddingRecallRepoPort {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+  // Optional existence probe for precheck paths that only need any-hit, not
+  // full vector hydration. Implementations should use LIMIT 1 / EXISTS.
+  existsAnyByObjectIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<boolean>;
   // Optional: full workspace vector scan, used by the embedding-on coarse
   // injection path to find semantically near memories that lexical recall
   // never admitted into the candidate pool. The optional `tierFilter` admits
@@ -49,6 +57,12 @@ export interface EmbeddingRecallRepoPort {
     workspaceId: string,
     options?: EmbeddingWorkspaceScanOptions
   ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+  // Optional id-only workspace prefilter. Same filters/order/limit as
+  // listByWorkspace, but does not hydrate embedding blobs.
+  listIdsByWorkspace?(
+    workspaceId: string,
+    options?: EmbeddingWorkspaceScanOptions
+  ): Promise<readonly string[]>;
 }
 
 export interface EmbeddingWorkspaceScanOptions {
@@ -56,6 +70,8 @@ export interface EmbeddingWorkspaceScanOptions {
   // whose backing memory_entry sits in one of the listed tiers.
   readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
   // Hard cap on the number of records returned. Applied after tier filtering.
+  // Unfiltered scans (no tier/provider/model/schema filter) require a positive
+  // limit; unbounded default blob hydration is rejected by the storage repo.
   readonly limit?: number;
   // invariant: cosine space is valid only within one (provider_kind, model_id);
   // SQL-side restriction prevents the scan cap from being consumed by vectors
@@ -85,7 +101,9 @@ export interface EmbeddingWorkspaceNeighborResult {
     | "provider_returned"
     | "provider_pending"
     | "provider_failed"
-    | "provider_not_requested";
+    | "provider_not_requested"
+    // Ready-but-unusable is not a provider failure; scoring must not treat it as observed empty.
+    | "query_embedding_unusable";
   readonly query_embedding_degradation_reason?: string | null;
   // Fresh query-embedding inference calls consumed by this workspace-neighbor
   // scan. A cache hit or unavailable provider contributes 0; a successful
@@ -111,6 +129,7 @@ export interface EmbeddingRecallSupplementResult {
 
 export interface EmbeddingRecallServiceDependencies {
   readonly embeddingRepo: EmbeddingRecallRepoPort;
+  readonly evidenceDocumentEmbeddingRepo?: EvidenceDocumentEmbeddingRepoPort;
   readonly provider: EmbeddingProviderPort;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly healthJournalRecorder?: HealthJournalRecordPort;
@@ -165,6 +184,131 @@ export interface PreparedEmbeddingSupplement {
   readonly degradedReason: string | null;
 }
 
+export interface EvidenceEmbeddingCandidate {
+  readonly candidateKey: string;
+  readonly evidenceObjectId: string;
+  readonly documentIdentity: string;
+  readonly content: string;
+}
+
+export interface EvidenceDocumentEmbeddingRef {
+  readonly ownerObjectId: string;
+  readonly documentIdentity: string;
+  readonly contentHash: string;
+}
+
+export interface EvidenceDocumentEmbeddingRecord extends EvidenceDocumentEmbeddingRef {
+  readonly workspaceId: string;
+  readonly documentRole: "evidence_document";
+  readonly providerKind: string;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+  readonly dimensions: number;
+  readonly embedding: Float32Array;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface EvidenceDocumentEmbeddingSource {
+  readonly workspaceId: string;
+  readonly ownerObjectId: string;
+  readonly documentIdentity: string;
+  readonly content: string;
+  readonly lifecycleState: string;
+  readonly createdBy: string;
+  readonly evidenceKind: string;
+  readonly evidenceHealthState: string;
+  readonly artifactRef: string | null;
+  readonly sourceHash: string | null;
+}
+
+export interface EvidenceDocumentEmbeddingRepoPort {
+  listSourcesByWorkspace(
+    workspaceId: string
+  ): Promise<readonly Readonly<EvidenceDocumentEmbeddingSource>[]>;
+  findByDocuments(input: {
+    readonly workspaceId: string;
+    readonly documents: readonly Readonly<EvidenceDocumentEmbeddingRef>[];
+    readonly documentRole: "evidence_document";
+    readonly providerKind: string;
+    readonly modelId: string;
+    readonly schemaVersion: number;
+  }): Promise<readonly Readonly<EvidenceDocumentEmbeddingRecord>[]>;
+  upsertMany(
+    records: readonly Readonly<EvidenceDocumentEmbeddingRecord>[]
+  ): Promise<void>;
+}
+
+export type EvidenceCandidateScoringStatus =
+  | "not_requested"
+  | "not_applicable"
+  | "returned"
+  | "failed";
+
+export type EvidenceCandidateScoringFailureClass =
+  | "provider_unavailable"
+  | "query_embedding_failed"
+  | "candidate_embedding_failed"
+  | "service_error";
+
+export interface EvidenceCandidateScoringResult {
+  readonly activationsByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<EvidenceCandidateScoringReceipt>
+  >;
+  readonly status: EvidenceCandidateScoringStatus;
+  readonly expectedCount: number;
+  readonly scoredCount: number;
+  readonly inferenceCalls: number;
+  readonly latencyMs: number;
+  readonly failureClass: EvidenceCandidateScoringFailureClass | null;
+  readonly fieldChannelCapture?: Readonly<RecallFiniteFieldChannelCapture>;
+  readonly selectionReceipt?: Readonly<EvidenceCandidateScoringSelectionReceipt>;
+}
+
+export interface EvidenceCandidateScoringSelectionReceipt {
+  readonly schema_version: 1;
+  readonly operator_id: "ordered_candidate_prefix_v1";
+  readonly input_candidate_keys: readonly string[];
+  readonly owner_gist_enabled: boolean;
+  readonly owner_gist_candidate_keys: readonly string[];
+  readonly full_evidence_candidate_keys: readonly string[];
+  readonly owner_gist_limit: 16;
+  readonly full_evidence_limit: 32;
+  readonly input_memory_count: number;
+  readonly owner_gist_selected_count: number;
+  readonly full_evidence_selected_count: number;
+  readonly owner_gist_excluded_count: number;
+  readonly full_evidence_excluded_count: number;
+}
+
+export interface EvidenceCandidateScoringWinner {
+  readonly score: number;
+  readonly evidenceObjectId: string;
+  readonly documentIdentity: string;
+  readonly contentHash?: string;
+}
+
+export interface EvidenceCandidateScoringReceipt {
+  readonly schema_version: 1;
+  readonly operator_id: "evidence_document_max_v1";
+  readonly state: "observed";
+  readonly score: number;
+  readonly winner: Readonly<EvidenceCandidateScoringWinner>;
+  readonly observations: readonly Readonly<EvidenceCandidateScoringWinner>[];
+  readonly observation_completeness: "complete" | "bounded_candidate_prefix";
+  readonly missing_channel_policy: "no_op";
+}
+
+export interface ScoreEvidenceCandidatesParams {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string;
+  readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
+  readonly candidates: readonly Readonly<EvidenceEmbeddingCandidate>[];
+  readonly selectionReceipt?: Readonly<EvidenceCandidateScoringSelectionReceipt>;
+}
+
 export interface EmbeddingRecallRequestScoreSnapshot {
   readonly workspaceId: string;
   readonly runId: string | null;
@@ -172,6 +316,7 @@ export interface EmbeddingRecallRequestScoreSnapshot {
   readonly poolScoresByObjectId: Readonly<Record<string, number>>;
   readonly scoringLatencyMs: number;
   readonly workspaceNeighbors: Readonly<EmbeddingWorkspaceNeighborResult>;
+  readonly fieldChannelCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly degradedReason: string | null;
 }
 

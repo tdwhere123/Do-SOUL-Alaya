@@ -16,6 +16,7 @@ import type {
   WorkspaceBootstrapReconcileResult,
   WorkspaceBootstrappingPlannerPort,
   WorkspaceBootstrappingRecordRepoPort,
+  WorkspaceCreationMutation,
   WorkspacePathRelationRepoPort,
   WorkspaceRepoPort
 } from "./workspace-service-ports.js";
@@ -47,6 +48,7 @@ export interface WorkspaceBootstrapCoordinatorDependencies {
   readonly bootstrappingPlanner?: WorkspaceBootstrappingPlannerPort;
   readonly pathRelationRepo?: WorkspacePathRelationRepoPort;
   readonly bootstrappingRecordRepo?: WorkspaceBootstrappingRecordRepoPort;
+  readonly workspaceCreationMutation?: WorkspaceCreationMutation;
 }
 
 class BootstrapReconcileRaceError extends AlayaError {
@@ -253,12 +255,18 @@ export class WorkspaceBootstrapCoordinator {
     };
   }
 
+  private persistCreatedWorkspace(createWorkspaceArgs: WorkspaceCreateArgs): Workspace {
+    const createdWorkspace = this.dependencies.workspaceRepo.create(createWorkspaceArgs);
+    this.dependencies.workspaceCreationMutation?.(createdWorkspace);
+    return createdWorkspace;
+  }
+
   private async createWorkspaceWithoutBootstrap(
     createWorkspaceArgs: WorkspaceCreateArgs,
     workspaceCreatedEvent: EventPublisherInput
   ): Promise<Workspace> {
     return await this.dependencies.eventPublisher.appendManyWithMutation([workspaceCreatedEvent], () =>
-      this.dependencies.workspaceRepo.create(createWorkspaceArgs)
+      this.persistCreatedWorkspace(createWorkspaceArgs)
     );
   }
 
@@ -272,7 +280,7 @@ export class WorkspaceBootstrapCoordinator {
     }>
   ): Promise<Workspace> {
     return await this.dependencies.eventPublisher.appendManyWithMutation(params.events, () => {
-      const createdWorkspace = this.dependencies.workspaceRepo.create(params.createWorkspaceArgs);
+      const createdWorkspace = this.persistCreatedWorkspace(params.createWorkspaceArgs);
       const persistedBootstrappingRecord =
         params.bootstrappingDeps.bootstrappingRecordRepo.findByWorkspace(createdWorkspace.workspace_id);
       if (persistedBootstrappingRecord !== null || !params.shouldPlantBootstrapPlan || params.bootstrapPlan === null) {

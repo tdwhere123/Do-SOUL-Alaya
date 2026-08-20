@@ -2,30 +2,32 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { rmSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import { readExtractionAttemptLedger } from
-  "../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../bench/extraction/authority/attempt-ledger.js";
 import { receiptExtractionCacheIdentity } from
-  "../../../longmemeval/extraction/authority/receipt-cache-identity.js";
+  "../../../bench/extraction/authority/receipt-cache-identity.js";
 import {
   createFreshRetiredSourceRebuildTargetSelection,
   writeExtractionTargetSelectionReceipt
-} from "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+} from "../../../bench/extraction/authority/target-selection/receipt.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
-  buildExtractionFillQuestion,
+  buildGroundedSignalResponse,
+  buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -74,7 +76,7 @@ describe("authority-bound provider failure isolation", () => {
       tolerateProviderTaskFailures: true,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/normal target-selection-bound fill authority/u);
+    })).rejects.toThrow(/target-selection-bound fill authority/u);
 
     expect(extract).not.toHaveBeenCalled();
   });
@@ -119,7 +121,9 @@ describe("authority-bound provider failure isolation", () => {
       await input.onTransportAttempt?.();
       const turn = readTurnContent(input.userPrompt);
       if (turn.includes("provider-failure")) throw nonRetryable4xx();
-      return { rawJson: '{"signals":[]}' };
+      return providerBackedExtractionResult(
+        buildGroundedSignalResponse(input.userPrompt)
+      );
     });
 
     const result = await runExtractionFill({
@@ -179,7 +183,7 @@ function setCredentialFixture(): void {
 }
 
 function question(id: string, fact: string, decoy: string): LongMemEvalQuestion {
-  return buildExtractionFillQuestion(id, `User: ${fact}`, `User: ${decoy}`);
+  return buildAuthorityQuestion(id, fact, decoy);
 }
 
 async function writeCanonicalDataset(questions: readonly LongMemEvalQuestion[]): Promise<void> {
@@ -190,6 +194,7 @@ async function writeCanonicalDataset(questions: readonly LongMemEvalQuestion[]):
   writeFileSync(join(pinnedMetaRoot, "longmemeval_s.meta.json"), JSON.stringify({
     name: "longmemeval_s",
     sha256,
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: questions.length
   }), "utf8");
 }
@@ -268,7 +273,12 @@ async function writeUnboundAuthority(): Promise<string> {
 }
 
 function readTurnContent(userPrompt: string): string {
-  return (JSON.parse(userPrompt) as { readonly turn_content: string }).turn_content;
+  const request = JSON.parse(userPrompt) as {
+    readonly source_assertions?: readonly { readonly text?: unknown }[];
+  };
+  const text = request.source_assertions?.[0]?.text;
+  if (typeof text !== "string") throw new Error("expected a source assertion");
+  return text;
 }
 
 function nonRetryable4xx(): Error {

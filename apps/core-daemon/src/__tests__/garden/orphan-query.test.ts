@@ -11,7 +11,7 @@ import {
   SqliteWorkspaceRepo,
   type EventLogAppendInput
 } from "@do-soul/alaya-storage";
-import { findEventLogOrphansForWorkspace } from "../../garden/orphan-query.js";
+import { findEventLogOrphansForWorkspace } from "../../garden/support/orphan-query.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

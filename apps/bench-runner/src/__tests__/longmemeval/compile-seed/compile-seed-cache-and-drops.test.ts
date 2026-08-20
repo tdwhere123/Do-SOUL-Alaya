@@ -6,7 +6,9 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
@@ -20,13 +22,14 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
+  providerBackedResult,
   makeSeed,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
@@ -34,7 +37,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
-import { computeExtractionRawJsonSha256 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { computeExtractionRawJsonSha256 } from "../../../bench/compile-seed/compile-seed-cache.js";
 
 describe("extraction cache key — load-bearing inputs only", () => {
   let cacheRoot: string;
@@ -47,24 +50,20 @@ describe("extraction cache key — load-bearing inputs only", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  // The provider assembles userPrompt as
-  // JSON.stringify({workspace_id, run_id, surface_id, turn_content, ...}).
-  // crossquestion.ts stamps run_id with a wall clock, so two runs of the
-  // same turn differ in run_id; the cache key must ignore it.
-  function userPromptFor(turn: string, runId: string): string {
-    return JSON.stringify({
-      workspace_id: "ws-1",
-      run_id: runId,
-      surface_id: null,
-      turn_content: turn,
-      turn_messages: []
-    });
+  function userPromptFor(turn: string, _runId: string): string {
+    return stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest(turn, [])
+    );
   }
 
   it("hits the cache for the same turn under a different run_id", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const rawJson = signalsEnvelope([{
+      matched: "I moved to Berlin.",
+      distilled: "The user moved to Berlin."
+    }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedResult(rawJson))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -100,7 +99,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(firstStats.llmCalls).toBe(1);
     expect(firstStats.lastRawJsonSha256)
-      .toBe(computeExtractionRawJsonSha256('{"signals":[]}'));
+      .toBe(computeExtractionRawJsonSha256(rawJson));
 
     // Same turn, a different wall-clock run_id — must be served from the
     // fixture with zero LLM calls. A run_id in the cache key would make
@@ -141,7 +140,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
     expect(secondStats.cacheHits).toBe(1);
     expect(secondStats.llmCalls).toBe(0);
     expect(secondStats.lastRawJsonSha256).toBe(firstStats.lastRawJsonSha256);
-    expect(cached.rawJson).toBe('{"signals":[]}');
+    expect(cached.rawJson).toBe(rawJson);
   });
 
   it("still misses when the turn_content itself changes", async () => {
@@ -151,8 +150,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({ rawJson: firstRaw })
-        .mockResolvedValueOnce({ rawJson: secondRaw })
+        .mockResolvedValueOnce(providerBackedResult(firstRaw))
+        .mockResolvedValueOnce(providerBackedResult(secondRaw))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -245,20 +244,11 @@ describe("bench evidence capsule — production-faithful span", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
-          rawJson: JSON.stringify({
-            signals: [{
-              signal_kind: "potential_preference",
-              object_kind: "user_preference",
-              confidence: 0.9,
-              matched_text: "I moved to Berlin",
-              distilled_fact: "Alice lives in Berlin.",
-              source_locator: {
-                contract_version: 2,
-                kind: "assertion_catalog",
-                assertion_id: 1
-              }
-            }]
-          })
+          ...providerBackedResult(""),
+          rawJson: signalsEnvelope([{
+            matched: "I moved to Berlin",
+            distilled: "Alice lives in Berlin."
+          }])
         })
       })
     });
@@ -294,12 +284,12 @@ describe("bench evidence capsule — production-faithful span", () => {
       proposed_matched_text: "I moved to Berlin"
     });
     // The pre-strip schema-grounding keys are gone; the original
-    // LLM-extracted object_kind is preserved for audit fidelity.
+    // The canonical parser owns the open semantic object kind.
     expect(raw?.schema_grounding).toBeUndefined();
     expect(raw?.detected_object).toBeUndefined();
     expect(raw?.field_candidates).toBeUndefined();
     expect(raw?.validation_result).toBeUndefined();
-    expect(raw?.extracted_object_kind).toBe("user_preference");
+    expect(raw?.extracted_object_kind).toBe("open_semantic_observation");
   });
 
   it("carries the full turn only on the no-credentials fallback", async () => {

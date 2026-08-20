@@ -2,6 +2,9 @@ import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 
 export interface BenchEmbeddingWarmupOptions {
   readonly maxPasses?: number;
+  readonly backfillMode?: Parameters<
+    AlayaDaemonRuntime["runGardenEmbeddingBackfillPass"]
+  >[1];
 }
 
 export interface BenchEmbeddingProviderReadinessInput {

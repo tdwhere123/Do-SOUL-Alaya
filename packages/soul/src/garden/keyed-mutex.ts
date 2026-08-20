@@ -5,6 +5,10 @@
 export class KeyedMutex {
   private readonly tails = new Map<string, Promise<void>>();
 
+  public get size(): number {
+    return this.tails.size;
+  }
+
   /** Run `task` with exclusive access for `key`; same-key tasks run one at
    *  a time in arrival order. The lock releases even when `task` throws. */
   public async runExclusive<T>(key: string, task: () => Promise<T>): Promise<T> {

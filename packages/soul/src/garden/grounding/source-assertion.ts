@@ -1,3 +1,4 @@
+import { PREFERENCE_FACT_MAX_CHARS } from "@do-soul/alaya-protocol";
 import {
   canExpandAcrossSentenceBoundary,
   coordinateSpan,
@@ -8,9 +9,15 @@ import {
 } from "./source-assertion/clause-spans.js";
 import {
   hasUnresolvedReference,
+  isLocallyClosedAtomicAssertion,
   isBoundedTemplateSlotAssertion,
   startsWithChineseThirdPersonSubject
 } from "./source-assertion/reference-closure.js";
+import {
+  hasAssertionPreservingRelativeClauseSuffix,
+  hasRelativeClauseSuffix
+} from "./source-assertion/relative-clause.js";
+import { stripSourceRoleMarker } from "./source-role/marker.js";
 
 export type SourceAssertionResolution =
   | { readonly status: "grounded"; readonly assertion: string }
@@ -24,6 +31,7 @@ export type SourceAssertionRejectionReason =
   | "source_assertion_too_long";
 
 export const SOURCE_ASSERTION_MAX_CHARS = 500;
+export const PREFERENCE_SOURCE_ASSERTION_MAX_CHARS = PREFERENCE_FACT_MAX_CHARS;
 
 export function buildSourceVerificationText(
   sourceText: string,
@@ -41,14 +49,15 @@ export function buildSourceVerificationText(
 
 export function resolveSourceAssertion(
   sourceText: string,
-  matchedText: string
+  matchedText: string,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
   const source = sourceText.trim();
   const matched = matchedText.trim();
   if (source.length === 0 || matched.length === 0) {
     return { status: "rejected", reason: "matched_text_absent" };
   }
-  const boundedPrefix = resolveBoundedVerbatimPrefix(source, matched);
+  const boundedPrefix = resolveBoundedVerbatimPrefix(source, matched, maxChars);
   if (boundedPrefix !== null) return boundedPrefix;
   const spans = sentenceSpans(source);
   const resolutions: SourceAssertionResolution[] = [];
@@ -56,13 +65,38 @@ export function resolveSourceAssertion(
   while (offset >= 0) {
     const span = enclosingSentenceSpan(spans, offset, matched.length);
     if (span !== null) {
-      resolutions.push(resolveAssertionAt(source, matched, offset, span.sentence, spans[span.startIndex - 1]));
+      resolutions.push(resolveAssertionAt(
+        source,
+        matched,
+        offset,
+        span.sentence,
+        spans[span.startIndex - 1],
+        maxChars
+      ));
     }
     offset = source.indexOf(matched, offset + 1);
   }
   if (resolutions.length === 0) return { status: "rejected", reason: "matched_text_absent" };
   if (resolutions.length > 1) return { status: "rejected", reason: "matched_text_ambiguous" };
   return resolutions[0]!;
+}
+
+export function resolveAtomicSourceAssertion(
+  assertionText: string,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
+): SourceAssertionResolution {
+  const assertion = stripSourceRoleLabel(assertionText);
+  if (assertion.length === 0) return { status: "rejected", reason: "matched_text_absent" };
+  if (assertion.length > maxChars) {
+    return { status: "rejected", reason: "source_assertion_too_long" };
+  }
+  if (!isLocallyClosedAtomicAssertion(assertion)) {
+    return { status: "rejected", reason: "source_assertion_not_self_contained" };
+  }
+  if (isVacuousFirstPersonStub(assertion) || !hasCompleteClause(assertion, false)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
+  }
+  return { status: "grounded", assertion };
 }
 
 function enclosingSentenceSpan(
@@ -87,12 +121,13 @@ function enclosingSentenceSpan(
 
 function resolveBoundedVerbatimPrefix(
   source: string,
-  matched: string
+  matched: string,
+  maxChars: number
 ): SourceAssertionResolution | null {
   const offset = source.indexOf(matched);
   if (offset < 0) return null;
   const assertion = stripSourceRoleLabel(matched);
-  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+  if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   const suffix = source.slice(offset + matched.length);
@@ -105,7 +140,7 @@ function resolveBoundedVerbatimPrefix(
   if (!hasMatchedTextStartBoundary(source, offset)) {
     return { status: "rejected", reason: "matched_text_absent" };
   }
-  if (relativeSuffix && !hasSafeSurpriseSuffix(suffix)) {
+  if (relativeSuffix && !hasAssertionPreservingRelativeClauseSuffix(suffix)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
   }
   if (isVacuousFirstPersonStub(assertion)) {
@@ -119,21 +154,6 @@ function resolveBoundedVerbatimPrefix(
 
 function hasMatchedTextStartBoundary(source: string, offset: number): boolean {
   return !isWordCharacter(source[offset - 1]);
-}
-
-const RELATIVE_CLAUSE_OPEN =
-  /^(?:\s*[,;:]\s*|\s*[—–‒-]\s*|\s*\(\s*|\s+)(?:which|who)\b/iu;
-
-function hasRelativeClauseSuffix(suffix: string): boolean {
-  return RELATIVE_CLAUSE_OPEN.test(suffix);
-}
-
-function hasSafeSurpriseSuffix(suffix: string): boolean {
-  return /^\s*,\s*which\s+(?:was|is)\s+(?:a\s+)?(?:nice|pleasant|welcome|great)\s+surprise\b/iu.test(
-    suffix
-  ) || /^\s*,\s*which surprised me because I had forgotten it\.\s*(?:\r?\n(?:Assistant|助手)\s*:[\s\S]*)?$/iu.test(
-    suffix
-  );
 }
 
 function hasWorthItSuffix(assertion: string, suffix: string): boolean {
@@ -212,7 +232,8 @@ function resolveAssertionAt(
   matched: string,
   offset: number,
   sentence: AssertionSpan,
-  previousSentence: AssertionSpan | undefined
+  previousSentence: AssertionSpan | undefined,
+  maxChars: number
 ): SourceAssertionResolution {
   if (hasCrossSentenceChineseReference(source, sentence, previousSentence)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
@@ -234,7 +255,7 @@ function resolveAssertionAt(
   let rejectionReason: SourceAssertionRejectionReason = "source_assertion_incomplete";
   for (const [index, candidate] of candidates.entries()) {
     if (index === 0 && exactHasDanglingTerminal) continue;
-    const resolution = evaluateAssertionCandidate(source, candidate);
+    const resolution = evaluateAssertionCandidate(source, candidate, maxChars);
     if (resolution.status === "grounded") return resolution;
     rejectionReason = strongerRejectionReason(rejectionReason, resolution.reason);
     if (index === 0 && sentence.ambiguous === true && !matchedDisambiguatesInitialism) break;
@@ -295,14 +316,15 @@ function assertionCandidates(
 
 function evaluateAssertionCandidate(
   source: string,
-  candidate: AssertionCandidate
+  candidate: AssertionCandidate,
+  maxChars: number
 ): SourceAssertionResolution {
   const assertion = stripSourceRoleLabel(source.slice(candidate.span.start, candidate.span.end));
   if (candidate.exact && !/[.!?。！？]$/u.test(assertion) &&
       !hasDirectQuestionBoundary(source, candidate.span.end)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
-  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+  if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   if (isVacuousFirstPersonStub(assertion)) {
@@ -327,7 +349,11 @@ function hasDanglingExactTerminal(
 }
 
 function stripSourceRoleLabel(assertion: string): string {
-  return assertion.trim().replace(/^(?:User|Assistant|用户|助手|团队)\s*:\s*/iu, "").trim();
+  const trimmed = assertion.trim();
+  const roleStripped = stripSourceRoleMarker(trimmed);
+  return roleStripped === trimmed
+    ? trimmed.replace(/^[\t\p{Zs}]*团队[\t\p{Zs}]*(?::|：)[\t\p{Zs}]*/u, "").trim()
+    : roleStripped;
 }
 
 function strongerRejectionReason(
@@ -356,6 +382,41 @@ function hasCompleteClause(assertion: string, coordinated: boolean): boolean {
   const namedSubject = /^\p{Lu}[\p{L}\p{N}'’-]*\s+(.*)$/u.exec(value);
   if (namedSubject !== null) return hasContent(namedSubject[1]);
   return !coordinated && hasCompleteChineseClause(value);
+}
+
+const EXPLICIT_FINITE_VERBS = new Set([
+  "allows", "appears", "arrived", "became", "began", "bought", "brought", "built",
+  "called", "came", "caught", "centres", "chose", "contains", "described", "describes",
+  "did", "does", "ended", "faded", "feels", "found", "gave", "gets", "gives", "goes",
+  "had", "has", "helped", "helps", "includes", "involves", "is", "joined", "keeps",
+  "knew", "left", "lives", "looked", "looks", "lost", "made", "makes", "managed",
+  "means", "met", "moved", "needs", "offers", "paid", "played", "prefers", "profited",
+  "provides", "ran", "received", "requires", "runs", "said", "saw", "says", "seems",
+  "sent", "shows", "sounds", "spent", "started", "starts", "stayed", "surpassed",
+  "takes", "told", "took", "tries", "uses", "visited", "wants", "went", "won", "worked",
+  "works", "wrote"
+]);
+
+export function isAmbiguousBareStandaloneAssertion(assertion: string): boolean {
+  const value = stripSourceRoleLabel(assertion);
+  if (/[.!?。！？]\s*$/u.test(value) || /^(?:i|we|you)\b/iu.test(value)) return false;
+  const namedSubject = /^\p{Lu}[\p{L}\p{N}'’-]*\s+(.*)$/u.exec(value);
+  const predicate = namedSubject?.[1];
+  if (predicate === undefined || hasExplicitFinitePredicate(value, predicate)) return false;
+  const match = /^\p{L}+(?:ed|ing)\b\s+(\p{L}[\p{L}\p{N}'’-]*)/iu.exec(predicate);
+  if (match === null) return false;
+  const complement = match[1]!;
+  return !/^(?:a|an|the|this|that|these|those|my|our|your|his|her|its|their|me|us|you|him|her|it|them|to|from|in|on|at|with|for|about|into|onto|over|under|by|as)$/iu.test(complement) &&
+    !/^\p{L}+ly$/iu.test(complement);
+}
+
+function hasExplicitFinitePredicate(assertion: string, predicate: string): boolean {
+  if (/^\p{Lu}[\p{L}\p{N}’'-]*[’']s\s+\p{L}+ing\b/u.test(assertion)) return true;
+  if (/[,;]\s*(?:i|we|you|he|she|it|they)\b/iu.test(predicate)) return true;
+  if (/\b(?:am|are|was|were|have|do|can|could|may|might|must|shall|should|will|would)\b/iu.test(predicate) ||
+      /\b\p{L}+[’'](?:m|re|ve|d|ll)\b/iu.test(predicate)) return true;
+  return [...predicate.matchAll(/\b(\p{L}+)\b/gu)]
+    .some((match) => EXPLICIT_FINITE_VERBS.has(match[1]!.toLocaleLowerCase("en-US")));
 }
 
 function hasCompleteChineseClause(value: string): boolean {

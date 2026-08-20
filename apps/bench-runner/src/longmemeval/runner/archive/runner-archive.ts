@@ -1,3 +1,4 @@
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type {
   BenchPolicyShape,
   BenchSimulateReportMode
@@ -9,14 +10,14 @@ import {
 } from "./runner-archive-aggregate.js";
 import { buildLongMemEvalRunPayload } from "./runner-archive-payload.js";
 import { writeLongMemEvalRunArchive } from "./runner-archive-write.js";
-import type { CompileSeedExtractionStats } from "../../compile-seed.js";
+import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
 import type { BenchCommitInfo } from "../runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "../../runner.js";
 import type { LongMemEvalWorkerResult } from "../question/runner-question.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../diagnostics/spool.js";
-import type { LongMemEvalSelectionContract } from "../../selection/contract.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import type { LongMemEvalSelectionContract } from "../../../bench/selection/contract.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 
 // End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
 export async function finalizeLongMemEvalRun(input: {
@@ -30,7 +31,7 @@ export async function finalizeLongMemEvalRun(input: {
   readonly selectionContract: LongMemEvalSelectionContract;
   readonly collected: readonly LongMemEvalWorkerResult[];
   readonly extractionStats: CompileSeedExtractionStats;
-  readonly seedFuelInventory: import("../../extraction/seed-fuel/seed-fuel-inventory.js").SeedFuelInventory;
+  readonly seedFuelInventory: import("../../../bench/extraction/seed-fuel/seed-fuel-inventory.js").SeedFuelInventory;
   readonly alayaVersion: string;
   readonly commitInfo: BenchCommitInfo;
   readonly commitSha7: string;
@@ -41,6 +42,7 @@ export async function finalizeLongMemEvalRun(input: {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly reconciliationBasis?: EffectiveReconciliationBasis;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<LongMemEvalRunResult> {
   logLongMemEvalExtractionStats(input.extractionStats);
@@ -63,6 +65,7 @@ export async function finalizeLongMemEvalRun(input: {
     runAt: input.runAt,
     questionFailures: input.questionFailures,
     failedQuestionIds: input.failedQuestionIds,
+    reconciliationBasis: input.reconciliationBasis,
     collectedLength: input.collected.length,
     diagnosticsSpool: input.diagnosticsSpool
   });

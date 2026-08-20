@@ -2,7 +2,7 @@ import type { ShardArchiveRef } from "../command/merge-command-shards.js";
 import {
   createLongMemEvalSelectionContractFromAssignments,
   type LongMemEvalSelectionContract
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 
 export function buildMergedSelectionContract(
   refs: readonly ShardArchiveRef[]

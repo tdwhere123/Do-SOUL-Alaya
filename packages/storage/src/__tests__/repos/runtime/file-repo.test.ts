@@ -37,11 +37,11 @@ function createFileRecord(overrides: Partial<FileRecord> = {}): FileRecord {
 }
 
 describe("SqliteFileRepo", () => {
-  it("applies migration 022 and creates files indexes", async () => {
+  it("creates files indexes", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 22 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
     const table = database.connection
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'files' LIMIT 1")
@@ -53,7 +53,7 @@ describe("SqliteFileRepo", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_files_run_id' LIMIT 1")
       .get() as { readonly name: string } | undefined;
 
-    expect(migration?.version).toBe(22);
+    expect(migration?.version).toBe(8);
     expect(table?.name).toBe("files");
     expect(workspaceIndex?.name).toBe("idx_files_workspace_id");
     expect(runIndex?.name).toBe("idx_files_run_id");

@@ -7,33 +7,31 @@ import {
 } from "../shared/fts-lane-routing.js";
 import {
   buildObjectIdFilterSql,
-  countQueryCodepoints,
-  createShortKeywordMatcher,
   mergeKeywordSearchRows,
+  mergeExactKeywordSearchRows,
   normalizeKeywordSearchObjectIds,
-  tokenBearsCjk,
+  partitionKeywordLaneTokens,
   tokenizeFtsQuery,
-  type ExactKeywordCandidateRow,
-  type ExactKeywordSearchRow,
   type FtsKeywordSearchRow,
   type ObjectIdFilterColumn
 } from "./keyword-search.js";
+import {
+  MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL
+} from "./semantic-tie-order.js";
 import type { SqliteAllStatement } from "./statement-types.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import { freezeKeywordSearchResults } from "./search/freeze-keyword-results.js";
+import { searchExactKeywordRows } from "./search/exact-keyword.js";
+import { searchObjectKeyKeywordLanes } from "./search/object-key-fts.js";
+
+export { searchExactKeywordRows };
 
 export interface MemoryEntrySearchWorkflowHost {
   activeConnection(): StorageDatabase["connection"];
   readonly searchByKeywordStatement: SqliteAllStatement;
   readonly searchByKeywordPorterStatement: SqliteAllStatement;
 }
-const EXACT_KEYWORD_SCAN_BATCH_SIZE = 200;
 
-interface KeywordLaneTokens {
-  readonly exact: readonly string[];
-  readonly trigram: readonly string[];
-  readonly porter: readonly string[];
-}
 export async function searchByKeyword(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
@@ -145,30 +143,47 @@ function searchAnchorFtsLane(
   limit: number,
   candidateObjectIds: readonly string[]
 ): readonly FtsKeywordSearchRow[] {
-  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, objectIdFilterColumnForFtsTable(table));
+  return searchMemoryFtsLaneRows.call(
+    this, table, workspaceId, matchExpression, limit, candidateObjectIds
+  );
+}
+
+export function searchMemoryFtsLaneRows(
+  this: MemoryEntrySearchWorkflowHost,
+  table: typeof MEMORY_FTS_TRIGRAM | typeof MEMORY_FTS_PORTER,
+  workspaceId: string,
+  matchExpression: string,
+  limit: number,
+  candidateObjectIds?: readonly string[],
+  tier?: StorageTier
+): readonly FtsKeywordSearchRow[] {
+  const objectIdFilter = buildObjectIdFilterSql(
+    candidateObjectIds,
+    objectIdFilterColumnForFtsTable(table)
+  );
+  const tierPredicate = tier === undefined ? "" : "AND memory_entries.storage_tier = ?";
   return this.activeConnection().prepare(`
-    SELECT
-      ${table}.object_id,
-      bm25(${table}) AS raw_rank
+    SELECT ${table}.object_id, bm25(${table}) AS raw_rank
     FROM ${table}
     JOIN memory_entries ON memory_entries.object_id = ${table}.object_id
-    WHERE
-      ${table}.workspace_id = ?
+    WHERE ${table}.workspace_id = ?
       AND ${table} MATCH ?
       AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
       AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-    ${objectIdFilter.sql}
-    ORDER BY raw_rank ASC, ${table}.object_id ASC
+      ${tierPredicate}
+      ${objectIdFilter.sql}
+    ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, ${table}.object_id ASC
     LIMIT ?
   `).all(
     workspaceId,
     matchExpression,
+    ...(tier === undefined ? [] : [tier]),
     ...objectIdFilter.params,
     limit
   ) as readonly FtsKeywordSearchRow[];
 }
 
-function objectIdFilterColumnForFtsTable(
+export function objectIdFilterColumnForFtsTable(
   table: typeof MEMORY_FTS_TRIGRAM | typeof MEMORY_FTS_PORTER
 ): ObjectIdFilterColumn {
   return table === MEMORY_FTS_TRIGRAM
@@ -216,112 +231,24 @@ function searchKeywordRows(
     params.candidateObjectIds,
     params.tier
   );
-  return freezeKeywordSearchResults(
-    mergeKeywordSearchRows(exactRows, trigramRows, params.limit, porterRows)
-  );
-}
-
-function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
-  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
-  return {
-    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
-    trigram,
-    porter: trigram.filter((token) => !tokenBearsCjk(token))
-  };
-}
-
-function searchExactKeywordRows(
-  this: MemoryEntrySearchWorkflowHost,
-  workspaceId: string,
-  tokens: readonly string[],
-  limit: number,
-  candidateObjectIds?: readonly string[],
-  tier?: StorageTier
-): readonly ExactKeywordSearchRow[] {
-  if (tokens.length === 0) {
-    return [];
-  }
-
-  const tokenMatchers = tokens.map((token) => createShortKeywordMatcher(token));
-  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds);
-  const rows: ExactKeywordSearchRow[] = [];
-  let lastObjectId: string | null = null;
-
-  while (true) {
-    const batch: readonly ExactKeywordCandidateRow[] = readExactKeywordCandidateBatch.call(
-      this,
-      workspaceId,
-      objectIdFilter,
-      lastObjectId,
-      tier
-    );
-
-    if (batch.length === 0) {
-      break;
-    }
-
-    rows.push(...matchExactKeywordRows(batch, tokenMatchers));
-
-    if (batch.length < EXACT_KEYWORD_SCAN_BATCH_SIZE) {
-      break;
-    }
-    lastObjectId = batch.at(-1)?.object_id ?? null;
-  }
-
-  return rows
-    .sort(compareExactKeywordRows)
-    .slice(0, limit);
-}
-
-function readExactKeywordCandidateBatch(
-  this: MemoryEntrySearchWorkflowHost,
-  workspaceId: string,
-  objectIdFilter: Readonly<{ readonly sql: string; readonly params: readonly string[] }>,
-  lastObjectId: string | null,
-  tier?: StorageTier
-): readonly ExactKeywordCandidateRow[] {
-  const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
-  const tierPredicate = tier === undefined ? "" : "AND storage_tier = ?";
-  return this.activeConnection().prepare(`
-    SELECT object_id, content
-    FROM memory_entries
-    WHERE workspace_id = ?
-    AND COALESCE(retention_state, '') != 'tombstoned'
-    AND COALESCE(lifecycle_state, '') != 'dormant'
-    ${objectIdFilter.sql}
-    ${tierPredicate}
-    ${keysetPredicate}
-    ORDER BY object_id ASC
-    LIMIT ?
-  `).all(
-    workspaceId,
-    ...objectIdFilter.params,
-    ...(tier === undefined ? [] : [tier]),
-    ...(lastObjectId === null ? [] : [lastObjectId]),
-    EXACT_KEYWORD_SCAN_BATCH_SIZE
-  ) as readonly ExactKeywordCandidateRow[];
-}
-
-function matchExactKeywordRows(
-  batch: readonly ExactKeywordCandidateRow[],
-  tokenMatchers: readonly ((content: string) => boolean)[]
-): readonly ExactKeywordSearchRow[] {
-  return batch.flatMap((row) => {
-    const matchedTokenCount = tokenMatchers.reduce(
-      (count, matcher) => count + (matcher(row.content) ? 1 : 0),
-      0
-    );
-    return matchedTokenCount > 0
-      ? [Object.freeze({ object_id: row.object_id, matched_token_count: matchedTokenCount })]
-      : [];
+  const objectKeys = searchObjectKeyKeywordLanes.call(this, {
+    workspaceId: params.workspaceId,
+    porterTokens: laneTokens.porter,
+    trigramTokens: laneTokens.trigram,
+    exactTokens: laneTokens.exact,
+    limit: params.limit,
+    candidateObjectIds: params.candidateObjectIds,
+    tier: params.tier
   });
-}
-
-function compareExactKeywordRows(
-  left: ExactKeywordSearchRow,
-  right: ExactKeywordSearchRow
-): number {
-  return right.matched_token_count - left.matched_token_count || left.object_id.localeCompare(right.object_id);
+  return freezeKeywordSearchResults(
+    mergeKeywordSearchRows(
+      mergeExactKeywordSearchRows(exactRows, objectKeys.exact),
+      trigramRows,
+      params.limit,
+      porterRows,
+      { porter: objectKeys.porter, trigram: objectKeys.trigram }
+    )
+  );
 }
 
 function searchTrigramKeywordRowsWithinObjectIds(
@@ -331,31 +258,17 @@ function searchTrigramKeywordRowsWithinObjectIds(
   limit: number,
   candidateObjectIds: readonly string[]
 ): readonly FtsKeywordSearchRow[] {
-  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, "memory_content_fts.object_id");
-
-  return this.activeConnection().prepare(`
-    SELECT
-      memory_content_fts.object_id,
-      bm25(memory_content_fts) AS raw_rank
-    FROM memory_content_fts
-    JOIN memory_entries ON memory_entries.object_id = memory_content_fts.object_id
-    WHERE
-      memory_content_fts.workspace_id = ?
-      AND memory_content_fts MATCH ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-    ${objectIdFilter.sql}
-    ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
-    LIMIT ?
-  `).all(
+  return searchMemoryFtsLaneRows.call(
+    this,
+    MEMORY_FTS_TRIGRAM,
     workspaceId,
     buildWorkspaceScopedFtsMatch(workspaceId, tokens),
-    ...objectIdFilter.params,
-    limit
-  ) as readonly FtsKeywordSearchRow[];
+    limit,
+    candidateObjectIds
+  );
 }
 
-function searchTrigramKeywordRows(
+export function searchTrigramKeywordRows(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
   tokens: readonly string[],
@@ -396,34 +309,17 @@ function searchPorterKeywordRowsWithinObjectIds(
   limit: number,
   candidateObjectIds: readonly string[]
 ): readonly FtsKeywordSearchRow[] {
-  const objectIdFilter = buildObjectIdFilterSql(
-    candidateObjectIds,
-    "memory_content_fts_porter.object_id"
-  );
-
-  return this.activeConnection().prepare(`
-    SELECT
-      memory_content_fts_porter.object_id,
-      bm25(memory_content_fts_porter) AS raw_rank
-    FROM memory_content_fts_porter
-    JOIN memory_entries ON memory_entries.object_id = memory_content_fts_porter.object_id
-    WHERE
-      memory_content_fts_porter.workspace_id = ?
-      AND memory_content_fts_porter MATCH ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-    ${objectIdFilter.sql}
-    ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
-    LIMIT ?
-  `).all(
+  return searchMemoryFtsLaneRows.call(
+    this,
+    MEMORY_FTS_PORTER,
     workspaceId,
     buildWorkspaceScopedFtsMatch(workspaceId, tokens),
-    ...objectIdFilter.params,
-    limit
-  ) as readonly FtsKeywordSearchRow[];
+    limit,
+    candidateObjectIds
+  );
 }
 
-function searchPorterKeywordRows(
+export function searchPorterKeywordRows(
   this: MemoryEntrySearchWorkflowHost,
   workspaceId: string,
   tokens: readonly string[],
@@ -465,20 +361,13 @@ function searchFtsKeywordRowsWithinTier(
   limit: number,
   tier: StorageTier
 ): readonly FtsKeywordSearchRow[] {
-  return this.activeConnection().prepare(`
-    SELECT ${table}.object_id, bm25(${table}) AS raw_rank
-    FROM ${table}
-    JOIN memory_entries ON memory_entries.object_id = ${table}.object_id
-    WHERE ${table}.workspace_id = ? AND ${table} MATCH ?
-      AND memory_entries.storage_tier = ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-    ORDER BY raw_rank ASC, ${table}.object_id ASC
-    LIMIT ?
-  `).all(
+  return searchMemoryFtsLaneRows.call(
+    this,
+    table,
     workspaceId,
     buildWorkspaceScopedFtsMatch(workspaceId, tokens),
-    tier,
-    limit
-  ) as readonly FtsKeywordSearchRow[];
+    limit,
+    undefined,
+    tier
+  );
 }

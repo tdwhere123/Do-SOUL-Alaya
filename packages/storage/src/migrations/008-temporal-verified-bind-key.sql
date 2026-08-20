@@ -1,0 +1,3 @@
+-- Verified (as_of, history_digest) uniqueness is applied by the version 8
+-- data hook after compatible duplicate collapse.
+-- INTENTIONAL_NOOP_MIGRATION

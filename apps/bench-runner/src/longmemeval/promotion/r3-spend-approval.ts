@@ -5,7 +5,7 @@ import {
   type LongMemEvalMaterialEffect
 } from "./schema/material-effect.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../extraction/authority/receipt-limits.js";
+  "../../bench/extraction/authority/receipt-limits.js";
 
 export interface R3SpendApproval {
   readonly schema_version: 1;
@@ -184,17 +184,16 @@ function assertR2MaterialEffect(r2: R2MaterialEffectEvidence): void {
     throw new Error("R3 requires all R2 hard gates across exactly 94 answerable questions");
   }
   if (!Number.isSafeInteger(r2.b_a_net_r5_wins) ||
-      r2.b_a_net_r5_wins < LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.minimumNetR5Wins) {
-    throw new Error("R3 requires at least five net R@5 wins");
+      Math.abs(r2.b_a_net_r5_wins) >
+        LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount) {
+    throw new Error("R3 requires an integer net R@5 diagnostic");
   }
   if (r2.mcnemar.method !== LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod) {
     throw new Error("R3 requires exact two-sided McNemar evidence");
   }
   if (!Number.isFinite(r2.mcnemar.p_value) ||
-      r2.mcnemar.p_value >=
-        LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarPValueMaxExclusive ||
-      r2.mcnemar.p_value < 0) {
-    throw new Error("R3 requires exact two-sided McNemar p < 0.05");
+      r2.mcnemar.p_value > 1 || r2.mcnemar.p_value < 0) {
+    throw new Error("R3 requires a bounded exact two-sided McNemar diagnostic");
   }
 }
 

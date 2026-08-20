@@ -1,3 +1,5 @@
+import { stripSourceRoleMarker } from "../source-role/marker.js";
+
 const ENGLISH_REFERENCE =
   /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/giu;
 
@@ -10,6 +12,39 @@ export function hasUnresolvedReference(assertion: string): boolean {
     if (!isLocallyClosedReference(assertion, match[0]!, match.index)) return true;
   }
   return false;
+}
+
+/**
+ * A span created by removing conversational wrapper text cannot borrow the
+ * omitted turn context to close a request or interlocutor reference.
+ */
+export function isLocallyClosedAtomicAssertion(assertion: string): boolean {
+  const value = stripSourceRoleMarker(assertion);
+  return !hasUnresolvedReference(value) && !hasAtomicConversationDependency(value);
+}
+
+function hasAtomicConversationDependency(assertion: string): boolean {
+  return /^(?:I\s+was|I\s+am|I['’]m)\s+(?:just\s+)?wondering\s+(?:if|whether)\b/iu.test(assertion) ||
+    /^I(?:['’]ll|\s+will)\s+(?:let\s+you\s+know|keep\s+you\s+posted|tell\s+you)\b/iu.test(assertion) ||
+    hasUnclosedAtomicInterlocutorReference(assertion) ||
+    hasUnanchoredAtomicEvaluation(assertion) ||
+    /\b(?:someone|something|anyone|anything|nothing|everything)\s+else\b/iu.test(assertion);
+}
+
+function hasUnclosedAtomicInterlocutorReference(assertion: string): boolean {
+  if (/\byou\b/iu.test(assertion)) return true;
+  if (/\byours\b/iu.test(assertion)) return true;
+  for (const match of assertion.matchAll(/\byour\s+([^,.!?;\n]{0,120})/giu)) {
+    const phrase = match[1]!.split(/\b(?:and|but|or|so)\b/iu, 1)[0] ?? "";
+    if (!/\b(?:called|named|titled|known\s+as)\s+(?:["“][^"”]{1,80}["”]|\p{Lu}[\p{L}\p{N}'’-]*(?:\s+\p{Lu}[\p{L}\p{N}'’-]*){0,5})/u.test(phrase)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnanchoredAtomicEvaluation(assertion: string): boolean {
+  return /\b(?:I|we)\s+(?:(?:really|just|quite|so)\s+)?(?:enjoyed|liked|loved|hated|appreciated)\s+the\s+\p{Ll}[\p{L}\p{N}'’-]*\s*[.!]?$/iu.test(assertion);
 }
 
 function isLocallyClosedReference(assertion: string, reference: string, index: number): boolean {
@@ -76,7 +111,7 @@ function isSimpleValuationTopic(topic: string): boolean {
 }
 
 export function isBoundedTemplateSlotAssertion(assertion: string): boolean {
-  const value = stripRoleLabel(assertion);
+  const value = stripSourceRoleMarker(assertion);
   return matchBoundedTemplateSlot(value) !== null && !hasUnresolvedReference(value);
 }
 
@@ -86,7 +121,7 @@ interface BoundedTemplateSlotMatch {
 }
 
 function matchBoundedTemplateSlot(assertion: string): BoundedTemplateSlotMatch | null {
-  const value = stripRoleLabel(assertion);
+  const value = stripSourceRoleMarker(assertion);
   const pattern = /^Under\s+["“]How We Met["”],\s+I['’]ll\s+include\s+the\s+location\s+where\s+I\s+met\s+them\.\s+For\s+\p{Lu}[\p{Ll}\p{N}'’-]*,\s+it\s+was\s+((?:a|an|the)\s+[\p{L}\p{N}'’ -]{1,80})[.!]$/u;
   const match = pattern.exec(value);
   if (match === null || !isBoundedTemplatePlaceValue(match[1]!)) return null;
@@ -147,10 +182,6 @@ function isTemplateBoundReference(
 ): boolean {
   return (reference === "them" && index === template.themIndex) ||
     (reference === "it" && index === template.itIndex);
-}
-
-function stripRoleLabel(assertion: string): string {
-  return assertion.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "");
 }
 
 function hasCoordinatedObjectAmbiguity(before: string): boolean {

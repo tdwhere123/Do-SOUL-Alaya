@@ -9,8 +9,6 @@ import type { RecallServiceEmbeddingRecallPort } from
   "../../recall/runtime/recall-service-types.js";
 import type { CoarseRecallCandidate } from
   "../../recall/runtime/recall-service-types.js";
-import { prepareRecallFineAssessmentWaist } from
-  "../../recall/runtime/orchestration/recall-fine-assessment.js";
 import { collectTimedSupplementaryData } from
   "../../recall/runtime/orchestration/recall-fine-assessment.js";
 import { compileRecallQueryProbes } from
@@ -24,9 +22,9 @@ import {
   overridePolicy
 } from "./recall-service-test-fixtures.js";
 
-describe("RecallService fine-assessment hard waist", () => {
+describe("RecallService complete fine-assessment field", () => {
   it.each(["legacy", "snapshot"] as const)(
-    "caps expensive %s supplementary reads before assessment",
+    "keeps every admitted %s candidate visible until final selection",
     async (mode) => {
       const memories = Array.from({ length: 6 }, (_, index) => createMemoryEntry({
         object_id: `memory-${index}`,
@@ -40,12 +38,13 @@ describe("RecallService fine-assessment hard waist", () => {
         : null;
       const { dependencies } = createDependencies(memories);
       const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
         ...dependencies,
         graphSupportPort: spies.graphSupportPort,
         pathPlasticityPort: { getStrengthByMemoryId: spies.getStrengthByMemoryId },
         ...(snapshot === null ? {} : { embeddingRecallService: snapshot.port })
       });
-      const policy = buildWaistPolicy(service, 2, mode === "snapshot");
+      const policy = buildFieldPolicy(service, 2, mode === "snapshot");
 
       const result = await service.recall({
         taskSurface: createTaskSurface(),
@@ -56,29 +55,18 @@ describe("RecallService fine-assessment hard waist", () => {
 
       expect(spies.readGraphMetrics).toHaveBeenCalledOnce();
       const graphIds = spies.readGraphMetrics.mock.calls[0]![0];
-      expect(graphIds).toHaveLength(2);
+      expect(graphIds).toHaveLength(6);
       expect(spies.getStrengthByMemoryId).toHaveBeenCalledWith(
         "workspace-1",
-        graphIds
+        graphIds,
+        { asOf: "2026-03-23T00:00:00.000Z" }
       );
       expect(result.diagnostics?.token_economy).toMatchObject({
         coarse_pool_size: 6,
-        fine_evaluated: 2,
-        fine_pruned_count: 4
+        fine_evaluated: 6,
+        fine_pruned_count: 0
       });
-      expect(result.diagnostics?.fine_assessment_pruned_candidates).toHaveLength(4);
-      expect(result.diagnostics?.fine_assessment_pruned_candidates).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            candidate_key: expect.stringMatching(/:memory_entry:memory-/u),
-            origin_plane: "workspace_local",
-            object_kind: "memory_entry",
-            object_id: expect.stringMatching(/^memory-/u),
-            coarse_index: expect.any(Number),
-            drop_reason: "fine_assessment_cap"
-          })
-        ])
-      );
+      expect(result.diagnostics?.fine_assessment_pruned_candidates).toEqual([]);
       if (mode === "snapshot") {
         expect(graphIds).toContain(targetId);
         const materialization = snapshot?.materializeEmbeddingSupplementFromSnapshot
@@ -91,45 +79,44 @@ describe("RecallService fine-assessment hard waist", () => {
     }
   );
 
-  it("reuses the priority-capped waist across legacy embedding reassessment", async () => {
+  it("reuses the complete field across legacy embedding reassessment", async () => {
     const fixture = createLegacyReassessmentFixture();
 
     const result = await fixture.service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildWaistPolicy(fixture.service, 1, true)
+      policyOverride: buildFieldPolicy(fixture.service, 1, true)
     });
 
     expect(fixture.prepareQuerySupplement).toHaveBeenCalledWith(expect.objectContaining({
-      eligibleMemories: [fixture.first]
+      eligibleMemories: [fixture.first, fixture.late]
     }));
     expect(fixture.querySupplementIfReady).toHaveBeenCalledOnce();
     expect(fixture.querySupplementIfReady).toHaveBeenCalledWith(expect.objectContaining({
-      eligibleMemories: [fixture.first]
+      eligibleMemories: [fixture.first, fixture.late]
     }));
     expect(fixture.scorePoolCandidates).toHaveBeenCalledWith(expect.objectContaining({
-      objectIds: [fixture.first.object_id]
+      objectIds: [fixture.first.object_id, fixture.late.object_id]
     }));
     expect(fixture.spies.readGraphMetrics).toHaveBeenCalledWith(
-      [fixture.first.object_id], "workspace-1"
+      [fixture.first.object_id, fixture.late.object_id],
+      "workspace-1",
+      { asOf: "2026-03-23T00:00:00.000Z" }
     );
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      fixture.first.object_id
-    ]);
     expect(result.diagnostics?.token_economy).toMatchObject({
       coarse_pool_size: 2,
-      fine_evaluated: 1,
-      fine_pruned_count: 1,
-      fine_priority_overflow_count: 1
+      fine_evaluated: 2,
+      fine_pruned_count: 0,
+      fine_priority_overflow_count: 0
     });
-    expect(fixture.warnSpy).toHaveBeenCalledWith(
+    expect(fixture.warnSpy).not.toHaveBeenCalledWith(
       "Fine-assessment priority candidates exceeded the hard evaluation budget.",
-      expect.objectContaining({ priority_overflow_count: 1 })
+      expect.anything()
     );
   });
 
-  it("scopes evidence and path supplementary reads to the waist survivors", async () => {
+  it("collects evidence and path signals for the complete candidate field", async () => {
     const first = createMemoryEntry({ object_id: "survivor", evidence_refs: ["evidence-survivor"] });
     const pruned = createMemoryEntry({ object_id: "pruned", evidence_refs: ["evidence-pruned"] });
     const evidenceFindByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
@@ -138,7 +125,7 @@ describe("RecallService fine-assessment hard waist", () => {
     const findByAnchors = vi.fn(async () => []);
     const { dependencies } = createDependencies([first, pruned]);
     const service = new RecallService({ ...dependencies });
-    const policy = buildWaistPolicy(service, 1, false);
+    const policy = buildFieldPolicy(service, 1, false);
     const context = {
       dependencies: {
         ...dependencies,
@@ -157,16 +144,19 @@ describe("RecallService fine-assessment hard waist", () => {
       tokenEstimator: () => 1
     } as unknown as Parameters<typeof collectTimedSupplementaryData>[2];
     const coarse = createSupplementaryCoarseFixture(first, pruned);
-    const waist = prepareRecallFineAssessmentWaist(context, prepared, coarse);
-
     await collectTimedSupplementaryData(context, { workspaceId: "workspace-1" } as never,
-      prepared, coarse, waist);
+      prepared, coarse);
 
-    expect(waist.survivors).toEqual([firstCandidate(first)]);
-    expect(evidenceFindByIds).toHaveBeenCalledWith("workspace-1", ["evidence-survivor"]);
+    expect(evidenceFindByIds).toHaveBeenCalledWith(
+      "workspace-1",
+      ["evidence-survivor", "evidence-pruned"]
+    );
     expect(findByAnchors).toHaveBeenCalledWith(
       "workspace-1",
-      [{ kind: "object", object_id: first.object_id }]
+      [
+        { kind: "object", object_id: first.object_id },
+        { kind: "object", object_id: pruned.object_id }
+      ]
     );
   });
 });
@@ -266,13 +256,14 @@ function createLegacyReassessmentFixture() {
     [first, late], slots, { "claim-a": [first.object_id], "claim-z": [late.object_id] }
   );
   const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     graphSupportPort: spies.graphSupportPort,
     pathPlasticityPort: { getStrengthByMemoryId: spies.getStrengthByMemoryId },
     embeddingRecallService
   });
   return {
-    first, service, spies, warnSpy,
+    first, late, service, spies, warnSpy,
     prepareQuerySupplement, querySupplementIfReady, scorePoolCandidates
   };
 }
@@ -296,7 +287,7 @@ function createExpensiveReadSpies() {
   };
 }
 
-function buildWaistPolicy(
+function buildFieldPolicy(
   service: RecallService,
   maxCandidates: number,
   embeddingEnabled: boolean
@@ -327,7 +318,6 @@ function buildWaistPolicy(
     },
     fine_assessment: {
       ...base.fine_assessment,
-      max_candidates: maxCandidates,
       budgets: {
         max_entries: maxCandidates,
         max_total_tokens: 10_000,

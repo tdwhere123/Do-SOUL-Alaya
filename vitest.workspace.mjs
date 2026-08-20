@@ -23,7 +23,7 @@ const sharedAlias = {
 // specific keys match first (Vite resolves alias entries in array order).
 const benchRunnerAlias = [
   ...Object.entries(sharedAlias).map(([find, replacement]) => ({ find, replacement })),
-  { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp/mcp-server.ts") },
+  { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp/server/mcp-server.ts") },
   { find: "@do-soul/alaya/cli/bridge", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/bridge.ts") },
   { find: "@do-soul/alaya/cli/register", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/register.ts") },
   {
@@ -31,6 +31,10 @@ const benchRunnerAlias = [
     replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
   },
   { find: "@do-soul/alaya", replacement: path.resolve(rootDir, "apps/core-daemon/src/index.ts") },
+  {
+    find: "@do-soul/alaya-eval/authority",
+    replacement: path.resolve(rootDir, "packages/eval/src/authority.ts")
+  },
   {
     find: "@do-soul/alaya-eval/internal",
     replacement: path.resolve(rootDir, "packages/eval/src/internal.ts")

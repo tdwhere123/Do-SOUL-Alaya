@@ -32,10 +32,11 @@ export function isPathAffinityOperation(operation: RecallReadWorkerOperation): b
 }
 
 export function resolveDefaultWorkerUrl(): URL | null {
-  const sibling = new URL("../recall-read-worker.js", import.meta.url);
+  // Entry lives in runtime/recall/; helpers stay in runtime/recall-read-worker/.
+  const sibling = new URL("../recall/recall-read-worker.js", import.meta.url);
   if (existsSync(fileURLToPath(sibling))) return sibling;
 
-  const builtFromSource = new URL("../../../dist/runtime/recall-read-worker.js", import.meta.url);
+  const builtFromSource = new URL("../../../dist/runtime/recall/recall-read-worker.js", import.meta.url);
   return existsSync(fileURLToPath(builtFromSource)) ? builtFromSource : null;
 }
 

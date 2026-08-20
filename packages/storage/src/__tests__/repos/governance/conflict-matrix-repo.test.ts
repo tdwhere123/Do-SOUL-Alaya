@@ -72,14 +72,14 @@ function createEdge(overrides: Partial<ConflictMatrixEdge> = {}): ConflictMatrix
 }
 
 describe("SqliteConflictMatrixRepo", () => {
-  it("applies migration 011 and creates conflict_matrix_edges table", async () => {
+  it("creates the conflict_matrix_edges table", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 11 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(11);
+    expect(migration?.version).toBe(8);
   });
 
   it("creates and finds an edge by id", async () => {

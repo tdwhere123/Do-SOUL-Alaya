@@ -3,8 +3,8 @@ import {
   assertRecallEvalProductPolicyEnvironment,
   buildEffectiveRecallConfigIdentity,
   readRecallEvalMaxResults
-} from "../../../longmemeval/provenance/effective-recall-config.js";
-import { prepareRecallEvalRunContext } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-run-context.js";
+} from "../../../bench/provenance/effective-recall-config.js";
+import { prepareRecallEvalRunContext } from "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
 import { resolveBenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/runtime/daemon-recall-result.js";
 
@@ -31,20 +31,24 @@ describe("effective recall config identity", () => {
       maxResults: 20
     });
     const equivalentAdapter = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "true"
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
     }, options);
     const adapterDrift = buildEffectiveRecallConfigIdentity({
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "true"
+    }, options);
+    const h1Drift = buildEffectiveRecallConfigIdentity({
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
     }, options);
 
     expect(equivalent.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(equivalentAdapter.effective_config_sha256).toBe(base.effective_config_sha256);
-    expect(runtimeDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+    expect(runtimeDrift.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(requestDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(adapterDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+    expect(h1Drift.effective_config_sha256).toBe(base.effective_config_sha256);
   });
 
-  it("binds the policy-derived fine-evaluation budget into provenance", () => {
+  it("binds result budgets into provenance without a pre-selection field cap", () => {
     const tenResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 10, true);
     const twentyResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 20, true);
     const tenResultIdentity = buildEffectiveRecallConfigIdentity({}, {
@@ -56,8 +60,8 @@ describe("effective recall config identity", () => {
       conflictAwareness: true
     });
 
-    expect(tenResultPolicy.fine_assessment.max_candidates).toBe(200);
-    expect(twentyResultPolicy.fine_assessment.max_candidates).toBe(400);
+    expect(tenResultPolicy.fine_assessment).not.toHaveProperty("max_candidates");
+    expect(twentyResultPolicy.fine_assessment).not.toHaveProperty("max_candidates");
     expect(twentyResultIdentity.effective_config_sha256)
       .not.toBe(tenResultIdentity.effective_config_sha256);
   });
@@ -141,6 +145,25 @@ describe("effective recall config identity", () => {
     }, undefined, treatment)).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
   });
 
+  it("ignores retired H1 max-product env before reading inputs", async () => {
+    const treatment = {
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
+    };
+    expect(buildEffectiveRecallConfigIdentity(treatment, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256).toBe(buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256);
+
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, treatment)).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
+  });
+
   it.each(["", "-1", "1.5", "9007199254740992"])(
     "rejects invalid bounded-final-authority treatment %j before reading inputs",
     async (value) => {
@@ -176,7 +199,10 @@ describe("effective recall config identity", () => {
 
   it.each([
     { ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:GARDEN_API_KEY" },
+    { ALAYA_OFFICIAL_GARDEN_API_KEY: "secret" },
+    { OFFICIAL_API_GARDEN_API_KEY: "secret" },
     { ALAYA_GARDEN_OPENAI_SECRET_REF: "env:LEGACY_GARDEN_API_KEY" },
+    { ALAYA_QA_API_KEY: "secret" },
     { ALAYA_CONFLICT_LLM_PROVIDER_URL: "https://example.invalid/v1" },
     { ALAYA_CONFLICT_LLM_API_KEY: "secret" },
     { ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "true" }
@@ -208,7 +234,7 @@ describe("effective recall config identity", () => {
     { ALAYA_RECALL_EVAL_MAX_RESULTS: "20" },
     { ALAYA_EMBEDDING_RECALL_TIERS: "cold" },
     { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "2" },
-    { ALAYA_RECALL_SOURCE_REF_ROBUST: "false" }
+    { ALAYA_RECALL_SOURCE_REF_ROBUST: "true" }
   ])("rejects effective product recall drift before reading inputs", async (drift) => {
     await expect(prepareRecallEvalRunContext({
       snapshotDbPath: "/missing/snapshot.db",

@@ -1,34 +1,52 @@
+import { createHash } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
+  ConversationMessageSchema,
   SignalKind,
   SignalSource,
   SignalState,
-  type CandidateMemorySignal
+  buildGardenSourceTurnFallbackReceiptPreimage,
+  buildGardenSourceTurnFallbackV2ReceiptPreimage,
+  formatGardenSourceTurnFallbackArtifactRef,
+  formatGardenSourceTurnFallbackSourceHash,
+  formatGardenSourceTurnFallbackV2SourceHash,
+  isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2AssistantObservations,
+  projectGardenSourceTurnFallbackV2UserContent,
+  verifyGardenSourceTurnFallbackReceipt,
+  type CandidateMemorySignal,
+  type ConversationMessage,
+  type EvidenceSearchProjection,
+  type GardenSourceTurnFallbackRoleSpan,
+  type GardenSourceTurnFallbackReason,
+  type GardenSourceTurnFallbackReceiptInput,
+  type GardenSourceTurnFallbackV2ReceiptInput
 } from "@do-soul/alaya-protocol";
+import { buildOfficialApiSourceAssertions } from "../grounding/source-locator.js";
 
 const RAW_PAYLOAD_MAX_SERIALIZED_CHARS = 16_384;
-const GARDEN_TURN_EVIDENCE_ARTIFACT_PREFIX = "alaya:garden-turn-evidence:";
-
-type EvidenceFallbackReason = "empty_extraction" | "no_evidence_created";
 
 type EvidenceFallbackInput = Readonly<{
   turnContent: string;
-  reason: EvidenceFallbackReason;
+  reason: GardenSourceTurnFallbackReason;
   signalId: string;
   workspaceId: string;
   runId: string;
   surfaceId: string | null;
   createdAt: string;
   sourceObservation: CandidateMemorySignal["source_observation"];
+  turnMessages?: readonly ConversationMessage[];
 }>;
 
 /** Build a host-originated evidence-only signal without asserting semantic truth. */
 export function buildGardenTurnEvidenceFallback(
   input: EvidenceFallbackInput
 ): CandidateMemorySignal | null {
+  const v2RawPayload = buildCompleteV2RawPayload(input);
   const normalized = input.turnContent.trim();
-  if (normalized.length === 0) return null;
-  const rawPayload = buildBoundedRawPayload(normalized, input.reason);
+  if (v2RawPayload === null && normalized.length === 0) return null;
+  const rawPayload = v2RawPayload ??
+    buildBoundedRawPayload(normalized, input);
   return CandidateMemorySignalSchema.parse({
     signal_id: input.signalId,
     workspace_id: input.workspaceId,
@@ -56,34 +74,145 @@ export function buildGardenTurnEvidenceFallback(
 export function isGardenTurnEvidenceFallback(
   signal: CandidateMemorySignal
 ): boolean {
-  if (
-    signal.source !== SignalSource.GARDEN_COMPILE ||
-    signal.signal_kind !== SignalKind.POTENTIAL_EVIDENCE_ANCHOR ||
-    signal.object_kind !== "source_turn" ||
-    signal.evidence_refs.length !== 0
-  ) return false;
-  const preservation = readRecord(signal.raw_payload.evidence_preservation);
-  return readString(signal.raw_payload.full_turn_content) !== null &&
-    preservation?.version === 1 &&
-    (preservation.reason === "empty_extraction" || preservation.reason === "no_evidence_created") &&
-    typeof preservation.truncated === "boolean" &&
-    typeof preservation.chars_clipped === "number";
+  if (!hasMaterializableFallbackState(signal.signal_state)) return false;
+  return verifyGardenSourceTurnFallbackReceipt(signal, digest) !== null;
 }
 
 export function buildGardenTurnEvidenceArtifactRef(signalId: string): string {
-  return `${GARDEN_TURN_EVIDENCE_ARTIFACT_PREFIX}${signalId}`;
+  return formatGardenSourceTurnFallbackArtifactRef(signalId);
+}
+
+export interface VerifiedGardenTurnEvidenceProjection {
+  readonly sourceHash: string;
+  readonly userContent: string | null;
+  readonly assistantObservations: readonly string[];
+}
+
+export function resolveVerifiedGardenTurnEvidenceProjection(
+  signal: CandidateMemorySignal,
+  sourceCorpus: string
+): Readonly<VerifiedGardenTurnEvidenceProjection> | null {
+  if (!hasMaterializableFallbackState(signal.signal_state)) return null;
+  const receipt = verifyGardenSourceTurnFallbackReceipt(signal, digest);
+  if (receipt === null || sourceCorpus !== receipt.source_corpus) return null;
+  const v2Receipt = isGardenSourceTurnFallbackV2Receipt(receipt) ? receipt : null;
+  const userContent = v2Receipt === null
+    ? null
+    : projectGardenSourceTurnFallbackV2UserContent(v2Receipt);
+  return Object.freeze({
+    sourceHash: v2Receipt !== null
+      ? formatGardenSourceTurnFallbackV2SourceHash(receipt.digest)
+      : formatGardenSourceTurnFallbackSourceHash(receipt.digest),
+    userContent: userContent === "" ? null : userContent,
+    assistantObservations: v2Receipt !== null
+      ? projectGardenSourceTurnFallbackV2AssistantObservations(v2Receipt)
+      : Object.freeze([])
+  });
+}
+
+export function buildGardenTurnEvidenceSearchProjections(
+  signal: CandidateMemorySignal
+): readonly Readonly<EvidenceSearchProjection>[] {
+  const receipt = verifyGardenSourceTurnFallbackReceipt(signal, digest);
+  if (receipt === null || !isGardenSourceTurnFallbackV2Receipt(receipt)) {
+    return Object.freeze([]);
+  }
+  const userContent = projectGardenSourceTurnFallbackV2UserContent(receipt);
+  const userAssertions = userContent === ""
+    ? []
+    : buildOfficialApiSourceAssertions(userContent).map((assertion) =>
+    Object.freeze({
+      projection_id: assertion.assertion_id,
+      projection_kind: "user_assertion" as const,
+      content: assertion.text
+    })
+  );
+  const assistantObservations =
+    projectGardenSourceTurnFallbackV2AssistantObservations(receipt)
+      .map((content, index) => Object.freeze({
+      projection_id: index + 1,
+      projection_kind: "assistant_observation" as const,
+      content
+      }));
+  return Object.freeze([...userAssertions, ...assistantObservations]);
+}
+
+function buildCompleteV2RawPayload(
+  input: EvidenceFallbackInput
+): CandidateMemorySignal["raw_payload"] | null {
+  const document = buildTrustedSourceDocument(input);
+  if (document === null || !hasWellFormedUtf16(document.sourceCorpus)) return null;
+  const preservation = {
+    version: 2,
+    reason: input.reason,
+    truncated: false,
+    chars_clipped: 0
+  } as const;
+  const receiptInput: GardenSourceTurnFallbackV2ReceiptInput = {
+    ...buildReceiptInput(input, document.sourceCorpus, preservation),
+    source_role_spans: document.sourceRoleSpans
+  };
+  const rawPayload = {
+    full_turn_content: document.sourceCorpus,
+    source_role_spans: document.sourceRoleSpans,
+    evidence_preservation: {
+      ...preservation,
+      source_receipt_sha256: digest(
+        buildGardenSourceTurnFallbackV2ReceiptPreimage(receiptInput)
+      )
+    }
+  };
+  return JSON.stringify(rawPayload).length <= RAW_PAYLOAD_MAX_SERIALIZED_CHARS
+    ? rawPayload
+    : null;
+}
+
+function buildTrustedSourceDocument(
+  input: EvidenceFallbackInput
+): SourceTurnDocument | null {
+  if (input.sourceObservation?.authority !== "trusted_host_event" ||
+      input.turnMessages === undefined ||
+      input.turnMessages.length === 0) return null;
+  const messages: ConversationMessage[] = [];
+  for (const candidate of input.turnMessages) {
+    const parsed = ConversationMessageSchema.safeParse(candidate);
+    if (!parsed.success || parsed.data.content.trim().length === 0) return null;
+    messages.push(parsed.data);
+  }
+  return formatSourceTurnMessages(messages);
+}
+
+function formatSourceTurnMessages(
+  messages: readonly ConversationMessage[]
+): SourceTurnDocument {
+  const fragments: string[] = [];
+  const sourceRoleSpans: GardenSourceTurnFallbackRoleSpan[] = [];
+  let offset = 0;
+  for (const [index, message] of messages.entries()) {
+    const content = message.content.trim();
+    const prefix = `${index === 0 ? "" : "\n"}${roleLabel(message.role)}: `;
+    fragments.push(prefix, content);
+    const start = offset + prefix.length;
+    const end = start + content.length;
+    sourceRoleSpans.push(Object.freeze({ role: message.role, start, end }));
+    offset = end;
+  }
+  return Object.freeze({
+    sourceCorpus: fragments.join(""),
+    sourceRoleSpans: Object.freeze(sourceRoleSpans)
+  });
 }
 
 function buildBoundedRawPayload(
   content: string,
-  reason: EvidenceFallbackReason
+  input: EvidenceFallbackInput
 ): CandidateMemorySignal["raw_payload"] {
   let low = 1;
   let high = content.length;
-  let best = buildRawPayload(content.slice(0, 1), content.length, reason);
+  let best = buildRawPayload(content.slice(0, 1), content.length, input);
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
-    const candidate = buildRawPayload(content.slice(0, middle), content.length, reason);
+    const candidate = buildRawPayload(content.slice(0, middle), content.length, input);
     if (JSON.stringify(candidate).length <= RAW_PAYLOAD_MAX_SERIALIZED_CHARS) {
       best = candidate;
       low = middle + 1;
@@ -97,25 +226,82 @@ function buildBoundedRawPayload(
 function buildRawPayload(
   source: string,
   originalLength: number,
-  reason: EvidenceFallbackReason
+  input: EvidenceFallbackInput
 ) {
+  const preservation = {
+    version: 1,
+    reason: input.reason,
+    truncated: source.length < originalLength,
+    chars_clipped: originalLength - source.length
+  } as const;
   return {
     full_turn_content: source,
     evidence_preservation: {
-      version: 1,
-      reason,
-      truncated: source.length < originalLength,
-      chars_clipped: originalLength - source.length
+      ...preservation,
+      source_receipt_sha256: digest(buildGardenSourceTurnFallbackReceiptPreimage(
+        buildReceiptInput(input, source, preservation)
+      ))
     }
   };
 }
 
-function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
+function buildReceiptInput(
+  input: EvidenceFallbackInput,
+  source: string,
+  preservation: ReceiptPreservation
+): GardenSourceTurnFallbackReceiptInput {
+  return {
+    signal_id: input.signalId,
+    workspace_id: input.workspaceId,
+    run_id: input.runId,
+    surface_id: input.surfaceId,
+    created_at: input.createdAt,
+    source_observation: input.sourceObservation,
+    source_corpus: source,
+    reason: preservation.reason,
+    truncated: preservation.truncated,
+    chars_clipped: preservation.chars_clipped
+  };
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+type ReceiptPreservation = Readonly<{
+  reason: GardenSourceTurnFallbackReason;
+  truncated: boolean;
+  chars_clipped: number;
+}>;
+
+interface SourceTurnDocument {
+  readonly sourceCorpus: string;
+  readonly sourceRoleSpans: readonly Readonly<GardenSourceTurnFallbackRoleSpan>[];
+}
+
+function roleLabel(role: ConversationMessage["role"]): "User" | "Assistant" {
+  return role === "user" ? "User" : "Assistant";
+}
+
+function hasWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const current = value.charCodeAt(index);
+    if (current >= 0xD800 && current <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xDC00 || next > 0xDFFF) return false;
+      index += 1;
+    } else if (current >= 0xDC00 && current <= 0xDFFF) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasMaterializableFallbackState(
+  state: CandidateMemorySignal["signal_state"]
+): boolean {
+  return state === SignalState.EMITTED ||
+    state === SignalState.NORMALIZED ||
+    state === SignalState.TRIAGED ||
+    state === SignalState.COMPILED;
+}
+
+function digest(preimage: string): string {
+  return createHash("sha256").update(preimage, "utf8").digest("hex");
 }

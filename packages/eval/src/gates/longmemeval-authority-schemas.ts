@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { LongMemEvalSelectionContractIdentitySchema } from
   "../schema/longmemeval-selection-contract.js";
@@ -12,7 +13,8 @@ export const LONGMEMEVAL_FANOUT_AUTHORITY_FILENAME =
 export const MAX_LONGMEMEVAL_EXTRACTION_AUTHORITY_BYTES = 64 * 1024 * 1024;
 export const LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES = [
   "provider-default-v1",
-  "deepseek-v4-nonthinking-v1"
+  "deepseek-v4-nonthinking-v1",
+  "mimo-v2.5-nonthinking-v1"
 ] as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -36,6 +38,34 @@ export const LongMemEvalSupplementalSourceProvenanceBindingWireSchema =
   SupplementalSourceBindingBaseSchema.extend({
     physical_provider_url: z.string().regex(/^sha256:[a-f0-9]{64}$/u)
   }).strict().readonly();
+
+export const LongMemEvalSupplementalSourceShardWireSchema = z.object({
+  cache_key: Sha256Schema,
+  raw_json_sha256: Sha256Schema
+}).strict().readonly();
+
+const SupplementalSourceReceiptExtensionBaseSchema = z.object({
+  schema_version: z.literal(1),
+  kind: z.literal("longmemeval-extraction-supplemental-source-extension"),
+  source_binding: LongMemEvalSupplementalSourceProvenanceBindingWireSchema,
+  target_binding: LongMemEvalSupplementalSourceProvenanceBindingWireSchema,
+  source_shard_count: z.number().int().positive(),
+  source_key_set_sha256: Sha256Schema,
+  source_content_sha256: Sha256Schema,
+  added_shard_count: z.number().int().positive(),
+  added_key_set_sha256: Sha256Schema,
+  added_content_sha256: Sha256Schema,
+  target_shard_count: z.number().int().positive(),
+  target_key_set_sha256: Sha256Schema,
+  target_content_sha256: Sha256Schema,
+  source_shards: z.array(LongMemEvalSupplementalSourceShardWireSchema).min(1).readonly(),
+  added_shards: z.array(LongMemEvalSupplementalSourceShardWireSchema).min(1).readonly(),
+  extension_sha256: Sha256Schema
+}).strict();
+
+export const LongMemEvalSupplementalSourceReceiptExtensionWireSchema =
+  SupplementalSourceReceiptExtensionBaseSchema.readonly()
+    .superRefine(refineSupplementalSourceReceiptExtension);
 export const LongMemEvalContentClosureIndexSchema = z.record(
   Sha256Schema,
   z.tuple([
@@ -69,7 +99,7 @@ const ProductDefaultSchema = z.object({
 
 const PromotionIdentityBaseSchema = z.object({
   contract_sha256: Sha256Schema,
-  policy_version: z.literal("longmemeval-product-default-v1"),
+  policy_version: z.literal("longmemeval-product-default-v2"),
   code: LongMemEvalPromotionCodeWireSchema,
   source_selection: LongMemEvalSelectionContractIdentitySchema,
   next_selection: LongMemEvalSelectionContractIdentitySchema,
@@ -142,7 +172,9 @@ export const LongMemEvalExpansionLineageWireSchema =
     kind: z.literal("longmemeval_100_to_500_expansion"),
     source_snapshot: SourceSnapshotSchema,
     source_cache: LongMemEvalExpansionSourceCacheWireSchema,
-    target_cache: LongMemEvalExpansionTargetCacheWireSchema
+    target_cache: LongMemEvalExpansionTargetCacheWireSchema,
+    supplemental_source_receipt_extension:
+      LongMemEvalSupplementalSourceReceiptExtensionWireSchema.optional()
   }).strict().readonly().superRefine(assertPromotionProgression);
 
 const ExtractionSummaryBaseSchema = z.object({
@@ -287,6 +319,12 @@ export type LongMemEvalExpansionSourceAnchorWire = z.infer<
 export type LongMemEvalExpansionLineageWire = z.infer<
   typeof LongMemEvalExpansionLineageWireSchema
 >;
+export type LongMemEvalSupplementalSourceShardWire = z.infer<
+  typeof LongMemEvalSupplementalSourceShardWireSchema
+>;
+export type LongMemEvalSupplementalSourceReceiptExtensionWire = z.infer<
+  typeof LongMemEvalSupplementalSourceReceiptExtensionWireSchema
+>;
 export type LongMemEvalExtractionAuthority = z.infer<
   typeof LongMemEvalExtractionAuthoritySchema
 >;
@@ -300,6 +338,50 @@ export type LongMemEvalFanoutAuthority = z.infer<
 export type LongMemEvalShardAuthorityReference = z.infer<
   typeof LongMemEvalShardAuthorityReferenceSchema
 >;
+
+export function buildLongMemEvalSupplementalSourceReceiptExtension(input: {
+  readonly source_binding: z.infer<
+    typeof LongMemEvalSupplementalSourceProvenanceBindingWireSchema
+  >;
+  readonly target_binding: z.infer<
+    typeof LongMemEvalSupplementalSourceProvenanceBindingWireSchema
+  >;
+  readonly source_shards: readonly LongMemEvalSupplementalSourceShardWire[];
+  readonly added_shards: readonly LongMemEvalSupplementalSourceShardWire[];
+}): LongMemEvalSupplementalSourceReceiptExtensionWire {
+  const sourceShards = sortSupplementalShards(input.source_shards);
+  const addedShards = sortSupplementalShards(input.added_shards);
+  const source = supplementalShardSummary(sourceShards);
+  const added = supplementalShardSummary(addedShards);
+  const target = supplementalShardSummary([...sourceShards, ...addedShards]);
+  const unsigned = {
+    schema_version: 1 as const,
+    kind: "longmemeval-extraction-supplemental-source-extension" as const,
+    source_binding: input.source_binding,
+    target_binding: input.target_binding,
+    source_shard_count: source.shard_count,
+    source_key_set_sha256: source.key_set_sha256,
+    source_content_sha256: source.content_sha256,
+    added_shard_count: added.shard_count,
+    added_key_set_sha256: added.key_set_sha256,
+    added_content_sha256: added.content_sha256,
+    target_shard_count: target.shard_count,
+    target_key_set_sha256: target.key_set_sha256,
+    target_content_sha256: target.content_sha256,
+    source_shards: sourceShards,
+    added_shards: addedShards
+  };
+  return LongMemEvalSupplementalSourceReceiptExtensionWireSchema.parse({
+    ...unsigned,
+    extension_sha256: sha256Canonical(unsigned)
+  });
+}
+
+export function assertLongMemEvalSupplementalSourceReceiptExtension(
+  value: unknown
+): LongMemEvalSupplementalSourceReceiptExtensionWire {
+  return LongMemEvalSupplementalSourceReceiptExtensionWireSchema.parse(value);
+}
 
 function assertPromotionProgression(
   value: z.infer<typeof PromotionIdentityBaseSchema>,
@@ -315,6 +397,86 @@ function assertPromotionProgression(
       message: "promotion must bind canonical 100Q to product-B 500Q"
     });
   }
+}
+
+function refineSupplementalSourceReceiptExtension(
+  value: z.infer<typeof SupplementalSourceReceiptExtensionBaseSchema>,
+  context: z.RefinementCtx
+): void {
+  const source = supplementalShardSummary(value.source_shards);
+  const added = supplementalShardSummary(value.added_shards);
+  const target = supplementalShardSummary([
+    ...value.source_shards,
+    ...value.added_shards
+  ]);
+  const sourceKeys = new Set(value.source_shards.map((shard) => shard.cache_key));
+  const duplicateSource = sourceKeys.size !== value.source_shards.length;
+  const duplicateAdded = new Set(value.added_shards.map((shard) => shard.cache_key))
+    .size !== value.added_shards.length;
+  const overlap = value.added_shards.some((shard) => sourceKeys.has(shard.cache_key));
+  const { extension_sha256: _digest, ...unsigned } = value;
+  if (duplicateSource || duplicateAdded || overlap ||
+      !sameSupplementalSummary(value, "source", source) ||
+      !sameSupplementalSummary(value, "added", added) ||
+      !sameSupplementalSummary(value, "target", target) ||
+      !sameBindingSummary(value.source_binding, source) ||
+      !sameBindingSummary(value.target_binding, target) ||
+      value.source_binding.physical_provider_url !==
+        value.target_binding.physical_provider_url ||
+      value.source_binding.physical_model !== value.target_binding.physical_model ||
+      value.extension_sha256 !== sha256Canonical(unsigned)) {
+    context.addIssue({
+      code: "custom",
+      message: "supplemental source receipt extension is invalid"
+    });
+  }
+}
+
+function supplementalShardSummary(
+  shards: readonly z.infer<typeof LongMemEvalSupplementalSourceShardWireSchema>[]
+) {
+  const sorted = sortSupplementalShards(shards);
+  return {
+    shard_count: sorted.length,
+    key_set_sha256: sha256Text(sorted.map((shard) => shard.cache_key).join("\n")),
+    content_sha256: sha256Text(sorted.map((shard) =>
+      `${shard.cache_key}\0${shard.raw_json_sha256}`
+    ).join("\n"))
+  };
+}
+
+function sortSupplementalShards(
+  shards: readonly z.infer<typeof LongMemEvalSupplementalSourceShardWireSchema>[]
+): readonly LongMemEvalSupplementalSourceShardWire[] {
+  return [...shards].sort((left, right) =>
+    left.cache_key.localeCompare(right.cache_key)
+  );
+}
+
+function sameSupplementalSummary(
+  value: z.infer<typeof SupplementalSourceReceiptExtensionBaseSchema>,
+  prefix: "source" | "added" | "target",
+  summary: ReturnType<typeof supplementalShardSummary>
+): boolean {
+  return value[`${prefix}_shard_count`] === summary.shard_count &&
+    value[`${prefix}_key_set_sha256`] === summary.key_set_sha256 &&
+    value[`${prefix}_content_sha256`] === summary.content_sha256;
+}
+
+function sameBindingSummary(
+  binding: z.infer<typeof LongMemEvalSupplementalSourceProvenanceBindingWireSchema>,
+  summary: ReturnType<typeof supplementalShardSummary>
+): boolean {
+  return binding.shard_count === summary.shard_count &&
+    binding.key_set_sha256 === summary.key_set_sha256;
+}
+
+function sha256Canonical(value: unknown): string {
+  return sha256Text(canonicalJson(value));
+}
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function hasExactFanoutPlan(

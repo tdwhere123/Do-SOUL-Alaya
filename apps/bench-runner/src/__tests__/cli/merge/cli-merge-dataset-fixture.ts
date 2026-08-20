@@ -20,6 +20,10 @@ const PREFIXES = [
 const GENERATED_IDS = PREFIXES.flatMap((prefix) =>
   Array.from({ length: 500 }, (_, index) => `${prefix}-${index + 1}`)
 );
+const MERGE_TEST_DATASET_QUESTION_COUNT = new Set([
+  ...GENERATED_IDS,
+  ...STATIC_IDS
+]).size;
 
 export const MERGE_TEST_DATASET_CONTENTS = `${JSON.stringify(
   [...new Set([...GENERATED_IDS, ...STATIC_IDS])].map((question_id) => ({
@@ -58,7 +62,11 @@ export async function createMergeDatasetSource(root: string): Promise<{
     writeFile(sourcePath, MERGE_TEST_DATASET_CONTENTS),
     writeFile(
       checksumSourcePath,
-      `${JSON.stringify({ sha256: MERGE_TEST_DATASET_SHA256 })}\n`
+      `${JSON.stringify({
+        sha256: MERGE_TEST_DATASET_SHA256,
+        size_bytes: Buffer.byteLength(MERGE_TEST_DATASET_CONTENTS, "utf8"),
+        question_count: MERGE_TEST_DATASET_QUESTION_COUNT
+      })}\n`
     )
   ]);
   return {

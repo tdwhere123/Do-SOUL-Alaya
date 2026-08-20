@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCodexSlashCommand } from "../../attach/profile-mutation-text.js";
+import { extractCodexSlashCommand } from "../../attach/profile-mutation/profile-mutation-text.js";
 
 describe("profile mutation text", () => {
   it("extracts codex slash commands from JSON-escaped Windows paths in TOML", () => {

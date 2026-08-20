@@ -12,8 +12,8 @@ import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import type {
-  MemoryEmbeddingMetadata,
-  MemoryEmbeddingRecord
+  MemoryEmbeddingRecord,
+  MemoryEmbeddingRepo
 } from "../../../repos/memory/memory-embedding-repo.js";
 
 export const trackedDatabases = new Set<ReturnType<typeof initDatabase>>();
@@ -22,30 +22,7 @@ export async function createRepoContext(): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly workspaceId: string;
   readonly memoryRepo: SqliteMemoryEntryRepo;
-  readonly repo: {
-    upsert(record: MemoryEmbeddingRecord): Promise<Readonly<MemoryEmbeddingRecord>>;
-    upsertIfContentHashMatchesCurrentMemory(
-      record: MemoryEmbeddingRecord
-    ): Promise<Readonly<MemoryEmbeddingRecord> | null>;
-    findByObjectId(objectId: string): Promise<Readonly<MemoryEmbeddingRecord> | null>;
-    findMetadataByObjectIds(
-      objectIds: readonly string[]
-    ): Promise<readonly Readonly<MemoryEmbeddingMetadata>[]>;
-    listByWorkspace(
-      workspaceId: string,
-      options?: {
-        readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
-        readonly limit?: number;
-        readonly providerKind?: string;
-        readonly modelId?: string;
-        readonly schemaVersion?: number;
-      }
-    ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
-    listByObjectIds(
-      workspaceId: string,
-      objectIds: readonly string[]
-    ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
-  };
+  readonly repo: MemoryEmbeddingRepo;
 }> {
   const database = initDatabase({ filename: ":memory:" });
   trackedDatabases.add(database);

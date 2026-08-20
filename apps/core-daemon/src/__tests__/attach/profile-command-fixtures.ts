@@ -4,7 +4,7 @@ import type {
   ProfileMutationAuditRow,
   ProfileMutationAuditWriter,
   ProfileMutationFs
-} from "../../attach/profile-mutation.js";
+} from "../../attach/profile-mutation/profile-mutation.js";
 import { createProfileTestEnv } from "../support/profile-test-home.js";
 import path from "node:path";
 import os from "node:os";

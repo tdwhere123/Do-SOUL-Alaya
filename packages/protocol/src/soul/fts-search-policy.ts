@@ -5,6 +5,35 @@ export const DEFAULT_FTS_QUERY_MIN_TOKEN_LENGTH = 2;
 export const CJK_SCRIPT_PATTERN =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
+export type FtsLaneId = "exact" | "porter" | "trigram";
+export const FTS_LANE_IDS: readonly FtsLaneId[] = Object.freeze([
+  "exact",
+  "porter",
+  "trigram"
+]);
+
+export function normalizeFtsLaneIds(
+  lanes: readonly FtsLaneId[]
+): readonly FtsLaneId[] {
+  return Object.freeze([...new Set(lanes)].sort((left, right) =>
+    FTS_LANE_IDS.indexOf(left) - FTS_LANE_IDS.indexOf(right)
+  ));
+}
+
+export function mergeFtsLaneIds(
+  ...groups: readonly (readonly FtsLaneId[])[]
+): readonly FtsLaneId[] {
+  return normalizeFtsLaneIds(groups.flat());
+}
+
+export function isCanonicalFtsLaneIds(value: unknown): value is readonly FtsLaneId[] {
+  return Array.isArray(value) && value.length > 0 && value.every((lane, index) =>
+    typeof lane === "string" &&
+    FTS_LANE_IDS.includes(lane as FtsLaneId) &&
+    lane === normalizeFtsLaneIds(value as FtsLaneId[])[index]
+  );
+}
+
 export interface FtsLaneSplit {
   readonly porterTokens: readonly string[];
   readonly trigramTokens: readonly string[];

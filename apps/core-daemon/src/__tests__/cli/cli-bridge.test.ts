@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   ALAYA_SYSEXITS,
@@ -14,8 +15,8 @@ import {
   runAlayaCli,
   resolveAlayaCliDistPaths,
   type LoadedAlayaCliModules
-} from "../../cli/module-loader.js";
-import { AlayaOperationError } from "../../cli/operations-types.js";
+} from "../../cli/support/module-loader.js";
+import { AlayaOperationError } from "../../cli/operations/operations-types.js";
 import { pathEndsWithPosixSegments, toPosixPath } from "../support/test-paths.js";
 
 function createTextSink(): { readonly stream: PassThrough; readonly readText: () => string } {
@@ -339,6 +340,9 @@ describe("cli bridge", () => {
   it("binary module loader binds imports to the fixed CLI dist modules", async () => {
     const importedPaths: string[] = [];
     const distPaths = resolveAlayaCliDistPaths();
+    expect(distPaths.bridgeDistPath).toBe(
+      fileURLToPath(new URL("../../../dist/cli/bridge.js", import.meta.url))
+    );
     const loaded = await loadAlayaCliModules(createAlayaCliModuleLoaders(async (modulePath: string) => {
       importedPaths.push(toPosixPath(modulePath));
       if (pathEndsWithPosixSegments(modulePath, "apps", "core-daemon", "dist", "cli", "bridge.js")) {

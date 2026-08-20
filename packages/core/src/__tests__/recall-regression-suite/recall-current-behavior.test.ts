@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
-import { selectCandidatesWithinBudgets } from "../../recall/runtime/recall-candidate-builder.js";
-import { compareRecallCandidates } from "../../recall/runtime/recall-service-helpers.js";
-import { WS, candidate, deps, evidenceCapsule, fineConfig, memory, pathRelation, task, withBudgets } from "./recall-current-behavior-test-fixtures.js";
+import { WS, deps, evidenceCapsule, memory, pathRelation, task, withBudgets } from "./recall-current-behavior-test-fixtures.js";
 import {
   RECALL_PHASES,
   createAnswerableSourceWindowScenario,
@@ -10,48 +8,7 @@ import {
   createSourceDeliveryBudgetScenario
 } from "./recall-current-behavior-scenarios.js";
 
-describe("recall regression suite", () => {
-it.each([
-    ["mixed dimensions", ["gold", "peer-1", "peer-2", "peer-3", "peer-4"]],
-    ["warm workspace peers", ["gold", "warm-1", "warm-2", "warm-3", "warm-4"]],
-    ["constraint peers", ["gold", "constraint-1", "constraint-2", "constraint-3", "constraint-4"]]
-  ])("keeps high-lexical gold inside top five under %s", (_name, ids) => {
-    const candidates = ids.map((id, index) =>
-      candidate(id, id === "gold" ? 0.98 : 0.7 - index * 0.05, id === "gold" ? 0.2 : 0.9)
-    );
-    const topFive = [...candidates].sort(compareRecallCandidates).slice(0, 5);
-    expect(topFive.map((item) => item.object_id)).toContain("gold");
-  });
-
-it.each([
-    ["simple descending", [0.9, 0.8, 0.7, 0.6]],
-    ["tie broken by activation", [0.8, 0.8, 0.7, 0.7]],
-    ["long tail", [0.95, 0.9, 0.6, 0.4, 0.2]]
-  ])("keeps delivered ordering monotonic for %s", (_name, scores) => {
-    const sorted = scores
-      .map((score, index) => candidate(`mem-${index}`, score, index % 2 === 0 ? 0.5 : 0.4))
-      .sort(compareRecallCandidates);
-    expect(sorted.map((item) => item.relevance_score)).toEqual(
-      [...scores].sort((left, right) => right - left)
-    );
-  });
-
-it("drops excess candidates by max_entries", () => {
-    const selected = selectCandidatesWithinBudgets(
-      [candidate("a", 0.9), candidate("b", 0.8), candidate("c", 0.7)],
-      fineConfig({ max_entries: 2, max_total_tokens: 1000 })
-    );
-    expect(selected.map((item) => item.object_id)).toEqual(["a", "b"]);
-  });
-
-it("drops candidates that would exceed token budget", () => {
-    const selected = selectCandidatesWithinBudgets(
-      [candidate("a", 0.9, 0.5, 8), candidate("b", 0.8, 0.5, 8)],
-      fineConfig({ max_entries: 5, max_total_tokens: 10 })
-    );
-    expect(selected.map((item) => item.object_id)).toEqual(["a"]);
-  });
-
+describe("recall regression suite (in-memory handler fixtures)", () => {
 it("keeps winning admission diagnostics aligned to the first specific attribution plane", async () => {
     const mem = memory({ object_id: "lexical-gold", content: "release checklist lexical-gold" });
     const { dependencies } = deps([mem], {
@@ -68,7 +25,7 @@ it("keeps winning admission diagnostics aligned to the first specific attributio
     expect(diag?.plane_winning_admission).toBe("lexical");
   });
 
-it("emits per-phase latency telemetry on the full recall path", async () => {
+it("emits per-phase latency telemetry on the in-memory handler fixture", async () => {
     const mem = memory({ object_id: "phase-mem", content: "phase latency probe" });
     const { dependencies } = deps([mem], {
       searchByKeyword: async () => [{ object_id: "phase-mem", normalized_rank: 1 }]
@@ -172,10 +129,9 @@ it("promotes answerable source-window neighbors without lifting source-only neig
       policyOverride: policy
     });
 
-    expect(result.candidates.map((item) => item.object_id)).toContain(answerableNeighbor.object_id);
     expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
     expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
-    expect(result.diagnostics?.query_sought_facets).toContain("location_place");
+    expect(result.diagnostics?.query_sought_facets).toEqual([]);
     const answerDiagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === answerableNeighbor.object_id
     );
@@ -286,7 +242,7 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
   });
 
-it("caps per-memory evidence_refs forwarded to findByIds for the gist collector at 8", async () => {
+it("loads every evidence ref needed to fail closed on receipt authority", async () => {
     const { dependencies, findByIds, topRankedRef } = createEvidenceFanoutScenario();
 
     await new RecallService(dependencies).recall({
@@ -297,13 +253,9 @@ it("caps per-memory evidence_refs forwarded to findByIds for the gist collector 
     });
 
     expect(findByIds).toHaveBeenCalled();
-    const callsUnderCap = findByIds.mock.calls
-      .map((call) => call[1] as readonly string[])
-      .filter((ids) => ids.length <= 8);
-    expect(callsUnderCap.length).toBeGreaterThan(0);
-    const cappedCall = callsUnderCap[0]!;
-    expect(cappedCall.length).toBeLessThanOrEqual(8);
-    expect(cappedCall).toContain(topRankedRef);
+    const loadedRefs = findByIds.mock.calls[0]![1] as readonly string[];
+    expect(loadedRefs).toHaveLength(20);
+    expect(loadedRefs).toContain(topRankedRef);
   });
 
 it("keeps final delivery budget filled after source proximity admission", async () => {

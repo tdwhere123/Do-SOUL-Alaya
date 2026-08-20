@@ -10,6 +10,9 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { buildRecallEvidencePack } from "../../recall/runtime/recall-evidence-pack.js";
 
 interface RecallFixture {
@@ -87,6 +90,11 @@ async function recallFixture(fixture: RecallFixture) {
 
 function createDependencies(memories: readonly MemoryEntry[]): RecallServiceDependencies {
   return {
+    testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+      fieldContractSha256,
+      "workspace-1"
+    ),
     now: () => "2026-05-13T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {

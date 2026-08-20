@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
 import {
   GardenProviderError,
   GardenProviderKind,
@@ -8,7 +9,7 @@ import {
 
 import {
   createContext as createBaseContext,
-  createExtractor
+  createOpenSemanticExtractor
 } from "./compute-provider-fixtures.js";
 
 function createContext() {
@@ -20,7 +21,7 @@ function createContext() {
 }
 
 describe("OfficialApiGardenProvider", () => {  it("materializes candidate signals from a successful official API response", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_preference",
@@ -45,8 +46,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         workspace_id: "workspace-1",
         run_id: "run-1",
         source: "garden_compile",
-        signal_kind: "potential_preference",
-        object_kind: "user_preference",
+        signal_kind: "potential_semantic_observation",
+        object_kind: "open_semantic_observation",
         confidence: 0.92,
         raw_payload: expect.objectContaining({
           matched_text: "Call me Ash.",
@@ -61,21 +62,18 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
 
-  it("instructs the model to emit a resolved one-assertion distilled_fact per signal", () => {
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("distilled_fact");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("one assertion");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("split compound statements into separate signals");
+  it("instructs the model to emit one open semantic graph per signal", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("semantic_factor_graph");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("dependent propositions together in one graph");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("evidence_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("source_memory_refs");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Preserve relative-date meaning");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("temporal_projection");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Preserve relative-date wording");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("Resolve every pronoun, relative date");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("preference_profile");
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("projection_schema_version");
   });
 
   it("carries official synthesis evidence and source refs into first-class signal fields", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_synthesis",
@@ -101,8 +99,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     expect(signals).toHaveLength(1);
     expect(signals[0]).toMatchObject({
-      signal_kind: "potential_synthesis",
-      object_kind: "synthesis",
+      signal_kind: "potential_semantic_observation",
+      object_kind: "open_semantic_observation",
       evidence_refs: ["evidence-1", "evidence-2"],
       source_memory_refs: ["memory-source-1", "memory-source-2"]
     });
@@ -110,7 +108,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
 
   it("derives a source assertion when a signal omits distilled_fact", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_claim",
@@ -132,7 +130,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
   it("preserves official temporal projection metadata on the raw payload", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_claim",
@@ -168,6 +166,17 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         event_time_end: "2026-03-19T23:59:59.999Z",
         time_precision: "day",
         time_source: "explicit"
+      },
+      time_concern: {
+        matched_text: "2026-03-19",
+        window_digest: createTimeConcernWindowDigest(
+          "2026-03-19T00:00:00.000Z",
+          "2026-03-19T23:59:59.999Z"
+        )
+      },
+      time_concern_projection_audit: {
+        status: "formed",
+        reason: "source_temporal_term_verified"
       }
     });
     expect(
@@ -177,7 +186,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
   it("drops an invalid official temporal projection atomically", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_claim",
@@ -206,8 +215,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(signals[0]!.raw_payload).not.toHaveProperty("temporal_projection");
   });
 
-  it("keeps an unverified preference profile only in the grounding audit", async () => {
-    const extractor = createExtractor(JSON.stringify({
+  it("projects only verified preference fields and retains the proposal in the grounding audit", async () => {
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_preference",
@@ -235,7 +244,13 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("I prefer dark mode.", createContext());
 
-    expect(signals[0]!.raw_payload).not.toHaveProperty("preference_profile");
+    expect(signals[0]!.raw_payload.preference_profile).toEqual({
+      projection_schema_version: 1,
+      preference_subject: "operator",
+      preference_predicate: "prefer",
+      preference_object: "dark mode",
+      preference_polarity: "positive"
+    });
     expect(signals[0]!.raw_payload.source_grounding).toMatchObject({
       proposed_preference_profile: {
         projection_schema_version: 1,
@@ -255,7 +270,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
 
   it("derives source assertions when distilled_fact is not a string", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_claim",
@@ -295,7 +310,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
 
   it("derives a source assertion when distilled_fact is empty", async () => {
-    const extractor = createExtractor(JSON.stringify({
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
       signals: [
         {
           signal_kind: "potential_claim",
@@ -321,7 +336,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   it("drops one schema-rejected signal but keeps the rest of the turn", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const extractor = createExtractor(JSON.stringify({
+      const extractor = createOpenSemanticExtractor(JSON.stringify({
         signals: [
           {
             signal_kind: "potential_claim",
@@ -354,10 +369,12 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       );
       expect(signals).toHaveLength(1);
       expect(signals[0]!.signal_id).toBe("signal-good");
-      expect(signals[0]!.signal_kind).toBe("potential_preference");
+      expect(signals[0]!.signal_kind).toBe("potential_semantic_observation");
       expect(warn).toHaveBeenCalledWith(
         "garden/compute-provider: dropped one official-API signal",
-        expect.objectContaining({ runId: "run-1", signalKind: "potential_claim" })
+        expect.objectContaining({
+          runId: "run-1", signalKind: "potential_claim"
+        })
       );
     } finally {
       warn.mockRestore();
@@ -368,11 +385,11 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   it("keeps the turn's good signals when one entry's model JSON is malformed", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      // Five signals, one malformed: a hallucinated signal_kind. A throwing
+      // Five signals, one malformed: a non-canonical confidence. A throwing
       // parse would abort the whole turn (GardenProviderError out of
       // compile()); per-entry resilience must drop the one bad fact and keep
       // the four good ones.
-      const extractor = createExtractor(JSON.stringify({
+      const extractor = createOpenSemanticExtractor(JSON.stringify({
         signals: [
           {
             signal_kind: "potential_preference",
@@ -382,9 +399,9 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
             distilled_fact: "The operator prefers to be called Ash."
           },
           {
-            signal_kind: "definitely_not_a_kind",
+            signal_kind: "potential_claim",
             object_kind: "decision",
-            confidence: 0.8,
+            confidence: "high",
             matched_text: "We decided to ship on Friday",
             distilled_fact: "The team decided to ship on Friday."
           },
@@ -426,22 +443,24 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         createContext()
       );
       expect(signals).toHaveLength(4);
-      expect(signals.map((s) => s.object_kind)).toEqual([
-        "user_preference",
-        "decision",
-        "fact",
-        "user_preference"
-      ]);
+      expect(signals.map((s) => s.object_kind)).toEqual(
+        ["open_semantic_observation", "decision", "fact", "open_semantic_observation"]
+      );
     } finally {
       warn.mockRestore();
     }
   });
 
 
+  it("refuses to construct a live provider without an injected extractor", () => {
+    expect(() => new OfficialApiGardenProvider({ apiKey: "sk-test" }))
+      .toThrow(/injected extractor/u);
+  });
+
   it("still fails the turn hard when the response envelope itself is malformed", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({ not_signals: [] }))
+      extractor: createOpenSemanticExtractor(JSON.stringify({ not_signals: [] }))
     });
 
     await expect(provider.compile("turn text", createContext())).rejects.toMatchObject({
@@ -461,7 +480,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       // not save it. The bad signal must be dropped and the rest survive.
       const oversizedMatched = "z".repeat(4_000);
       const turnContent = `${oversizedMatched}. We deploy on Tuesdays.`;
-      const extractor = createExtractor(JSON.stringify({
+      const extractor = createOpenSemanticExtractor(JSON.stringify({
         signals: [
           {
             signal_kind: "potential_claim",
@@ -490,7 +509,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
       const signals = await provider.compile(turnContent, createContext());
       expect(signals).toHaveLength(1);
-      expect(signals[0]!.signal_kind).toBe("potential_preference");
+      expect(signals[0]!.signal_kind).toBe("potential_semantic_observation");
       expect(warn).toHaveBeenCalledWith(
         "garden/compute-provider: dropped one official-API signal",
         expect.objectContaining({ matchedTextChars: 4_000 })

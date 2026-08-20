@@ -55,7 +55,10 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
           event_id: "event-1",
           occurred_at: "2026-07-16T23:59:00.000Z"
         }
-      })
+      }),
+      [],
+      undefined,
+      undefined
     );
   });
 

@@ -4,12 +4,12 @@ import {
   RecallEvalDiagnosticsEvidenceSchema,
   RecallEvalDiagnosticsEvidenceV2Schema,
   RECALL_EVAL_DIAGNOSTICS_FILENAME
-} from "../../../longmemeval/provenance/recall-eval/recall-eval-diagnostics.js";
+} from "../../../bench/provenance/recall-eval/recall-eval-diagnostics.js";
 import {
   buildLongMemEvalEvidenceManifest,
   verifyLongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/provenance/evidence-manifest.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture
@@ -17,7 +17,7 @@ import {
 import {
   createLongMemEvalSelectionContractFromAssignments,
   selectionContractIdentity
-} from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/selection/contract.js";
 
 const documentWarmup = {
   status: "ready" as const,

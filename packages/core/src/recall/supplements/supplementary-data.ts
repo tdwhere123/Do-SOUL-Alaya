@@ -1,103 +1,160 @@
 import {
-  type ManifestationState,
-  type MemoryEntry,
-  type RecallPolicy
-} from "@do-soul/alaya-protocol";
-import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import {
   clamp01,
   errorNameOf,
   mapBudgetPenalty,
   normalizeGraphSupport,
   toErrorMessage
 } from "../runtime/recall-service-helpers.js";
-import type {
-  EvidenceSupportVector,
-  PathInflowEdge,
-  RecallServiceDependencies,
-  RecallServiceWarnPort,
-  RecallSupplementaryData
-} from "../runtime/recall-service-types.js";
+import { recordRecallDegradation } from "../runtime/diagnostics.js";
+import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
-import { uniqueStrings } from "../expansion/path-relations.js";
-import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
-import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
+import { collectEvidenceAndGovernanceSupplement } from "./evidence/evidence-governance-supplement.js";
+import { collectRoutingKeySupplement } from "./routing-key-supplement.js";
+import { compileRecallQueryDemand } from "../query/recall-query-demand.js";
+import { captureRecallQueryEntities } from
+  "../field/query-entity-attribution-producer.js";
+import { collectQueryFieldAttribution } from
+  "./query/query-field-attribution.js";
+import { captureCertifiedRecallQueryOpenSemanticFactors } from
+  "../field/open-semantic-factors/query-capture.js";
+import { deriveQueryFactFrameOsfObligation } from
+  "../field/open-semantic-factors/query-obligation.js";
+import {
+  freezeSupplementaryData,
+  type CollectSupplementaryDataParams
+} from "./supplementary-data-freeze.js";
+export { buildEvidenceSupportVectors } from "./supplementary-data-freeze.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
-const MAX_REFS_PER_MEMORY = 8;
-
-interface CollectSupplementaryDataParams {
-  readonly dependencies: Pick<
-    RecallServiceDependencies,
-    | "budgetPenaltyPort"
-    | "evidenceSearchPort"
-    | "graphSupportPort"
-    | "pathExpansionPort"
-    | "pathPlasticityPort"
-  >;
-  readonly warn: RecallServiceWarnPort;
-  readonly candidates: readonly Readonly<MemoryEntry>[];
-  readonly workspaceId: string;
-  readonly pathProjectionAsOf?: string;
-  readonly runId: string | null;
-  readonly queryText: string | null;
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly policy: Readonly<RecallPolicy>;
-  readonly coarseFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
-  readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
-  readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
-  readonly coarseStructuralScores: Readonly<Record<string, number>>;
-  readonly coarseGraphExpansionScores: Readonly<Record<string, number>>;
-  readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
-  readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
-  readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
-  readonly captureAnswerFeatures: boolean;
-}
 
 export async function collectSupplementaryData(
   params: CollectSupplementaryDataParams
 ): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
-  const graphMetrics = await collectGraphMetrics(params);
-  const graphSupportCounts = graphMetrics.graphSupportCounts;
-  const recallEdgeCounts = graphMetrics.recallEdgeCounts;
-  const budgetPenaltyFactor = await collectBudgetPenaltyFactor(params);
-  const plasticityFactors = await collectPlasticityFactors(params);
-  const coldMetrics = computeColdGraphPathMetrics(params, graphSupportCounts, recallEdgeCounts, plasticityFactors);
-  const evidenceAndGovernance = await collectEvidenceAndGovernanceData(params, candidates);
-
-  return Object.freeze({
-    queryProbes: params.queryProbes,
-    ftsRanks: params.coarseFtsRanks,
-    trigramFtsRanks: params.coarseTrigramFtsRanks,
-    synthesisFtsRanks: params.coarseSynthesisFtsRanks,
-    evidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    evidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
-    sourceProximityScores: params.coarseSourceProximityScores,
-    sourceCohortKeys: params.coarseSourceCohortKeys,
-    structuralScores: params.coarseStructuralScores,
-    graphExpansionScores: params.coarseGraphExpansionScores,
-    entitySeedScores: params.coarseEntitySeedScores,
-    pathExpansionScores: params.coarsePathExpansionScores,
-    pathSuppressionScores: params.coarsePathSuppressionScores,
-    embeddingSimilarityScores: Object.freeze({}),
-    graphSupportCounts: Object.freeze(graphSupportCounts),
-    evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
+  const queryCaptures = await captureQuerySupplementInputs(params);
+  const {
+    queryEntityExtraction,
+    querySoughtFacets,
+    queryFieldAttribution,
+    querySemanticFactorFormation
+  } = queryCaptures;
+  // graphMetrics is independent of budget+plasticity; evidence needs candidates only.
+  const [
+    graphMetrics,
     budgetPenaltyFactor,
     plasticityFactors,
-    graphAndPathColdScore: coldMetrics.graphAndPathColdScore,
-    recallsEdgeCount: coldMetrics.recallsEdgeCount,
-    weightTransferAmount: coldMetrics.weightTransferAmount,
-    evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
-    governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
-    pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
-    querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
+    evidenceAndGovernance,
+    routingKeySupplement,
+    resolvedQueryFieldAttribution,
+    resolvedQuerySemanticFactorFormation
+  ] =
+    await Promise.all([
+      collectGraphMetrics(params),
+      collectBudgetPenaltyFactor(params),
+      collectPlasticityFactors(params),
+      collectEvidenceAndGovernanceSupplement({
+        dependencies: params.dependencies,
+        warn: params.warn,
+        workspaceId: params.workspaceId,
+        pathProjectionAsOf: params.pathProjectionAsOf,
+        candidates,
+        coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
+        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+        degradationReasons: params.degradationReasons
+      }),
+      collectRoutingKeySupplement({
+        dependencies: params.dependencies,
+        warn: params.warn,
+        workspaceId: params.workspaceId,
+        ownerIds: params.routingKeyOwnerIds,
+        asOfMs: Date.parse(params.referenceTime),
+        queryProbes: params.queryProbes,
+        queryEntityExtraction
+      }),
+      queryFieldAttribution,
+      querySemanticFactorFormation
+    ]);
+  const coldMetrics = computeColdGraphPathMetrics(
+    params,
+    graphMetrics.graphSupportCounts,
+    graphMetrics.recallEdgeCounts,
+    plasticityFactors
+  );
+  return freezeSupplementaryData(
+    params,
+    candidates,
+    graphMetrics.graphSupportCounts,
+    budgetPenaltyFactor,
+    plasticityFactors,
+    coldMetrics,
+    evidenceAndGovernance,
+    routingKeySupplement,
+    querySoughtFacets,
+    resolvedQueryFieldAttribution,
+    resolvedQuerySemanticFactorFormation
+  );
+}
+
+async function captureQuerySupplementInputs(
+  params: CollectSupplementaryDataParams
+) {
+  const queryEntityExtraction = params.queryEntityExtraction ??
+    await captureRecallQueryEntities({
+      query_text: params.queryText,
+      port: params.dependencies.entityExtractionPort,
+      on_failure: (error) => params.warn("routing query entity extraction failed", {
+        workspace_id: params.workspaceId,
+        operation: "routing_query_entity_extraction",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      })
+    });
+  // Closed-vocab FACET_VOCABULARY has no memory-side Key partner.
+  const querySoughtFacets = Object.freeze([] as const);
+  const queryFieldAttribution = await collectQueryFieldAttribution({
+    queryText: params.queryText,
+    queryDemand: compileRecallQueryDemand(params.queryProbes),
+    entityCapture: queryEntityExtraction,
+    factFramePort: params.dependencies.queryFactFrameExtractionPort,
+    onFailure: (error) => params.warn("query field attribution failed", {
+      workspace_id: params.workspaceId,
+      operation: "query_field_attribution",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    })
+  });
+  const querySemanticFactorFormation = captureCertifiedQueryFormation(
+    params, queryFieldAttribution.factFrameCapture
+  );
+  return {
+    queryEntityExtraction,
+    querySoughtFacets,
+    queryFieldAttribution,
+    querySemanticFactorFormation
+  };
+}
+
+function captureCertifiedQueryFormation(
+  params: CollectSupplementaryDataParams,
+  factFrameCapture: Awaited<ReturnType<typeof collectQueryFieldAttribution>>["factFrameCapture"]
+) {
+  const obligation = params.queryText === null ? null : deriveQueryFactFrameOsfObligation({
+    query_text: params.queryText, fact_frame_capture: factFrameCapture
+  });
+  return captureCertifiedRecallQueryOpenSemanticFactors({
+    query_text: params.queryText,
+    obligation,
+    port: params.dependencies.openSemanticFactorExtractionPort,
+    prepared_capture: params.querySemanticFactorFormationCapture,
+    prepared_receipt: params.querySemanticFactorCompletenessReceipt,
+    on_failure: (error) => params.warn("query open semantic factor extraction failed", {
+      workspace_id: params.workspaceId,
+      operation: "query_open_semantic_factor_extraction",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    })
   });
 }
 
@@ -139,6 +196,7 @@ async function collectGraphMetrics(
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
+    recordRecallDegradation(params, "graph_metrics_bulk_failed");
     return collectLegacyGraphMetrics(params);
   }
 }
@@ -152,38 +210,6 @@ async function collectLegacyGraphMetrics(
   const graphSupportCounts = await collectGraphSupportCounts(params);
   const recallEdgeCounts = await collectRecallEdgeCounts(params);
   return Object.freeze({ graphSupportCounts, recallEdgeCounts });
-}
-
-async function collectEvidenceAndGovernanceData(
-  params: CollectSupplementaryDataParams,
-  candidates: readonly Readonly<MemoryEntry>[]
-): Promise<Readonly<{
-  readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
-  readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
-  readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
-}>> {
-  // Coverage-aware delivery selects on gist identity; collect whenever the
-  // evidence port can answer, not only for deep diagnostic capture.
-  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    candidates,
-    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
-  });
-  const governanceDerivations = await collectGovernancePathDerivations({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    pathProjectionAsOf: params.pathProjectionAsOf,
-    candidates
-  });
-  return Object.freeze({
-    evidenceGistsByMemoryId,
-    governanceCeilingByMemoryId: governanceDerivations.governanceCeilingByMemoryId,
-    pathInflowByTarget: governanceDerivations.pathInflowByTarget
-  });
 }
 
 async function collectGraphSupportCounts(
@@ -203,25 +229,6 @@ async function collectGraphSupportCounts(
       }
     })
   );
-}
-
-export function buildEvidenceSupportVectors(
-  candidates: readonly Readonly<MemoryEntry>[]
-): Record<string, readonly EvidenceSupportVector[]> {
-  const vectorsByMemoryId: Record<string, readonly EvidenceSupportVector[]> = {};
-  for (const candidate of candidates) {
-    const evidenceRefs = uniqueStrings(candidate.evidence_refs ?? []);
-    if (evidenceRefs.length > 0) {
-      vectorsByMemoryId[candidate.object_id] = Object.freeze(
-        evidenceRefs.map((source_id) => Object.freeze({
-          source_kind: "evidence_ref" as const,
-          source_id,
-          support: normalizeGraphSupport(1)
-        }))
-      );
-    }
-  }
-  return vectorsByMemoryId;
 }
 
 async function collectRecallEdgeCounts(
@@ -312,155 +319,6 @@ function computeColdGraphPathMetrics(
     recallsEdgeCount,
     weightTransferAmount: computeMaxWeightTransferAmount({ candidates: params.candidates, policy: params.policy, graphAndPathColdScore, warn: params.warn })
   });
-}
-
-async function collectEvidenceGistsByMemoryId(params: {
-  readonly dependencies: Pick<RecallServiceDependencies, "evidenceSearchPort">;
-  readonly warn: RecallServiceWarnPort;
-  readonly workspaceId: string;
-  readonly candidates: readonly Readonly<MemoryEntry>[];
-  readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
-}): Promise<Readonly<Record<string, string>>> {
-  const evidenceSearchPort = params.dependencies.evidenceSearchPort;
-  if (evidenceSearchPort?.findByIds === undefined) {
-    return Object.freeze({});
-  }
-  const relevantCandidates = collectRelevantEvidenceCandidates(
-    params.candidates,
-    params.coarseEvidenceFtsRanks
-  );
-  if (relevantCandidates.length === 0) {
-    return Object.freeze({});
-  }
-  const evidenceIds = collectRelevantEvidenceIds(
-    relevantCandidates,
-    params.coarseEvidenceFtsRanksPerRef
-  );
-  if (evidenceIds.length === 0) {
-    return Object.freeze({});
-  }
-  try {
-    const evidenceCapsules = await evidenceSearchPort.findByIds(params.workspaceId, evidenceIds);
-    const gistById = buildEvidenceGistById(params.workspaceId, evidenceCapsules);
-    return buildMemoryEvidenceGists(
-      relevantCandidates,
-      params.coarseEvidenceFtsRanksPerRef,
-      gistById
-    );
-  } catch (error) {
-    params.warn("evidence gist lookup for coverage selection failed", {
-      workspace_id: params.workspaceId,
-      operation: "evidence_gist_lookup_for_coverage",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return Object.freeze({});
-  }
-}
-
-function collectRelevantEvidenceCandidates(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanks: Readonly<Record<string, number>>
-): readonly Readonly<MemoryEntry>[] {
-  // Only candidates that landed via an evidence FTS hit; bounds findByIds instead of scanning every memory's full evidence_refs.
-  return candidates.filter(
-    (entry) =>
-      entry.evidence_refs.length > 0 &&
-      (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
-  );
-}
-
-function collectRelevantEvidenceIds(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
-): readonly string[] {
-  // invariant: findByIds payload bounded by the evidence-FTS hit set, not the candidate's full evidence_refs cardinality.
-  return uniqueStrings(
-    candidates.flatMap((entry) =>
-      selectRelevantEvidenceRefs(entry, coarseEvidenceFtsRanksPerRef)
-    )
-  );
-}
-
-function selectRelevantEvidenceRefs(
-  entry: Readonly<MemoryEntry>,
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
-): readonly string[] {
-  // Bound diagnostic enrichment independently of a memory's evidence cardinality.
-  const hitRefs = entry.evidence_refs.filter(
-    (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
-  );
-  if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
-    return hitRefs;
-  }
-  return [...hitRefs]
-    .sort(
-      (left, right) =>
-        (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-        (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-    )
-    .slice(0, MAX_REFS_PER_MEMORY);
-}
-
-function buildEvidenceGistById(
-  workspaceId: string,
-  evidenceCapsules: readonly Readonly<{ readonly workspace_id: string; readonly object_id: string; readonly gist?: string | null }>[]
-): ReadonlyMap<string, string> {
-  const gistById = new Map<string, string>();
-  for (const evidence of evidenceCapsules) {
-    if (evidence.workspace_id !== workspaceId) {
-      continue;
-    }
-    const gist = evidence.gist?.trim() ?? "";
-    if (gist.length > 0) {
-      gistById.set(evidence.object_id, gist);
-    }
-  }
-  return gistById;
-}
-
-function buildMemoryEvidenceGists(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
-  gistById: ReadonlyMap<string, string>
-): Readonly<Record<string, string>> {
-  const gistsByMemory: Record<string, string> = {};
-  for (const entry of candidates) {
-    const gist =
-      pickRankedEvidenceGist(entry, coarseEvidenceFtsRanksPerRef, gistById) ??
-      pickFallbackEvidenceGist(entry, gistById);
-    if (gist !== undefined) {
-      gistsByMemory[entry.object_id] = gist;
-    }
-  }
-  return Object.freeze(gistsByMemory);
-}
-
-function pickRankedEvidenceGist(
-  entry: Readonly<MemoryEntry>,
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
-  gistById: ReadonlyMap<string, string>
-): string | undefined {
-  // invariant: gist from the highest-ranked ref (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order on ties.
-  const orderedRefs = [...entry.evidence_refs].sort(
-    (left, right) =>
-      (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-      (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-  );
-  return orderedRefs
-    .map((ref) => gistById.get(ref))
-    .find((gist) => gist !== undefined && gist.length > 0);
-}
-
-function pickFallbackEvidenceGist(
-  entry: Readonly<MemoryEntry>,
-  gistById: ReadonlyMap<string, string>
-): string | undefined {
-  // fallback: aggregate rank > 0 but no per-ref rank; first-non-empty-gist rule for producers that emit only the aggregate.
-  return entry.evidence_refs
-    .map((ref) => gistById.get(ref))
-    .find((gist) => gist !== undefined && gist.length > 0);
 }
 
 async function mapWithConcurrency<T, R>(

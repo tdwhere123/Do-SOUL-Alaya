@@ -8,7 +8,6 @@ import {
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 
 type EvidenceCreate = MaterializationRouterDeps["evidenceService"]["create"];
-type EvidenceDeleteCreated = MaterializationRouterDeps["evidenceService"]["deleteCreatedEvidence"];
 type MemoryCreate = MaterializationRouterDeps["memoryService"]["create"];
 type SynthesisCreate = MaterializationRouterDeps["synthesisService"]["create"];
 type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
@@ -143,6 +142,22 @@ describe("MaterializationRouter routing-by-object_kind", () => {
     expect(target.route_target).toBe("memory_entry_only");
   });
 
+  it("routes open semantic observations to recallable memory without a world kind", () => {
+    const router = new MaterializationRouter(createDeps());
+
+    const target = router.route(
+      createSignal({
+        object_kind: "open_semantic_observation",
+        signal_kind: "potential_semantic_observation",
+        confidence: 0.95,
+        evidence_refs: []
+      })
+    );
+
+    expect(target.kind).toBe("evidence_only");
+    expect(target.route_target).toBe("memory_entry_only");
+  });
+
   it("still defers a low-confidence unknown object_kind even when retainUnroutedHighConfidenceFacts is set", () => {
     const router = new MaterializationRouter({
       ...createDeps(),
@@ -251,7 +266,7 @@ describe("MaterializationRouter routing-by-object_kind", () => {
 
 
 interface TestDeps {
-  readonly evidenceService: { create: Mock<EvidenceCreate>; deleteCreatedEvidence: Mock<EvidenceDeleteCreated> };
+  readonly evidenceService: { create: Mock<EvidenceCreate> };
   readonly memoryService: { create: Mock<MemoryCreate> };
   readonly synthesisService: { create: Mock<SynthesisCreate> };
   readonly claimService: { create: Mock<ClaimCreate> };
@@ -270,8 +285,7 @@ function createDeps(): TestDeps {
         object_kind: "evidence_capsule",
         object_id: `evidence-${evidenceCounter}`
       } as never;
-    }),
-    deleteCreatedEvidence: vi.fn<EvidenceDeleteCreated>(async () => undefined)
+    })
   };
   const memoryService = {
     create: vi.fn<MemoryCreate>(async () =>

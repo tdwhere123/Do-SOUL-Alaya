@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OfficialApiGardenProvider, type GardenCompileContext } from "../../garden/compute-provider.js";
 import { resolveSourceAssertion } from "../../garden/grounding/source-assertion.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CONTEXT: GardenCompileContext = {
   workspace_id: "workspace-source-grounding",
@@ -66,6 +67,24 @@ describe("official Garden source grounding", () => {
         "proposed_distilled_fact_not_verbatim"
       ])
     });
+  });
+
+  it("rejects a fragment whose complete User assertion is a direct question", async () => {
+    const source =
+      "I'm thinking of getting a few throw pillows with a geometric pattern. " +
+      "Do you think that would work well with my rug and gray paint?";
+    const provider = providerFor({
+      matched_text: "my rug and gray paint",
+      distilled_fact: "my rug and gray paint"
+    });
+
+    const [signal] = await provider.compile(`User: ${source}`, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "rejected",
+      reasons: ["source_assertion_incomplete"]
+    });
+    expect(signal?.raw_payload).not.toHaveProperty("distilled_fact");
   });
 
   it("removes the User role label from a grounded source assertion", async () => {
@@ -399,6 +418,10 @@ describe("official Garden source grounding", () => {
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.full_turn_content).toContain(assertion);
     expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
+    expect(signal?.raw_payload).toMatchObject({
+      source_locator: { contract_version: 2, kind: "assertion_catalog" },
+      verified_user_assertion_source_hash: expect.any(String)
+    });
   });
 });
 
@@ -408,12 +431,12 @@ function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider
     extractor: {
       extract: async () => ({
         rawJson: JSON.stringify({
-          signals: [{
+          signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_claim",
             object_kind: "activity",
             confidence: 0.9,
             ...fields
-          }]
+          })]
         })
       })
     },

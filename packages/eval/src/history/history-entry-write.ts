@@ -1,6 +1,8 @@
 import {
   access, copyFile, link, mkdir, mkdtemp, rename, rm, writeFile
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import type { BenchName, KpiPayload } from "../schema/kpi-schema.js";
 import {
@@ -15,6 +17,7 @@ import {
   writePointer
 } from "./history-files.js";
 import type { HistoryEntry, HistoryLayout } from "./history.js";
+import { isHistoryEntrySlug } from "./history-slug.js";
 
 export interface HistorySidecar {
   readonly filename: string;
@@ -24,6 +27,10 @@ export interface HistorySidecar {
 export interface HistoryFileSidecar {
   readonly filename: string;
   readonly sourcePath: string;
+  readonly identity?: Readonly<{
+    readonly sha256: string;
+    readonly bytes: number;
+  }>;
 }
 
 export interface WriteEntryOptions {
@@ -31,6 +38,14 @@ export interface WriteEntryOptions {
   readonly fileSidecars?: readonly HistoryFileSidecar[];
   readonly pointerWriter?: typeof writePointer;
 }
+
+interface HistoryEntryOperations {
+  readonly removeStaging: (stagingPath: string) => Promise<void>;
+}
+
+const historyEntryOperations: HistoryEntryOperations = {
+  removeStaging: (stagingPath) => rm(stagingPath, { recursive: true, force: true })
+};
 
 export class HistoryEntryCommittedError extends Error {
   readonly committed = true;
@@ -60,6 +75,7 @@ export async function writeHistoryEntry(input: {
   readonly findings: string | null;
   readonly options: WriteEntryOptions;
   readonly entryAllowsPassing: () => Promise<boolean>;
+  readonly operations?: HistoryEntryOperations;
 }): Promise<HistoryEntry> {
   assertEntrySlug(input.slug);
   const benchRoot = path.join(input.layout.historyRoot, input.benchName);
@@ -91,7 +107,17 @@ async function stageAndCommitEntry(
     await stageEntryFiles(staging, input.payload, input.report, input.findings, sidecars, fileSidecars);
     await rename(staging, entryRoot);
   } catch (error) {
-    await rm(staging, { recursive: true, force: true });
+    const removeStaging = input.operations?.removeStaging ??
+      historyEntryOperations.removeStaging;
+    try {
+      await removeStaging(staging);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "history entry staging failed and cleanup was incomplete",
+        { cause: error }
+      );
+    }
     throw error;
   }
 }
@@ -130,7 +156,7 @@ function assertEntrySlug(slug: string): void {
   if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
     throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
   }
-  if (!SLUG_PATTERN.test(slug)) {
+  if (!isHistoryEntrySlug(slug)) {
     throw new Error(
       `invalid slug: '${slug}' must match <YYYY-MM-DDTHHMMSSZ>-<sha7+> (use entrySlug helper)`
     );
@@ -162,7 +188,35 @@ async function stageEntryFiles(
     await writeFile(path.join(root, sidecar.filename), sidecar.contents, "utf8");
   }
   for (const sidecar of fileSidecars) {
-    await linkOrCopy(sidecar.sourcePath, path.join(root, sidecar.filename));
+    await stageFileSidecar(root, sidecar);
+  }
+}
+
+async function stageFileSidecar(
+  root: string,
+  sidecar: HistoryFileSidecar
+): Promise<void> {
+  const destination = path.join(root, sidecar.filename);
+  if (sidecar.identity === undefined) {
+    await linkOrCopy(sidecar.sourcePath, destination);
+    return;
+  }
+  await copyFile(sidecar.sourcePath, destination);
+  await assertFileIdentity(destination, sidecar.identity);
+}
+
+async function assertFileIdentity(
+  filePath: string,
+  expected: Readonly<{ readonly sha256: string; readonly bytes: number }>
+): Promise<void> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+    bytes += chunk.length;
+  }
+  if (bytes !== expected.bytes || hash.digest("hex") !== expected.sha256) {
+    throw new Error("history file sidecar identity mismatch");
   }
 }
 
@@ -191,5 +245,3 @@ async function linkOrCopy(source: string, destination: string): Promise<void> {
     await copyFile(source, destination);
   }
 }
-
-const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/;

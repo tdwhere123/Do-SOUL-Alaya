@@ -5,9 +5,9 @@ import {
   createAlayaMcpServer,
   createAlayaMcpServerInfo,
   createAlayaMcpToolsResult
-} from "../../mcp/mcp-server.js";
-import { readRuntimeVersion } from "../../runtime/build-info.js";
-import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
+} from "../../mcp/server/mcp-server.js";
+import { readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
+import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
 
 describe("mcp server", () => {
   it("lists the Alaya memory tools as MCP tools", () => {

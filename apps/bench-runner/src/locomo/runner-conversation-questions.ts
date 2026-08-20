@@ -5,16 +5,16 @@ import type { BenchEmbeddingMode, BenchWorkspaceHandle } from "../harness/daemon
 import {
   buildQuestionDiagnostic,
   type LongMemEvalQuestionDiagnostic
-} from "../longmemeval/diagnostics.js";
+} from "../bench/diagnostics.js";
 import {
   scoreQaQuestion,
   type QaDeliveredCandidate,
   type QaQuestionVerdict
-} from "../longmemeval/qa/qa-harness.js";
-import { selectRelevantMemories } from "../longmemeval/qa/qa-llm-filter.js";
-import { buildQaSupportPack } from "../longmemeval/qa/qa-support-pack.js";
+} from "../bench/qa/qa-harness.js";
+import { selectRelevantMemories } from "../bench/qa/qa-llm-filter.js";
+import { buildQaSupportPack } from "../bench/qa/qa-support-pack.js";
 import { resolveQaDeliveryBudget } from "../longmemeval/runner/question/runner-question.js";
-import { extractRecallTokenEconomy } from "../longmemeval/qa/recall-token-economy.js";
+import { extractRecallTokenEconomy } from "../bench/qa/recall-token-economy.js";
 import type { LocomoQa, LocomoSample } from "./dataset.js";
 import type { LocomoRunOptions } from "./runner-types.js";
 import type { LocomoSeededConversation } from "./runner-conversation-seed.js";

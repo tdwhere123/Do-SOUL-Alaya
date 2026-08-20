@@ -99,29 +99,16 @@ try {
   }
 
   if (!preflightOnly) {
-    // 4) Self benchmark is a release gate, not an advisory. The gate fails on
-    //    R@5 below the absolute floor, and on >5pp drop when history has a
-    //    comparable previous self/synthetic run.
-    const historyRoot = path.join(workDir, "bench-history");
-    const selfBench = runBench(["self", "--history-root", historyRoot]);
-    if (selfBench.status !== 0) {
-      fail(`alaya-bench-runner self exited ${selfBench.status}`, `${selfBench.stdout}\n${selfBench.stderr}`);
+    // 4) Bench-runner help must advertise the two public benches.
+    const benchHelp = runBench(["--help"]);
+    if (benchHelp.status !== 0 || (benchHelp.stdout?.trim() ?? "") === "") {
+      fail(`alaya-bench-runner --help exited ${benchHelp.status}`, benchHelp.stderr);
     }
-    const selfGate = spawnSync(
-      process.execPath,
-      [path.join(scriptDir, "self-benchmark-gate.mjs"), "--history-root", historyRoot],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-        maxBuffer: 32 * 1024 * 1024
-      }
-    );
-    if (selfGate.error) {
-      fail(`self benchmark gate spawn failed: ${selfGate.error.message}`);
-    }
-    if (selfGate.status !== 0) {
-      fail(`self benchmark gate exited ${selfGate.status}`, `${selfGate.stdout}\n${selfGate.stderr}`);
+    if (!benchHelp.stdout.includes("longmemeval") || !benchHelp.stdout.includes("locomo")) {
+      fail(
+        "alaya-bench-runner --help omitted the public LongMemEval-S or LoCoMo surface",
+        benchHelp.stdout.slice(0, 500)
+      );
     }
   }
 

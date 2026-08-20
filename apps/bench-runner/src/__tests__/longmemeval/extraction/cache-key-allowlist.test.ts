@@ -5,13 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   computeExtractionTurnCacheKey
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import { writeCachedExtraction } from
-  "../../../longmemeval/compile-seed/cache/cache-shard.js";
-import { resolveCacheKeyAllowlistedTurns } from
-  "../../../longmemeval/extraction/fill/policy/cache-key-allowlist.js";
+  "../../../bench/compile-seed/cache/cache-shard.js";
+import {
+  resolveCacheKeyAllowlistedTurns,
+  resolveContinuationMissingTurns
+} from
+  "../../../bench/extraction/fill/policy/cache-key-allowlist.js";
 import type { LongMemEvalExtractionTurn } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 
 const roots: string[] = [];
 const config = {
@@ -20,30 +23,86 @@ const config = {
 };
 const first = turn("alpha", "first");
 const second = turn("beta", "second");
+const third = turn("gamma", "third");
 
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("extraction cache-key allowlist", () => {
-  it("selects exactly the ordered full-window keys that are currently missing", () => {
+describe("extraction cache-key allowlist selection", () => {
+  it("selects exactly the receipt-bound full-window keys that are currently missing", () => {
     const cacheRoot = temporaryRoot();
     const writeLease = { assertOwned: vi.fn() };
     const firstKey = cacheKey(first);
     const secondKey = cacheKey(second);
 
+    const keys = [secondKey, firstKey].sort();
     const selected = resolveCacheKeyAllowlistedTurns({
-      allowlist: [secondKey, firstKey],
+      allowlist: keys,
       cacheRoot,
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority(keys),
       writeLease
     });
 
-    expect(selected).toEqual({ turns: [second, first], skippedCacheHits: 0 });
+    expect(selected).toEqual({
+      turns: keys.map((key) => key === firstKey ? first : second),
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set(keys)
+    });
     expect(writeLease.assertOwned).toHaveBeenCalledOnce();
   });
 
+  it("bounds a catalog question batch without narrowing its receipt allowlist", () => {
+    const cacheRoot = temporaryRoot();
+    const writeLease = { assertOwned: vi.fn() };
+    const firstKey = cacheKey(first);
+    const keys = [firstKey, cacheKey(second)].sort();
+    const authority = catalogAuthority(keys);
+
+    const selected = resolveCacheKeyAllowlistedTurns({
+      allowlist: keys,
+      cacheRoot,
+      prepared: prepared({
+        questionBatchLimit: 1,
+        executionExtractionTurns: [first]
+      }),
+      authority,
+      writeLease
+    });
+    const emptyBatch = resolveCacheKeyAllowlistedTurns({
+      allowlist: keys,
+      cacheRoot,
+      prepared: prepared({
+        questionBatchLimit: 1,
+        executionExtractionTurns: []
+      }),
+      authority,
+      writeLease
+    });
+
+    expect(selected).toEqual({
+      turns: [first],
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set([firstKey])
+    });
+    expect(emptyBatch).toEqual({
+      turns: [],
+      skippedCacheHits: 0,
+      executionCacheKeys: new Set()
+    });
+    expect(() => resolveCacheKeyAllowlistedTurns({
+      allowlist: [firstKey],
+      cacheRoot,
+      prepared: prepared({ questionBatchLimit: 1 }),
+      authority,
+      writeLease
+    })).toThrow(/does not match the catalog refill authority/u);
+    expect(writeLease.assertOwned).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("extraction cache-key allowlist continuation", () => {
   it("is inert when no programmatic allowlist was supplied", () => {
     expect(resolveCacheKeyAllowlistedTurns({
       allowlist: undefined,
@@ -54,13 +113,102 @@ describe("extraction cache-key allowlist", () => {
     })).toBeUndefined();
   });
 
+  it("derives a sparse continuation scope from settled ledger successes", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({ pinnedCachedTurns: 1 }),
+      authority: continuationAuthority(),
+      successfulKeys: [firstKey],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey])
+    });
+  });
+
+  it("keeps audited predecessor hits outside the continuation ledger", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({ pinnedCachedTurns: 1 }),
+      authority: continuationAuthority(1),
+      successfulKeys: [],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey])
+    });
+  });
+
+  it("preserves canonical turn order across a continuation", () => {
+    const cacheRoot = temporaryRoot();
+    const firstKey = cacheKey(first);
+    const secondKey = cacheKey(second);
+    const thirdKey = cacheKey(third);
+    writeCachedExtraction(cacheRoot, firstKey, {
+      model: config.model,
+      request_profile: config.requestProfile,
+      cache_key: firstKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-08-09T00:00:00.000Z"
+    });
+
+    const selected = resolveContinuationMissingTurns({
+      cacheRoot,
+      prepared: prepared({
+        pinnedCachedTurns: 1,
+        distinctExtractionTurns: [first, second, third],
+        executionExtractionTurns: [first, second, third]
+      }),
+      authority: continuationAuthority(),
+      successfulKeys: [firstKey],
+      writeLease: { assertOwned: vi.fn() }
+    });
+
+    expect(selected).toEqual({
+      turns: [second, third],
+      skippedCacheHits: 1,
+      executionCacheKeys: new Set([secondKey, thirdKey])
+    });
+  });
+
   it.each([
     ["without authority", undefined, prepared()],
-    ["for a probe", { action: "probe" as const }, prepared()],
-    ["for repair", { action: "fill" as const, repair_scope: {} as never }, prepared()],
-    ["for direct spend", { action: "fill" as const, direct_spend: {} as never }, prepared()],
-    ["for expansion", { action: "fill" as const }, prepared({ expansion: {} })],
-    ["for a question batch", { action: "fill" as const }, prepared({ questionBatchLimit: 1 })]
+    ["for a probe", { ...catalogAuthority([cacheKey(first)]), action: "probe" as const }, prepared()],
+    ["for repair", {
+      ...catalogAuthority([cacheKey(first)]), repair_scope: {} as never
+    }, prepared()],
+    ["for direct spend", {
+      ...catalogAuthority([cacheKey(first)]), direct_spend: {} as never
+    }, prepared()],
+    ["for expansion", catalogAuthority([cacheKey(first)]), prepared({ expansion: {} })]
   ])("rejects the allowlist %s", (_label, authority, scopedPrepared) => {
     expect(() => resolveCacheKeyAllowlistedTurns({
       allowlist: [cacheKey(first)],
@@ -68,9 +216,11 @@ describe("extraction cache-key allowlist", () => {
       prepared: scopedPrepared,
       authority,
       writeLease: { assertOwned: vi.fn() }
-    })).toThrow(/authority-bound normal fill/u);
+    })).toThrow(/authority-bound catalog refill/u);
   });
+});
 
+describe("extraction cache-key allowlist validation", () => {
   it.each([
     ["empty", []],
     ["uppercase", ["A".repeat(64)]],
@@ -81,7 +231,7 @@ describe("extraction cache-key allowlist", () => {
       allowlist,
       cacheRoot: temporaryRoot(),
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority([cacheKey(first)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/non-empty|lowercase SHA-256|duplicate/u);
   });
@@ -91,17 +241,19 @@ describe("extraction cache-key allowlist", () => {
       allowlist: [cacheKey(first)],
       cacheRoot: temporaryRoot(),
       prepared: { ...prepared(), pinnedCachedTurns: undefined },
-      authority: { action: "fill" },
+      authority: catalogAuthority([cacheKey(first)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/pinned manifest cached-turn count/u);
   });
+});
 
+describe("extraction cache-key allowlist production window", () => {
   it("rejects stale or orphan routes outside the production full window", () => {
     expect(() => resolveCacheKeyAllowlistedTurns({
       allowlist: ["f".repeat(64)],
       cacheRoot: temporaryRoot(),
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority(["f".repeat(64)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/outside the production full window/u);
   });
@@ -123,16 +275,35 @@ describe("extraction cache-key allowlist", () => {
         allowlist: [key],
         cacheRoot,
         prepared: prepared(),
-        authority: { action: "fill" },
+        authority: catalogAuthority([key]),
         writeLease: { assertOwned: vi.fn() }
       })).toThrow(new RegExp(`status is ${status}`, "u"));
     }
   );
 });
 
+function catalogAuthority(keys: readonly string[]) {
+  return {
+    action: "fill" as const,
+    catalog_refill: { keys } as never
+  };
+}
+
+function continuationAuthority(initialPreservedShards = 0) {
+  return {
+    action: "fill" as const,
+    continuation: {
+      predecessor: { initial_preserved_shards: initialPreservedShards }
+    } as never
+  };
+}
+
 function prepared(overrides: {
   readonly expansion?: object;
   readonly questionBatchLimit?: number;
+  readonly pinnedCachedTurns?: number;
+  readonly distinctExtractionTurns?: readonly LongMemEvalExtractionTurn[];
+  readonly executionExtractionTurns?: readonly LongMemEvalExtractionTurn[];
 } = {}) {
   return {
     config,

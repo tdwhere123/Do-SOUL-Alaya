@@ -6,6 +6,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import {
+  readNonEmptyStringField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
 import type { PathRelationProposalPayload } from "./types.js";
 import type { ProposalPathRelationRow } from "./rows.js";
 import type { parseAcceptedPathRelationGovernanceInput } from "./acceptance.js";
@@ -182,6 +187,24 @@ export function pathRelationMatchesProposalPayload(
       serializePathAnchorRef(payload.target_anchor)
   );
 }
+
+export const ProposalPathRelationRowParser: RowParser<ProposalPathRelationRow> = {
+  parse(value: unknown): ProposalPathRelationRow {
+    const record = readRecord(value, "proposal path relation row");
+    return {
+      path_id: readNonEmptyStringField(record, "path_id"),
+      workspace_id: readNonEmptyStringField(record, "workspace_id"),
+      anchors_json: readNonEmptyStringField(record, "anchors_json"),
+      constitution_json: readNonEmptyStringField(record, "constitution_json"),
+      effect_vector_json: readNonEmptyStringField(record, "effect_vector_json"),
+      plasticity_state_json: readNonEmptyStringField(record, "plasticity_state_json"),
+      lifecycle_json: readNonEmptyStringField(record, "lifecycle_json"),
+      legitimacy_json: readNonEmptyStringField(record, "legitimacy_json"),
+      created_at: readNonEmptyStringField(record, "created_at"),
+      updated_at: readNonEmptyStringField(record, "updated_at")
+    };
+  }
+};
 
 export function parseProposalPathRelationRow(row: ProposalPathRelationRow): Readonly<PathRelation> {
   return PathRelationSchema.parse({

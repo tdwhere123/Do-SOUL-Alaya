@@ -9,6 +9,7 @@ import {
   SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
+  SqliteMemoryEmbeddingRepo,
   SqliteMemoryEntryRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -80,5 +81,23 @@ export async function createRecallRealStorage(
     database,
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
     evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database)
+  };
+}
+
+export async function createRecallEmbeddingRealStorage(
+  registerDatabase: RegisterDatabase
+): Promise<
+  RealSqliteFixture & {
+    readonly memoryEntryRepo: SqliteMemoryEntryRepo;
+    readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
+    readonly memoryEmbeddingRepo: SqliteMemoryEmbeddingRepo;
+    readonly eventLogRepo: SqliteEventLogRepo;
+  }
+> {
+  const recallStorage = await createRecallRealStorage(registerDatabase);
+  return {
+    ...recallStorage,
+    memoryEmbeddingRepo: new SqliteMemoryEmbeddingRepo(recallStorage.database),
+    eventLogRepo: new SqliteEventLogRepo(recallStorage.database)
   };
 }

@@ -26,8 +26,10 @@ These rules always win over lower-level docs and task-card convenience.
 
 ## Event And State
 
-7. EventLog is first for state-changing writes: append EventLog, update
-   DB, then notify (per §10 below — there is no SSE).
+7. EventPublisher-owned runtime transitions stay EventLog-first: append
+   EventLog, update DB, then notify (per §10 below — there is no SSE).
+   Field formation, projection-generation, and causal-usage writes persist
+   the receipt first, then append EventLog as a separate audit step.
 8. Only `packages/core` and `apps/core-daemon` may author
    EventLog-producing runtime transitions or mutate run truth.
    `packages/storage` may provide mechanical persistence helpers behind
@@ -60,7 +62,10 @@ These rules always win over lower-level docs and task-card convenience.
     query-time transfer along one of its directed edges and the
     resulting fused score are runtime decisions and projections.
     Rebuildable SliceKey routing views remain workspace-scoped
-    projections.
+    projections. Live connectedness of flood, SliceKey matching, and
+    typed path transfer must be proved by their producer-to-consumer path,
+    not inferred from this ontology constraint; see
+    `docs/handbook/recall.md`.
 12a. **Temporal relation authority.** Evidence owns the source
     observation/event time. Storage or ingestion timestamps, including
     `created_at`, must not be substituted for source time. Each active
@@ -123,7 +128,20 @@ These rules always win over lower-level docs and task-card convenience.
     `used` receipt is a soft read-side signal: repeated used receipts
     decay for path-strength reinforcement, `trust_mode = automatic`
     carries reduced weight, and durable truth still requires the
-    proposal/governance path.
+    proposal/governance path. The live used-report producer records a
+    `CausalUsageReceipt` only. That port is constructed at the daemon
+    composition root; delivery, inspection, and top-k membership have
+    weight 0.
+20a. **Source write persist-first.** A valid evidence create persists
+    the root capsule, then optionally admits source spans and F0-F2
+    incidences. Optional formation failure does not delete or
+    invalidate that capsule. Soul materialization does not compensate
+    a later memory-create failure by deleting the evidence.
+20b. **One query as-of and one pinned generation.** `prepareRecallRequest`
+    captures `effective_as_of` once and pins exactly one projection
+    generation. Select_Gamma is the admission-order selector; later
+    consensus does not reorder the delivered set. Missing generation
+    or condition pins fail closed.
 
 ### Temporal Relation Contract
 
@@ -273,7 +291,7 @@ port time. New work scopes through a PR brief or task card.
 The following three invariants were extracted from the Cause Class
 Aggregation step of `p5-system-review-r1`. Each was a Cause Class that
 appeared in ≥2 independent findings; abstracting them here is the
-required防复发 step when a cause class recurs across independent reviews.
+required anti-recurrence step when a cause class recurs across independent reviews.
 
 29. **Default Scope Invariant.** All Alaya-redesign / clean-room
     storage paths, MCP tool inputs, HTTP routes, and resource access
@@ -300,8 +318,12 @@ required防复发 step when a cause class recurs across independent reviews.
 ## Docs
 
 32. `docs/archive/v0.1-port-record/` is the historical v0.1 port-era task-card record
-    (v0.1.0 shipped 2026-05-05). New work tracking lives in
-    `docs/handbook/backlog.md` and PR descriptions.
+    (v0.1.0 shipped 2026-05-05). Track ordinary engineering debt in
+    `docs/handbook/backlog.md` and PR descriptions. The in-repo
+    authority for the recall-field contract and current live state is
+    `docs/handbook/recall.md`. Gitignored local work artifacts under
+    `.do-it/` (including `.do-it/plans/`) are execution tracking, not
+    handbook or invariant truth.
 33. `docs/handbook/` is the maintained implementation handbook.
 34. `docs/archive/` holds retired-but-preserved discipline documents
     (port-protocol, port-era task-card template). They are

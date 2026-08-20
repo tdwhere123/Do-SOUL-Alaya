@@ -4,6 +4,8 @@ import type { RecallTierWindowCursor } from
 export const OFFSET_RECALL_TIER_PAGE_SIZE = 512;
 export const STORAGE_RECALL_TIER_PAGE_SIZE = 500;
 export const MAX_OFFSET_RECALL_TIER_PAGES = 200;
+// Safety valve only: activation admission prefers SQL top-K, then hydrate.
+// This cap still bounds the HOT window used by other coarse planes.
 export const MAX_RECALL_TIER_MEMORIES =
   OFFSET_RECALL_TIER_PAGE_SIZE * MAX_OFFSET_RECALL_TIER_PAGES;
 export const MAX_CURSOR_RECALL_TIER_PAGES = Math.ceil(

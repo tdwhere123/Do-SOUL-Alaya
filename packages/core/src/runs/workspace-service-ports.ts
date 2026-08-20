@@ -102,6 +102,8 @@ export type WorkspaceBootstrapReconcileResult = Readonly<
     }
 >;
 
+export type WorkspaceCreationMutation = (workspace: Workspace) => void;
+
 export interface WorkspaceServiceDependencies {
   readonly workspaceRepo: WorkspaceRepoPort;
   readonly runRepo: WorkspaceRunRepoPort;
@@ -110,6 +112,7 @@ export interface WorkspaceServiceDependencies {
   readonly bootstrappingPlanner?: WorkspaceBootstrappingPlannerPort;
   readonly pathRelationRepo?: WorkspacePathRelationRepoPort;
   readonly bootstrappingRecordRepo?: WorkspaceBootstrappingRecordRepoPort;
+  readonly workspaceCreationMutation?: WorkspaceCreationMutation;
 }
 
 export type CreateWorkspaceInput = WorkspaceCreateInput;

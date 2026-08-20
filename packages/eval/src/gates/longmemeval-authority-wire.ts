@@ -16,7 +16,8 @@ import {
   type LongMemEvalExtractionAuthority,
   type LongMemEvalExtractionSummary,
   type LongMemEvalFanoutAuthority,
-  type LongMemEvalShardAuthorityReference
+  type LongMemEvalShardAuthorityReference,
+  type LongMemEvalSupplementalSourceReceiptExtensionWire
 } from "./longmemeval-authority-schemas.js";
 
 export * from "./longmemeval-authority-schemas.js";
@@ -35,6 +36,10 @@ export function assertLongMemEvalFullExtractionClosure(value: unknown): void {
       full.expansion_source_anchor !== undefined) {
     const { content_closure_index: _closure, ...summary } = full;
     assertLongMemEvalExpansionBinding(summary);
+    const extension = full.expansion_lineage?.supplemental_source_receipt_extension;
+    if (extension !== undefined) {
+      assertSupplementalExtensionClosure(extension, full.content_closure_index);
+    }
   }
 }
 
@@ -114,7 +119,8 @@ export function assertLongMemEvalExpansionBinding(
   if (anchor === undefined || lineage === undefined) {
     throw new Error("500Q extraction authority requires source anchor and lineage");
   }
-  assertExpansionPair(anchor, lineage, compact);
+  assertExpansionAuthorityPair(anchor, lineage);
+  assertExpansionCompactTarget(lineage, compact);
   if ((context.code !== undefined &&
       canonicalJson(context.code) !== canonicalJson(anchor.code)) ||
       (context.selection !== undefined &&
@@ -123,6 +129,15 @@ export function assertLongMemEvalExpansionBinding(
       context.datasetSha256 !== anchor.next_selection.dataset_sha256)) {
     throw new Error("500Q expansion identity differs from run provenance");
   }
+}
+
+export function assertLongMemEvalExpansionAuthorityPair(
+  anchorValue: unknown,
+  lineageValue: unknown
+): void {
+  const anchor = LongMemEvalExpansionSourceAnchorWireSchema.parse(anchorValue);
+  const lineage = LongMemEvalExpansionLineageWireSchema.parse(lineageValue);
+  assertExpansionAuthorityPair(anchor, lineage);
 }
 
 export function assertLongMemEvalFanoutAuthorityBinding(input: {
@@ -244,22 +259,88 @@ function assertClosureIntegrity(value: {
   }
 }
 
-function assertExpansionPair(
+function assertExpansionAuthorityPair(
   anchor: z.infer<typeof LongMemEvalExpansionSourceAnchorWireSchema>,
+  lineage: z.infer<typeof LongMemEvalExpansionLineageWireSchema>
+): void {
+  const { schema_version: _aSchema, kind: _aKind, target_cache: aTarget, ...a } = anchor;
+  const {
+    schema_version: _lSchema,
+    kind: _lKind,
+    target_cache: lTarget,
+    supplemental_source_receipt_extension: extension,
+    ...l
+  } = lineage;
+  const { content_closure_sha256: _closure, ...lineageTarget } = lTarget;
+  const commonMismatch = canonicalJson(a) !== canonicalJson(l);
+  const cacheMismatch = extension === undefined
+    ? canonicalJson(aTarget) !== canonicalJson(lineageTarget) ||
+      anchor.source_cache.supplemental_source_binding_sha256 !==
+        aTarget.supplemental_source_binding_sha256
+    : !hasValidSupplementalExtensionBinding(
+      anchor.source_cache.supplemental_source_binding_sha256,
+      aTarget,
+      lineage.source_cache.supplemental_source_binding_sha256,
+      lineageTarget,
+      extension
+    );
+  if (commonMismatch || cacheMismatch) {
+    throw new Error("500Q source anchor and lineage are not bound to target cache");
+  }
+}
+
+function assertExpansionCompactTarget(
   lineage: z.infer<typeof LongMemEvalExpansionLineageWireSchema>,
   compact: LongMemEvalExtractionSummary
 ): void {
-  const { schema_version: _aSchema, kind: _aKind, target_cache: aTarget, ...a } = anchor;
-  const { schema_version: _lSchema, kind: _lKind, target_cache: lTarget, ...l } = lineage;
-  const { content_closure_sha256: lineageClosure, ...lineageTarget } = lTarget;
+  const { content_closure_sha256: lineageClosure, ...lineageTarget } =
+    lineage.target_cache;
   const compactTarget = targetCacheFromSummary(compact);
-  if (canonicalJson(a) !== canonicalJson(l) ||
-      canonicalJson(aTarget) !== canonicalJson(lineageTarget) ||
-      canonicalJson(aTarget) !== canonicalJson(compactTarget) ||
-      anchor.source_cache.supplemental_source_binding_sha256 !==
-        aTarget.supplemental_source_binding_sha256 ||
-      lineageClosure !== compact.content_closure_sha256) {
+  const extension = lineage.supplemental_source_receipt_extension;
+  if (canonicalJson(lineageTarget) !== canonicalJson(compactTarget) ||
+      lineageClosure !== compact.content_closure_sha256 ||
+      (extension !== undefined && canonicalJson(extension.target_binding) !==
+        canonicalJson(compact.supplemental_source_receipt))) {
     throw new Error("500Q source anchor and lineage are not bound to target cache");
+  }
+}
+
+function hasValidSupplementalExtensionBinding(
+  anchorSourceDigest: string | undefined,
+  anchorTarget: Readonly<Record<string, unknown>>,
+  lineageSourceDigest: string | undefined,
+  lineageTarget: Readonly<Record<string, unknown>>,
+  extension: LongMemEvalSupplementalSourceReceiptExtensionWire
+): boolean {
+  const sourceDigest = hashLongMemEvalSupplementalSourceBinding(
+    extension.source_binding
+  );
+  const targetDigest = hashLongMemEvalSupplementalSourceBinding(
+    extension.target_binding
+  );
+  return canonicalJson(withoutSupplementalBinding(anchorTarget)) ===
+      canonicalJson(withoutSupplementalBinding(lineageTarget)) &&
+    anchorSourceDigest === sourceDigest &&
+    anchorTarget.supplemental_source_binding_sha256 === sourceDigest &&
+    lineageSourceDigest === sourceDigest &&
+    lineageTarget.supplemental_source_binding_sha256 === targetDigest;
+}
+
+function withoutSupplementalBinding(value: Readonly<Record<string, unknown>>) {
+  const { supplemental_source_binding_sha256: _binding, ...rest } = value;
+  return rest;
+}
+
+function assertSupplementalExtensionClosure(
+  extension: LongMemEvalSupplementalSourceReceiptExtensionWire,
+  closure: z.infer<typeof LongMemEvalContentClosureIndexSchema>
+): void {
+  for (const shard of [...extension.source_shards, ...extension.added_shards]) {
+    if (closure[shard.cache_key]?.[0] !== shard.raw_json_sha256) {
+      throw new Error(
+        "supplemental source receipt extension differs from extraction content closure"
+      );
+    }
   }
 }
 

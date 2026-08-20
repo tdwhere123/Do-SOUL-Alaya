@@ -12,25 +12,26 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   readExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
+} from "../../../bench/extraction/extraction-fill.js";
 import { computeExtractionTurnCacheKey } from
-  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../bench/compile-seed/compile-seed-cache.js";
 import { inspectTurnContentKeySpace, type LongMemEvalExtractionTurn } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionFillCompletion
-} from "../../../longmemeval/extraction/fill/fill-completion.js";
+} from "../../../bench/extraction/fill/fill-completion.js";
 import { preflightExtractionCache } from
-  "../../../longmemeval/compile-seed/compile-seed-preflight.js";
+  "../../../bench/compile-seed/compile-seed-preflight.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -79,7 +80,7 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
     extractorFactory: () => ({
       extract: async () => {
         firstWorkerManifest ??= readExtractionCacheManifest(cacheRoot);
-        return { rawJson: '{"signals":[]}' };
+        return providerBackedExtractionResult('{"signals":[]}');
       }
     }),
     log: () => undefined
@@ -317,7 +318,7 @@ it("rejects a narrower window on a superset root before creating a delegate", as
 });
 
 function emptyExtractor() {
-  return { extract: async () => ({ rawJson: '{"signals":[]}' }) };
+  return { extract: async () => providerBackedExtractionResult('{"signals":[]}') };
 }
 
 function firstShardPath(): string {

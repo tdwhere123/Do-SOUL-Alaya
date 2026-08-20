@@ -55,6 +55,10 @@ files: `docs/handbook/README.md`.
 boundary; EventLog → DB → broadcast; `apps/core-daemon` wires; Garden is
 fire-and-forget. Detail: `docs/handbook/architecture.md`.
 
+Recall target is the UGAF field; the live runtime is a degenerate
+projection of that path. Do not implement from flood / SliceKey /
+"four strategies" prose. Owner: `docs/handbook/recall.md`.
+
 ## Commands
 
 CLI quickstart: `README.md`.

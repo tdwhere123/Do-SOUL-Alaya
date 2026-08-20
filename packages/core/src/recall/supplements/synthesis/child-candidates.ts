@@ -3,7 +3,8 @@ import { buildEvidenceSearchQueries } from "../../coarse-filter/coarse-candidate
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import {
   clamp01,
-  compareMemoryEntries
+  compareMemoryEntries,
+  compareMemorySemanticIdentity
 } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -13,6 +14,8 @@ import {
   scoreEvidenceAnchorMatch,
   scoreQueryEvidenceMatch
 } from "../../scoring/query-evidence-scoring.js";
+import type { RecallRetrievalFieldBundle } from
+  "../../field/retrieval/retrieval-field-bundle.js";
 
 type SynthesisSearchPort = NonNullable<RecallServiceDependencies["synthesisSearchPort"]>;
 type SynthesisSearchRow = Awaited<ReturnType<SynthesisSearchPort["findByIds"]>>[number];
@@ -35,6 +38,7 @@ export async function collectSynthesisChildCandidates(params: Readonly<{
   readonly queryText: string;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly synthesisSearchPort: SynthesisSearchPort;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly limit: number;
 }>): Promise<Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -57,14 +61,13 @@ async function collectSynthesisRankById(
   params: Parameters<typeof collectSynthesisChildCandidates>[0]
 ): Promise<ReadonlyMap<string, number>> {
   const rankById = new Map<string, number>();
-  const queryResults = await Promise.allSettled(
-    buildEvidenceSearchQueries(params.queryText, params.queryProbes).map((query) =>
-      params.synthesisSearchPort.searchByKeyword(params.workspaceId, query, params.limit)
+  const queryResults = await params.retrievalFieldBundle.searchSynthesisKeywords({
+    queries: buildEvidenceSearchQueries(params.queryText, params.queryProbes).map(
+      (queryText) => ({ queryText, limit: params.limit })
     )
-  );
+  });
   for (const result of queryResults) {
-    if (result.status === "rejected") throw result.reason;
-    for (const match of result.value) {
+    for (const match of result) {
       rankById.set(
         match.object_id,
         Math.max(rankById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
@@ -187,7 +190,10 @@ function compareSynthesisChildCandidates(
   right: SynthesisChildCandidate
 ): number {
   const delta = right.synthesisRank - left.synthesisRank;
-  return delta !== 0 ? delta : compareMemoryEntries(left.candidate.entry, right.candidate.entry);
+  return delta !== 0
+    ? delta
+    : compareMemorySemanticIdentity(left.candidate.entry, right.candidate.entry) ||
+      compareMemoryEntries(left.candidate.entry, right.candidate.entry);
 }
 
 function buildSynthesisChildFtsRanks(

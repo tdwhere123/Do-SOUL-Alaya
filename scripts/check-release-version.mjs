@@ -14,6 +14,11 @@ if (tag === undefined || !/^v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/u.test(tag)) {
   process.exit(1);
 }
 
+// App packages share the release tag semver; @do-soul/alaya-protocol tracks its
+// own contract semver because MCP schema breaks are independent of app releases.
+const PROTOCOL_PACKAGE = "@do-soul/alaya-protocol";
+const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/u;
+
 const expectedVersion = tag.slice(1);
 const packageJsonPaths = [
   "package.json",
@@ -22,11 +27,29 @@ const packageJsonPaths = [
 ].sort();
 
 const mismatches = [];
+const protocolIssues = [];
 for (const packageJsonPath of packageJsonPaths) {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  if (packageJson.name === PROTOCOL_PACKAGE) {
+    if (
+      typeof packageJson.version !== "string" ||
+      !SEMVER_PATTERN.test(packageJson.version)
+    ) {
+      protocolIssues.push(`${packageJsonPath}: ${packageJson.version ?? "<missing>"}`);
+    }
+    continue;
+  }
   if (packageJson.version !== expectedVersion) {
     mismatches.push(`${packageJsonPath}: ${packageJson.version ?? "<missing>"}`);
   }
+}
+
+if (protocolIssues.length > 0) {
+  console.error(`${PROTOCOL_PACKAGE} must declare a valid semver version:`);
+  for (const issue of protocolIssues) {
+    console.error(`- ${issue}`);
+  }
+  process.exit(1);
 }
 
 if (mismatches.length > 0) {
@@ -37,7 +60,9 @@ if (mismatches.length > 0) {
   process.exit(1);
 }
 
-console.log(`release version check ok: ${tag} matches ${packageJsonPaths.length} package.json files`);
+console.log(
+  `release version check ok: ${tag} matches ${packageJsonPaths.length - 1} app package.json files; ${PROTOCOL_PACKAGE} semver validated separately`
+);
 
 function listPackageJsons(root) {
   if (!existsSync(root)) return [];

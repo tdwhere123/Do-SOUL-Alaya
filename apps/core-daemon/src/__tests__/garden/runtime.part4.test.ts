@@ -130,7 +130,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 type CapturedScheduler = (typeof hoisted.schedulers)[number];
 
@@ -210,12 +210,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -267,12 +261,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -312,12 +300,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -351,12 +333,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -383,12 +359,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const error = new Error("Failed to append event log entry.", { cause });
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: { handle: vi.fn(async () => { throw error; }) }
       }),
       warn
@@ -418,17 +388,10 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const completion = currentScheduler().completions.at(-1);
     expect(completion?.error_message).not.toMatch(/alice|private\.db|super-secret/u);
   });
-
   it("identifies coherence, answers_with, and completion warning phases", async () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({
             objectsAffected: ["memory-1", "memory-2"],
@@ -436,6 +399,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
           }))
         }
       }),
+      legacyTopologyMutationsEnabled: true,
       coherenceEdgeProducerPort: {
         crystallizeForBackfill: vi.fn(async () => { throw new Error("coherence failed"); })
       },
@@ -458,8 +422,8 @@ describe("garden runtime targeted embedding backfill pass", () => {
     await expect(runtime.runEmbeddingBackfillPass("workspace-1")).resolves.toBeUndefined();
 
     expect(warn.mock.calls.map((call) => call[1]?.phase)).toEqual([
-      "coherence",
       "answers_with",
+      "coherence",
       "completion"
     ]);
     expect(scheduler.completions).toContainEqual(
@@ -471,12 +435,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
       ...createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler: {
           handle: vi.fn(async () => ({ objectsAffected: ["memory-1"], auditEntries: [] }))
         }

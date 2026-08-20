@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   runIsolatedQuestionSequence,
   type IsolatedQuestionSequenceInput
-} from "../../../longmemeval/lifecycle/question-isolated-execution.js";
+} from "../../../bench/lifecycle/question-isolated-execution.js";
 import {
   emptySeedFuelInventory,
   mergeSeedFuelInventories,
   type SeedFuelInventory
-} from "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
+} from "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 
 interface TestDaemon {
   readonly db: DatabaseSync;
@@ -82,6 +82,26 @@ describe("question-isolated execution", () => {
         rootParent: parent
       });
       await expect(access(sentinel)).resolves.toBeUndefined();
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("retains successful question databases only when explicitly requested", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "alaya-question-materialize-test-"));
+    let questionRoot: string | undefined;
+    try {
+      await runIsolatedQuestionSequence({
+        ...fixtureInput(["only"], [], {
+          onStart: (root) => { questionRoot = root; }
+        }),
+        rootParent: parent,
+        retainSuccessfulRoots: true
+      });
+
+      expect(questionRoot).toBeDefined();
+      await expect(access(join(questionRoot ?? "missing", "question.db")))
+        .resolves.toBeUndefined();
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

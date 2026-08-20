@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { parseMemoryDimension, parseMemoryEntryRow, parseScopeClass, parseStorageTier, type MemoryEntryRow } from "./row-mapper.js";
+import { parseMemoryDimension, MemoryEntryRowParser, parseScopeClass, parseStorageTier } from "./row-mapper.js";
 import type { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import type { MemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
@@ -14,12 +14,14 @@ import { MemoryEntryConflictReadQueries } from "./memory-entry-conflict-read-que
 import { MemoryEntryDynamicReadQueries } from "./memory-entry-dynamic-read-queries.js";
 import { DEFAULT_MEMORY_ENTRY_PAGE, parseMemoryEntryPage } from "./memory-entry-read-page.js";
 import type { MemoryEntryListPageOptions, MemoryEntryRepoDiagnosticSink } from "./types.js";
-import type { RecallTierWindowQuery, RecallTierWindowResult } from "./types.js";
+import type {
+  RecallEventTimeWindowQuery,
+  RecallTierWindowQuery,
+  RecallTierWindowResult
+} from "./types.js";
 import { findRecallTierWindow } from "./recall/recall-tier-window-query.js";
-
-interface CountRow {
-  readonly total: number;
-}
+import { findByEventTimeWindow } from "./recall/event-time-window-query.js";
+import { CountRowParser, parseOptionalRow, parseRows } from "../shared/parse-row.js";
 
 export class MemoryEntryReadQueries {
   private readonly conflictQueries: MemoryEntryConflictReadQueries;
@@ -51,10 +53,13 @@ export class MemoryEntryReadQueries {
   // transition can re-read the mutated row inside a single EventLog transaction.
   public findByIdSync(objectId: string): Readonly<MemoryEntry> | null {
     try {
-      const row = this.statements.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
-      return row === undefined ? null : parseMemoryEntryRow(row);
+      return parseOptionalRow(
+        this.statements.findByIdStatement.get(objectId),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to load memory entry ${objectId}.`, error);
+      throw wrapMemoryEntryQueryError(`Failed to load memory entry ${objectId}.`, error);
     }
   }
 
@@ -74,22 +79,24 @@ export class MemoryEntryReadQueries {
 
     try {
       const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
-      const rows =
-        parsedTier === undefined || parsedTier === StorageTier.HOT
-          ? (this.statements.findByWorkspaceHotPagedStatement.all(workspaceId, parsedPage.limit, parsedPage.offset) as MemoryEntryRow[])
-          : (this.statements.findByWorkspaceTierPagedStatement.all(
+      return parsedTier === undefined || parsedTier === StorageTier.HOT
+        ? parseRows(
+            this.statements.findByWorkspaceHotPagedStatement.all(workspaceId, parsedPage.limit, parsedPage.offset),
+            MemoryEntryRowParser,
+            "memory entry row"
+          )
+        : parseRows(
+            this.statements.findByWorkspaceTierPagedStatement.all(
               workspaceId,
               parsedTier,
               parsedPage.limit,
               parsedPage.offset
-            ) as MemoryEntryRow[]);
-      return rows.map((row) => parseMemoryEntryRow(row));
+            ),
+            MemoryEntryRowParser,
+            "memory entry row"
+          );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list memory entries for workspace ${workspaceId}.`,
-        error
-      );
+      throw wrapMemoryEntryQueryError(`Failed to list memory entries for workspace ${workspaceId}.`, error);
     }
   }
 
@@ -99,20 +106,31 @@ export class MemoryEntryReadQueries {
     return findRecallTierWindow(this.statements, query);
   }
 
+  public async findByEventTimeWindow(
+    query: RecallEventTimeWindowQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]> {
+    return findByEventTimeWindow(this.statements, query);
+  }
+
   public async findByWorkspaceIdAll(
     workspaceId: string,
     tier?: StorageTier
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
       const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
-      const rows =
-        parsedTier === undefined || parsedTier === StorageTier.HOT
-          ? (this.statements.findByWorkspaceHotStatement.all(workspaceId) as MemoryEntryRow[])
-          : (this.statements.findByWorkspaceTierStatement.all(workspaceId, parsedTier) as MemoryEntryRow[]);
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parsedTier === undefined || parsedTier === StorageTier.HOT
+        ? parseRows(
+            this.statements.findByWorkspaceHotStatement.all(workspaceId),
+            MemoryEntryRowParser,
+            "memory entry row"
+          )
+        : parseRows(
+            this.statements.findByWorkspaceTierStatement.all(workspaceId, parsedTier),
+            MemoryEntryRowParser,
+            "memory entry row"
+          );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to list all memory entries for workspace ${workspaceId}.`,
         error
       );
@@ -124,12 +142,19 @@ export class MemoryEntryReadQueries {
       const parsedTier = tier === undefined ? undefined : parseStorageTier(tier);
       const row =
         parsedTier === undefined || parsedTier === StorageTier.HOT
-          ? (this.statements.countByWorkspaceHotStatement.get(workspaceId) as CountRow | undefined)
-          : (this.statements.countByWorkspaceTierStatement.get(workspaceId, parsedTier) as CountRow | undefined);
-      return readCount(row);
+          ? parseOptionalRow(
+              this.statements.countByWorkspaceHotStatement.get(workspaceId),
+              CountRowParser,
+              "memory entry count row"
+            )
+          : parseOptionalRow(
+              this.statements.countByWorkspaceTierStatement.get(workspaceId, parsedTier),
+              CountRowParser,
+              "memory entry count row"
+            );
+      return row?.total ?? 0;
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to count memory entries for workspace ${workspaceId}.`,
         error
       );
@@ -144,32 +169,33 @@ export class MemoryEntryReadQueries {
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
 
     try {
-      const rows = this.statements.findByRunIdPagedStatement.all(
-        runId,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findByRunIdPagedStatement.all(runId, parsedPage.limit, parsedPage.offset),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to list memory entries for run ${runId}.`, error);
+      throw wrapMemoryEntryQueryError(`Failed to list memory entries for run ${runId}.`, error);
     }
   }
 
   public async findByRunIdAll(runId: string): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      const rows = this.statements.findByRunIdStatement.all(runId) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(this.statements.findByRunIdStatement.all(runId), MemoryEntryRowParser, "memory entry row");
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to list all memory entries for run ${runId}.`, error);
+      throw wrapMemoryEntryQueryError(`Failed to list all memory entries for run ${runId}.`, error);
     }
   }
 
   public async countByRunId(runId: string): Promise<number> {
     try {
-      const row = this.statements.countByRunIdStatement.get(runId) as CountRow | undefined;
-      return readCount(row);
+      return parseOptionalRow(
+        this.statements.countByRunIdStatement.get(runId),
+        CountRowParser,
+        "memory entry count row"
+      )?.total ?? 0;
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to count memory entries for run ${runId}.`, error);
+      throw wrapMemoryEntryQueryError(`Failed to count memory entries for run ${runId}.`, error);
     }
   }
 
@@ -182,16 +208,18 @@ export class MemoryEntryReadQueries {
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
 
     try {
-      const rows = this.statements.findByDimensionHotPagedStatement.all(
-        workspaceId,
-        parsedDimension,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findByDimensionHotPagedStatement.all(
+          workspaceId,
+          parsedDimension,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to list memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
         error
       );
@@ -205,11 +233,13 @@ export class MemoryEntryReadQueries {
     const parsedDimension = parseMemoryDimension(dimension);
 
     try {
-      const rows = this.statements.findByDimensionHotStatement.all(workspaceId, parsedDimension) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findByDimensionHotStatement.all(workspaceId, parsedDimension),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to list all memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
         error
       );
@@ -220,11 +250,13 @@ export class MemoryEntryReadQueries {
     const parsedDimension = parseMemoryDimension(dimension);
 
     try {
-      const row = this.statements.countByDimensionHotStatement.get(workspaceId, parsedDimension) as CountRow | undefined;
-      return readCount(row);
+      return parseOptionalRow(
+        this.statements.countByDimensionHotStatement.get(workspaceId, parsedDimension),
+        CountRowParser,
+        "memory entry count row"
+      )?.total ?? 0;
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to count memory entries for workspace ${workspaceId} and dimension ${parsedDimension}.`,
         error
       );
@@ -240,16 +272,18 @@ export class MemoryEntryReadQueries {
     const parsedPage = parseMemoryEntryPage(page ?? DEFAULT_MEMORY_ENTRY_PAGE);
 
     try {
-      const rows = this.statements.findByScopeClassHotPagedStatement.all(
-        workspaceId,
-        parsedScopeClass,
-        parsedPage.limit,
-        parsedPage.offset
-      ) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findByScopeClassHotPagedStatement.all(
+          workspaceId,
+          parsedScopeClass,
+          parsedPage.limit,
+          parsedPage.offset
+        ),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to list memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
         error
       );
@@ -263,11 +297,13 @@ export class MemoryEntryReadQueries {
     const parsedScopeClass = parseScopeClass(scopeClass);
 
     try {
-      const rows = this.statements.findByScopeClassHotStatement.all(workspaceId, parsedScopeClass) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findByScopeClassHotStatement.all(workspaceId, parsedScopeClass),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to list all memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
         error
       );
@@ -278,11 +314,13 @@ export class MemoryEntryReadQueries {
     const parsedScopeClass = parseScopeClass(scopeClass);
 
     try {
-      const row = this.statements.countByScopeClassHotStatement.get(workspaceId, parsedScopeClass) as CountRow | undefined;
-      return readCount(row);
+      return parseOptionalRow(
+        this.statements.countByScopeClassHotStatement.get(workspaceId, parsedScopeClass),
+        CountRowParser,
+        "memory entry count row"
+      )?.total ?? 0;
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to count memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
         error
       );
@@ -370,15 +408,24 @@ export class MemoryEntryReadQueries {
     return await this.dynamicQueries.findByEvidenceRefs(workspaceId, evidenceObjectIds);
   }
 
+  public async findBoundEvidenceRefs(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]> {
+    return await this.dynamicQueries.findBoundEvidenceRefs(workspaceId, evidenceObjectIds);
+  }
+
   public async findLowActivityActiveMemories(
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      const rows = this.statements.findLowActivityActiveMemoriesStatement.all(workspaceId) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findLowActivityActiveMemoriesStatement.all(workspaceId),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to find low-activity active memories for workspace ${workspaceId}.`,
         error
       );
@@ -389,11 +436,13 @@ export class MemoryEntryReadQueries {
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      const rows = this.statements.findTombstonedMemoriesStatement.all(workspaceId) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findTombstonedMemoriesStatement.all(workspaceId),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to find tombstoned memories for workspace ${workspaceId}.`,
         error
       );
@@ -404,11 +453,13 @@ export class MemoryEntryReadQueries {
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      const rows = this.statements.findDormantMemoriesStatement.all(workspaceId) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findDormantMemoriesStatement.all(workspaceId),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to find dormant memories for workspace ${workspaceId}.`,
         error
       );
@@ -419,11 +470,13 @@ export class MemoryEntryReadQueries {
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     try {
-      const rows = this.statements.findTombstonedWithDispositionStatement.all(workspaceId) as MemoryEntryRow[];
-      return rows.map((row) => parseMemoryEntryRow(row));
+      return parseRows(
+        this.statements.findTombstonedWithDispositionStatement.all(workspaceId),
+        MemoryEntryRowParser,
+        "memory entry row"
+      );
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
+      throw wrapMemoryEntryQueryError(
         `Failed to find tombstoned-with-disposition memories for workspace ${workspaceId}.`,
         error
       );
@@ -432,6 +485,9 @@ export class MemoryEntryReadQueries {
 
 }
 
-function readCount(row: CountRow | undefined): number {
-  return row === undefined ? 0 : Number(row.total);
+function wrapMemoryEntryQueryError(message: string, error: unknown): StorageError {
+  if (error instanceof StorageError) {
+    return error;
+  }
+  return new StorageError("QUERY_FAILED", message, error);
 }

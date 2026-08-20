@@ -1,6 +1,7 @@
 import { StorageTier } from "@do-soul/alaya-protocol";
 import { parseRecallRuntimeConfigFromEnv, type RecallRuntimeConfig } from "./recall-runtime-config.js";
 import { CORE_CONFIG_ENV_KEYS } from "./core-config-environment.js";
+import { parseEnvOptionalNumber } from "./env-value.js";
 
 export interface EmbeddingRuntimeConfig {
   readonly backfillConcurrency: number | undefined;
@@ -26,12 +27,13 @@ const VALID_EMBEDDING_TIERS: readonly StorageTier[] = [
 
 const DEFAULT_EMBEDDING_RECALL_TIERS: readonly StorageTier[] = [StorageTier.HOT, StorageTier.WARM];
 
-function readOptionalPositiveInt(raw: string | undefined): number | undefined {
-  if (raw === undefined) {
-    return undefined;
+function readOptionalPositiveInt(raw: string | undefined, key: string): number | undefined {
+  const value = parseEnvOptionalNumber(raw, key);
+  if (value === undefined) return undefined;
+  if (value <= 0) {
+    throw new Error(`${key} must be a positive number`);
   }
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+  return Math.floor(value);
 }
 
 export function parseCoreConfigFromEnv(
@@ -41,9 +43,15 @@ export function parseCoreConfigFromEnv(
   return Object.freeze({
     recall: parseRecallRuntimeConfigFromEnv(env),
     embedding: Object.freeze({
-      backfillConcurrency: readOptionalPositiveInt(env[embeddingKeys.backfillConcurrency]),
+      backfillConcurrency: readOptionalPositiveInt(
+        env[embeddingKeys.backfillConcurrency],
+        embeddingKeys.backfillConcurrency
+      ),
       recallTiersRaw: env[embeddingKeys.recallTiers],
-      workspaceScanCap: readOptionalPositiveInt(env[embeddingKeys.workspaceScanCap])
+      workspaceScanCap: readOptionalPositiveInt(
+        env[embeddingKeys.workspaceScanCap],
+        embeddingKeys.workspaceScanCap
+      )
     }),
     pathGraph: Object.freeze({
       pathrelContentStrength: env[CORE_CONFIG_ENV_KEYS.pathGraph.contentStrength]

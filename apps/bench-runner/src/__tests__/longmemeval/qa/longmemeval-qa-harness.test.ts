@@ -1,19 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateQaVerdicts,
   buildQaAnswerContext,
   judgeIsCorrect,
   scoreQaQuestion,
   type QaQuestionVerdict
-} from "../../../longmemeval/qa/qa-harness.js";
-import type { QaChatFn } from "../../../longmemeval/qa/qa-chat.js";
+} from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import {
   QA_ENV_API_KEY,
   QA_ENV_MODEL,
   QA_ENV_PROVIDER_URL,
+  QaChatError,
   createGardenChatFn,
   resolveQaChatConfig
-} from "../../../longmemeval/qa/qa-chat.js";
+} from "../../../bench/qa/qa-chat.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 // A fake chat fn that records every (system,user) call and replays scripted
 // replies. Zero network, zero cost — the whole point of the --qa unit gate.
@@ -272,40 +278,43 @@ describe("aggregateQaVerdicts", () => {
 describe("resolveQaChatConfig (env gating)", () => {
   it("resolves url/key/model from env", () => {
     const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test",
-      [QA_ENV_MODEL]: "gpt-5.4-nano"
+      [QA_ENV_MODEL]: "qa-answer-model"
     } as NodeJS.ProcessEnv);
-    expect(config.url).toBe("https://yunwu.ai/v1");
+    expect(config.url).toBe("https://provider.example/v1");
     expect(config.apiKey).toBe("sk-test");
-    expect(config.model).toBe("gpt-5.4-nano");
+    expect(config.model).toBe("qa-answer-model");
   });
 
-  it("defaults the model when unset", () => {
-    const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+  it("requires an explicit QA model", () => {
+    expect(() => resolveQaChatConfig({
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test"
-    } as NodeJS.ProcessEnv);
-    expect(config.model).toBe("gpt-5.4-nano");
+    } as NodeJS.ProcessEnv)).toThrow(/ALAYA_QA_MODEL/u);
   });
 
-  it("prefers the QA model override over the base model (extraction stays on base)", () => {
+  it("does not inherit the extraction model", () => {
     const config = resolveQaChatConfig({
-      [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1",
+      [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
       [QA_ENV_API_KEY]: "sk-test",
-      [QA_ENV_MODEL]: "gpt-5.4-nano",
-      OFFICIAL_API_GARDEN_QA_MODEL: "gpt-4.1"
+      [QA_ENV_MODEL]: "qa-answer-model",
+      OFFICIAL_API_GARDEN_MODEL: "extraction-model"
     } as NodeJS.ProcessEnv);
-    expect(config.model).toBe("gpt-4.1");
+    expect(config.model).toBe("qa-answer-model");
   });
 
   it("throws when url or key is missing (fail-loud, no silent degrade)", () => {
     expect(() =>
-      resolveQaChatConfig({ [QA_ENV_API_KEY]: "sk-test" } as NodeJS.ProcessEnv)
+      resolveQaChatConfig({
+        [QA_ENV_API_KEY]: "sk-test",
+        [QA_ENV_MODEL]: "qa-answer-model"
+      } as NodeJS.ProcessEnv)
     ).toThrow(/PROVIDER_URL/u);
     expect(() =>
       resolveQaChatConfig({
-        [QA_ENV_PROVIDER_URL]: "https://yunwu.ai/v1"
+        [QA_ENV_PROVIDER_URL]: "https://provider.example/v1",
+        [QA_ENV_MODEL]: "qa-answer-model"
       } as NodeJS.ProcessEnv)
     ).toThrow(/API_KEY/u);
   });
@@ -320,3 +329,56 @@ describe("resolveQaChatConfig (env gating)", () => {
     expect(typeof fn).toBe("function");
   });
 });
+
+describe("createGardenChatFn provider execution", () => {
+  it("preserves the five-attempt policy for declared transient statuses", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(new Response("busy", { status: 409 }))
+      .mockResolvedValueOnce(qaChatResponse("answer"));
+    const pending = createGardenChatFn(qaConfig())("system", "user");
+
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBe("answer");
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it("maps exhausted transient transport to QaChatError", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    const pending = createGardenChatFn(qaConfig())("system", "user");
+    const assertion = expect(pending).rejects.toBeInstanceOf(QaChatError);
+
+    await vi.runAllTimersAsync();
+
+    await assertion;
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps nonretryable HTTP failure plain and performs one call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("unauthorized", { status: 401 })
+    );
+    const error = await createGardenChatFn(qaConfig())("system", "user")
+      .then(() => null, (cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(QaChatError);
+    expect((error as Error).message).toBe("garden chat HTTP 401");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+});
+
+function qaConfig() {
+  return { url: "https://provider.example/v1", apiKey: "sk-test", model: "qa-model" };
+}
+
+function qaChatResponse(content: string): Response {
+  return new Response(JSON.stringify({
+    choices: [{ message: { content }, finish_reason: "stop" }]
+  }), { headers: { "content-type": "application/json" } });
+}

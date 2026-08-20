@@ -270,7 +270,7 @@ export type FullGoldDeliveryContribution = z.infer<
   typeof FullGoldDeliveryContributionSchema
 >;
 
-const FullGoldCoverageSchema = z
+const FullGoldCoverageSliceSchema = z
   .object({
     gold_bearing_questions: z.number().int().nonnegative(),
     full_gold_at_5: RatioSchema,
@@ -285,6 +285,12 @@ const FullGoldCoverageSchema = z
     // Optional so older kpi.json records stay schema-valid; new LongMemEval
     // runs populate it from bench-runner delivery diagnostics.
     delivery_contribution: FullGoldDeliveryContributionSchema.optional()
+  })
+  .strict();
+
+const FullGoldCoverageSchema = FullGoldCoverageSliceSchema
+  .extend({
+    memory_only: FullGoldCoverageSliceSchema.optional()
   })
   .strict();
 export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;
@@ -326,6 +332,7 @@ const KpiCoreSchema = z.object({
   provider_pending_rate: RatioSchema.optional(),
   provider_failed_rate: RatioSchema.optional(),
   provider_not_requested_rate: RatioSchema.optional(),
+  query_embedding_unusable_rate: RatioSchema.optional(),
   embedding_vector_cache_ready_rate: RatioSchema.optional(),
   query_embedding_cache_ready_rate: RatioSchema.optional(),
   latency_ms_p50: z.number().nonnegative(),

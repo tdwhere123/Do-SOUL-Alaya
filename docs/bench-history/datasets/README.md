@@ -3,7 +3,7 @@
 Each `<dataset>.meta.json` here pins the exact bytes a public benchmark
 was scored against. The bench-runner's `fetch-longmemeval` verb warms or
 refreshes the local JSON cache and writes a scratch meta file; the pinned
-checksum is enforced by `loadDataset` and by the sharded full-bench
+identity is enforced by `loadDataset` and by the sharded full-bench
 preflight before scoring. That split keeps cache warmup cheap while still
 making `alaya-bench-runner longmemeval` reproducible on another machine.
 
@@ -15,17 +15,32 @@ making `alaya-bench-runner longmemeval` reproducible on another machine.
   "source_url": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json",
   "sha256": "<filled by fetch>",
   "fetched_at": "<ISO>",
-  "size_bytes": 0
+  "size_bytes": 0,
+  "question_count": 0
 }
 ```
 
+For LongMemEval, the load-bearing committed pin fields are snake_case
+`sha256`, `size_bytes`, and `question_count`. The loader streams the local
+dataset bytes and fails closed if any of those three values differ from the
+committed meta file. Other fields, such as `name`, `source_url`,
+`upstream_filename`, `fetched_at`, `first_pinned_at`, and
+`pinned_by_commit`, are audit context.
+
+The scratch meta file written next to the local cache by
+`fetch-longmemeval` is not a committed pin and does not replace this
+directory's meta files. It exists only to describe the local warm cache; the
+scoring path still reads this directory's committed pin before accepting
+cached bytes.
+
 ## Files
 
-- `longmemeval_oracle.meta.json` — populated on the first `alaya-bench-runner
-  fetch-longmemeval --variant oracle` run; commit alongside the kpi entry
-  whose numbers were computed against it.
-- `longmemeval_s.meta.json` — same shape, `--variant s`.
-- `longmemeval_m.meta.json` — same shape, `--variant m`.
+- `longmemeval_oracle.meta.json` — committed oracle dataset identity.
+- `longmemeval_s.meta.json` — committed small dataset identity.
+- `longmemeval_m.meta.json` — committed medium dataset identity.
+
+Update one of these files only as an intentional dataset-pin change; a fetch
+updates the local scratch metadata, not the committed identity.
 
 ## Why pin checksum
 

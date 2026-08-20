@@ -15,7 +15,7 @@ import {
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import {
   buildEffectiveRecallConfigIdentity
-} from "../../../longmemeval/provenance/effective-recall-config.js";
+} from "../../../bench/provenance/effective-recall-config.js";
 
 const roots: string[] = [];
 let daemon: BenchDaemonHandle | undefined;
@@ -40,7 +40,6 @@ const STALE_TREATMENT_KEYS = [
 
 const POST_LAUNCH_ENV_DRIFT = Object.freeze({
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
-  ALAYA_RECALL_SEMANTIC_POST_LAUNCH_WEIGHT: "0.91",
   ALAYA_EMBEDDING_RECALL_TIERS: "cold",
   ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP: "777",
   ALAYA_PATHREL_CONTENT_STRENGTH: "true",
@@ -108,7 +107,7 @@ describe("effective bench daemon environment", () => {
     expect(policy.coarse_filter.semantic_supplement)
       .not.toHaveProperty("injection_similarity_floor");
     expect(policy.fine_assessment.budgets.max_total_tokens).toBe(2_000);
-    expect(policy.fine_assessment.max_candidates).toBe(200);
+    expect(policy.fine_assessment).not.toHaveProperty("max_candidates");
     expect(policy.coarse_filter.precomputed_rank.max_candidates).toBeGreaterThan(0);
   });
 
@@ -135,7 +134,7 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ),
-      ALAYA_RECALL_SOURCE_REF_ROBUST: "true",
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "false",
       ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true",
       ALAYA_EMBEDDING_PROVIDER: "local_onnx"
     });
@@ -169,7 +168,7 @@ describe("effective bench daemon environment", () => {
         "do-soul-alaya",
         "models"
       ));
-      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBe("true");
+      expect(process.env.ALAYA_RECALL_SOURCE_REF_ROBUST).toBe("false");
       await daemon.shutdown();
       daemon = undefined;
       expect(process.env.HOME).toBe(operatorHome);
@@ -264,7 +263,8 @@ describe("effective bench daemon environment", () => {
         tokenFactory: () => "test-review-token"
       });
       const claimed = parseRecallRuntimeConfigFromEnv(launch.environment);
-      expect(claimed.confSliceCompatibility).toBe(false);
+      expect(claimed).not.toHaveProperty("confSliceCompatibility");
+      expect(launch.environment.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY).toBeUndefined();
       expect(launch.environment.ALAYA_RECALL_D2Q).toBeUndefined();
       expect(launch.environment.ALAYA_LOCAL_EMBEDDING_MODEL).toBeUndefined();
       expect(launch.environment.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK).toBeUndefined();
@@ -274,8 +274,7 @@ describe("effective bench daemon environment", () => {
         embeddingMode: "disabled",
         embeddingProviderKind: "local_onnx"
       }, launch);
-      expect(getCoreConfig().recall.confSliceCompatibility)
-        .toBe(claimed.confSliceCompatibility);
+      expect(getCoreConfig().recall).not.toHaveProperty("confSliceCompatibility");
       await expect(
         daemon.runtime.services.embeddingStatusService.getStatus(daemon.workspaceId)
       ).resolves.toMatchObject({ embedding_enabled: false, model_id: null });
@@ -378,4 +377,50 @@ describe("effective bench daemon environment", () => {
       restoreEnvironment(savedCoreEnv, POST_LAUNCH_ENV_DRIFT_KEYS);
     }
   });
+
+  it("attests the effective rule-only reconciliation basis", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "bench-reconciliation-basis-"));
+    roots.push(dataDir);
+    const launch = createRuleOnlyLaunch(dataDir);
+
+    daemon = await startBenchDaemon({
+      dataDirRoot: dataDir,
+      embeddingMode: "disabled",
+      embeddingProviderKind: "local_onnx",
+      expectedReconciliationBasis: "rule_only"
+    }, launch);
+
+    expect(daemon).toBeDefined();
+  });
+
+  it("closes startup before workload when the expected reconciliation basis mismatches", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "bench-reconciliation-mismatch-"));
+    roots.push(dataDir);
+    const launch = createRuleOnlyLaunch(dataDir);
+
+    await expect(startBenchDaemon({
+      dataDirRoot: dataDir,
+      embeddingMode: "disabled",
+      embeddingProviderKind: "local_onnx",
+      expectedReconciliationBasis: "garden_llm"
+    }, launch)).rejects.toThrow(
+      "expected reconciliation basis garden_llm but daemon selected rule_only"
+    );
+    await expect(access(launch.configDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
+
+function createRuleOnlyLaunch(dataDir: string) {
+  return createBenchDaemonLaunchConfig({
+    dataDir,
+    embeddingMode: "disabled",
+    embeddingProviderKind: "local_onnx",
+    ambientEnv: {
+      ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
+      ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
+      ALAYA_OFFICIAL_GARDEN_SECRET_REF: "",
+      ALAYA_OFFICIAL_GARDEN_API_KEY: ""
+    },
+    tokenFactory: () => "test-review-token"
+  });
+}

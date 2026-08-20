@@ -1,4 +1,5 @@
 import { buildRecallDiagnostics, computeRecallTokenEconomy } from "./diagnostics.js";
+import { queryConditionParityView } from "./query-condition-parity.js";
 import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
 import type { CoarseStageResult } from "./recall-service-runner-coarse.js";
 import type {
@@ -13,18 +14,22 @@ import type {
   RecallResult,
   RecallTokenEconomy
 } from "./recall-service-types.js";
+import type { SelectGammaSynthesisStatus } from
+  "../delivery/select-gamma/synthesis-adapter.js";
 
 export function buildRecallResult(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   assessment: RecallAssessmentStageResult,
   manifested: RecallManifestedResult,
-  degradationReasons: ReadonlySet<RecallDegradationReason>
+  degradationReasons: ReadonlySet<RecallDegradationReason>,
+  synthesis: SelectGammaSynthesisStatus
 ): RecallResult {
   const phaseLatencyMs = buildPhaseLatencyMs(coarse, assessment, manifested);
   const tokenEconomy = buildTokenEconomy(assessment, coarse.combinedCoarseCandidates.length, manifested);
   return Object.freeze({
     candidates: manifested.candidates,
+    synthesis,
     active_constraints: prepared.activeConstraints.constraints,
     active_constraints_count: prepared.activeConstraints.total_count,
     total_scanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
@@ -34,13 +39,42 @@ export function buildRecallResult(
     working_projection: null,
     diagnostics: buildRecallDiagnostics({
       queryProbes: prepared.queryProbes,
+      queryEntityExtraction: prepared.queryEntityExtraction,
+      queryFactFrameExtraction:
+        assessment.supplementaryData.queryFactFrameExtraction,
+      queryOpenSemanticFactorFormation:
+        assessment.supplementaryData.queryOpenSemanticFactorFormation,
+      queryOpenSemanticFactorCompletenessReceipt:
+        assessment.supplementaryData.queryOpenSemanticFactorCompletenessReceipt,
+      openSemanticFactorCompatibilityTrace:
+        assessment.supplementaryData.openSemanticFactorCompatibilityTrace,
+      openSemanticFactorComposition:
+        assessment.supplementaryData.openSemanticFactorComposition,
+      openSemanticFactorActivation:
+        assessment.supplementaryData.openSemanticFactorActivation,
+      retrievalFieldCaptures: assessment.retrievalFieldCaptures,
+      retrievalFieldRefinementReceipts:
+        assessment.supplementaryData.retrievalFieldRefinementReceipts,
+      fieldRefinementStopCertificate:
+        assessment.finalAssessment.fieldRefinementStopCertificate,
+      queryCondition: queryConditionParityView(prepared.queryCondition),
+      fieldProjectionTrace: Object.freeze({
+        generation_id: prepared.queryCondition.generation_id,
+        condition_digest: prepared.queryCondition.identity,
+        ...prepared.fieldProjectionSelection
+      }),
       querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
+      answerShapePlan: prepared.answerShapePlan,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
       preBudgetCount: manifested.candidateDiagnostics.length,
       deliveredCount: manifested.candidates.length,
+      ...(assessment.packetPlanTrace === undefined
+        ? {}
+        : { packetPlanTrace: assessment.packetPlanTrace }),
       embeddingProviderStatus: assessment.embeddingProviderStatus,
       embeddingSupplementStatus: assessment.embeddingSupplementStatus,
+      evidenceEmbeddingScoring: assessment.evidenceEmbeddingScoring,
       providerDegradationReason: assessment.providerDegradationReason,
       answerRerankDiagnostics: assessment.answerRerankDiagnostics,
       degradationReasons: [...degradationReasons],
@@ -118,6 +152,8 @@ function buildTokenEconomy(
     finePriorityOverflowCount: assessment.finalAssessment.finePriorityOverflowCount,
     preBudgetCandidates: manifested.candidateDiagnostics,
     embeddingInferenceCalls:
-      assessment.embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls
+      assessment.embeddingCoarseInjection.embeddingInferenceCalls +
+      preparedEmbeddingInferenceCalls +
+      assessment.evidenceEmbeddingScoring.inferenceCalls
   });
 }

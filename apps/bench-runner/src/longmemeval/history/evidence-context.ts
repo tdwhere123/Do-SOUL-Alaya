@@ -6,9 +6,9 @@ import {
 import {
   loadLongMemEvalReleaseEvidenceFromAuthority,
   type LongMemEvalReleaseEvidenceAuthority
-} from "@do-soul/alaya-eval/internal";
+} from "@do-soul/alaya-eval/authority";
 import { validateLongMemEvalReleaseDiagnostics } from
-  "../diagnostics/release-evidence-validator.js";
+  "../../bench/diagnostics/release-evidence-validator.js";
 
 export function createLongMemEvalHistoryLayout(input: {
   readonly historyRoot: string;

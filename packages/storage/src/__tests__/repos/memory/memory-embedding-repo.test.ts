@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
@@ -25,18 +25,18 @@ afterEach(() => {
 });
 
 describe("Memory embedding storage repo", () => {
-  it("applies migration 052, exports the repo, and persists embeddings keyed by memory object id", async () => {
+  it("exports the repo and persists embeddings keyed by memory object id", async () => {
     const storage = (await import("../../../index.js")) as Record<string, unknown>;
     const { database, workspaceId, repo } = await createRepoContext();
 
     expect(storage.SqliteMemoryEmbeddingRepo).toBeTypeOf("function");
 
     const versions = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 52")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
     const columns = getColumnNames(database, "memory_embeddings");
 
-    expect(versions.map((entry) => entry.version)).toEqual([52]);
+    expect(versions.map((entry) => entry.version)).toEqual([8]);
     expect(columns).toEqual([
       "object_id",
       "workspace_id",
@@ -81,17 +81,48 @@ describe("Memory embedding storage repo", () => {
       -0.5,
       0.75
     ]);
-    await expect(repo.listByWorkspace(workspaceId)).resolves.toEqual([persisted]);
+    await expect(repo.listByWorkspace(workspaceId, { limit: 10 })).resolves.toEqual([persisted]);
   });
 
-  it("allows migration 052 DDL to be re-run without failing on existing objects", async () => {
-    const { database } = await createRepoContext();
-    const migrationSql = readFileSync(
-      new URL("../../../migrations/052-memory-embeddings.sql", import.meta.url),
-      "utf8"
+  it("rejects unfiltered listByWorkspace without a positive limit", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    await expect(repo.listByWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+    await expect(repo.listByWorkspace(workspaceId, { limit: 0 })).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+  });
+
+  it("lists eligible workspace embedding ids without hydrating blobs", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "11111111-1111-4111-8111-111111111111",
+        workspace_id: workspaceId,
+        embedding: new Float32Array([1, 0, 0])
+      })
+    );
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: "22222222-2222-4222-8222-222222222222",
+        workspace_id: workspaceId,
+        embedding: new Float32Array([0, 1, 0])
+      })
     );
 
-    expect(() => database.connection.exec(migrationSql)).not.toThrow();
+    const ids = await repo.listIdsByWorkspace(workspaceId, {
+      tierFilter: ["hot"],
+      providerKind: "openai",
+      modelId: "text-embedding-3-small",
+      schemaVersion: 1,
+      limit: 10
+    });
+    expect(ids).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222"
+    ]);
+    expect(ids.every((objectId) => typeof objectId === "string")).toBe(true);
   });
 
   it("updates existing rows in place and lists only requested object ids", async () => {
@@ -195,9 +226,12 @@ describe("Memory embedding storage repo", () => {
     });
     expect(wrongModelRows).toEqual([]);
 
-    // No filter falls back to the original behavior: returns both rows.
-    const unfiltered = await repo.listByWorkspace(workspaceId);
-    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+    // No filter without a positive limit is rejected (unbounded blob hydrate footgun).
+    await expect(repo.listByWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+    const capped = await repo.listByWorkspace(workspaceId, { limit: 10 });
+    expect(capped.map((row) => row.object_id).sort()).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
     ]);
@@ -233,7 +267,7 @@ describe("Memory embedding storage repo", () => {
       "22222222-2222-4222-8222-222222222222"
     ]);
 
-    const unfiltered = await repo.listByWorkspace(workspaceId);
+    const unfiltered = await repo.listByWorkspace(workspaceId, { limit: 10 });
     expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
@@ -273,11 +307,9 @@ describe("Memory embedding storage repo", () => {
     });
     expect(filtered.map((row) => row.object_id)).toEqual([activeId]);
 
-    const unfiltered = await repo.listByWorkspace(workspaceId);
+    const unfiltered = await repo.listByWorkspace(workspaceId, { limit: 10 });
     expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
-      activeId,
-      dormantId,
-      tombstonedId
+      activeId
     ]);
   });
 
@@ -469,6 +501,26 @@ describe("Memory embedding storage repo", () => {
     await expect(repo.findByObjectId(objectId)).rejects.toMatchObject({
       code: "VALIDATION_FAILED"
     });
+  });
+
+  it("existsAnyByObjectIds probes without requiring blob hydration", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    const presentId = "11111111-1111-4111-8111-111111111111";
+    const absentId = "22222222-2222-4222-8222-222222222222";
+
+    await expect(repo.existsAnyByObjectIds(workspaceId, [])).resolves.toBe(false);
+    await expect(repo.existsAnyByObjectIds(workspaceId, [absentId])).resolves.toBe(false);
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: presentId,
+        workspace_id: workspaceId,
+        embedding: new Float32Array([0.1, 0.2, 0.3])
+      })
+    );
+
+    await expect(repo.existsAnyByObjectIds(workspaceId, [presentId, absentId])).resolves.toBe(true);
+    await expect(repo.existsAnyByObjectIds("workspace-other", [presentId])).resolves.toBe(false);
   });
 
 });

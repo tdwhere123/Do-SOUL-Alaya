@@ -45,6 +45,22 @@ export interface RecallTierWindowResult {
   readonly truncated: boolean;
 }
 
+export interface RecallEventTimeWindowQuery {
+  readonly workspaceId: string;
+  readonly tier: StorageTier;
+  readonly startTime: string;
+  readonly endTime: string;
+  readonly limit: number;
+}
+
+export interface RecallActivationTopKQuery {
+  readonly workspaceId: string;
+  readonly tier: StorageTier;
+  readonly limit: number;
+  readonly min_activation_score?: number | null;
+  readonly exclude_object_ids?: readonly string[];
+}
+
 export interface MemoryEntryRepoTierUpdateInput {
   readonly objectId: string;
   readonly workspaceId: string;
@@ -62,6 +78,28 @@ export interface MemoryEntryKeywordSearchResult {
   readonly normalized_rank: number;
   // invariant: trigram_rank marks substring/CJK hits for recall's trigram_fts stream.
   readonly trigram_rank?: number;
+  // invariant: object_key_rank marks hits that Key FTS admitted; not a new scoring stream.
+  readonly object_key_rank?: number;
+}
+
+export interface MemoryEntryKeywordLaneReceipt {
+  readonly lane: "exact" | "porter" | "trigram";
+  readonly status: "complete" | "truncated" | "unavailable" | "ineligible";
+  readonly depth: number;
+  readonly observations: readonly Readonly<
+    MemoryEntryKeywordSearchResult & { readonly rank: number; readonly source_id?: string }
+  >[];
+  readonly unseen_upper_bound: number | null;
+}
+
+export interface MemoryEntryKeywordFieldResult {
+  readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
+  readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
+  readonly refinement_levels?: readonly Readonly<{
+    readonly requested_depth: number;
+    readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
+    readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
+  }>[];
 }
 
 export interface MemoryEntryRepo {
@@ -89,6 +127,12 @@ export interface MemoryEntryRepo {
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   findRecallTierWindow(query: RecallTierWindowQuery): Promise<Readonly<RecallTierWindowResult>>;
+  findRecallActivationTopK(
+    query: RecallActivationTopKQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findByEventTimeWindow(
+    query: RecallEventTimeWindowQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceIdAll(
     workspaceId: string,
     tier?: StorageTier
@@ -158,6 +202,13 @@ export interface MemoryEntryRepo {
     queryText: string,
     limit: number
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,
     queryText: string,
@@ -184,12 +235,24 @@ export interface MemoryEntryRepo {
     limit: number,
     tier: StorageTier
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
-  // see also: packages/storage/src/migrations/005-evidence-capsules.sql
-  // see also: packages/storage/src/migrations/068-evidence-capsule-fts.sql
+  searchByAnchorField?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
+  // see also: packages/storage/src/migrations/001-runtime-foundation.sql
+  // see also: packages/storage/src/migrations/003-memory-fts-and-garden.sql
   findByEvidenceRefs?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findBoundEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]>;
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;

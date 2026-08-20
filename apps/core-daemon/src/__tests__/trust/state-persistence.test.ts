@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
+  RecallContextEventType,
   RunMode,
   RunState,
   ScopeClass,
@@ -21,7 +22,6 @@ import {
   WorkspaceKind,
   WorkspaceState,
   type MemoryEntry,
-  type SoulMemorySearchResponse,
   type TrustSummary
 } from "@do-soul/alaya-protocol";
 
@@ -30,6 +30,7 @@ import {
   createGardenBackgroundDataPorts,
   getCurrentSchemaSummary,
   SqliteMemoryEntryRepo,
+  SqliteEventLogRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
@@ -39,6 +40,7 @@ import { createAlayaCliBridge } from "../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../cli/register.js";
 
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
 
 const tempDirs: string[] = [];
 
@@ -69,15 +71,15 @@ async function callRuntimeMemoryTool<TOutput = unknown>(
       workspaceId: "workspace-1",
       runId: "run-1",
       agentTarget: "codex",
-      sessionId: "trust-state-persistence-test-session",
+      sessionId: "run-1",
       surfaceId: "gate4-proof"
     }
   });
 
-  expect(result).toMatchObject({ ok: true, tool_name: toolName });
   if (!result.ok) {
-    throw new Error(result.error.message);
+    throw new Error(`${toolName} failed [${result.error.code}]: ${result.error.message}`);
   }
+  expect(result).toMatchObject({ ok: true, tool_name: toolName });
 
   return result.output as TOutput;
 }
@@ -131,6 +133,15 @@ async function seedRecallFixture(dataDir: string, memory: MemoryEntry = createMe
       current_surface_id: null
     });
     await memoryRepo.create(memory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      evidenceId: memory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: memory.content,
+      recordedAt: memory.created_at
+    });
   } finally {
     database.close();
   }
@@ -203,7 +214,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     scope_class: ScopeClass.PROJECT,
     content: "Use pnpm for all workspace commands.",
     domain_tags: ["tooling", "workflow"],
-    evidence_refs: ["gate4-proof"],
+    evidence_refs: ["11111111-1111-4111-8111-111111111102"],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
@@ -262,7 +273,7 @@ afterEach(async () => {
 
 describe("trust state SQL persistence", () => {
 
-  it("persists delivered and used counts across daemon restart after runtime recall and usage proof", async () => {
+  it("persists bound delivery and usage telemetry across daemon restart", async () => {
     const dataDir = await createTempDataDir();
     const databasePath = join(dataDir, "alaya.db");
     setDataDir(dataDir);
@@ -272,23 +283,17 @@ describe("trust state SQL persistence", () => {
     let firstStatus: TrustSummary | null = null;
 
     try {
-      const recall = await callRuntimeMemoryTool<SoulMemorySearchResponse>(
-        firstRuntime,
-        "soul.recall",
-        {
-          query: "Use pnpm for all workspace commands.",
-          scope_class: ScopeClass.PROJECT,
-          dimension: MemoryDimension.PREFERENCE,
-          domain_tags: null,
-          max_results: 3
-        }
-      );
-      expect(recall.results.map((result) => result.object_id)).toEqual([
-        "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"
-      ]);
+      await firstRuntime.services.trustStateRecorder.recordDelivery({
+        delivery_id: "delivery-persistence",
+        agent_target: "codex",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        delivered_object_ids: ["70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"],
+        delivered_at: "2026-05-01T00:00:00.000Z"
+      });
 
       await callRuntimeMemoryTool(firstRuntime, "soul.report_context_usage", {
-        delivery_id: recall.delivery_id,
+        delivery_id: "delivery-persistence",
         usage_state: "used",
         used_object_ids: ["70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"],
         reason: "Used the recalled pnpm preference."
@@ -316,6 +321,21 @@ describe("trust state SQL persistence", () => {
       throw new Error("first daemon lifetime did not produce a trust status");
     }
 
+    const telemetryDatabase = initDatabase({ filename: databasePath });
+    try {
+      const telemetryEvents = await new SqliteEventLogRepo(telemetryDatabase).queryByType(
+        RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
+      );
+      expect(telemetryEvents).toHaveLength(1);
+      expect(telemetryEvents[0]).toMatchObject({
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        caused_by: "codex"
+      });
+    } finally {
+      telemetryDatabase.close();
+    }
+
     const secondRuntime = await createAlayaDaemonRuntime();
     try {
       const restartedStatus = await readCodexStatus(secondRuntime);
@@ -334,7 +354,7 @@ describe("trust state SQL persistence", () => {
     }
   }, INTEGRATION_TEST_TIMEOUT_MS);
 
-  it("refreshes reported cold memory in the caller workspace and keeps it out of Janitor demotion candidates", async () => {
+  it("records cold-memory usage without mutating memory or Janitor eligibility", async () => {
     const dataDir = await createTempDataDir();
     const databasePath = join(dataDir, "alaya.db");
     setDataDir(dataDir);
@@ -370,14 +390,15 @@ describe("trust state SQL persistence", () => {
       const memoryRepo = new SqliteMemoryEntryRepo(database);
       const updated = await memoryRepo.findById("70a0b18b-5f8b-4fd2-a1b0-97ce48113fca");
       expect(updated).toMatchObject({
-        storage_tier: StorageTier.HOT,
-        workspace_id: "workspace-1"
+        storage_tier: StorageTier.COLD,
+        activation_score: 0.1,
+        workspace_id: "workspace-1",
+        last_used_at: "2026-04-01T00:00:00.000Z",
+        last_hit_at: "2026-04-01T00:00:00.000Z"
       });
-      expect(Date.parse(updated?.last_used_at ?? "")).toBeGreaterThan(Date.parse("2026-04-01T00:00:00.000Z"));
-      expect(updated?.last_hit_at).toBe(updated?.last_used_at);
 
       const ports = createGardenBackgroundDataPorts(database, {
-        now: () => updated?.last_hit_at ?? "2026-05-01T00:00:00.000Z"
+        now: () => "2026-05-01T00:00:00.000Z"
       });
       await expect(
         ports.tieringPort.findHotDemotionCandidates("workspace-1", {

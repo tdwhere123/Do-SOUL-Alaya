@@ -33,6 +33,7 @@ it("applies coarse scope filters to all global-source candidates", async () => {
     ]);
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -105,6 +106,7 @@ it("applies min_activation_score and preserves full content for full-eligible gl
     };
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       projectMappingPort: {
         findByWorkspace: vi.fn(async () => []),
@@ -174,6 +176,7 @@ it("returns more candidates for analyze than build", async () => {
       { object_id: "memory-answer", normalized_rank: 1 }
     ]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,

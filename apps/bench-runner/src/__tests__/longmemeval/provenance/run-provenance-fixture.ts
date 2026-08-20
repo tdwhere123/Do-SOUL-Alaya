@@ -8,16 +8,16 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   buildLongMemEvalRunProvenance,
   buildLongMemEvalRunProvenanceSidecar
-} from "../../../longmemeval/provenance/run.js";
+} from "../../../bench/provenance/run.js";
 import {
   createLongMemEvalSelectionContract,
   selectionContractIdentity
-} from "../../../longmemeval/selection/contract.js";
-import { createStratifiedQuestionManifest } from "../../../longmemeval/selection/question-manifest.js";
+} from "../../../bench/selection/contract.js";
+import { createStratifiedQuestionManifest } from "../../../bench/selection/question-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 
 const EXTRACTION_CLOSURE = syntheticExtractionClosure({
@@ -39,7 +39,7 @@ export function registerRunProvenanceRootCleanup(): string[] {
 
 export async function createRunProvenanceFixture(roots: string[]) {
   const paths = await createRunProvenancePaths(roots);
-  await writeLocalModelArtifacts(paths.modelCacheRoot, paths.crossEncoderCacheRoot);
+  await writeLocalModelArtifacts(paths.modelCacheRoot);
   const authority = await createQuestionAuthority(paths.manifestPath);
   writeFixtureExtractionManifest(paths.extractionCacheRoot);
   const provenance = await buildLongMemEvalRunProvenance({
@@ -54,11 +54,13 @@ export async function createRunProvenanceFixture(roots: string[]) {
     evaluatedCount: 1,
     commitSha7: "05d98df",
     embeddingProviderLabel: "local_onnx:Xenova/test",
-    env: createRunProvenanceEnvironment(paths.modelCacheRoot, paths.crossEncoderCacheRoot),
+    env: createRunProvenanceEnvironment(paths.modelCacheRoot),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
+    measureGitState: stubDirtyGitState,
     datasetSha256: authority.manifest.dataset_sha256,
-    selection: authority.selection
+    selection: authority.selection,
+    reconciliationBasis: "rule_only"
   });
 
   return { ...paths, ...authority, provenance };
@@ -71,26 +73,16 @@ async function createRunProvenancePaths(roots: string[]) {
     root,
     manifestPath: join(root, "manifest.json"),
     extractionCacheRoot: join(root, "extraction-cache"),
-    modelCacheRoot: join(root, "models"),
-    crossEncoderCacheRoot: join(root, "cross-models")
+    modelCacheRoot: join(root, "models")
   };
 }
 
-async function writeLocalModelArtifacts(
-  modelCacheRoot: string,
-  crossEncoderCacheRoot: string
-): Promise<void> {
+async function writeLocalModelArtifacts(modelCacheRoot: string): Promise<void> {
   await mkdir(join(modelCacheRoot, "Xenova", "test"), { recursive: true });
-  await mkdir(join(crossEncoderCacheRoot, "Xenova", "reranker"), { recursive: true });
   await writeFile(join(modelCacheRoot, "Xenova", "test", "config.json"), "model-config", {
     encoding: "utf8",
     flag: "w"
   });
-  await writeFile(
-    join(crossEncoderCacheRoot, "Xenova", "reranker", "model.onnx"),
-    "cross-encoder-model",
-    "utf8"
-  );
 }
 
 async function createQuestionAuthority(manifestPath: string) {
@@ -168,21 +160,18 @@ export async function buildFixtureRunProvenanceSidecar(
     evaluatedCount: 1,
     commitSha7: "05d98df",
     embeddingProviderLabel: "local_onnx:Xenova/test",
-    env: createRunProvenanceEnvironment(
-      fixture.modelCacheRoot,
-      fixture.crossEncoderCacheRoot,
-      false
-    ),
+    env: createRunProvenanceEnvironment(fixture.modelCacheRoot, false),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
+    measureGitState: stubDirtyGitState,
     datasetSha256: fixture.manifest.dataset_sha256,
-    selection: fixture.selection
+    selection: fixture.selection,
+    reconciliationBasis: "rule_only"
   });
 }
 
 function createRunProvenanceEnvironment(
   modelCacheRoot: string,
-  crossEncoderCacheRoot: string,
   includeRedactionInputs = true
 ): NodeJS.ProcessEnv {
   return {
@@ -195,14 +184,10 @@ function createRunProvenanceEnvironment(
     OFFICIAL_API_GARDEN_MODEL: "cached-model",
     ALAYA_LOCAL_ONNX_THREADS: "2",
     ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
-    ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-    ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
-    ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
     ALAYA_EXP_ANSWERS_WITH_CAP: "3",
     ALAYA_RECALL_ANSWERS_WITH: "1",
-    ALAYA_RECALL_FACET_TAGS: "1",
     ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
-    ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
+    ALAYA_INGEST_RECONCILIATION_ENABLED: "1",
     ALAYA_CONFLICT_DETECTION_ENABLED: "0",
     ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
     ...(includeRedactionInputs ? {
@@ -218,6 +203,16 @@ export async function fakeExecutedDistIdentity() {
     sha256: "2".repeat(64),
     file_count: 17
   } as const;
+}
+
+async function stubDirtyGitState() {
+  return {
+    commitSha: "05d98df" + "0".repeat(33),
+    commitSha7: "05d98df",
+    worktreeStateSha256: "c".repeat(64),
+    worktreeStateAlgorithm: "sha256-worktree-state-v3" as const,
+    worktreeClean: false
+  };
 }
 
 export { EXTRACTION_CLOSURE };

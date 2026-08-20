@@ -24,7 +24,7 @@ export function buildLongMemEvalFixtureQuestion(
       [
         {
           role: "user",
-          content: `coelacanth depth fact ${id}: it swims very deep in the ocean.`,
+          content: `I completed coelacanth depth observation ${id} in the ocean.`,
           has_answer: true
         },
         { role: "assistant", content: "Acknowledged." }
@@ -53,6 +53,7 @@ export async function writeLongMemEvalFixtureDataset(input: {
     JSON.stringify({
       name: input.variant,
       sha256: sha,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
       question_count: input.questions.length
     }),
     "utf8"

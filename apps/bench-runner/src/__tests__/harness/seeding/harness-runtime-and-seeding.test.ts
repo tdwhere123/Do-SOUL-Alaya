@@ -21,8 +21,13 @@ import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemo
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
-import { writeExtractionCacheTestManifest } from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
+} from "../../../bench/compile-seed.js";
+import {
+  TEST_PROVIDER_COMPLETION_METADATA,
+  writeExtractionCacheTestManifest
+} from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
+import { withOpenSemanticFactorGraph } from
+  "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
@@ -124,6 +129,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           distilledFact: "Mira uses oat milk in coffee.",
           turnContent: "Mira uses oat milk in coffee.",
           evidenceRef: "answers-with-hq-q0",
+          sourceObservedAt: "2026-07-29T00:00:00.000Z",
           turnSeedIndex: 1,
           extractionProvider: "official_api_compile",
           productionRawPayload: {
@@ -294,8 +300,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                     assertion_id: 3
                   }
                 }
-              ]
-            })
+              ].map(withOpenSemanticFactorGraph)
+            }),
+            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
           })
         })
       });
@@ -404,8 +411,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                     assertion_id: 3
                   }
                 }
-              ]
-            })
+              ].map(withOpenSemanticFactorGraph)
+            }),
+            responseMetadata: TEST_PROVIDER_COMPLETION_METADATA
           })
         })
       });

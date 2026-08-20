@@ -1,4 +1,5 @@
 import {
+  PREFERENCE_FACT_MAX_CHARS,
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -25,9 +26,9 @@ export interface ReconciliationInput {
   readonly runId: string;
   readonly signalId: string;
   readonly incomingContent: string;
+  readonly incomingDimension: MemoryEntry["dimension"];
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
-  readonly incomingFacetTags?: MemoryEntry["facet_tags"];
 }
 
 export type ReconciliationMemoryProjectionFields = Pick<
@@ -287,7 +288,7 @@ export function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<strin
 }
 
 // invariant: NOOP audit content cap matches the distilled fact cap.
-export const AUDIT_DROPPED_CONTENT_MAX_CHARS = 500;
+export const AUDIT_DROPPED_CONTENT_MAX_CHARS = PREFERENCE_FACT_MAX_CHARS;
 
 export function auditDroppedContent(content: string): string {
   const trimmed = content.trim();
@@ -304,4 +305,26 @@ export function errorMessage(error: unknown): string {
     return cause === undefined ? error.message : `${error.message}: ${errorMessage(cause)}`;
   }
   return String(error);
+}
+
+export function compareCandidateContent(
+  leftContent: string,
+  rightContent: string,
+  leftObjectId?: string,
+  rightObjectId?: string
+): number {
+  const leftNormalized = normalizeForIdentity(leftContent);
+  const rightNormalized = normalizeForIdentity(rightContent);
+  const normalizedDiff = leftNormalized.localeCompare(rightNormalized);
+  if (normalizedDiff !== 0) {
+    return normalizedDiff;
+  }
+  const rawDiff = leftContent.localeCompare(rightContent);
+  if (rawDiff !== 0) {
+    return rawDiff;
+  }
+  if (leftObjectId !== undefined && rightObjectId !== undefined) {
+    return leftObjectId.localeCompare(rightObjectId);
+  }
+  return 0;
 }

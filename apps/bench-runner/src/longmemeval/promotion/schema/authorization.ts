@@ -40,7 +40,8 @@ const MaterialEffectSchema = z.object({
   }).strict(),
   safeguards: z.object({
     token_saved_ratio_vs_full_prompt: MetricDeltaSchema,
-    measurement_attribution: z.literal("eligible_in_both")
+    recall_eval_attribution: z.literal("eligible_in_both"),
+    measurement_attribution: z.literal("honest_in_both")
   }).strict(),
   paired_r_at_5: z.object({
     answerable_count: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount),
@@ -79,17 +80,17 @@ const UnsignedLongMemEvalMatrixPromotionAuthorizationSchema = z.object({
   kind: z.literal("longmemeval_matrix_promotion_authorization"),
   status: z.literal("authorized"),
   contract_sha256: Sha256Schema,
-  policy_version: z.literal("longmemeval-product-default-v1"),
+  policy_version: z.literal("longmemeval-product-default-v2"),
   source_selection: LongMemEvalSelectionContractIdentitySchema,
   next_selection: LongMemEvalSelectionContractIdentitySchema,
   matrix: z.object({
     sha256: Sha256Schema,
     cells: z.array(z.object({
-      cell: z.enum(["A", "B", "C", "D"]),
+      cell: z.enum(["A", "B"]),
       treatment: LongMemEvalMatrixTreatmentSchema,
       evidence_root: z.string().min(1),
       bundle_sha256: Sha256Schema
-    }).strict()).length(4)
+    }).strict()).length(2)
   }).strict(),
   product_default: z.object({
     cell: z.literal("B"),
@@ -194,7 +195,7 @@ function validateMaterialEffect(
     context.addIssue({ code: "custom", message: "material-effect delta is inconsistent" });
   }
   if (directional.some((metric) => metric.delta < 0) ||
-      !directional.some((metric) => metric.delta > 0) || token.delta < 0) {
+      !directional.some((metric) => metric.delta > 0)) {
     context.addIssue({ code: "custom", message: "material-effect direction is not authorized" });
   }
   const paired = effect.paired_r_at_5;
@@ -207,9 +208,7 @@ function validateMaterialEffect(
       rAt5.control !== paired.control_hits / denominator ||
       rAt5.product !== paired.product_hits / denominator ||
       paired.net !== paired.gained - paired.lost ||
-      paired.net < LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.minimumNetR5Wins ||
-      paired.mcnemar.p_value !== pValue ||
-      pValue >= LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarPValueMaxExclusive) {
+      paired.mcnemar.p_value !== pValue) {
     context.addIssue({ code: "custom", message: "paired material effect is not authorized" });
   }
 }

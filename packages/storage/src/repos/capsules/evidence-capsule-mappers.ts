@@ -1,11 +1,21 @@
 import {
   EvidenceCapsuleSchema,
   EvidenceHealthStateSchema,
+  EvidenceSearchProjectionKindSchema,
   type EvidenceCapsule,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import {
+  readJsonColumn,
+  readNonEmptyStringField,
+  readNullableJsonColumn,
+  readNullableStringField,
+  readPositiveIntField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parsePageLimit,
@@ -13,6 +23,7 @@ import {
   parseTimestamp
 } from "../shared/validators.js";
 import type { EvidenceCapsuleListPageOptions } from "./evidence-capsule-repo.js";
+import type { EvidenceSourceAnchor } from "./evidence-capsule-repo-port.js";
 
 export interface EvidenceCapsuleRow {
   readonly object_id: string;
@@ -69,7 +80,12 @@ export function parseEvidenceCapsule(value: EvidenceCapsule): Readonly<EvidenceC
   }
 }
 
-export function parseEvidenceCapsuleRow(row: EvidenceCapsuleRow): Readonly<EvidenceCapsule> {
+export const EvidenceCapsuleRowParser: RowParser<Readonly<EvidenceCapsule>> = {
+  parse: parseEvidenceCapsuleRow
+};
+
+export function parseEvidenceCapsuleRow(value: unknown): Readonly<EvidenceCapsule> {
+  const row = readRecord(value, "evidence capsule row");
   try {
     return deepFreeze(
       EvidenceCapsuleSchema.parse({
@@ -81,9 +97,9 @@ export function parseEvidenceCapsuleRow(row: EvidenceCapsuleRow): Readonly<Evide
         updated_at: row.updated_at,
         created_by: row.created_by,
         evidence_kind: row.evidence_kind,
-        semantic_anchor: JSON.parse(row.semantic_anchor),
-        event_anchor: row.event_anchor === null ? null : JSON.parse(row.event_anchor),
-        physical_anchor: row.physical_anchor === null ? null : JSON.parse(row.physical_anchor),
+        semantic_anchor: readJsonColumn(row, "semantic_anchor"),
+        event_anchor: readNullableJsonColumn(row, "event_anchor"),
+        physical_anchor: readNullableJsonColumn(row, "physical_anchor"),
         evidence_health_state: row.evidence_health_state,
         gist: row.gist,
         excerpt: row.excerpt,
@@ -96,6 +112,61 @@ export function parseEvidenceCapsuleRow(row: EvidenceCapsuleRow): Readonly<Evide
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence capsule row.", error);
   }
+}
+
+export interface FactKeyProjectionIdentityRow {
+  readonly object_id: string;
+  readonly projection_id: number;
+  readonly projection_kind: "fact_key";
+}
+
+export interface EvidenceSourceAnchorRow {
+  readonly evidence_object_id: string;
+  readonly artifact_ref: string | null;
+}
+
+export const FactKeyProjectionIdentityRowParser: RowParser<FactKeyProjectionIdentityRow> = {
+  parse(value: unknown): FactKeyProjectionIdentityRow {
+    const record = readRecord(value, "fact key projection identity row");
+    const projectionKind = EvidenceSearchProjectionKindSchema.parse(
+      readNonEmptyStringField(record, "projection_kind")
+    );
+    if (projectionKind !== "fact_key") {
+      throw new StorageError("VALIDATION_FAILED", "Failed to validate projection_kind.");
+    }
+    return {
+      object_id: readNonEmptyStringField(record, "object_id"),
+      projection_id: readPositiveIntField(record, "projection_id"),
+      projection_kind: projectionKind
+    };
+  }
+};
+
+export const EvidenceSourceAnchorRowParser: RowParser<EvidenceSourceAnchorRow> = {
+  parse(value: unknown): EvidenceSourceAnchorRow {
+    const record = readRecord(value, "evidence source anchor row");
+    return {
+      evidence_object_id: readNonEmptyStringField(record, "evidence_object_id"),
+      artifact_ref: readNullableStringField(record, "artifact_ref")
+    };
+  }
+};
+
+export function uniqueNonEmptyEvidenceIds(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+export function sortSourceAnchors(rows: readonly EvidenceSourceAnchor[]): readonly EvidenceSourceAnchor[] {
+  return [...rows].sort((left, right) =>
+    left.evidence_object_id.localeCompare(right.evidence_object_id)
+  );
+}
+
+export function wrapEvidenceCapsuleQueryError(message: string, error: unknown): StorageError {
+  if (error instanceof StorageError) {
+    return error;
+  }
+  return new StorageError("QUERY_FAILED", message, error);
 }
 
 export function parseEvidenceHealthState(health: EvidenceHealthState): EvidenceHealthState {

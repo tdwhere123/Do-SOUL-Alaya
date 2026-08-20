@@ -1,5 +1,6 @@
 import {
   addDecision,
+  compareCandidateContent,
   errorMessage,
   jaccardIndex,
   normalizeForIdentity,
@@ -110,9 +111,34 @@ export class ReconciliationDecider {
     for (const neighbor of neighbors) {
       const lexicalSimilarity = jaccardIndex(incomingTokens, tokenize(neighbor.entry.content));
       const similarity = Math.max(lexicalSimilarity, neighbor.structuralScore);
-      best = best === null || similarity > best.similarity ? { neighbor, similarity } : best;
-      if (identical === null && normalizeForIdentity(neighbor.entry.content) === incomingIdentityKey) {
-        identical = neighbor.entry;
+      if (
+        best === null ||
+        similarity > best.similarity ||
+        (similarity === best.similarity &&
+          compareCandidateContent(
+            neighbor.entry.content,
+            best.neighbor.entry.content,
+            neighbor.entry.object_id,
+            best.neighbor.entry.object_id
+          ) < 0)
+      ) {
+        best = { neighbor, similarity };
+      }
+      if (
+        normalizeForIdentity(neighbor.entry.content) === incomingIdentityKey &&
+        neighbor.entry.dimension === input.incomingDimension
+      ) {
+        if (
+          identical === null ||
+          compareCandidateContent(
+            neighbor.entry.content,
+            identical.content,
+            neighbor.entry.object_id,
+            identical.object_id
+          ) < 0
+        ) {
+          identical = neighbor.entry;
+        }
       }
       if (similarity >= this.deps.similarityFloor) {
         ambiguous.push({ neighbor, similarity });
@@ -149,7 +175,13 @@ export class ReconciliationDecider {
       (left, right) =>
         right.similarity - left.similarity ||
         right.neighbor.lexicalScore - left.neighbor.lexicalScore ||
-        right.neighbor.families.length - left.neighbor.families.length
+        right.neighbor.families.length - left.neighbor.families.length ||
+        compareCandidateContent(
+          left.neighbor.entry.content,
+          right.neighbor.entry.content,
+          left.neighbor.entry.object_id,
+          right.neighbor.entry.object_id
+        )
     );
     const candidates = selectLlmCandidates(analysis.ambiguous, this.deps.maxLlmCandidates)
       .map((item) => ({ objectId: item.neighbor.entry.object_id, content: item.neighbor.entry.content }));

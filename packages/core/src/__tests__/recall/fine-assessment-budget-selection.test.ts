@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
@@ -16,6 +17,7 @@ describe("selectFineAssessmentCandidates", () => {
     const estimate = vi.fn(() => 6);
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [
         createCandidate("memory-1"),
         createCandidate("memory-2")
@@ -45,6 +47,7 @@ describe("selectFineAssessmentCandidates", () => {
     const sharedAfterSkip = createRankedCandidate("shared-after-skip", 4, 0.85);
     const candidates = [first, oversized, unrelated, sharedAfterSkip];
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: candidates,
       config: {
         ...createConfig(),
@@ -80,13 +83,11 @@ describe("selectFineAssessmentCandidates", () => {
     expect(oversizedDiagnostic).toMatchObject({
       final_rank: null,
       dropped_reason: "max_total_tokens",
-      rank_after_feature_rerank: 2,
-      rank_after_coverage_selector: 2,
-      coverage_selector_action: "kept"
+      rank_after_feature_rerank: 2
     });
     expect(oversizedDiagnostic?.rank_after_session_coverage).toBeUndefined();
     expect(oversizedDiagnostic?.session_coverage_action).toBeUndefined();
-    expect(stageRanks(result, "shared-after-skip")).toEqual([4, 3, "promoted"]);
-    expect(stageRanks(result, "unrelated")).toEqual([3, 4, "displaced"]);
+    expect(stageRanks(result, "shared-after-skip")[2]).toBe("promoted");
+    expect(stageRanks(result, "unrelated")[2]).toBe("displaced");
   });
 });

@@ -1,22 +1,25 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
+import { selectOffsetLimitWindow } from "../../bench/window.js";
 import type { BenchRecallWeightOverrides } from
   "../../harness/recall/recall-weight-overrides.js";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import {
   createCompileSeedRunner,
   EXTRACTION_CACHE_ROOT
-} from "../compile-seed.js";
-import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
-import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
+} from "../../bench/compile-seed.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../bench/diagnostics/spool.js";
+import { inspectTurnContentKeySpace } from "../../bench/extraction/turn-contents.js";
 import {
-  deriveLongMemEvalReleaseEvidenceAuthority,
+  loadDatasetWindowWithIdentity,
   loadDatasetWithIdentity
 } from "../ingestion/fetch.js";
 import {
   createOwnedTempRoot,
   externalTempRoot
-} from "../lifecycle/owned-temp-root.js";
+} from "../../bench/lifecycle/owned-temp-root.js";
+import { deriveLongMemEvalRunnerReleaseEvidenceAuthority } from
+  "../release-evidence-authority.js";
 import {
   recallOptionsForPolicyShape,
   resolveBenchEmbeddingProviderLabel,
@@ -24,13 +27,29 @@ import {
 } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import { loadQuestionManifestSelection } from
-  "../selection/question-manifest.js";
+  "../../bench/selection/question-manifest.js";
 import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
-} from "../selection/contract.js";
+} from "../../bench/selection/contract.js";
+import { resolveSourceAssertionSupplementOptions } from
+  "../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+import { createCurrentPostFillCacheAuthorityProof } from
+  "../../bench/snapshot/current/current-substrate-authority.js";
+import { readExtractionCacheManifest } from
+  "../../bench/extraction/cache/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from
+  "../../bench/extraction/fill/fill-authority.js";
+import {
+  assertSnapshotProducerInvocationPolicy,
+  assertSnapshotProducerReleaseAuthority
+} from
+  "./policy/snapshot-producer-policy.js";
 
 type LoadedLongMemEvalDataset = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
+type LoadedRunDataset = LoadedLongMemEvalDataset & Readonly<{
+  datasetQuestionCount?: number;
+}>;
 type LongMemEvalQuestions = LoadedLongMemEvalDataset["questions"];
 type LongMemEvalQuestion = LongMemEvalQuestions[number];
 
@@ -38,6 +57,7 @@ export interface LongMemEvalRunContext {
   readonly opts: LongMemEvalRunOptions;
   readonly questions: LongMemEvalQuestions;
   readonly window: readonly LongMemEvalQuestion[];
+  readonly datasetQuestionCount: number;
   readonly datasetSha256: string;
   readonly datasetChecksumSource: string;
   readonly datasetSourcePath: string;
@@ -65,20 +85,27 @@ export async function prepareLongMemEvalRun(
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LongMemEvalRunContext> {
-  const dataset = await loadDatasetWithIdentity(opts.variant, datasetLoadOptions(opts));
+  assertSnapshotProducerInvocationBeforeLoad(opts, recallWeightOverrides, process.env);
+  const dataset = await loadRunDataset(opts);
   const questions = dataset.questions;
   const selectedQuestions = await selectManifestQuestions(opts, dataset);
-  const window = selectQuestionWindow(selectedQuestions, opts);
+  const window = opts.questionManifest === undefined
+    ? selectedQuestions
+    : selectQuestionWindow(selectedQuestions, opts);
   const commitInfo = resolveCommitInfo();
   const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const executionPolicy = resolvePreparationExecutionPolicy(
+    dataset, opts, window, extractionCacheRoot, recallWeightOverrides, process.env
+  );
   return {
     opts,
     questions,
     window,
+    datasetQuestionCount: dataset.datasetQuestionCount ?? questions.length,
     datasetSha256: dataset.sha256,
     datasetChecksumSource: dataset.checksumSource,
     datasetSourcePath: dataset.sourcePath,
-    releaseEvidenceAuthority: deriveRunEvidenceAuthority(dataset, opts, window),
+    ...executionPolicy,
     selectionContract: createLongMemEvalSelectionContract({
       datasetSha256: dataset.sha256,
       questions: window
@@ -92,20 +119,71 @@ export async function prepareLongMemEvalRun(
       process.env,
       opts.embeddingProviderKind
     ),
-    policyShape: opts.policyShape ?? "stress",
-    simulateReport: opts.simulateReport ?? "none",
-    recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
     seedRunner: createLongMemEvalSeedRunner(
       window,
       extractionCacheRoot,
-      Math.max(0, opts.offset ?? 0)
+      Math.max(0, opts.offset ?? 0),
+      dataset.sha256,
+      executionPolicy.captureSnapshot
     ),
-    captureSnapshot: opts.snapshotOut !== undefined,
     extractionCacheRoot,
     recallWeightOverrides,
     diagnosticsSpool,
     ...(await resolveSeedDataDirRoot(opts))
   };
+}
+
+function assertSnapshotProducerInvocationBeforeLoad(
+  opts: LongMemEvalRunOptions,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  env: Readonly<Record<string, string | undefined>>
+): void {
+  if (opts.snapshotOut === undefined) return;
+  assertSnapshotProducerInvocationPolicy({
+    opts,
+    policyShape: opts.policyShape ?? "stress",
+    simulateReport: opts.simulateReport ?? "none",
+    recallWeightOverrides,
+    releaseEvidenceAuthority: null
+  }, env);
+}
+
+function resolvePreparationExecutionPolicy(
+  dataset: LoadedLongMemEvalDataset,
+  opts: LongMemEvalRunOptions,
+  window: readonly LongMemEvalQuestion[],
+  extractionCacheRoot: string,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  env: Readonly<Record<string, string | undefined>>
+) {
+  const policy = {
+    releaseEvidenceAuthority: deriveRunEvidenceAuthority(dataset, opts, window),
+    policyShape: opts.policyShape ?? "stress",
+    simulateReport: opts.simulateReport ?? "none",
+    recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
+    captureSnapshot: opts.snapshotOut !== undefined
+  } as const;
+  if (policy.captureSnapshot) {
+    const input = { ...policy, opts, recallWeightOverrides };
+    assertSnapshotProducerInvocationPolicy(input, env);
+    const manifest = readExtractionCacheManifest(extractionCacheRoot);
+    if (manifest === undefined || hasCompleteExtractionFillAuthority(manifest)) {
+      assertSnapshotProducerReleaseAuthority(input);
+    }
+  }
+  return policy;
+}
+
+async function loadRunDataset(opts: LongMemEvalRunOptions): Promise<LoadedRunDataset> {
+  const options = datasetLoadOptions(opts);
+  if (opts.questionManifest !== undefined) {
+    return await loadDatasetWithIdentity(opts.variant, options);
+  }
+  return await loadDatasetWindowWithIdentity(opts.variant, {
+    ...options,
+    offset: Math.max(0, opts.offset ?? 0),
+    ...(opts.limit === undefined ? {} : { limit: opts.limit })
+  });
 }
 
 function deriveRunEvidenceAuthority(
@@ -114,11 +192,15 @@ function deriveRunEvidenceAuthority(
   window: readonly LongMemEvalQuestion[]
 ): LongMemEvalReleaseEvidenceAuthority | null {
   const offset = Math.max(0, opts.offset ?? 0);
-  if (opts.questionManifest !== undefined || offset !== 0) return null;
-  return deriveLongMemEvalReleaseEvidenceAuthority(dataset.promotionAuthority, {
-    kind: "execution_window",
+  if (opts.questionManifest !== undefined) return null;
+  return deriveLongMemEvalRunnerReleaseEvidenceAuthority({
+    datasetAuthority: dataset.promotionAuthority,
     offset,
-    limit: window.length
+    selection: {
+      kind: "execution_window",
+      offset,
+      limit: window.length
+    }
   });
 }
 
@@ -143,23 +225,43 @@ function selectQuestionWindow(
   questions: LongMemEvalQuestions,
   opts: LongMemEvalRunOptions
 ) {
-  const offset = Math.max(0, opts.offset ?? 0);
-  const sliceEnd = opts.limit !== undefined ? offset + opts.limit : questions.length;
-  return questions.slice(offset, sliceEnd);
+  return selectOffsetLimitWindow(questions, opts);
 }
 
 function createLongMemEvalSeedRunner(
   window: readonly LongMemEvalQuestion[],
   extractionCacheRoot: string,
-  offset: number
+  offset: number,
+  datasetSha256: string,
+  captureSnapshot: boolean
 ) {
   const requiredTurns = inspectTurnContentKeySpace(window);
+  const requiredQuestionWindow = { offset, limit: window.length };
+  const extractionCachePreflightProof = captureSnapshot
+    ? createCurrentPostFillCacheAuthorityProof({
+        cacheRoot: extractionCacheRoot,
+        datasetSha256,
+        requiredTurnContents: requiredTurns.distinctTurnContents,
+        requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
+        requiredQuestionWindow,
+        env: process.env
+      })
+    : undefined;
+  const sourceAssertionSupplement = resolveSourceAssertionSupplementOptions(
+    process.env
+  );
   return createCompileSeedRunner({
     requiredTurnContents: requiredTurns.distinctTurnContents,
     requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
-    requiredQuestionWindow: { offset, limit: window.length },
+    requiredQuestionWindow,
     cacheRoot: extractionCacheRoot,
-    allowLiveExtraction: false
+    allowLiveExtraction: false,
+    ...(extractionCachePreflightProof === undefined ? {} : {
+      extractionCachePreflightProof
+    }),
+    ...(sourceAssertionSupplement === undefined
+      ? {}
+      : { sourceAssertionSupplement })
   });
 }
 

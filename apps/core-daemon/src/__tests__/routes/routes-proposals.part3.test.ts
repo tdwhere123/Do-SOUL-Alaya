@@ -35,9 +35,9 @@ import {
 
 import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core";
 
-import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal/proposal-workflow.js";
 
-import { registerProposalRoutes } from "../../routes/governance/proposals.js";
+import { registerProposalRoutes } from "../../routes/governance/proposals/proposals.js";
 import { proposalRouteServices } from "../support/route-service-stubs.js";
 
 const databases = new Set<StorageDatabase>();

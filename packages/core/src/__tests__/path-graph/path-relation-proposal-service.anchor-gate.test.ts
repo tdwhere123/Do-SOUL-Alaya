@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
-  PATH_RELATION_PROPOSE_THRESHOLD,
   type CoUsageCounterPort,
   type MemoryAnchorExistencePort,
   type PathRelationProposalEventPublisherPort,
@@ -226,11 +225,10 @@ describe("PathRelationProposalService — object-anchor existence + ownership ga
       // neither mem-x nor mem-y exists
     });
 
-    // Drive the counter to its threshold; the counter-gated co_recalled mint
-    // runs through the same materialize gate as submitCandidate.
-    for (let i = 0; i < PATH_RELATION_PROPOSE_THRESHOLD; i += 1) {
-      await service.onCoRecall(["mem-x", "mem-y"], "workspace-A");
-    }
+    await service.submitCandidate(candidate({
+      sourceAnchor: { kind: "object", object_id: "mem-x" },
+      targetAnchor: { kind: "object", object_id: "mem-y" }
+    }));
 
     expect(repoCreate).not.toHaveBeenCalled();
     expect(events.every((e) => e.event_type === "path.relation_rejected")).toBe(true);

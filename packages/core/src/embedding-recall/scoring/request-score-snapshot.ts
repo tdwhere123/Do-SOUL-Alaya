@@ -1,4 +1,7 @@
-import { resolveEmbeddingWorkspaceScanCap } from "../constants.js";
+import {
+  NO_STORED_VECTORS_DEGRADATION_REASON,
+  resolveEmbeddingWorkspaceScanCap
+} from "../constants.js";
 import {
   clamp01,
   createCosineBatchScorer,
@@ -21,6 +24,15 @@ import type {
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot
 } from "../types.js";
+import { selectTopNeighborHits } from "./neighbor-top-k.js";
+import {
+  loadWorkspaceVectorsWithIdPrefilter,
+  workspaceScanOptionsForProvider
+} from "../workspace-vector-prefilter.js";
+import {
+  buildObjectEmbeddingFieldCaptures,
+  type ObjectEmbeddingFieldWorkspaceSnapshot
+} from "../../recall/field/object-embedding-field-capture.js";
 
 interface RequestScoreSnapshotDependencies {
   readonly provider: EmbeddingProviderPort;
@@ -32,14 +44,8 @@ interface RequestScoreSnapshotDependencies {
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }
 
-interface WorkspaceScan {
-  readonly records: readonly Readonly<EmbeddingVectorRecord>[];
+interface WorkspaceScan extends ObjectEmbeddingFieldWorkspaceSnapshot {
   readonly objectIds: ReadonlySet<string>;
-  readonly cap: number;
-  readonly returned: number;
-  readonly truncated: boolean;
-  readonly attempted: boolean;
-  readonly failed: boolean;
 }
 
 interface QueryResolution {
@@ -54,6 +60,8 @@ interface QueryResolution {
 interface ScoredLedger {
   readonly poolScores: Readonly<Record<string, number>>;
   readonly neighbors: readonly Readonly<EmbeddingNeighborHit>[];
+  readonly workspaceFieldHits: readonly Readonly<EmbeddingNeighborHit>[];
+  readonly seedNeighborCount: number;
   readonly scoringLatencyMs: number;
 }
 
@@ -66,15 +74,20 @@ export class RequestScoreSnapshotBuilder {
     const scan = await this.loadWorkspaceScan(params);
     const ledger = new Map(scan.records.map((record) => [record.object_id, record] as const));
     const missingPoolIds = this.missingPoolIds(params, ledger);
-    const exactLookupFailed = await this.addMissingPoolVectors(params, missingPoolIds, ledger);
+    const poolLookup = await this.addMissingPoolVectors(params, missingPoolIds, ledger);
     if (ledger.size === 0) {
-      return this.emptySnapshot(params, scan, exactLookupFailed);
+      return this.emptySnapshot(
+        params,
+        scan,
+        poolLookup.exactLookupFailed,
+        shouldReportNoStoredVectors(params, scan, poolLookup.rawReturnedCount, this.deps.provider)
+      );
     }
     const query = await this.resolveQuery(params);
     const scored = query.embedding === null
       ? emptyScoredLedger()
       : this.scoreLedger(params, ledger, scan.objectIds, query.embedding);
-    return this.buildSnapshot(params, scan, query, scored, exactLookupFailed);
+    return this.buildSnapshot(params, scan, query, scored, poolLookup.exactLookupFailed);
   }
 
   private async loadWorkspaceScan(
@@ -86,12 +99,22 @@ export class RequestScoreSnapshotBuilder {
       return emptyWorkspaceScan(cap);
     }
     try {
+      const scanOptions = workspaceScanOptionsForProvider(
+        this.deps.provider,
+        resolveEmbeddingRecallTiers()
+      );
+      const prefiltered = await loadWorkspaceVectorsWithIdPrefilter({
+        embeddingRepo: this.deps.embeddingRepo,
+        workspaceId: params.workspaceId,
+        cap,
+        scanOptions
+      });
+      if (prefiltered !== null) {
+        return this.buildWorkspaceScan(params, prefiltered.records, cap, prefiltered);
+      }
       const returned = await listByWorkspace.call(this.deps.embeddingRepo, params.workspaceId, {
-        tierFilter: resolveEmbeddingRecallTiers(),
-        limit: cap + 1,
-        providerKind: this.deps.provider.providerKind,
-        modelId: this.deps.provider.modelId,
-        schemaVersion: this.deps.provider.schemaVersion
+        ...scanOptions,
+        limit: cap + 1
       });
       return this.buildWorkspaceScan(params, returned, cap);
     } catch (error) {
@@ -103,28 +126,31 @@ export class RequestScoreSnapshotBuilder {
   private buildWorkspaceScan(
     params: PrepareRecallEmbeddingSnapshotParams,
     returned: readonly Readonly<EmbeddingVectorRecord>[],
-    cap: number
+    cap: number,
+    prefilter?: Readonly<{ readonly scannedCount: number; readonly truncated: boolean }>
   ): WorkspaceScan {
     const records = returned.filter((record) =>
       isProviderMatchedEmbedding(record, this.deps.provider)
     );
-    const neighborObjectIds = returned.slice(0, cap)
+    const neighborObjectIds = (prefilter === undefined ? returned.slice(0, cap) : returned)
       .filter((record) => isProviderMatchedEmbedding(record, this.deps.provider))
       .map((record) => record.object_id);
-    if (returned.length > cap) {
+    const scannedCount = prefilter?.scannedCount ?? returned.length;
+    const truncated = prefilter?.truncated ?? returned.length > cap;
+    if (truncated) {
       this.deps.warn("embedding workspace scan truncated by cap", {
         workspace_id: params.workspaceId,
         run_id: params.runId,
         scan_cap: cap,
-        returned: returned.length
+        returned: scannedCount
       });
     }
     return Object.freeze({
       records: Object.freeze(records),
       objectIds: new Set(neighborObjectIds),
       cap,
-      returned: returned.length,
-      truncated: returned.length > cap,
+      returned: scannedCount,
+      truncated,
       attempted: true,
       failed: false
     });
@@ -143,9 +169,9 @@ export class RequestScoreSnapshotBuilder {
     params: PrepareRecallEmbeddingSnapshotParams,
     objectIds: readonly string[],
     ledger: Map<string, Readonly<EmbeddingVectorRecord>>
-  ): Promise<boolean> {
+  ): Promise<{ readonly exactLookupFailed: boolean; readonly rawReturnedCount: number }> {
     if (objectIds.length === 0) {
-      return false;
+      return Object.freeze({ exactLookupFailed: false, rawReturnedCount: 0 });
     }
     try {
       const requested = new Set(objectIds);
@@ -159,10 +185,10 @@ export class RequestScoreSnapshotBuilder {
           ledger.set(record.object_id, record);
         }
       }
-      return false;
+      return Object.freeze({ exactLookupFailed: false, rawReturnedCount: records.length });
     } catch (error) {
       this.warnLookupFailure(params, "pool lookup", error);
-      return true;
+      return Object.freeze({ exactLookupFailed: true, rawReturnedCount: 0 });
     }
   }
 
@@ -202,6 +228,7 @@ export class RequestScoreSnapshotBuilder {
     const poolMemories = new Map(params.poolMemories.map((memory) => [memory.object_id, memory] as const));
     const poolScores: Record<string, number> = {};
     const neighbors: EmbeddingNeighborHit[] = [];
+    const workspaceFieldHits: EmbeddingNeighborHit[] = [];
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
     for (const record of ledger.values()) {
       if (!isUsableEmbeddingRecordVector(record, queryEmbedding.length)) {
@@ -215,20 +242,28 @@ export class RequestScoreSnapshotBuilder {
         continue;
       }
       const similarity = clamp01(scoreCosine(record.embedding));
+      const hit = Object.freeze({
+        object_id: record.object_id,
+        normalized_similarity: similarity,
+        content_hash: record.content_hash
+      });
+      if (similarity > 0 && workspaceObjectIds.has(record.object_id)) {
+        workspaceFieldHits.push(hit);
+      }
       if (poolMemory !== undefined) {
         poolScores[record.object_id] = similarity;
       } else if (similarity > 0 && workspaceObjectIds.has(record.object_id)) {
-        neighbors.push(Object.freeze({
-          object_id: record.object_id,
-          normalized_similarity: similarity,
-          content_hash: record.content_hash
-        }));
+        neighbors.push(hit);
       }
     }
-    neighbors.sort(compareNeighborHits);
     return Object.freeze({
       poolScores: Object.freeze(poolScores),
-      neighbors: Object.freeze(neighbors.slice(0, params.maxNeighbors)),
+      neighbors: selectTopNeighborHits(neighbors, params.maxNeighbors),
+      workspaceFieldHits: selectTopNeighborHits(
+        workspaceFieldHits,
+        workspaceFieldHits.length
+      ),
+      seedNeighborCount: neighbors.length,
       scoringLatencyMs: elapsedMs(this.deps.nowEpochMs(), startedAtEpochMs)
     });
   }
@@ -248,14 +283,32 @@ export class RequestScoreSnapshotBuilder {
       poolScoresByObjectId: scored.poolScores,
       scoringLatencyMs: scored.scoringLatencyMs,
       workspaceNeighbors: buildNeighborResult(scan, query, scored.neighbors, this.deps.provider),
-      degradedReason: resolveDegradationReason(scan, query.degradationReason, exactLookupFailed)
+      fieldChannelCaptures: buildObjectEmbeddingFieldCaptures({
+        ...params,
+        provider: this.deps.provider,
+        queryStatus: query.status,
+        queryEmbedding: query.embedding,
+        scan,
+        exactLookupFailed,
+        poolScores: scored.poolScores,
+        workspaceHits: scored.workspaceFieldHits,
+        seedNeighborCount: scored.seedNeighborCount,
+        seedNeighborLimit: params.maxNeighbors
+      }),
+      degradedReason: resolveDegradationReason(
+        scan,
+        query.degradationReason,
+        exactLookupFailed,
+        false
+      )
     });
   }
 
   private emptySnapshot(
     params: PrepareRecallEmbeddingSnapshotParams,
     scan: WorkspaceScan,
-    exactLookupFailed: boolean
+    exactLookupFailed: boolean,
+    reportNoStoredVectors: boolean
   ): Readonly<EmbeddingRecallRequestScoreSnapshot> {
     const query = notRequestedQueryResolution();
     return Object.freeze({
@@ -265,7 +318,19 @@ export class RequestScoreSnapshotBuilder {
       poolScoresByObjectId: Object.freeze({}),
       scoringLatencyMs: 0,
       workspaceNeighbors: buildNeighborResult(scan, query, Object.freeze([]), this.deps.provider),
-      degradedReason: resolveDegradationReason(scan, null, exactLookupFailed)
+      fieldChannelCaptures: buildObjectEmbeddingFieldCaptures({
+        ...params,
+        provider: this.deps.provider,
+        queryStatus: query.status,
+        queryEmbedding: query.embedding,
+        scan,
+        exactLookupFailed,
+        poolScores: Object.freeze({}),
+        workspaceHits: Object.freeze([]),
+        seedNeighborCount: 0,
+        seedNeighborLimit: params.maxNeighbors
+      }),
+      degradedReason: resolveDegradationReason(scan, null, exactLookupFailed, reportNoStoredVectors)
     });
   }
 
@@ -287,16 +352,47 @@ function emptyScoredLedger(): ScoredLedger {
   return Object.freeze({
     poolScores: Object.freeze({}),
     neighbors: Object.freeze([]),
+    workspaceFieldHits: Object.freeze([]),
+    seedNeighborCount: 0,
     scoringLatencyMs: 0
   });
+}
+
+function isEmbeddingSnapshotEngaged(
+  params: PrepareRecallEmbeddingSnapshotParams,
+  provider: EmbeddingProviderPort
+): boolean {
+  return provider.isAvailable && (params.poolMemories.length > 0 || params.maxNeighbors > 0);
+}
+
+function shouldReportNoStoredVectors(
+  params: PrepareRecallEmbeddingSnapshotParams,
+  scan: WorkspaceScan,
+  poolLookupReturnedCount: number,
+  provider: EmbeddingProviderPort
+): boolean {
+  if (!isEmbeddingSnapshotEngaged(params, provider)) {
+    return false;
+  }
+  return scan.returned === 0 && poolLookupReturnedCount === 0;
 }
 
 function resolveDegradationReason(
   scan: WorkspaceScan,
   queryReason: string | null,
-  exactLookupFailed: boolean
+  exactLookupFailed: boolean,
+  reportNoStoredVectors: boolean
 ): string | null {
-  return queryReason ?? (scan.failed || exactLookupFailed ? "local_vector_lookup_failed" : null);
+  if (queryReason !== null) {
+    return queryReason;
+  }
+  if (scan.failed || exactLookupFailed) {
+    return "local_vector_lookup_failed";
+  }
+  if (reportNoStoredVectors) {
+    return NO_STORED_VECTORS_DEGRADATION_REASON;
+  }
+  return null;
 }
 
 function elapsedMs(finishedAtEpochMs: number, startedAtEpochMs: number): number {
@@ -320,6 +416,16 @@ function resolveQuerySnapshot(
   snapshot: PreparedEmbeddingQuerySnapshot
 ): QueryResolution {
   if (snapshot.status === "ready") {
+    if (snapshot.embedding === null || !isFiniteNonzeroVector(snapshot.embedding)) {
+      return Object.freeze({
+        handle,
+        embedding: null,
+        status: "query_embedding_unusable",
+        degradationReason: "query_embedding_unusable",
+        inferenceCalls: handle.cacheHit ? 0 : 1,
+        cacheHit: handle.cacheHit
+      });
+    }
     return Object.freeze({
       handle,
       embedding: snapshot.embedding,
@@ -382,12 +488,4 @@ function buildNeighborResult(
       schema_version: provider.schemaVersion
     } : {})
   });
-}
-
-function compareNeighborHits(
-  left: Readonly<EmbeddingNeighborHit>,
-  right: Readonly<EmbeddingNeighborHit>
-): number {
-  const delta = right.normalized_similarity - left.normalized_similarity;
-  return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
 }

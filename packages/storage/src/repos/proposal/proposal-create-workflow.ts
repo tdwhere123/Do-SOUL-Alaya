@@ -1,10 +1,16 @@
-import type { EventLogEntry, Proposal } from "@do-soul/alaya-protocol";
+import {
+  PrivacyEraseReasonCodeSchema,
+  type EventLogEntry,
+  type MemoryProposalOperation,
+  type Proposal
+} from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   parseNullableTimestamp,
+  parseMemoryProposalOperation,
   parseProposal,
   parseProposalReviewerAssignment,
   parseProposalRow,
@@ -39,6 +45,7 @@ interface ParsedProposalCreateRequest {
   readonly proposal: Readonly<Proposal>;
   readonly workspaceId: string;
   readonly runId: string | null;
+  readonly proposalOperation: ReturnType<typeof parseMemoryProposalOperation>;
   readonly targetObjectKind: string;
   readonly proposedChangeSummary: string;
   readonly proposedChanges: string | null;
@@ -202,18 +209,45 @@ function findPendingProposalByDedupeKey(
 
 function parseProposalCreateRequest(input: ProposalCreateInput): ParsedProposalCreateRequest {
   const proposal = parseProposal(input.proposal);
+  const proposalOperation = parseMemoryProposalOperation(input.proposal_operation ?? null);
+  const targetObjectKind = parseNonEmptyString(input.target_object_kind, "target_object_kind");
+  const proposedChangeSummary = input.proposed_change_summary ?? "";
+  assertPrivacyEraseCreateInput(
+    proposalOperation,
+    targetObjectKind,
+    proposedChangeSummary,
+    input.proposed_changes ?? null
+  );
   return {
     proposal,
     workspaceId: parseWorkspaceId(input.workspace_id),
     runId: parseRunId(input.run_id),
-    targetObjectKind: parseNonEmptyString(input.target_object_kind, "target_object_kind"),
-    proposedChangeSummary: input.proposed_change_summary ?? "",
+    proposalOperation,
+    targetObjectKind,
+    proposedChangeSummary,
     proposedChanges: serializeProposedChanges(input.proposed_changes ?? null),
     proposedPathRelation: serializeProposedPathRelation(input.proposed_path_relation ?? null),
     createdAt: input.created_at ?? proposal.last_updated_at,
     targetBaselineUpdatedAt: parseNullableTimestamp(input.target_baseline_updated_at ?? null),
     sourceDeliveryIds: serializeSourceDeliveryIds(input.source_delivery_ids ?? null)
   };
+}
+
+function assertPrivacyEraseCreateInput(
+  operation: MemoryProposalOperation | null,
+  targetObjectKind: string,
+  summary: string,
+  proposedChanges: ProposalCreateInput["proposed_changes"]
+): void {
+  if (operation !== "privacy_erase") return;
+  const valid = targetObjectKind === "source_record" && proposedChanges === null &&
+    PrivacyEraseReasonCodeSchema.safeParse(summary).success;
+  if (!valid) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "Privacy erase proposals require a source_record, reason code, and no proposed changes."
+    );
+  }
 }
 
 function insertProposal(
@@ -236,6 +270,7 @@ function insertProposal(
     proposal.last_updated_at,
     request.workspaceId,
     request.runId,
+    request.proposalOperation,
     request.targetObjectKind,
     request.proposedChangeSummary,
     request.proposedChanges,

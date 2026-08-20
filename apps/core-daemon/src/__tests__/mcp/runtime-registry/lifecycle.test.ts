@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDaemonMcpRuntimeRegistry } from "../../../mcp/mcp-runtime-registry.js";
+import { createDaemonMcpRuntimeRegistry } from "../../../mcp/catalog/mcp-runtime-registry.js";
 
 describe("daemon MCP runtime registry lifecycle", () => {
   it("marks servers active only after a successful refresh and deactivates them after refresh failure", async () => {

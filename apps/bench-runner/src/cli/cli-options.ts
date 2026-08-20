@@ -9,6 +9,7 @@ import {
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind
 } from "../harness/daemon/daemon-types.js";
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalVariant } from "../longmemeval/ingestion/dataset.js";
 import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
 import {
@@ -19,6 +20,9 @@ import {
   readFlagValue,
   readRequiredFlagValue
 } from "./options/flag-values.js";
+import { consumeBooleanFlags } from "./options/boolean-flags.js";
+import { consumeRecallEvalPathFlag } from "./options/recall-eval-flags.js";
+import { finalizeParsedFlags } from "./cli-options-finalize.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -29,7 +33,6 @@ export interface ParsedFlags {
   readonly historyRoot: string;
   readonly dataDir?: string;
   readonly shards?: ReadonlyArray<string>;
-  readonly source?: string;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly policyShape: BenchPolicyShape;
@@ -40,6 +43,7 @@ export interface ParsedFlags {
   readonly snapshot?: string;
   readonly snapshotOut?: string;
   readonly dataDirRoot?: string;
+  readonly materializeQuestionDbs: boolean;
   readonly pinnedMetaRoot?: string;
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
@@ -48,19 +52,25 @@ export interface ParsedFlags {
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
   readonly extractionTargetSelection?: string;
   readonly extractionPredecessorAuthority?: string;
-  readonly promotionContract?: string;
   readonly r3SpendApproval?: string;
   readonly concurrency?: number;
   readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
-  readonly legacySnapshot: boolean;
-  readonly legacyManifestSha256?: string;
-  readonly legacyDatasetSha256?: string;
+  readonly tolerateProviderTaskFailures: boolean;
+  readonly experiment?: boolean;
+  readonly rebuildEvidenceSearchProjections?: boolean;
+  readonly backfillMissingFactFrameFormations?: boolean;
+  readonly warmDerivedSnapshotReceipt?: string;
+  readonly embeddingCacheOverlayReceipt?: string;
+  readonly factFrameRetrofitLedger?: string;
+  readonly seedExtractionSystemPrompt?: string;
+  readonly querySemanticFactorCache?: string;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
   // modes only). Default off keeps embedding ON/OFF corpora comparable.
   readonly edgePlane: boolean;
+  readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
 }
 
 export interface ParsedFlagsState {
@@ -69,7 +79,6 @@ export interface ParsedFlagsState {
   offset?: number;
   historyRoot: string;
   dataDir?: string;
-  source?: string;
   embeddingMode: BenchEmbeddingMode;
   embeddingProviderKind: BenchEmbeddingProviderKind;
   policyShape: BenchPolicyShape;
@@ -80,28 +89,40 @@ export interface ParsedFlagsState {
   snapshot?: string;
   snapshotOut?: string;
   dataDirRoot?: string;
+  materializeQuestionDbs: boolean;
   pinnedMetaRoot?: string;
   questionManifest?: string;
   extractionCacheRoot?: string;
   extractionAuthority?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
-  promotionContract?: string;
   r3SpendApproval?: string;
   concurrency?: number;
   extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
-  legacySnapshot: boolean;
-  legacyManifestSha256?: string;
-  legacyDatasetSha256?: string;
+  tolerateProviderTaskFailures: boolean;
+  experiment: boolean;
+  rebuildEvidenceSearchProjections: boolean;
+  backfillMissingFactFrameFormations: boolean;
+  warmDerivedSnapshotReceipt?: string;
+  embeddingCacheOverlayReceipt?: string;
+  factFrameRetrofitLedger?: string;
+  seedExtractionSystemPrompt?: string;
+  querySemanticFactorCache?: string;
   qa: boolean;
   edgePlane: boolean;
+  expectedReconciliationBasis?: EffectiveReconciliationBasis;
   shards: string[];
   collectingShards: boolean;
 }
 
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
+  assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
+  assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
+  assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
+  assertFlagAtMostOnce(args, "--embedding-cache-overlay");
+  assertFlagAtMostOnce(args, "--query-semantic-factor-cache");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -125,7 +146,11 @@ function createParsedFlagsState(): ParsedFlagsState {
     force: false,
     qa: false,
     edgePlane: false,
-    legacySnapshot: false,
+    materializeQuestionDbs: false,
+    experiment: false,
+    rebuildEvidenceSearchProjections: false,
+    backfillMissingFactFrameFormations: false,
+    tolerateProviderTaskFailures: false,
     shards: [],
     collectingShards: false
   };
@@ -192,6 +217,18 @@ function consumeExtendedFlagToken(
   if (matchFlagToken(token, "--policy-shape")) {
     state.policyShape = parsePolicyShape(
       readFlagValue(args, index, token, "--policy-shape", "stress") ?? "stress"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--expected-reconciliation-basis")) {
+    state.expectedReconciliationBasis = parseExpectedReconciliationBasis(
+      readRequiredFlagValue(
+        args,
+        index,
+        token,
+        "--expected-reconciliation-basis",
+        "--expected-reconciliation-basis requires a value"
+      )
     );
     return nextIndex(index, token);
   }
@@ -263,8 +300,21 @@ function consumeOtherPathFlags(
 ): number | undefined {
   const promotionEvidenceIndex = consumePromotionEvidencePathFlags(args, index, token, state);
   if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
-  const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
-  if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
+  const recallEvalIndex = consumeRecallEvalPathFlag(args, index, token, state);
+  if (recallEvalIndex !== undefined) return recallEvalIndex;
+  const snapshotIndex = consumeSnapshotCachePathFlags(args, index, token, state);
+  if (snapshotIndex !== undefined) return snapshotIndex;
+  const extractionIndex = consumeExtractionReceiptPathFlags(args, index, token, state);
+  if (extractionIndex !== undefined) return extractionIndex;
+  return consumeConcurrencyPathFlags(args, index, token, state);
+}
+
+function consumeSnapshotCachePathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (token === "--data-dir") {
     state.dataDir = args[index + 1];
     return index + 1;
@@ -285,6 +335,19 @@ function consumeOtherPathFlags(
     state.extractionCacheRoot = readFlagValue(args, index, token, "--extraction-cache-root");
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--snapshot")) {
+    state.snapshot = readFlagValue(args, index, token, "--snapshot");
+    return nextIndex(index, token);
+  }
+  return undefined;
+}
+
+function consumeExtractionReceiptPathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (matchFlagToken(token, "--extraction-authority")) {
     state.extractionAuthority = readRequiredFlagValue(
       args,
@@ -315,10 +378,15 @@ function consumeOtherPathFlags(
     );
     return nextIndex(index, token);
   }
-  if (matchFlagToken(token, "--snapshot")) {
-    state.snapshot = readFlagValue(args, index, token, "--snapshot");
-    return nextIndex(index, token);
-  }
+  return undefined;
+}
+
+function consumeConcurrencyPathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
       readFlagValue(args, index, token, "--concurrency"), "--concurrency"
@@ -342,58 +410,6 @@ function consumeOtherPathFlags(
   return undefined;
 }
 
-function consumeLegacyIdentityFlags(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number | undefined {
-  if (matchFlagToken(token, "--legacy-manifest-sha256")) {
-    state.legacyManifestSha256 = readRequiredFlagValue(
-      args, index, token, "--legacy-manifest-sha256",
-      "--legacy-manifest-sha256 requires a SHA-256 value"
-    );
-    return nextIndex(index, token);
-  }
-  if (matchFlagToken(token, "--legacy-dataset-sha256")) {
-    state.legacyDatasetSha256 = readRequiredFlagValue(
-      args, index, token, "--legacy-dataset-sha256",
-      "--legacy-dataset-sha256 requires a SHA-256 value"
-    );
-    return nextIndex(index, token);
-  }
-  return undefined;
-}
-
-function consumeBooleanFlags(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number {
-  if (token === "--force") {
-    state.force = true;
-    return index;
-  }
-  if (token === "--qa" || token === "--answer-judge") {
-    state.qa = true;
-    return index;
-  }
-  if (token === "--edge-plane") {
-    state.edgePlane = true;
-    return index;
-  }
-  if (token === "--legacy-snapshot") {
-    state.legacySnapshot = true;
-    return index;
-  }
-  if (token === "--source") {
-    state.source = args[index + 1];
-    return index + 1;
-  }
-  return index;
-}
-
 function parseEmbeddingMode(raw: string): BenchEmbeddingMode {
   if (raw !== "disabled" && raw !== "env") {
     throw new Error("--embedding must be one of: disabled, env");
@@ -415,6 +431,15 @@ function parsePolicyShape(raw: string): BenchPolicyShape {
   return raw;
 }
 
+function parseExpectedReconciliationBasis(raw: string): EffectiveReconciliationBasis {
+  if (raw !== "rule_only" && raw !== "garden_llm") {
+    throw new Error(
+      "--expected-reconciliation-basis must be one of: rule_only, garden_llm"
+    );
+  }
+  return raw;
+}
+
 function parseSimulateReport(raw: string): BenchSimulateReportMode {
   if (
     raw !== "none" &&
@@ -427,50 +452,4 @@ function parseSimulateReport(raw: string): BenchSimulateReportMode {
     );
   }
   return raw;
-}
-
-function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
-  const variantMap: Record<string, LongMemEvalVariant> = {
-    oracle: "longmemeval_oracle",
-    s: "longmemeval_s",
-    m: "longmemeval_m",
-    longmemeval_oracle: "longmemeval_oracle",
-    longmemeval_s: "longmemeval_s",
-    longmemeval_m: "longmemeval_m"
-  };
-  return {
-    variant: variantMap[state.variantRaw] ?? "longmemeval_oracle",
-    limit: state.limit,
-    offset: state.offset,
-    historyRoot: state.historyRoot,
-    dataDir: state.dataDir,
-    shards: state.shards.length > 0 ? state.shards : undefined,
-    source: state.source,
-    embeddingMode: state.embeddingMode,
-    embeddingProviderKind: state.embeddingProviderKind,
-    policyShape: state.policyShape,
-    simulateReport: state.simulateReport,
-    weightOverridesJson: state.weightOverridesJson,
-    rounds: state.rounds,
-    force: state.force,
-    snapshot: state.snapshot,
-    snapshotOut: state.snapshotOut,
-    dataDirRoot: state.dataDirRoot,
-    pinnedMetaRoot: state.pinnedMetaRoot,
-    questionManifest: state.questionManifest,
-    extractionCacheRoot: state.extractionCacheRoot,
-    extractionAuthority: state.extractionAuthority,
-    extractionTargetSelection: state.extractionTargetSelection,
-    extractionPredecessorAuthority: state.extractionPredecessorAuthority,
-    promotionContract: state.promotionContract,
-    r3SpendApproval: state.r3SpendApproval,
-    concurrency: state.concurrency,
-    extractionInitialConcurrency: state.extractionInitialConcurrency,
-    questionBatchLimit: state.questionBatchLimit,
-    legacySnapshot: state.legacySnapshot,
-    legacyManifestSha256: state.legacyManifestSha256,
-    legacyDatasetSha256: state.legacyDatasetSha256,
-    qa: state.qa,
-    edgePlane: state.edgePlane
-  };
 }

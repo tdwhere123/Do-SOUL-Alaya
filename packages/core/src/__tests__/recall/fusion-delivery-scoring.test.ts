@@ -26,6 +26,7 @@ function emptySupplementaryData(query: string): RecallSupplementaryData {
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},
@@ -214,7 +215,7 @@ describe("buildRecallFusionDetails temporal lane", () => {
 });
 
 describe("buildRecallFusionDetails query-adaptive fusion", () => {
-  it("clamps evidence-structural agreement before stream ranking", () => {
+  it("shares a competition rank for clamped equal agreement scores", () => {
     const strongerRaw = createMemoryEntry({
       object_id: "99999999-9999-4999-8999-999999999999",
       content: "MaterializationRouter evidence and structure match.",
@@ -224,6 +225,11 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
       object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       content: "MaterializationRouter evidence and structure mostly match.",
       created_at: "2026-03-20T00:00:00.000Z"
+    });
+    const weakerRaw = createMemoryEntry({
+      object_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      content: "MaterializationRouter evidence and structure partially match.",
+      created_at: "2026-03-19T00:00:00.000Z"
     });
 
     const fusion = buildRecallFusionDetails({
@@ -245,6 +251,15 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
             relevance: 0
           },
           structuralScore: 0.9
+        },
+        {
+          entry: weakerRaw,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          },
+          structuralScore: 0.25
         }
       ],
       policy: {} as RecallPolicy,
@@ -252,11 +267,13 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
         ...emptySupplementaryData("how does MaterializationRouter create memory?"),
         evidenceFtsRanks: {
           [strongerRaw.object_id]: 1,
-          [earlierTieBreak.object_id]: 1
+          [earlierTieBreak.object_id]: 1,
+          [weakerRaw.object_id]: 1
         },
         structuralScores: {
           [strongerRaw.object_id]: 1,
-          [earlierTieBreak.object_id]: 0.9
+          [earlierTieBreak.object_id]: 0.9,
+          [weakerRaw.object_id]: 0.25
         }
       },
       nowIso: "2026-03-20T10:20:30.000Z"
@@ -269,7 +286,11 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
     expect(
       fusion.get(`workspace_local:memory_entry:${strongerRaw.object_id}`)
         ?.per_stream_rank.evidence_structural_agreement
-    ).toBe(2);
+    ).toBe(1);
+    expect(
+      fusion.get(`workspace_local:memory_entry:${weakerRaw.object_id}`)
+        ?.per_stream_rank.evidence_structural_agreement
+    ).toBe(3);
   });
 
   it("family-decorrelates repeated lexical hits without damping individual lane contributions", () => {
@@ -390,6 +411,8 @@ describe("buildRecallFusionDetails preference profile lane", () => {
       object_id: "33333333-3333-4333-8333-333333333333",
       dimension: "preference",
       content: "Dark mode is preferred.",
+      source_kind: "seed",
+      formation_kind: "explicit",
       preference_subject: "operator",
       preference_predicate: "prefer",
       preference_object: "dark mode",
@@ -399,7 +422,9 @@ describe("buildRecallFusionDetails preference profile lane", () => {
     const plainMemory = createMemoryEntry({
       object_id: "44444444-4444-4444-8444-444444444444",
       dimension: "preference",
-      content: "A plain preference without profile fields."
+      content: "A plain preference without profile fields.",
+      source_kind: "seed",
+      formation_kind: "explicit"
     });
 
     const fusion = buildRecallFusionDetails({
@@ -422,7 +447,7 @@ describe("buildRecallFusionDetails preference profile lane", () => {
         }
       ],
       policy,
-      supplementaryData: emptySupplementaryData("preferred theme"),
+      supplementaryData: emptySupplementaryData("preference theme"),
       nowIso: "2026-03-20T10:20:30.000Z"
     });
 

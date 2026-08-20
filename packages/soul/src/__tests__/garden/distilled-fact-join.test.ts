@@ -7,6 +7,7 @@ import {
   DISTILLED_FACT_MAX_CHARS,
   buildDistilledFact
 } from "../../garden/materialization-router.js";
+import { createOpenSemanticExtractor } from "./compute-provider-fixtures.js";
 
 // Producer -> consumer join: model paraphrases remain auditable proposals,
 // while durable content is rebuilt from the source assertion.
@@ -27,7 +28,7 @@ async function compileSingleSignal(
 ): Promise<CandidateMemorySignal> {
   const provider = new OfficialApiGardenProvider({
     apiKey: "sk-test",
-    extractor: { extract: async () => ({ rawJson: modelJson }) },
+    extractor: createOpenSemanticExtractor(modelJson),
     now: () => "2026-04-23T09:00:00.000Z",
     generateSignalId: () => "signal-1"
   });

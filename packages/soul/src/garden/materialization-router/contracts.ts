@@ -2,8 +2,11 @@ import {
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
+  type EvidenceFactFrameFormationProposal,
+  type EvidenceSearchProjection,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
+  type OpenSemanticFactorFormationProposal,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
   type RelationValidity,
@@ -152,8 +155,12 @@ export type ClaimMaterializationInput = Omit<
 };
 
 export interface EvidenceMaterializationPort {
-  create(input: EvidenceMaterializationInput): Promise<MaterializationCreatedObject>;
-  deleteCreatedEvidence(objectId: string): Promise<void>;
+  create(
+    input: EvidenceMaterializationInput,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
+    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
+  ): Promise<MaterializationCreatedObject>;
 }
 
 // invariant: the memory-create port reports whether the enrich_pending no-drop
@@ -378,10 +385,9 @@ export interface ReconciliationPort {
       readonly runId: string;
       readonly signalId: string;
       readonly incomingContent: string;
+      readonly incomingDimension: MemoryMaterializationInput["dimension"];
       readonly incomingDomainTags: readonly string[];
       readonly incomingProjectionFields?: ReconciliationProjectionFields;
-      // content-derived; refreshes the survivor's facet_tags on an in-place UPDATE.
-      readonly incomingFacetTags?: MemoryMaterializationInput["facet_tags"];
     },
     applyVerdict: (
       verdict: ReconciliationDecisionView
@@ -441,12 +447,7 @@ export interface MaterializationRouterDeps {
   // would otherwise be archived to evidence_only. Trades curation for recall;
   // shared by prod + bench via the single daemon construction.
   readonly materializationConfidenceFloor?: number;
-  // Widen each evidence capsule's searchable excerpt/gist to the signal's full
-  // source turn (full_turn_content) instead of the matched_text span, so evidence
-  // FTS can recall a memory whose distilled content dropped the query terms.
+  // Use the full source turn as the gist basis. A digest-bound assertion keeps
+  // its atomic grounded excerpt; source-turn fallbacks remain searchable whole.
   readonly fullTurnEvidenceExcerpt?: boolean;
-  // When true, lift a projection-bearing signal_only signal to memory_entry_only; default-off keeps the curated deferral.
-  readonly projectionRoutingEnabled?: boolean;
-  // flag-on: derive facet_tags from content for the facet_overlap stream; off → no facet_tags.
-  readonly deriveFacetTags?: boolean;
 }

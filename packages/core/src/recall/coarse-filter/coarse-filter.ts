@@ -6,10 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
-  compareMemoryEntries,
   filterMemoriesByTimeWindow,
   matchesDeterministicFilter,
-  matchesPrecomputedRankFilter,
   toErrorMessage,
   type RecallTimeFilter
 } from "../runtime/recall-service-helpers.js";
@@ -24,14 +22,16 @@ import {
   type CoarseFilterRunResult
 } from "./coarse-filter-result.js";
 import {
-  MAX_RECALL_TIER_MEMORIES,
   MAX_OFFSET_RECALL_TIER_PAGES,
   OFFSET_RECALL_TIER_PAGE_SIZE,
   resolveRecallTierWindowPageLimit,
   resolveRecallTierWindowStep,
   STORAGE_RECALL_TIER_PAGE_SIZE
 } from "./pagination/recall-tier-window-pagination.js";
-import { selectBoundedTopK } from "./selection/bounded-top-k.js";
+import {
+  canUseSqlActivationAdmissionTopK,
+  loadActivationAdmissionTopK
+} from "./selection/activation-admission-top-k.js";
 import {
   admitDynamicCoarseCandidates,
   admitInitialCoarseCandidates,
@@ -39,10 +39,19 @@ import {
   createCoarseFilterState
 } from "./coarse-filter-pipeline.js";
 import {
-  resolveRoutedSurfaceIds,
-  sessionRouteEnabled,
-  withRoutedSurfaceIds
-} from "./session-route.js";
+  createTemporalWindowCandidateBudget,
+  type TemporalWindowCandidateBudget
+} from
+  "./temporal/temporal-window-candidates.js";
+import {
+  captureRecallQueryEntities,
+  type RecallQueryEntityExtractionCapture
+} from "../field/query-entity-attribution-producer.js";
+import {
+  createRecallRetrievalFieldBundle,
+  type RecallRetrievalFieldBundle
+} from
+  "../field/retrieval/retrieval-field-bundle.js";
 
 export interface RunCoarseFilterContext {
   readonly dependencies: RecallServiceDependencies;
@@ -59,7 +68,11 @@ export interface RunCoarseFilterOptions {
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle?: Readonly<RecallRetrievalFieldBundle>;
 }
 
 interface CoarseFilterInput {
@@ -337,7 +350,40 @@ export async function runCoarseFilter(
   options: Readonly<RunCoarseFilterOptions> = {}
 ): Promise<CoarseFilterRunResult> {
   const input = await loadCoarseFilterInput(context, workspaceId, config, queryText, options);
-  const queryProbes = routeQueryToSession(input.tierMemories, input.queryProbes);
+  const queryEntityExtraction = options.queryEntityExtraction ??
+    await captureRecallQueryEntities({
+      query_text: queryText,
+      port: context.dependencies.entityExtractionPort,
+      on_failure: (error) => context.warn("entity extraction failed", {
+        workspace_id: workspaceId,
+        operation: "entity_extraction",
+        error: toErrorMessage(error)
+      })
+    });
+  const queryProbes = input.queryProbes;
+  const retrievalFieldBundle = options.retrievalFieldBundle ??
+    createRecallRetrievalFieldBundle({
+      workspaceId,
+      queryText,
+      memoryRepo: context.dependencies.memoryRepo,
+      evidenceSearchPort: context.dependencies.evidenceSearchPort,
+      synthesisSearchPort: context.dependencies.synthesisSearchPort,
+      refinementMaxDepth:
+        config.semantic_supplement.field_observation_max_depth,
+      onFailure: (operation, error) => context.warn("retrieval field query failed", {
+        workspace_id: workspaceId,
+        operation,
+        error: toErrorMessage(error)
+      }),
+      onBatchFailure: (operation, failure) => context.warn(
+        "retrieval field batch query failed; using scalar field queries",
+        {
+          workspace_id: workspaceId,
+          operation,
+          ...failure
+        }
+      )
+    });
   const state = createCoarseFilterState({ config, winnerMemoryIds: input.winnerMemoryIds });
   admitInitialCoarseCandidates({
     tierMemories: input.tierMemories,
@@ -357,7 +403,12 @@ export async function runCoarseFilter(
     tierScopedSearchEligible: input.tierScopedSearchEligible,
     byId: input.byId,
     deliveryMaxEntries: options.deliveryMaxEntries,
+    temporalCandidateBudget: options.temporalCandidateBudget ??
+      createTemporalWindowCandidateBudget(options.deliveryMaxEntries),
+    referenceTime: options.referenceTime,
     pathProjectionAsOf: options.pathProjectionAsOf,
+    queryEntityExtraction,
+    retrievalFieldBundle,
     state
   });
   return buildCoarseFilterRunResult({
@@ -369,16 +420,6 @@ export async function runCoarseFilter(
     state,
     dynamic
   });
-}
-
-function routeQueryToSession(
-  tierMemories: readonly Readonly<MemoryEntry>[],
-  queryProbes: Readonly<RecallQueryProbes>
-): Readonly<RecallQueryProbes> {
-  if (!sessionRouteEnabled()) {
-    return queryProbes;
-  }
-  return withRoutedSurfaceIds(queryProbes, resolveRoutedSurfaceIds(tierMemories, queryProbes));
 }
 
 async function loadCoarseFilterInput(
@@ -401,6 +442,15 @@ async function loadCoarseFilterInput(
   const deterministicMatches = tierMemories.filter(
     (entry) => !protectedIds.has(entry.object_id) && matchesDeterministicFilter(entry, config)
   );
+  const rankedMatches = await loadActivationAdmissionTopK({
+    memoryRepo: context.dependencies.memoryRepo,
+    workspaceId,
+    tier,
+    config,
+    eligible: deterministicMatches,
+    excludeObjectIds: protectedIds,
+    allowSql: canUseSqlActivationAdmissionTopK(config, options.timeFilter)
+  });
   return Object.freeze({
     tier,
     tierMemories,
@@ -410,10 +460,6 @@ async function loadCoarseFilterInput(
     queryProbes,
     winnerMemoryIds,
     protectedCandidates,
-    rankedMatches: selectBoundedTopK(
-      deterministicMatches.filter((entry) => matchesPrecomputedRankFilter(entry, config)),
-      config.precomputed_rank.max_candidates,
-      compareMemoryEntries
-    )
+    rankedMatches
   });
 }

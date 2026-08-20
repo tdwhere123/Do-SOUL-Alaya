@@ -12,6 +12,7 @@ import {
 } from "./graph-expansion.js";
 import { collectPathGraphNeighbors, pathRelationMemoryIds } from "./path-relations.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
+import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import type {
@@ -229,6 +230,9 @@ async function loadEligibleGraphExpansionPaths(
     );
     return paths.filter((path) => isPathRecallEligible(path));
   } catch (error) {
+    if (classifyPathIndexReadFailure(error) === "index_unbound") {
+      return null;
+    }
     for (const seedCount of failureSeedCounts) {
       recordRecallDegradation(params, "graph_expansion_failed");
       params.warn("graph expansion path lookup failed", {

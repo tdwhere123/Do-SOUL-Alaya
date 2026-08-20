@@ -6,19 +6,19 @@ import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach } from "vitest";
 
-import type { CompileSeedExtractionConfig } from "../../../longmemeval/compile-seed.js";
+import type { CompileSeedExtractionConfig } from "../../../bench/compile-seed.js";
 import {
   cacheFilePath,
-  computeCacheKey,
+  computeSourceTurnCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import {
   computeSystemPromptSha256,
   EXTRACTION_CACHE_KEY_ALGO,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 export const EXTRACTION_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://yunwu.ai/v1",
@@ -54,11 +54,11 @@ export function scopedManifestFor(
   turnContents: readonly string[],
   fillStatus: "in_progress" | "complete"
 ): ExtractionCacheManifestV3 {
-  const keys = [...new Set(turnContents.map((turnContent) => computeCacheKey(
+  const keys = [...new Set(turnContents.map((turnContent) => computeSourceTurnCacheKey(
     EXTRACTION_CONFIG.model,
     EXTRACTION_CONFIG.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent
+    { turnContent }
   )))].sort();
   return manifestFor({
     requested_turns: keys.length,
@@ -86,13 +86,14 @@ export function writeCacheShard(
   cacheRoot: string,
   model: string,
   turnContent: string,
-  rawJson: string
+  rawJson: string,
+  responseMetadata?: unknown
 ): void {
-  const cacheKey = computeCacheKey(
+  const cacheKey = computeSourceTurnCacheKey(
     model,
     EXTRACTION_CONFIG.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    turnContent
+    { turnContent }
   );
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
@@ -101,7 +102,10 @@ export function writeCacheShard(
     request_profile: EXTRACTION_CONFIG.requestProfile,
     cache_key: cacheKey,
     raw_json: rawJson,
-    extracted_at: "2026-07-01T00:00:00Z"
+    extracted_at: "2026-07-01T00:00:00Z",
+    ...(responseMetadata === undefined ? {} : {
+      response_metadata: responseMetadata
+    })
   })}\n`, "utf8");
 }
 

@@ -1,22 +1,28 @@
 import { mkdirSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import {
+  buildOfficialApiExtractionRequest,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../bench/compile-seed/compile-seed-cache.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,
+  buildGroundedSignalResponse,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -27,15 +33,21 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
   ({ cacheRoot, dataDir, pinnedMetaRoot } = roots);
 });
 
+function extractionPrompt(turnContent: string): string {
+  return stringifyOfficialApiExtractionRequest(
+    buildOfficialApiExtractionRequest(turnContent, [])
+  );
+}
+
 describe("runExtractionFill", () => {
 
   it("serves a second fill entirely from cache (zero new extractions)", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const factory = (): BenchSignalExtractor => ({ extract });
 
     const first = await runExtractionFill({
@@ -68,7 +80,7 @@ describe("runExtractionFill", () => {
   it("rejects an existing provider identity before invoking the live delegate", async () => {
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://other-provider.invalid/v1");
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     writeExtractionCacheManifest(cacheRoot, {
       schema_version: 3,
@@ -88,7 +100,7 @@ describe("runExtractionFill", () => {
       builder: "test"
     });
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -107,7 +119,7 @@ describe("runExtractionFill", () => {
       extraction_model: "gpt-5.4-mini",
       model_family: "gpt-5.4-mini",
       request_profile: "provider-default-v1",
-      provider_url: "https://yunwu.ai/v1",
+      provider_url: "https://fixture-provider.invalid/v1",
       system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
       dataset: "longmemeval-oracle",
@@ -117,34 +129,34 @@ describe("runExtractionFill", () => {
       builder: "test"
     });
     const turn = "unwritable shard turn";
-    const key = computeCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turn
+    const key = computeSourceTurnCacheKey(
+      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
     );
     mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
     const liveWriter = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: '{"signals":[]}' }) },
+      delegate: { extract: async () => providerBackedExtractionResult('{"signals":[]}') },
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
-        providerUrl: "https://yunwu.ai/v1",
+        providerUrl: "https://fixture-provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
       cacheRoot
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({ turn_content: turn })
+      userPrompt: extractionPrompt(turn)
     })).rejects.toThrow(/failed to persist extraction cache shard/u);
   });
 
   it("honours --limit by staging the first N questions only", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: one\nAssistant: ok.", "User: decoy-one"),
-      buildQuestion("q002", "User: two\nAssistant: ok.", "User: decoy-two"),
-      buildQuestion("q003", "User: three\nAssistant: ok.", "User: decoy-three")
+      buildQuestion("q001", "I remember one.", "I prefer decoy one."),
+      buildQuestion("q002", "I remember two.", "I prefer decoy two."),
+      buildQuestion("q003", "I remember three.", "I prefer decoy three.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const result = await runExtractionFill({
       variant: VARIANT,
       limit: 1,

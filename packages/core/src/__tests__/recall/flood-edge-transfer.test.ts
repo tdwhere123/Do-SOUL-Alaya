@@ -4,7 +4,7 @@ import {
   computeFloodEdgeTransfer,
   RECALL_FLOOD_EDGE_TRACE_LIMIT
 } from "../../recall/flood/edge-transfer.js";
-import type { SliceCompatibilityV1 } from "../../recall/flood/slice-key-selector.js";
+import type { SliceCompatibilityV2 } from "../../recall/flood/slice-key-selector.js";
 import { noisyOrDecorrelate } from "../../recall/scoring/conformant-evidence-math.js";
 import type { PathInflowEdge } from "../../recall/runtime/recall-service-types.js";
 
@@ -180,10 +180,9 @@ describe("flood edge transfer trace", () => {
     });
   });
 
-  it("observes a slice mismatch without changing default transfer math", () => {
+  it("withholds transfer when the fiber rejects the edge", () => {
     const inflow = [edge("path-a", "seed", "target", 0.5)];
     const potentials = new Map([["seed", 0.8]]);
-    const expected = legacyCollapse(inflow, "target", potentials, 1, 3, 0.5);
     const result = computeFloodEdgeTransfer({
       inflow,
       targetObjectId: "target",
@@ -197,37 +196,14 @@ describe("flood edge transfer trace", () => {
       ]])
     });
 
-    expect(Object.is(result.value, expected)).toBe(true);
-    expect(result.traces[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_slice_match",
-      decision: "transferred",
-      reason: "transferred"
-    }));
-  });
-
-  it("rejects only the mismatched edge when call-level slice enforcement is enabled", () => {
-    const result = computeFloodEdgeTransfer({
-      inflow: [edge("path-a", "seed", "target", 0.5)],
-      targetObjectId: "target",
-      rObjectById: new Map([["seed", 0.8]]),
-      capPerSource: 1,
-      capTotal: 3,
-      rhoPath: 0.5,
-      enforceSliceCompatibility: true,
-      sliceCompatibilityByPathId: new Map([[
-        "path-a",
-        { decision: "rejected", reason: "no_slice_match", matches: [] }
-      ]])
-    });
-
     expect(result.value).toBe(0);
     expect(result.traces[0]).toEqual(expect.objectContaining({
       slice_compatibility: "no_slice_match",
-      capped_transfer: 0,
       decision: "rejected",
       reason: "no_slice_match"
     }));
   });
+
 
   it("records no_query_key as a neutral pass-through", () => {
     const result = computeFloodEdgeTransfer({
@@ -237,7 +213,6 @@ describe("flood edge transfer trace", () => {
       capPerSource: 1,
       capTotal: 3,
       rhoPath: 0.5,
-      enforceSliceCompatibility: true,
       sliceCompatibilityByPathId: new Map([[
         "path-a",
         { decision: "pass_through", reason: "no_query_key", matches: [] }
@@ -259,7 +234,6 @@ describe("flood edge transfer trace", () => {
       capPerSource: 1,
       capTotal: 3,
       rhoPath: 0.5,
-      enforceSliceCompatibility: true,
       sliceCompatibilityByPathId: new Map([[
         "path-a",
         { decision: "pass_through", reason: "missing_target_key", matches: [] }
@@ -274,35 +248,6 @@ describe("flood edge transfer trace", () => {
     }));
   });
 
-  it("rejects missing or blank edge provenance when slice enforcement is enabled", () => {
-    const invalidEdges = [
-      edge("path-a", "seed", "target", 0.5, { pathId: undefined }),
-      edge("path-a", "seed", "target", 0.5, { pathId: " " }),
-      edge("path-a", "seed", "target", 0.5, { seedAnchor: undefined }),
-      edge("path-a", "seed", "target", 0.5, { targetAnchor: undefined }),
-      edge("path-a", "seed", "target", 0.5, { pathSourceVersion: undefined }),
-      edge("path-a", "seed", "target", 0.5, { pathSourceVersion: " " })
-    ];
-
-    for (const invalidEdge of invalidEdges) {
-      const result = computeFloodEdgeTransfer({
-        inflow: [invalidEdge],
-        targetObjectId: "target",
-        rObjectById: new Map([["seed", 0.8]]),
-        capPerSource: 1,
-        capTotal: 3,
-        rhoPath: 0.5,
-        enforceSliceCompatibility: true
-      });
-      expect(result.value).toBe(0);
-      expect(result.traces[0]).toEqual(expect.objectContaining({
-        slice_compatibility: "not_evaluated",
-        capped_transfer: 0,
-        decision: "rejected",
-        reason: "missing_edge_provenance"
-      }));
-    }
-  });
 
   it("keeps missing provenance byte-equivalent on the default legacy path", () => {
     const invalidEdges = [
@@ -324,9 +269,7 @@ describe("flood edge transfer trace", () => {
     }
   });
 
-  it.each([false, true])(
-    "aggregates every parallel directed edge when slice enforcement is %s",
-    (enforceSliceCompatibility) => {
+  it("aggregates every parallel directed edge", () => {
       const inflow = [
         edge("path-a", "seed", "target", 0.5),
         edge("path-b", "seed", "target", 0.25)
@@ -339,7 +282,6 @@ describe("flood edge transfer trace", () => {
         capPerSource: 1,
         capTotal: 1,
         rhoPath: 0.5,
-        enforceSliceCompatibility,
         sliceCompatibilityByPathId: new Map([
           ["path-a", { decision: "compatible", reason: "slice_match", matches: [] }],
           ["path-b", { decision: "compatible", reason: "slice_match", matches: [] }]
@@ -350,8 +292,7 @@ describe("flood edge transfer trace", () => {
       expect(Object.is(result.value, expected)).toBe(true);
       expect(result.value).toBeCloseTo(0.46, 15);
       expect(result.traces).toHaveLength(2);
-    }
-  );
+  });
 
   it("keeps material diagnostics under truncation with deterministic input ordering", () => {
     const inflow = [
@@ -366,8 +307,7 @@ describe("flood edge transfer trace", () => {
       capTotal: 1,
       rhoPath: 0.5,
       traceLimit: 2,
-      enforceSliceCompatibility: true,
-      sliceCompatibilityByPathId: new Map<string, SliceCompatibilityV1>([
+      sliceCompatibilityByPathId: new Map<string, SliceCompatibilityV2>([
         ["aa-low-transfer", { decision: "compatible", reason: "slice_match", matches: [] }],
         ["zy-high-transfer", { decision: "compatible", reason: "slice_match", matches: [] }],
         ["zz-material-rejection", { decision: "rejected", reason: "no_slice_match", matches: [] }]

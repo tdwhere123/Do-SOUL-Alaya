@@ -6,16 +6,19 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   readExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
+} from "../../../bench/extraction/extraction-fill.js";
 import type {
   BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type {
   LongMemEvalQuestion
 } from "../../../longmemeval/ingestion/dataset.js";
+import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
+  "../extraction/extraction-cache-test-fixture.js";
+import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -30,6 +33,7 @@ beforeEach(async () => {
   pinnedMetaRoot = join(root, "pinned");
   await Promise.all([mkdir(cacheRoot), mkdir(dataDir), mkdir(pinnedMetaRoot)]);
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", TEST_EXTRACTION_PROVIDER_URL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   await writeDataset();
 });
@@ -47,7 +51,10 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return { rawJson: '{"signals":[]}' };
+    if (calls === 1) return providerBackedExtractionResult(signalsEnvelope([{
+      distilled: "I saved alpha.",
+      matched: "I saved alpha."
+    }]));
     secondStarted.resolve();
     return waitForAbort(input.abortSignal);
   });
@@ -83,7 +90,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
     }),
     log: () => undefined
   });
@@ -168,7 +175,7 @@ it("stops without caching a semantically invalid extraction payload", async () =
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"not_signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"not_signals":[]}')
     }),
     log: () => undefined
   });
@@ -196,7 +203,7 @@ it("does not finalize coverage when interruption follows the last response", asy
     concurrency: 1,
     signal: controller.signal,
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: '{"signals":[]}' })
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
     }),
     log: (message) => {
       if (message.includes("2/2")) controller.abort(interrupted);
@@ -240,7 +247,11 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(dataDir, `${VARIANT}.json`), raw, "utf8");
   await writeFile(
     join(pinnedMetaRoot, `${VARIANT}.meta.json`),
-    JSON.stringify({ sha256, question_count: questions.length }),
+    JSON.stringify({
+      sha256,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
+      question_count: questions.length
+    }),
     "utf8"
   );
 }
@@ -256,10 +267,10 @@ function questionFixture(): LongMemEvalQuestion {
     haystack_dates: ["2025-12-01", "2025-11-01"],
     haystack_sessions: [
       [
-        { role: "user", content: "alpha", has_answer: true },
+        { role: "user", content: "I saved alpha.", has_answer: true },
         { role: "assistant", content: "noted" }
       ],
-      [{ role: "user", content: "decoy" }]
+      [{ role: "user", content: "I saved decoy." }]
     ],
     answer_session_ids: ["s-answer"]
   };

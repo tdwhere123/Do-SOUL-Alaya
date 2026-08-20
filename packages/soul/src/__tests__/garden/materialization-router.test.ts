@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGardenTurnEvidenceFallback,
   LocalHeuristics,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
@@ -146,7 +147,7 @@ describe("MaterializationRouter routing and grounding", () => {
 
     expect(router.route(signal)).toMatchObject({
       kind: "deferred",
-      routing_reason: "garden source grounding failed: source_grounding_rejected"
+      routing_reason: "garden source grounding failed: matched_text_absent"
     });
     await router.materializeSignal(signal);
     expect(deps.memoryService.create).not.toHaveBeenCalled();
@@ -156,21 +157,16 @@ describe("MaterializationRouter routing and grounding", () => {
   it("archives a Garden evidence anchor without treating it as a durable fact", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
-    const signal = createSignal({
-      source: "garden_compile",
-      signal_kind: "potential_evidence_anchor",
-      object_kind: "source_turn",
-      evidence_refs: [],
-      raw_payload: {
-        full_turn_content: "User: ok thanks",
-        evidence_preservation: {
-          version: 1,
-          reason: "empty_extraction",
-          truncated: false,
-          chars_clipped: 0
-        }
-      }
-    });
+    const signal = buildGardenTurnEvidenceFallback({
+      turnContent: "Assistant: the requested script is attached.",
+      reason: "empty_extraction",
+      signalId: "fallback-1",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      surfaceId: null,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      sourceObservation: null
+    })!;
 
     const result = await router.materializeSignal(signal);
 
@@ -180,13 +176,78 @@ describe("MaterializationRouter routing and grounding", () => {
       success: true,
       created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }]
     });
-    expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
-      excerpt: "User: ok thanks",
-      evidence_health_state: "questionable",
-      physical_anchor: expect.objectContaining({
-        artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
-      })
-    }));
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excerpt: "Assistant: the requested script is attached.",
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified",
+        source_hash: expect.stringMatching(
+          /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+        ),
+        physical_anchor: expect.objectContaining({
+          artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
+        })
+      }),
+      [],
+      undefined,
+      undefined
+    );
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("materializes typed User assertions and complete Assistant observations", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
+    const userContent =
+      "I bought my bookshelf from IKEA.\nAssistant: quoted inside User content.";
+    const assistantContent = "Private assistant-only elaboration.";
+    const sourceCorpus =
+      `User: ${userContent}\nAssistant: ${assistantContent}`;
+    const signal = buildGardenTurnEvidenceFallback({
+      turnContent: sourceCorpus,
+      turnMessages: [
+        { message_id: "u1", role: "user", content: userContent },
+        { message_id: "a1", role: "assistant", content: assistantContent }
+      ],
+      reason: "empty_extraction",
+      signalId: "fallback-v2",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      surfaceId: null,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      sourceObservation: {
+        observed_at: "2026-07-21T12:00:00.000Z",
+        authority: "trusted_host_event",
+        source_event_id: "event-v2"
+      }
+    })!;
+
+    await router.materializeSignal(signal);
+
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gist: sourceCorpus,
+        excerpt: userContent,
+        semantic_anchor: expect.objectContaining({ summary: userContent }),
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified",
+        source_hash: expect.stringMatching(
+          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
+        )
+      }),
+      [{
+        projection_id: 1,
+        projection_kind: "user_assertion",
+        content: "I bought my bookshelf from IKEA."
+      }, {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: assistantContent
+      }],
+      undefined,
+      undefined
+    );
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });

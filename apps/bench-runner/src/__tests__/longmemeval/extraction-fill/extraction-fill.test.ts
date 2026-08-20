@@ -5,27 +5,32 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import {
+  buildOfficialApiExtractionRequest,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   createCachingSignalExtractor,
   preflightExtractionCache,
   type BenchSignalExtractor
-} from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../bench/compile-seed/compile-seed-cache.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -40,7 +45,13 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
   ({ cacheRoot, dataDir, pinnedMetaRoot } = roots);
 });
 
-describe("runExtractionFill", () => {
+function extractionPrompt(turnContent: string): string {
+  return stringifyOfficialApiExtractionRequest(
+    buildOfficialApiExtractionRequest(turnContent, [])
+  );
+}
+
+describe("runExtractionFill authority", () => {
 
   it("rejects an initial concurrency above the extraction maximum", async () => {
     await expect(runExtractionFill({
@@ -51,7 +62,7 @@ describe("runExtractionFill", () => {
       concurrency: 8,
       initialConcurrency: 9,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"signals":[]}' })
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
       }),
       log: () => undefined
     })).rejects.toThrow(/initial concurrency must be an integer from 1 to 8/u);
@@ -61,11 +72,11 @@ describe("runExtractionFill", () => {
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://provider-a.invalid/v1");
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "family-a");
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () =>
+      providerBackedExtractionResult('{"signals":[]}')
+    );
     let interrupted = false;
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -98,10 +109,12 @@ describe("runExtractionFill", () => {
       log: () => undefined
     })).rejects.toThrow(/provider URL mismatch|model family mismatch/u);
   });
+});
 
+describe("runExtractionFill writer lease", () => {
   it("holds an exclusive cache-root lock for the full fill", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     let releaseFirst!: () => void;
     let markStarted!: () => void;
@@ -117,14 +130,14 @@ describe("runExtractionFill", () => {
         extract: async () => {
           markStarted();
           await blocked;
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined
     });
     await started;
     const secondFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -133,12 +146,34 @@ describe("runExtractionFill", () => {
       pinnedMetaRoot,
       extractorFactory: secondFactory,
       log: () => undefined
-    })).rejects.toThrow(/fill.*lock|already.*fill/iu);
+    })).rejects.toThrow(/already has an active writer lock/iu);
     expect(secondFactory).not.toHaveBeenCalled();
     releaseFirst();
     await first;
   });
 
+  it("normalizes an explicit relative cache root before sharing the writer lease", async () => {
+    await writeFixtureDataset([
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
+    ]);
+    const result = await runExtractionFill({
+      variant: VARIANT,
+      cacheRoot: relative(process.cwd(), cacheRoot),
+      dataDir,
+      pinnedMetaRoot,
+      concurrency: 1,
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
+      log: () => undefined
+    });
+
+    expect(result.newlyExtracted).toBeGreaterThan(0);
+    expect(result.manifest.cached_turns).toBe(result.requestedTurns);
+  });
+});
+
+describe("runExtractionFill live-write identity", () => {
   it("revalidates manifest identity at the shared live-write boundary", async () => {
     preflightExtractionCache({
       cacheRoot,
@@ -156,17 +191,19 @@ describe("runExtractionFill", () => {
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://provider-a.invalid/v1");
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "family-a");
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     await runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
     const liveWriter = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: {
@@ -178,13 +215,13 @@ describe("runExtractionFill", () => {
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({ turn_content: "new uncached turn" })
+      userPrompt: extractionPrompt("I started a new project.")
     })).rejects.toThrow(/model family mismatch|provider URL mismatch/u);
     expect(delegate).not.toHaveBeenCalled();
   });
 
   it("rejects an ordinary live write when extraction-fill has not initialized identity", async () => {
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'));
     const liveWriter = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: {
@@ -196,45 +233,49 @@ describe("runExtractionFill", () => {
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({ turn_content: "uncached turn" })
+      userPrompt: extractionPrompt("I am an uncached user.")
     })).rejects.toThrow(/require manifest\.json.*extraction-fill/su);
     expect(delegate).not.toHaveBeenCalled();
     expect(readdirSync(cacheRoot).some((name) => /^[0-9a-f]{2}$/u.test(name))).toBe(false);
   });
+});
 
+describe("runExtractionFill delegate mutation", () => {
   it("does not write a shard when manifest identity disappears during the delegate", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     await runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
-    const turn = "new turn after fill";
-    const key = computeCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turn
+    const turn = "I started a new project after fill.";
+    const key = computeSourceTurnCacheKey(
+      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
     );
     const liveWriter = createCachingSignalExtractor({
       delegate: {
         extract: async () => {
-          rmSync(join(cacheRoot, "manifest.json"));
-          return { rawJson: '{"signals":[]}' };
+          rmSync(join(cacheRoot, "manifest.json"), { force: true });
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       },
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
-        providerUrl: "https://yunwu.ai/v1",
+        providerUrl: "https://fixture-provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
       cacheRoot
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({ turn_content: turn })
+      userPrompt: extractionPrompt(turn)
     })).rejects.toThrow(/require manifest\.json|manifest changed/u);
     expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
   });
@@ -245,7 +286,7 @@ describe("runExtractionFill", () => {
       extraction_model: "gpt-5.4-mini",
       model_family: "gpt-5.4-mini",
       request_profile: "provider-default-v1",
-      provider_url: "https://yunwu.ai/v1",
+      provider_url: "https://fixture-provider.invalid/v1",
       system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
       dataset: "longmemeval-oracle",
@@ -254,9 +295,9 @@ describe("runExtractionFill", () => {
       built_at: "2026-07-12T00:00:00.000Z",
       builder: "test"
     });
-    const turn = "ownership-loss turn";
-    const key = computeCacheKey(
-      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turn
+    const turn = "I lost ownership after fill.";
+    const key = computeSourceTurnCacheKey(
+      "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, { turnContent: turn }
     );
     const liveWriter = createCachingSignalExtractor({
       delegate: {
@@ -266,26 +307,28 @@ describe("runExtractionFill", () => {
             JSON.stringify({ pid: process.pid, token: "replacement" }),
             "utf8"
           );
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       },
       config: {
         model: "gpt-5.4-mini", modelFamily: "gpt-5.4-mini",
-        providerUrl: "https://yunwu.ai/v1",
+        providerUrl: "https://fixture-provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
       cacheRoot
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({ turn_content: turn })
+      userPrompt: extractionPrompt(turn)
     })).rejects.toBeInstanceOf(AggregateError);
     expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
   });
+});
 
+describe("runExtractionFill finalization", () => {
   it("does not auto-delete an ownerless crash lock", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     const lockPath = join(cacheRoot, ".extraction-fill.lock");
     mkdirSync(lockPath);
@@ -294,15 +337,17 @@ describe("runExtractionFill", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
-    })).rejects.toThrow(/writer lock.*verifying its owner process/iu);
+    })).rejects.toThrow(/writer lock.*metadata is unreadable/iu);
     expect(existsSync(lockPath)).toBe(true);
   });
 
   it("aborts fill without finalizing when delegate replaces the lease token", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -317,7 +362,7 @@ describe("runExtractionFill", () => {
             JSON.stringify({ pid: process.pid, token: "replacement" }),
             "utf8"
           );
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined
@@ -331,7 +376,7 @@ describe("runExtractionFill", () => {
 
   it("aborts fill without overwriting a manifest replaced during the delegate", async () => {
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -345,16 +390,16 @@ describe("runExtractionFill", () => {
             schema_version: 2,
             extraction_model: "gpt-5.4-mini",
             model_family: "gpt-5.4-mini",
-            provider_url: "https://yunwu.ai/v1",
+      provider_url: "https://fixture-provider.invalid/v1",
             system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-            cache_key_algo: "sha256(model\\0systemPrompt\\0turnContent)",
+            cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
             dataset: "longmemeval-oracle",
             dataset_revision: "fixture",
             storage: "git-tracked",
             built_at: "2026-07-12T00:00:00.000Z",
             builder: "intruder"
           });
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: () => undefined
@@ -363,6 +408,4 @@ describe("runExtractionFill", () => {
     expect(readExtractionCacheManifest(cacheRoot)?.coverage).toBeUndefined();
     expect(readdirSync(cacheRoot).filter((name) => /^[0-9a-f]{2}$/u.test(name))).toHaveLength(0);
   });
-
-
 });

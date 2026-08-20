@@ -7,6 +7,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-capsule-repo.js";
+import type { VerifiedAssertionLocatorResolver } from
+  "../../../repos/capsules/evidence-recall-types.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
@@ -51,7 +53,10 @@ export function createEvidenceCapsule(
   };
 }
 
-export async function createEvidenceCapsuleRepo(filename = ":memory:"): Promise<{
+export async function createEvidenceCapsuleRepo(
+  filename = ":memory:",
+  resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver
+): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteEvidenceCapsuleRepo;
 }> {
@@ -61,7 +66,10 @@ export async function createEvidenceCapsuleRepo(filename = ":memory:"): Promise<
   const runRepo = new SqliteRunRepo(database);
 
   await seedWorkspaceAndRuns(workspaceRepo, runRepo);
-  return { database, repo: new SqliteEvidenceCapsuleRepo(database) };
+  return {
+    database,
+    repo: new SqliteEvidenceCapsuleRepo(database, resolveVerifiedAssertionLocator)
+  };
 }
 
 async function seedWorkspaceAndRuns(

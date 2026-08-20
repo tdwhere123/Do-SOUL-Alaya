@@ -12,7 +12,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { runLocomo } from "../../locomo/runner.js";
 import { buildLongMemEvalQualityMetrics } from
-  "../../longmemeval/diagnostics/quality/diagnostics-quality.js";
+  "../../bench/diagnostics/quality/diagnostics-quality.js";
 import { promotionMeasurementDiagnostic } from
   "../longmemeval/recall-eval/specialized-answerable-recall-fixture.js";
 
@@ -31,13 +31,8 @@ describe("LoCoMo runner", () => {
   it("leaves query encode to timed recall instead of pre-warming the query cache", async () => {
     const warmQueryEmbeddingCache = vi.fn();
     const recall = vi.fn(async () => buildRecallResult());
-    const accrueSessionCoRecall = vi.fn(async () => ({
-      pairsObserved: 1,
-      minted: 1,
-      belowThreshold: 0
-    }));
     startBenchDaemonMock.mockResolvedValue(
-      buildMockDaemon({ recall, warmQueryEmbeddingCache, accrueSessionCoRecall })
+      buildMockDaemon({ recall, warmQueryEmbeddingCache })
     );
 
     const result = await runLocomo({
@@ -45,7 +40,6 @@ describe("LoCoMo runner", () => {
       historyRoot: tmpDir,
       embeddingMode: "env"
     });
-    expect(accrueSessionCoRecall).toHaveBeenCalled();
     const kpi = JSON.parse(await readFile(result.kpiPath, "utf8")) as {
       readonly kpi: {
         readonly query_embedding_cache_ready_rate?: number;

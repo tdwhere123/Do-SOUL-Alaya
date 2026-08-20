@@ -38,7 +38,8 @@ import {
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../cli/register.js";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
-import { createAlayaMcpServer } from "../../mcp/mcp-server.js";
+import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
+import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
 const tempDirs: string[] = [];
 const originalDataDir = process.env.DATA_DIR;
@@ -76,13 +77,14 @@ describe("Gate-4 attached-agent MCP proof", () => {
 
     const runtime = await createAlayaDaemonRuntime();
     runtime.startBackgroundServices();
+    let activeAgentTarget = "codex";
     const server = createAlayaMcpServer({
       memoryToolHandler: runtime.services.mcpMemoryToolHandler,
       contextProvider: () => ({
         workspaceId: "workspace-1",
         runId: "run-1",
-        agentTarget: "codex",
-      sessionId: "attached-agent-mcp-proof-session",
+        agentTarget: activeAgentTarget,
+        sessionId: "attached-agent-mcp-proof-session",
         surfaceId: "gate4-attached-agent-proof"
       })
     });
@@ -199,6 +201,7 @@ describe("Gate-4 attached-agent MCP proof", () => {
       transcript.push({ step: "soul.propose_memory_update", evidence: proposal });
       expect(proposal.status).toBe("created");
 
+      activeAgentTarget = "cli";
       const review = await callTool<SoulReviewMemoryProposalResponse>(client, "soul.review_memory_proposal", {
         proposal_id: proposal.proposal_id,
         verdict: "reject",
@@ -363,7 +366,17 @@ async function seedRecallFixture(dataDir: string): Promise<void> {
       run_state: RunState.IDLE,
       current_surface_id: null
     });
-    await memoryRepo.create(createMemoryEntry());
+    const memory = createMemoryEntry();
+    await memoryRepo.create(memory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      evidenceId: memory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: memory.content,
+      recordedAt: memory.created_at
+    });
   } finally {
     database.close();
   }
@@ -413,7 +426,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     scope_class: ScopeClass.PROJECT,
     content: "Use pnpm for all workspace commands.",
     domain_tags: ["tooling", "workflow"],
-    evidence_refs: ["gate4-proof"],
+    evidence_refs: ["11111111-1111-4111-8111-111111111102"],
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,

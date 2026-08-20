@@ -1,4 +1,5 @@
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
+import type { SoulReviewMemoryProposalResponse } from "@do-soul/alaya-protocol";
 
 export interface CreateBenchSeedOpsInput {
   readonly activeRuntime: AlayaDaemonRuntime;
@@ -11,6 +12,8 @@ export interface CreateBenchSeedOpsInput {
   readonly readMaterializedObjects: (
     signalId: string
   ) => Promise<{ readonly memoryId: string; readonly evidenceId: string | null }>;
-  readonly reviewerIdentity: string;
-  readonly reviewerToken: string;
+  readonly reviewMemoryProposal: (input: {
+    readonly proposalId: string;
+    readonly reason: string;
+  }) => Promise<SoulReviewMemoryProposalResponse>;
 }

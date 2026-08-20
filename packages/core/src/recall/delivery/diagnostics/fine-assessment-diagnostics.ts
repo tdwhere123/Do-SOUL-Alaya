@@ -7,12 +7,17 @@ import {
 } from "../../runtime/recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
+  RecallAdmissionDiagnosticPass,
   RecallCandidateDiagnostic,
   RecallCandidateDropReason,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
+import { resolveRecallCandidateSemanticActivation } from
+  "../../scoring/activation/candidate-semantic-activation-context.js";
 import { selectRecallAdmissionAttributionPlane } from "../../scoring/scoring.js";
 import { buildRecallCandidateAnswerFeatures } from "../fine-assessment-answer-features.js";
+import { buildCandidateSelectorObservation } from
+  "./candidate-selector-observation.js";
 import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
@@ -30,7 +35,8 @@ export function createFineAssessmentDiagnostic(
   selectionOrder: number,
   finalRank: number | null,
   droppedReason: RecallCandidateDropReason | null,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  admissionPass: RecallAdmissionDiagnosticPass
 ): Readonly<RecallCandidateDiagnostic> {
   const admissionPlanes: readonly RecallAdmissionPlane[] = Object.freeze([
     ...(candidate.admissionPlanes ?? ["activation"])
@@ -41,7 +47,18 @@ export function createFineAssessmentDiagnostic(
     ...buildAdmissionDiagnosticFields(candidate, admissionPlanes),
     pre_budget_rank: selectionOrder,
     selection_order: selectionOrder,
+    admission_attempts: Object.freeze([Object.freeze({
+      pass: admissionPass,
+      selection_order: selectionOrder,
+      admitted: droppedReason === null,
+      dropped_reason: droppedReason
+    })]),
+    evidence_projection_matches: collectEvidenceProjectionMatches(
+      candidate,
+      context.supplementaryData
+    ),
     ...buildFusionDiagnosticFields(candidate),
+    ...copySemanticActivation(candidate, candidateKey, context),
     final_rank: finalRank,
     post_rank: finalRank,
     in_final_packet: droppedReason === null,
@@ -53,9 +70,45 @@ export function createFineAssessmentDiagnostic(
     source_channels: buildSourceChannels(candidate, admissionPlanes),
     path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
     ...buildAnswerFeatureDiagnostics(candidate, context),
+    ...buildDecisionTraceDiagnostics(candidate, context),
+    ...(context.captureAnswerFeatures
+      ? { selector_observation: buildCandidateSelectorObservation(candidate, context) }
+      : {}),
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
   });
+}
+
+function copySemanticActivation(
+  candidate: FineAssessmentCandidate,
+  candidateKey: string,
+  context: FineAssessmentSelectionContext
+) {
+  return {
+    semantic_activation: resolveRecallCandidateSemanticActivation(
+      candidate,
+      context.supplementaryData,
+      candidateKey
+    )
+  };
+}
+
+function collectEvidenceProjectionMatches(
+  candidate: FineAssessmentCandidate,
+  supplementaryData: RecallSupplementaryData
+) {
+  const evidenceRefs = new Set(candidate.entry.evidence_refs);
+  if (candidate.objectKind === "evidence_capsule") {
+    evidenceRefs.add(candidate.entry.object_id);
+  }
+  const matchesByRef = supplementaryData.evidenceProjectionMatchesByRef ?? {};
+  return Object.freeze([...evidenceRefs].flatMap((evidenceRef) =>
+    matchesByRef[evidenceRef] ?? []
+  ).sort((left, right) =>
+    right.normalized_rank - left.normalized_rank ||
+    left.projection_kind.localeCompare(right.projection_kind) ||
+    (left.projection_id ?? 0) - (right.projection_id ?? 0)
+  ));
 }
 
 export function buildFinalScoreFactors(
@@ -74,7 +127,6 @@ function buildIdentityDiagnosticFields(
     object_id: candidate.entry.object_id,
     object_kind: candidate.objectKind ?? "memory_entry",
     created_at: candidate.entry.created_at,
-    facet_overlap: candidate.fusion.facet_overlap,
     dimension: candidate.entry.dimension,
     origin_plane: candidate.originPlane ?? "workspace_local"
   };
@@ -134,12 +186,36 @@ function buildAnswerFeatureDiagnostics(
   const evidenceGist = isWorkspaceMemoryCandidate(candidate)
     ? context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id]
     : undefined;
+  const answerSupport = context.answerSupportByCandidateKey.get(
+    candidate.fusion.candidate_key
+  );
   return {
     answer_features: buildRecallCandidateAnswerFeatures(
       candidate.entry,
       candidate.objectKind ?? "memory_entry",
-      evidenceGist
+      evidenceGist,
+      answerSupport,
+      context.answerSupportObservationsByCandidateKey.get(
+        candidate.fusion.candidate_key
+      )
     )
+  };
+}
+
+function buildDecisionTraceDiagnostics(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+) {
+  if (!context.captureAnswerFeatures) return {};
+  const candidateKey = candidate.fusion.candidate_key;
+  const deepHeadTrace = context.deepHeadTraceByCandidateKey.get(candidateKey);
+  const coverageMarginalGain =
+    context.coverageMarginalGainByCandidateKey.get(candidateKey);
+  return {
+    ...(deepHeadTrace === undefined ? {} : { deep_head_trace: deepHeadTrace }),
+    ...(coverageMarginalGain === undefined
+      ? {}
+      : { coverage_marginal_gain: coverageMarginalGain })
   };
 }
 

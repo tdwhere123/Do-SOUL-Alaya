@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { configureSqliteWriteQueuePort, initDatabase } from "../../sqlite/db.js";
-import { createInMemorySqliteWriteQueuePort } from "../../sqlite/write-queue-port.js";
+import { createInMemorySqliteWriteQueuePort } from "../../sqlite/write-queue/port.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
 interface TempContext {

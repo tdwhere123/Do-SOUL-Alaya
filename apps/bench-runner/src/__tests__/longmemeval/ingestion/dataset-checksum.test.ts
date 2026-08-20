@@ -1,24 +1,29 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  deriveLongMemEvalReleaseEvidenceAuthority,
   loadDataset,
+  loadDatasetWindowWithIdentity,
   loadDatasetWithIdentity
 } from "../../../longmemeval/ingestion/fetch.js";
 import { aggregateLongMemEvalRunResults } from "../../../longmemeval/runner/archive/runner-archive-aggregate.js";
 import { buildLongMemEvalRunPayload } from "../../../longmemeval/runner/archive/runner-archive-payload.js";
 import { prepareLongMemEvalRun } from "../../../longmemeval/runner/prepare-context.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
-import { emptySeedFuelInventory } from "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
-import { createStratifiedQuestionManifest } from "../../../longmemeval/selection/question-manifest.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { emptySeedFuelInventory } from "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
+import { createStratifiedQuestionManifest } from "../../../bench/selection/question-manifest.js";
 import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
 import { writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
 
-const committedPinRead = vi.hoisted(() => ({ sha256: null as string | null }));
+const committedPinRead = vi.hoisted(() => ({
+  sha256: null as string | null,
+  sizeBytes: 0
+}));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -29,7 +34,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       if (committedPinRead.sha256 !== null && requestedPath.endsWith(
         "/docs/bench-history/datasets/longmemeval_oracle.meta.json"
       )) {
-        return Promise.resolve(JSON.stringify({ sha256: committedPinRead.sha256 }));
+        return Promise.resolve(JSON.stringify({
+          sha256: committedPinRead.sha256,
+          size_bytes: committedPinRead.sizeBytes,
+          question_count: 2
+        }));
       }
       return Reflect.apply(actual.readFile, undefined, args);
     }
@@ -74,17 +83,34 @@ const FIXTURE_QUESTIONS = [
 
 async function seedLocalDataset(rawOverride?: string): Promise<string> {
   const raw = rawOverride ?? JSON.stringify(FIXTURE_QUESTIONS);
-  await writeFile(join(dataDir, `${VARIANT}.json`), raw, "utf8");
-  return createHash("sha256").update(raw, "utf8").digest("hex");
+  return await seedLocalDatasetBytes(Buffer.from(raw, "utf8"));
+}
+
+async function seedLocalDatasetBytes(raw: Uint8Array): Promise<string> {
+  await writeFile(join(dataDir, `${VARIANT}.json`), raw);
+  committedPinRead.sizeBytes = raw.byteLength;
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+function invalidUtf8DatasetBytes(): Buffer {
+  const raw = Buffer.from(JSON.stringify(FIXTURE_QUESTIONS), "utf8");
+  const offset = raw.indexOf(Buffer.from("fixture content", "utf8"));
+  return Buffer.concat([
+    raw.subarray(0, offset),
+    Buffer.from([0x80]),
+    raw.subarray(offset + 1)
+  ]);
 }
 
 async function seedPinnedMeta(sha256: string): Promise<void> {
+  const sizeBytes = (await stat(join(dataDir, `${VARIANT}.json`))).size;
   await writeFile(
     join(pinnedMetaRoot, `${VARIANT}.meta.json`),
     JSON.stringify(
       {
         name: VARIANT,
         sha256,
+        size_bytes: sizeBytes,
         question_count: FIXTURE_QUESTIONS.length,
         first_pinned_at: "2026-05-14T00:00:00Z",
         pinned_by_commit: "test"
@@ -144,9 +170,130 @@ describe("loadDataset checksum verification", () => {
     );
     expect(result.promotionAuthority).not.toBeNull();
   });
+
+  it("retains authority when the committed pin root is explicit", async () => {
+    committedPinRead.sha256 = await seedLocalDataset();
+
+    const result = await loadDatasetWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot: resolve("docs/bench-history/datasets")
+    });
+
+    expect(result.promotionAuthority).not.toBeNull();
+  });
+});
+
+describe("loadDatasetWindowWithIdentity", () => {
+  it("returns only the requested window while retaining full dataset identity", async () => {
+    const sha = await seedLocalDataset();
+    committedPinRead.sha256 = sha;
+
+    const result = await loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      offset: 1,
+      limit: 1
+    });
+
+    expect(result.questions.map((question) => question.question_id)).toEqual([
+      "fixture-2"
+    ]);
+    expect(result.datasetQuestionCount).toBe(FIXTURE_QUESTIONS.length);
+    expect(result.sha256).toBe(sha);
+    expect(result.promotionAuthority).not.toBeNull();
+    expect(() => deriveLongMemEvalReleaseEvidenceAuthority(
+      result.promotionAuthority,
+      { kind: "execution_window", offset: 0, limit: FIXTURE_QUESTIONS.length }
+    )).not.toThrow();
+  });
+
+  it("keeps custom pinned metadata diagnostic-only", async () => {
+    const sha = await seedLocalDataset();
+    await seedPinnedMeta(sha);
+
+    const result = await loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot,
+      offset: 0,
+      limit: 1
+    });
+
+    expect(result.promotionAuthority).toBeNull();
+    expect(result.datasetQuestionCount).toBe(FIXTURE_QUESTIONS.length);
+  });
+
+  it("rejects a schema-invalid item outside the requested window", async () => {
+    const raw = JSON.stringify([
+      FIXTURE_QUESTIONS[0],
+      { ...FIXTURE_QUESTIONS[1], question_id: 42 }
+    ]);
+    const sha = await seedLocalDataset(raw);
+    await seedPinnedMeta(sha);
+
+    await expect(loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot,
+      offset: 0,
+      limit: 1
+    })).rejects.toThrow(/invalid LongMemEval question/u);
+  });
+
+  it("checks the complete dataset bytes before returning a window", async () => {
+    const sha = await seedLocalDataset();
+    await seedPinnedMeta(sha);
+    const localPath = join(dataDir, `${VARIANT}.json`);
+    const raw = await readFile(localPath, "utf8");
+    await writeFile(localPath, `${raw}\n`, "utf8");
+
+    await expect(loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot,
+      offset: 0,
+      limit: 1
+    })).rejects.toThrow(/dataset checksum mismatch: longmemeval_oracle/u);
+  });
+
+  it("rejects pinned bytes that are not valid UTF-8", async () => {
+    const sha = await seedLocalDatasetBytes(invalidUtf8DatasetBytes());
+    await seedPinnedMeta(sha);
+
+    await expect(loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot,
+      offset: 0,
+      limit: 1
+    })).rejects.toThrow();
+  });
+
+  it("reports checksum drift before invalid UTF-8", async () => {
+    const pinnedSha = await seedLocalDataset();
+    await seedPinnedMeta(pinnedSha);
+    await writeFile(
+      join(dataDir, `${VARIANT}.json`),
+      invalidUtf8DatasetBytes()
+    );
+
+    await expect(loadDatasetWindowWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot,
+      offset: 0,
+      limit: 1
+    })).rejects.toThrow(/dataset checksum mismatch: longmemeval_oracle/u);
+  });
 });
 
 describe("prepareLongMemEvalRun release evidence authority", () => {
+  it("reports the full dataset count while preparing only the prefix window", async () => {
+    committedPinRead.sha256 = await seedLocalDataset();
+
+    const context = await prepareCanonicalContext({ limit: 1 });
+
+    expect(context.datasetQuestionCount).toBe(FIXTURE_QUESTIONS.length);
+    expect(context.questions).toHaveLength(1);
+    expect(context.window.map((question) => question.question_id)).toEqual([
+      "fixture-1"
+    ]);
+  });
+
   it.each([
     ["full dataset", {}],
     ["canonical prefix", { limit: 1 }]
@@ -159,7 +306,7 @@ describe("prepareLongMemEvalRun release evidence authority", () => {
     }
   );
 
-  it("keeps a nonzero-offset window diagnostic-only", async () => {
+  it("keeps a nonzero-offset execution window diagnostic-only", async () => {
     committedPinRead.sha256 = await seedLocalDataset();
 
     await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.toBeNull();
@@ -189,6 +336,12 @@ describe("prepareLongMemEvalRun release evidence authority", () => {
 async function prepareCanonicalAuthority(
   overrides: Partial<LongMemEvalRunOptions>
 ) {
+  return (await prepareCanonicalContext(overrides)).releaseEvidenceAuthority;
+}
+
+async function prepareCanonicalContext(
+  overrides: Partial<LongMemEvalRunOptions>
+) {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
@@ -201,7 +354,7 @@ async function prepareCanonicalAuthority(
   });
   const spool = await LongMemEvalDiagnosticsSpool.create();
   try {
-    const context = await prepareLongMemEvalRun({
+    return await prepareLongMemEvalRun({
       variant: VARIANT,
       historyRoot: join(tmpDir, "authority-history"),
       dataDir,
@@ -210,7 +363,6 @@ async function prepareCanonicalAuthority(
       embeddingMode: "disabled",
       ...overrides
     }, undefined, spool);
-    return context.releaseEvidenceAuthority;
   } finally {
     await spool.dispose();
   }
@@ -287,6 +439,7 @@ describe("loadDataset checksum verification", () => {
         checksum_sha256: verifiedSha,
         checksum_source: join(pinnedMetaRoot, `${VARIANT}.meta.json`)
       });
+      expect(build.payload.kpi.full_gold_coverage?.memory_only).toBeDefined();
     } finally {
       await spool.dispose();
     }

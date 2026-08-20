@@ -30,24 +30,24 @@ function createKarmaEvent(overrides: Partial<KarmaEvent> = {}): KarmaEvent {
 }
 
 describe("SqliteKarmaEventRepo", () => {
-  it("applies migration 014", async () => {
+  it("records the rebuilt schema ledger", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 14 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(14);
+    expect(migration?.version).toBe(8);
   });
 
-  it("applies migration 084 (run_id column)", async () => {
+  it("exposes the karma_events.run_id column", async () => {
     const { database } = await createRepo();
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 84 LIMIT 1")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(84);
+    expect(migration?.version).toBe(8);
 
     const columns = database.connection
       .prepare("PRAGMA table_info(karma_events)")

@@ -8,16 +8,14 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { prepareCrossQuestionRun } from "../../../longmemeval/crossquestion/crossquestion-run.js";
-import { prepareMultiturnRun } from "../../../longmemeval/multiturn/multiturn-run.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { LongMemEvalDiagnosticsSpool } from
-  "../../../longmemeval/diagnostics/spool.js";
+  "../../../bench/diagnostics/spool.js";
 import { prepareLongMemEvalRun } from
   "../../../longmemeval/runner/prepare-context.js";
 import { buildLongMemEvalRunProvenance } from
-  "../../../longmemeval/provenance/run.js";
-import { selectionContractIdentity } from "../../../longmemeval/selection/contract.js";
+  "../../../bench/provenance/run.js";
+import { selectionContractIdentity } from "../../../bench/selection/contract.js";
 import {
   buildRunnerQuestions,
   createRunnerFixture,
@@ -37,19 +35,27 @@ afterEach(async () => {
   await rm(tmpRoot, { recursive: true, force: true });
 });
 
-describe("Tier 1 effective extraction root", () => {
-  it.each(["multiturn", "crossquestion"] as const)(
-    "binds the %s producer and provenance to one isolated v3 root",
-    async (surface) => {
-      const fixture = await createRunnerFixture({
-        root: tmpRoot,
-        label: surface,
-        variant: "longmemeval_s",
-        questions: buildRunnerQuestions(`q-${surface}-`, 1)
-      });
-      writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
-      vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
-      const context = await prepareSurface(surface, fixture);
+describe("LongMemEval-S effective extraction root", () => {
+  it("binds the producer and provenance to one isolated v3 root", async () => {
+    const fixture = await createRunnerFixture({
+      root: tmpRoot,
+      label: "recall",
+      variant: "longmemeval_s",
+      questions: buildRunnerQuestions("q-recall-", 1)
+    });
+    writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
+    const spool = await LongMemEvalDiagnosticsSpool.create();
+    try {
+      const context = await prepareLongMemEvalRun({
+        variant: fixture.variant,
+        limit: 1,
+        historyRoot: fixture.historyRoot,
+        dataDir: fixture.dataDir,
+        pinnedMetaRoot: fixture.pinnedMetaRoot,
+        extractionCacheRoot: fixture.extractionCacheRoot,
+        embeddingMode: "disabled"
+      }, undefined, spool);
       const provenance = await provenanceFor(context, fixture.datasetSha256);
 
       expect(context.opts.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
@@ -58,8 +64,10 @@ describe("Tier 1 effective extraction root", () => {
         dataset_revision: fixture.datasetSha256,
         request_profile: "provider-default-v1"
       });
+    } finally {
+      await spool.dispose();
     }
-  );
+  });
 
   it.each(["recall", "snapshot"] as const)(
     "fails the %s entrypoint closed on a cache miss despite live env opt-in",
@@ -94,46 +102,10 @@ describe("Tier 1 effective extraction root", () => {
       }
     }
   );
-
-  it.each(["multiturn", "crossquestion"] as const)(
-    "fails the %s entrypoint at run start on a cache miss despite live env opt-in",
-    async (surface) => {
-      const fixture = await createRunnerFixture({
-        root: tmpRoot,
-        label: `cache-only-${surface}`,
-        variant: "longmemeval_s",
-        questions: buildRunnerQuestions(`q-${surface}-`, 1)
-      });
-      writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
-      vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
-      const fetchSpy = stubCredentialledLiveExtractionEnv();
-
-      await expect(prepareSurface(surface, fixture)).rejects.toThrow(
-        /cache covers only part/u
-      );
-      expect(fetchSpy).not.toHaveBeenCalled();
-    }
-  );
 });
 
-async function prepareSurface(
-  surface: "multiturn" | "crossquestion",
-  fixture: Awaited<ReturnType<typeof createRunnerFixture>>
-) {
-  const opts = {
-    variant: fixture.variant,
-    limit: 1,
-    historyRoot: fixture.historyRoot,
-    dataDir: fixture.dataDir,
-    pinnedMetaRoot: fixture.pinnedMetaRoot
-  };
-  return surface === "multiturn"
-    ? prepareMultiturnRun({ ...opts, rounds: 2 })
-    : prepareCrossQuestionRun(opts);
-}
-
 async function provenanceFor(
-  context: Awaited<ReturnType<typeof prepareSurface>>,
+  context: Awaited<ReturnType<typeof prepareLongMemEvalRun>>,
   datasetSha256: string
 ) {
   return buildLongMemEvalRunProvenance({

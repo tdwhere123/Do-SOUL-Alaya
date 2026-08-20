@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseOfficialApiSignals } from "../../garden/compute-provider.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 // canonical_entities is the answer-selective recall key: the parser must lift it
 // from the extraction JSON, default safely when absent, and normalize to a
@@ -8,14 +9,14 @@ import { parseOfficialApiSignals } from "../../garden/compute-provider.js";
 function envelope(entry: Record<string, unknown>): string {
   return JSON.stringify({
     signals: [
-      {
+      withOpenSemanticFactorGraph({
         signal_kind: "potential_preference",
         object_kind: "user_preference",
         confidence: 0.9,
         matched_text: "I use PostgreSQL at Acme",
         distilled_fact: "The operator uses PostgreSQL at Acme.",
         ...entry
-      }
+      })
     ]
   });
 }

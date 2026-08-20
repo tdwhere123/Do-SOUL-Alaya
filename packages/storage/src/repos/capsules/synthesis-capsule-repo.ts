@@ -7,10 +7,10 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
+import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import {
-  mergeFtsLanes,
-  queryFtsLane,
+  queryFtsLaneRows,
   splitFtsLanes,
   tokenizeFtsQuery
 } from "../shared/fts-lane-routing.js";
@@ -19,11 +19,17 @@ import {
   prepareSynthesisCapsuleStatements,
   type SynthesisCapsuleStatements
 } from "./synthesis-capsule-statements.js";
+import {
+  buildSynthesisFieldRefinementLevels,
+  buildSynthesisFieldView,
+  ineligibleSynthesisField,
+  normalizeSynthesisRefinementDepths,
+  type SynthesisCapsuleKeywordHit,
+  type SynthesisKeywordFieldResult
+} from "./synthesis-search/synthesis-keyword-field.js";
 
-export interface SynthesisCapsuleKeywordHit {
-  readonly object_id: string;
-  readonly normalized_rank: number;
-}
+export type { SynthesisCapsuleKeywordHit } from
+  "./synthesis-search/synthesis-keyword-field.js";
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
@@ -52,6 +58,20 @@ export interface SynthesisCapsuleRepo {
     query: string,
     limit: number
   ): Promise<readonly SynthesisCapsuleKeywordHit[]>;
+  searchByKeywordField?(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    refinementDepths?: readonly number[]
+  ): Promise<Readonly<SynthesisKeywordFieldResult>>;
+  searchManyByKeywordField?(
+    workspaceId: string,
+    queries: readonly Readonly<{
+      readonly queryText: string;
+      readonly limit: number;
+      readonly refinement_depths?: readonly number[];
+    }>[]
+  ): Promise<readonly Readonly<SynthesisKeywordFieldResult>[]>;
 }
 
 interface SynthesisCapsuleRow {
@@ -77,7 +97,7 @@ interface SynthesisCapsuleRow {
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<SynthesisCapsuleStatements>;
 
-  public constructor(db: StorageDatabase) {
+  public constructor(private readonly db: StorageDatabase) {
     this.statementHolder = new RefreshableStatementHolder(db, prepareSynthesisCapsuleStatements);
   }
 
@@ -90,41 +110,80 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     queryText: string,
     limit: number
   ): Promise<readonly SynthesisCapsuleKeywordHit[]> {
+    return (await this.searchByKeywordField(workspaceId, queryText, limit)).matches;
+  }
+
+  public async searchByKeywordField(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    refinementDepths: readonly number[] = []
+  ): Promise<Readonly<SynthesisKeywordFieldResult>> {
     const trimmed = queryText.trim();
     if (trimmed.length === 0 || !Number.isInteger(limit) || limit <= 0) {
-      return Object.freeze([]);
+      return ineligibleSynthesisField();
     }
     try {
       const tokens = tokenizeFtsQuery(trimmed);
       if (tokens.length === 0) {
-        return Object.freeze([]);
+        return ineligibleSynthesisField();
       }
       // Script-routed dual-lane FTS over synthesis_capsules.summary: word
       // tokens to the porter unicode61 lane, CJK-bearing tokens to the trigram
       // lane. The merged result preserves the SynthesisCapsuleKeywordHit
       // contract (normalized_rank, 1.0 = top).
       const { porterTokens, trigramTokens } = splitFtsLanes(tokens);
-      const porterHits =
-        porterTokens.length === 0
-          ? []
-          : queryFtsLane(this.statements.searchByKeywordStatement, workspaceId, porterTokens, limit);
-      const trigramHits =
-        trigramTokens.length === 0
-          ? []
-          : queryFtsLane(
-              this.statements.searchByKeywordTrigramStatement,
-              workspaceId,
-              trigramTokens,
-              limit
-            );
-      return mergeFtsLanes(porterHits, trigramHits, limit);
+      const depths = normalizeSynthesisRefinementDepths(limit, refinementDepths);
+      const maxDepth = depths.at(-1) ?? limit;
+      const rows = this.db.connection.transaction(() => Object.freeze({
+        porter: porterTokens.length === 0
+          ? Object.freeze([])
+          : queryFtsLaneRows(
+            this.statements.searchByKeywordStatement, workspaceId, porterTokens, maxDepth
+          ),
+        trigram: trigramTokens.length === 0
+          ? Object.freeze([])
+          : queryFtsLaneRows(
+            this.statements.searchByKeywordTrigramStatement,
+            workspaceId,
+            trigramTokens,
+            maxDepth
+          )
+      }))();
+      const base = buildSynthesisFieldView(
+        rows, limit, porterTokens.length > 0, trigramTokens.length > 0
+      );
+      return Object.freeze({
+        ...base,
+        ...(depths.length === 0 ? {} : {
+          refinement_levels: buildSynthesisFieldRefinementLevels(
+            rows,
+            base.matches,
+            depths,
+            porterTokens.length > 0,
+            trigramTokens.length > 0
+          )
+        })
+      });
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to search synthesis capsules for workspace ${workspaceId}.`,
-        error
+      throw toFieldSearchStorageError(
+        error,
+        `Failed to search synthesis capsules for workspace ${workspaceId}.`
       );
     }
+  }
+
+  public async searchManyByKeywordField(
+    workspaceId: string,
+    queries: readonly Readonly<{
+      readonly queryText: string;
+      readonly limit: number;
+      readonly refinement_depths?: readonly number[];
+    }>[]
+  ): Promise<readonly Readonly<SynthesisKeywordFieldResult>[]> {
+    return await Promise.all(queries.map(({ queryText, limit, refinement_depths }) =>
+      this.searchByKeywordField(workspaceId, queryText, limit, refinement_depths)
+    ));
   }
 
   public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {

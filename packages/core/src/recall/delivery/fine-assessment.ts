@@ -20,19 +20,28 @@ import {
   buildRecallFusionDetails
 } from "./fusion-delivery.js";
 import { applyDeliverySelection } from "./delivery-selection.js";
+import { resolveFineAssessmentDeliveryBranch } from
+  "./fine-assessment-delivery-branch.js";
+import { resolveFineAssessmentDeepHead } from
+  "./fine-assessment-deep-head.js";
 import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
 import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
 } from "./fine-assessment-selection.js";
-import {
-  pruneCoarseCandidatesForFineAssessment,
-  resolveFineAssessmentCandidateBudget,
-  type FineAssessmentPruneResult
-} from "./fine-assessment-prune.js";
-import { resolveDeepHeadScores } from "../rerank/deep-head.js";
+import type { RecallPacketPlanObservation } from
+  "./packet-plan/packet-plan-observation.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "./selection-boundary/selection-boundary-capture.js";
+import type { CoverageSelectionObjectiveReceipt } from
+  "./coverage-selection.js";
+import type { RecallFieldRefinementStopCertificate } from
+  "../field/refinement/field-refinement-stop-certificate.js";
+import type { RecallAnswerShapePlan } from
+  "../query/recall-answer-shape-plan.js";
 
 export interface FineAssessParams {
+  readonly workspace_id: string;
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
@@ -41,33 +50,33 @@ export interface FineAssessParams {
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
   readonly captureAnswerFeatures?: boolean;
-  readonly finalAuthorityMaxHeadDrop?: number;
+  readonly capturePacketPlanTrace?: boolean;
+  readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
+  readonly generation_id?: string;
+  readonly condition_digest?: string;
 }
 
 export type FineAssessmentPreparation = Readonly<{
   readonly candidates: readonly FineAssessmentCandidate[];
-  readonly prunedCandidates: FineAssessmentPruneResult["prunedCandidates"];
+  readonly prunedCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
 }>;
 
-export interface FineAssessmentWaistParams {
-  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
-  readonly policy: Readonly<RecallPolicy>;
-  readonly winnerMemoryIds: ReadonlySet<string>;
-  readonly supplementaryData: Parameters<
-    typeof pruneCoarseCandidatesForFineAssessment
-  >[0]["supplementaryData"];
-  readonly warn: RecallServiceWarnPort;
-}
-
 export function fineAssess(params: FineAssessParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
+  readonly fieldRefinementStopCertificate?:
+    Readonly<RecallFieldRefinementStopCertificate>;
+  readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
-  readonly prunedCandidates: FineAssessmentPruneResult["prunedCandidates"];
+  readonly prunedCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
@@ -77,45 +86,30 @@ export function fineAssess(params: FineAssessParams): Readonly<{
 }
 
 export function prepareFineAssessment(
-  params: FineAssessParams,
-  waist: FineAssessmentPruneResult = prepareFineAssessmentWaist(params)
+  params: FineAssessParams
 ): FineAssessmentPreparation {
-  const scoredCandidates = scoreFineAssessmentCandidates({
-    ...params,
-    candidates: waist.survivors
-  });
+  assertUniqueCandidateField(params.candidates);
+  const scoredCandidates = scoreFineAssessmentCandidates(params);
   const fusedCandidates = fuseFineAssessmentCandidates(
     scoredCandidates,
     params.policy,
     params.supplementaryData,
     params.now()
   );
-  return preparationFromPrune(waist, fusedCandidates);
+  return preparationFromCompleteField(params.candidates, fusedCandidates);
 }
 
-export function prepareFineAssessmentWaist(
-  params: FineAssessmentWaistParams
-): FineAssessmentPruneResult {
-  const waist = pruneCoarseCandidatesForFineAssessment({
-    candidates: params.candidates,
-    supplementaryData: params.supplementaryData,
-    winnerMemoryIds: params.winnerMemoryIds,
-    cap: resolveFineAssessmentCandidateBudget(params.policy)
-  });
-  warnOnPriorityOverflow(params.warn, waist);
-  return waist;
-}
-
-function warnOnPriorityOverflow(
-  warn: RecallServiceWarnPort,
-  pruned: FineAssessmentPruneResult
+function assertUniqueCandidateField(
+  candidates: readonly Readonly<CoarseRecallCandidate>[]
 ): void {
-  if (pruned.priorityOverflowCount === 0) return;
-  warn("Fine-assessment priority candidates exceeded the hard evaluation budget.", {
-    hard_budget: pruned.hardBudget,
-    priority_candidate_count: pruned.priorityCandidateCount,
-    priority_overflow_count: pruned.priorityOverflowCount
-  });
+  const keys = new Set<string>();
+  for (const candidate of candidates) {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    if (keys.has(key)) {
+      throw new Error(`duplicate recall candidate field key: ${key}`);
+    }
+    keys.add(key);
+  }
 }
 
 export function deliverFineAssessment(
@@ -124,19 +118,25 @@ export function deliverFineAssessment(
 ): ReturnType<typeof fineAssess> {
   const answerRelevanceScores =
     params.supplementaryData.answerRelevanceScoresByCandidateKey ?? new Map();
-  // CE present → scores own public relevance. Lightweight head reorders only so
-  // fused_score / 8-factor governance stay visible on RecallCandidate.
-  const replacePublicRelevance = answerRelevanceScores.size > 0;
-  const deepHeadScores = resolveDeepHeadScores({
+  const deepHead = resolveFineAssessmentDeepHead({
     candidates: preparation.candidates,
     answerRelevanceScores,
-    supplementaryData: params.supplementaryData
+    supplementaryData: params.supplementaryData,
+    captureAnswerFeatures: params.captureAnswerFeatures
+  });
+  const deepHeadScores = deepHead.scores;
+  const branch = resolveFineAssessmentDeliveryBranch({
+    answerRelevanceScores
   });
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
-    replacePublicRelevance
+    replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates({
+    workspace_id: params.workspace_id,
     orderedCandidates: delivery.orderedCandidates,
+    packetCandidates: preparation.candidates,
+    generation_id: params.generation_id,
+    condition_digest: params.condition_digest,
     config: params.policy.fine_assessment,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
@@ -145,17 +145,13 @@ export function deliverFineAssessment(
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
-    // Empty deep-head: fused public order (not coverage scramble). CE owns
-    // final order via delivery_rank; lightweight CE-off keeps public_relevance
-    // (100Q probe: delivery_rank cost B −4 hits vs fused final order).
-    finalOrderAfterCoverage: deepHeadScores.size === 0
-      ? "public_relevance"
-      : replacePublicRelevance ? "delivery_rank" : "public_relevance",
-    maxHeadDropAfterCoverage: !replacePublicRelevance && deepHeadScores.size > 0
-      ? params.finalAuthorityMaxHeadDrop
-      : undefined,
+    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
-    captureAnswerFeatures: params.captureAnswerFeatures
+    captureAnswerFeatures: params.captureAnswerFeatures,
+    answerShapePlan: params.answerShapePlan,
+    capturePacketPlanTrace: params.capturePacketPlanTrace,
+    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey,
+    selectionBoundaryObserver: params.selectionBoundaryObserver
   });
   return Object.freeze({
     ...selected,
@@ -209,16 +205,16 @@ function fuseFineAssessmentCandidates(
   return fusedCandidates;
 }
 
-function preparationFromPrune(
-  pruned: FineAssessmentPruneResult,
+function preparationFromCompleteField(
+  field: readonly Readonly<CoarseRecallCandidate>[],
   candidates: readonly FineAssessmentCandidate[]
 ): FineAssessmentPreparation {
   return Object.freeze({
     candidates,
-    prunedCandidates: pruned.prunedCandidates,
-    coarsePoolSize: pruned.coarsePoolSize,
-    fineEvaluated: pruned.fineEvaluated,
-    finePrunedCount: pruned.finePrunedCount,
-    finePriorityOverflowCount: pruned.priorityOverflowCount
+    prunedCandidates: Object.freeze([]),
+    coarsePoolSize: field.length,
+    fineEvaluated: field.length,
+    finePrunedCount: 0,
+    finePriorityOverflowCount: 0
   });
 }

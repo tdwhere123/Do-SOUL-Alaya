@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
 import { buildSnapshotMeasurementOracle } from
-  "../../../longmemeval/snapshot/measurement-oracle.js";
+  "../../../bench/snapshot/measurement-oracle.js";
 
 describe("snapshot measurement oracle", () => {
   it("matches live scoring when a canonical question repeats a session id", () => {
@@ -48,6 +48,46 @@ describe("snapshot measurement oracle", () => {
         runId: "run"
       }]
     })).toThrow(/source date\/session count mismatch/u);
+  });
+
+  it("preserves kind-aware gold identity when raw ids collide", () => {
+    const question = { ...buildQuestion(), answer_session_ids: ["repeated"] };
+    const oracle = buildSnapshotMeasurementOracle([question], {
+      schema_version: 2,
+      variant: "longmemeval_s",
+      questions: [{
+        questionId: question.question_id,
+        question: question.question,
+        questionDate: question.question_date,
+        answerSessionIds: question.answer_session_ids,
+        sidecar: [{
+          objectId: "shared-id",
+          objectKind: "memory_entry",
+          sessionId: "repeated",
+          hasAnswer: true
+        }, {
+          objectId: "shared-id",
+          objectKind: "evidence_capsule",
+          sessionId: "repeated",
+          hasAnswer: true
+        }],
+        workspaceId: "workspace",
+        runId: "run"
+      }]
+    })(question.question_id);
+
+    expect(oracle).toMatchObject({
+      goldMemoryIds: ["shared-id"],
+      goldEvidenceIds: ["shared-id"],
+      goldObjectIds: ["shared-id"],
+      goldObjectIdentities: [{
+        objectId: "shared-id",
+        objectKind: "memory_entry"
+      }, {
+        objectId: "shared-id",
+        objectKind: "evidence_capsule"
+      }]
+    });
   });
 });
 

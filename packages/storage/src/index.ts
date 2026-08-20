@@ -1,16 +1,31 @@
 export { measureSqliteBlockingOnEventLoop, type SqliteBlockingProbeResult } from "./diagnostics/sqlite-blocking-probe.js";
-export { StorageError, type StorageErrorCode } from "./shared/index.js";
+export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./shared/index.js";
 export {
   initDatabase,
   closeCachedDatabase,
   StorageDatabase,
   getCurrentSchemaSummary,
+  configureSqliteWriteQueuePort,
+  getSqliteWriteQueuePort,
+  createInMemorySqliteWriteQueuePort,
+  createSerialSqliteWriteQueuePort,
+  createWorkerThreadSqliteWriteQueuePort,
+  resolveSqliteWriteQueueWorkerUrl,
+  ALAYA_SQLITE_WRITE_QUEUE_ENV,
+  TEMPORAL_OFFLINE_MIGRATION_VERSION,
+  installDefaultSqliteWriteQueue,
+  isSqliteWriteQueueDisabled,
   prepareTemporalCandidate,
   inspectTemporalProjectionSelection,
   isTemporalProjectionSelected,
   selectTemporalProjection,
   rollbackTemporalProjection,
   type InitDatabaseOptions,
+  type SqliteWriteJob,
+  type SqliteWriteJobKind,
+  type SqliteWriteQueuePort,
+  type SqliteWriteStatement,
+  type WorkerThreadSqliteWriteQueueOptions,
   type TemporalCandidateFileDigest,
   type TemporalCandidatePreparation,
   acquireTemporalMaintenanceLease,
@@ -40,20 +55,43 @@ export {
   type EventLogPageOptions,
   type EventLogRepo
 } from "./repos/runtime/index.js";
-export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
+  SqliteRecallRoutingKeyProjectionRepo,
+  SqliteSignalRepo,
+  type SignalRepo,
+  type StoredRecallRoutingKeyProjection
+} from "./repos/signal/index.js";
+export {
+  RecallQualifiedEvidenceReader,
   SqliteEvidenceCapsuleRepo,
+  SqliteEvidenceRecallEmbeddingRepo,
+  readObjectKeyEvidenceSources,
+  scanObjectKeyRetrofitSources,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleKeywordHit,
+  type EvidenceRecallEmbeddingRecord,
+  type EvidenceRecallEmbeddingRef,
+  type EvidenceRecallEmbeddingSource,
+  type EvidenceSearchMatch,
+  type EvidenceSearchProjectionIdentity,
+  type RecallQualifiedEvidence,
+  type StoredObjectKeyEvidenceSource,
+  type ObjectKeyRetrofitOwnerRow,
+  type ObjectKeyRetrofitScan,
+  type VerifiedAssertionLocatorResolutionInput,
+  type VerifiedAssertionLocatorResolver,
   type EvidenceSourceAnchor
 } from "./repos/capsules/index.js";
 export {
   SqliteMemoryEntryRepo,
+  SqliteMemoryObjectKeyRepo,
   type MemoryEntryRepo,
   type MemoryEntryRepoDynamicsUpdateFields,
   type MemoryEntryRepoTierUpdateInput,
-  type MemoryEntryRepoUpdateFields
+  type MemoryEntryRepoUpdateFields,
+  type MemoryObjectKeyRepo,
+  type RecallActivationTopKQuery
 } from "./repos/memory-entry/index.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,
@@ -141,12 +179,59 @@ export {
   type PathRelationRepo
 } from "./repos/path/index.js";
 export {
+  SqliteSoftAssociationPathRepo,
+  type SoftAssociationPathReadOptions
+} from "./repos/path/index.js";
+export {
+  SqliteFieldCausalUsageRepo,
+  SqliteFieldDerivationJobRepo,
+  SqliteFieldEraseBarrierRepo,
+  SqliteFieldFactorRepo,
+  SqliteFieldProjectionGenerationRepo,
+  SqliteFieldProofEffectRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteFieldSourceSpanRepo,
+  factorFromRow,
+  generationFromRow,
+  generationToRow,
+  incidenceFromRow,
+  jobFromRow,
+  sourceRecordFromRow,
+  sourceSpanFromRow,
+  type FieldCausalUsageRepo,
+  type FieldCausalUsageRow,
+  type FieldDerivationJobRepo,
+  type FieldDerivationJobRow,
+  type FieldEraseBarrierRepo,
+  type FieldEraseBarrierInput,
+  type FieldEraseBarrierRow,
+  type FieldFactorDescriptorRow,
+  type FieldFactorIncidenceRow,
+  type FieldFactorRepo,
+  type FieldProjectionPinRow,
+  type FieldProjectionPointerRow,
+  type FieldProjectionGenerationRepo,
+  type FieldProjectionGenerationRow,
+  type FieldProofEffectRepo,
+  type FieldProofEffectRow,
+  type FieldSourceRecordRepo,
+  type FieldSourceRecordRow,
+  type FieldSourceSpanRepo,
+  type FieldSourceSpanRow
+} from "./repos/field/index.js";
+export {
+  assertRelationProjectionCurrent,
+  digestRelationFormationEventSource,
+  isLegacyPathIndexUnbound,
+  isRelationProjectionReadable,
   SqliteRelationAssertionRepo,
   type RelationAssertionProjectionGeneration,
-  type RelationAssertionRepo
+  type RelationAssertionRepo,
+  type RelationFormationEventSource
 } from "./repos/path/index.js";
 export {
   SqliteTemporalPathProjectionReader,
+  TemporalProjectionGenerationMissingError,
   type TemporalProjectionReadOptions
 } from "./repos/path/index.js";
 export {
@@ -260,6 +345,8 @@ export {
 } from "./repos/memory/index.js";
 export {
   SqliteMemoryHqRepo,
+  type MemoryHqEvidenceRecord,
+  type MemoryHqObservationRecord,
   type MemoryHqRecord,
   type MemoryHqRepo
 } from "./repos/memory/index.js";
@@ -285,8 +372,11 @@ export {
   warmCjkSegmentation,
   segmentCjkRun,
   isCjkSegmentationCandidate,
+  readCjkSegmentationStatus,
+  CJK_SEGMENTATION_FALLBACK_WARNING_CODE as STORAGE_CJK_SEGMENTATION_FALLBACK_WARNING_CODE,
   __resetCjkSegmentationStateForTests as __resetStorageCjkSegmentationStateForTests
 } from "./repos/shared/cjk-segmentation.js";
+export type { CjkSegmentationStatus } from "./repos/shared/cjk-segmentation.js";
 export {
   createGardenBackgroundDataPorts,
   type GardenBackgroundDataPorts,

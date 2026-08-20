@@ -203,7 +203,7 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
           record: parseCrossCuttingPermissionRecord(parsedPermissionId, parsedPermission),
           event: storedEvent
         };
-      })();
+      }).immediate();
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -349,7 +349,7 @@ export class SqliteCrossCuttingPermissionRepo implements CrossCuttingPermissionR
         record: this.findRequiredByPermissionId(parsed.permissionId),
         event: storedEvent
       };
-    })();
+    }).immediate();
   }
 
   private runStateUpdate(parsed: ParsedCrossCuttingStateUpdate): { readonly changes: number } {

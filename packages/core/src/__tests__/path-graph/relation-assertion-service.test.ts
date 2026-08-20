@@ -1,13 +1,17 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EMPTY_RELATION_HISTORY_DIGEST,
   RunMode,
   RunState,
   SignalEventType,
   WorkspaceKind,
   WorkspaceState,
+  type EventLogEntry,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import {
+  digestRelationFormationEventSource,
   initDatabase,
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
@@ -17,9 +21,11 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import { RelationAssertionService } from "../../path-graph/relation-assertions/relation-assertion-service.js";
 import type { RelationAssertionAtomicRepoPort } from "../../path-graph/relation-assertions/relation-assertion-service-types.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
 
 const databases = new Set<StorageDatabase>();
 const observedAt = "2026-07-17T01:02:03.000Z";
@@ -32,12 +38,12 @@ afterEach(() => {
 describe("RelationAssertionService", () => {
   it("admission is EventLog-first, idempotent, and activates only a typed projection", async () => {
     const harness = await createHarness();
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
 
-    const first = await harness.service.admit(admissionRequest(sourceEvent.event_id));
+    const first = await harness.service.admit(admissionRequest(sourceEvent));
     const replay = await harness.service.admit({
-      ...admissionRequest(sourceEvent.event_id),
+      ...admissionRequest(sourceEvent),
       admittedAt: "2026-07-17T01:03:03.000Z"
     });
 
@@ -51,13 +57,66 @@ describe("RelationAssertionService", () => {
     ]);
   });
 
+  it("admits one relation from independently anchored Evidence receipts", async () => {
+    const harness = await createHarness();
+    const firstEvent = await appendSourceSignalEvent(harness);
+    const secondEvent = await appendSourceSignalEvent(harness);
+    const secondEvidenceId = "95b3671a-d8d8-4848-9e5c-07d0a89f5ae9";
+    const secondObservedAt = "2026-07-17T01:02:03.500Z";
+    await createAnchoredEvidence(harness, firstEvent.event_id);
+    await createAnchoredEvidence(harness, secondEvent.event_id, secondEvidenceId, secondObservedAt);
+
+    const request = admissionRequest(firstEvent);
+    const admitted = await harness.service.admit({
+      ...request,
+      assertionId: "assertion-multi-source",
+      evidenceReceipts: [
+        ...request.evidenceReceipts,
+        {
+          evidence_id: secondEvidenceId,
+          source_event_anchor: {
+            event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+            event_id: secondEvent.event_id,
+            occurred_at: secondObservedAt
+          }
+        }
+      ],
+      formationReceipt: formationReceipt([firstEvent, secondEvent]),
+      validity: { kind: "open", valid_from: secondObservedAt }
+    });
+
+    expect(admitted.assertion.evidence_receipts).toHaveLength(2);
+    expect((await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))[0])
+      .toMatchObject({ legitimacy: { evidence_basis: [
+        "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+        secondEvidenceId
+      ] } });
+  });
+  it("rejects a formation receipt whose canonical digest does not match", async () => {
+    const harness = await createHarness();
+    const sourceEvent = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    const request = admissionRequest(sourceEvent);
+
+    await expect(harness.service.admit({
+      ...request,
+      formationReceipt: {
+        ...request.formationReceipt,
+        parameter_sha256: "0".repeat(64)
+      }
+    })).rejects.toThrow(/parameter digest does not match/);
+
+    expect(harness.relationRepo.listAssertionsInCurrentTransaction()).toEqual([]);
+  });
+
+
   it("rolls the EventLog admission back when the projection apply phase fails", async () => {
     const harness = await createHarness({ failProjectionActivation: true });
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
-    const assertionId = admissionRequest(sourceEvent.event_id).assertionId!;
+    const assertionId = admissionRequest(sourceEvent).assertionId!;
 
-    await expect(harness.service.admit(admissionRequest(sourceEvent.event_id)))
+    await expect(harness.service.admit(admissionRequest(sourceEvent)))
       .rejects.toThrow("projection activation failed");
 
     expect(await harness.eventLogRepo.queryByEntity("relation_assertion", assertionId)).toEqual([]);
@@ -67,20 +126,20 @@ describe("RelationAssertionService", () => {
 
   it("rejects a replay whose assertion id has a different source-event identity", async () => {
     const harness = await createHarness();
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
-    await harness.service.admit(admissionRequest(sourceEvent.event_id));
+    await harness.service.admit(admissionRequest(sourceEvent));
 
-    const conflictingSourceEvent = appendSourceSignalEvent(harness);
-    await expect(harness.service.admit(admissionRequest(conflictingSourceEvent.event_id)))
+    const conflictingSourceEvent = await appendSourceSignalEvent(harness);
+    await expect(harness.service.admit(admissionRequest(conflictingSourceEvent)))
       .rejects.toThrow(/replay conflicts with immutable assertion/);
   });
 
   it("keeps a resolved assertion inactive when its admission is replayed", async () => {
     const harness = await createHarness({ now: () => "2026-07-18T01:00:00.000Z" });
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
-    const admitted = await harness.service.admit(admissionRequest(sourceEvent.event_id));
+    const admitted = await harness.service.admit(admissionRequest(sourceEvent));
     await harness.service.resolve({
       assertionId: admitted.assertion.assertion_id,
       workspaceId: "workspace-1",
@@ -91,7 +150,7 @@ describe("RelationAssertionService", () => {
       resolvedAt: "2026-07-18T00:00:00.000Z"
     });
 
-    await expect(harness.service.admit(admissionRequest(sourceEvent.event_id))).resolves.toMatchObject({
+    await expect(harness.service.admit(admissionRequest(sourceEvent))).resolves.toMatchObject({
       status: "already_admitted",
       activeProjectionCount: 0
     });
@@ -100,9 +159,9 @@ describe("RelationAssertionService", () => {
 
   it("resolves atomically, supports deterministic replay, and rejects EventLog drift", async () => {
     const harness = await createHarness();
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
-    const admitted = await harness.service.admit(admissionRequest(sourceEvent.event_id));
+    const admitted = await harness.service.admit(admissionRequest(sourceEvent));
     const resolved = await harness.service.resolve({
       assertionId: admitted.assertion.assertion_id,
       workspaceId: "workspace-1",
@@ -155,10 +214,10 @@ describe("RelationAssertionService", () => {
 
   it("reports the next validity boundary that can change the current projection", async () => {
     const harness = await createHarness();
-    const sourceEvent = appendSourceSignalEvent(harness);
+    const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
     await harness.service.admit({
-      ...admissionRequest(sourceEvent.event_id),
+      ...admissionRequest(sourceEvent),
       validity: {
         kind: "bounded",
         valid_from: "2026-07-17T00:00:00.000Z",
@@ -176,6 +235,45 @@ describe("RelationAssertionService", () => {
         activeProjectionCount: 0,
         nextProjectionRefreshAt: null
       });
+  });
+
+  it("writes an empty as-of generation witness without activating historical rebuild", async () => {
+    const harness = await createHarness();
+    const asOf = "2026-07-17T01:30:00.000Z";
+    const before = readSchemaOperator(harness.database);
+    expect(before.history_digest).toBe(EMPTY_RELATION_HISTORY_DIGEST);
+
+    await harness.service.verifyAndRebuild(asOf);
+    const first = readVerifiedGenerationAtAsOf(harness.database, asOf);
+    const afterFirst = readSchemaOperator(harness.database);
+    expect(first.history_digest).toBe(afterFirst.history_digest);
+    expect(afterFirst).toEqual(before);
+
+    await harness.service.verifyAndRebuild(asOf);
+    expect(readVerifiedGenerationAtAsOf(harness.database, asOf)).toEqual(first);
+    expect(readSchemaOperator(harness.database)).toEqual(before);
+    expect(countGenerationsAtAsOf(harness.database, asOf)).toBe(1);
+  });
+
+  it("reads [] for non-empty history that has no active projection at an earlier as-of", async () => {
+    const harness = await createHarness();
+    const sourceEvent = await appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    await harness.service.admit(admissionRequest(sourceEvent));
+    const earlierAsOf = "2026-07-16T12:00:00.000Z";
+
+    const rebuilt = await harness.service.verifyAndRebuild(earlierAsOf);
+    const generation = readVerifiedGenerationAtAsOf(harness.database, earlierAsOf);
+    expect(rebuilt.activeProjectionCount).toBe(0);
+    expect(generation.history_digest).not.toBe(EMPTY_RELATION_HISTORY_DIGEST);
+    expect(generation.history_digest).not.toBe(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST);
+
+    const projectionReader = new SqliteTemporalPathProjectionReader(harness.relationRepo);
+    await expect(projectionReader.findByAnchors(
+      "workspace-1",
+      [{ kind: "object", object_id: "memory-1" }],
+      { asOf: earlierAsOf }
+    )).resolves.toEqual([]);
   });
 });
 
@@ -228,8 +326,8 @@ async function createHarness(options: {
   };
 }
 
-function appendSourceSignalEvent(harness: Awaited<ReturnType<typeof createHarness>>) {
-  return harness.eventLogRepo.append({
+async function appendSourceSignalEvent(harness: Awaited<ReturnType<typeof createHarness>>) {
+  return await harness.eventLogRepo.append({
     event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
     entity_type: "candidate_memory_signal",
     entity_id: "signal-1",
@@ -242,22 +340,24 @@ function appendSourceSignalEvent(harness: Awaited<ReturnType<typeof createHarnes
 
 async function createAnchoredEvidence(
   harness: Awaited<ReturnType<typeof createHarness>>,
-  sourceEventId: string
+  sourceEventId: string,
+  evidenceId = "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+  sourceObservedAt = observedAt
 ): Promise<void> {
   await harness.evidenceRepo.create({
-    object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    object_id: evidenceId,
     object_kind: "evidence_capsule",
     schema_version: 1,
     lifecycle_state: "active",
-    created_at: observedAt,
-    updated_at: observedAt,
+    created_at: sourceObservedAt,
+    updated_at: sourceObservedAt,
     created_by: "garden",
     evidence_kind: "conversation_excerpt",
     semantic_anchor: { topic: "temporal relation", keywords: ["temporal"], summary: "source evidence" },
     event_anchor: {
       event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
       event_id: sourceEventId,
-      occurred_at: observedAt
+      occurred_at: sourceObservedAt
     },
     physical_anchor: null,
     evidence_health_state: "verified",
@@ -270,26 +370,84 @@ async function createAnchoredEvidence(
   } satisfies EvidenceCapsule);
 }
 
-function admissionRequest(sourceEventId: string) {
+function admissionRequest(sourceEvent: Readonly<EventLogEntry>) {
+  const evidenceReceipt = {
+    evidence_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    source_event_anchor: {
+      event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+      event_id: sourceEvent.event_id,
+      occurred_at: observedAt
+    }
+  };
   return {
     assertionId: "assertion-1",
     workspaceId: "workspace-1",
     runId: "run-1",
     causedBy: "garden",
-    evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
+    evidenceReceipts: [evidenceReceipt],
+    formationReceipt: formationReceipt([sourceEvent]),
     anchors: {
       source_anchor: { kind: "object" as const, object_id: "memory-1" },
       target_anchor: { kind: "object" as const, object_id: "memory-2" }
     },
     relationKind: "supports",
     validity: { kind: "open" as const, valid_from: observedAt },
-    sourceEventAnchor: {
-      eventType: SignalEventType.SOUL_SIGNAL_EMITTED,
-      eventId: sourceEventId,
-      occurredAt: observedAt
-    },
     admittedAt: "2026-07-17T01:02:04.000Z"
   };
+}
+
+function formationReceipt(sourceEvents: readonly Readonly<EventLogEntry>[]) {
+  const parameters = { relation_kind: "supports" };
+  const decision = { source_event_ids: sourceEvents.map((event) => event.event_id) };
+  return {
+    operator_id: "test_relation_operator_v1",
+    operator_sha256: "a".repeat(64),
+    parameters,
+    parameter_sha256: digest(parameters),
+    source_observations: sourceEvents.map((event) => ({
+      source_kind: "event_log_entry",
+      source_id: event.event_id,
+      source_sha256: digestRelationFormationEventSource(event)
+    })),
+    decision,
+    decision_sha256: digest(decision)
+  };
+}
+
+function digest(value: unknown): string {
+  return createHash("sha256").update(stableStringify(value), "utf8").digest("hex");
+}
+
+function readSchemaOperator(database: StorageDatabase) {
+  return database.connection.prepare(`
+    SELECT active_projection_generation, active_as_of, history_digest
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get() as Readonly<{
+    readonly active_projection_generation: string;
+    readonly active_as_of: string;
+    readonly history_digest: string;
+  }>;
+}
+
+function readVerifiedGenerationAtAsOf(database: StorageDatabase, asOf: string) {
+  return database.connection.prepare(`
+    SELECT generation, history_digest, as_of, status
+    FROM temporal_projection_generations
+    WHERE as_of = ? AND status = 'verified'
+  `).get(asOf) as Readonly<{
+    readonly generation: string;
+    readonly history_digest: string;
+    readonly as_of: string;
+    readonly status: string;
+  }>;
+}
+
+function countGenerationsAtAsOf(database: StorageDatabase, asOf: string): number {
+  const row = database.connection.prepare(
+    "SELECT COUNT(*) AS n FROM temporal_projection_generations WHERE as_of = ?"
+  ).get(asOf) as { readonly n: number };
+  return row.n;
 }
 
 function failingProjectionRepo(repo: SqliteRelationAssertionRepo): RelationAssertionAtomicRepoPort {

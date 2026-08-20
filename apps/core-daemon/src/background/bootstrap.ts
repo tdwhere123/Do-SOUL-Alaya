@@ -1,4 +1,4 @@
-import { createWarnLogger } from "../runtime/daemon-runtime-helpers.js";
+import { createWarnLogger } from "../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 
 const defaultBackgroundWarnLogger = createWarnLogger();
 

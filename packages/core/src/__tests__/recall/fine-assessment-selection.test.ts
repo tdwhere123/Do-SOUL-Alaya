@@ -1,6 +1,11 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
 import { RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS } from "../../recall/delivery/fine-assessment-answer-features.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import {
+  projectVerifiedUserAssertionContext
+} from "../../recall/query/recall-user-assertion-context.js";
 import {
   createCandidate,
   createConfig,
@@ -15,6 +20,7 @@ describe("selectFineAssessmentCandidates", () => {
   it("copies bounded answer features and path suppression from existing recall state", () => {
     const longGist = `  ${"g".repeat(RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS + 4)}  `;
     const candidate = createCandidate("memory-1", {
+      evidence_refs: ["evidence-memory-1"],
       projection_schema_version: 1,
       event_time_start: "2026-05-01T00:00:00.000Z",
       event_time_end: "2026-05-02T00:00:00.000Z",
@@ -32,10 +38,23 @@ describe("selectFineAssessmentCandidates", () => {
     });
     const supplementaryData = createSupplementaryData({
       evidenceGistsByMemoryId: { "memory-1": longGist },
-      pathSuppressionScores: { "memory-1": 0.25 }
+      pathSuppressionScores: { "memory-1": 0.25 },
+      evidenceProjectionMatchesByRef: {
+        "evidence-memory-1": [{
+          evidence_ref: "evidence-memory-1",
+          projection_kind: "fact_key",
+          projection_id: 4,
+          normalized_rank: 0.8,
+          fact_key_forms: [{
+            kind: "leave_one_slot_out",
+            omitted_slot: { slot_index: 2, role: "value" }
+          }]
+        }]
+      }
     });
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [candidate],
       config: createConfig(),
       supplementaryData,
@@ -46,12 +65,22 @@ describe("selectFineAssessmentCandidates", () => {
 
     expect(result.diagnostics[0]).toMatchObject({
       path_suppression_score: 0.25,
+      evidence_projection_matches: [{
+        evidence_ref: "evidence-memory-1",
+        projection_kind: "fact_key",
+        projection_id: 4,
+        normalized_rank: 0.8,
+        fact_key_forms: [{
+          kind: "leave_one_slot_out",
+          omitted_slot: { slot_index: 2, role: "value" }
+        }]
+      }],
       answer_features: {
         content: "Recall content for memory-1.",
         evidence_gist: "g".repeat(RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS),
         evidence_gist_truncated: true,
         domain_tags: ["repo"],
-        evidence_refs: [],
+        evidence_refs: ["evidence-memory-1"],
         facet_tags: [{ facet: "food_dining", value: "tea" }],
         canonical_entities: ["alice", "tea"],
         projection_schema_version: 1,
@@ -80,6 +109,7 @@ describe("selectFineAssessmentCandidates", () => {
     }, "synthesis_capsule");
 
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [synthesis],
       config: createConfig(),
       supplementaryData: createSupplementaryData(),
@@ -112,6 +142,174 @@ describe("selectFineAssessmentCandidates", () => {
     expect(result.diagnostics[0]?.path_suppression_score).toBe(0);
   });
 
+  it("captures candidate-local answer support without trusting the evidence gist", () => {
+    const candidate = createCandidate("bookshelf", {
+      content: "The new bookshelf is from IKEA.",
+      evidence_refs: ["evidence-bookshelf"]
+    });
+    const queryProbes = compileRecallQueryProbes(
+      "Where did I buy my new bookshelf from?"
+    );
+    const select = (evidenceGist: string) => selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+      orderedCandidates: [candidate],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        evidenceGistsByMemoryId: { bookshelf: evidenceGist }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: createRanks(),
+      captureAnswerFeatures: true
+    });
+
+    const first = select("Assistant: IKEA is probably a good guess.");
+    const second = select("Assistant: This unrelated text must not affect support.");
+
+    expect(first.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
+      shape: "place",
+      status: "compatible",
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true
+    });
+    expect(second.diagnostics[0]?.answer_features?.answer_support).toEqual(
+      first.diagnostics[0]?.answer_features?.answer_support
+    );
+  });
+
+  it("separates shared provenance from atomic answer-support identity", () => {
+    const evidenceRef = "evidence-shared";
+    const content = "I bought my new bookshelf from IKEA.";
+    const memory = createCandidate("bookshelf", {
+      content,
+      evidence_refs: [evidenceRef]
+    });
+    const evidenceBase = createCandidate("capsule", {
+      content,
+      evidence_refs: [evidenceRef]
+    }, "evidence_capsule");
+    const evidence = {
+      ...evidenceBase,
+      verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "turn_projection" as const,
+        evidence_ref: evidenceRef,
+        support_identity: null
+      },
+      fusion: {
+        ...evidenceBase.fusion,
+        candidate_key: "workspace_local:evidence_capsule:capsule"
+      }
+    };
+    const verified = projectVerifiedUserAssertionContext({
+      evidenceRef,
+      entryContent: content,
+      gist: `User: ${content}`
+    });
+    if (verified === null) throw new Error("test fixture must project");
+    const queryProbes = compileRecallQueryProbes(
+      "Where did I buy my new bookshelf from?"
+    );
+
+    const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+      orderedCandidates: [memory, evidence],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        verifiedUserAssertionContextsByMemoryId: { bookshelf: verified }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory, evidence]),
+      captureAnswerFeatures: true
+    });
+    const diagnostics = new Map(
+      result.diagnostics.map((row) => [row.candidate_key, row])
+    );
+    const memoryObservation = diagnostics.get(memory.fusion.candidate_key)
+      ?.answer_features?.answer_support_observations?.[0];
+    const evidenceObservation = diagnostics.get(evidence.fusion.candidate_key)
+      ?.answer_features?.answer_support_observations?.[0];
+
+    expect(memoryObservation).toMatchObject({
+      source_identity: `evidence_ref:${evidenceRef}`,
+      support_identity: expect.stringMatching(
+        /^verified_user_assertion:evidence-shared:sha256:[0-9a-f]{64}$/u
+      ),
+      projection_kind: "atomic_assertion",
+      query_status: "compatible",
+      behavior_eligible: true
+    });
+    expect(evidenceObservation).toMatchObject({
+      source_identity: memoryObservation?.source_identity,
+      support_identity: null,
+      projection_kind: "turn_projection",
+      query_status: "compatible",
+      behavior_eligible: false
+    });
+
+    const stale = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+      orderedCandidates: [memory],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        verifiedUserAssertionContextsByMemoryId: {
+          bookshelf: { ...verified, assertion_text: "stale assertion" }
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory]),
+      captureAnswerFeatures: true
+    });
+    expect(stale.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
+      authority: { provenance_status: "unverified" }
+    });
+    expect(stale.diagnostics[0]?.answer_features)
+      .not.toHaveProperty("answer_support_observations");
+  });
+
+  it.each([
+    ["How much total money have I spent on bike expenses?", "observation_only"],
+    ["Remind me what I said about bike expenses.", "unresolved"]
+  ] as const)(
+    "observes verified atomic support when query status is %s",
+    (query, queryStatus) => {
+      const content = "I paid $120 for the bike and $40 for a tune-up.";
+      const candidate = createCandidate("bike-expense", {
+        content,
+        evidence_refs: ["evidence-bike"]
+      });
+      const verified = projectVerifiedUserAssertionContext({
+        evidenceRef: "evidence-bike",
+        entryContent: content,
+        gist: `User: ${content}`
+      });
+      if (verified === null) throw new Error("test fixture must project");
+      const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+        orderedCandidates: [candidate],
+        config: createConfig(),
+        supplementaryData: createSupplementaryData({
+          queryProbes: compileRecallQueryProbes(query),
+          verifiedUserAssertionContextsByMemoryId: { "bike-expense": verified }
+        }),
+        tokenEstimator: { estimate: vi.fn(() => 6) },
+        rankByCandidateKey: rankMap([candidate]),
+        captureAnswerFeatures: true
+      });
+
+      expect(result.diagnostics[0]?.answer_features
+        ?.answer_support_observations?.[0]).toMatchObject({
+        projection_kind: "atomic_assertion",
+        query_status: queryStatus,
+        behavior_eligible: false
+      });
+    }
+  );
+
   it("keeps memory-keyed diagnostics scoped away from same-id projections", () => {
     const local = createCandidate("shared");
     const synthesisBase = createCandidate("shared", {}, "synthesis_capsule");
@@ -132,6 +330,7 @@ describe("selectFineAssessmentCandidates", () => {
       }
     };
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [local, synthesis, global],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -175,6 +374,7 @@ describe("selectFineAssessmentCandidates", () => {
     };
     const ordinary = createCandidate("ordinary-memory");
     const result = selectFineAssessmentCandidates({
+    ...FIELD_PINS,
       orderedCandidates: [child, ordinary],
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -190,87 +390,6 @@ describe("selectFineAssessmentCandidates", () => {
 
     expect(diagnostics.get("synthesis-child")?.lexical_rank).toBe(0.8);
     expect(diagnostics.get("ordinary-memory")?.lexical_rank).toBeNull();
-  });
-
-  it("omits answer features unless deep diagnostic capture is explicit", () => {
-    const result = selectFineAssessmentCandidates({
-      orderedCandidates: [createCandidate("memory-1")],
-      config: createConfig(),
-      supplementaryData: createSupplementaryData(),
-      tokenEstimator: { estimate: vi.fn(() => 6) },
-      rankByCandidateKey: createRanks()
-    });
-
-    expect(result.diagnostics[0]).not.toHaveProperty("answer_features");
-  });
-
-  it("deduplicates object representations while retaining provenance diagnostics", () => {
-    const local = createCandidate("shared");
-    const globalBase = createCandidate("shared");
-    const global = {
-      ...globalBase,
-      originPlane: "global" as const,
-      fusion: {
-        ...globalBase.fusion,
-        candidate_key: "global:memory_entry:shared",
-        fused_rank: 2,
-        fused_score: 0.6
-      }
-    };
-    const next = createCandidate("next");
-
-    const result = selectFineAssessmentCandidates({
-      orderedCandidates: [local, global, next],
-      config: {
-        ...createConfig(),
-        budgets: { ...createConfig().budgets, max_entries: 2 }
-      },
-      supplementaryData: createSupplementaryData(),
-      tokenEstimator: { estimate: vi.fn(() => 6) },
-      rankByCandidateKey: new Map([
-        [local.fusion.candidate_key, 1],
-        [global.fusion.candidate_key, 2],
-        [next.fusion.candidate_key, 3]
-      ])
-    });
-
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["shared", "next"]);
-    expect(result.diagnostics.map((candidate) => ({
-      candidateKey: candidate.candidate_key,
-      droppedReason: candidate.dropped_reason
-    }))).toEqual([
-      { candidateKey: local.fusion.candidate_key, droppedReason: null },
-      { candidateKey: next.fusion.candidate_key, droppedReason: null },
-      { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" }
-    ]);
-  });
-
-  it("attributes gist coverage movement to the coverage selector", () => {
-    const primary = createRankedCandidate("primary", 1, 1);
-    const redundant = createRankedCandidate("redundant", 2, 0.9);
-    const diverse = createRankedCandidate("diverse", 3, 0.8);
-    const result = selectFineAssessmentCandidates({
-      orderedCandidates: [primary, redundant, diverse],
-      config: createConfig(),
-      supplementaryData: createSupplementaryData({
-        evidenceGistsByMemoryId: {
-          primary: "shared gist",
-          redundant: "shared gist",
-          diverse: "different gist"
-        }
-      }),
-      tokenEstimator: { estimate: vi.fn(() => 6) },
-      rankByCandidateKey: rankMap([primary, redundant, diverse]),
-      coverageRelevanceByCandidateKey: new Map([
-        [primary.fusion.candidate_key, 1],
-        [redundant.fusion.candidate_key, 0.9],
-        [diverse.fusion.candidate_key, 0.8]
-      ])
-    });
-
-    expect(stageRanks(result, "primary")).toEqual([1, 1, "kept"]);
-    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted"]);
-    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced"]);
   });
 
 });

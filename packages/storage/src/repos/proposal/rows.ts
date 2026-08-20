@@ -14,6 +14,7 @@ export const PROPOSAL_SELECT_COLUMNS = `
         workspace_id,
         run_id,
         reviewer_identity,
+        proposal_operation,
         target_object_kind,
         proposed_change_summary,
         proposed_changes,
@@ -41,6 +42,7 @@ export interface ProposalRow {
   readonly run_id: string | null;
   // Review identity + HITL summary projection columns.
   readonly reviewer_identity: string | null;
+  readonly proposal_operation: string | null;
   readonly target_object_kind: string;
   readonly proposed_change_summary: string;
   readonly proposed_changes: string | null;

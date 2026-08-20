@@ -1,12 +1,12 @@
+import type { MemoryEntrySemanticTieRow } from "./semantic-tie-order.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
 } from "../shared/cjk-segmentation.js";
 
-export interface ExactKeywordCandidateRow {
+export interface ExactKeywordCandidateRow extends MemoryEntrySemanticTieRow {
   readonly object_id: string;
-  readonly content: string;
 }
 
 export interface ExactKeywordSearchRow {
@@ -26,12 +26,18 @@ type RankedKeywordSearchResult = Readonly<
 export type ObjectIdFilterColumn =
   | "memory_entries.object_id"
   | "memory_content_fts.object_id"
-  | "memory_content_fts_porter.object_id";
+  | "memory_content_fts_porter.object_id"
+  | "memory_object_key_fts.owner_id"
+  | "memory_object_key_fts_trigram.owner_id"
+  | "k.owner_id";
 
 const OBJECT_ID_FILTER_COLUMNS: Readonly<Record<ObjectIdFilterColumn, string>> = Object.freeze({
   "memory_entries.object_id": "object_id",
   "memory_content_fts.object_id": "memory_content_fts.object_id",
-  "memory_content_fts_porter.object_id": "memory_content_fts_porter.object_id"
+  "memory_content_fts_porter.object_id": "memory_content_fts_porter.object_id",
+  "memory_object_key_fts.owner_id": "memory_object_key_fts.owner_id",
+  "memory_object_key_fts_trigram.owner_id": "memory_object_key_fts_trigram.owner_id",
+  "k.owner_id": "k.owner_id"
 });
 
 export function buildObjectIdFilterSql(
@@ -62,35 +68,53 @@ export function normalizeKeywordSearchObjectIds(objectIds: readonly string[]): r
   );
 }
 
+interface ObjectKeySearchLanes {
+  readonly porter?: readonly FtsKeywordSearchRow[];
+  readonly trigram?: readonly FtsKeywordSearchRow[];
+}
+
 export function mergeKeywordSearchRows(
   exactRows: readonly ExactKeywordSearchRow[],
   trigramRows: readonly FtsKeywordSearchRow[],
   limit: number,
-  porterRows: readonly FtsKeywordSearchRow[] = []
+  porterRows: readonly FtsKeywordSearchRow[] = [],
+  objectKeyLanes: Readonly<ObjectKeySearchLanes> = {}
 ): readonly Readonly<MemoryEntryKeywordSearchResult>[] {
   const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
   const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
   const porterScores = buildGroupedOrdinalScores(porterRows, (row) => row.raw_rank);
+  const keyPorter = objectKeyLanes.porter ?? [];
+  const keyTrigram = objectKeyLanes.trigram ?? [];
+  const keyPorterScores = buildGroupedOrdinalScores(keyPorter, (row) => row.raw_rank);
+  const keyTrigramScores = buildGroupedOrdinalScores(keyTrigram, (row) => row.raw_rank);
   const trigramScoreByObjectId = buildTrigramScoreByObjectId(trigramRows, trigramScores);
+  const objectKeyScoreByObjectId = mergeScoreMaps(
+    buildTrigramScoreByObjectId(keyPorter, keyPorterScores),
+    buildTrigramScoreByObjectId(keyTrigram, keyTrigramScores)
+  );
   const byObjectId = new Map<string, RankedKeywordSearchResult>();
 
   exactRows.forEach((row, index) => {
     considerKeywordRow(byObjectId, row.object_id, exactScores[index] ?? 0, 0, index);
   });
-
   porterRows.forEach((row, index) => {
     considerKeywordRow(byObjectId, row.object_id, porterScores[index] ?? 0, 1, index);
   });
-
+  keyPorter.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, keyPorterScores[index] ?? 0, 1, index);
+  });
   trigramRows.forEach((row, index) => {
     considerKeywordRow(byObjectId, row.object_id, trigramScores[index] ?? 0, 2, index);
+  });
+  keyTrigram.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, keyTrigramScores[index] ?? 0, 2, index);
   });
 
   return Object.freeze(
     [...byObjectId.values()]
       .sort(compareKeywordRows)
       .slice(0, limit)
-      .map((row) => toKeywordSearchResult(row, trigramScoreByObjectId))
+      .map((row) => toKeywordSearchResult(row, trigramScoreByObjectId, objectKeyScoreByObjectId))
   );
 }
 
@@ -138,14 +162,45 @@ function compareKeywordRows(left: RankedKeywordSearchResult, right: RankedKeywor
 
 function toKeywordSearchResult(
   row: RankedKeywordSearchResult,
-  trigramScoreByObjectId: ReadonlyMap<string, number>
+  trigramScoreByObjectId: ReadonlyMap<string, number>,
+  objectKeyScoreByObjectId: ReadonlyMap<string, number>
 ): Readonly<MemoryEntryKeywordSearchResult> {
   const trigramRank = trigramScoreByObjectId.get(row.object_id) ?? 0;
+  const objectKeyRank = objectKeyScoreByObjectId.get(row.object_id) ?? 0;
   return Object.freeze({
     object_id: row.object_id,
     normalized_rank: row.normalized_rank,
-    ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {})
+    ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {}),
+    ...(objectKeyRank > 0 ? { object_key_rank: objectKeyRank } : {})
   });
+}
+
+function mergeScoreMaps(
+  left: ReadonlyMap<string, number>,
+  right: ReadonlyMap<string, number>
+): ReadonlyMap<string, number> {
+  const merged = new Map(left);
+  for (const [objectId, score] of right) {
+    merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
+  }
+  return merged;
+}
+
+export function mergeExactKeywordSearchRows(
+  left: readonly ExactKeywordSearchRow[],
+  right: readonly ExactKeywordSearchRow[]
+): readonly ExactKeywordSearchRow[] {
+  if (right.length === 0) return left;
+  if (left.length === 0) return right;
+  const counts = new Map<string, number>();
+  for (const row of [...left, ...right]) {
+    counts.set(row.object_id, Math.max(counts.get(row.object_id) ?? 0, row.matched_token_count));
+  }
+  return Object.freeze(
+    [...counts.entries()]
+      .sort((leftRow, rightRow) => rightRow[1] - leftRow[1] || leftRow[0].localeCompare(rightRow[0]))
+      .map(([object_id, matched_token_count]) => Object.freeze({ object_id, matched_token_count }))
+  );
 }
 
 export function buildGroupedOrdinalScores<T>(
@@ -239,6 +294,28 @@ const CJK_TOKEN_PATTERN =
 
 export function tokenBearsCjk(token: string): boolean {
   return CJK_TOKEN_PATTERN.test(token);
+}
+
+export interface KeywordLaneTokens {
+  readonly exact: readonly string[];
+  readonly trigram: readonly string[];
+  readonly porter: readonly string[];
+}
+
+export function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
+  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+  return {
+    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
+    trigram,
+    porter: trigram.filter((token) => !tokenBearsCjk(token))
+  };
+}
+
+export function objectKeyExactTokens(tokens: readonly string[]): readonly string[] {
+  // FTS5 trigram cannot MATCH below 3 chars; porter is >=3 codepoints, so ASCII shorts ride content exact.
+  return Object.freeze(tokens.filter((token) =>
+    countQueryCodepoints(token) < 3 && tokenBearsCjk(token)
+  ));
 }
 
 export function createShortKeywordMatcher(token: string): (content: string) => boolean {

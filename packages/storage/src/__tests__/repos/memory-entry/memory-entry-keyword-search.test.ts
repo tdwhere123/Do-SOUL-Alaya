@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildObjectIdFilterSql,
   mergeKeywordSearchRows,
+  objectKeyExactTokens,
   tokenizeFtsQuery,
   type ExactKeywordSearchRow,
   type FtsKeywordSearchRow
@@ -26,6 +27,10 @@ describe("buildObjectIdFilterSql", () => {
     expect(buildObjectIdFilterSql(["y"], "memory_content_fts_porter.object_id")).toEqual({
       sql: "AND memory_content_fts_porter.object_id IN (?)",
       params: ["y"]
+    });
+    expect(buildObjectIdFilterSql(["z"], "memory_object_key_fts.owner_id")).toEqual({
+      sql: "AND memory_object_key_fts.owner_id IN (?)",
+      params: ["z"]
     });
   });
 
@@ -93,6 +98,44 @@ describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
     // trigram_fts fusion stream to read.
     expect(byId.get("obj-both")?.trigram_rank).toBeGreaterThan(0);
     expect(byId.get("obj-trigram-only")?.trigram_rank).toBeGreaterThan(0);
+  });
+
+  it("surfaces object_key_rank for objects admitted by Key FTS", () => {
+    const merged = mergeKeywordSearchRows([], [], 10, [], {
+      porter: [{ object_id: "obj-key", raw_rank: -4 }]
+    });
+    expect(merged).toEqual([
+      { object_id: "obj-key", normalized_rank: 1, object_key_rank: 1 }
+    ]);
+  });
+
+  it("collapses content porter and multiple key hits into one object vote", () => {
+    const merged = mergeKeywordSearchRows(
+      [],
+      [{ object_id: "obj-1", raw_rank: -1 }],
+      10,
+      [{ object_id: "obj-1", raw_rank: -2 }],
+      {
+        porter: [
+          { object_id: "obj-1", raw_rank: -5 },
+          { object_id: "obj-1", raw_rank: -3 }
+        ],
+        trigram: [
+          { object_id: "obj-1", raw_rank: -9 },
+          { object_id: "obj-1", raw_rank: -7 }
+        ]
+      }
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.object_id).toBe("obj-1");
+    expect(merged[0]?.normalized_rank).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("objectKeyExactTokens", () => {
+  it("keeps trigram-infeasible CJK tokens and drops short ASCII", () => {
+    expect(objectKeyExactTokens(["I", "a", "to", "8", "3", "2月"])).toEqual(["2月"]);
+    expect(objectKeyExactTokens(["museum", "Retriever"])).toEqual([]);
   });
 });
 

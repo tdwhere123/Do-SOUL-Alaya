@@ -1,104 +1,150 @@
 import { describe, expect, it } from "vitest";
-import {
-  MemoryDimension,
-  ScopeClass,
-  type MemoryEntry,
-  type RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import { applyDeliverySelection, type DeliverySelectionCandidate } from "../../recall/delivery/delivery-selection.js";
 import { orderByCoverageMarginalGain } from "../../recall/delivery/coverage-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import type { RecallFusionBreakdown } from "../../recall/runtime/recall-service-types.js";
+import { applyDeliverySelection } from
+  "../../recall/delivery/delivery-selection.js";
 import {
   computeLightweightDeepHeadScores,
+  resolveDeepHeadAssessment,
   resolveDeepHeadScores
 } from "../../recall/rerank/deep-head.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-
-function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
-  return {
-    object_id: "obj",
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.FACT,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "memory content",
-    domain_tags: [],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null,
-    ...overrides
-  };
-}
-
-function fusedCandidate(input: {
-  readonly objectId: string;
-  readonly fusedScore: number;
-  readonly fusedRank?: number;
-  readonly embedding?: number;
-  readonly evidenceFts?: number;
-  readonly contributions?: Partial<Record<string, number>>;
-}): DeliverySelectionCandidate {
-  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
-  const fusion: RecallFusionBreakdown = Object.freeze({
-    ...breakdown,
-    fused_rank: input.fusedRank ?? breakdown.fused_rank,
-    fused_score: input.fusedScore,
-    ...(input.contributions === undefined
-      ? {}
-      : {
-          fused_rank_contribution_per_stream: Object.freeze({
-            ...breakdown.fused_rank_contribution_per_stream,
-            ...input.contributions
-          })
-        })
-  });
-  const factors = {
-    ...(input.embedding === undefined ? {} : { embedding_similarity: input.embedding })
-  } as RecallScoreFactors;
-  return Object.freeze({
-    entry: memory({ object_id: input.objectId }),
-    effectiveScore: input.fusedScore,
-    effectiveFactors: factors,
-    fusion
-  });
-}
-
-function emptySupplementary(overrides: {
-  readonly embeddingSimilarityScores?: Record<string, number>;
-  readonly evidenceFtsRanks?: Record<string, number>;
-  readonly structuralScores?: Record<string, number>;
-  readonly sourceProximityScores?: Record<string, number>;
-} = {}) {
-  return {
-    queryProbes: compileRecallQueryProbes(null),
-    embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
-    evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},
-    structuralScores: overrides.structuralScores ?? {},
-    sourceProximityScores: overrides.sourceProximityScores ?? {}
-  };
-}
+import { emptySupplementary, fusedCandidate } from
+  "./rerank/deep-head-fixtures.js";
 
 describe("deep head", () => {
+  it("traces the exact live lightweight score composition", () => {
+    const candidate = fusedCandidate({
+      objectId: "traced",
+      fusedScore: 0.2,
+      embedding: 0.4
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { traced: 0.81 },
+        trigramFtsRanks: { traced: 1 },
+        evidenceFtsRanks: { traced: 0.25 },
+        structuralScores: { traced: 1 }
+      }),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.lexical_agreement).toBeCloseTo(0.9);
+    expect(trace.evidence_agreement).toBeCloseTo(0.5);
+    expect(trace.resolved_evidence).toBeCloseTo(0.9);
+    expect(trace.embedding_signal).toBeCloseTo(0.4);
+    expect(trace.activation).toMatchObject({
+      schema_version: 1,
+      operator_id: "candidate_semantic_max_v1",
+      state: "observed",
+      score: 0.4,
+      winner: { channel: "effective_factor", score: 0.4 },
+      missing_channel_policy: "no_op"
+    });
+    expect(trace.formula_operator_id).toBe("lightweight_deep_head_prob_or_v1");
+    expect(trace.fusion_baseline_used).toBe(false);
+    expect(trace.score_source).toBe("embedding_evidence");
+    expect(trace.resolved_score).toBeCloseTo(0.94);
+    expect(assessment.scores.get(candidate.fusion.candidate_key))
+      .toBe(trace.resolved_score);
+  });
+
+  it("does not add correlated lexical evidence forms as independent probability", () => {
+    const candidate = fusedCandidate({
+      objectId: "correlated-lexical",
+      fusedScore: 0.2,
+      embedding: 0.4
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { "correlated-lexical": 0.81 },
+        trigramFtsRanks: { "correlated-lexical": 1 },
+        evidenceFtsRanks: { "correlated-lexical": 0.81 },
+        structuralScores: { "correlated-lexical": 1 }
+      }),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.lexical_agreement).toBeCloseTo(0.9);
+    expect(trace.evidence_agreement).toBeCloseTo(0.9);
+    expect(trace.resolved_evidence).toBeCloseTo(0.9);
+    expect(trace.resolved_score).toBeCloseTo(0.94);
+  });
+
+  it("keeps the fused opportunity channel beside observed embedding support", () => {
+    const candidate = fusedCandidate({
+      objectId: "resident-opportunity",
+      fusedScore: 0.2,
+      embedding: 0.4,
+      contributions: { lexical_fts: 0.02 }
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.fusion_baseline_used).toBe(true);
+    expect(trace.score_source).toBe("fusion_embedding_evidence");
+    expect(trace.resolved_score).toBeCloseTo(1 - (1 - 0.4) * (1 - 0.2));
+    expect(assessment.scores.get(candidate.fusion.candidate_key))
+      .toBe(trace.resolved_score);
+  });
+
+  it("keeps the canonical raw fusion baseline when embedding is stronger", () => {
+    const leader = fusedCandidate({
+      objectId: "fusion-leader",
+      fusedScore: 0.114,
+      fusedRank: 1,
+      embedding: 0.42,
+      contributions: { lexical_fts: 0.016, embedding_similarity: 0.015 }
+    });
+    const assessment = resolveDeepHeadAssessment(
+      {
+        candidates: [leader],
+        answerRelevanceScores: new Map(),
+        supplementaryData: emptySupplementary({
+          embeddingSimilarityScores: { "fusion-leader": 0.42 }
+        }),
+        includeTraces: true
+      }
+    );
+    const trace = assessment.traceByCandidateKey.get(leader.fusion.candidate_key)!;
+
+    expect(trace.resolved_score).toBeCloseTo(
+      1 - (1 - 0.42) * (1 - 0.114)
+    );
+    expect(assessment.scores.get(leader.fusion.candidate_key))
+      .toBe(trace.resolved_score);
+  });
+
+  it("activates a source-bound field baseline without inventing embedding evidence", () => {
+    const candidate = fusedCandidate({
+      objectId: "inactive",
+      fusedScore: 0.2,
+      contributions: { path_expansion: 0.01 }
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(assessment.scores.size).toBe(1);
+    expect(trace.score_source).toBe("field_baseline");
+    expect(trace.fusion_baseline_used).toBe(true);
+    expect(trace.embedding_signal).toBeNull();
+    expect(trace.resolved_score).toBeCloseTo(0.2);
+  });
+
   it("scores every candidate in the already-pruned waist", () => {
     const candidates = Array.from({ length: 37 }, (_, index) =>
       fusedCandidate({
@@ -115,7 +161,7 @@ describe("deep head", () => {
     expect(scores.has(candidates.at(-1)!.fusion.candidate_key)).toBe(true);
   });
 
-  it("prefers cross-encoder scores when present and otherwise uses lightweight head", () => {
+  it("does not let a dormant cross-encoder map replace lightweight scores", () => {
     const candidates = [
       fusedCandidate({ objectId: "a", fusedScore: 0.9, fusedRank: 1, embedding: 0.1 }),
       fusedCandidate({ objectId: "b", fusedScore: 0.8, fusedRank: 2, embedding: 0.9 })
@@ -128,7 +174,9 @@ describe("deep head", () => {
     const withCe = resolveDeepHeadScores({
       candidates,
       answerRelevanceScores: ceScores,
-      supplementaryData: emptySupplementary()
+      supplementaryData: emptySupplementary({
+        embeddingSimilarityScores: { a: 0.1, b: 0.9 }
+      })
     });
     const withoutCe = resolveDeepHeadScores({
       candidates,
@@ -138,9 +186,28 @@ describe("deep head", () => {
       })
     });
 
-    expect(withCe.get(candidates[0]!.fusion.candidate_key)).toBe(0.95);
+    expect(withCe).toEqual(withoutCe);
     expect(withoutCe.get(candidates[1]!.fusion.candidate_key)!)
       .toBeGreaterThan(withoutCe.get(candidates[0]!.fusion.candidate_key)!);
+  });
+
+  it("keeps lightweight traces when a dormant cross-encoder map is present", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "scored", fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "unscored", fusedScore: 0.8 })
+    ];
+    const scoredKey = candidates[0]!.fusion.candidate_key;
+    const assessment = resolveDeepHeadAssessment({
+      candidates,
+      answerRelevanceScores: new Map([[scoredKey, 0.75]]),
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
+    });
+
+    expect(assessment.traceByCandidateKey.get(scoredKey)?.formula_operator_id)
+      .toBe("lightweight_deep_head_prob_or_v1");
+    expect(assessment.traceByCandidateKey.get(scoredKey)?.score_source)
+      .not.toBe("cross_encoder");
   });
 
   it("lets independent semantic support promote a candidate from a distant fused rank", () => {
@@ -187,6 +254,56 @@ describe("deep head", () => {
     expect(scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(0.84);
   });
 
+  it("treats concurrence between two lexical lanes as answer evidence", () => {
+    const embeddingOnly = fusedCandidate({
+      objectId: "embedding-only",
+      fusedScore: 0.3,
+      embedding: 0.2
+    });
+    const textCorroborated = fusedCandidate({
+      objectId: "text-corroborated",
+      fusedScore: 0.2,
+      embedding: 0.2
+    });
+
+    const scores = computeLightweightDeepHeadScores(
+      [embeddingOnly, textCorroborated],
+      emptySupplementary({
+        ftsRanks: { "text-corroborated": 0.9 },
+        trigramFtsRanks: { "text-corroborated": 0.81 }
+      })
+    );
+
+    expect(scores.get(embeddingOnly.fusion.candidate_key)).toBeCloseTo(0.2);
+    expect(scores.get(textCorroborated.fusion.candidate_key)!).toBeGreaterThan(0.8);
+  });
+
+  it("adds direct answer evidence to a query-supported embedding-cold baseline", () => {
+    const direct = fusedCandidate({
+      objectId: "direct",
+      fusedScore: 0.4,
+      contributions: { lexical_fts: 0.02 }
+    });
+    const contextual = fusedCandidate({
+      objectId: "contextual",
+      fusedScore: 0.6,
+      contributions: { subject_alignment: 0.02 }
+    });
+
+    const scores = computeLightweightDeepHeadScores(
+      [direct, contextual],
+      emptySupplementary({
+        ftsRanks: { direct: 0.9 },
+        trigramFtsRanks: { direct: 0.81 }
+      })
+    );
+
+    expect(scores.get(direct.fusion.candidate_key)).toBeCloseTo(
+      1 - (1 - 0.4) * (1 - Math.sqrt(0.9 * 0.81))
+    );
+    expect(scores.get(contextual.fusion.candidate_key)).toBeCloseTo(0.6);
+  });
+
   it("preserves query-supported relevance without a usable embedding in a mixed pool", () => {
     const exactLexical = fusedCandidate({
       objectId: "exact-lexical",
@@ -227,20 +344,19 @@ describe("deep head", () => {
       candidates,
       relevanceByCandidateKey: scores,
       supplementaryData: {
-        evidenceGistsByMemoryId: {},
-        sourceCohortKeys: {}
+        evidenceGistsByMemoryId: {}
       }
     });
 
     expect(scores.get(exactLexical.fusion.candidate_key)).toBeCloseTo(0.08);
     expect(scores.get(invalidVectorLexical.fusion.candidate_key)).toBeCloseTo(0.07);
-    expect(scores.get(zeroSimilarityLexical.fusion.candidate_key)).toBe(0);
+    expect(scores.get(zeroSimilarityLexical.fusion.candidate_key)).toBeCloseTo(0.09);
     expect(packed.map((candidate) => candidate.entry.object_id))
       .toEqual([
+        "zero-similarity-lexical",
         "exact-lexical",
         "invalid-vector-lexical",
-        "weak-semantic",
-        "zero-similarity-lexical"
+        "weak-semantic"
       ]);
   });
 
@@ -263,186 +379,7 @@ describe("deep head", () => {
     const scores = computeLightweightDeepHeadScores(candidates, emptySupplementary());
 
     expect(scores.size).toBe(2);
-    expect([...scores.values()]).toEqual([0, 0]);
+    expect([...scores.values()]).toEqual([0.09, 0.08]);
   });
 
-  it("keeps missing and invalid embeddings cold beside an observed supplementary zero", () => {
-    const observedZero = fusedCandidate({
-      objectId: "observed-zero",
-      fusedScore: 0.9,
-      contributions: { lexical_fts: 0.016 }
-    });
-    const missing = fusedCandidate({
-      objectId: "missing",
-      fusedScore: 0.08,
-      contributions: { lexical_fts: 0.015 }
-    });
-    const invalid = fusedCandidate({
-      objectId: "invalid",
-      fusedScore: 0.07,
-      embedding: Number.NaN,
-      contributions: { lexical_fts: 0.014 }
-    });
-    const candidates = [observedZero, missing, invalid];
-    const scores = computeLightweightDeepHeadScores(
-      candidates,
-      emptySupplementary({ embeddingSimilarityScores: { "observed-zero": 0 } })
-    );
-    const packed = orderByCoverageMarginalGain({
-      candidates,
-      relevanceByCandidateKey: scores,
-      supplementaryData: { evidenceGistsByMemoryId: {}, sourceCohortKeys: {} }
-    });
-
-    expect(scores.get(observedZero.fusion.candidate_key)).toBe(0);
-    expect(scores.get(missing.fusion.candidate_key)).toBeCloseTo(0.08);
-    expect(scores.get(invalid.fusion.candidate_key)).toBeCloseTo(0.07);
-    expect(packed.map((candidate) => candidate.entry.object_id))
-      .toEqual(["missing", "invalid", "observed-zero"]);
-  });
-
-  it("falls back from a non-finite factor to a finite supplementary embedding", () => {
-    const candidate = fusedCandidate({
-      objectId: "supplementary-fallback",
-      fusedScore: 0.09,
-      embedding: Number.NaN,
-      contributions: { lexical_fts: 0.016 }
-    });
-
-    const scores = computeLightweightDeepHeadScores(
-      [candidate],
-      emptySupplementary({
-        embeddingSimilarityScores: { "supplementary-fallback": 0.42 }
-      })
-    );
-
-    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.42);
-  });
-
-  it("does not leak memory-keyed signals into same-id synthesis or global candidates", () => {
-    const local = fusedCandidate({ objectId: "shared", fusedScore: 0.3 });
-    const synthesisBase = fusedCandidate({ objectId: "shared", fusedScore: 0.2 });
-    const globalBase = fusedCandidate({ objectId: "shared", fusedScore: 0.1 });
-    const synthesis: DeliverySelectionCandidate = Object.freeze({
-      ...synthesisBase,
-      objectKind: "synthesis_capsule",
-      fusion: Object.freeze({
-        ...synthesisBase.fusion,
-        candidate_key: "workspace_local:synthesis_capsule:shared"
-      })
-    });
-    const global: DeliverySelectionCandidate = Object.freeze({
-      ...globalBase,
-      originPlane: "global",
-      fusion: Object.freeze({
-        ...globalBase.fusion,
-        candidate_key: "global:memory_entry:shared"
-      })
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [synthesis, global, local],
-      emptySupplementary({
-        embeddingSimilarityScores: { shared: 0.8 },
-        evidenceFtsRanks: { shared: 1 },
-        structuralScores: { shared: 1 },
-        sourceProximityScores: { shared: 1 }
-      })
-    );
-
-    expect(scores.get(local.fusion.candidate_key)).toBe(1);
-    expect(scores.get(synthesis.fusion.candidate_key)).toBe(0);
-    expect(scores.get(global.fusion.candidate_key)).toBe(0);
-  });
-
-  it("keeps query-supported fusion wins when emb is cold and agreement-gates conflict-only piles", () => {
-    // Path rescue with a lexical foothold must keep fused mass; content-disjoint
-    // path piles stay agreement-gated so they cannot lead over lexical hits.
-    const lexicalRescue = fusedCandidate({
-      objectId: "lexical-rescue",
-      fusedScore: 0.08,
-      fusedRank: 2,
-      contributions: { path_expansion: 0.016, lexical_fts: 0.012 }
-    });
-    const conflictOnly = fusedCandidate({
-      objectId: "conflict-only",
-      fusedScore: 0.07,
-      fusedRank: 3,
-      contributions: { path_expansion: 0.016, existing_score: 0.014 }
-    });
-    const lexicalPeer = fusedCandidate({
-      objectId: "lexical-peer",
-      fusedScore: 0.04,
-      fusedRank: 4,
-      contributions: { lexical_fts: 0.013, existing_score: 0.015 }
-    });
-    const seed = fusedCandidate({
-      objectId: "path-seed",
-      fusedScore: 0.09,
-      fusedRank: 1,
-      contributions: { path_expansion: 0.015, lexical_fts: 0.014 }
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer],
-      emptySupplementary({
-        evidenceFtsRanks: {
-          "lexical-peer": 1,
-          "lexical-rescue": 0.2,
-          "path-seed": 0.3,
-          "conflict-only": 0.01
-        },
-        structuralScores: {
-          "lexical-peer": 1,
-          "lexical-rescue": 0.2,
-          "path-seed": 0.3,
-          "conflict-only": 0.01
-        }
-      })
-    );
-    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.08);
-    expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(0.04);
-    expect(scores.get(conflictOnly.fusion.candidate_key)!)
-      .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);
-
-    const result = applyDeliverySelection(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer],
-      scores,
-      { replacePublicRelevance: false }
-    );
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["path-seed", "lexical-rescue", "lexical-peer", "conflict-only"]);
-  });
-
-  it("is a no-op when emb and agreement are both cold (fused order binds)", () => {
-    // Without emb or corroboration the deep head has no signal orthogonal to
-    // fusion; rescoring would demote path-only candidates that fusion admitted.
-    const pathOnly = fusedCandidate({
-      objectId: "path-only",
-      fusedScore: 0.07,
-      fusedRank: 2,
-      contributions: { path_expansion: 0.016 }
-    });
-    const lexicalHead = fusedCandidate({
-      objectId: "lexical-head",
-      fusedScore: 0.09,
-      fusedRank: 1,
-      contributions: { lexical_fts: 0.014 }
-    });
-    const lexicalTail = fusedCandidate({
-      objectId: "lexical-tail",
-      fusedScore: 0.05,
-      fusedRank: 3,
-      contributions: { lexical_fts: 0.012 }
-    });
-    const scores = computeLightweightDeepHeadScores(
-      [lexicalHead, pathOnly, lexicalTail],
-      emptySupplementary()
-    );
-    expect(scores.size).toBe(0);
-
-    const result = applyDeliverySelection([lexicalHead, pathOnly, lexicalTail], scores, {
-      replacePublicRelevance: false
-    });
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["lexical-head", "path-only", "lexical-tail"]);
-  });
 });

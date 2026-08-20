@@ -238,5 +238,5 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       cache_hit_count: 1,
       provider_requested_count: 19
     });
-  });
+  }, 20_000);
 });

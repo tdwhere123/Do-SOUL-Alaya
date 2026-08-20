@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateRecallTokenEconomy,
   extractRecallTokenEconomy
-} from "../../../longmemeval/qa/recall-token-economy.js";
+} from "../../../bench/qa/recall-token-economy.js";
 import type { BenchRecallTokenEconomy } from "../../../harness/recall/recall-diagnostics-schema.js";
 
 function sample(overrides: Partial<BenchRecallTokenEconomy> = {}): BenchRecallTokenEconomy {

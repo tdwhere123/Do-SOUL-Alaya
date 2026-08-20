@@ -11,7 +11,7 @@ import {
 import { uniqueStrings } from "./path-relations.js";
 import {
   clamp01,
-  compareMemoryEntries,
+  compareMemoryEntriesForActivationAdmission,
   errorNameOf,
   toErrorMessage
 } from "../runtime/recall-service-helpers.js";
@@ -97,7 +97,7 @@ function collectSourceProximityNeighborCandidates(
   return [...neighborById.values()]
     .sort((left, right) =>
       right.score === left.score
-        ? compareMemoryEntries(left.entry, right.entry)
+        ? compareMemoryEntriesForActivationAdmission(left.entry, right.entry)
         : right.score - left.score
     )
     .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_NEIGHBORS_PER_SEED);

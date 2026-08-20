@@ -98,10 +98,12 @@ export {
 } from "./gates/thresholds.js";
 
 export { buildDiffVsPrevious, diffKpis, verdictBadge } from "./history/diff.js";
+export { isHistoryEntrySlug } from "./history/history-slug.js";
 
 export {
   benchArchiveDiscriminator,
   entrySlug,
+  joinSlugDiscriminators,
   listEntries,
   policyShapeSlug,
   readEntry,
@@ -117,6 +119,14 @@ export {
   type HistoryFileSidecar,
   type HistoryLayout
 } from "./history/history.js";
+
+export {
+  WORKTREE_STATE_ALGORITHM_HEAD_LF,
+  WORKTREE_STATE_ALGORITHM_V2,
+  WORKTREE_STATE_ALGORITHM_V3,
+  WorktreeStateAlgorithmSchema,
+  type WorktreeStateAlgorithm
+} from "./gates/worktree-state-algorithm.js";
 
 export { renderFindings, renderReport } from "./reporting/report.js";
 

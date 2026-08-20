@@ -2,33 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { CoarseCandidateDraft } from "../../recall/coarse-filter/coarse-candidates.js";
 import { addContentDerivedExpansionCandidates } from "../../recall/expansion/content-expansion.js";
-import { deriveFacetsFromText } from "../../recall/expansion/facet-keywords.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 describe("content expansion cohort indexing", () => {
-  it("admits concept-matched memories without lexical term fitting", () => {
-    const cousin = conceptMemory("cousin", "Alice is my cousin and attended graduation.");
-    const sibling = conceptMemory("sibling", "Bob is my sibling and attended graduation.");
-    const business = conceptMemory("business", "Acme is our business partner.");
-    const technology = conceptMemory("technology", "Contoso is a technology partner.");
-    const admitted: string[] = [];
-
-    addContentDerivedExpansionCandidates({
-      tierMemories: [cousin, sibling, business, technology],
-      drafts: new Map(),
-      queryProbes: compileRecallQueryProbes("Which relative attended graduation?"),
-      addCandidate: (entry, plane) => {
-        if (plane === "facet_concept") admitted.push(entry.object_id);
-        return true;
-      },
-      dynamicRecallPlaneCap: 10,
-      dynamicRecallCohortRadius: 1
-    });
-
-    expect(admitted).toEqual([cousin.object_id, sibling.object_id]);
-  });
-
   it("reuses one ordered cohort scan while preserving per-seed neighbors", () => {
     const reads = { count: 0 };
     const memories = Array.from({ length: 100 }, (_, index) =>
@@ -55,14 +32,6 @@ describe("content expansion cohort indexing", () => {
     expect(reads.count).toBeLessThanOrEqual(memories.length * 12);
   });
 });
-
-function conceptMemory(objectId: string, content: string): MemoryEntry {
-  return createMemoryEntry({
-    object_id: objectId,
-    content,
-    facet_tags: deriveFacetsFromText(content).map((facet) => ({ facet }))
-  });
-}
 
 function createCohortMemory(index: number): MemoryEntry {
   const shared = index < 50;

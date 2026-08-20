@@ -6,9 +6,9 @@ import type {
   BenchQueryEmbeddingWarmupSummary,
   BenchWorkspaceHandle
 } from "../harness/daemon.js";
-import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
-import type { QaQuestionVerdict } from "../longmemeval/qa/qa-harness.js";
-import type { CompileSeedRunner } from "../longmemeval/compile-seed.js";
+import type { LongMemEvalQuestionDiagnostic } from "../bench/diagnostics.js";
+import type { QaQuestionVerdict } from "../bench/qa/qa-harness.js";
+import type { CompileSeedRunner } from "../bench/compile-seed.js";
 import type { LocomoSample } from "./dataset.js";
 import type { LocomoRunOptions } from "./runner-types.js";
 import {

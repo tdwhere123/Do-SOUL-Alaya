@@ -14,13 +14,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   accrueAnswersWithCoRelevance,
-  accrueCoherenceCoRecall,
-  accrueSessionCoRecall,
   proposeMemoriesFromCompileSignals,
   proposeMemory,
   proposeMemoryFromSignal,
   proposeSynthesis
 } from "../seed/daemon-seed-operations.js";
+import { createBenchSeedProposalReviewer } from "../seed/daemon-seed-review.js";
 import {
   buildBenchDiagnosticRecallPolicy,
   buildBenchMemorySearchResult,
@@ -68,6 +67,10 @@ import {
   parseBenchRecallDiagnosticsForRun
 } from "../../recall/recall-diagnostics-schema.js";
 import { assertEmbeddingTreatmentDiagnosticsPresent } from "../../embedding/embedding-treatment-activation.js";
+import { createFieldProjectionCheckpointOperation } from
+  "../runtime/daemon-field-projection.js";
+import { createRelationProjectionCheckpointOperation } from
+  "../runtime/daemon-relation-projection.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -83,6 +86,7 @@ interface BenchDaemonOpsInput {
   readonly activeRuntime: AlayaDaemonRuntime;
   readonly activeServer: { close(): Promise<unknown> };
   readonly activeMcpClient: Client;
+  readonly dispatchCli: BenchDaemonHandle["dispatchCli"];
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
@@ -111,13 +115,13 @@ export function createBenchDaemonOps(
   | "warmEmbeddingCache"
   | "warmQueryEmbeddingCache"
   | "runEdgePlanePassIfConfigured"
+  | "checkpointRelationProjection"
+  | "checkpointFieldProjection"
   | "reportContextUsage"
   | "proposeMemory"
   | "proposeMemoryFromSignal"
   | "proposeMemoriesFromCompileSignals"
   | "proposeSynthesis"
-  | "accrueSessionCoRecall"
-  | "accrueCoherenceCoRecall"
   | "accrueAnswersWithCoRelevance"
   | "shutdown"
 > {
@@ -127,6 +131,14 @@ export function createBenchDaemonOps(
     warmEmbeddingCache: createWarmEmbeddingCacheOperation(input),
     warmQueryEmbeddingCache: createWarmQueryEmbeddingCacheOperation(input),
     runEdgePlanePassIfConfigured: createRunEdgePlaneOperation(input),
+    checkpointRelationProjection: createRelationProjectionCheckpointOperation({
+      dataDir: input.dataDir,
+      runtime: input.activeRuntime
+    }),
+    checkpointFieldProjection: createFieldProjectionCheckpointOperation({
+      dataDir: input.dataDir,
+      runtime: input.activeRuntime
+    }),
     reportContextUsage: createBenchReportContextUsageOperation(input),
     ...seedOps,
     shutdown: createBenchShutdownOperation(input)
@@ -154,14 +166,27 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       strategy: "chat",
       policyOverride: policy,
-      diagnosticCapture: "answer_features",
+      diagnosticCapture:
+        input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"
+          ? "packet_trace"
+          : undefined,
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
+      ...(opts.selectionBoundaryObserver === undefined
+        ? {}
+        : { selectionBoundaryObserver: opts.selectionBoundaryObserver }),
+      ...(opts.querySemanticFactorFormationCapture === undefined
+        ? {}
+        : { querySemanticFactorFormationCapture: opts.querySemanticFactorFormationCapture }),
+      ...(opts.querySemanticFactorCompletenessReceipt === undefined
+        ? {}
+        : { querySemanticFactorCompletenessReceipt:
+            opts.querySemanticFactorCompletenessReceipt }),
       activeConstraintsCap: null
     });
     const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);
     const results = collectBenchRecallResults(recallResult, policy, opts.maxResults);
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
-    emitBenchContextLensAssembledEvent(input.dataDir, {
+    await emitBenchContextLensAssembledEvent(input.dataDir, {
       taskSurfaceRef: taskSurface.runtime_id,
       lensEntryCount: results.length,
       totalTokenEstimate: results.reduce(
@@ -220,7 +245,8 @@ function createWarmEmbeddingCacheOperation(
       maxStallPasses: EMBEDDING_WARMUP_MAX_STALL_PASSES,
       runPass: async () =>
         await input.activeRuntime.runGardenEmbeddingBackfillPass(
-          input.activeContext.workspaceId
+          input.activeContext.workspaceId,
+          opts.backfillMode
         ),
       readSummary: async (passCount) =>
         await readEmbeddingWarmupSummary({
@@ -320,8 +346,6 @@ function createBenchSeedOperations(
   | "proposeMemoryFromSignal"
   | "proposeMemoriesFromCompileSignals"
   | "proposeSynthesis"
-  | "accrueSessionCoRecall"
-  | "accrueCoherenceCoRecall"
   | "accrueAnswersWithCoRelevance"
 > {
   const seedInput = {
@@ -334,8 +358,11 @@ function createBenchSeedOperations(
     ): Promise<TOutput> => await callMcpTool<TOutput>(input.activeMcpClient, name, args),
     readMaterializedObjects: async (signalId: string) =>
       await readMaterializedObjects(input.dataDir, signalId),
-    reviewerIdentity: input.reviewerCredentials.identity,
-    reviewerToken: input.reviewerCredentials.token
+    reviewMemoryProposal: createBenchSeedProposalReviewer({
+      activeContext: input.activeContext,
+      dispatchCli: input.dispatchCli,
+      reviewerIdentity: input.reviewerCredentials.identity
+    })
   };
   return {
     proposeMemory: async (content, evidenceRef, options) =>
@@ -346,10 +373,6 @@ function createBenchSeedOperations(
       await proposeMemoriesFromCompileSignals(seedInput, signalInputs),
     proposeSynthesis: async (synthesisInput) =>
       await proposeSynthesis(seedInput, synthesisInput),
-    accrueSessionCoRecall: async (memberMemoryIds) =>
-      await accrueSessionCoRecall(seedInput, memberMemoryIds),
-    accrueCoherenceCoRecall: async (members, options) =>
-      await accrueCoherenceCoRecall(seedInput, members, options),
     accrueAnswersWithCoRelevance: async (members, options) =>
       await accrueAnswersWithCoRelevance(seedInput, members, options)
   };

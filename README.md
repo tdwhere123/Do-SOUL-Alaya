@@ -80,11 +80,11 @@ The v0.3.11 bench surface is published through
 
 | Root | `bench_name` / `split` | Release use |
 |---|---|---|
-| `public/` | `public` / `longmemeval-s` | LongMemEval-S single-turn recall. |
-| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | Repeated recall plus `soul.report_context_usage` rounds. |
-| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Cross-question LongMemEval-S recall. |
-| `public-locomo/` | `public-locomo` / `locomo10` | LoCoMo full recall gates, embedding-off and local ONNX embedding-on. |
-| `live/` | `live` / `strict-real` | Sanitized strict-real live-check imports. |
+| `public/` | `public` / `longmemeval-s` | Operator LongMemEval-S single-turn recall. |
+| `public-locomo/` | `public-locomo` / `locomo10` | Operator LoCoMo recall gates, embedding-off and local ONNX embedding-on. |
+| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | Historical archive only; runner retired. |
+| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Historical archive only; runner retired. |
+| `live/` | `live` / `strict-real` | Historical archive only; runner retired. |
 
 Every archive write updates `latest-run*.json`. Only a run with no
 findings and passing executable hard gates updates
@@ -104,19 +104,11 @@ The core release runs are reproducible by:
 # LongMemEval-S single-turn sharded embedding-off gate.
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --embedding disabled --shards 2 --data-dir <shared-cache>/longmemeval
 
-# LongMemEval-S multiturn and cross-question Tier 1 runs.
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --embedding disabled --data-dir <shared-cache>/longmemeval
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --embedding disabled --data-dir <shared-cache>/longmemeval
-
 # LoCoMo embedding-off gate.
 apps/bench-runner/scripts/run-full-locomo-bench.sh --embedding disabled --data-dir <shared-cache>/locomo
 
 # LoCoMo local ONNX embedding-on gate.
 ALAYA_LOCAL_EMBEDDING_CACHE_DIR=<user-cache> node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --embedding env --embedding-provider local_onnx --data-dir <shared-cache>/locomo
-
-# Local smoke/import surfaces.
-node apps/bench-runner/bin/alaya-bench-runner.mjs self
-node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
 Checkpoint note (2026-06-04): v0.3.11 is implementation complete but the full
@@ -161,8 +153,10 @@ grammar — every section below refers back to them.
 
 This is the rule that lets recall (Path axis) reach into evidence
 (Evidence axis) and ontology (Object axis) without quietly mutating
-either. Every phase below honours it explicitly; remaining runtime gaps
-are tracked in the [Roadmap](#where-this-is-going).
+either. Every phase below honours it explicitly. The intended recall
+algorithm versus the live degenerate projection is in
+[`docs/handbook/recall.md`](docs/handbook/recall.md), not the dated
+roadmap checkpoint.
 
 ---
 
@@ -270,10 +264,13 @@ output is `claim_status = draft` either way.
 - **Out-of-band Proposal** via `soul.propose_memory_update` plus
   `soul.review_memory_proposal`. Triaged signals become `Proposal`s
   with `resolution_state: PENDING`; a reviewer accepts or rejects
-  with explicit `reviewer_identity`. Acceptance applies the accepted
-  `proposed_changes` through the controlled durable memory service
-  and leaves a proposal audit trail. Reject leaves durable memory
-  untouched.
+  with explicit `reviewer_identity`. Accepted `memory_update` proposals
+  apply `proposed_changes` through the controlled durable memory service.
+  Accepted `privacy_erase` proposals atomically erase the source closure,
+  including linked evidence, memory search data, embeddings, and synthesis,
+  only after the proof-carrying hard-effect authority records an `erase=allow`
+  decision in the same transaction.
+  Both operations leave a proposal audit trail; rejection never erases.
 
 The Memory Inspector is the **origination surface** for human
 review actions, never a persistence surface — the "Promote to
@@ -326,41 +323,41 @@ the DB. Lives on the **Memory Ontology** layer (durable truth) plus
 
 ### 4. Recall (召回)
 
-**What happens.** `soul.recall` runs four strategies in a fixed
-order:
+**What is intended.** Recall is one governed associative-memory field
+(UGAF), not a stack of post-processors:
 
-1. **Coarse filter** — deterministic match (scope / dimension /
-   domain tags) plus precomputed activation rank on HOT-tier
-   memories.
-2. **FTS supplement** — full-text search inside the filtered set.
-3. **Fine assessment** — budget-aware ranking with a weighted score
-   (`activation × base + relevance + graph support − budget penalty
-   − conflict penalty`).
-4. **Embedding supplement** — *additive boost only*, never
-   override.
+```text
+q, S_t → Q_q → Ω(H_q, C_seal) → A(X_q) → G_L(~X_q) → M(Z_q) → Select_Γ → D_q
+```
 
-The agent receives a `delivery_id` plus result entries, pointers, and
-stable explanation metadata: numeric `score_factors` (API),
-`source_channels`, `budget_state`, response-level `strategy_mix`, and an
-optional `degradation_reason`. `selection_reason` is diagnostic prose
-only — agents must not branch on its wording. Internal plumbing (the full
-`ContextPack` projection) stays inside Alaya.
+Hopfield / Lyapunov / attractor language in the review tree is a
+design lens, not a proved runtime. Owner:
+[`docs/handbook/recall.md`](docs/handbook/recall.md).
+
+**What actually runs** on HEAD `10da1318`: family-max RRF
+(`fused_score`) plus stacked reorders, then `max_entries`. Typed path
+transfer \(G_L\) is not connected (`path_status = inactive:pass_through`,
+flood fuel unverified). Live deep-head operator is
+`lightweight_deep_head_prob_or_v1`. Embedding is a scorer and almost
+not a discoverer. Do not implement from the retired "four strategies
+in a fixed order" wording.
 
 **Failure mode this prevents.** The most seductive failure of any
 agent-memory system is letting embedding decide truth. Cosine
 distance is fluent and confident, and it is also inversion-shaped:
 a similar phrasing of a *contradicting* fact still scores high.
+Invariant §18: embedding never decides durable truth.
 
-**Design choice.** Embedding cannot override the lexical / FTS /
-path ranking — it can only add a clamped, weighted boost
-(similarity ∈ [0, 1], weight 0.8) on top of the base score. If the
+**Design choice.** Embedding cannot become the ontology. If the
 embedding service is missing, misconfigured, or returns nothing,
-recall falls back to lexical without raising. Recall lives on the
+recall must still have a lexical path. Recall lives on the
 **Path axis** (recall *is* a runtime manifestation of paths) and
-the **Runtime Control** layer.
+the **Runtime Control** layer — even while \(G_L\) is a degenerate
+projection.
 
-*Code anchors:* `packages/core/src/recall/recall-service.ts`
-(`RecallService.recall` orchestration and the embedding-supplement merge).
+*Code anchors:* `docs/handbook/recall.md` (target vs live, with
+file:line). Do not treat `RecallService.recall` orchestration as the
+algorithm definition.
 
 ### 5. Receipt (回执)
 
@@ -734,7 +731,13 @@ place to look. Package layout and dependency direction are in
 
 ## Where this is going
 
-### Current state (2026-06-04)
+### Historical checkpoint (2026-06-04) — v0.3.11 card set
+
+The paragraphs below are a dated v0.3.11 implementation checkpoint.
+They are **not** the current recall-algorithm destination. For target
+vs live recall, read [`docs/handbook/recall.md`](docs/handbook/recall.md).
+**R@5 → 90% is not claimed as achieved.** That checkpoint is **not**
+`gate passed`.
 
 v0.3.11 is **implementation complete with the big-machine 500q KPI gate
 pending** — all completion-effort code is landed and code-reviewed, but the
@@ -804,34 +807,26 @@ is intentionally out-of-scope.
 
 ### Where it is going
 
-The arc past v0.1 is a *memory-centric agent* — one whose inner loop
-is built around reading and writing memory rather than around chat.
-Threads I'll pull next:
+The destination algorithm is the UGAF field, not another post-processor
+or a lever search on the current degenerate projection. Land typed
+path transfer \(G_L\), write-side Keys / facets, open-semantic
+candidate comparison, and embedding-as-\(\Omega\)-seed **before**
+retuning weights, caps, or cutoffs. See
+[`docs/handbook/recall.md`](docs/handbook/recall.md).
 
-- **Trustworthy Memory Loop hardening** — keep the domain sequence
-  explicit: recall delivery → usage receipt → candidate signal →
-  proposal → accepted proposal → durable application → post-apply
-  recall / usage proof. Make every link auditable from the daemon
-  alone, no external tracing required. v0.2.x closed the cold-start
-  gap — `soul.recall` now feeds server-side extraction so an empty
-  store learns from the first conversation. v0.3.0 proves real-host
-  recall/usage follow-through; what's left is richer extraction beyond
-  `LocalHeuristics` and future proof, when available, that agents drive
-  the *explicit* `emit`/`propose` channel autonomously.
-- **Embedding strategy refinement** — keep "supplement, never
-  oracle"; experiment with boost weight, supplement cap, per-domain
-  calibration.
-- **Recall budget shaping** — let the budget-penalty schedule reflect
-  actual agent context-window cost rather than a static constant.
-- **Provider boundary cleanup** — `packages/engine-gateway` becomes
-  the only provider integration surface; core never imports a
-  provider SDK directly.
-- **Multi-agent shared memory** — two agents on the same project
-  see the same governance queue, the same durable memory, and the
-  same usage receipts without merging local state files.
+Still true, and not a substitute for that landing:
 
-Gaps and unfinished items live in `docs/handbook/backlog.md`; that
-file is the source of truth, not this README.
+- Keep the domain sequence auditable from the daemon alone: recall
+  delivery → usage receipt → candidate signal → proposal → accepted
+  proposal → durable application.
+- Embedding remains supplement, never oracle (invariant §18).
+- `packages/engine-gateway` stays the only provider integration
+  surface; core never imports a provider SDK directly.
+- Two agents on the same project should see the same governance
+  queue, the same durable memory, and the same usage receipts.
+
+Non-recall engineering gaps still live in
+`docs/handbook/backlog.md`. Do not file a new fusion stream there.
 
 ---
 

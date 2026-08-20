@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultGetWorkspaceById } from "../../cli/inspect-daemon-client.js";
+import { defaultGetWorkspaceById } from "../../cli/inspect/inspect-daemon-client.js";
 
 // invariant: a 200 response whose body is not valid JSON is a broken daemon,
 // not an empty-ok workspace. defaultGetWorkspaceById must surface

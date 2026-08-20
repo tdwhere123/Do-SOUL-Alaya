@@ -12,6 +12,7 @@ import { sha256RelationAssertionValue as sha256 } from "./relation-projection-bu
 import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
+  RelationAssertionDeferredAdmissionResult,
   RelationAssertionProjectionResult,
   RelationAssertionResolutionRequest,
   RelationAssertionResolutionResult
@@ -31,18 +32,18 @@ export function prepareAdmission(
   admittedAt: string
 ): PreparedAdmission {
   const identityKey = deriveIdentityKey(request);
-  return Object.freeze({
-    admission: RelationAssertionAdmissionSchema.parse({
-      assertion_id: request.assertionId ?? `relation_assertion_${identityKey.slice(0, 48)}`,
-      workspace_id: request.workspaceId,
-      evidence_ids: request.evidenceIds,
-      anchors: request.anchors,
-      relation_kind: request.relationKind,
-      validity: request.validity,
-      admitted_at: admittedAt
-    }),
-    identityKey
+  const admission = RelationAssertionAdmissionSchema.parse({
+    assertion_id: request.assertionId ?? `relation_assertion_${identityKey.slice(0, 48)}`,
+    workspace_id: request.workspaceId,
+    evidence_receipts: request.evidenceReceipts,
+    formation_receipt: request.formationReceipt,
+    anchors: request.anchors,
+    relation_kind: request.relationKind,
+    validity: request.validity,
+    admitted_at: admittedAt
   });
+  assertFormationReceiptDigests(admission.formation_receipt);
+  return Object.freeze({ admission, identityKey });
 }
 
 export function deriveResolutionId(request: RelationAssertionResolutionRequest): string {
@@ -112,6 +113,13 @@ export function projectionAdmissionResult(
   };
 }
 
+export function deferredProjectionAdmissionResult(
+  status: RelationAssertionDeferredAdmissionResult["status"],
+  assertion: Readonly<RelationAssertion>
+): RelationAssertionDeferredAdmissionResult {
+  return { status, assertion };
+}
+
 export function projectionResolutionResult(
   status: RelationAssertionResolutionResult["status"],
   resolution: Readonly<RelationAssertionResolution>,
@@ -125,11 +133,24 @@ export function projectionResolutionResult(
   };
 }
 
+function assertFormationReceiptDigests(
+  receipt: RelationAssertionAdmissionRequest["formationReceipt"]
+): void {
+  if (sha256(stableStringify(receipt.parameters)) !== receipt.parameter_sha256) {
+    throw new Error("Relation formation parameter digest does not match its canonical payload.");
+  }
+  if (sha256(stableStringify(receipt.decision)) !== receipt.decision_sha256) {
+    throw new Error("Relation formation decision digest does not match its canonical payload.");
+  }
+}
+
 function deriveIdentityKey(request: RelationAssertionAdmissionRequest): string {
   return sha256(stableStringify({
     workspace_id: request.workspaceId,
-    source_event_anchor: request.sourceEventAnchor,
-    evidence_ids: [...request.evidenceIds].sort(),
+    evidence_receipts: [...request.evidenceReceipts].sort((left, right) =>
+      left.evidence_id.localeCompare(right.evidence_id)
+    ),
+    formation_receipt: request.formationReceipt,
     anchors: request.anchors,
     relation_kind: request.relationKind,
     validity: request.validity

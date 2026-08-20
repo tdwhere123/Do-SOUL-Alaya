@@ -5,16 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
-import { readExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { readExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   cacheFilePath,
   computeCacheKey,
   inspectCachedExtraction
-} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+} from "../../../bench/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { computeTrustedRoleCorpusDigest } from
-  "../../../longmemeval/extraction/turn-contents.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -32,6 +32,7 @@ beforeEach(async () => {
   ));
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid/v1");
 });
 
 afterEach(async () => {
@@ -42,7 +43,8 @@ afterEach(async () => {
 describe("extraction-fill cache validity", () => {
   it("rejects a non-empty signals array with no valid entries", async () => {
     await writeDataset();
-    await expect(fill(() => ({ rawJson: '{"signals":[42]}' }))).rejects.toMatchObject({
+    await expect(fill(() => providerBackedExtractionResult('{"signals":[42]}')))
+      .rejects.toMatchObject({
       name: "ExtractionFillTaskError",
       retryClassification: "unknown"
     });
@@ -61,10 +63,32 @@ describe("extraction-fill cache validity", () => {
         object_kind: "user_preference",
         confidence: 0.9,
         matched_text: "alpha",
-        distilled_fact: "Alpha fact."
+        distilled_fact: "Alpha fact.",
+        semantic_factor_graph: {
+          schema_version: 2,
+          source_kind: "evidence",
+          factors: [{
+            factor_id: "fact",
+            semantic_identity: "alpha",
+            surface: "alpha",
+            source_occurrence: 0
+          }],
+          variables: [],
+          result_variable_ids: [],
+          propositions: [{
+            proposition_id: "fact-proposition",
+            predicate_factor_id: "fact",
+            arguments: [{
+              position: 0,
+              binding_identity: "fact",
+              reference_kind: "factor",
+              reference_id: "fact"
+            }]
+          }]
+        }
       }]
     });
-    const result = await fill(() => ({ rawJson }));
+    const result = await fill(() => providerBackedExtractionResult(rawJson));
     expect(result).toMatchObject({ coverage: 1, newlyExtracted: 2 });
     const shard = JSON.parse(readFileSync(firstShardPath(), "utf8")) as {
       readonly cache_key: string;
@@ -83,16 +107,20 @@ describe("extraction-fill cache validity", () => {
 
   it("replaces a semantically invalid existing shard during live fill", async () => {
     await writeDataset();
-    await fill(() => ({ rawJson: '{"signals":[]}' }));
+    await fill(() => providerBackedExtractionResult('{"signals":[]}'));
     const shardPath = firstShardPath();
     const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
     writeFileSync(shardPath, JSON.stringify({ ...shard, raw_json: '{"signals":[42]}' }));
-    const delegate = vi.fn(async () => ({ rawJson: '{"signals":[]}' }));
+    const delegate = vi.fn<BenchSignalExtractor["extract"]>(
+      async () => providerBackedExtractionResult('{"signals":[]}')
+    );
 
     const result = await fill(delegate);
 
     expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
-    expect(delegate).toHaveBeenCalledOnce();
+    expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
+    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
       raw_json: '{"signals":[]}'
     });
@@ -110,18 +138,16 @@ describe("extraction-fill cache validity", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           const turn = JSON.parse(input.userPrompt) as {
-            turn_content: string;
-            turn_messages: readonly { role: string; content: string }[];
+            source_assertions: readonly { assertion_id: number; text: string }[];
           };
           const key = computeCacheKey(
             "fixture-model",
             "provider-default-v1",
             OFFICIAL_API_SYSTEM_PROMPT,
-            turn.turn_content,
-            computeTrustedRoleCorpusDigest(turn.turn_messages)
+            input.userPrompt
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult('{"signals":[]}');
         }
       }),
       log: (message) => logs.push(message)
@@ -155,15 +181,14 @@ describe("extraction-fill cache validity", () => {
         extract: async () => {
           call += 1;
           if (call === 1) {
-            return {
-              rawJson: '{"signals":[]}',
+            return providerBackedExtractionResult('{"signals":[]}', {
               extractorMeta: {
                 recoveryKind: "none",
                 retryCount: 1,
                 retryClassification: "success_after_retry",
                 rateLimitRetries: 1
               }
-            };
+            });
           }
           const error = new Error("provider retries exhausted");
           (error as { benchRetry?: unknown }).benchRetry = {
@@ -186,16 +211,32 @@ describe("extraction-fill cache validity", () => {
     )]));
     expect(logs.some((message) => message.includes("[extraction-fill] done"))).toBe(false);
   });
+
+  it("surfaces failure_non_retryable_response without counting it as max retries", async () => {
+    await writeDataset();
+    const error = new Error("unparseable content");
+    (error as { benchRetry?: unknown }).benchRetry = {
+      retryCount: 0,
+      retryClassification: "failure_non_retryable_response",
+      rateLimitRetries: 0
+    };
+    await expect(fill(async () => {
+      throw error;
+    })).rejects.toMatchObject({
+      name: "ExtractionFillTaskError",
+      retryClassification: "failure_non_retryable_response"
+    });
+  });
 });
 
-async function fill(extract: () => Promise<{ rawJson: string }> | { rawJson: string }) {
+async function fill(extract: BenchSignalExtractor["extract"]) {
   return runExtractionFill({
     variant: VARIANT,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
     concurrency: 1,
-    extractorFactory: () => ({ extract: async () => extract() }),
+    extractorFactory: () => ({ extract }),
     log: () => undefined
   });
 }
@@ -214,6 +255,7 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(pinnedMetaRoot, `${VARIANT}.meta.json`), JSON.stringify({
     name: VARIANT,
     sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: 1
   }), "utf8");
 }
@@ -228,9 +270,9 @@ function question(): LongMemEvalQuestion {
     haystack_session_ids: ["s1", "s2"],
     haystack_dates: ["2025-12-01", "2025-12-02"],
     haystack_sessions: [[
-      { role: "user", content: "alpha", has_answer: true },
-      { role: "assistant", content: "ok" }
-    ], [{ role: "user", content: "unrelated decoy" }]],
+      { role: "user", content: "Alpha happened.", has_answer: true },
+      { role: "assistant", content: "Acknowledged." }
+    ], [{ role: "user", content: "Unrelated decoy." }]],
     answer_session_ids: ["s1"]
   };
 }

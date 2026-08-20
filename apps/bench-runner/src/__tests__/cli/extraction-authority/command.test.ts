@@ -3,9 +3,13 @@ import {
   runAuthorizeExtractionCommand
 } from "../../../cli/extraction-authority/command.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../../bench/extraction/authority/target-selection/receipt.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../bench/extraction/authority/receipt-limits.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -82,7 +86,9 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
     receipt_digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
     target_selection_digest: "9".repeat(64)
   });
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("attempt_cap=10"));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining(
+    `attempt_cap=${computeExtractionFillAttemptCeiling(2)}`
+  ));
 });
 
 it("does not require target selection outside the canonical longmemeval_s windows", async () => {
@@ -115,7 +121,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   const ledger = {
     lineageDigest: "f".repeat(64),
     startingMissing: 2,
-    maximumAttempts: 10,
+    maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2,
     attempts: 1,
     successfulShards: 1,
@@ -124,12 +130,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
     telemetry: {
       retrySuccesses: 0,
       rateLimitRetries: 0,
-      terminalRetryClassifications: {
-        failure_max_retries: 0,
-        failure_non_retryable_4xx: 0,
-        failure_timeout: 0,
-        failure_aborted: 0
-      },
+      terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
@@ -156,7 +157,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     limits: {
       starting_missing: 2,
-      maximum_attempts: 10,
+      maximum_attempts: computeExtractionFillAttemptCeiling(2),
       successful_shard_ceiling: 2
     },
     observation: {
@@ -165,146 +166,46 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   });
 });
 
-it("writes a direct DeepSeek 500 receipt only after explicit operator authorization", async () => {
-  const inspect = vi.fn(async () => directAuthorityInspection());
-  const write = vi.fn();
-  const createDirectSpend = vi.fn(() => ({
-    kind: "deepseek_direct_500" as const,
-    operator: "local-operator",
-    requests_per_minute: 30 as const,
-    cache_root_sha256: "a".repeat(64),
-    cache_root_device: "1",
-    cache_root_inode: "2",
-    cache_root_marker_sha256: "b".repeat(64)
-  }));
+it("keeps the full predecessor closure when authorizing a same-root continuation", async () => {
+  const inspect = vi.fn(async () => authorityInspection("a".repeat(64)));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
   const exitCode = await runAuthorizeExtractionCommand([
-    "--variant", "s",
-    "--offset", "0",
-    "--limit", "500",
-    "--extraction-cache-root", "/tmp/direct-deepseek-cache",
-    "--extraction-action", "fill",
-    "--direct-deepseek-500-operator", "local-operator",
-    "--concurrency", "32",
-    "--extraction-receipt-out", "/tmp/authority.json",
-    "--extraction-output-token-cap", "512",
-    "--extraction-output-token-field", "max_tokens",
-    "--extraction-input-price-usd-per-million", "1",
-    "--extraction-output-price-usd-per-million", "2",
-    "--extraction-max-input-tokens", "300",
-    "--extraction-disk-floor-bytes", "1024"
+    ...authorizeArgs(),
+    "--extraction-predecessor-authority", "/tmp/missing-parent.json"
   ], {
     inspect,
-    write,
-    createDirectSpend,
     readRevision: () => "a".repeat(40),
-    readLedger: () => undefined
-  });
-
-  expect(exitCode).toBe(0);
-  expect(createDirectSpend).toHaveBeenCalledWith({
-    cacheRoot: "/tmp/direct-deepseek-cache",
-    operator: "local-operator"
-  });
-  expect(write.mock.calls[0]?.[1]).toMatchObject({
-    direct_spend: { kind: "deepseek_direct_500" },
-    limits: { max_concurrency: 32 }
-  });
-});
-
-it("writes a separately bound NewAPI direct 500 receipt", async () => {
-  const inspect = vi.fn(async () => newApiDirectAuthorityInspection());
-  const write = vi.fn();
-  const createNewApiDirectSpend = vi.fn(() => ({
-    kind: "deepseek_newapi_direct_500" as const,
-    operator: "newapi-operator",
-    cache_root_sha256: "a".repeat(64),
-    cache_root_device: "1",
-    cache_root_inode: "2",
-    cache_root_marker_sha256: "b".repeat(64)
-  }));
-
-  const exitCode = await runAuthorizeExtractionCommand(newApiDirectAuthorizeArgs(), {
-    inspect,
-    write,
-    createNewApiDirectSpend,
-    readRevision: () => "a".repeat(40),
-    readLedger: () => undefined
-  });
-
-  expect(exitCode).toBe(0);
-  expect(createNewApiDirectSpend).toHaveBeenCalledWith({
-    cacheRoot: "/tmp/direct-deepseek-cache",
-    operator: "newapi-operator"
-  });
-  expect(write.mock.calls[0]?.[1]).toMatchObject({
-    direct_spend: { kind: "deepseek_newapi_direct_500" },
-    limits: { max_concurrency: 32 }
-  });
-});
-
-it("rejects mixed legacy and NewAPI direct operator flags before creating a root", async () => {
-  const createDirectSpend = vi.fn();
-  const createNewApiDirectSpend = vi.fn();
-  const inspect = vi.fn();
-  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-
-  const exitCode = await runAuthorizeExtractionCommand([
-    ...directAuthorizeArgs(),
-    "--direct-newapi-deepseek-500-operator", "newapi-operator"
-  ], { createDirectSpend, createNewApiDirectSpend, inspect });
-
-  expect(exitCode).toBe(2);
-  expect(createDirectSpend).not.toHaveBeenCalled();
-  expect(createNewApiDirectSpend).not.toHaveBeenCalled();
-  expect(inspect).not.toHaveBeenCalled();
-  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("only one direct DeepSeek 500"));
-});
-
-it("retires a newly created direct target when its offline inspection fails", async () => {
-  const directSpend = {
-    kind: "deepseek_direct_500" as const,
-    operator: "local-operator",
-    requests_per_minute: 30 as const,
-    cache_root_sha256: "a".repeat(64),
-    cache_root_device: "1",
-    cache_root_inode: "2",
-    cache_root_marker_sha256: "b".repeat(64)
-  };
-  const discardDirectSpend = vi.fn();
-  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-
-  const exitCode = await runAuthorizeExtractionCommand(directAuthorizeArgs(), {
-    inspect: vi.fn(async () => {
-      throw new Error("dataset preflight failed");
+    readLedger: () => ({
+      lineageDigest: "f".repeat(64),
+      startingMissing: 2,
+      maximumAttempts: computeExtractionFillAttemptCeiling(2),
+      successfulShardCeiling: 2,
+      attempts: 1,
+      successfulShards: 1,
+      successfulKeys: ["1".repeat(64)],
+      pendingKeys: [],
+      telemetry: {
+        retrySuccesses: 0,
+        rateLimitRetries: 0,
+        terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        usageUnavailableRequests: 0,
+        unresolvedTransportAttempts: 0,
+        usageUnknownAttempts: 0
+      }
     }),
-    createDirectSpend: vi.fn(() => directSpend),
-    discardDirectSpend,
-    readRevision: () => "a".repeat(40)
+    ...targetSelectionDependencies()
   });
 
   expect(exitCode).toBe(2);
-  expect(discardDirectSpend).toHaveBeenCalledWith({
-    authorization: directSpend,
-    cacheRoot: "/tmp/direct-deepseek-cache"
-  });
-  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("dataset preflight failed"));
-});
-
-it("rejects custom pinned metadata before creating a direct target root", async () => {
-  const createDirectSpend = vi.fn();
-  const inspect = vi.fn();
-  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-
-  const exitCode = await runAuthorizeExtractionCommand([
-    ...directAuthorizeArgs(),
-    "--pinned-meta-root", "/custom-meta"
-  ], { createDirectSpend, inspect });
-
-  expect(exitCode).toBe(2);
-  expect(createDirectSpend).not.toHaveBeenCalled();
-  expect(inspect).not.toHaveBeenCalled();
-  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("canonical longmemeval_s"));
+  expect(inspect).toHaveBeenCalledOnce();
+  expect(inspect).toHaveBeenCalledWith(expect.not.objectContaining({
+    excludeContentClosureKeys: expect.anything()
+  }));
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("missing-parent.json"));
 });
 
 it("rejects a duplicate continuation predecessor before inspection", async () => {
@@ -349,34 +250,6 @@ function targetSelectionDependencies() {
   };
 }
 
-function directAuthorizeArgs(): string[] {
-  return [
-    "--variant", "s",
-    "--offset", "0",
-    "--limit", "500",
-    "--extraction-cache-root", "/tmp/direct-deepseek-cache",
-    "--extraction-action", "fill",
-    "--direct-deepseek-500-operator", "local-operator",
-    "--concurrency", "32",
-    "--extraction-receipt-out", "/tmp/authority.json",
-    "--extraction-output-token-cap", "512",
-    "--extraction-output-token-field", "max_tokens",
-    "--extraction-input-price-usd-per-million", "1",
-    "--extraction-output-price-usd-per-million", "2",
-    "--extraction-max-input-tokens", "300",
-    "--extraction-disk-floor-bytes", "1024"
-  ];
-}
-
-function newApiDirectAuthorizeArgs(): string[] {
-  return directAuthorizeArgs().map((argument) => argument === "--direct-deepseek-500-operator"
-    ? "--direct-newapi-deepseek-500-operator"
-    : argument === "local-operator"
-      ? "newapi-operator"
-      : argument
-  );
-}
-
 function authorityInspection(rawContentClosureSha256: string) {
   return {
     observation: {
@@ -415,57 +288,5 @@ function authorityInspection(rawContentClosureSha256: string) {
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,
     modelReadiness: "not_probed" as const
-  };
-}
-
-function directAuthorityInspection() {
-  return {
-    observation: {
-      revision: "a".repeat(40),
-      commandDigest: "b".repeat(64),
-      selectionDigest: "c".repeat(64),
-      keyDigest: "d".repeat(64),
-      dataset: {
-        variant: "longmemeval_s",
-        revisionSha256: "e".repeat(64),
-        windowOffset: 0,
-        windowLimit: 500,
-        expectedKeySetSha256: "d".repeat(64)
-      },
-      extraction: {
-        model: "deepseek-v4-flash",
-        modelFamily: "deepseek-v4-flash-nonthinking",
-        requestProfile: "deepseek-v4-nonthinking-v1" as const,
-        providerUrl: "https://example.test/v1",
-        systemPromptSha256: "f".repeat(64),
-        cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-        manifestSha256: null,
-        rawContentClosureSha256: "a".repeat(64)
-      },
-      inventory: {
-        expectedTurns: 500,
-        validTurns: 0,
-        missingTurns: 500,
-        invalidTurns: 0,
-        orphanTurns: 0
-      }
-    },
-    missingKeys: Array.from({ length: 500 }, (_, index) => index.toString(16).padStart(64, "0")),
-    ...emptyExtractionAuthorityShardStatus(),
-    writerLock: "absent" as const,
-    disk: { status: "available" as const, freeBytes: 10_000 },
-    credentialStatus: "present" as const,
-    modelReadiness: "not_probed" as const
-  };
-}
-
-function newApiDirectAuthorityInspection() {
-  const direct = directAuthorityInspection();
-  return {
-    ...direct,
-    observation: {
-      ...direct.observation,
-      extraction: { ...direct.observation.extraction, model: "DeepSeek-V4-Flash" }
-    }
   };
 }

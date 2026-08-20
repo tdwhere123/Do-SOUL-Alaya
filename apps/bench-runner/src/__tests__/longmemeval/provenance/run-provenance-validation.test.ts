@@ -2,14 +2,16 @@ import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveLocalArtifactTreeSha256 } from "../../../longmemeval/provenance/embedding/local-onnx.js";
-import { buildLongMemEvalRunProvenance } from "../../../longmemeval/provenance/run.js";
+import { resolveLocalArtifactTreeSha256 } from "../../../bench/provenance/embedding/local-onnx.js";
+import { buildLongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
 import {
   fakeExecutedDistIdentity,
   registerRunProvenanceRootCleanup
 } from "./run-provenance-fixture.js";
+import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 
 const roots = registerRunProvenanceRootCleanup();
+const currentCommitSha7 = resolveBenchCommitSha7();
 
 describe("LongMemEval run provenance", () => {
 
@@ -34,7 +36,7 @@ describe("LongMemEval run provenance", () => {
         embeddingMode: "disabled"
       },
       evaluatedCount: 0,
-      commitSha7: "05d98df",
+      commitSha7: currentCommitSha7,
       embeddingProviderLabel: "disabled",
       env: {
         ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "f".repeat(64),
@@ -52,7 +54,7 @@ describe("LongMemEval run provenance", () => {
         embeddingMode: "disabled"
       },
       evaluatedCount: 0,
-      commitSha7: "05d98df",
+      commitSha7: currentCommitSha7,
       embeddingProviderLabel: "disabled",
       env: { ALAYA_LOCAL_ONNX_THREADS: "128" },
       computeExecutedDistIdentity: fakeExecutedDistIdentity

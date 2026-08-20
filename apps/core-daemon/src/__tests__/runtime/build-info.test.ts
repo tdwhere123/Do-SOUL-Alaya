@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readBuildInfo, readRuntimeVersion } from "../../runtime/build-info.js";
+import { readBuildInfo, readRuntimeVersion } from "../../runtime/daemon/support/build-info.js";
 import { fileModuleUrl, pathEndsWithPosixSegments } from "../support/test-paths.js";
 
 describe("build info", () => {

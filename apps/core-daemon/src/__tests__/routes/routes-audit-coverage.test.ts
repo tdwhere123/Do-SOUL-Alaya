@@ -13,7 +13,7 @@ import {
   type E2eEventTriggerRouteServices
 } from "../../routes/workspace/e2e-event-triggers.js";
 import { registerProjectMappingRoutes } from "../../routes/workspace/project-mapping.js";
-import { registerSoulRoutes } from "../../routes/memory/soul.js";
+import { registerSoulRoutes } from "../../routes/memory/soul/soul.js";
 
 function appWithErrors(): Hono {
   const app = new Hono();

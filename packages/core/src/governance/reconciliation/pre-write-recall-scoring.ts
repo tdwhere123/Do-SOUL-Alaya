@@ -1,6 +1,7 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 
 import {
+  compareCandidateContent,
   jaccardIndex,
   normalizeForIdentity,
   tokenize,
@@ -173,13 +174,30 @@ export function selectFinalCandidates(
 }
 
 export function compareStructuralCandidate(left: StructuralCandidate, right: StructuralCandidate): number {
-  return right.score - left.score || left.entry.object_id.localeCompare(right.entry.object_id);
+  return (
+    right.score - left.score ||
+    compareCandidateContent(
+      left.entry.content,
+      right.entry.content,
+      left.entry.object_id,
+      right.entry.object_id
+    )
+  );
 }
 
 export function compareCandidateNeighbors(left: PreWriteCandidateNeighbor, right: PreWriteCandidateNeighbor): number {
   const leftScore = Math.max(left.lexicalScore, left.structuralScore);
   const rightScore = Math.max(right.lexicalScore, right.structuralScore);
-  return rightScore - leftScore || right.families.length - left.families.length;
+  return (
+    rightScore - leftScore ||
+    right.families.length - left.families.length ||
+    compareCandidateContent(
+      left.entry.content,
+      right.entry.content,
+      left.entry.object_id,
+      right.entry.object_id
+    )
+  );
 }
 
 export function computeUncertainty(candidates: readonly PreWriteCandidateNeighbor[]): number {

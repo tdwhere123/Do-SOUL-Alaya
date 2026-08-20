@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionSynthesisInput } from "../../../longmemeval/compile-seed.js";
+import { buildSessionSynthesisInput } from "../../../bench/compile-seed.js";
 import {
   buildLongMemEvalSidecarKey,
   scoreLongMemEvalRecallHits,

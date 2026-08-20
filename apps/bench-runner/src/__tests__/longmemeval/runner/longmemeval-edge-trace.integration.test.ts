@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createSeededTestOnlyInMemoryFieldQuerySession,
+  fieldContractSha256,
   RecallService,
   resetCoreConfigForTests,
   type RecallServiceDependencies
@@ -31,8 +33,8 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { BenchRecallDiagnosticsSchema } from "../../../harness/recall/recall-diagnostics-schema.js";
-import { buildQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const WORKSPACE_ID = "workspace-edge-trace";
 const RUN_ID = "run-edge-trace";
@@ -53,7 +55,7 @@ afterEach(() => {
 });
 
 describe("LongMemEval edge trace integration", () => {
-  it("parses a capped typed-anchor match from SQLite through both strict schemas", async () => {
+  it("parses a capped path transfer without inventing a query facet", async () => {
     process.env[SLICE_ENV] = "on";
     process.env[CAP_ENV] = "0.001";
     resetCoreConfigForTests();
@@ -76,7 +78,7 @@ describe("LongMemEval edge trace integration", () => {
     });
     const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
     expect(parsed.query_probes.normalized_query).toBe(taskSurface().display_name);
-    expect(parsed.query_sought_facets).toContain("location_place");
+    expect(parsed.query_sought_facets).toEqual([]);
     const targetCandidate = parsed.candidates.find((row) => row.object_id === TARGET_ID);
     expect(targetCandidate).toMatchObject({
       answer_features: {
@@ -85,6 +87,26 @@ describe("LongMemEval edge trace integration", () => {
         evidence_gist_truncated: false,
         facet_tags: [{ facet: "location_place", value: "Paris" }],
         projection_schema_version: 1
+      },
+      selector_observation: {
+        evidence: { directness: "none", validity: "none" },
+        path: {
+          status: "complete",
+          receipts: [expect.objectContaining({
+            receipt_status: "complete",
+            path_id: PATH_ID,
+            relation_kind: "answers_with",
+            source_object_id: SEED_ID,
+            target_object_id: TARGET_ID,
+            source_anchor: {
+              kind: "object_facet",
+              object_id: SEED_ID,
+              facet_key: "location_place"
+            },
+            target_anchor: { kind: "object", object_id: TARGET_ID },
+            edge_conductance: 1
+          })]
+        }
       },
       path_suppression_score: 0
     });
@@ -96,7 +118,7 @@ describe("LongMemEval edge trace integration", () => {
         relation_kind: "answers_with",
         seed_object_id: SEED_ID,
         target_object_id: TARGET_ID,
-        slice_compatibility: "slice_match",
+        slice_compatibility: "no_query_key",
         capped_transfer: 0.001,
         decision: "transferred",
         reason: "capped"
@@ -105,15 +127,17 @@ describe("LongMemEval edge trace integration", () => {
 
     const strictQuestion = buildStrictQuestion(result);
     expect(strictQuestion).toMatchObject({
+      query_condition: parsed.query_condition,
       query_probes: { normalized_query: taskSurface().display_name },
-      query_sought_facets: ["location_place"]
+      query_sought_facets: []
     });
     expect(strictQuestion.candidates.find((row) => row.object_id === TARGET_ID)).toMatchObject({
       answer_features: targetCandidate?.answer_features,
+      selector_observation: targetCandidate?.selector_observation,
       path_suppression_score: 0
     });
     expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(
-      expect.objectContaining({ path_id: PATH_ID, slice_compatibility: "slice_match" })
+      expect.objectContaining({ path_id: PATH_ID, slice_compatibility: "no_query_key" })
     );
   });
 
@@ -137,7 +161,7 @@ describe("LongMemEval edge trace integration", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
     const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
     expect(target?.flood_potential?.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "missing_target_key",
+      slice_compatibility: "no_query_key",
       decision: "transferred",
       reason: "transferred"
     }));
@@ -145,13 +169,13 @@ describe("LongMemEval edge trace integration", () => {
     const strictQuestion = buildStrictQuestion(result);
     expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(
       expect.objectContaining({
-        slice_compatibility: "missing_target_key",
+        slice_compatibility: "no_query_key",
         decision: "transferred"
       })
     );
   });
 
-  it("keeps default and env-off scores identical, then rejects a typed mismatch on env-on", async () => {
+  it("keeps scores identical when no source-bound query facet is available", async () => {
     const storage = await createStorage();
     await storage.memoryRepo.create(memory(SEED_ID, "deploy staging database edge trace"));
     await storage.memoryRepo.create(memory(
@@ -174,16 +198,17 @@ describe("LongMemEval edge trace integration", () => {
     const envOffFlood = targetFlood(envOffResult.diagnostics);
     const envOnFlood = targetFlood(envOnResult.diagnostics);
     expect(defaultFlood.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_slice_match",
+      slice_compatibility: "no_query_key",
       decision: "transferred"
     }));
     expect(Object.is(defaultFlood.A_path, envOffFlood.A_path)).toBe(true);
     expect(Object.is(defaultFlood.final_score, envOffFlood.final_score)).toBe(true);
-    expect(envOnFlood).toEqual(expect.objectContaining({ A_path: 0 }));
+    expect(Object.is(defaultFlood.A_path, envOnFlood.A_path)).toBe(true);
+    expect(Object.is(defaultFlood.final_score, envOnFlood.final_score)).toBe(true);
     expect(envOnFlood.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_slice_match",
-      decision: "rejected",
-      reason: "no_slice_match"
+      slice_compatibility: "no_query_key",
+      decision: "transferred",
+      reason: "transferred"
     }));
   });
 });
@@ -273,6 +298,8 @@ function createRecallService(
   const dependencies: RecallServiceDependencies = {
     now: () => "2026-07-10T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    sha256: fieldContractSha256,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WORKSPACE_ID),
     memoryRepo: {
       findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),

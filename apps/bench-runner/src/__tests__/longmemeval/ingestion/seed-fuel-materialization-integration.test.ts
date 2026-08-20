@@ -10,6 +10,10 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
+  buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import {
   initDatabase,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
@@ -21,10 +25,11 @@ import {
   createCachingSignalExtractor,
   toSeedFuelInventoryKpi,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
-import { BENCH_DAEMON_DB_FILENAME } from "../../../longmemeval/snapshot/materialize.js";
+} from "../../../bench/compile-seed.js";
+import { BENCH_DAEMON_DB_FILENAME } from "../../../bench/snapshot/materialize.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import {
+  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
@@ -208,11 +213,9 @@ describe("materialization fuel inventory integration", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate = {
-      extract: vi.fn(async () => ({
-        rawJson: signalsEnvelope([
+      extract: vi.fn(async () => providerBackedExtractionResult(signalsEnvelope([
           { distilled: "Alice lives in Berlin.", matched: "moved to Berlin" }
-        ])
-      }))
+        ])))
     };
     const warmStats = freshStats();
     const warmExtractor = createCachingSignalExtractor({
@@ -225,7 +228,10 @@ describe("materialization fuel inventory integration", () => {
       cacheRoot,
       stats: warmStats
     });
-    await warmExtractor.extract({ systemPrompt: "sys", userPrompt: "turn-content" });
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest("I moved to Berlin.", [])
+    );
+    await warmExtractor.extract({ systemPrompt: "sys", userPrompt });
     expect(warmStats.llmCalls).toBe(1);
 
     const replayStats = freshStats();
@@ -239,7 +245,7 @@ describe("materialization fuel inventory integration", () => {
       cacheRoot,
       stats: replayStats
     });
-    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt: "turn-content" });
+    const replay = await replayExtractor.extract({ systemPrompt: "sys", userPrompt });
     expect(replay.rawJson).toContain("Alice lives in Berlin");
     expect(replayStats.cacheHits).toBe(1);
     expect(replayStats.llmCalls).toBe(0);

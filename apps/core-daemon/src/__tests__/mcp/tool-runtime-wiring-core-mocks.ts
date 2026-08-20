@@ -10,21 +10,15 @@ type ToolRuntimeWiringHoisted = Record<string, any>;
 function createStubCoreConfig(): CoreConfig {
   return {
     recall: {
-      facetSlice: undefined,
       confRhoPath: undefined,
       confRhoEvidence: undefined,
       confWPath: undefined,
-      confEvidenceBeta: undefined,
       confFloodCap: undefined,
       confFloodCapTotal: undefined,
-      confSliceCompatibility: false,
       pathEmbModulation: undefined,
       projectionsEnabled: true,
-      lexicalDecorr: undefined,
-      intentV2: false,
       extraSynonymClusters: undefined,
-      sessionRoute: false,
-      coarseFilterSemanticFlags: {}
+      finalAuthorityMaxHeadDrop: undefined
     },
     embedding: {
       backfillConcurrency: undefined,
@@ -107,8 +101,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       }))
     }),
     PathRelationProposalService: makeClass({
-      onCoUsage: vi.fn(async () => undefined),
-      onCoRecall: vi.fn(async () => undefined),
+      submitCandidate: vi.fn(async () => "applied"),
       evictExpired: vi.fn(async () => 0),
       counterSize: vi.fn(async () => 0)
     }),
@@ -116,10 +109,10 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       admit: vi.fn(async () => ({ assertion: { assertion_id: "relation-assertion-1" } }))
     }),
     AnswersWithEdgeProducerService: makeClass({
-      crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, minted: 0 }))
+      crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, admitted: 0 }))
     }),
     HqAnswerOverlapPairSource: makeClass({
-      answerCoRelevantPairKeys: vi.fn(async () => new Set())
+      answerCoRelevantPairs: vi.fn(async () => [])
     }),
     DEFAULT_ANSWER_OVERLAP_BAR: 3,
     PathActivationCandidateProducer: vi.fn().mockImplementation(function PathActivationCandidateProducer() {
@@ -127,7 +120,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
         produce: vi.fn(async () => [])
       };
     }),
-    PATH_RELATION_PROPOSE_THRESHOLD: 3,
     PATH_RELATION_COUNTER_DEFAULT_TTL_MS: 24 * 60 * 60 * 1000,
     ConstitutionalFragmentService: makeClass({
       ensureRegistered: vi.fn(async (fragment: unknown) => fragment),
@@ -146,6 +138,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       return {};
     }),
     createSignalEmissionWriter: vi.fn(() => ({})),
+    createMemoryObjectKeyWriter: vi.fn(() => ({
+      materializeForMemory: vi.fn()
+    })),
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
       recall: vi.fn(async () => []),
       // anchor: index.ts createAlayaDaemonRuntime subscribes the recall port
@@ -211,6 +206,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       };
     }),
     EvidenceService: makeClass(),
+    RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER: Object.freeze({
+      normalize: vi.fn(() => null)
+    }),
     EdgeAutoProducerService: makeClass({
       produceForNewMemory: vi.fn(async () => undefined)
     }),
@@ -360,6 +358,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     RuleBasedEntityExtractor: makeClass({
       extract: vi.fn(async () => [])
     }),
+    RuleBasedQueryFactFrameExtractor: makeClass({
+      extract: vi.fn(async () => [])
+    }),
     RuntimeEventNormalizer: makeClass(),
     RunHotStateService: makeClass(),
     RunService: makeClass({
@@ -469,14 +470,6 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     }),
     WorkerRunLifecycleService: makeClass(),
     ZeroDaySecurityLayer: makeClass(),
-    PathPlasticityService: makeClass({
-      computeAndApplyPlasticity: vi.fn(async () => ({
-        reinforced: 0,
-        weakened: 0,
-        retired: 0,
-        affectedPathIds: []
-      }))
-    }),
     createVerificationBiasReaderFromPathLookup: vi.fn(() => ({
       getMaxVerificationBias: vi.fn(async () => 0)
     })),

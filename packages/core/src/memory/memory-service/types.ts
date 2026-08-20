@@ -7,6 +7,7 @@ import {
   type ScopeClass,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
+import type { MemoryObjectKeyWriter } from "../object-keys/write-service.js";
 
 export type MemoryEntryInput = Omit<
   MemoryEntry,
@@ -267,6 +268,7 @@ export interface MemoryServiceDependencies {
   readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
   // invariant: enqueueEnrichment requires atomic createWithinTransaction wiring.
   readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
+  readonly objectKeyWriter?: MemoryObjectKeyWriter;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }

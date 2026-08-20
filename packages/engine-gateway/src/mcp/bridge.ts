@@ -1,8 +1,10 @@
 import { type ConversationRuntimeContext, type ToolUseBlock } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "../provider/soul-tool-specs.js";
+import { parseEnvPositiveInt } from "./env-value.js";
 import { withTimeout } from "./with-timeout.js";
 
-const DEFAULT_TOOL_TIMEOUT_MS = 30000;
+export const DEFAULT_TOOL_TIMEOUT_MS = 30000;
+const MCP_TOOL_TIMEOUT_ENV = "ALAYA_MCP_TOOL_TIMEOUT_MS";
 
 export interface McpToolResultBlock {
   readonly type: "tool_result";
@@ -29,6 +31,7 @@ export class McpBridge {
     runtimeContext?: Readonly<ConversationRuntimeContext>
   ) => Promise<McpToolResultBlock>;
   private readonly hasConversationToolName: (toolName: string) => boolean;
+  private readonly timeoutMs: number;
 
   public constructor(private readonly dependencies: McpBridgeDependencies) {
     // invariant: production always injects a toolsHandler; this default is only
@@ -43,6 +46,7 @@ export class McpBridge {
           "no tools handler injected for this MCP bridge"
         ));
     this.hasConversationToolName = dependencies.hasConversationToolName ?? (() => false);
+    this.timeoutMs = resolveMcpToolTimeoutMs();
   }
 
   public async executeToolUse(
@@ -58,14 +62,14 @@ export class McpBridge {
         // suppresses a late reject so a timed-out handler cannot crash the daemon.
         return await withTimeout(
           (_signal) => this.dependencies.soulHandler(toolUse, runtimeContext),
-          resolveTimeoutMs()
+          this.timeoutMs
         );
       }
 
       if (this.hasConversationToolName(toolUse.name)) {
         return await withTimeout(
           (_signal) => this.toolsHandler(toolUse, runtimeContext),
-          resolveTimeoutMs()
+          this.timeoutMs
         );
       }
 
@@ -91,14 +95,10 @@ export class McpBridge {
 
 const allowedSoulToolNames = createStringLookup(soulToolDefs.map((toolDef) => toolDef.name));
 
-function resolveTimeoutMs(): number {
-  const raw = process.env["ALAYA_MCP_TOOL_TIMEOUT_MS"];
-  if (raw === undefined) {
-    return DEFAULT_TOOL_TIMEOUT_MS;
-  }
-
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TOOL_TIMEOUT_MS;
+export function resolveMcpToolTimeoutMs(
+  raw: string | undefined = process.env[MCP_TOOL_TIMEOUT_ENV]
+): number {
+  return parseEnvPositiveInt(raw, MCP_TOOL_TIMEOUT_ENV) ?? DEFAULT_TOOL_TIMEOUT_MS;
 }
 
 function createErrorResult(

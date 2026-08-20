@@ -2,16 +2,17 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
+import { providerBackedExtractionResult } from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -111,7 +112,7 @@ function fill(limit: number) {
 }
 
 function extractor(): BenchSignalExtractor {
-  return { extract: async () => ({ rawJson: '{"signals":[]}' }) };
+  return { extract: async () => providerBackedExtractionResult('{"signals":[]}') };
 }
 
 async function pinnedRevision(): Promise<string> {

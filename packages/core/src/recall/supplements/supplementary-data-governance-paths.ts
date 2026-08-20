@@ -5,9 +5,11 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
+import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
   PathInflowEdge,
+  RecallPathInflowAvailability,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
@@ -30,10 +32,15 @@ export async function collectGovernancePathDerivations(params: {
 }): Promise<Readonly<{
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
+  readonly pathInflowAvailability: RecallPathInflowAvailability;
 }>> {
   const pathExpansionPort = params.dependencies.pathExpansionPort;
   if (pathExpansionPort === undefined || params.candidates.length === 0) {
-    return Object.freeze({ governanceCeilingByMemoryId: Object.freeze({}), pathInflowByTarget: Object.freeze({}) });
+    return Object.freeze({
+      governanceCeilingByMemoryId: Object.freeze({}),
+      pathInflowByTarget: Object.freeze({}),
+      pathInflowAvailability: "not_observed" as const
+    });
   }
   const candidateIds = new Set(params.candidates.map((candidate) => candidate.object_id));
   const anchors = buildGovernanceCandidateAnchors(candidateIds);
@@ -54,13 +61,17 @@ export async function collectGovernancePathDerivations(params: {
     });
     return Object.freeze({
       governanceCeilingByMemoryId: buildGovernanceFailsafeCeilings(candidateIds),
-      pathInflowByTarget: Object.freeze({})
+      pathInflowByTarget: Object.freeze({}),
+      pathInflowAvailability: classifyPathIndexReadFailure(error) === "index_unbound"
+        ? "unavailable" as const
+        : "storage_error" as const
     });
   }
   const contributionsByMemoryId = collectGovernanceContributions(paths, candidateIds);
   return Object.freeze({
     governanceCeilingByMemoryId: buildGovernanceCeilingByMemoryId(contributionsByMemoryId),
-    pathInflowByTarget: Object.freeze(buildPathInflowByTarget(paths, candidateIds))
+    pathInflowByTarget: Object.freeze(buildPathInflowByTarget(paths, candidateIds)),
+    pathInflowAvailability: "available" as const
   });
 }
 

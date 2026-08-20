@@ -18,8 +18,8 @@ import type {
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 
-const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
-const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
+export const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
+export const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
 
 type EmbeddingCoarseInjectionResult = Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -247,7 +247,9 @@ function buildEmbeddingInjectionResult(
   const contentHashByObjectId = new Map(
     neighborResult.hits.filter((hit) => hit.content_hash !== undefined).map((hit) => [hit.object_id, hit.content_hash as string] as const)
   );
-  const admission = admitEmbeddingNeighborCandidates(params, request, neighborEntries, similarityByObjectId, contentHashByObjectId);
+  const admission = admitEmbeddingNeighborCandidates(
+    params, request, neighborEntries, similarityByObjectId, contentHashByObjectId
+  );
   if (admission.staleVectorDrops > 0) {
     params.warn("embedding coarse injection dropped stale vectors", {
       workspace_id: params.workspaceId,
@@ -255,8 +257,12 @@ function buildEmbeddingInjectionResult(
       stale_vector_drops: admission.staleVectorDrops
     });
   }
+  const workspaceScan = mergeInjectionScan(
+    readWorkspaceScanDiagnostics(neighborResult),
+    admission
+  );
   if (admission.candidates.length === 0) {
-    return emptyWithProvider;
+    return Object.freeze({ ...emptyWithProvider, workspaceScan });
   }
   return Object.freeze({
     candidates: Object.freeze([...admission.candidates]),
@@ -267,7 +273,7 @@ function buildEmbeddingInjectionResult(
     embeddingInferenceCalls: neighborResult.embedding_inference_calls,
     embeddingProviderStatus: neighborResult.query_embedding_status ?? null,
     providerDegradationReason: neighborResult.query_embedding_degradation_reason ?? null,
-    workspaceScan: readWorkspaceScanDiagnostics(neighborResult)
+    workspaceScan
   });
 }
 
@@ -277,21 +283,24 @@ function admitEmbeddingNeighborCandidates(
   entries: readonly Readonly<MemoryEntry>[],
   similarityByObjectId: ReadonlyMap<string, number>,
   contentHashByObjectId: ReadonlyMap<string, string>
-): Readonly<{ readonly candidates: readonly Readonly<CoarseRecallCandidate>[]; readonly staleVectorDrops: number }> {
+): Readonly<{
+  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly staleVectorDrops: number;
+  readonly eligibleCount: number;
+}> {
   const poolObjectIdSet = new Set(request.poolObjectIds);
   const injectionFloor = params.policy.coarse_filter.semantic_supplement.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR;
   let staleVectorDrops = 0;
-  const candidates = entries.filter((entry) => {
+  const eligible = entries.filter((entry) => {
     const knownHash = contentHashByObjectId.get(entry.object_id);
     if (knownHash !== undefined && knownHash !== hashMemoryContent(entry.content)) {
       staleVectorDrops += 1;
       return false;
     }
     return entry.workspace_id === params.workspaceId && !poolObjectIdSet.has(entry.object_id) && (similarityByObjectId.get(entry.object_id) ?? 0) >= injectionFloor;
-  }).sort((left, right) => (similarityByObjectId.get(right.object_id) ?? 0) - (similarityByObjectId.get(left.object_id) ?? 0))
-    .slice(0, request.injectionCap)
-    .map(buildSemanticSupplementCandidate);
-  return Object.freeze({ candidates, staleVectorDrops });
+  }).sort((left, right) => (similarityByObjectId.get(right.object_id) ?? 0) - (similarityByObjectId.get(left.object_id) ?? 0));
+  const candidates = eligible.slice(0, request.injectionCap).map(buildSemanticSupplementCandidate);
+  return Object.freeze({ candidates, staleVectorDrops, eligibleCount: eligible.length });
 }
 
 function buildSemanticSupplementCandidate(entry: Readonly<MemoryEntry>): Readonly<CoarseRecallCandidate> {
@@ -327,6 +336,26 @@ function emptyEmbeddingCoarseInjectionWithProvider(
     providerDegradationReason: result.query_embedding_degradation_reason ?? null,
     workspaceScan: readWorkspaceScanDiagnostics(result)
   });
+}
+
+function mergeInjectionScan(
+  scan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null,
+  admission: Readonly<{
+    readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+    readonly eligibleCount: number;
+  }>
+): Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null {
+  const injection = Object.freeze({
+    injection_truncated: admission.eligibleCount > admission.candidates.length,
+    injection_eligible_count: admission.eligibleCount,
+    injection_admitted_count: admission.candidates.length
+  });
+  if (scan === null) {
+    return injection.injection_truncated || injection.injection_eligible_count > 0
+      ? injection
+      : null;
+  }
+  return Object.freeze({ ...scan, ...injection });
 }
 
 function readWorkspaceScanDiagnostics(

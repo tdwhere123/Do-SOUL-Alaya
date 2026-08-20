@@ -7,7 +7,7 @@ import { makeShardKpi } from "../../cli/merge/cli-merge-validations-fixture.js";
 import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   readLatestLongMemEvalOppositeArchive
-} from "../../../longmemeval/archive/archive-evidence.js";
+} from "../../../bench/archive/archive-evidence.js";
 
 const roots: string[] = [];
 

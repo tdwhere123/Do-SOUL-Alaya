@@ -1,13 +1,19 @@
 import type {
   MemoryEntry,
   RecallCandidate,
-  RecallOriginPlane
+  RecallOriginPlane,
+  RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import {
   buildRecallLogicalObjectKey,
   isWorkspaceMemoryCandidate
 } from "../runtime/recall-service-helpers.js";
 import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
+import {
+  resolveCandidateCoverageReceipt,
+  type CandidateCoverageReceipt
+} from "./fine-assessment-selection/coverage-atoms.js";
+import { compareText } from "../../shared/compare-text.js";
 
 export type CoverageIdentity = Readonly<{
   readonly objectKey: string;
@@ -15,64 +21,316 @@ export type CoverageIdentity = Readonly<{
 }>;
 
 export type CoverageSelectableCandidate = Readonly<{
-  readonly entry: Readonly<Pick<MemoryEntry, "object_id" | "evidence_refs">>;
+  readonly entry: Readonly<Pick<
+    MemoryEntry,
+    "object_id" | "object_kind" | "evidence_refs"
+  >>;
   readonly originPlane?: RecallOriginPlane;
   readonly objectKind?: RecallCandidate["object_kind"];
+  readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
+  readonly effectiveFactors: Readonly<RecallScoreFactors>;
   readonly fusion: Readonly<{
     readonly candidate_key: string;
     readonly fused_score: number;
   }>;
 }>;
 
-type CoverageSupplementary = Readonly<Pick<
+export type CoverageMarginalObservation = Readonly<{
+  readonly candidate_key: string;
+  readonly marginal_gain: number;
+  readonly selection_order: number;
+}>;
+
+export type CoverageSelectionObjectiveReceipt = Readonly<{
+  readonly schema_version: 1;
+  readonly operator_id: string;
+  readonly mathematical_class: "monotone_submodular" | null;
+  readonly configuration_digest: string | null;
+}>;
+
+export type CoverageSelectionObjective<in T, State> = Readonly<{
+  /** Identity of the marginal-gain operator; consumers must not infer it from its score. */
+  readonly operator_id: string;
+  /** Declared only when the operator's implementation has a separate proof/test. */
+  readonly mathematical_class?: "monotone_submodular";
+  readonly configuration_digest?: string;
+  readonly createState: () => State;
+  /** Required by offline search operators that branch from one objective state. */
+  readonly cloneState?: (state: State) => State;
+  readonly marginalGain: (params: Readonly<{
+    readonly candidate: T;
+    readonly identity: CoverageIdentity;
+    readonly relevance: number;
+    readonly coverage: CandidateCoverageReceipt;
+    readonly state: State;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+  }>) => number;
+  readonly accept: (params: Readonly<{
+    readonly candidate: T;
+    readonly identity: CoverageIdentity;
+    readonly relevance: number;
+    readonly coverage: CandidateCoverageReceipt;
+    readonly state: State;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+  }>) => void;
+  /** Admissible gain of any not-yet-observed candidate at the supplied relevance bound. */
+  readonly unseenMarginalGainUpperBound?: (params: Readonly<{
+    readonly relevanceUpperBound: number;
+    readonly state: State;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+  }>) => number;
+  readonly compareCandidatesOnEqualGain?: (left: T, right: T) => number;
+}>;
+
+export type CoverageSelectionCandidateState<T> = Readonly<{
+  readonly candidate: T;
+  readonly identity: CoverageIdentity;
+  readonly relevance: number;
+  readonly coverage: CandidateCoverageReceipt;
+}>;
+
+export type CoverageSelectionEvaluation<State> = Readonly<{
+  readonly score: number;
+  readonly state: State;
+}>;
+
+export type CoverageSelectionSupplementary = Readonly<Pick<
   RecallSupplementaryData,
   "evidenceGistsByMemoryId"
->>;
+>> & Readonly<Partial<Pick<
+  RecallSupplementaryData,
+  | "queryProbes"
+  | "querySoughtFacets"
+  | "queryFieldAttribution"
+  | "queryFactFrameExtraction"
+  | "embeddingSimilarityScores"
+  | "evidenceProjectionMatchesByRef"
+  | "evidenceSemanticActivationsByCandidateKey"
+  | "evidenceSemanticDocumentsByMemoryId"
+>>>;
+
+export type DuplicateGistCoverageState = Readonly<{
+  readonly objectCounts: Map<string, number>;
+  readonly gistCounts: Map<string, number>;
+}>;
+
+export const DUPLICATE_GIST_COVERAGE_OPERATOR_ID =
+  "duplicate_gist_penalty_v1";
+
+const duplicateGistCoverageObjective: CoverageSelectionObjective<
+  CoverageSelectableCandidate,
+  DuplicateGistCoverageState
+> = Object.freeze({
+  operator_id: DUPLICATE_GIST_COVERAGE_OPERATOR_ID,
+  createState: () => ({
+    objectCounts: new Map<string, number>(),
+    gistCounts: new Map<string, number>()
+  }),
+  marginalGain: ({ identity, relevance, state }) => {
+    return marginalCoverageGain({
+      identity,
+      relevance,
+      objectCounts: state.objectCounts,
+      gistCounts: state.gistCounts
+    });
+  },
+  accept: ({ identity, state }) => {
+    incrementCoverageCounts(identity, state.objectCounts, state.gistCounts);
+  }
+});
+
+export function createDuplicateGistCoverageObjective<
+  T extends CoverageSelectableCandidate = CoverageSelectableCandidate
+>(): CoverageSelectionObjective<T, DuplicateGistCoverageState> {
+  return duplicateGistCoverageObjective;
+}
 
 export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate>(
   params: Readonly<{
     readonly candidates: readonly T[];
     readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
-    readonly supplementaryData: CoverageSupplementary;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly objective?: undefined;
     readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>
+): readonly T[];
+export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate, State>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly objective: CoverageSelectionObjective<T, State>;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>
+): readonly T[];
+export function orderByCoverageMarginalGain<
+  T extends CoverageSelectableCandidate,
+  State = DuplicateGistCoverageState
+>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly objective?: CoverageSelectionObjective<T, State>;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
   }>
 ): readonly T[] {
-  if (params.candidates.length <= 1) {
-    return Object.freeze([...params.candidates]);
+  if (params.objective === undefined) {
+    return orderByResolvedCoverageObjective(params, duplicateGistCoverageObjective);
   }
+  return orderByResolvedCoverageObjective(params, params.objective);
+}
+
+function orderByResolvedCoverageObjective<
+  T extends CoverageSelectableCandidate,
+  State
+>(
+  params: Readonly<{
+    readonly candidates: readonly T[];
+    readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+    readonly supplementaryData: CoverageSelectionSupplementary;
+    readonly advancesCoverage?: (candidate: T) => boolean;
+    readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+    readonly onObjective?: (receipt: CoverageSelectionObjectiveReceipt) => void;
+  }>,
+  objective: CoverageSelectionObjective<T, State>
+): readonly T[] {
+  params.onObjective?.(materializeCoverageSelectionObjectiveReceipt(objective));
+  const candidates = materializeCoverageSelectionCandidateStates(params);
+  return Object.freeze(orderCoverageSelectionCandidateStatesByMarginalGain({
+    candidates,
+    objective,
+    supplementaryData: params.supplementaryData,
+    advancesCoverage: params.advancesCoverage,
+    onSelection: params.onSelection
+  }).map(({ candidate }) => candidate));
+}
+
+export function materializeCoverageSelectionObjectiveReceipt<T, State>(
+  objective: CoverageSelectionObjective<T, State>
+): CoverageSelectionObjectiveReceipt {
+  if (objective.operator_id.trim().length === 0) {
+    throw new Error("coverage selection objective operator id must be non-empty");
+  }
+  return Object.freeze({
+    schema_version: 1,
+    operator_id: objective.operator_id,
+    mathematical_class: objective.mathematical_class ?? null,
+    configuration_digest: objective.configuration_digest ?? null
+  });
+}
+
+export function materializeCoverageSelectionCandidateStates<
+  T extends CoverageSelectableCandidate
+>(params: Readonly<{
+  readonly candidates: readonly T[];
+  readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly supplementaryData: CoverageSelectionSupplementary;
+}>): readonly CoverageSelectionCandidateState<T>[] {
+  return Object.freeze(params.candidates.map((candidate) =>
+    initializeCoverageCandidateState(
+      candidate,
+      params.relevanceByCandidateKey,
+      params.supplementaryData
+    )
+  ));
+}
+
+export function orderCoverageSelectionCandidateStatesByMarginalGain<
+  T extends CoverageSelectableCandidate,
+  State
+>(params: Readonly<{
+  readonly candidates: readonly CoverageSelectionCandidateState<T>[];
+  readonly objective: CoverageSelectionObjective<T, State>;
+  readonly supplementaryData: CoverageSelectionSupplementary;
+  readonly advancesCoverage?: (candidate: T) => boolean;
+  readonly onSelection?: (observation: CoverageMarginalObservation) => void;
+}>): readonly CoverageSelectionCandidateState<T>[] {
   const remaining = [...params.candidates];
-  const selected: T[] = [];
-  const objectCounts = new Map<string, number>();
-  const gistCounts = new Map<string, number>();
+  const objective = params.objective;
+  const state = objective.createState();
+  const selected: CoverageSelectionCandidateState<T>[] = [];
 
   while (remaining.length > 0) {
-    const bestIndex = selectBestCoverageIndex({
+    const best = selectBestCoverageCandidate({
       candidates: remaining,
-      relevanceByCandidateKey: params.relevanceByCandidateKey,
-      supplementaryData: params.supplementaryData,
-      objectCounts,
-      gistCounts
+      objective,
+      state,
+      supplementaryData: params.supplementaryData
     });
-    const picked = remaining.splice(bestIndex, 1)[0]!;
+    const picked = remaining.splice(best.index, 1)[0]!;
+    const candidate = picked.candidate;
     selected.push(picked);
-    if (params.advancesCoverage?.(picked) ?? true) {
-      incrementCoverageCounts(
-        resolveCoverageIdentity(picked, params.supplementaryData),
-        objectCounts,
-        gistCounts
-      );
+    params.onSelection?.(Object.freeze({
+      candidate_key: candidate.fusion.candidate_key,
+      marginal_gain: best.gain,
+      selection_order: selected.length
+    }));
+    if (params.advancesCoverage?.(candidate) ?? true) {
+      objective.accept({
+        candidate,
+        identity: picked.identity,
+        relevance: picked.relevance,
+        coverage: picked.coverage,
+        state,
+        supplementaryData: params.supplementaryData
+      });
     }
   }
 
   return Object.freeze(selected);
 }
 
+export function evaluateCoverageSelectionCandidateStates<
+  T extends CoverageSelectableCandidate,
+  State
+>(params: Readonly<{
+  readonly candidates: readonly CoverageSelectionCandidateState<T>[];
+  readonly objective: CoverageSelectionObjective<T, State>;
+  readonly supplementaryData: CoverageSelectionSupplementary;
+}>): CoverageSelectionEvaluation<State> {
+  const state = params.objective.createState();
+  let score = 0;
+  const ordered = [...params.candidates].sort((left, right) =>
+    compareText(
+      left.candidate.fusion.candidate_key,
+      right.candidate.fusion.candidate_key
+    )
+  );
+  for (const candidate of ordered) {
+    const input = {
+      candidate: candidate.candidate,
+      identity: candidate.identity,
+      relevance: candidate.relevance,
+      coverage: candidate.coverage,
+      state,
+      supplementaryData: params.supplementaryData
+    } as const;
+    const gain = params.objective.marginalGain(input);
+    if (!Number.isFinite(gain) || gain < 0) {
+      throw new Error("coverage evaluation requires finite non-negative marginal gain");
+    }
+    score += gain;
+    params.objective.accept(input);
+  }
+  return Object.freeze({ score, state });
+}
+
+// Document-identity gistKey would ungroup same-text memories and change order.
 export function resolveCoverageIdentity(
   candidate: CoverageSelectableCandidate,
-  supplementaryData: CoverageSupplementary
+  supplementaryData: CoverageSelectionSupplementary
 ): CoverageIdentity {
   const objectId = candidate.entry.object_id;
   const canUseMemorySignals = isWorkspaceMemoryCandidate(candidate);
+  const evidenceIdentity = resolveEvidenceCoverageIdentity(candidate);
   const gist = canUseMemorySignals
     ? supplementaryData.evidenceGistsByMemoryId[objectId]?.trim() ?? ""
     : "";
@@ -83,48 +341,108 @@ export function resolveCoverageIdentity(
       ? `ref:${evidenceRef}`
       : `object:${candidate.fusion.candidate_key}`;
   return Object.freeze({
-    objectKey: buildRecallLogicalObjectKey(candidate),
-    gistKey
+    objectKey: evidenceIdentity ?? buildRecallLogicalObjectKey(candidate),
+    gistKey: evidenceIdentity ?? gistKey
   });
 }
 
+function resolveEvidenceCoverageIdentity(
+  candidate: CoverageSelectableCandidate
+): string | null {
+  if (isWorkspaceMemoryCandidate(candidate)) return null;
+  const source = candidate.evidenceSourceIdentity?.trim() ?? "";
+  const document = candidate.evidenceDocumentIdentity?.trim() ?? "";
+  if (source.length === 0 && document.length === 0) return null;
+  return `evidence:${source}:${document}`;
+}
+
 function marginalCoverageGain(params: Readonly<{
-  readonly candidate: CoverageSelectableCandidate;
+  readonly identity: CoverageIdentity;
   readonly relevance: number;
-  readonly supplementaryData: CoverageSupplementary;
   readonly objectCounts: ReadonlyMap<string, number>;
   readonly gistCounts: ReadonlyMap<string, number>;
 }>): number {
-  const identity = resolveCoverageIdentity(params.candidate, params.supplementaryData);
-  const sameObjectCount = params.objectCounts.get(identity.objectKey) ?? 0;
-  const sameGistCount = params.gistCounts.get(identity.gistKey) ?? 0;
+  const sameObjectCount = params.objectCounts.get(params.identity.objectKey) ?? 0;
+  const sameGistCount = params.gistCounts.get(params.identity.gistKey) ?? 0;
   return params.relevance / (1 + sameObjectCount + sameGistCount);
 }
 
-function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: Readonly<{
-  readonly candidates: readonly T[];
-  readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
-  readonly supplementaryData: CoverageSupplementary;
-  readonly objectCounts: ReadonlyMap<string, number>;
-  readonly gistCounts: ReadonlyMap<string, number>;
-}>): number {
+function selectBestCoverageCandidate<
+  T extends CoverageSelectableCandidate,
+  State
+>(params: Readonly<{
+  readonly candidates: readonly CoverageSelectionCandidateState<T>[];
+  readonly objective: CoverageSelectionObjective<T, State>;
+  readonly state: State;
+  readonly supplementaryData: CoverageSelectionSupplementary;
+}>): Readonly<{ readonly index: number; readonly gain: number }> {
   let bestIndex = 0;
   let bestGain = Number.NEGATIVE_INFINITY;
   for (let index = 0; index < params.candidates.length; index += 1) {
-    const candidate = params.candidates[index]!;
-    const gain = marginalCoverageGain({
-      candidate,
-      relevance: resolveRelevance(candidate, params.relevanceByCandidateKey),
-      supplementaryData: params.supplementaryData,
-      objectCounts: params.objectCounts,
-      gistCounts: params.gistCounts
+    const state = params.candidates[index]!;
+    const gain = params.objective.marginalGain({
+      candidate: state.candidate,
+      identity: state.identity,
+      relevance: state.relevance,
+      coverage: state.coverage,
+      state: params.state,
+      supplementaryData: params.supplementaryData
     });
-    if (gain > bestGain) {
+    const tieOrder = params.objective.compareCandidatesOnEqualGain?.(
+      state.candidate,
+      params.candidates[bestIndex]!.candidate
+    );
+    const tiedBeforeBest = gain === bestGain && tieOrder !== undefined && tieOrder < 0;
+    if (gain > bestGain || tiedBeforeBest) {
       bestGain = gain;
       bestIndex = index;
     }
   }
-  return bestIndex;
+  return Object.freeze({ index: bestIndex, gain: bestGain });
+}
+
+function buildCoverageReceipt<T extends CoverageSelectableCandidate>(
+  candidate: T,
+  supplementaryData: CoverageSelectionSupplementary
+): CandidateCoverageReceipt {
+  const semanticActivations =
+    supplementaryData.evidenceSemanticActivationsByCandidateKey ?? new Map();
+  return resolveCandidateCoverageReceipt(candidate, {
+    embeddingSimilarityScores: supplementaryData.embeddingSimilarityScores ?? {},
+    evidenceSemanticActivationsByCandidateKey: semanticActivations,
+    evidenceProjectionMatchesByRef:
+      supplementaryData.evidenceProjectionMatchesByRef ?? {}
+  });
+}
+
+function initializeCoverageCandidateState<T extends CoverageSelectableCandidate>(
+  candidate: T,
+  relevanceByCandidateKey: ReadonlyMap<string, number>,
+  supplementaryData: CoverageSelectionSupplementary
+): CoverageSelectionCandidateState<T> {
+  const stableView: CoverageSelectableCandidate = Object.freeze({
+    entry: Object.freeze({
+      object_id: candidate.entry.object_id,
+      object_kind: candidate.entry.object_kind,
+      evidence_refs: candidate.entry.evidence_refs
+    }),
+    originPlane: candidate.originPlane,
+    objectKind: candidate.objectKind,
+    ...(candidate.evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity: candidate.evidenceDocumentIdentity }),
+    ...(candidate.evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity: candidate.evidenceSourceIdentity }),
+    effectiveFactors: candidate.effectiveFactors,
+    fusion: candidate.fusion
+  });
+  return Object.freeze({
+    candidate,
+    identity: resolveCoverageIdentity(stableView, supplementaryData),
+    relevance: resolveRelevance(stableView, relevanceByCandidateKey),
+    coverage: buildCoverageReceipt(stableView, supplementaryData)
+  });
 }
 
 function incrementCoverageCounts(

@@ -1,11 +1,24 @@
-import type { RecallPolicy, SoulRecallHostContext, TaskObjectSurface } from "@do-soul/alaya-protocol";
+import type {
+  FieldContractSha256,
+  MemoryEntry,
+  ProjectionPin,
+  QueryConditionReceipt,
+  RecallPolicy,
+  SoulRecallHostContext,
+  TaskObjectSurface
+} from "@do-soul/alaya-protocol";
+import type { RecallFieldQuerySession } from "./query/field-query-session.js";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
+import type {
+  EvidenceCandidateScoringResult
+} from "../../embedding-recall/embedding-recall-service.js";
 import type {
   fineAssess,
   prepareFineAssessment
 } from "../delivery/fine-assessment.js";
 import type { loadActiveConstraints } from "./orchestration.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
@@ -20,6 +33,29 @@ import type {
 } from "./recall-service-types.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
+import type { RecallPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "../delivery/selection-boundary/selection-boundary-capture.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
+import type { RecallFiniteFieldChannelCapture } from
+  "../field/finite-field-capture.js";
+import type { PinnedProjectionCandidateSelection } from
+  "../field/retrieval/projection/pinned-projection-selection.js";
+import type { SelectGammaSynthesisDependencies } from
+  "../delivery/select-gamma/synthesis-adapter.js";
+import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
+
+export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
+
+export function capturesRecallAnswerFeatures(
+  capture: RecallDiagnosticCapture | undefined
+): boolean {
+  return capture === "answer_features" || capture === "packet_trace";
+}
 
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
@@ -31,15 +67,33 @@ export interface RecallExecutionParams {
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
+  >;
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
+  // Observer attachment is observation-only; answer features follow diagnosticCapture.
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
 }
 
 export interface RecallExecutionContext {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & SelectGammaSynthesisDependencies;
   readonly warn: RecallServiceWarnPort;
   readonly now: () => string;
-  readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
+  readonly buildDefaultPolicy: (
+    strategy: NodeStrategy,
+    taskSurfaceRef: string,
+    capturedAt: string
+  ) => Readonly<RecallPolicy>;
   readonly degradationReasons?: Set<RecallDegradationReason>;
+  readonly fieldQuerySession: RecallFieldQuerySession;
+  readonly sha256: FieldContractSha256;
+  readonly projectionPinHeartbeatScheduler?:
+    import("./query/projection-pin-lease.js").ProjectionPinHeartbeatScheduler;
 }
 
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
@@ -48,16 +102,24 @@ export type FineAssessmentResult = ReturnType<typeof fineAssess>;
 export type FineAssessmentPreparation = ReturnType<typeof prepareFineAssessment>;
 
 export interface PreparedRecallRequest {
+  readonly time: RecallRequestTimeContext;
   readonly policy: Readonly<RecallPolicy>;
   readonly tokenEstimator: TokenEstimator;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
+  readonly answerShapePlan: Readonly<RecallAnswerShapePlan>;
   readonly referenceTime: string;
-  // Only an explicit caller value selects a historical projection. The normal
-  // current-recall clock must keep using the active runtime projection.
-  readonly temporalProjectionAsOf?: string;
+  readonly temporalProjectionAsOf: string;
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
+  readonly queryCondition: QueryConditionReceipt;
+  readonly fieldProjectionSelection: PinnedProjectionCandidateSelection;
+  readonly fieldProjectionMemories: readonly Readonly<MemoryEntry>[];
+  readonly projectionPin: ProjectionPin;
+  readonly projectionPinLease: import("./query/projection-pin-lease.js").ProjectionPinLeaseGuard;
+  readonly releaseProjectionPin: () => void;
 }
 
 type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];
@@ -69,8 +131,11 @@ export interface RecallAssessmentStageResult {
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
+  readonly evidenceEmbeddingScoring: Readonly<EvidenceCandidateScoringResult>;
+  readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
+  readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;
   readonly phaseLatencyMs: Readonly<{
     readonly embedding: number;
     readonly assessment: number;

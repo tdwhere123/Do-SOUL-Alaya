@@ -97,7 +97,8 @@ describe("enum coverage", () => {
       "potential_handoff",
       "potential_evidence_anchor",
       "potential_conflict",
-      "potential_preference"
+      "potential_preference",
+      "potential_semantic_observation"
     ]);
     expect(Object.values(SignalSource)).toEqual(["model_tool", "garden_compile", "user_seed", "import"]);
     expect(Object.values(SignalState)).toEqual([

@@ -10,7 +10,7 @@ import {
 import {
   requireAtomicKarmaTransition,
   type AtomicKarmaTransitionWiring
-} from "../../runtime/karma-atomic-wiring-guard.js";
+} from "../../runtime/daemon/support/karma-atomic-wiring-guard.js";
 
 const SHARED_CONNECTION_IDENTITY = { connection: "shared" };
 

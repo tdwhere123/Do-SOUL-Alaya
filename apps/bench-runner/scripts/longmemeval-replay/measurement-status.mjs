@@ -3,7 +3,9 @@ const MEASUREMENT_STATUSES = new Set([
   "scorable", "abstention_unscorable", "evaluator_identity_unscorable"
 ]);
 const EVALUATOR_STATUSES = new Set(["present", "absent", "ambiguous"]);
-const MATERIALIZATION_STATUSES = new Set(["memory_emitted", "drop", "unknown"]);
+const MATERIALIZATION_STATUSES = new Set([
+  "memory_emitted", "evidence_preserved", "drop", "unknown"
+]);
 const EVALUATION_ISSUES = new Set([
   "missing_diagnostics", "empty_gold_identity", "extraction_materialization_drop",
   "gold_taxonomy_fallthrough", "identity_join_error",
@@ -56,7 +58,9 @@ function hasScorableAnswerableEvidence(ledger) {
 function hasEmittedGoldIdentity(ledger) {
   return ledger.evaluator_gold_identity?.status === "present" &&
     ledger.evaluator_gold_identity.object_ids?.length > 0 &&
-    ledger.extraction_materialization?.status === "memory_emitted" &&
+    ["memory_emitted", "evidence_preserved"].includes(
+      ledger.extraction_materialization?.status
+    ) &&
     ledger.evaluation_issue_reason === null;
 }
 
@@ -112,8 +116,15 @@ function validateMaterialization(materialization, identity) {
     throw new Error("invalid extraction_materialization.emitted_memory_count");
   }
   if (materialization.status === "memory_emitted") {
-    if (count === 0 || count !== identity.object_ids.length || reason !== null) {
+    if (count === 0 || count > identity.object_ids.length || reason !== null) {
       throw new Error("invalid extraction_materialization memory_emitted tuple");
+    }
+    return;
+  }
+  if (materialization.status === "evidence_preserved") {
+    if (count !== 0 || reason !== null || identity.status !== "present" ||
+        identity.object_ids.length === 0) {
+      throw new Error("invalid extraction_materialization evidence_preserved tuple");
     }
     return;
   }

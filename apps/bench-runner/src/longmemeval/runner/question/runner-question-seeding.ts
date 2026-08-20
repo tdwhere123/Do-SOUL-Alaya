@@ -15,33 +15,37 @@ import {
   type CompileSeedExtractionStats,
   type CompileSeedRunner,
   type SessionSeededTurn
-} from "../../compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   buildLongMemEvalSidecarKey,
   type LongMemEvalSidecarEntry
 } from "../runner-helpers.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import {
   createEmptyLongMemEvalSeedDropReasons,
   type LongMemEvalSeedDropReasons
-} from "../../extraction/seed-fuel/seed-drop-reasons.js";
+} from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
 import {
   assertLongMemEvalTimeline,
   requireLongMemEvalTimestamp
 } from "../../ingestion/source-time.js";
 import type {
+  LongMemEvalAnswersWithFormationReceipt,
   LongMemEvalSnapshotSeedRound
-} from "../../snapshot/materialize.js";
+} from "../../../bench/snapshot/materialize.js";
+import { isSeededMemoryResult } from
+  "../../../harness/daemon/seed/daemon-seed-results.js";
 import {
   mergeLongMemEvalSourceRounds,
   type LongMemEvalSourceRound
-} from "../../provenance/source-rounds.js";
+} from "../../../bench/provenance/source-rounds.js";
 import {
   isVerifiedEmptyAnswerWipe,
   recordAnswerSeedDrops,
   snapshotSeedCounters,
   type SeedCounterSnapshot
 } from "./seeding/answer-seed-drop-accounting.js";
+import { buildRoundExtractionLedger } from "./seed-round-extraction-ledger.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
@@ -49,6 +53,7 @@ export interface LongMemEvalQuestionSeedState {
   answerSeedDropReasons: LongMemEvalSeedDropReasons;
   readonly coherenceMembers: BenchEdgeFormationMember[];
   readonly seedRounds: LongMemEvalSnapshotSeedRound[];
+  answersWithFormation?: LongMemEvalAnswersWithFormationReceipt;
   seedTurnsTruncated: number;
   answerTurnsTruncated: number;
   seedCharsClipped: number;
@@ -95,7 +100,6 @@ async function seedQuestionSession(
   if (session === undefined) return seedIndex;
   const sessionId = input.question.haystack_session_ids[sessionIndex] ?? `session-${sessionIndex}`;
   const sessionTurns: SessionSeededTurn[] = [];
-  const sessionMemberMemoryIds: string[] = [];
   let sessionHasAnswer = false;
   let previousTurnSeedMemoryIds: readonly string[] = [];
   for (let ri = 0; ri < pairSessionIntoRounds(session).length; ri++) {
@@ -107,15 +111,11 @@ async function seedQuestionSession(
       sessionId,
       seedIndex,
       previousTurnSeedMemoryIds,
-      sessionTurns,
-      sessionMemberMemoryIds
+      sessionTurns
     });
     seedIndex += 1;
     sessionHasAnswer = sessionHasAnswer || round.hasAnswer;
     previousTurnSeedMemoryIds = result.nextTurnSeedMemoryIds;
-  }
-  if (input.seedFormationMode === "diagnostic_warmup") {
-    await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
   }
   await seedSessionSynthesis(input.workspace, state, {
     questionId: input.question.question_id,
@@ -134,7 +134,6 @@ interface SeedRoundContext {
   readonly seedIndex: number;
   readonly previousTurnSeedMemoryIds: readonly string[];
   readonly sessionTurns: SessionSeededTurn[];
-  readonly sessionMemberMemoryIds: string[];
 }
 
 async function seedQuestionRound(
@@ -165,6 +164,7 @@ async function seedQuestionRound(
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
     sourceObservedAt,
+    sourceEvidenceFallback: "trusted_source_turn",
     ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {}),
     ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
   });
@@ -174,7 +174,8 @@ async function seedQuestionRound(
     round.hasAnswer,
     beforeDropReasons,
     input.seedRunner.stats.signalsDroppedByReason,
-    isVerifiedEmptyAnswerWipe(input.seedRunner.stats, beforeCounters)
+    !seedResult.seeds.some((seed) => seed.kind === "evidence_capsule") &&
+      isVerifiedEmptyAnswerWipe(input.seedRunner.stats, beforeCounters)
   );
   addSeedSidecarEntries(input, state, context, round, seedResult);
   state.seedRounds.push(buildSeedRoundLedger({
@@ -194,18 +195,13 @@ function buildSeedRoundLedger(input: {
   readonly round: ReturnType<typeof pairSessionIntoRounds>[number];
   readonly seeds: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"];
 }): LongMemEvalSnapshotSeedRound {
-  const official = input.stats.lastExtractionSource !== null;
   return {
     sessionIndex: input.context.sessionIndex,
     roundIndex: input.context.roundIndex,
     sessionId: input.context.sessionId,
     contentSha256: sha256(input.round.content.trim()),
     hasAnswer: input.round.hasAnswer,
-    extractionSource: input.stats.lastExtractionSource ?? "fallback",
-    cacheKey: official ? input.stats.lastCacheKey ?? null : null,
-    rawJsonSha256: official ? input.stats.lastRawJsonSha256 : null,
-    rawSignalCount: official ? input.stats.lastTurnRawSignalCount : null,
-    draftCount: official ? input.stats.lastTurnDraftCount : null,
+    ...buildRoundExtractionLedger(input.stats),
     factsProduced: delta(input.stats.factsProduced, input.before.factsProduced),
     parseDropped: delta(input.stats.parseDropped, input.before.parseDropped),
     compileOverflowDropped: delta(
@@ -219,12 +215,21 @@ function buildSeedRoundLedger(input: {
       input.stats.signalsDroppedByReason.materialization_drop,
       input.before.materializationDrop
     ),
-    memoryObjectIds: uniqueSurvivorSeeds(input.seeds).map(({ seed }) => seed.memoryId),
-    memoryBindings: input.seeds.map((seed) => ({
-      objectId: seed.memoryId,
-      signalId: seed.signalId,
-      evidenceId: seed.evidenceId
-    }))
+    memoryObjectIds: uniqueSurvivorMemorySeeds(input.seeds)
+      .map(({ seed }) => seed.memoryId),
+    memoryBindings: input.seeds
+      .filter(isSeededMemoryResult)
+      .map((seed) => ({
+        objectId: seed.memoryId,
+        signalId: seed.signalId,
+        evidenceId: seed.evidenceId
+      })),
+    directEvidenceBindings: input.seeds
+      .filter((seed) => seed.kind === "evidence_capsule")
+      .map((seed) => ({
+        signalId: seed.signalId,
+        evidenceId: seed.evidenceId
+      }))
   };
 }
 
@@ -257,7 +262,22 @@ function addSeedSidecarEntries(
   round: ReturnType<typeof pairSessionIntoRounds>[number],
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
-  for (const { seed, seedOrdinal } of uniqueSurvivorSeeds(seedResult.seeds)) {
+  for (const seed of seedResult.seeds) {
+    if (seed.kind !== "evidence_capsule") continue;
+    addSidecarEntry(state, {
+      objectId: seed.evidenceId,
+      objectKind: "evidence_capsule",
+      sessionId: context.sessionId,
+      hasAnswer: round.hasAnswer,
+      sourceRounds: [sourceRound(context, round)],
+      ...optionalSeedContent(input, context.sessionIndex, round.content)
+    });
+    context.sessionTurns.push({
+      turnContent: round.content,
+      evidenceId: seed.evidenceId
+    });
+  }
+  for (const { seed, seedOrdinal } of uniqueSurvivorMemorySeeds(seedResult.seeds)) {
     addSidecarEntry(state, {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
@@ -267,9 +287,6 @@ function addSeedSidecarEntries(
       ...optionalSeedContent(input, context.sessionIndex, round.content)
     });
     context.sessionTurns.push({ turnContent: round.content, evidenceId: seed.evidenceId });
-    if (!context.sessionMemberMemoryIds.includes(seed.memoryId)) {
-      context.sessionMemberMemoryIds.push(seed.memoryId);
-    }
     if (!state.coherenceMembers.some((member) => member.memoryId === seed.memoryId)) {
       state.coherenceMembers.push({
         memoryId: seed.memoryId,
@@ -280,13 +297,19 @@ function addSeedSidecarEntries(
   }
 }
 
-type SeededTurnMemory = Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"][number];
+type SeededTurnObject =
+  Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"][number];
+type SeededTurnMemory = Exclude<
+  SeededTurnObject,
+  { readonly kind: "evidence_capsule" }
+>;
 
-function uniqueSurvivorSeeds(
-  seeds: readonly SeededTurnMemory[]
+function uniqueSurvivorMemorySeeds(
+  seeds: readonly SeededTurnObject[]
 ): readonly { readonly seed: SeededTurnMemory; readonly seedOrdinal: number }[] {
   const survivors = new Map<string, { seed: SeededTurnMemory; seedOrdinal: number }>();
   for (const [seedOrdinal, seed] of seeds.entries()) {
+    if (!isSeededMemoryResult(seed)) continue;
     const prior = survivors.get(seed.memoryId);
     if (prior === undefined || (prior.seed.evidenceId === null && seed.evidenceId !== null)) {
       survivors.set(seed.memoryId, { seed, seedOrdinal: prior?.seedOrdinal ?? seedOrdinal });

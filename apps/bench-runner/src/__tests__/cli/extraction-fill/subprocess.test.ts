@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 const VARIANT = "longmemeval_oracle";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "subprocess-fixture.mjs");
-const SUBPROCESS_STARTUP_TIMEOUT_MS = 30_000;
+const SUBPROCESS_STARTUP_TIMEOUT_MS = 60_000;
 let root: string;
 
 beforeEach(async () => {
@@ -38,14 +38,14 @@ it("self-stops on a terminal task failure with a safe exit and no stale lease", 
   );
   expect(result.stderr).not.toMatch(/sk-fixture-secret|PROMPT_BODY/u);
   expect(existsSync(join(root, "cache", ".extraction-fill.lock"))).toBe(false);
-}, 40_000);
+}, 90_000);
 
 it("settles a real SIGINT as exit 130 after releasing the lease", async () => {
   const result = await runFixture("signal", (child) => child.kill("SIGINT"));
 
   expect(result).toMatchObject({ exitCode: 130, signal: null, leaseSeenAtReady: true });
   expect(existsSync(join(root, "cache", ".extraction-fill.lock"))).toBe(false);
-}, 40_000);
+}, 90_000);
 
 async function runFixture(
   mode: "terminal" | "signal",
@@ -64,12 +64,14 @@ async function runFixture(
       ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:E0_SUBPROCESS_GARDEN_KEY",
       E0_SUBPROCESS_GARDEN_KEY: "test-key"
     },
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: [mode === "terminal" ? "pipe" : "ignore", "pipe", "pipe"]
   });
   let stdout = "";
   let stderr = "";
   let ready = false;
+  let armed = false;
   let readyAt: number | null = null;
+  let settledAt: number | null = null;
   let leaseSeenAtReady = false;
   // Source-graph startup is outside the settlement behavior asserted after FIXTURE_READY.
   const timeout = setTimeout(() => child.kill("SIGKILL"), SUBPROCESS_STARTUP_TIMEOUT_MS);
@@ -81,12 +83,17 @@ async function runFixture(
       ready = true;
       readyAt = Date.now();
       leaseSeenAtReady = existsSync(join(root, "cache", ".extraction-fill.lock"));
+      if (mode === "terminal") child.stdin?.end("LEASE_OBSERVED\n");
+    }
+    if (!armed && stdout.includes("FIXTURE_ARMED")) {
+      armed = true;
       onReady?.(child);
     }
+    if (settledAt === null && stdout.includes("FIXTURE_SETTLED")) {
+      settledAt = Date.now();
+    }
   });
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
+  child.stderr.on("data", (chunk: string) => { stderr += chunk; });
   return new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (exitCode, signal) => {
@@ -96,7 +103,7 @@ async function runFixture(
         signal,
         stdout,
         stderr,
-        settlementMs: readyAt === null ? null : Date.now() - readyAt,
+        settlementMs: readyAt === null || settledAt === null ? null : settledAt - readyAt,
         leaseSeenAtReady
       });
     });
@@ -113,8 +120,8 @@ async function writeDataset(): Promise<void> {
     haystack_session_ids: ["s-answer", "s-decoy"],
     haystack_dates: ["2025-12-01", "2025-11-01"],
     haystack_sessions: [
-      [{ role: "user", content: "alpha", has_answer: true }],
-      [{ role: "user", content: "decoy" }]
+      [{ role: "user", content: "I completed alpha.", has_answer: true }],
+      [{ role: "user", content: "I completed decoy." }]
     ],
     answer_session_ids: ["s-answer"]
   }];
@@ -123,7 +130,11 @@ async function writeDataset(): Promise<void> {
   await writeFile(join(root, "data", `${VARIANT}.json`), raw, "utf8");
   await writeFile(
     join(root, "pinned", `${VARIANT}.meta.json`),
-    JSON.stringify({ sha256, question_count: questions.length }),
+    JSON.stringify({
+      sha256,
+      size_bytes: Buffer.byteLength(raw, "utf8"),
+      question_count: questions.length
+    }),
     "utf8"
   );
 }

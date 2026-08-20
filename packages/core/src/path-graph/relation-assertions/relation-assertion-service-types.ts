@@ -1,17 +1,13 @@
 import type {
   PathRelation,
   RelationAssertion,
+  RelationAssertionEvidenceReceipt,
+  RelationFormationReceipt,
   RelationAssertionResolution,
   RelationAssertionResolutionKind,
   RelationValidity
 } from "@do-soul/alaya-protocol";
 import type { EventPublisherDecision, EventPublisherInput } from "../../runtime/event-publisher.js";
-
-export type RelationAssertionSourceEventAnchor = Readonly<{
-  readonly eventType: "soul.signal.emitted";
-  readonly eventId: string;
-  readonly occurredAt: string;
-}>;
 
 export type RelationAssertionProjectionGenerationInput = Readonly<{
   readonly generation: string;
@@ -30,16 +26,18 @@ export type RelationAssertionProjectionGenerationInput = Readonly<{
 export interface RelationAssertionAtomicRepoPort {
   getStorageConnectionIdentity?(): object;
   readActiveProjectionGenerationInCurrentTransaction?(): string | null;
+  readCurrentHistoryDigestInCurrentTransaction?(): string | null;
   getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null;
   findByIdentityKeyInCurrentTransaction(identityKey: string): Readonly<RelationAssertion> | null;
   createInCurrentTransaction(input: {
     readonly assertion: RelationAssertion;
     readonly identityKey: string;
   }): Readonly<RelationAssertion>;
-  assertEvidenceAnchorsInCurrentTransaction(input: {
+  markProjectionRefreshRequiredInCurrentTransaction(): void;
+  assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
-    readonly evidenceIds: readonly string[];
-    readonly sourceAnchor: RelationAssertionSourceEventAnchor;
+    readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
+    readonly formationReceipt: RelationFormationReceipt;
   }): void;
   getCurrentResolutionInCurrentTransaction(
     assertionId: string
@@ -52,7 +50,7 @@ export interface RelationAssertionAtomicRepoPort {
   writeProjectionGenerationInCurrentTransaction(
     generation: RelationAssertionProjectionGenerationInput,
     options: { readonly activate: boolean }
-  ): void;
+  ): string;
 }
 
 export interface RelationAssertionHistoryPort {
@@ -81,11 +79,11 @@ export type RelationAssertionAdmissionRequest = Readonly<{
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly causedBy: string;
-  readonly evidenceIds: readonly string[];
+  readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
+  readonly formationReceipt: RelationFormationReceipt;
   readonly anchors: RelationAssertion["anchors"];
   readonly relationKind: string;
   readonly validity: RelationValidity;
-  readonly sourceEventAnchor: RelationAssertionSourceEventAnchor;
   readonly assertionId?: string;
   readonly admittedAt?: string;
 }>;
@@ -107,6 +105,17 @@ export type RelationAssertionAdmissionResult = Readonly<{
   readonly activeProjectionCount: number;
   readonly projectionGeneration: string;
 }>;
+
+export type RelationAssertionDeferredAdmissionResult = Readonly<{
+  readonly status: "admitted" | "already_admitted";
+  readonly assertion: Readonly<RelationAssertion>;
+}>;
+
+export interface RelationAssertionAdmissionPort {
+  admit(
+    request: RelationAssertionAdmissionRequest
+  ): Promise<RelationAssertionDeferredAdmissionResult>;
+}
 
 export type RelationAssertionResolutionResult = Readonly<{
   readonly status: "resolved" | "already_resolved";

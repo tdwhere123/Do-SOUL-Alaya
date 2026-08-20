@@ -6,7 +6,7 @@ import {
   assertFreshExtractionCacheRoot,
   decideExtractionCacheCompatibility,
   hashExtractionCacheCompatibilityDecision
-} from "../../../longmemeval/extraction/cache-audit/compatibility.js";
+} from "../../../bench/extraction/cache-audit/compatibility.js";
 
 const roots: string[] = [];
 
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("extraction cache compatibility", () => {
-  it("permits reuse only with complete replay and exact identity", () => {
+  it("reuses raw observations and projections with complete replay and exact identity", () => {
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
@@ -23,25 +23,49 @@ describe("extraction cache compatibility", () => {
       replay: completeReplay()
     });
 
-    expect(result.action).toBe("reuse");
-    expect(result.reasons).toEqual([]);
+    expect(result.raw).toMatchObject({ action: "reuse", reasons: [] });
+    expect(result.projection).toMatchObject({ action: "reuse", reasons: [] });
     expect(hashExtractionCacheCompatibilityDecision(result)).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it("forces rebuild for semantic drift even when raw identity matches", () => {
+  it("replays projections without rebuilding raw observations after semantic drift", () => {
     const final = identity();
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
-      source: identity(),
-      final: { ...final, formationSemanticsSha256: "f".repeat(64) },
+      source: final,
+      final: {
+        ...final,
+        projection: {
+          ...final.projection,
+          formationSemanticsSha256: "f".repeat(64)
+        }
+      },
       replay: completeReplay()
     });
 
-    expect(result.action).toBe("rebuild");
-    expect(result.reasons).toContain("formation_semantics_mismatch");
+    expect(result.raw).toMatchObject({ action: "reuse", reasons: [] });
+    expect(result.projection.action).toBe("replay");
+    expect(result.projection.reasons).toContain("formation_semantics_mismatch");
   });
 
-  it("forces rebuild for any invalid or unaccounted replay outcome", () => {
+  it("rebuilds raw observations when the frozen signal-contract prompt changes", () => {
+    const source = identity();
+    const result = decideExtractionCacheCompatibility({
+      sourceRoot: "/cache/canonical",
+      source,
+      final: {
+        ...source,
+        raw: { ...source.raw, systemPromptSha256: "9".repeat(64) }
+      },
+      replay: completeReplay()
+    });
+
+    expect(result.raw.action).toBe("rebuild");
+    expect(result.raw.reasons).toContain("system_prompt_mismatch");
+    expect(result.projection.reasons).toContain("raw_cache_rebuild");
+  });
+
+  it("blocks projection reuse without invalidating closed raw observations", () => {
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
@@ -49,11 +73,12 @@ describe("extraction cache compatibility", () => {
       replay: { ...completeReplay(), invalid: 1, accountedElements: 3 }
     });
 
-    expect(result.action).toBe("rebuild");
-    expect(result.reasons).toContain("replay_not_closed");
+    expect(result.raw).toMatchObject({ action: "reuse", reasons: [] });
+    expect(result.projection.action).toBe("blocked");
+    expect(result.projection.reasons).toContain("replay_not_closed");
   });
 
-  it("forces rebuild when the cache-root scan finds unbound raw paths", () => {
+  it("rebuilds raw observations and replays projections for an unclosed inventory", () => {
     const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
@@ -62,8 +87,10 @@ describe("extraction cache compatibility", () => {
       rawInventoryClosed: false
     });
 
-    expect(result.action).toBe("rebuild");
-    expect(result.reasons).toContain("raw_inventory_not_closed");
+    expect(result.raw.action).toBe("rebuild");
+    expect(result.raw.reasons).toContain("raw_inventory_not_closed");
+    expect(result.projection.action).toBe("replay");
+    expect(result.projection.reasons).toContain("raw_cache_rebuild");
   });
 
   it("accepts only a new, empty target root for rebuild", () => {
@@ -84,17 +111,21 @@ describe("extraction cache compatibility", () => {
 
 function identity() {
   return {
-    datasetRevision: "a".repeat(64),
-    model: "gpt-5.4-mini",
-    modelFamily: "gpt-5.4",
-    requestProfile: "provider-default-v1",
-    providerUrl: "https://provider.example/v1",
-    systemPromptSha256: "b".repeat(64),
-    cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
-    rawClosureSha256: "c".repeat(64),
-    parserSemanticsSha256: "d".repeat(64),
-    formationSemanticsSha256: "e".repeat(64),
-    temporalSchemaRevision: "relation-assertion-v1"
+    raw: {
+      datasetRevision: "a".repeat(64),
+      model: "gpt-5.4-mini",
+      requestProfile: "provider-default-v1",
+      providerUrl: "https://provider.example/v1",
+      systemPromptSha256: "b".repeat(64),
+      cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+      rawClosureSha256: "c".repeat(64)
+    },
+    projection: {
+      modelFamily: "gpt-5.4",
+      parserSemanticsSha256: "d".repeat(64),
+      formationSemanticsSha256: "e".repeat(64),
+      temporalSchemaRevision: "relation-assertion-v1"
+    }
   };
 }
 

@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { buildRecallDiagnostics } from "../../recall/runtime/diagnostics.js";
+import { compileRecallAnswerShapePlan } from "../../recall/query/recall-answer-shape-plan.js";
 import type {
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics,
   RecallCandidateDiagnostic
 } from "../../recall/runtime/recall-service-types.js";
+import {
+  captureRecallQueryEntities
+} from "../../recall/field/query-entity-attribution-producer.js";
+import {
+  materializeRecallRetrievalFieldCaptures,
+  RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1
+} from "../../recall/field/finite-field-capture.js";
 
 const emptyQueryProbes = Object.freeze({
   normalized_query: "where did alice live",
@@ -21,7 +29,7 @@ const emptyQueryProbes = Object.freeze({
   dimensions: [],
   scope_classes: [],
   domain_tags: [],
-  lexical_terms: [],
+  lexical_terms: ["alice", "live"],
   expanded_terms: [],
   phrases: [],
   char_ngrams: [],
@@ -29,7 +37,7 @@ const emptyQueryProbes = Object.freeze({
 });
 
 describe("recall diagnostics", () => {
-  it("preserves optional conformant axis and flood diagnostics in fusion breakdown", () => {
+  it("preserves optional conformant axis and flood diagnostics in fusion breakdown", async () => {
     const floodPotential: IntegratedFloodCandidateDiagnostics = Object.freeze({
       R_obj: 0.2,
       Slice: 1,
@@ -39,12 +47,12 @@ describe("recall diagnostics", () => {
       omega: 1,
       Flood: 0.2,
       lambda: 0.15,
-      beta: 0,
+      beta: 1,
       final_score: 0.23,
       slice_status: "active",
       path_status: "active",
       evidence_status: "active",
-      e_direct_status: "inactive:beta_disabled",
+      e_direct_status: "active",
       fuel_verified: true
     });
     const floodFuelCoverage: FloodFuelCoverageSummary = Object.freeze({
@@ -62,7 +70,6 @@ describe("recall diagnostics", () => {
       dimension: "fact",
       origin_plane: "workspace_local",
       created_at: "2026-07-07T00:00:00.000Z",
-      facet_overlap: 0,
       admission_planes: ["activation"] as RecallCandidateDiagnostic["admission_planes"],
       plane_first_admitted: "activation" as RecallCandidateDiagnostic["plane_first_admitted"],
       plane_winning_admission: "activation" as RecallCandidateDiagnostic["plane_winning_admission"],
@@ -114,6 +121,9 @@ describe("recall diagnostics", () => {
 
     const diagnostics = buildRecallDiagnostics({
       queryProbes: emptyQueryProbes,
+      queryEntityExtraction: await captureRecallQueryEntities({ query_text: null }),
+      retrievalFieldCaptures: materializeRecallRetrievalFieldCaptures([]),
+      answerShapePlan: compileRecallAnswerShapePlan(emptyQueryProbes),
       querySoughtFacets: ["location_place"],
       totalScanned: 1,
       candidatePoolCount: 1,
@@ -121,6 +131,30 @@ describe("recall diagnostics", () => {
       deliveredCount: 1,
       embeddingProviderStatus: "provider_not_requested",
       embeddingSupplementStatus: "disabled",
+      evidenceEmbeddingScoring: {
+        activationsByCandidateKey: new Map(),
+        status: "not_applicable",
+        expectedCount: 0,
+        scoredCount: 0,
+        inferenceCalls: 0,
+        latencyMs: 0,
+        failureClass: null,
+        selectionReceipt: {
+          schema_version: 1,
+          operator_id: "ordered_candidate_prefix_v1",
+          input_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          owner_gist_enabled: true,
+          owner_gist_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          full_evidence_candidate_keys: ["workspace_local:memory_entry:memory-a"],
+          owner_gist_limit: 16,
+          full_evidence_limit: 32,
+          input_memory_count: 1,
+          owner_gist_selected_count: 1,
+          full_evidence_selected_count: 1,
+          owner_gist_excluded_count: 0,
+          full_evidence_excluded_count: 0
+        }
+      },
       providerDegradationReason: null,
       answerRerankDiagnostics: {
         status: "not_requested",
@@ -157,6 +191,23 @@ describe("recall diagnostics", () => {
     });
     expect(diagnostics.fine_assessment_pruned_candidates).toEqual([]);
     expect(diagnostics.query_probes.normalized_query).toBe("where did alice live");
+    expect(diagnostics.answer_shape_plan).toEqual({
+      schema_version: 1,
+      status: "high_confidence",
+      shape: "place",
+      target_terms: ["alice"],
+      relation_terms: ["live"]
+    });
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
+    expect(diagnostics.query_entity_extraction?.status).toBe("ineligible");
+    expect(diagnostics.retrieval_field_captures).toHaveLength(
+      RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1.length
+    );
+    expect(diagnostics.evidence_embedding_selection_receipt).toMatchObject({
+      operator_id: "ordered_candidate_prefix_v1",
+      input_memory_count: 1,
+      owner_gist_selected_count: 1,
+      full_evidence_selected_count: 1
+    });
   });
 });

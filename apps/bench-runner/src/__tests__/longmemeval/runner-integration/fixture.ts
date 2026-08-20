@@ -5,7 +5,7 @@ import { expect, vi } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from
-  "../../../longmemeval/provenance/evidence-manifest.js";
+  "../../../bench/provenance/evidence-manifest.js";
 import { buildMockQuestion } from "../runner/longmemeval-runner-fixture.js";
 
 export interface RunnerIntegrationFixture {
@@ -55,6 +55,7 @@ export async function createRunnerFixture(input: {
       JSON.stringify({
         name: input.variant,
         sha256: datasetSha256,
+        size_bytes: Buffer.byteLength(datasetRaw, "utf8"),
         question_count: input.questions.length,
         first_pinned_at: "2026-05-14T00:00:00Z",
         pinned_by_commit: "test"

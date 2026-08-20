@@ -5,6 +5,7 @@ import {
   LongMemEvalArtifactDescriptorSchema,
   LongMemEvalExtractionSummarySchema
 } from "./longmemeval-authority-schemas.js";
+import { WORKTREE_STATE_ALGORITHM_HEAD_LF } from "./worktree-state-algorithm.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -14,6 +15,7 @@ const CodeIdentitySchema = z.object({
   gate_sha256: Sha256Schema,
   gate_contract_path: z.string().min(1),
   worktree_state_sha256: Sha256Schema,
+  worktree_state_algorithm: z.literal(WORKTREE_STATE_ALGORITHM_HEAD_LF).optional(),
   worktree_clean: z.literal(true),
   executed_dist: z.object({
     algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),

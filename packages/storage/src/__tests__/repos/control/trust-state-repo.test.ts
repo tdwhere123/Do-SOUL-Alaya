@@ -76,6 +76,47 @@ describe("SqliteTrustStateRepo", () => {
     });
   });
 
+  it("persists kind-qualified usage identities in the legacy payload column", async () => {
+    const repo = createRepo();
+
+    repo.createDelivery({
+      delivery_id: "delivery-qualified-usage",
+      agent_target: "codex",
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      delivered_object_ids: ["shared-object"],
+      delivered_at: "2026-04-30T10:00:00.000Z",
+      audit_event_id: "event-qualified-delivery"
+    });
+    repo.createUsage({
+      delivery_id: "delivery-qualified-usage",
+      usage_state: "used",
+      used_object_ids: ["shared-object"],
+      used_objects: [
+        { object_id: "shared-object", object_kind: "synthesis_capsule" }
+      ],
+      reason: "synthesis informed the response",
+      reported_at: "2026-04-30T10:01:00.000Z",
+      audit_event_id: "event-qualified-usage"
+    });
+
+    await expect(
+      repo.listUsageByDeliveryIds(["delivery-qualified-usage"])
+    ).resolves.toEqual([
+      {
+        delivery_id: "delivery-qualified-usage",
+        usage_state: "used",
+        used_object_ids: ["shared-object"],
+        used_objects: [
+          { object_id: "shared-object", object_kind: "synthesis_capsule" }
+        ],
+        reason: "synthesis informed the response",
+        reported_at: "2026-04-30T10:01:00.000Z",
+        audit_event_id: "event-qualified-usage"
+      }
+    ]);
+  });
+
   it("persists and reloads per-anchor usage proof signals", async () => {
     const repo = createRepo();
 

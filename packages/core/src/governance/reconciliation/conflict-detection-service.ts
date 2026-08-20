@@ -390,9 +390,9 @@ function selectAmbiguousLlmNeighbors(
 // whose hit conditions (tag overlap + low token overlap) are entirely
 // agent-controllable content. A rule verdict is therefore a WEAK claim,
 // not a system-derived ruling: it seeds attention_only at low strength
-// (recall_bias - preserved so plasticity still classifies it negative) and
-// must earn recall eligibility through PathPlasticityService — it never
-// mints a recall_allowed negative path and never fires supersede_penalty
+// (recall_bias - preserved for negative soft projection) and never becomes
+// recall-eligible without governed promotion. It never mints a
+// recall_allowed negative path and never fires supersede_penalty
 // karma. This mirrors edge-auto-producer's LOCAL_SUPERSEDES_SEED_PROFILE.
 // The recall_allowed/0.9 band is reserved for the LLM-verdict path, which
 // the system computed itself.

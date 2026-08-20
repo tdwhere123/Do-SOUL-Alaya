@@ -2,7 +2,7 @@
   "name": "@do-soul/alaya-bench-runner",
   "version": "0.3.11",
   "private": true,
-  "description": "Daemon-attached bench runner for self-bench, LongMemEval-S, and live strict-real benchmark archives. Owns the harness; eval package stays a zod-only leaf.",
+  "description": "Daemon-attached bench runner for LongMemEval-S and LoCoMo. Owns the harness; eval package stays a zod-only leaf.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
@@ -22,11 +22,13 @@
   "dependencies": {
     "@do-soul/alaya": "workspace:*",
     "@do-soul/alaya-core": "workspace:*",
+    "@do-soul/alaya-engine-gateway": "workspace:*",
     "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "better-sqlite3": "12.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

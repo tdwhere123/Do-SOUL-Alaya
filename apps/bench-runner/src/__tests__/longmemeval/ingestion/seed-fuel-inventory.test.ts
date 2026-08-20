@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryEntry, PathRelation } from "@do-soul/alaya-protocol";
-import { deriveSeedFuelInventory } from "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
+import { deriveSeedFuelInventory } from "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 
 function memoryEntry(
   overrides: Partial<MemoryEntry> & Pick<MemoryEntry, "object_id">

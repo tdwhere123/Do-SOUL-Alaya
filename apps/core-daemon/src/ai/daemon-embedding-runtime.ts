@@ -2,31 +2,40 @@ import {
   D2Q_SCHEMA_VERSION,
   EmbeddingBackfillHandler,
   EmbeddingRecallService,
-  LocalOnnxCrossEncoderClient,
+  EvidenceDocumentEmbeddingBackfillHandler,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
   applyRecallPolicyEmbeddingState,
   assertValidEmbeddingBatch,
   defaultLocalOnnxCacheDir,
+  EMBEDDING_INJECTION_SIMILARITY_FLOOR,
+  EMBEDDING_MAX_INJECTED_DELIVERY,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
   type EmbeddingRecallServiceDependencies,
   type HqProvider
 } from "@do-soul/alaya-core";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import type { SqliteMemoryEntryRepo, StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  RecallQualifiedEvidenceReader,
+  type SqliteMemoryEntryRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import {
   createEmbeddingStatusService,
   type EmbeddingStatusDegradationSource
-} from "../services/embedding-status-service.js";
+} from "../services/status/embedding-status-service.js";
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
+  createOptionalEvidenceRecallEmbeddingRepo,
   createOptionalMemoryEmbeddingRepo,
   createOptionalMemoryHqRepo
 } from "../runtime/index.js";
 import {
   isD2qActive,
   readEmbeddingRuntimeConfig,
+  type EmbeddingProviderKind,
   type EmbeddingRuntimeConfig
 } from "./daemon-embedding-runtime-config.js";
 import {
@@ -54,7 +63,6 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingApiKey: runtimeConfig.embeddingApiKey,
     embeddingStatusService: services.embeddingStatusService,
     embeddingRecallService: services.embeddingRecallService,
-    answerRerankService: createAnswerRerankService(runtimeConfig),
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
@@ -65,21 +73,10 @@ export function createDaemonEmbeddingRuntime(input: {
 
 interface EmbeddingProviderState {
   readonly memoryEmbeddingRepo: ReturnType<typeof createOptionalMemoryEmbeddingRepo>;
+  readonly evidenceEmbeddingRepo: ReturnType<typeof createOptionalEvidenceRecallEmbeddingRepo>;
   readonly embeddingProvider: EmbeddingProviderPort | null;
   readonly embeddingModelId: string | null;
   readonly readiness: EmbeddingProviderReadiness;
-}
-
-function createAnswerRerankService(
-  config: EmbeddingRuntimeConfig
-): LocalOnnxCrossEncoderClient | undefined {
-  if (!config.localAnswerRerankEnabled) return undefined;
-  return new LocalOnnxCrossEncoderClient({
-    cacheDir: config.localAnswerRerankCacheDir ?? defaultLocalOnnxCacheDir(),
-    ...(config.localAnswerRerankModel === null
-      ? {}
-      : { modelId: config.localAnswerRerankModel })
-  });
 }
 
 function createEmbeddingProviderState(
@@ -87,6 +84,7 @@ function createEmbeddingProviderState(
   config: EmbeddingRuntimeConfig
 ): EmbeddingProviderState {
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(input.database);
+  const evidenceEmbeddingRepo = createOptionalEvidenceRecallEmbeddingRepo(input.database);
   const resolvedProvider = resolveEmbeddingProvider({
     providerKind: config.embeddingProviderKind,
     storageAvailable: memoryEmbeddingRepo !== null,
@@ -103,6 +101,7 @@ function createEmbeddingProviderState(
   const embeddingProvider = observeEmbeddingProviderReadiness(resolvedProvider, readiness);
   return {
     memoryEmbeddingRepo,
+    evidenceEmbeddingRepo,
     embeddingProvider,
     embeddingModelId:
       embeddingProvider?.modelId ??
@@ -158,6 +157,9 @@ function createEmbeddingRecallService(
   }
   return new EmbeddingRecallService({
     embeddingRepo: providerState.memoryEmbeddingRepo,
+    ...(providerState.evidenceEmbeddingRepo === null
+      ? {}
+      : { evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo }),
     provider: providerState.embeddingProvider,
     eventLogRepo: input.eventLogRepo,
     healthJournalRecorder: input.healthJournalService,
@@ -174,7 +176,7 @@ function createEmbeddingBackfillHandler(
     return undefined;
   }
   const hqProvider = resolveBackfillHqProvider(input, config);
-  return new EmbeddingBackfillHandler({
+  const memoryHandler = new EmbeddingBackfillHandler({
     memoryRepo: input.memoryEntryRepo,
     memoryEmbeddingRepo: providerState.memoryEmbeddingRepo,
     provider: providerState.embeddingProvider,
@@ -182,6 +184,34 @@ function createEmbeddingBackfillHandler(
     ...(hqProvider === null ? {} : { hqProvider }),
     warn: input.warn
   });
+  if (providerState.evidenceEmbeddingRepo === null) return memoryHandler;
+  const receiptQualification = new RecallQualifiedEvidenceReader(
+    input.database,
+    verifyOfficialApiSourceLocatorBinding
+  );
+  const evidenceHandler = new EvidenceDocumentEmbeddingBackfillHandler({
+    evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo,
+    receiptQualification,
+    provider: providerState.embeddingProvider,
+    warn: input.warn
+  });
+  return composeEmbeddingBackfillHandlers(memoryHandler, evidenceHandler);
+}
+
+function composeEmbeddingBackfillHandlers(
+  memoryHandler: EmbeddingBackfillHandler,
+  evidenceHandler: EvidenceDocumentEmbeddingBackfillHandler
+) {
+  return {
+    handle: async (task: Parameters<EmbeddingBackfillHandler["handle"]>[0]) => {
+      const memory = await memoryHandler.handle(task);
+      const evidence = await evidenceHandler.handle(task);
+      return Object.freeze({
+        objectsAffected: memory.objectsAffected,
+        auditEntries: Object.freeze([...memory.auditEntries, ...evidence.auditEntries])
+      });
+    }
+  };
 }
 
 function resolveBackfillHqProvider(
@@ -226,9 +256,9 @@ function applyEmbeddingPolicyDecorator(
   const semantic = policy.coarse_filter.semantic_supplement;
   const embeddingPolicy = applyRecallPolicyEmbeddingState(policy, {
     embeddingEnabled: true,
-    injectionCap: semantic.injection_cap ?? DEFAULT_EMBEDDING_INJECTION_CAP,
+    injectionCap: semantic.injection_cap ?? EMBEDDING_MAX_INJECTED_DELIVERY,
     injectionSimilarityFloor:
-      semantic.injection_similarity_floor ?? DEFAULT_EMBEDDING_INJECTION_FLOOR
+      semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR
   });
   return {
     ...embeddingPolicy,
@@ -274,12 +304,9 @@ function createProviderWarmup(
 
 // Equal family ballot with RECALL_FUSION_DEFAULT_WEIGHTS — not a fitted emb boost.
 const DEFAULT_EMBEDDING_FUSION_WEIGHT = 1;
-// mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
-const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
-const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;
 
 function resolveEmbeddingProvider(input: {
-  readonly providerKind: "openai" | "local_onnx";
+  readonly providerKind: EmbeddingProviderKind;
   readonly storageAvailable: boolean;
   readonly optInEnabled: boolean;
   readonly apiKey: string | null;
@@ -298,14 +325,22 @@ function resolveEmbeddingProvider(input: {
   }
 
   if (input.providerKind === "local_onnx") {
-    return new LocalOnnxEmbeddingClient({
+    const client = new LocalOnnxEmbeddingClient({
       cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(),
       ...(input.localModel === null ? {} : { modelId: input.localModel }),
       ...(input.localSchemaVersion === null ? {} : { schemaVersion: input.localSchemaVersion })
     });
+    // Extractor load is the cold-start cost; do not await (listen must not block on model I/O).
+    void client.warmup().catch(() => undefined);
+    return client;
   }
 
   if (input.apiKey === null) {
+    if (input.optInEnabled) {
+      throw new Error(
+        "ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF"
+      );
+    }
     return null;
   }
   return new OpenAIEmbeddingClient({

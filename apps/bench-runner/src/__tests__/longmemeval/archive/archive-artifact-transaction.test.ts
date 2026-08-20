@@ -1,4 +1,5 @@
-import { access, mkdir, mkdtemp, readFile, truncate, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from
+  "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,7 +7,7 @@ import { HistoryEntryCommittedError } from "@do-soul/alaya-eval";
 import {
   prepareDiagnosticsArtifactStagingPath,
   withPublishedDiagnosticsArtifact
-} from "../../../longmemeval/measurement/artifact-transaction.js";
+} from "../../../bench/measurement/artifact-transaction.js";
 
 describe("LongMemEval full diagnostics artifact transaction", () => {
   it("removes the published artifact when archive publication fails", async () => {
@@ -36,7 +37,9 @@ describe("LongMemEval full diagnostics artifact transaction", () => {
     await expect(readFile(finalPath, "utf8")).resolves.toBe("evidence");
     await expect(access(stagedPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
+});
 
+describe("LongMemEval committed diagnostics artifact transaction", () => {
   it("retains an artifact referenced by an entry committed before pointer failure", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-reconcile-"));
     const stagedPath = path.join(root, "diagnostics.tmp");
@@ -57,16 +60,91 @@ describe("LongMemEval full diagnostics artifact transaction", () => {
     )).rejects.toBe(committed);
     await expect(readFile(finalPath, "utf8")).resolves.toBe("durable evidence");
   });
+});
 
-  it("bounds stale staging by bytes as well as file count", async () => {
+describe("LongMemEval diagnostics artifact cleanup failures", () => {
+  it("preserves the primary and all rollback failures", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-errors-"));
+    const stagedPath = path.join(root, "diagnostics.tmp");
+    const finalPath = path.join(root, "diagnostics.json.gz");
+    await writeFile(stagedPath, "evidence", "utf8");
+    const primary = new Error("archive primary");
+    const finalCleanup = new Error("final cleanup");
+    const stagedCleanup = new Error("staged cleanup");
+    let removeCount = 0;
+
+    try {
+      await expect(withPublishedDiagnosticsArtifact(
+        { stagedPath, finalPath },
+        async () => { throw primary; },
+        () => false,
+        { remove: async (target, options) => {
+          removeCount += 1;
+          if (removeCount === 1) return rm(target, options);
+          throw target === finalPath ? finalCleanup : stagedCleanup;
+        } }
+      )).rejects.toMatchObject({ errors: [primary, finalCleanup, stagedCleanup] });
+      expect(removeCount).toBe(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("LongMemEval committed artifact cleanup failures", () => {
+  it("preserves a committed error when staged cleanup also fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-committed-errors-"));
+    const stagedPath = path.join(root, "diagnostics.tmp");
+    const finalPath = path.join(root, "diagnostics.json.gz");
+    await writeFile(stagedPath, "evidence", "utf8");
+    const committed = new HistoryEntryCommittedError({
+      slug: "2026-05-15T133000Z-c0ffee0",
+      kpiPath: path.join(root, "kpi.json"),
+      reportPath: path.join(root, "report.md"),
+      findingsPath: path.join(root, "findings.md"),
+      sidecarPaths: {}
+    }, new Error("pointer failure"));
+    const cleanup = new Error("staged cleanup");
+    let removeCount = 0;
+
+    try {
+      await expect(withPublishedDiagnosticsArtifact(
+        { stagedPath, finalPath },
+        async () => { throw committed; },
+        (error) => error instanceof HistoryEntryCommittedError,
+        { remove: async (target, options) => {
+          removeCount += 1;
+          if (removeCount === 1) return rm(target, options);
+          throw cleanup;
+        } }
+      )).rejects.toMatchObject({ errors: [committed, cleanup] });
+      expect(removeCount).toBe(2);
+      await expect(readFile(finalPath, "utf8")).resolves.toBe("evidence");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("LongMemEval diagnostics staging retention", () => {
+  it("never prunes active artifacts when one process stages more than eight", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-stale-"));
-    const stagingRoot = path.join(root, ".staging");
-    const oversized = path.join(stagingRoot, "abandoned.tmp");
-    await mkdir(stagingRoot, { recursive: true });
-    await writeFile(oversized, "x");
-    await truncate(oversized, 513 * 1024 * 1024);
+    const paths = await Promise.all(Array.from({ length: 12 }, async (_, index) => {
+      const stagedPath = await prepareDiagnosticsArtifactStagingPath(root, `active-${index}`);
+      await writeFile(stagedPath, `evidence-${index}`);
+      return stagedPath;
+    }));
+
+    await Promise.all(paths.map((stagedPath) => expect(access(stagedPath)).resolves.toBeUndefined()));
+  });
+
+  it("removes staging sessions whose owning process has exited", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "alaya-artifact-stale-"));
+    const abandoned = path.join(root, ".staging", `2147483647-${"a".repeat(36)}`);
+    await mkdir(abandoned, { recursive: true });
+    await writeFile(path.join(abandoned, "artifact.tmp"), "abandoned");
 
     await prepareDiagnosticsArtifactStagingPath(root, "next");
-    await expect(access(oversized)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(abandoned)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

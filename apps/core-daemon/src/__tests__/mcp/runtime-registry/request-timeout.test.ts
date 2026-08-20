@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDaemonMcpRuntimeRegistry } from "../../../mcp/mcp-runtime-registry.js";
+import { createDaemonMcpRuntimeRegistry } from "../../../mcp/catalog/mcp-runtime-registry.js";
 
 const warn = (_message: string, _meta: Record<string, unknown>): void => undefined;
 

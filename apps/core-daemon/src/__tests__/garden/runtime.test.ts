@@ -132,7 +132,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 type CapturedScheduler = (typeof hoisted.schedulers)[number];
 
@@ -182,97 +182,6 @@ describe("garden runtime path plasticity queue", () => {
     hoisted.schedulers.splice(0, hoisted.schedulers.length);
   });
 
-  it("dedupes pending path plasticity workspaces and re-enqueues after Librarian completion clears the marker", async () => {
-    const computeAndApplyPlasticity = vi.fn(async () => ({
-      reinforced: 1,
-      weakened: 0,
-      retired: 0,
-      affectedPathIds: ["path-1"]
-    }));
-    const runtime = createGardenRuntime(createRuntimeInput({ computeAndApplyPlasticity }));
-    const scheduler = currentScheduler();
-
-    await enqueueMaintenanceTick(runtime);
-    await enqueueMaintenanceTick(runtime);
-
-    const pendingPlasticityTasks = plasticityTasks(scheduler);
-    expect(pendingPlasticityTasks).toHaveLength(1);
-    expect(pendingPlasticityTasks[0]).toMatchObject({
-      task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-      required_tier: GardenTier.TIER_2,
-      workspace_id: "workspace-1"
-    });
-    // tier_0 = 2 ticks * 3 Janitor kinds (TTL_CLEANUP + DORMANT_DEMOTION + TOMBSTONE_GC).
-    expect(runtime.backlogTelemetrySource.getBacklogSnapshot().queue_depth_by_tier).toMatchObject({
-      tier_0: 6,
-      tier_1: 2,
-      tier_2: 5
-    });
-
-    await drainScheduler(runtime);
-
-    expect(computeAndApplyPlasticity).toHaveBeenCalledTimes(1);
-    expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceId: "workspace-1",
-        sinceIso: pendingPlasticityTasks[0]?.target_object_refs[0],
-        untilIso: pendingPlasticityTasks[0]?.target_object_refs[1]
-      })
-    );
-
-    await enqueueMaintenanceTick(runtime);
-
-    expect(plasticityTasks(scheduler)).toHaveLength(1);
-
-    await drainScheduler(runtime);
-
-    expect(computeAndApplyPlasticity).toHaveBeenCalledTimes(2);
-  });
-
-  it("clears the pending marker after a Librarian path plasticity failure result", async () => {
-    const computeAndApplyPlasticity = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("plasticity exploded"))
-      .mockResolvedValueOnce({
-        reinforced: 0,
-        weakened: 1,
-        retired: 0,
-        affectedPathIds: ["path-2"]
-      });
-    const runtime = createGardenRuntime(createRuntimeInput({ computeAndApplyPlasticity }));
-    const scheduler = currentScheduler();
-
-    await enqueueMaintenanceTick(runtime);
-    await drainScheduler(runtime);
-
-    expect(computeAndApplyPlasticity).toHaveBeenCalledTimes(1);
-    expect(scheduler.completions).toContainEqual(
-      expect.objectContaining({
-        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-        role: GardenRole.LIBRARIAN,
-        tier: GardenTier.TIER_2,
-        success: false,
-        error_message: "plasticity exploded"
-      })
-    );
-
-    await enqueueMaintenanceTick(runtime);
-
-    expect(plasticityTasks(scheduler)).toHaveLength(1);
-
-    await drainScheduler(runtime);
-
-    expect(computeAndApplyPlasticity).toHaveBeenCalledTimes(2);
-    expect(scheduler.completions).toContainEqual(
-      expect.objectContaining({
-        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-        role: GardenRole.LIBRARIAN,
-        tier: GardenTier.TIER_2,
-        success: true
-      })
-    );
-  });
-
   it("records embedding backfill failures without aborting the scheduler pass", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => {
@@ -281,12 +190,6 @@ describe("garden runtime path plasticity queue", () => {
     };
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         embeddingBackfillHandler
       })
     );
@@ -314,12 +217,6 @@ describe("garden runtime path plasticity queue", () => {
   });
 
   it("does not leave a workspace pending when watermark lookup fails before enqueue", async () => {
-    const computeAndApplyPlasticity = vi.fn(async () => ({
-      reinforced: 0,
-      weakened: 0,
-      retired: 0,
-      affectedPathIds: []
-    }));
     const findByWorkspaceId = vi
       .fn()
       .mockImplementationOnce(() => {
@@ -328,7 +225,6 @@ describe("garden runtime path plasticity queue", () => {
       .mockReturnValue(null);
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity,
         pathPlasticityWatermarkRepo: {
           findByWorkspaceId,
           upsert: vi.fn((record) => record)
@@ -352,20 +248,15 @@ describe("garden runtime path plasticity queue", () => {
   });
 
   it("updates Garden status after scheduled background services complete", async () => {
-    const runtime = createGardenRuntime(createRuntimeInput({
-      computeAndApplyPlasticity: vi.fn(async () => ({
-        reinforced: 0,
-        weakened: 0,
-        retired: 0,
-        affectedPathIds: []
-      }))
-    }));
+    const referenceTime = "2026-05-05T12:34:56.000Z";
+    const runtime = createGardenRuntime(createRuntimeInput({ now: () => referenceTime }));
 
     expect(runtime.getStatus().last_pass_at).toBeNull();
 
     await getService(runtime, "Janitor").task();
 
-    expect(runtime.getStatus().last_pass_at).toEqual(expect.any(String));
+    expect(runtime.getStatus().last_pass_at).toBe(referenceTime);
+    expect(currentScheduler().queue.every((task) => task.created_at === referenceTime)).toBe(true);
   });
 
   it("enqueues DORMANT_DEMOTION on the Janitor pass and demotes faded+idle memories (reversible, never tombstoned)", async () => {
@@ -379,13 +270,7 @@ describe("garden runtime path plasticity queue", () => {
     });
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        gardenDataPorts,
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        }))
+        gardenDataPorts
       })
     );
     const scheduler = currentScheduler();

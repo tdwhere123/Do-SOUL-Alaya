@@ -2,10 +2,10 @@ import type { BenchDaemonHandle, BenchWorkspaceHandle } from "../../../harness/d
 import type { BenchTokenMetrics } from "../../../harness/token/token-metrics.js";
 import type { BenchRecallTokenEconomy } from "../../../harness/recall/recall-diagnostics-schema.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
-import { buildQuestionDiagnostic, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportSideEffectSnapshot } from "../../diagnostics.js";
-import { isAbstentionQuestionId } from "../../diagnostics/abstention.js";
+import { buildQuestionDiagnostic, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportSideEffectSnapshot } from "../../../bench/diagnostics.js";
+import { isAbstentionQuestionId } from "../../../bench/diagnostics/abstention.js";
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
-import { extractRecallTokenEconomy } from "../../qa/recall-token-economy.js";
+import { extractRecallTokenEconomy } from "../../../bench/qa/recall-token-economy.js";
 import { scoreLongMemEvalQaIfRequested } from "./runner-question-delivery.js";
 import {
   readLongMemEvalReportSideEffectSnapshot,
@@ -14,17 +14,19 @@ import {
   type LongMemEvalRecallCycleResult,
   type LongMemEvalSidecarEntry
 } from "../runner-helpers.js";
-import type { QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
+import type { QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
 import type { LongMemEvalQuestionSeedState } from "./runner-question-seeding.js";
 import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
-import { hasLongMemEvalSeedDropReasons } from "../../extraction/seed-fuel/seed-drop-reasons.js";
-import { attachQuestionMeasurementAxes } from "../../diagnostics/diagnostics-measurement-axes.js";
+import { hasLongMemEvalSeedDropReasons } from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
+import { attachQuestionMeasurementAxes } from "../../../bench/diagnostics/diagnostics-measurement-axes.js";
 import {
   buildLongMemEvalSourceDatesBySession,
   requireLongMemEvalTimestamp
 } from "../../ingestion/source-time.js";
+import { buildGoldObjectIdentities } from
+  "../../../bench/diagnostics/gold-object-identities.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -32,6 +34,8 @@ export async function buildLongMemEvalQuestionResult(input: {
   readonly question: LongMemEvalQuestion;
   readonly seedState: LongMemEvalQuestionSeedState;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
   readonly recallCycle: LongMemEvalRecallCycleResult;
   readonly embeddingWarmup: LongMemEvalWorkerResult["embeddingWarmup"];
   readonly queryEmbeddingWarmup: LongMemEvalWorkerResult["queryEmbeddingWarmup"];
@@ -42,7 +46,7 @@ export async function buildLongMemEvalQuestionResult(input: {
 }): Promise<LongMemEvalWorkerResult> {
   writeQuestionDiagnosticDumps({
     question: input.question,
-    goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities: buildGoldObjectIdentities(input),
     sidecar: input.seedState.sidecar,
     recallResult: input.recallCycle.scoredRecallResult
   });
@@ -54,6 +58,7 @@ export async function buildLongMemEvalQuestionResult(input: {
 async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionResult>[0]) {
   const recallResult = input.recallCycle.scoredRecallResult;
   const isAbstention = isAbstentionQuestionId(input.question.question_id);
+  const goldObjectIdentities = buildGoldObjectIdentities(input);
   const qaVerdict = await scoreLongMemEvalQaIfRequested({
     question: input.question,
     qaChat: input.qaChat,
@@ -61,6 +66,7 @@ async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionRe
     isAbstention,
     results: recallResult.results,
     goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities,
     sidecar: input.seedState.sidecar
   });
   const hits = resolveLongMemEvalHitVerdict({
@@ -84,6 +90,8 @@ function buildDiagnostics(
     questionId: input.question.question_id,
     questionType: input.question.question_type,
     goldMemoryIds: input.goldMemoryIds,
+    goldEvidenceIds: input.goldEvidenceIds,
+    goldObjectIds: input.goldObjectIds,
     answerSessionIds: input.question.answer_session_ids,
     deliveredResults: deliveredResults(recallResult),
     activeConstraintResults: activeConstraintResults(recallResult),
@@ -196,6 +204,9 @@ export function buildLongMemEvalSnapshotQuestion(input: Pick<
     answerSessionIds: [...input.question.answer_session_ids],
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
+    ...(input.seedState.answersWithFormation === undefined
+      ? {}
+      : { answersWithFormation: { ...input.seedState.answersWithFormation } }),
     sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry),
     seedRounds: input.seedState.seedRounds.map((round) => ({
       ...round,

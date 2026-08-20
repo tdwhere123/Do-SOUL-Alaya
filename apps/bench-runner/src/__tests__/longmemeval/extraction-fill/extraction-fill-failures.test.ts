@@ -6,32 +6,39 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
-import { readExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/extraction/extraction-fill.js";
+import { readExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import { cacheFilePath, computeExtractionTurnCacheKey } from
-  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+  "../../../bench/compile-seed/compile-seed-cache.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
+} from "../../../bench/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
+} from "../../../bench/extraction/authority/receipt.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
-} from "../../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
+} from "../../../bench/extraction/fill/manifest/fill-root-guard.js";
+import { requireProviderBinding } from "../../../bench/provider/catalog.js";
 
 import {
+  buildAuthorityQuestion,
+  buildGroundedSignalResponse,
   buildExtractionFillQuestion as buildQuestion,
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
+  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+
+const MIMO = requireProviderBinding("mimo-v2.5");
+const MIMO_FAMILY_PROBE = `${MIMO.id}-family`;
 
 let cacheRoot: string;
 let dataDir: string;
@@ -54,7 +61,9 @@ describe("runExtractionFill", () => {
         dataDir,
         pinnedMetaRoot,
         concurrency: 1,
-        extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+        extractorFactory: () => ({
+          extract: async () => providerBackedExtractionResult('{"signals":[]}')
+        }),
         log: (message) => {
           if (!message.includes("1/2")) return;
           writeFileSync(
@@ -99,7 +108,7 @@ describe("runExtractionFill", () => {
     ]);
     await writeFile(join(cacheRoot, "aa"), "not-a-shard-directory", "utf8");
     const extractorFactory = vi.fn(() => ({
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}'))
     }));
     await expect(runExtractionFill({
       variant: VARIANT,
@@ -113,20 +122,25 @@ describe("runExtractionFill", () => {
   });
 
   it("binds family config to the exact HTTP model, shard, and manifest", async () => {
-    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "deepseek-v4-flash-free");
-    vi.stubEnv(
-      "ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE",
-      "deepseek-v4-nonthinking-v1"
-    );
-    vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash");
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MIMO.id);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", MIMO.requestProfile);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", MIMO_FAMILY_PROBE);
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://opencode.ai/zen/v1");
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:ZEN_TEST_API_KEY");
     vi.stubEnv("ZEN_TEST_API_KEY", "test-only-key");
     await writeFixtureDataset([
-      buildQuestion("q001", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildAuthorityQuestion("q001", "alpha", "decoy")
     ]);
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      choices: [{ message: { content: '{"signals":[]}' } }]
+      choices: [{ message: { content: buildGroundedSignalResponse(JSON.stringify({
+        schema_version: 2,
+        source_locator_contract_version: 2,
+        batch_contract_version: 1,
+        source_corpus_identity: "a".repeat(64),
+        batch_index: 0,
+        batch_count: 1,
+        source_assertions: [{ assertion_id: 1, text: "User: alpha" }]
+      })) } }]
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const authorityReceiptPath = await writeLiveAuthorityReceipt();
@@ -145,35 +159,35 @@ describe("runExtractionFill", () => {
     for (const [url, init] of fetchMock.mock.calls) {
       expect(String(url)).toBe("https://opencode.ai/zen/v1/chat/completions");
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        model: "deepseek-v4-flash-free",
+        model: MIMO.id,
         stream: true
       });
     }
     const shardDirs = readdirSync(cacheRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-    expectFirstShardModel(cacheRoot, shardDirs, "deepseek-v4-flash-free");
+    expectFirstShardModel(cacheRoot, shardDirs, MIMO.id);
     const answerTurn = inspectTurnContentKeySpace([
-      buildQuestion("key", "User: alpha\nAssistant: ok.", "User: decoy")
+      buildAuthorityQuestion("key", "alpha", "decoy")
     ]).distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
     expect(answerTurn).toBeDefined();
     const exactKey = computeExtractionTurnCacheKey(
-      "deepseek-v4-flash-free",
-      "deepseek-v4-nonthinking-v1",
+      MIMO.id,
+      MIMO.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
       answerTurn!
     );
     const familyKey = computeExtractionTurnCacheKey(
-      "deepseek-v4-flash",
-      "deepseek-v4-nonthinking-v1",
+      MIMO_FAMILY_PROBE,
+      MIMO.requestProfile,
       OFFICIAL_API_SYSTEM_PROMPT,
       answerTurn!
     );
     expect(existsSync(cacheFilePath(cacheRoot, exactKey))).toBe(true);
     expect(existsSync(cacheFilePath(cacheRoot, familyKey))).toBe(false);
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
-      extraction_model: "deepseek-v4-flash-free",
-      model_family: "deepseek-v4-flash",
+      extraction_model: MIMO.id,
+      model_family: MIMO_FAMILY_PROBE,
       provider_url: "https://opencode.ai/zen/v1"
     });
   });
@@ -184,12 +198,12 @@ describe("runExtractionFill", () => {
     // a distinct decoy round. Distinct turns: 2 shared-collapsed-to-1 + 2 decoys
     // = 3 cache keys.
     await writeFixtureDataset([
-      buildQuestion("q001", "User: shared fact\nAssistant: Acknowledged.", "User: decoy one"),
-      buildQuestion("q002", "User: shared fact\nAssistant: Acknowledged.", "User: decoy two")
+      buildAuthorityQuestion("q001", "shared fact", "decoy one"),
+      buildAuthorityQuestion("q002", "shared fact", "decoy two")
     ]);
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => ({
-      rawJson: '{"signals":[]}'
-    }));
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
+      providerBackedExtractionResult(buildGroundedSignalResponse(input.userPrompt))
+    );
     const result = await runExtractionFill({
       variant: VARIANT,
       cacheRoot,

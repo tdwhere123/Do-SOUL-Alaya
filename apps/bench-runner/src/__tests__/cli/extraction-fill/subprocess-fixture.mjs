@@ -26,17 +26,18 @@ const server = await createServer({
   server: { middlewareMode: true },
   resolve: benchProject.resolve
 });
-
 try {
-  const cli = await server.ssrLoadModule("/apps/bench-runner/src/cli/cli-commands.ts");
   const fill = await server.ssrLoadModule(
-    "/apps/bench-runner/src/longmemeval/extraction/extraction-fill.ts"
+    "/apps/bench-runner/src/bench/extraction/extraction-fill.ts"
+  );
+  const cli = await server.ssrLoadModule(
+    "/apps/bench-runner/src/cli/extraction-fill/command-core.ts"
   );
   const authorityInspection = await server.ssrLoadModule(
-    "/apps/bench-runner/src/longmemeval/extraction/authority/inspection.ts"
+    "/apps/bench-runner/src/bench/extraction/authority/inspection.ts"
   );
   const authorityReceipt = await server.ssrLoadModule(
-    "/apps/bench-runner/src/longmemeval/extraction/authority/receipt.ts"
+    "/apps/bench-runner/src/bench/extraction/authority/receipt.ts"
   );
   const inspection = await authorityInspection.inspectExtractionAuthority({
     variant: "longmemeval_oracle",
@@ -84,6 +85,7 @@ try {
     }
   );
   process.exitCode = exitCode;
+  process.stdout.write("FIXTURE_SETTLED\n");
 } finally {
   await server.close();
 }
@@ -118,24 +120,40 @@ function createFixtureExtractor(fixtureMode) {
       }
       releasePeer();
       process.stdout.write("FIXTURE_READY\n");
-      return waitForAbort(input.abortSignal);
+      if (fixtureMode === "terminal") await waitForLeaseObservation();
+      return waitForAbort(input.abortSignal, () => {
+        process.stdout.write("FIXTURE_ARMED\n");
+      });
     }
   };
 }
 
-function waitForAbort(signal) {
+async function waitForLeaseObservation() {
+  process.stdin.setEncoding("utf8");
+  let received = "";
+  for await (const chunk of process.stdin) {
+    received += chunk;
+    if (received.includes("LEASE_OBSERVED")) return;
+  }
+  throw new Error("fixture parent closed before observing the extraction lease");
+}
+
+function waitForAbort(signal, onArmed) {
   return new Promise((_resolve, reject) => {
     if (signal?.aborted === true) {
       reject(signal.reason);
       return;
     }
     const timer = setTimeout(
-      () => reject(new Error("fixture peer was not cooperatively aborted")),
+      () => {
+        reject(new Error("fixture peer was not cooperatively aborted"));
+      },
       2_000
     );
     signal?.addEventListener("abort", () => {
       clearTimeout(timer);
       reject(signal.reason);
     }, { once: true });
+    onArmed();
   });
 }

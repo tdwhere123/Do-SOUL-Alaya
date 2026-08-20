@@ -73,11 +73,11 @@ v0.3.11 的 bench surface 通过
 
 | Root | `bench_name` / `split` | Release 用途 |
 |---|---|---|
-| `public/` | `public` / `longmemeval-s` | LongMemEval-S single-turn recall。 |
-| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | 多轮 recall 加 `soul.report_context_usage` 回执。 |
-| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | Cross-question LongMemEval-S recall。 |
-| `public-locomo/` | `public-locomo` / `locomo10` | LoCoMo full recall gates，覆盖 embedding-off 和 local ONNX embedding-on。 |
-| `live/` | `live` / `strict-real` | 脱敏 strict-real live-check import。 |
+| `public/` | `public` / `longmemeval-s` | 当前 operator：LongMemEval-S single-turn recall。 |
+| `public-locomo/` | `public-locomo` / `locomo10` | 当前 operator：LoCoMo recall gates，覆盖 embedding-off 和 local ONNX embedding-on。 |
+| `public-multiturn/` | `public-multiturn` / `longmemeval-s` | 历史归档；runner 已退役。 |
+| `public-crossquestion/` | `public-crossquestion` / `longmemeval-s` | 历史归档；runner 已退役。 |
+| `live/` | `live` / `strict-real` | 历史归档；runner 已退役。 |
 
 每次归档写入都会更新 `latest-run*.json`。只有没有 findings 且可执行 hard
 gate 通过的 run 才会更新 `latest-passing*.json`；
@@ -95,16 +95,8 @@ surface 之外：优先使用 `ALAYA_BENCH_ARTIFACT_ROOT`，否则默认写到 r
 # LongMemEval-S single-turn sharded run。
 apps/bench-runner/scripts/run-full-public-bench.sh --variant s --shards 2
 
-# LongMemEval-S multiturn 和 cross-question Tier 1 runs。
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --data-dir <shared-cache>/longmemeval
-node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --data-dir <shared-cache>/longmemeval
-
 # LoCoMo full release runs。
 apps/bench-runner/scripts/run-full-locomo-bench.sh --variant locomo10
-
-# 本地 smoke/import surfaces。
-node apps/bench-runner/bin/alaya-bench-runner.mjs self
-node apps/bench-runner/bin/alaya-bench-runner.mjs live --help
 ```
 
 检查点说明（2026-06-04）：v0.3.11 实现已完成，但全量公开 bench **没有**

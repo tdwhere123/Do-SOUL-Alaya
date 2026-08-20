@@ -15,8 +15,7 @@ import type {
 import { isGardenTurnEvidenceFallback } from "../evidence-preservation/turn-evidence-anchor.js";
 import {
   hasMaterializableSignalMemoryRefs,
-  routeByObjectKind,
-  signalCarriesProjectionPayload
+  routeByObjectKind
 } from "./inputs.js";
 import { materializationFailure } from "./materialization-results.js";
 import { MaterializationRouterRouteHandlers } from "./route-handlers.js";
@@ -181,10 +180,11 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   private routeDurableSignal(signal: CandidateMemorySignal): MaterializationTarget | null {
     const floor = this.dependencies.materializationConfidenceFloor ?? 0.5;
     const eligibleKind = signal.signal_kind === "potential_claim" ||
-      signal.signal_kind === "potential_preference";
+      signal.signal_kind === "potential_preference" ||
+      signal.signal_kind === "potential_semantic_observation";
     if (!eligibleKind || signal.confidence < floor) return null;
     const route = routeByObjectKind(signal.object_kind);
-    if (route !== null) return this.liftSignalOnlyForProjection(signal, route);
+    if (route !== null) return route;
     if (this.dependencies.retainUnroutedHighConfidenceFacts === true) {
       return {
         kind: "evidence_only",
@@ -196,25 +196,6 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
       kind: "evidence_only",
       route_target: "evidence_only",
       routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> evidence_only`
-    };
-  }
-
-  // Lift a projection-bearing signal_only kind to memory_entry_only so its projection reaches a recallable memory_entry.
-  private liftSignalOnlyForProjection(
-    signal: CandidateMemorySignal,
-    route: MaterializationTarget
-  ): MaterializationTarget {
-    if (
-      this.dependencies.projectionRoutingEnabled !== true ||
-      route.route_target !== "signal_only" ||
-      !signalCarriesProjectionPayload(signal)
-    ) {
-      return route;
-    }
-    return {
-      kind: "evidence_only",
-      route_target: "memory_entry_only",
-      routing_reason: `${route.routing_reason} -> memory_entry_only (projection payload present)`
     };
   }
 

@@ -180,4 +180,125 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
     expect(scores.get("aligned")).toBeCloseTo(1, 5);
     expect(embedTexts).toHaveBeenCalledTimes(1);
   });
+
+  it("records no_stored_vectors when pool rescoring finds an empty vector table", async () => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: "event-1",
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [])
+      },
+      provider: createProvider(),
+      eventLogRepo: {
+        append,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "pool-no-vectors",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const scores = await service.scorePoolCandidates({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "anything",
+      objectIds: ["missing-a", "missing-b"]
+    });
+
+    expect(scores.size).toBe(0);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          degradation_reason: "no_stored_vectors",
+          query_id: "pool-no-vectors"
+        })
+      })
+    );
+  });
+
+  it("records local_vector_lookup_failed when pool vector load throws", async () => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: "event-1",
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => {
+          throw new Error("sqlite busy");
+        }),
+        listByWorkspace: vi.fn(async () => [])
+      },
+      provider: createProvider(),
+      eventLogRepo: {
+        append,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "pool-lookup-failed",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const scores = await service.scorePoolCandidates({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "anything",
+      objectIds: ["a"]
+    });
+
+    expect(scores.size).toBe(0);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          degradation_reason: "local_vector_lookup_failed",
+          query_id: "pool-lookup-failed"
+        })
+      })
+    );
+  });
+});
+
+describe("EmbeddingRecallService.coherentPairKeys quiet degradation", () => {
+  it("records no_stored_vectors when coherence finds an empty vector table", async () => {
+    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: "event-1",
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => []),
+        listByWorkspace: vi.fn(async () => [])
+      },
+      provider: createProvider(),
+      eventLogRepo: {
+        append,
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "coherence-no-vectors",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const pairs = await service.coherentPairKeys({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      objectIds: ["a", "b"],
+      floor: 0.5
+    });
+
+    expect(pairs.size).toBe(0);
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          degradation_reason: "no_stored_vectors",
+          query_id: "coherence-no-vectors"
+        })
+      })
+    );
+  });
 });

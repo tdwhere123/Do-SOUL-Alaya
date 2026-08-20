@@ -2,27 +2,26 @@ import {
   ensureForkedExtractionAttemptLedger,
   readSettledExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot
-} from "../../longmemeval/extraction/authority/attempt-ledger.js";
+} from "../../bench/extraction/authority/attempt-ledger.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+  "../../bench/extraction/cache/extraction-cache-manifest.js";
 import {
   claimExtractionContinuationChild,
   createExtractionContinuationChildClaim
-} from "../../longmemeval/extraction/authority/continuation/child-claim.js";
+} from "../../bench/extraction/authority/continuation/child-claim.js";
 import {
   createSameRootExtractionContinuation
-} from "../../longmemeval/extraction/authority/continuation/continuation.js";
-import { writeContinuationAuthorityReceiptExclusive } from
-  "../../longmemeval/extraction/authority/continuation/writer.js";
+} from "../../bench/extraction/authority/continuation/continuation.js";
 import type { ExtractionAuthorityInspection } from
-  "../../longmemeval/extraction/authority/inspection.js";
+  "../../bench/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   readExtractionAuthorityReceipt,
+  writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt
-} from "../../longmemeval/extraction/authority/receipt.js";
+} from "../../bench/extraction/authority/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../longmemeval/extraction/authority/target-selection/receipt.js";
+  "../../bench/extraction/authority/target-selection/receipt.js";
 
 export interface PreparedAuthorityContinuation {
   readonly predecessor: ExtractionAuthorityReceipt;
@@ -36,19 +35,20 @@ export interface AuthorityContinuationDependencies {
   readonly ensureForkedLedger?: typeof ensureForkedExtractionAttemptLedger;
   readonly claimChild?: typeof claimExtractionContinuationChild;
   readonly readManifest?: typeof readExtractionCacheManifestIdentity;
-  readonly writeContinuation?: typeof writeContinuationAuthorityReceiptExclusive;
+  readonly writeContinuation?: typeof writeExtractionAuthorityReceiptExclusive;
 }
 
 export function prepareAuthorityContinuation(input: {
   readonly predecessorAuthorityPath: string | undefined;
   readonly cacheRoot: string;
   readonly inspection: ExtractionAuthorityInspection;
+  readonly predecessorBaseInspection?: ExtractionAuthorityInspection;
   readonly targetSelection: ExtractionTargetSelectionReceipt | undefined;
   readonly dependencies?: AuthorityContinuationDependencies;
 }): PreparedAuthorityContinuation | undefined {
   if (input.predecessorAuthorityPath === undefined) return undefined;
   if (input.targetSelection === undefined) {
-    throw new Error("same-root continuation requires a successor target selection");
+    throw new Error("same-root continuation requires a bound target selection");
   }
   const deps = input.dependencies ?? {};
   const predecessor = (deps.readPredecessorAuthority ?? readExtractionAuthorityReceipt)(
@@ -68,7 +68,10 @@ export function prepareAuthorityContinuation(input: {
     predecessor,
     predecessorLedger,
     targetSelection: input.targetSelection,
-    inspection: input.inspection
+    inspection: input.inspection,
+    ...(input.predecessorBaseInspection === undefined ? {} : {
+      predecessorBaseInspection: input.predecessorBaseInspection
+    })
   });
   return Object.freeze({ predecessor, predecessorLedger, evidence });
 }
@@ -108,27 +111,15 @@ export function persistContinuationAuthority(input: {
     predecessorLedgerSha256: livePredecessor.ledgerSha256,
     predecessorRawLedgerSha256: livePredecessor.rawLedgerSha256,
     successorLineageDigest: input.receipt.lineage_digest,
+    successorMaximumAttempts: input.receipt.limits.maximum_attempts,
     cacheIdentity: {
       model: input.receipt.observation.extraction.model,
       requestProfile: input.receipt.observation.extraction.requestProfile
     }
   });
-  (deps.writeContinuation ?? writeContinuationAuthorityReceiptExclusive)(
+  (deps.writeContinuation ?? writeExtractionAuthorityReceiptExclusive)(
     input.outputPath, input.receipt
   );
-}
-
-export function assertExactContinuationIssuanceInspection(
-  prepared: ExtractionAuthorityInspection,
-  live: ExtractionAuthorityInspection
-): void {
-  if (JSON.stringify(prepared.observation) !== JSON.stringify(live.observation) ||
-      JSON.stringify(prepared.missingKeys) !== JSON.stringify(live.missingKeys) ||
-      JSON.stringify(prepared.invalidShards) !== JSON.stringify(live.invalidShards) ||
-      JSON.stringify(prepared.preservedValidClosure) !==
-        JSON.stringify(live.preservedValidClosure)) {
-    throw new Error("same-root continuation cache drifted during authority issuance");
-  }
 }
 
 function assertExactPreparedLedger(

@@ -1,0 +1,3 @@
+-- Temporal generation rows are written by the version 7 data hook so empty
+-- bootstrap and leftover untyped path quarantine share one apply path.
+-- INTENTIONAL_NOOP_MIGRATION

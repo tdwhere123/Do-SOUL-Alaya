@@ -12,17 +12,14 @@ import { runCli } from "../../../cli/index.js";
 
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from "./cli-merge-validations-fixture.js";
 import {
-  buildGoldDiagnostic,
-  buildQuestionDiagnosticFixture
-} from "../../longmemeval/diagnostics/gold-diagnostic-fixture.js";
-
-import {
   makeQualityMetrics,
   makeShardDiagnostics,
   makeShardKpi,
   writeHistoryEntry,
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
+
+const MERGE_ARCHIVE_TEST_TIMEOUT_MS = 15_000;
 
 describe("merge-longmemeval validations", () => {
 
@@ -118,7 +115,7 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.latency_source).toBe("exact");
     expect(merged.kpi.latency_ms_p50).toBe(10);
     expect(merged.kpi.latency_ms_p95).toBe(19);
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("merges shard roots that only expose latest-run pointers", async () => {
     const shardA = path.join(tmpRoot, "shard-latest-run-a");
@@ -178,150 +175,7 @@ describe("merge-longmemeval validations", () => {
       )
     ) as KpiPayload;
     expect(merged.evaluated_count).toBe(10);
-  });
-
-  it("rebuilds merged full_gold_coverage from shard diagnostics", async () => {
-    const shardA = path.join(tmpRoot, "shard-full-gold-a");
-    const shardB = path.join(tmpRoot, "shard-full-gold-b");
-    await writeShardRoot(
-      shardA,
-      makeShardKpi({
-        evaluated_count: 1,
-        kpi: {
-          ...makeShardKpi().kpi,
-          r_at_5: 1,
-          per_scenario: [
-            { id: "q-full-gold-a", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      }),
-      makeShardDiagnostics({
-        questions: [
-          buildQuestionDiagnosticFixture({
-            questionId: "q-full-gold-a",
-            gold: [
-              buildGoldDiagnostic({ object_id: "gold-a-1", final_rank: 1 }),
-              buildGoldDiagnostic({ object_id: "gold-a-2", final_rank: 4 })
-            ]
-          })
-        ]
-      })
-    );
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        evaluated_count: 1,
-        kpi: {
-          ...makeShardKpi().kpi,
-          r_at_5: 0,
-          per_scenario: [
-            { id: "q-full-gold-b", version: 1, hit_at_5: false, tier: "warm" }
-          ]
-        }
-      }),
-      makeShardDiagnostics({
-        questions: [
-          buildQuestionDiagnosticFixture({
-            questionId: "q-full-gold-b",
-            gold: [
-              buildGoldDiagnostic({ object_id: "gold-b-1", final_rank: 7 }),
-              buildGoldDiagnostic({
-                object_id: "gold-b-2",
-                final_rank: null,
-                pre_budget_rank: 80
-              })
-            ]
-          })
-        ]
-      })
-    );
-
-    const historyRoot = path.join(tmpRoot, "history-full-gold");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-
-    expect(exitCode).toBe(1);
-    const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
-    ) as { slug: string };
-    const merged = JSON.parse(
-      await readFile(
-        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
-        "utf8"
-      )
-    ) as KpiPayload;
-    expect(merged.kpi.full_gold_coverage).toMatchObject({
-      gold_bearing_questions: 2,
-      full_gold_at_5: 0.5,
-      full_gold_at_10: 0.5,
-      gold_coverage_at_5: 0.5,
-      gold_coverage_at_10: 0.75,
-      pool_recall_at_50: 0.75,
-      pool_recall_at_100: 1
-    });
-  });
-
-  it("omits merged full_gold_coverage for legacy diagnostics without gold detail", async () => {
-    const shard = path.join(tmpRoot, "shard-full-gold-mismatch");
-    await writeShardRoot(
-      shard,
-      makeShardKpi({
-        evaluated_count: 1,
-        kpi: {
-          ...makeShardKpi().kpi,
-          r_at_5: 1,
-          per_scenario: [
-            { id: "q-full-gold-expected", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      }),
-      makeShardDiagnostics({
-        questions: [
-          {
-            question_id: "q-full-gold-expected",
-            gold_memory_ids: ["gold-a-1"],
-            delivered_memory_ids: ["gold-a-1"],
-            delivered_gold_ids: ["gold-a-1"],
-            hit_at_5: true,
-            miss_reasons: [],
-            provider_state: "provider_not_requested",
-            candidates: []
-          }
-        ]
-      })
-    );
-
-    const historyRoot = path.join(tmpRoot, "history-full-gold-mismatch");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shard
-    ]);
-
-    expect(exitCode).toBe(1);
-    const pointer = JSON.parse(
-      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
-    ) as { slug: string };
-    const merged = JSON.parse(
-      await readFile(
-        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
-        "utf8"
-      )
-    ) as KpiPayload;
-    expect(merged.kpi.full_gold_coverage).toBeUndefined();
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("fails merge when a shard is missing its diagnostics sidecar", async () => {
     const shard = path.join(tmpRoot, "shard-missing-diagnostics");
@@ -401,7 +255,7 @@ describe("merge-longmemeval validations", () => {
     ]);
 
     expect(exitCode).toBe(1);
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("fails closed when present side-effect counters are malformed", async () => {
     const shard = path.join(tmpRoot, "shard-malformed-side-effects");

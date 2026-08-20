@@ -27,11 +27,11 @@ import {
 
 import { registerConfigRoutes } from "../../routes/workspace/config.js";
 
-import { createConfigService } from "../../services/config-service.js";
+import { createConfigService } from "../../services/config/config-service.js";
 
-import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file-service.js";
+import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file/env-file-service.js";
 
-import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../../cli/config-files.js";
+import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../../cli/support/config-files.js";
 
 async function createServiceHarness(options: {
   readonly platform?: NodeJS.Platform;

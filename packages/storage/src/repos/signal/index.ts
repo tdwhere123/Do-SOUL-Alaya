@@ -9,3 +9,7 @@ export {
   SqliteSignalRepo,
   type SignalRepo
 } from "./signal-repo.js";
+export {
+  SqliteRecallRoutingKeyProjectionRepo,
+  type StoredRecallRoutingKeyProjection
+} from "./recall-routing-key-projection-repo.js";

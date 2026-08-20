@@ -17,14 +17,14 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
  *   incompatible_with universe. ConflictDetectionService owns the
  *   contradicts / incompatible_with classifier; the supersedes writer
  *   lives in materialization-router via first-class candidate signal
- *   refs. Mixing them would re-collapse the KPI K3.2 per-trigger
+ *   refs. Mixing them would re-collapse the per-trigger KPI
  *   breakdown.
  * - The decision returned here is advisory only. The service applies a
  *   confidence floor (>= 0.85, see LLM_CONFIDENCE_FLOOR in
  *   edge-auto-producer-service.ts) and submits the result as a weak
- *   attention_only PathRelation candidate via submitCandidate, so
- *   PathPlasticityService reinforcement remains the final gate on recall
- *   eligibility.
+ *   attention_only PathRelation candidate via submitCandidate. It remains
+ *   non-recallable without governed promotion; usage receipts cannot grant
+ *   that authority.
  * - A `null` return value is the correct shape for "no relationship"
  *   and never raises a proposal. Returning `null` is also the correct
  *   adapter response on a malformed or low-confidence garden response —

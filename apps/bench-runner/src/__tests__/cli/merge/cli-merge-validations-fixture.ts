@@ -4,9 +4,9 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
-} from "../../../longmemeval/archive/archive-evidence.js";
+} from "../../../bench/archive/archive-evidence.js";
 import type { LongMemEvalDiagnosticsSidecar } from
-  "../../../longmemeval/diagnostics.js";
+  "../../../bench/diagnostics.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 
 export {
@@ -297,11 +297,13 @@ export function makeValidShardDiagnostics(
       provider_pending: 0,
       provider_failed: 0,
       provider_not_requested: 1,
+      query_embedding_unusable: 0,
       unknown: 0,
       provider_returned_rate: 0,
       provider_pending_rate: 0,
       provider_failed_rate: 0,
       provider_not_requested_rate: 1,
+      query_embedding_unusable_rate: 0,
       unknown_rate: 0
     },
     questions: [],

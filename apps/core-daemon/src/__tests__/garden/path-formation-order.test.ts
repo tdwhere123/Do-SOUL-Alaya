@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AnswersWithEdgeProducerService,
-  type SubmitCandidateInput
+  type RelationAssertionAdmissionRequest
 } from "@do-soul/alaya-core";
 import {
   FormationKind,
@@ -23,7 +23,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 
-import { loadBackfillFormationObjects } from "../../runtime/path-formation-order.js";
+import { loadBackfillFormationObjects } from "../../runtime/daemon/support/path-formation-order.js";
 
 const databases: StorageDatabase[] = [];
 
@@ -80,10 +80,10 @@ describe("production backfill formation order", () => {
     ];
     for (const objectId of objectIds) await memoryRepo.create(memory(objectId, "same content"));
     const objects = await loadBackfillFormationObjects(memoryRepo, "workspace-1", objectIds);
-    const calls: SubmitCandidateInput[] = [];
+    const calls: RelationAssertionAdmissionRequest[] = [];
     const producer = new AnswersWithEdgeProducerService({
-      pairSource: { answerCoRelevantPairKeys: async () => completePairs(objectIds) },
-      mintPort: { submitCandidate: async (input) => { calls.push(input); return "applied"; } }
+      pairSource: { answerCoRelevantPairs: async () => completePairWitnesses(objectIds) },
+      assertionPort: { admit: async (input) => admissionResult(calls, input) }
     });
 
     expect(new Set(objects.map((object) => object.formationKey)).size).toBe(1);
@@ -94,7 +94,7 @@ describe("production backfill formation order", () => {
       bar: 1,
       capPerNode: 1,
       crossSessionOnly: false
-    })).resolves.toMatchObject({ minted: 1 });
+    })).resolves.toMatchObject({ admitted: 1 });
     expect(calls).toHaveLength(1);
   });
 });
@@ -115,10 +115,10 @@ async function runTopology(
   const objectIds = queryOrder.map((content) => idsByContent[content]!);
   const repoRows = await memoryRepo.findByIds("workspace-1", objectIds);
   const objects = await loadBackfillFormationObjects(memoryRepo, "workspace-1", objectIds);
-  const calls: SubmitCandidateInput[] = [];
+  const calls: RelationAssertionAdmissionRequest[] = [];
   const producer = new AnswersWithEdgeProducerService({
-    pairSource: { answerCoRelevantPairKeys: async ({ objectIds: ids }) => completePairs(ids) },
-    mintPort: { submitCandidate: async (input) => { calls.push(input); return "applied"; } }
+    pairSource: { answerCoRelevantPairs: async ({ objectIds: ids }) => completePairWitnesses(ids) },
+    assertionPort: { admit: async (input) => admissionResult(calls, input) }
   });
   await producer.crystallize({
     workspaceId: "workspace-1",
@@ -132,8 +132,10 @@ async function runTopology(
   return {
     repoOrder: repoRows.map((row) => row.content),
     topology: calls.map((call) => {
-      const source = call.sourceAnchor.kind === "object" ? call.sourceAnchor.object_id : "";
-      const target = call.targetAnchor.kind === "object" ? call.targetAnchor.object_id : "";
+      const source = call.anchors.source_anchor.kind === "object"
+        ? call.anchors.source_anchor.object_id : "";
+      const target = call.anchors.target_anchor.kind === "object"
+        ? call.anchors.target_anchor.object_id : "";
       return `${contentById.get(source)}->${contentById.get(target)}`;
     })
   };
@@ -198,14 +200,51 @@ function memory(objectId: string, content: string): MemoryEntry {
   };
 }
 
-function completePairs(ids: readonly string[]): ReadonlySet<string> {
-  const pairs = new Set<string>();
+function completePairWitnesses(ids: readonly string[]) {
+  const observedAt = "2026-07-10T00:00:00.000Z";
+  const witnesses = [];
   for (let left = 0; left < ids.length; left += 1) {
     for (let right = left + 1; right < ids.length; right += 1) {
-      const a = ids[left]!;
-      const b = ids[right]!;
-      pairs.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+      const pair = [ids[left]!, ids[right]!] as const;
+      witnesses.push({
+        pair,
+        evidenceReceipts: [{
+          evidence_id: `evidence-${left}-${right}`,
+          source_event_anchor: {
+            event_type: "soul.signal.emitted",
+            event_id: `event-${left}-${right}`,
+            occurred_at: observedAt
+          }
+        }],
+        formationReceipt: {
+          operator_id: "formation_order_test_v1",
+          operator_sha256: "a".repeat(64),
+          parameters: { bar: 1 },
+          parameter_sha256: "b".repeat(64),
+          source_observations: [{
+            source_kind: "memory_hq_observation",
+            source_id: `hq-${left}-${right}`,
+            source_sha256: "c".repeat(64)
+          }],
+          decision: { shared_token_count: 1 },
+          decision_sha256: "d".repeat(64)
+        },
+        validFrom: observedAt
+      });
     }
   }
-  return pairs;
+  return witnesses;
+}
+
+function admissionResult(
+  calls: RelationAssertionAdmissionRequest[],
+  input: RelationAssertionAdmissionRequest
+) {
+  calls.push(input);
+  return {
+    status: "admitted" as const,
+    assertion: {} as never,
+    activeProjectionCount: 1,
+    projectionGeneration: "test-generation"
+  };
 }

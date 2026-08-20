@@ -1,9 +1,15 @@
 import type {
   RecallPolicy,
+  OpenSemanticFactorFormationCapture,
+  QueryOsfSemanticCompletenessReceipt,
   SoulRecallHostContext,
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { NodeStrategy } from "@do-soul/alaya-core";
+import type {
+  FineAssessmentSelectionBoundaryPendingCapture,
+  NodeStrategy,
+  RecallDiagnosticCapture
+} from "@do-soul/alaya-core";
 
 export type RecallBoundSideEffectMode = "production_mcp" | "benchmark";
 
@@ -23,7 +29,12 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -40,7 +51,12 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
 }>;
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall
@@ -59,7 +75,16 @@ export async function invokeBoundRecall<TRecallResult>(
     ...(params.timeFilter === undefined ? {} : { timeFilter: params.timeFilter }),
     ...(params.hostContext === undefined ? {} : { hostContext: params.hostContext }),
     ...(params.referenceTime === undefined ? {} : { referenceTime: params.referenceTime }),
+    ...(params.querySemanticFactorFormationCapture === undefined ? {} : {
+      querySemanticFactorFormationCapture: params.querySemanticFactorFormationCapture
+    }),
+    ...(params.querySemanticFactorCompletenessReceipt === undefined ? {} : {
+      querySemanticFactorCompletenessReceipt: params.querySemanticFactorCompletenessReceipt
+    }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
+    ...(params.selectionBoundaryObserver === undefined
+      ? {}
+      : { selectionBoundaryObserver: params.selectionBoundaryObserver }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

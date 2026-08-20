@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
@@ -121,22 +123,25 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
         "memory-anchor": 0.9,
         ...(params.extraLexicalRanks ?? {})
       };
-      const service = new RecallService({
+      const scopedKeywordSearch = vi.fn(
+        async (_workspaceId: string, query: string, limit: number, candidateIds?: readonly string[]) =>
+          query.toLowerCase().includes("materializationrouter")
+            ? Object.entries(lexicalRanks)
+                .filter(
+                  ([object_id]) => candidateIds === undefined || candidateIds.includes(object_id)
+                )
+                .map(([object_id, normalized_rank]) => ({ object_id, normalized_rank }))
+                .sort((left, right) => right.normalized_rank - left.normalized_rank)
+                .slice(0, limit)
+            : []
+      );
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds: vi.fn(
-            async (_workspaceId: string, query: string, limit: number, candidateIds?: readonly string[]) =>
-              query.toLowerCase().includes("materializationrouter")
-                ? Object.entries(lexicalRanks)
-                    .filter(
-                      ([object_id]) => candidateIds === undefined || candidateIds.includes(object_id)
-                    )
-                    .map(([object_id, normalized_rank]) => ({ object_id, normalized_rank }))
-                    .sort((left, right) => right.normalized_rank - left.normalized_rank)
-                    .slice(0, limit)
-                : []
-          )
+          searchByKeywordWithinObjectIds: scopedKeywordSearch,
+          searchByKeywordWithinTier: async (workspaceId, query, limit) =>
+            await scopedKeywordSearch(workspaceId, query, limit)
         },
         pathExpansionPort: { findByAnchors },
         entityExtractionPort: {
@@ -200,7 +205,7 @@ const isStructuralDominant = (diagnostic: ReturnType<typeof goldDiag>): boolean 
       return structural > 0 && structural > lexicalLaneContribution(diagnostic);
     };
 
-it("keeps the fusion head and cuts buried path evidence at maxEntries=1", async () => {
+it("does not let unique path identity replace quality at maxEntries=1", async () => {
       const { service } = buildMultiGoldFixture({
         decoyCount: 6,
         golds: [{ id: "memory-gold", pathStrength: 0.05 }]
@@ -208,7 +213,7 @@ it("keeps the fusion head and cuts buried path evidence at maxEntries=1", async 
       const result = await runStructuralRecall(service, 1);
       const delivered = result.candidates;
       expect(delivered.length).toBe(1);
-      expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-gold");
+      expect(delivered.map((candidate) => candidate.object_id)).toEqual(["memory-anchor"]);
       const headDiagnostic = goldDiag(result, delivered[0]!.object_id);
       expect(headDiagnostic?.pre_budget_rank).toBe(1);
       expect(headDiagnostic?.final_rank).toBe(1);
@@ -237,12 +242,10 @@ it("respects maxEntries=2 and 3 without post-fusion displacement", async () => {
           expect(candidate.rank_after_lexical_priority).toBeUndefined();
           expect(candidate.rank_after_structural_reserve).toBeUndefined();
           expect(candidate.reserved_by).toBeUndefined();
-          if (candidate.fused_rank <= maxEntries) {
+          if (candidate.final_rank !== null) {
             expect(deliveredIds).toContain(candidate.object_id);
-            expect(candidate.final_rank).toBe(candidate.fused_rank);
           } else {
             expect(deliveredIds).not.toContain(candidate.object_id);
-            expect(candidate.final_rank).toBeNull();
           }
         }
         const headId = diagnostics.find((candidate) => candidate.pre_budget_rank === 1)?.object_id;
@@ -279,11 +282,9 @@ it("keeps structural contribution visible without granting tail slots", async ()
         const diagnostic = goldDiag(result, id);
         expect(diagnostic?.admission_planes).toContain("path_expansion");
         expect(structuralContribution(diagnostic)).toBeGreaterThan(0);
-        expect(diagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
-        expect(diagnostic?.final_rank).toBeNull();
+        expect(diagnostic?.fused_rank ?? 0).toBeGreaterThan(5);
         expect(diagnostic?.rank_after_structural_reserve).toBeUndefined();
         expect(diagnostic?.reserved_by).toBeUndefined();
-        expect(delivered).not.toContain(id);
       }
       expect(delivered.length).toBeLessThanOrEqual(5);
       expect(diagnostics.filter((candidate) => candidate.within_budget).length).toBe(delivered.length);
@@ -336,7 +337,7 @@ it("distinguishes path-plus-lexical evidence from lexical-only evidence", async 
       const goldDiagnostic = goldDiag(result, "gold-weak-lexical");
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
       expect(goldDiagnostic?.admission_planes).toContain("lexical");
-      expect(goldDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
+      expect(goldDiagnostic?.fused_rank ?? 0).toBeGreaterThan(5);
       expect(isStructuralDominant(goldDiagnostic)).toBe(true);
 
       const fillerDiagnostic = goldDiag(result, "filler-strong-lexical");
@@ -345,9 +346,12 @@ it("distinguishes path-plus-lexical evidence from lexical-only evidence", async 
       expect(isStructuralDominant(fillerDiagnostic)).toBe(false);
 
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
-      expect(goldDiagnostic?.final_rank).toBeNull();
-      expect(delivered).not.toContain("gold-weak-lexical");
-      expect(delivered).not.toContain("filler-strong-lexical");
+      expect(delivered.slice(0, 2)).toEqual([
+        "gold-weak-lexical",
+        "decoy-1"
+      ]);
+      expect(goldDiagnostic?.coverage_selector_action).toBe("promoted");
+      expect(fillerDiagnostic?.final_rank).not.toBe(2);
     });
 
 it("keeps lexical and structural legacy stages aligned to fusion", async () => {
@@ -369,16 +373,12 @@ it("keeps lexical and structural legacy stages aligned to fusion", async () => {
       const deliveredIds = delivered.map((candidate) => candidate.object_id);
 
       expect(delivered.length).toBeLessThanOrEqual(5);
-      expect(deliveredIds).not.toContain("memory-gold");
       const goldDiagnostic = goldDiag(result, "memory-gold");
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
       expect(goldDiagnostic?.rank_after_lexical_priority).toBeUndefined();
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
-      expect(goldDiagnostic?.final_rank).toBeNull();
-      expect(goldDiag(result, delivered[0]!.object_id)?.pre_budget_rank).toBe(1);
-      expect(
-        delivered.map((candidate) => goldDiag(result, candidate.object_id)?.fused_rank)
-      ).toEqual([1, 2, 3, 4, 5]);
+      expect(goldDiagnostic?.fused_rank ?? 0).toBeGreaterThan(5);
+      expect(goldDiag(result, delivered[0]!.object_id)?.final_rank).toBe(1);
     });
 });
 });

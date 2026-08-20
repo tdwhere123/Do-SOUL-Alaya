@@ -5,13 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import {
+  buildGroundedSignalResponse,
+  providerBackedExtractionResult
+} from "./fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -49,7 +53,12 @@ describe("extraction-fill identity transaction", () => {
   });
 
   it("rejects manifest replacement during dataset preparation on a zero-turn run", async () => {
-    await writeDataset([]);
+    await writeDataset([{ ...question(),
+      haystack_session_ids: [],
+      haystack_dates: [],
+      haystack_sessions: [],
+      answer_session_ids: []
+    }]);
     writeIdentityManifest("https://provider-a.invalid/v1", "family-a", "initial");
     const run = fillSuccessfully();
     writeIdentityManifest("https://provider-b.invalid/v1", "family-b", "replacement");
@@ -76,7 +85,9 @@ describe("extraction-fill identity transaction", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: (message) => {
         if (!message.includes("2/2")) return;
         writeIdentityManifest("https://provider-a.invalid/v1", "family-a", "replacement");
@@ -101,7 +112,7 @@ describe("extraction-fill identity transaction", () => {
       pinnedMetaRoot,
       concurrency: 2,
       extractorFactory: () => ({
-        extract: async () => {
+        extract: async (input) => {
           call++;
           if (call === 1) {
             await started;
@@ -110,7 +121,9 @@ describe("extraction-fill identity transaction", () => {
             blockedStarted();
             await blocked;
           }
-          return { rawJson: '{"signals":[]}' };
+          return providerBackedExtractionResult(
+            buildGroundedSignalResponse(input.userPrompt)
+          );
         }
       }),
       log: () => undefined
@@ -132,7 +145,9 @@ async function fillSuccessfully() {
     dataDir,
     pinnedMetaRoot,
     concurrency: 1,
-    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+    extractorFactory: () => ({
+      extract: async () => providerBackedExtractionResult('{"signals":[]}')
+    }),
     log: () => undefined
   });
 }
@@ -143,6 +158,7 @@ async function writeDataset(questions: readonly LongMemEvalQuestion[]): Promise<
   await writeFile(join(pinnedMetaRoot, `${VARIANT}.meta.json`), JSON.stringify({
     name: VARIANT,
     sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+    size_bytes: Buffer.byteLength(raw, "utf8"),
     question_count: questions.length
   }), "utf8");
 }
@@ -174,10 +190,10 @@ function question(): LongMemEvalQuestion {
     haystack_dates: ["2025-12-01", "2025-12-02"],
     haystack_sessions: [
       [
-        { role: "user", content: "alpha", has_answer: true },
+        { role: "user", content: "I completed alpha.", has_answer: true },
         { role: "assistant", content: "ok" }
       ],
-      [{ role: "user", content: "unrelated decoy" }]
+      [{ role: "user", content: "I completed an unrelated decoy." }]
     ],
     answer_session_ids: ["s1"]
   };

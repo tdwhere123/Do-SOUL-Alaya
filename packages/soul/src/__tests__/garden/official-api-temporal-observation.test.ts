@@ -6,7 +6,8 @@ import {
 } from "../../garden/compute-provider.js";
 import {
   createContext as createBaseContext,
-  createExtractor
+  createOpenSemanticExtractor,
+  withOpenSemanticFactorGraph
 } from "./compute-provider-fixtures.js";
 
 function createContext() {
@@ -22,14 +23,14 @@ function temporalEnvelope(
   matchedText = "I completed the review today."
 ): string {
   return JSON.stringify({
-    signals: [{
+    signals: [withOpenSemanticFactorGraph({
       signal_kind: "potential_claim",
       object_kind: "activity",
       confidence: 0.9,
       matched_text: matchedText,
       distilled_fact: "The operator completed the review today.",
       temporal_projection: projection
-    }]
+    })]
   });
 }
 
@@ -56,10 +57,89 @@ describe("official Garden temporal observation contract", () => {
     }));
 
     expect(draft?.temporal_projection).toBeUndefined();
+    expect(draft?.temporal_projection_audit).toEqual({
+      status: "rejected",
+      reason: "temporal_projection_invalid"
+    });
+  });
+
+  it("accepts an open valid-time nomination before source verification", () => {
+    const [draft] = parseOfficialApiSignals(temporalEnvelope({
+      projection_schema_version: 1,
+      valid_from: "2024-03-01",
+      time_precision: "month",
+      time_source: "explicit"
+    }, "I have worked at Acme since March 2024."));
+
+    expect(draft?.temporal_projection).toMatchObject({
+      valid_from: "2024-03-01T00:00:00.000Z",
+      time_precision: "month",
+      time_source: "explicit"
+    });
+  });
+
+  it("persists source-verified open valid time and its formation receipt", async () => {
+    const source = "I have worked at Acme since March 2024.";
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
+        projection_schema_version: 1,
+        valid_from: "2024-03-01",
+        time_precision: "month",
+        time_source: "explicit"
+      }, source)),
+      generateSignalId: () => "signal-valid-time"
+    });
+
+    const [signal] = await provider.compile(source, createContext());
+
+    expect(signal?.raw_payload.temporal_projection).toEqual({
+      projection_schema_version: 1,
+      valid_from: "2024-03-01T00:00:00.000Z",
+      time_precision: "month",
+      time_source: "explicit"
+    });
+    expect(signal?.raw_payload.temporal_projection_audit).toEqual({
+      status: "formed",
+      reason: "valid_time_source_verified"
+    });
+  });
+
+  it("rejects an ungrounded valid-time role without manufacturing validity", async () => {
+    const source = "I traveled from March 2024 to April 2024.";
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
+        projection_schema_version: 1,
+        valid_from: "2024-03-01",
+        time_precision: "month",
+        time_source: "explicit"
+      }, source)),
+      generateSignalId: () => "signal-invalid-valid-time"
+    });
+
+    const [signal] = await provider.compile(source, createContext());
+
+    expect(signal?.raw_payload.temporal_projection).toMatchObject({
+      event_time_start: "2024-03-01T00:00:00.000Z",
+      event_time_end: "2024-04-30T23:59:59.999Z",
+      time_precision: "range",
+      time_source: "explicit"
+    });
+    expect(signal?.raw_payload.temporal_projection).not.toHaveProperty("valid_from");
+    expect(signal?.raw_payload.temporal_projection_audit).toEqual({
+      status: "rejected",
+      reason: "valid_time_role_not_source_grounded"
+    });
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      proposed_temporal_projection: {
+        valid_from: "2024-03-01T00:00:00.000Z"
+      }
+    });
   });
 
   it("derives relative time from source observation after raw extraction", async () => {
-    const extractor = createExtractor(temporalEnvelope({
+    const extractor = createOpenSemanticExtractor(temporalEnvelope({
       projection_schema_version: 1,
       event_time_start: "2025-03-27",
       event_time_end: "2025-03-27",
@@ -132,7 +212,7 @@ describe("official Garden temporal observation contract", () => {
     const matchedText = `I completed the review ${term}.`;
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({}, matchedText)),
+      extractor: createOpenSemanticExtractor(temporalEnvelope({}, matchedText)),
       generateSignalId: () => `signal-fixed-offset-${term}`
     });
     const [signal] = await provider.compile(matchedText, {
@@ -149,7 +229,7 @@ describe("official Garden temporal observation contract", () => {
   it("keeps relative durable content grounded in the source wording", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
+      extractor: createOpenSemanticExtractor(JSON.stringify({
         signals: [{
           signal_kind: "potential_claim",
           object_kind: "activity",
@@ -180,7 +260,7 @@ describe("official Garden temporal observation contract", () => {
   it("rejects an absolute date added by untrusted cached extraction", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
+      extractor: createOpenSemanticExtractor(JSON.stringify({
         signals: [{
           signal_kind: "potential_claim",
           object_kind: "activity",
@@ -200,7 +280,7 @@ describe("official Garden temporal observation contract", () => {
   it("keeps source month precision when extraction invents a day", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(JSON.stringify({
+      extractor: createOpenSemanticExtractor(JSON.stringify({
         signals: [{
           signal_kind: "potential_claim",
           object_kind: "activity",
@@ -229,7 +309,7 @@ describe("official Garden temporal observation contract", () => {
   it("derives an explicit source range instead of collapsing to its first month", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2024-03-01",
         event_time_end: "2024-04-30",
@@ -254,7 +334,7 @@ describe("official Garden temporal observation contract", () => {
   it("does not accept extracted precision or field semantics that source text cannot prove", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         valid_from: "2024-03-01",
         valid_to: "2024-03-31",
@@ -276,7 +356,7 @@ describe("official Garden temporal observation contract", () => {
   it("accepts a natural-language explicit date only when the source verifies it", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2026-03-19",
         event_time_end: "2026-03-19",
@@ -305,7 +385,7 @@ describe("official Garden temporal observation contract", () => {
     const matchedText = `I completed the review ${term}.`;
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2025-03-27",
         event_time_end: "2025-03-27",
@@ -330,7 +410,7 @@ describe("official Garden temporal observation contract", () => {
   it("does not persist a model-resolved relative date without a source observation", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2025-03-27",
         event_time_end: "2025-03-27",
@@ -348,7 +428,7 @@ describe("official Garden temporal observation contract", () => {
   it("retains a later explicit date when an unanchored relative term appears first", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2025-03-27",
         event_time_end: "2025-03-27",
@@ -373,7 +453,7 @@ describe("official Garden temporal observation contract", () => {
   it("does not treat source observation as semantic event time", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor(temporalEnvelope({
+      extractor: createOpenSemanticExtractor(temporalEnvelope({
         projection_schema_version: 1,
         event_time_start: "2025-03-27",
         event_time_end: "2025-03-27",

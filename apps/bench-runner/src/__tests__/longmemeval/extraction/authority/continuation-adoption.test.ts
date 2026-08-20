@@ -1,17 +1,18 @@
 import { writeFileSync, unlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSettledExtractionAttemptLedger } from
-  "../../../../longmemeval/extraction/authority/attempt-ledger.js";
+  "../../../../bench/extraction/authority/attempt-ledger.js";
 import {
   adoptExistingContinuationChild,
   assertContinuationChildClaimBinding,
   assertExtractionAuthorityHasNoContinuationChild,
   continuationChildClaimPath
-} from "../../../../longmemeval/extraction/authority/continuation/child-claim.js";
+} from "../../../../bench/extraction/authority/continuation/child-claim.js";
 import {
   addFailedPredecessorAttempt,
   cleanupContinuationRoots,
   createAndPersistGrandchild,
+  createAuthorityRenewalScenario,
   createContinuationScenario,
   model,
   persistScenario,
@@ -22,6 +23,30 @@ import {
 afterEach(cleanupContinuationRoots);
 
 describe("same-root continuation legacy adoption", () => {
+  it("adopts an output-cap renewal that intentionally reuses its target selection", () => {
+    const scenario = createAuthorityRenewalScenario();
+    persistScenario(scenario);
+
+    expect(adoptExistingContinuationChild({
+      cacheRoot: scenario.cacheRoot,
+      child: scenario.successorReceipt,
+      childTargetSelection: scenario.successorSelection
+    })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+  });
+
+  it("adopts a transport successor that intentionally reuses its target selection", () => {
+    const scenario = createAuthorityRenewalScenario(
+      512, 300, "https://provider-b.example/v1"
+    );
+    persistScenario(scenario);
+
+    expect(adoptExistingContinuationChild({
+      cacheRoot: scenario.cacheRoot,
+      child: scenario.successorReceipt,
+      childTargetSelection: scenario.successorSelection
+    })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+  });
+
   it("adopts a spent legacy child and permits the next claimed generation", () => {
     const scenario = createContinuationScenario();
     persistScenario(scenario);

@@ -1,16 +1,9 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 export const HASH = /^[a-f0-9]{64}$/u;
-export const execFileAsync = promisify(execFile);
-export const cliPath = path.resolve(
-  __dirname,
-  "../../../../scripts/analyze-longmemeval-stage-matrix.mjs"
-);
 
 export function candidate(objectId: string, ranks: Record<string, number | null>) {
   return {

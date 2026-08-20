@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
+import { emptyBenchTerminalRetryClassifications } from
+  "../../../bench/compile-seed/compile-seed-types.js";
 
 const mocks = vi.hoisted(() => ({ runExtractionFill: vi.fn() }));
 
-vi.mock("../../../longmemeval/extraction/extraction-fill.js", () => ({
+vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.runExtractionFill
 }));
 
@@ -34,10 +36,8 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
     retrySuccesses: 1,
     rateLimitRetries: 3,
     terminalRetryClassifications: {
-      failure_max_retries: 0,
-      failure_non_retryable_4xx: 2,
-      failure_timeout: 0,
-      failure_aborted: 0
+      ...emptyBenchTerminalRetryClassifications(),
+      failure_non_retryable_4xx: 2
     },
     coverage: 1,
     manifest: {}
@@ -50,7 +50,7 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
 
   expect(exitCode).toBe(0);
   expect(stdout).toMatch(
-    /failures=2.*retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=0.*terminal_nonretryable_4xx=2.*terminal_timeouts=0/u
+    /failures=2.*retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=0.*terminal_nonretryable_4xx=2.*terminal_nonretryable_response=0.*terminal_timeouts=0/u
   );
 });
 
@@ -61,12 +61,7 @@ it("forwards the selected cache and pinned dataset authority roots", async () =>
     newlyExtracted: 0,
     retrySuccesses: 0,
     rateLimitRetries: 0,
-    terminalRetryClassifications: {
-      failure_max_retries: 0,
-      failure_non_retryable_4xx: 0,
-      failure_timeout: 0,
-      failure_aborted: 0
-    },
+    terminalRetryClassifications: emptyBenchTerminalRetryClassifications(),
     coverage: 1,
     manifest: { fill_status: "in_progress", coverage: 0.25 }
   });

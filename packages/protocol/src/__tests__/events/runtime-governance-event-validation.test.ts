@@ -60,6 +60,15 @@ describe("Phase C event validation", () => {
         detail: "extra"
       })
     ).toThrow();
+    expect(
+      SecurityPassthroughInitializationFailedPayloadSchema.parse({
+        ...basePayload,
+        operation: "ensure"
+      })
+    ).toEqual({
+      ...basePayload,
+      operation: "ensure"
+    });
   });
 
   it("parses runtime side-effect failure events with strict keys", () => {

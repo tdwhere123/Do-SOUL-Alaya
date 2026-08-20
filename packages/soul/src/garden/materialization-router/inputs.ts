@@ -7,7 +7,12 @@ import {
   type EvidenceHealthState as EvidenceHealthStateValue,
   type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
-import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
+import {
+  readGardenVerifiedUserAssertionReceipt
+} from "../grounding/signal-source-grounding.js";
+import {
+  resolveVerifiedGardenTurnEvidenceProjection
+} from "../evidence-preservation/turn-evidence-anchor.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
@@ -87,6 +92,7 @@ export function routeByObjectKind(objectKind: string): MaterializationTarget | n
     case "task_state":
     case "fact":
     case "activity":
+    case "open_semantic_observation":
       return {
         kind: "evidence_only",
         route_target: "memory_entry_only",
@@ -131,14 +137,6 @@ function normalizePayloadString(value: unknown): string | null {
   return normalized.length === 0 ? null : normalized;
 }
 
-// True when raw_payload carries a non-empty preference_profile / temporal_projection; gates the projection-routing lift.
-export function signalCarriesProjectionPayload(signal: CandidateMemorySignal): boolean {
-  return (
-    Object.keys(readMemoryPreferenceProfilePayload(signal.raw_payload)).length > 0 ||
-    Object.keys(readMemoryTemporalProjectionPayload(signal.raw_payload)).length > 0
-  );
-}
-
 export function hasMaterializableSignalMemoryRefs(signal: CandidateMemorySignal): boolean {
   return SIGNAL_REF_SEED_SPECS.some((spec) =>
     signal[spec.signalRefsKey].some((ref) => typeof ref === "string" && ref.trim().length > 0)
@@ -151,10 +149,13 @@ export function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySig
   );
 }
 
-function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {
+function computeEvidenceHealthState(
+  signal: CandidateMemorySignal,
+  hasVerifiedSourceReceipt: boolean
+): EvidenceHealthStateValue {
   // Invariant #16: objects without evidence_refs must default to questionable,
   // not verified. Signals from local heuristics carry no supporting evidence.
-  if (signal.evidence_refs.length === 0) {
+  if (signal.evidence_refs.length === 0 && !hasVerifiedSourceReceipt) {
     return EvidenceHealthState.QUESTIONABLE;
   }
   return EvidenceHealthState.VERIFIED;
@@ -163,11 +164,18 @@ function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHeal
 // invariant: evidence_kind diversifies producer-side so the live ontology
 // no longer collapses to 100% `inferred`. Mapping rules:
 //   - user_seed / import sources → user_statement (operator-attested origin)
+//   - digest-bound source receipts → conversation_excerpt
 //   - signals carrying evidence_refs → external_reference (linked anchor)
-//   - everything else (LLM / Garden compile) → inferred (default)
-function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
+//   - everything else → inferred (default)
+function pickEvidenceKind(
+  signal: CandidateMemorySignal,
+  hasVerifiedSourceReceipt: boolean
+): EvidenceKindValue {
   if (signal.source === "user_seed" || signal.source === "import") {
     return "user_statement";
+  }
+  if (hasVerifiedSourceReceipt) {
+    return "conversation_excerpt";
   }
   if (signal.evidence_refs.length > 0) {
     return "external_reference";
@@ -184,37 +192,90 @@ export function buildEvidenceInput(
     readonly context?: MaterializationContext;
   }
 ): EvidenceMaterializationInput {
-  // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
-  // source turn so evidence FTS keeps the query terms distillation drops;
-  // otherwise the matched_text-span summary is used.
-  const excerpt =
+  // Keep the receipt corpus intact in gist, but do not collapse every grounded
+  // assertion from one turn onto the same searchable/displayed projection.
+  const sourceCorpus = resolveEvidenceSourceCorpus(
+    signal,
     opts?.fullTurnExcerpt === true
-      ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
-         buildSignalSummary(signal))
-      : buildSignalSummary(signal);
+  );
+  const projection = resolveEvidenceTextProjection(
+    signal,
+    sourceCorpus,
+    summarySuffix,
+    opts?.fullTurnExcerpt === true
+  );
+  const gist = appendSummarySuffix(sourceCorpus, summarySuffix);
 
   return {
     created_by: signal.source,
-    evidence_kind: pickEvidenceKind(signal),
+    evidence_kind: pickEvidenceKind(signal, projection.sourceHash !== null),
     semantic_anchor: {
       topic: buildTopicKey(signal),
       keywords: [...signal.domain_tags],
-      summary: appendSummarySuffix(excerpt, summarySuffix)
+      summary: appendSummarySuffix(projection.excerpt, summarySuffix)
     },
     // Signal creation/admission clocks are not source time. A caller can only
     // supply this through the verified EventLog receipt context.
     event_anchor: opts?.context?.source_event_anchor ?? null,
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
-    evidence_health_state: computeEvidenceHealthState(signal),
-    gist: appendSummarySuffix(excerpt, summarySuffix),
-    excerpt,
-    source_hash: null,
+    evidence_health_state: computeEvidenceHealthState(
+      signal,
+      projection.sourceHash !== null
+    ),
+    gist,
+    excerpt: projection.excerpt,
+    source_hash: projection.sourceHash,
     run_id: signal.run_id,
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
   };
 }
 
+function resolveEvidenceSourceCorpus(
+  signal: CandidateMemorySignal,
+  fullTurnExcerpt: boolean
+): string {
+  if (!fullTurnExcerpt) return buildSignalSummary(signal);
+  const fullTurn = readExactPayloadSource(signal, "full_turn_content");
+  if (fullTurn !== null) {
+    const receiptBound =
+      resolveVerifiedGardenTurnEvidenceProjection(signal, fullTurn) !== null ||
+      readGardenVerifiedUserAssertionReceipt(signal) !== null;
+    return receiptBound ? fullTurn : fullTurn.trim();
+  }
+  return readExactPayloadSource(signal, "excerpt") ??
+    readExactPayloadSource(signal, "gist") ??
+    readExactPayloadSource(signal, "matched_text") ??
+    buildSignalSummary(signal);
+}
+
+function readExactPayloadSource(
+  signal: CandidateMemorySignal,
+  key: string
+): string | null {
+  const value = signal.raw_payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function resolveEvidenceTextProjection(
+  signal: CandidateMemorySignal,
+  sourceCorpus: string,
+  summarySuffix: string | undefined,
+  fullTurnExcerpt: boolean
+): Readonly<{ excerpt: string; sourceHash: string | null }> {
+  if (!fullTurnExcerpt) return { excerpt: sourceCorpus, sourceHash: null };
+  const fallback = resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus);
+  const assertionSourceHash = readGardenVerifiedUserAssertionReceipt(signal)?.sourceHash ?? null;
+  const sourceHash = summarySuffix === undefined
+    ? fallback?.sourceHash ?? assertionSourceHash
+    : null;
+  if (sourceHash !== null && sourceHash === assertionSourceHash) {
+    return { excerpt: buildDistilledFact(signal), sourceHash };
+  }
+  const excerpt = fallback?.userContent ??
+    (fallback?.assistantObservations.length ? buildSignalSummary(signal) : sourceCorpus);
+  return { excerpt, sourceHash };
+}
 function buildSignalPhysicalAnchor(
   signal: CandidateMemorySignal,
   artifactRefOverride?: string | null
@@ -238,8 +299,7 @@ function buildSignalPhysicalAnchor(
 export function buildMemoryInput(
   signal: CandidateMemorySignal,
   evidenceRefs: readonly string[],
-  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"],
-  deriveFacetTags = false
+  enqueueEnrichment?: MemoryMaterializationInput["enqueueEnrichment"]
 ): MemoryMaterializationInput {
   const temporalProjection = readMemoryTemporalProjectionPayload(signal.raw_payload);
   const preferenceProfile = readMemoryPreferenceProfilePayload(signal.raw_payload);
@@ -263,7 +323,6 @@ export function buildMemoryInput(
     storage_tier: StorageTier.HOT,
     ...temporalProjection,
     ...preferenceProfile,
-    ...buildFacetTagsProjection(content, deriveFacetTags),
     ...buildCanonicalEntitiesProjection(signal),
     ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
   };
@@ -304,19 +363,6 @@ function normalizeCanonicalEntities(values: readonly string[]): readonly string[
     }
   }
   return output;
-}
-
-// Off → no facet_tags key (byte-identical to flat write); on → deterministic
-// content-derived tags aligned to the read-side query facets via the same vocabulary.
-export function buildFacetTagsProjection(
-  content: string,
-  deriveFacetTags: boolean
-): Partial<Pick<MemoryMaterializationInput, "facet_tags">> {
-  if (!deriveFacetTags) {
-    return {};
-  }
-  const facets = deriveFacetsFromText(content);
-  return facets.length === 0 ? {} : { facet_tags: facets.map((facet) => ({ facet })) };
 }
 
 // invariant: the enrich_pending no-drop intent carried into a memory-creating

@@ -46,7 +46,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { createEnvironmentStatusService } from "../../services/environment-status-service.js";
+import { createEnvironmentStatusService } from "../../services/status/environment-status-service.js";
 
 describe("environment status service", () => {
   beforeEach(() => {

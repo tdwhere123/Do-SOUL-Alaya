@@ -3,7 +3,7 @@ import { createDetachCommandSpec } from "../../cli/attach/detach.js";
 import {
   applyProfileMutationPlan,
   buildAttachProfileMutationPlan
-} from "../../attach/profile-mutation.js";
+} from "../../attach/profile-mutation/profile-mutation.js";
 import {
   createProfileCommandContext,
   MemoryProfileAuditWriter,

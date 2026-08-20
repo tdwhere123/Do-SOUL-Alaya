@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { PathGraphSnapshot, PathRelation } from "@do-soul/alaya-protocol";
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 export type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 
@@ -56,19 +56,7 @@ export function createDormantPath(overrides: Partial<PathRelation> = {}): PathRe
 }
 
 export function createRuntimeInput(options: {
-  // Test mocks return only the result fields the garden runtime reads
-  // (reinforced/weakened/retired/affectedPathIds); the full
-  // PathPlasticityComputeResult shape is cast on at the assignment below.
-  readonly computeAndApplyPlasticity: (
-    params: Parameters<
-      NonNullable<GardenRuntimeInput["pathPlasticityService"]>["computeAndApplyPlasticity"]
-    >[0]
-  ) => Promise<{
-    readonly reinforced: number;
-    readonly weakened: number;
-    readonly retired: number;
-    readonly affectedPathIds: readonly string[];
-  }>;
+  readonly now?: () => string;
   readonly gardenDataPorts?: GardenRuntimeInput["gardenDataPorts"];
   readonly healthJournalRepo?: GardenRuntimeInput["healthJournalRepo"];
   readonly embeddingBackfillHandler?: GardenRuntimeInput["embeddingBackfillHandler"];
@@ -81,7 +69,7 @@ export function createRuntimeInput(options: {
   readonly databaseConnection?: GardenRuntimeInput["databaseConnection"];
   // Legacy topology mutation is deliberately opt-in in non-S4 fixtures.
   readonly legacyTopologyMutationsEnabled?: boolean;
-}): GardenRuntimeInput {
+} = {}): GardenRuntimeInput {
   let latestSnapshot: PathGraphSnapshot | null = null;
   const publish = vi.fn(async (entry: Record<string, unknown>) => ({
     event_id: `event-${publish.mock.calls.length + 1}`,
@@ -91,6 +79,7 @@ export function createRuntimeInput(options: {
   }));
 
   return {
+    now: options.now ?? (() => "2026-05-05T12:00:00.000Z"),
     databaseConnection:
       options.databaseConnection ?? ({} as GardenRuntimeInput["databaseConnection"]),
     backlogThresholds: {
@@ -151,12 +140,6 @@ export function createRuntimeInput(options: {
     ...(options.pathPlasticityWatermarkRepo === undefined
       ? {}
       : { pathPlasticityWatermarkRepo: options.pathPlasticityWatermarkRepo }),
-    pathPlasticityService: {
-      computeAndApplyPlasticity:
-        options.computeAndApplyPlasticity as NonNullable<
-          GardenRuntimeInput["pathPlasticityService"]
-        >["computeAndApplyPlasticity"]
-    },
     ...(options.embeddingBackfillHandler === undefined
       ? {}
       : { embeddingBackfillHandler: options.embeddingBackfillHandler }),

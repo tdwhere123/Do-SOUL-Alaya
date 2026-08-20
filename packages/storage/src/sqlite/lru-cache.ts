@@ -21,11 +21,15 @@ export class LruCache<K, V> {
     return value;
   }
 
-  public set(key: K, value: V): void {
+  public set(
+    key: K,
+    value: V,
+    options: { readonly blocksEviction?: (key: K) => boolean } = {}
+  ): void {
     if (this.entries.has(key)) {
       this.entries.delete(key);
     } else if (this.entries.size >= this.maxEntries) {
-      this.deleteOldest();
+      this.evictOldestAllowed(options.blocksEviction);
     }
     this.entries.set(key, value);
   }
@@ -46,5 +50,20 @@ export class LruCache<K, V> {
     const value = this.entries.get(oldestKey);
     this.entries.delete(oldestKey);
     return value;
+  }
+
+  private evictOldestAllowed(blocksEviction?: (key: K) => boolean): void {
+    if (blocksEviction === undefined) {
+      this.deleteOldest();
+      return;
+    }
+    for (const key of this.entries.keys()) {
+      if (blocksEviction(key)) {
+        continue;
+      }
+      this.entries.delete(key);
+      return;
+    }
+    // Prefer temporary oversize over evicting a blocked entry.
   }
 }

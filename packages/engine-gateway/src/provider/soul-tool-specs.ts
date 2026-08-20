@@ -1,5 +1,4 @@
 import {
-  SignalKind,
   GardenClaimTaskRequestSchema,
   GardenCompleteTaskRequestSchema,
   GardenListPendingTasksRequestSchema,
@@ -52,13 +51,13 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.propose_memory_update",
     description:
-      "WHEN: a candidate signal has matured into a concrete memory write you want governance to review. Submit a proposed durable memory update; this does not directly write durable memory. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
+      "WHEN: a durable memory update or source privacy deletion needs governance review. Submit a pending memory update or privacy_erase proposal; this does not directly mutate storage. An accepted privacy_erase irreversibly removes the source closure. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
     parametersSchema: SoulProposeMemoryUpdateRequestSchema
   },
   {
     name: "soul.review_memory_proposal",
     description:
-      "WHEN: a human reviewer has explicitly approved or rejected a pending proposal and you need to record their decision. Accept or reject a pending memory proposal while preserving an explicit governance trace. Requires reviewer_identity so the review record names who approved or rejected the change.",
+      "WHEN: a human reviewer has explicitly approved or rejected a pending memory update or privacy erase proposal. Record the decision with an explicit governance trace; accepting privacy_erase irreversibly removes the source closure, while rejecting it does not erase. Requires reviewer_identity so the review record names who approved or rejected the change.",
     parametersSchema: SoulReviewMemoryProposalRequestSchema
   },
   {
@@ -128,7 +127,3 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
     parametersSchema: GardenCompleteTaskRequestSchema
   }
 ];
-
-export function readSignalKindCount(): number {
-  return Object.values(SignalKind).length;
-}

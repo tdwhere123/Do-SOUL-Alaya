@@ -1,11 +1,11 @@
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalRunProvenance } from "../../../longmemeval/provenance/run.js";
-import type { SnapshotExtractionProvenance } from "../../../longmemeval/snapshot/materialize.js";
-import { deriveSnapshotAttribution } from "../../../longmemeval/snapshot/attribution.js";
-import type { ExtractionRequestProfile } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
+import type { SnapshotExtractionProvenance } from "../../../bench/snapshot/materialize.js";
+import { deriveSnapshotAttribution } from "../../../bench/snapshot/attribution.js";
+import type { ExtractionRequestProfile } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { compactSnapshotRunProvenance } from "../../../longmemeval/snapshot/run-provenance.js";
+import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
 
 const DATASET_SHA = "a".repeat(64);
 type FillStatus = "in_progress" | "complete";
@@ -83,6 +83,7 @@ function provenance(input: {
       gate_sha256: "b".repeat(64),
       gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "c".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf",
       worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -247,6 +248,7 @@ function attribution(input: {
   readonly snapshotWindowOffset?: number;
   readonly runSupplementalReceiptSha?: string;
   readonly snapshotSupplementalReceiptSha?: string;
+  readonly snapshotWriteAuthority?: "diagnostic" | "promotion";
 }) {
   const family = input.snapshotModelFamily ?? input.modelFamily ?? "fixture-family";
   const profile = input.snapshotRequestProfile ?? input.requestProfile ?? "provider-default-v1";
@@ -294,7 +296,10 @@ function attribution(input: {
       ...(input.snapshotWindowOffset === undefined
         ? {}
         : { window_offset: input.snapshotWindowOffset })
-    }
+    },
+    ...(input.snapshotWriteAuthority === undefined
+      ? {}
+      : { snapshotWriteAuthority: input.snapshotWriteAuthority })
   });
 }
 
@@ -489,5 +494,14 @@ describe("snapshot attribution dataset binding", () => {
       status: "attributed",
       gate_eligible: false
     });
+  });
+
+  it("stores diagnostic_attributed and gate_eligible false under diagnostic write authority", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      snapshotWriteAuthority: "diagnostic"
+    })).toEqual({ status: "diagnostic_attributed", gate_eligible: false });
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import {
+  createFieldBackedRecallService,
+  keywordFieldResult
+} from
+  "./fixtures/keyword-field-fixture.js";
 import { collectEmbeddingSupplement } from "../../recall/supplements/supplements.js";
 import { buildRecallPolicy } from "../../shared/recall-policy.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
@@ -145,7 +150,7 @@ it("handles overlapped embedding preparation rejection when vector precheck fail
       await new Promise((resolve) => setTimeout(resolve, 0));
       throw new Error("unexpected vector precheck failure");
     });
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
@@ -222,7 +227,7 @@ it("uses prepared embedding supplements without the legacy query-embedding port"
       supplementaryEntries: Object.freeze([]),
       similarityHintsByObjectId: Object.freeze({})
     }));
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       embeddingRecallService: {
         prepareQuerySupplement,
@@ -278,7 +283,7 @@ it("merges keyword supplement candidates without duplicating deterministic match
       { object_id: "memory-1", normalized_rank: 1 },
       { object_id: "memory-2", normalized_rank: 0.5 }
     ]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -328,7 +333,7 @@ it("uses direct lexical FTS rank as lexical structural evidence", async () => {
       { object_id: "memory-alpha", normalized_rank: 1 },
       { object_id: "memory-beta", normalized_rank: 0.8 }
     ]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -382,7 +387,7 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
       { object_id: "memory-trigram-weak", normalized_rank: 0.9, trigram_rank: 0.4 },
       { object_id: "memory-no-trigram", normalized_rank: 0.9 }
     ]);
-    const service = new RecallService({
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
@@ -412,7 +417,7 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
     expect(absent?.per_stream_rank.trigram_fts).toBeNull();
   });
 
-it("ranks the trigram_fts fusion stream through the production within-object-ids supplement path", async () => {
+  it("ranks trigram_fts through the canonical tier-scoped field path", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-trigram-strong",
@@ -431,19 +436,16 @@ it("ranks the trigram_fts fusion stream through the production within-object-ids
       })
     ];
     const { dependencies } = createDependencies(memories);
-    // Production `MemoryEntryRepo` implements `searchByKeywordWithinObjectIds`,
-    // so recall always takes that branch rather than the `searchByKeyword`
-    // fallback. Mock it directly to exercise the path bench actually runs.
-    const searchByKeywordWithinObjectIds = vi.fn(async () => [
+    const searchByKeywordField = vi.fn(async () => keywordFieldResult([
       { object_id: "memory-trigram-strong", normalized_rank: 0.9, trigram_rank: 1 },
       { object_id: "memory-trigram-weak", normalized_rank: 0.9, trigram_rank: 0.4 },
       { object_id: "memory-no-trigram", normalized_rank: 0.9 }
-    ]);
-    const service = new RecallService({
+    ]));
+    const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
         ...dependencies.memoryRepo,
-        searchByKeywordWithinObjectIds
+        searchByKeywordField
       }
     });
 
@@ -453,7 +455,9 @@ it("ranks the trigram_fts fusion stream through the production within-object-ids
       strategy: "chat"
     });
 
-    expect(searchByKeywordWithinObjectIds).toHaveBeenCalled();
+    expect(searchByKeywordField).toHaveBeenCalledWith(
+      "workspace-1", "Implement recall", 5, { tier: "hot" }
+    );
     const strong = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-strong"
     );

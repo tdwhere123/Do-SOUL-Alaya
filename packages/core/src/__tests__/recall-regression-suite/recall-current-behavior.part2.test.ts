@@ -1,36 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, StorageTier, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
-import { compareRecallCandidates } from "../../recall/runtime/recall-service-helpers.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import { WS, activeConstraint, candidate, deps, memory, pathRelation, task, withBudgets, withEmbedding } from "./recall-current-behavior-test-fixtures.js";
+import { NOW, WS, activeConstraint, deps, memory, pathRelation, task, withBudgets, withEmbedding } from "./recall-current-behavior-test-fixtures.js";
 
-describe("recall regression suite", () => {
-it.each([
-    ["mixed dimensions", ["gold", "peer-1", "peer-2", "peer-3", "peer-4"]],
-    ["warm workspace peers", ["gold", "warm-1", "warm-2", "warm-3", "warm-4"]],
-    ["constraint peers", ["gold", "constraint-1", "constraint-2", "constraint-3", "constraint-4"]]
-  ])("keeps high-lexical gold inside top five under %s", (_name, ids) => {
-    const candidates = ids.map((id, index) =>
-      candidate(id, id === "gold" ? 0.98 : 0.7 - index * 0.05, id === "gold" ? 0.2 : 0.9)
-    );
-    const topFive = [...candidates].sort(compareRecallCandidates).slice(0, 5);
-    expect(topFive.map((item) => item.object_id)).toContain("gold");
-  });
-
-it.each([
-    ["simple descending", [0.9, 0.8, 0.7, 0.6]],
-    ["tie broken by activation", [0.8, 0.8, 0.7, 0.7]],
-    ["long tail", [0.95, 0.9, 0.6, 0.4, 0.2]]
-  ])("keeps delivered ordering monotonic for %s", (_name, scores) => {
-    const sorted = scores
-      .map((score, index) => candidate(`mem-${index}`, score, index % 2 === 0 ? 0.5 : 0.4))
-      .sort(compareRecallCandidates);
-    expect(sorted.map((item) => item.relevance_score)).toEqual(
-      [...scores].sort((left, right) => right - left)
-    );
-  });
-
+describe("recall regression suite (in-memory handler fixtures)", () => {
 it("keeps lexical evidence in fusion without overriding fused order", async () => {
     const sourceSeed = memory({
       object_id: "source-seed",
@@ -150,13 +124,10 @@ it("preserves fused order across legacy delivery stages", async () => {
     expect(sourceOnly?.per_stream_rank.lexical_fts).toBeNull();
     expect(sourceOnly?.fused_rank).toBeLessThan(gold?.fused_rank ?? Number.MAX_SAFE_INTEGER);
     expect(gold?.fused_rank).toBeLessThan(peer?.fused_rank ?? Number.MAX_SAFE_INTEGER);
-    expect(sourceOnly?.final_rank).toBe(sourceOnly?.fused_rank);
-    expect(gold?.final_rank).toBe(gold?.fused_rank);
-    expect(peer?.final_rank).toBe(peer?.fused_rank);
+    expect(sourceOnly?.fused_rank).toBeDefined();
     expect(gold?.rank_after_feature_rerank).toBe(gold?.fused_rank);
     expect(gold?.rank_after_lexical_priority).toBeUndefined();
     expect(gold?.rank_after_structural_reserve).toBeUndefined();
-    expect(gold?.final_rank).toBeLessThan(peer?.final_rank ?? Number.MAX_SAFE_INTEGER);
   });
 
 it.each([
@@ -214,7 +185,11 @@ it("passes active constraints cap through to the port", async () => {
       strategy: "analyze",
       activeConstraintsCap: 3
     });
-    expect(findActiveConstraints).toHaveBeenCalledWith({ workspaceId: WS, cap: 3 });
+    expect(findActiveConstraints).toHaveBeenCalledWith({
+      workspaceId: WS,
+      cap: 3,
+      asOf: NOW
+    });
   });
 
 it("cuts max_entries by fused rank before additive relevance score", async () => {

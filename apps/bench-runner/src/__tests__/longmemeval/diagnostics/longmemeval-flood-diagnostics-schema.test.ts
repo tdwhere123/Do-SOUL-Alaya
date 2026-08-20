@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DiagnosticFloodEdgeTraceV1Schema,
   DiagnosticFloodPotentialSchema
-} from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 
 const legacyPotential = {
   R_obj: 0.2,
@@ -14,13 +14,68 @@ const legacyPotential = {
   omega: 1,
   Flood: 0.2,
   lambda: 0.15,
-  beta: 0,
+  beta: 1,
   final_score: 0.23,
   slice_status: "active",
   path_status: "active",
   evidence_status: "active",
-  e_direct_status: "inactive:beta_disabled",
+  e_direct_status: "active",
   fuel_verified: true
+} as const;
+
+const winningTrace = {
+  schema_version: 1,
+  path_id: "path-overlay",
+  relation_kind: "answers_with",
+  seed_object_id: "seed",
+  target_object_id: "target",
+  input_potential: 0.6,
+  edge_conductance: 0.5,
+  slice_compatibility: "slice_match",
+  raw_transfer: 0.3,
+  capped_transfer: 0.3,
+  decision: "transferred",
+  reason: "transferred"
+} as const;
+
+const validH1Potential = {
+  ...legacyPotential,
+  final_score: 0.3,
+  score_mode: "rrf_seeded_h1_max_product",
+  h1_max_product: {
+    schema_version: 1,
+    seed_basis: "rrf_family_base",
+    direct_potential: 0.2,
+    strongest_transfer: 0.3,
+    winner: "edge",
+    winning_edge_trace: winningTrace,
+    frontier_admitted: false,
+    transition_counts: {
+      evaluated_edge_count: 1,
+      seed_overlap_edge_count: 1,
+      transferred_edge_count: 1,
+      rejected_edge_count: 0,
+      reason_counts: {
+        transferred: 1,
+        capped: 0,
+        self_loop: 0,
+        missing_edge_provenance: 0,
+        missing_or_zero_input: 0,
+        non_positive_conductance: 0,
+        no_slice_match: 0
+      }
+    }
+  },
+  h1_overlay: {
+    schema_version: 1,
+    baseline_score: 0.23,
+    edge_score: 0.3,
+    final_score: 0.3,
+    delta: 0.07,
+    applied: true,
+    winner: "edge",
+    winning_edge_trace: winningTrace
+  }
 } as const;
 
 describe("LongMemEval flood diagnostics schemas", () => {
@@ -35,6 +90,44 @@ describe("LongMemEval flood diagnostics schemas", () => {
     expect(() => DiagnosticFloodPotentialSchema.parse({
       ...legacyPotential,
       unexpected_trace_contract: true
+    })).toThrow();
+  });
+
+  it("accepts the explicit H1 delivery overlay contract", () => {
+    const parsed = DiagnosticFloodPotentialSchema.parse(validH1Potential);
+
+    expect(parsed.h1_overlay).toMatchObject({
+      baseline_score: 0.23,
+      applied: true,
+      winner: "edge"
+    });
+  });
+
+  it("rejects contradictory H1 delivery overlay evidence", () => {
+    expect(() => DiagnosticFloodPotentialSchema.parse({
+      ...validH1Potential,
+      h1_overlay: {
+        ...validH1Potential.h1_overlay,
+        winning_edge_trace: null
+      }
+    })).toThrow();
+    expect(() => DiagnosticFloodPotentialSchema.parse({
+      ...validH1Potential,
+      final_score: 0.29
+    })).toThrow();
+    expect(() => DiagnosticFloodPotentialSchema.parse({
+      ...validH1Potential,
+      h1_max_product: undefined
+    })).toThrow();
+    expect(() => DiagnosticFloodPotentialSchema.parse({
+      ...validH1Potential,
+      h1_overlay: {
+        ...validH1Potential.h1_overlay,
+        winning_edge_trace: {
+          ...winningTrace,
+          path_id: "different-path"
+        }
+      }
     })).toThrow();
   });
 

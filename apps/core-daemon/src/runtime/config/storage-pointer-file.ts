@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { chmod, link, mkdir, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import { syncDirectory } from "../../services/private-file-service.js";
+import { syncDirectory } from "../../services/support/private-file-service.js";
 
 /** Writes a complete configuration file by rename so a daemon never observes a torn pointer. */
 export async function writeTextAtomic(filePath: string, content: string, mode: number): Promise<void> {

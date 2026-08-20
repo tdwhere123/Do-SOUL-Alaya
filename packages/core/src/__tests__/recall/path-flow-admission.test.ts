@@ -40,9 +40,7 @@ function admitPathExpansion(
     "path_expansion",
     edgeStrength,
     "path_expansion",
-    undefined,
-    undefined,
-    pathFlowScore
+    { pathFlowScore }
   );
 }
 

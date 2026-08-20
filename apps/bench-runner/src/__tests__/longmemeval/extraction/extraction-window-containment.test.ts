@@ -3,27 +3,32 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import {
+  buildOfficialApiExtractionRequest,
+  OFFICIAL_API_SYSTEM_PROMPT,
+  stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction/extraction-fill.js";
+} from "../../../bench/extraction/extraction-fill.js";
 import {
   createCachingSignalExtractor,
   preflightExtractionCache,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest,
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { inspectTurnContentKeySpace } from
-  "../../../longmemeval/extraction/turn-contents.js";
+  "../../../bench/extraction/turn-contents.js";
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
+import { providerBackedExtractionResult } from "./extraction-cache-test-fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 // @anchor extraction-window-containment — I2: the cache coverage gate must
@@ -43,7 +48,7 @@ const CONFIG: CompileSeedExtractionConfig = {
 
 // Offline delegate: writes one empty signal envelope per turn, no live HTTP.
 function offlineExtractorFactory(): BenchSignalExtractor {
-  return { extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' })) };
+  return { extract: vi.fn(async () => providerBackedExtractionResult('{"signals":[]}')) };
 }
 
 // Populate the cache with fixtures for exactly `turnContents`, through the same
@@ -67,13 +72,9 @@ async function fillTurns(
   for (const turn of turnContents) {
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      userPrompt: JSON.stringify({
-        workspace_id: "x",
-        run_id: "x",
-        surface_id: null,
-        turn_content: turn,
-        turn_messages: []
-      })
+      userPrompt: stringifyOfficialApiExtractionRequest(
+        buildOfficialApiExtractionRequest(turn, [])
+      )
     });
   }
   // The staged-fill scenario always has a manifest claiming full coverage of
@@ -169,7 +170,12 @@ describe("extraction window-containment preflight", () => {
       await writeFile(join(dataDir, "longmemeval_oracle.json"), raw, "utf8");
       await writeFile(
         join(pinnedMetaRoot, "longmemeval_oracle.meta.json"),
-        JSON.stringify({ name: "longmemeval_oracle", sha256: sha, question_count: 2 }),
+        JSON.stringify({
+          name: "longmemeval_oracle",
+          sha256: sha,
+          size_bytes: Buffer.byteLength(raw, "utf8"),
+          question_count: 2
+        }),
         "utf8"
       );
 

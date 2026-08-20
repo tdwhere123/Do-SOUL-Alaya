@@ -12,9 +12,9 @@ import {
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
 
-import { getBuiltinConversationToolSpecs } from "../../mcp/builtin-conversation-tool-specs.js";
+import { getBuiltinConversationToolSpecs } from "../../mcp/server/builtin-conversation-tool-specs.js";
 
-import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
+import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 
@@ -280,10 +280,11 @@ describe("daemon tool runtime bootstrap", () => {
 
     expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
     await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
-    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
+    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: "sk-official",
-      model: "gpt-4.1-mini"
-    });
+      model: "gpt-4.1-mini",
+      extractor: expect.objectContaining({ extract: expect.any(Function) })
+    }));
     expect(process.env.OPENAI_API_KEY).toBeUndefined();
     expect(hoisted.computeRoutingServiceDeps).toMatchObject({
       providers: expect.arrayContaining([
@@ -312,10 +313,11 @@ describe("daemon tool runtime bootstrap", () => {
 
     expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
     await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
-    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
+    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: "sk-dedicated-garden",
-      model: "gpt-4.1-mini"
-    });
+      model: "gpt-4.1-mini",
+      extractor: expect.objectContaining({ extract: expect.any(Function) })
+    }));
   });
 
   it("loads embedding secret-ref config from the Alaya config-dir .env during daemon bootstrap", async () => {
@@ -344,10 +346,11 @@ describe("daemon tool runtime bootstrap", () => {
 
     expect(hoisted.officialGardenProviderCtor).not.toHaveBeenCalled();
     await expect(resolveBootGardenProvider()).resolves.toBe(hoisted.officialGardenProviderInstance);
-    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith({
+    expect(hoisted.officialGardenProviderCtor).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: "sk-config-file",
-      model: "gpt-4.1-mini"
-    });
+      model: "gpt-4.1-mini",
+      extractor: expect.objectContaining({ extract: expect.any(Function) })
+    }));
     expect(hoisted.computeRoutingServiceDeps).toMatchObject({
       providers: expect.arrayContaining([
         expect.objectContaining({

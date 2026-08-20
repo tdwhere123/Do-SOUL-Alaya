@@ -5,9 +5,11 @@ import type { BenchWorkspaceHandle } from "../harness/daemon.js";
 import {
   computeNextTurnSeedRefs,
   type CompileSeedRunner
-} from "../longmemeval/compile-seed.js";
+} from "../bench/compile-seed.js";
 import { extractSessions, type LocomoSample, type LocomoTurn } from "./dataset.js";
 import { buildLocomoSeedContent } from "./runner-utils.js";
+import { isSeededMemoryResult } from
+  "../harness/daemon/seed/daemon-seed-results.js";
 
 export interface LocomoSeededConversation {
   readonly diaIdByMemoryId: ReadonlyMap<string, string>;
@@ -71,7 +73,6 @@ async function seedLocomoSession(input: {
   const sessionSurfaceId = benchSessionSurfacesEnabled()
     ? `${input.conversation.sample_id}-s${input.sessionOrdinal}`
     : undefined;
-  const sessionMemberMemoryIds: string[] = [];
   let previousTurnSeedMemoryIds: readonly string[] = [];
   let seedIndex = input.seedIndex;
   for (let turnOrdinal = 0; turnOrdinal < input.session.turns.length; turnOrdinal += 1) {
@@ -87,9 +88,8 @@ async function seedLocomoSession(input: {
     });
     seedIndex += 1;
     previousTurnSeedMemoryIds = computeNextTurnSeedRefs(seedResult);
-    recordLocomoSeedResult(input, turn, seedResult, sessionMemberMemoryIds);
+    recordLocomoSeedResult(input, turn, seedResult);
   }
-  await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
   return seedIndex;
 }
 
@@ -112,6 +112,7 @@ async function seedLocomoTurn(input: {
     seedIndex: input.seedIndex,
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
+    sourceEvidenceFallback: "disabled",
     ...(input.sessionSurfaceId === undefined ? {} : { surfaceId: input.sessionSurfaceId }),
     ...(input.previousTurnSeedMemoryIds.length === 0
       ? {}
@@ -127,11 +128,11 @@ function recordLocomoSeedResult(
     readonly sessionOrdinal: number;
   },
   turn: LocomoTurn,
-  seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>,
-  sessionMemberMemoryIds: string[]
+  seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
   const seedContent = buildLocomoSeedContent(turn);
   for (const seed of seedResult.seeds) {
+    if (!isSeededMemoryResult(seed)) continue;
     input.seeded.diaIdByMemoryId.set(seed.memoryId, turn.dia_id);
     const current = input.seeded.memoryIdsByDiaId.get(turn.dia_id) ?? [];
     current.push(seed.memoryId);
@@ -142,7 +143,6 @@ function recordLocomoSeedResult(
       seed.memoryId,
       `${input.conversation.sample_id}-s${input.sessionOrdinal}`
     );
-    sessionMemberMemoryIds.push(seed.memoryId);
   }
 }
 

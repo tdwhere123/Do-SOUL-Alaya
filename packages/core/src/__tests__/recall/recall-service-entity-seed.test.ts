@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, MemoryGovernanceEventType, ScopeClass, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { createFieldBackedRecallService } from
+  "./fixtures/keyword-field-fixture.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
@@ -51,11 +53,12 @@ it("admits FTS hits for extracted entities on the entity_seed plane and fans int
           : [];
       });
 
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds
+          searchByKeywordWithinObjectIds,
+          searchByKeywordWithinTier: searchByKeywordWithinObjectIds
         },
         pathExpansionPort: {
           findByAnchors
@@ -103,7 +106,8 @@ it("admits FTS hits for extracted entities on the entity_seed plane and fans int
 
       expect(findByAnchors).toHaveBeenCalledWith(
         "workspace-1",
-        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }])
+        expect.arrayContaining([{ kind: "object", object_id: "memory-anchor" }]),
+        { asOf: "2026-03-23T00:00:00.000Z" }
       );
     });
 
@@ -118,11 +122,12 @@ it("is a no-op when entityExtractionPort is not wired", async () => {
       const searchByKeywordWithinObjectIds = vi.fn(async () => [
         { object_id: "memory-x", normalized_rank: 0.9 }
       ]);
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds
+          searchByKeywordWithinObjectIds,
+          searchByKeywordWithinTier: searchByKeywordWithinObjectIds
         }
       });
 
@@ -160,11 +165,12 @@ it("never writes propose/accept paths from entity-seed admissions", async () => 
       const searchByKeywordWithinObjectIds = vi.fn(async () => [
         { object_id: "memory-truth", normalized_rank: 0.9 }
       ]);
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds
+          searchByKeywordWithinObjectIds,
+          searchByKeywordWithinTier: searchByKeywordWithinObjectIds
         },
         entityExtractionPort: {
           extract: async () => [
@@ -256,7 +262,7 @@ it("entity_seed admissions still pass the deterministic scope/dimension filter",
         return [];
       });
 
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
@@ -325,11 +331,12 @@ it("does not double-count fusion when the same memory hits lexical_fts and entit
         { object_id: "memory-overlap", normalized_rank: 0.9 }
       ]);
 
-      const service = new RecallService({
+      const service = createFieldBackedRecallService({
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          searchByKeywordWithinObjectIds
+          searchByKeywordWithinObjectIds,
+          searchByKeywordWithinTier: searchByKeywordWithinObjectIds
         },
         entityExtractionPort: {
           extract: async () => [

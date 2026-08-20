@@ -1,4 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +5,6 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
-  computeNextTurnSeedRefs,
   createCachingSignalExtractor,
   createCompileSeedRunner,
   createGardenHttpExtractor,
@@ -14,15 +12,15 @@ import {
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
-  type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
+  providerBackedResult,
   OFFLINE_CONFIG,
   makeSeed,
   signalsEnvelope
@@ -31,8 +29,16 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
+import { buildGroundedSignalResponse } from "../extraction-fill/fixture.js";
+import {
+  computeExtractionTurnCacheKeys,
+  computeExtractionTurnCacheKey,
+  computeSourceTurnCacheKeys,
+  computeSourceTurnCacheKey
+} from "../../../bench/compile-seed/compile-seed-cache.js";
+import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-shard.js";
 
-describe("userPrompt shape contract — cache key turn_content dependency", () => {
+describe("canonical extraction request cache identity", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
@@ -43,22 +49,74 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  // The extraction cache key hashes only the load-bearing turn_content,
-  // recovered by parsing the userPrompt JSON the production
-  // OfficialApiGardenProvider assembles. If a future compute-provider.ts
-  // change renames or restructures the turn_content field,
-  // extractTurnContent silently falls through to hashing the WHOLE
-  // userPrompt — which embeds the wall-clock run_id, making every run a
-  // 100% cache miss and the committed fixture dead. These tests drive the
-  // REAL provider so that shape change fails a test instead of silently
-  // degrading the cache.
+  it("derives one raw cache key for each bounded assertion batch", () => {
+    const source = Array.from(
+      { length: 9 },
+      (_, index) => `I recorded durable detail number ${index + 1}.`
+    ).join(" ");
+    const input = { turnContent: source };
 
-  it("the production provider's userPrompt carries turn_content as a top-level string", async () => {
+    const sourceKeys = computeSourceTurnCacheKeys(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, input
+    );
+    const turnKeys = computeExtractionTurnCacheKeys(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT,
+      { ...input, turnMessages: [] }
+    );
+
+    expect(sourceKeys).toHaveLength(2);
+    expect(turnKeys).toEqual(sourceKeys);
+    expect(new Set(sourceKeys)).toHaveLength(2);
+  });
+
+  it("accounts and receipts every bounded shard in one seed turn", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+      })
+    });
+    const source = Array.from(
+      { length: 9 },
+      (_, index) => `I recorded durable detail number ${index + 1}.`
+    ).join(" ");
+
+    await runner.seedTurn({
+      daemon: buildCompileSeedDaemon(() => makeSeed("unexpected")),
+      turnContent: source,
+      evidenceRefBase: "q-1-s0-r0",
+      seedIndex: 0,
+      workspaceId: "workspace-1",
+      runId: "run-1"
+    });
+
+    expect(runner.stats.extractionAttempts).toBe(2);
+    expect(runner.stats.llmCalls).toBe(2);
+    expect(runner.stats.lastExtractionShards).toHaveLength(2);
+    expect(runner.stats.lastExtractionShards?.map(({ cacheKey }) => cacheKey)).toEqual(
+      computeSourceTurnCacheKeys(
+        CREDENTIALLED_CONFIG.model,
+        CREDENTIALLED_CONFIG.requestProfile,
+        OFFICIAL_API_SYSTEM_PROMPT,
+        { turnContent: source }
+      )
+    );
+  });
+
+  it("the production provider's userPrompt carries only the canonical assertion catalog", async () => {
     let capturedUserPrompt: string | null = null;
     const capturingExtractor: BenchSignalExtractor = {
       extract: async (input) => {
         capturedUserPrompt = input.userPrompt;
-        return { rawJson: '{"signals":[]}' };
+        return providerBackedResult('{"signals":[]}');
       }
     };
     const provider = new OfficialApiGardenProvider({
@@ -79,11 +137,15 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       string,
       unknown
     >;
-    // The cache key (createCachingSignalExtractor / extractTurnContent)
-    // reads `turn_content`. If this assertion fails, the provider changed
-    // its userPrompt shape and the bench cache must be updated in lockstep.
-    expect(typeof parsed.turn_content).toBe("string");
-    expect(parsed.turn_content).toBe("I moved to Berlin last spring.");
+    expect(parsed).toEqual({
+      schema_version: 2,
+      source_locator_contract_version: 2,
+      batch_contract_version: 1,
+      source_corpus_identity: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      batch_index: 0,
+      batch_count: 1,
+      source_assertions: [{ assertion_id: 1, text: "User: I moved to Berlin last spring." }]
+    });
   });
 
   it("the cache hits for the same turn across a different run_id, end to end", async () => {
@@ -92,13 +154,11 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       model: "test-model",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    // Full-chain check: the real provider builds the userPrompt, the real
-    // caching extractor derives the key. A second compile() of the SAME
-    // turn under a DIFFERENT wall-clock run_id must be served from the
-    // fixture with zero delegate calls — only true if the key ignores
-    // run_id, which depends on extractTurnContent recovering turn_content.
+    // Full-chain check: run_id is absent from the canonical request and cannot
+    // change a cache identity.
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async (input) =>
+        providerBackedResult(buildGroundedSignalResponse(input.userPrompt)))
     };
     const cachingExtractor = createCachingSignalExtractor({
       delegate,
@@ -121,9 +181,7 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    // The first strict-empty live result is rechecked once because the real
-    // provider prompt carries a non-empty source assertion catalog.
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
 
     await provider.compile("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
@@ -131,18 +189,47 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    // Still 2 — the second turn was a cache hit despite the new run_id.
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
-  it("does not reuse a shard when the trusted role corpus changes", async () => {
+  it("passes the live semantic validator through the cache delegate boundary", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,
       model: "test-model",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+      extract: vi.fn(async (input) => {
+        input.validateRawJson?.('{"signals":[42]}');
+        return providerBackedResult('{"signals":[]}');
+      })
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot,
+      })
+    });
+
+    await expect(provider.compile("I moved to Berlin.", {
+      workspace_id: "ws-1", run_id: "run-validator", surface_id: null,
+      turn_messages: []
+    })).rejects.toMatchObject({ kind: "invalid_response" });
+    expect(delegate.extract).toHaveBeenCalledOnce();
+  });
+
+  it("does not reuse a shard when the User assertion catalog changes", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async (input) =>
+        providerBackedResult(buildGroundedSignalResponse(input.userPrompt)))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -157,263 +244,194 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
         cacheRoot
       })
     });
-    const turnContent = "User: A.\nAssistant: B.";
+    const turnContent = "User: I chose A.\nAssistant: You chose B.";
 
     await provider.compile(turnContent, {
       workspace_id: "ws-1", run_id: "run-1", surface_id: null,
       turn_messages: [
-        { message_id: "m1", role: "user", content: "A." },
-        { message_id: "m2", role: "assistant", content: "B." }
+        { message_id: "m1", role: "user", content: "I chose A." },
+        { message_id: "m2", role: "assistant", content: "You chose B." }
       ]
     });
     await provider.compile(turnContent, {
       workspace_id: "ws-1", run_id: "run-2", surface_id: null,
       turn_messages: [
-        { message_id: "m3", role: "assistant", content: "A." },
-        { message_id: "m4", role: "user", content: "B." }
+        { message_id: "m3", role: "assistant", content: "I chose A." },
+        { message_id: "m4", role: "user", content: "You chose B." }
       ]
     });
 
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
-});
 
-describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
-  // invariant: every assertion in this block guards the N x M edge-blowup
-  // ceiling described in the helper anchor. A regression that re-introduces
-  // the union-of-every-fact behavior must surface here, not in a
-  // multi-hour bench.
-  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-  //   computeNextTurnSeedRefs
-
-  it("returns [] when the current turn produced no seeds", () => {
-    expect(
-      computeNextTurnSeedRefs({ seeds: [] })
-    ).toEqual([]);
-  });
-
-  it("returns exactly the first seed id when the current turn has one fact", () => {
-    expect(
-      computeNextTurnSeedRefs({ seeds: [makeSeed("memory-a")] })
-    ).toEqual(["memory-a"]);
-  });
-
-  it("returns only the first seed id when the current turn has many facts (no N-fact union)", () => {
-    // invariant: length is always 0 or 1, never N. This is the load-bearing
-    // bound for the WSL2 500q runs.
-    const seeds = [
-      makeSeed("memory-a"),
-      makeSeed("memory-b"),
-      makeSeed("memory-c"),
-      makeSeed("memory-d")
-    ];
-    const refs = computeNextTurnSeedRefs({ seeds });
-    expect(refs).toEqual(["memory-a"]);
-    expect(refs.length).toBeLessThanOrEqual(1);
-  });
-
-  it("models a multi-turn session: refs grow at most 1-per-turn and first turn carries none", () => {
-    // Caller pattern: previousTurnSeedMemoryIds starts [], updates via
-    // computeNextTurnSeedRefs after each seedTurn. Turn 0 always emits
-    // with sourceMemoryRefs omitted (the [] sentinel maps to undefined in
-    // the spread); turn N>=1 emits with exactly one ref (its predecessor's
-    // first seed).
-    const turns = [
-      { seeds: [makeSeed("t0-a"), makeSeed("t0-b")] },
-      { seeds: [makeSeed("t1-a"), makeSeed("t1-b"), makeSeed("t1-c")] },
-      { seeds: [makeSeed("t2-a"), makeSeed("t2-b")] },
-      { seeds: [] }, // a turn that produced no facts at all
-      { seeds: [makeSeed("t4-a")] }
-    ];
-    let prev: readonly string[] = [];
-    const observedSourceRefs: (readonly string[] | undefined)[] = [];
-    for (const turn of turns) {
-      observedSourceRefs.push(prev.length === 0 ? undefined : prev);
-      prev = computeNextTurnSeedRefs(turn);
-    }
-    expect(observedSourceRefs).toEqual([
-      undefined,         // turn 0: no predecessor
-      ["t0-a"],          // turn 1: only the FIRST seed of turn 0
-      ["t1-a"],          // turn 2: only the FIRST seed of turn 1
-      ["t2-a"],          // turn 3: only the FIRST seed of turn 2
-      undefined          // turn 4: predecessor produced zero seeds -> reset
-    ]);
-    for (const refs of observedSourceRefs) {
-      // invariant: cardinality is the load-bearing bound.
-      expect((refs ?? []).length).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("session-boundary semantics: caller resets prev to [] across sessions, first turn of session 2 is undefined", () => {
-    // The bench runners hold `previousTurnSeedMemoryIds` in the per-session
-    // scope. Re-entering the inner loop for a new session starts from [],
-    // mirroring the very first turn of the run. This test pins that the
-    // helper alone is consistent with that caller contract: a fresh [] in
-    // produces a sourceMemoryRefs-undefined spread for the next call.
-    const session1Refs = computeNextTurnSeedRefs({
-      seeds: [makeSeed("s1-t0-a"), makeSeed("s1-t0-b")]
-    });
-    expect(session1Refs).toEqual(["s1-t0-a"]);
-    // Caller flips to the next session, which re-initializes prev to [].
-    const session2Prev: readonly string[] = [];
-    expect(session2Prev.length).toBe(0);
-    // The first turn of session 2 emits with undefined sourceMemoryRefs
-    // (the runners use `prev.length === 0 ? {} : { sourceMemoryRefs: prev }`).
-    const session2EmitSpread = session2Prev.length === 0
-      ? ({} as { sourceMemoryRefs?: readonly string[] })
-      : { sourceMemoryRefs: session2Prev };
-    expect(session2EmitSpread.sourceMemoryRefs).toBeUndefined();
-  });
-});
-
-// Phase A.1 instrument coverage: a seed-side extraction failure must drop one
-// diagnostic JSON file carrying cache_key_prefix / model / provider so a
-// Phase A.2 preflight reader can attribute the failure to a specific cache
-// shard or live call without re-running the bench.
-describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
-  let cacheRoot: string;
-  let diagnosticDir: string;
-
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-diag-cache-"));
-    diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
+  it("replays a non-empty canonical shard against its assertion id", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,
-      model: "gpt-test-mini",
-      providerUrl: "https://example.test/v1",
+      model: "test-model",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-  });
-
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-    await rm(diagnosticDir, { recursive: true, force: true });
-  });
-
-  it("writes a compile-seed-*.json dump carrying cache_key_prefix when live extraction fails", async () => {
-    const config: CompileSeedExtractionConfig = {
-      providerUrl: "https://example.test/v1",
-      model: "gpt-test-mini",
-      requestProfile: "provider-default-v1",
-      apiKey: "test-key"
-    };
-    const daemon: CompileSeedDaemon = {
-      proposeMemoryFromSignal: async (_input) => ({
-        memoryId: "memory-1",
-        signalId: "signal-memory-1",
-        proposalId: "proposal-memory-1",
-        evidenceId: "evidence-memory-1",
-        truncated: false,
-        charsClipped: 0
-      }),
-      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({
-      config,
-      cacheRoot,
-      allowLiveExtraction: true,
-      diagnosticDir,
-      extractorFactory: () => ({
-        extract: async () => {
-          throw new Error("garden extraction HTTP 500 from provider");
+    const source = "I use TypeScript, but I avoid any.";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    const canonicalKey = computeSourceTurnCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source, turnMessages: messages }
+    );
+    writeCachedExtraction(cacheRoot, canonicalKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: canonicalKey,
+      raw_json: JSON.stringify({ signals: [{
+        signal_kind: "potential_claim",
+        object_kind: "activity",
+        confidence: 0.9,
+        source_locator: {
+          contract_version: 2,
+          kind: "assertion_catalog",
+          assertion_id: 3
+        },
+        matched_text: "I avoid any.",
+        distilled_fact: "I avoid any.",
+        semantic_factor_graph: {
+          schema_version: 2,
+          source_kind: "evidence",
+          factors: [{
+            factor_id: "f0",
+            surface: "avoid",
+            semantic_identity: "avoid"
+          }, {
+            factor_id: "f1",
+            surface: "any",
+            semantic_identity: "any"
+          }],
+          variables: [],
+          result_variable_ids: [],
+          propositions: [{
+            proposition_id: "p0",
+            predicate_factor_id: "f0",
+            arguments: [{
+              position: 0,
+              binding_identity: "object",
+              reference_kind: "factor",
+              reference_id: "f1"
+            }]
+          }]
         }
-      })
+      }] }),
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot })
     });
 
-    await expect(
-      runner.seedTurn({
-        daemon,
-        turnContent: "Turn whose extraction blows up.",
-        evidenceRefBase: "q1-s0-t0",
-        seedIndex: 0,
-        workspaceId: "ws-test",
-        runId: "run-test"
-      })
-    ).rejects.toThrow("Official garden provider returned an invalid response.");
-
-    const dumpFiles = readdirSync(diagnosticDir).filter(
-      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
-    );
-    expect(dumpFiles).toHaveLength(1);
-    const dump = JSON.parse(
-      readFileSync(join(diagnosticDir, dumpFiles[0]!), "utf8")
-    ) as Record<string, unknown>;
-
-    expect(dump).toMatchObject({
-      surface: "compile-seed",
-      provider_kind: "official_api",
-      model_id: "gpt-test-mini",
-      workspace_id: "ws-test",
-      run_id: "run-test",
-      last_extraction_source: "live",
-      live_extraction_failures: 1,
-      cached_extraction_failures: 0
+    const [signal] = await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-legacy-id", surface_id: null,
+      turn_messages: messages
     });
-    // cache_key_prefix is the 12-char SHA-256 prefix the caching extractor
-    // recorded onto stats.lastCacheKey before the delegate threw.
-    expect(typeof dump.cache_key_prefix).toBe("string");
-    expect((dump.cache_key_prefix as string).length).toBe(12);
-    expect((dump.cache_key_prefix as string)).toMatch(/^[0-9a-f]{12}$/u);
-    expect(typeof dump.error_message).toBe("string");
-    // The seed-side dump receives the wrapped GardenProviderError (the
-    // OfficialApiGardenProvider maps the transport HTTP 500 onto
-    // "invalid_response"). The underlying HTTP 500 is in the provider-side
-    // dump's `response_status` field, not in the bench-side error_message
-    // string.
-    expect((dump.error_message as string)).toContain(
-      "Official garden provider returned an invalid response."
-    );
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: "I avoid any."
+    });
   });
 
-  it("does not write a dump when diagnosticDir is null (instrument disabled)", async () => {
-    const config: CompileSeedExtractionConfig = {
-      providerUrl: "https://example.test/v1",
-      model: "gpt-test-mini",
-      requestProfile: "provider-default-v1",
-      apiKey: "test-key"
-    };
-    const daemon: CompileSeedDaemon = {
-      proposeMemoryFromSignal: async () => ({
-        memoryId: "memory-1",
-        signalId: "signal-memory-1",
-        proposalId: "proposal-memory-1",
-        evidenceId: "evidence-memory-1",
-        truncated: false,
-        charsClipped: 0
-      }),
-      proposeMemoriesFromCompileSignals: async () => ({ seeds: [], dropped: [] }),
-      proposeSynthesis: async () => ({ synthesisId: null })
-    };
-    const runner = createCompileSeedRunner({
-      config,
+  it("uses the same changed-catalog key in preflight and the live provider", async () => {
+    writeExtractionCacheTestManifest({
       cacheRoot,
-      allowLiveExtraction: true,
-      diagnosticDir: null,
-      extractorFactory: () => ({
-        extract: async () => {
-          throw new Error("garden extraction HTTP 502");
-        }
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    const cacheKey = computeExtractionTurnCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source, turnMessages: messages }
+    );
+    writeCachedExtraction(cacheRoot, cacheKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: cacheKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
       })
     });
 
-    await expect(
-      runner.seedTurn({
-        daemon,
-        turnContent: "Another failing turn.",
-        evidenceRefBase: "q2-s0-t0",
-        seedIndex: 0,
-        workspaceId: "ws-test",
-        runId: "run-test"
-      })
-    ).rejects.toThrow();
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-preflight", surface_id: null,
+      turn_messages: messages
+    });
 
-    // diagnosticDir was created by beforeEach but never written to.
-    const dumpFiles = readdirSync(diagnosticDir).filter(
-      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
+    expect(delegate.extract).not.toHaveBeenCalled();
+  });
+
+  it("uses the same changed-catalog key without trusted turn messages", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise.";
+    const cacheKey = computeSourceTurnCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source }
     );
-    expect(dumpFiles).toHaveLength(0);
-    // The classification path still ran so liveExtractionFailures is bumped.
-    expect(runner.stats.liveExtractionFailures).toBe(1);
+    writeCachedExtraction(cacheRoot, cacheKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: cacheKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => providerBackedResult('{"signals":[]}'))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-text-only", surface_id: null,
+      turn_messages: []
+    });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
   });
 });
+
+function testCacheConfig(): CompileSeedExtractionConfig {
+  return {
+    model: "test-model",
+    modelFamily: "test-model",
+    providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+    requestProfile: "provider-default-v1",
+    apiKey: "test-key"
+  };
+}

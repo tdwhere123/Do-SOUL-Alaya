@@ -1,4 +1,4 @@
-import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
 
 /** A delivered top-1 gold diagnostic; override any field per case. */
 export const buildGoldDiagnostic = (

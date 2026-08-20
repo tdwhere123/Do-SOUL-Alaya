@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry, TopologyExplorationResult } from "@do-soul/alaya-protocol";
 import { GraphAuditorEventType } from "@do-soul/alaya-protocol";
-import { SoulTopologyAuditService } from "../../services/soul-topology-audit-service.js";
+import { SoulTopologyAuditService } from "../../services/soul/soul-topology-audit-service.js";
 
 describe("SoulTopologyAuditService", () => {
   it("delegates revision allocation to the event log repo instead of hardcoding it in the caller", async () => {

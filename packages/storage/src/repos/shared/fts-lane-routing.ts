@@ -1,14 +1,13 @@
-import type BetterSqlite3 from "better-sqlite3";
 import {
-  rankFtsLaneRows,
   tokenizeFtsQuery as tokenizeFtsQueryPolicy,
-  type FtsLaneHit,
   type FtsLaneRankRow
 } from "@do-soul/alaya-protocol";
 import {
   isCjkSegmentationCandidate,
   segmentCjkRun
 } from "./cjk-segmentation.js";
+import { parseRows } from "./parse-row.js";
+import { FtsLaneRankRowParser } from "./sqlite-row-schemas.js";
 
 export {
   CJK_SCRIPT_PATTERN,
@@ -53,15 +52,18 @@ function dedupeNonEmpty(tokens: readonly string[]): readonly string[] {
   return [...new Set(tokens.map((token) => token.trim()).filter((token) => token.length > 0))];
 }
 
-export function queryFtsLane(
-  statement: BetterSqlite3.Statement,
+export function queryFtsLaneRows(
+  statement: { all(...params: unknown[]): unknown },
   workspaceId: string,
   laneTokens: readonly string[],
   limit: number
-): readonly FtsLaneHit[] {
+): readonly FtsLaneRankRow[] {
   const matchExpression = buildWorkspaceScopedFtsMatch(workspaceId, laneTokens);
-  const rows = statement.all(workspaceId, matchExpression, limit) as readonly FtsLaneRankRow[];
-  return rankFtsLaneRows(rows);
+  return Object.freeze(parseRows(
+    statement.all(workspaceId, matchExpression, limit),
+    FtsLaneRankRowParser,
+    "fts lane rank row"
+  ));
 }
 
 export function tokenizeFtsQuery(queryText: string): readonly string[] {

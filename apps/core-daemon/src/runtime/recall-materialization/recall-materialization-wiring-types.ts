@@ -1,0 +1,105 @@
+import type {
+  BudgetBankruptcyService,
+  ClaimService,
+  DynamicsService,
+  EdgeProposalService,
+  EventPublisher,
+  EvidenceService,
+  GraphExploreService,
+  HealthJournalService,
+  ManifestationBudgetConfigProviderPort,
+  MemoryService,
+  ProjectMappingService,
+  SessionOverrideService,
+  SynthesisService,
+  TaskSurfaceBuilder,
+  PathFailureHealthInboxPort,
+  RecallFailureHealthInboxPort
+} from "@do-soul/alaya-core";
+import type { ContextDeliveryRecord } from "@do-soul/alaya-protocol";
+import type {
+  GlobalMemoryRecallCacheRepo,
+  GlobalMemoryRepo,
+  SqliteClaimFormRepo,
+  SqliteCoUsageCounterRepo,
+  SqliteDeferredObligationRepo,
+  SqliteEventLogRepo,
+  SqliteEvidenceCapsuleRepo,
+  SqliteHandoffGapRepo,
+  SqliteMemoryEntryRepo,
+  SqlitePathRelationRepo,
+  SqliteRelationAssertionRepo,
+  SqliteSoftAssociationPathRepo,
+  SqliteProposalRepo,
+  SqliteReconciliationLeaseRepo,
+  SqliteSignalRepo,
+  SqliteSlotRepo,
+  SqliteSourceGroundingDeferQueueRepo,
+  SqliteSynthesisCapsuleRepo,
+  StorageDatabase
+} from "@do-soul/alaya-storage";
+import type { AppConfigService } from "../../services/config/config-service.js";
+import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
+import type { RelationProjectionAdmissionMode } from "./relation-projection/mode.js";
+import type { RecallPathReadBind } from "../recall/recall-path-read-bind.js";
+
+export type CreateRecallMaterializationWiringInput = {
+  readonly database: StorageDatabase;
+  readonly pathReadBind?: RecallPathReadBind;
+  readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
+  readonly configEnv: ReadonlyMap<string, string>;
+  readonly rawConfigService: Pick<AppConfigService, "getRuntimeGardenComputeConfig">;
+  readonly eventLogRepo: SqliteEventLogRepo;
+  readonly eventPublisher: EventPublisher;
+  readonly runtimeNotifier: AlayaRuntimeNotifier;
+  readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  readonly healthJournalService: HealthJournalService;
+  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
+  readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly softAssociationPathRepo: SqliteSoftAssociationPathRepo;
+  readonly relationAssertionRepo: SqliteRelationAssertionRepo;
+  readonly manifestationBudgetConfigProvider: ManifestationBudgetConfigProviderPort;
+  readonly projectMappingService: ProjectMappingService;
+  readonly claimFormRepo: SqliteClaimFormRepo;
+  readonly coUsageCounterRepo: SqliteCoUsageCounterRepo;
+  readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
+  readonly synthesisCapsuleRepo: SqliteSynthesisCapsuleRepo;
+  readonly globalMemoryRepo: GlobalMemoryRepo | null;
+  readonly globalMemoryRecallCacheRepo: GlobalMemoryRecallCacheRepo | null;
+  readonly budgetBankruptcyService: BudgetBankruptcyService;
+  readonly budgetNow: () => string;
+  readonly slotRepo: SqliteSlotRepo;
+  readonly graphExploreService: GraphExploreService;
+  readonly sessionOverrideService: SessionOverrideService;
+  readonly taskSurfaceBuilder: TaskSurfaceBuilder;
+  readonly trustStateRecorder: {
+    findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
+  };
+  readonly edgeProposalService: EdgeProposalService;
+  readonly dynamicsService: DynamicsService;
+	  readonly memoryService: MemoryService;
+	  readonly proposalRepo: SqliteProposalRepo;
+	  readonly runLookup: {
+	    getById(runId: string): Promise<{ readonly workspace_id: string } | null>;
+	  };
+	  readonly reconciliationLeaseRepo: SqliteReconciliationLeaseRepo;
+  readonly deferredObligationRepo: SqliteDeferredObligationRepo;
+  readonly claimService: ClaimService;
+  readonly synthesisService: SynthesisService;
+  readonly enqueueEnrichPending: (params: {
+    readonly workspaceId: string;
+    readonly memoryId: string;
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  }) => void;
+  readonly sqliteHandoffGapRepo: SqliteHandoffGapRepo;
+  readonly signalRepo: SqliteSignalRepo;
+  readonly sourceGroundingDeferQueueRepo: SqliteSourceGroundingDeferQueueRepo;
+  readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
+  readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
+  readonly evidenceService: EvidenceService;
+  readonly fieldQuerySession: import("@do-soul/alaya-core").RecallFieldQuerySession;
+  readonly fieldComposition: import("../field/field-composition.js").DaemonFieldComposition;
+  readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")
+    .OpenSemanticFactorExtractionPort;
+};

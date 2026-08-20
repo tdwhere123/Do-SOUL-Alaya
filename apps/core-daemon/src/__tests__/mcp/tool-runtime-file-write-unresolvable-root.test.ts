@@ -40,7 +40,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { writeFile } = await import("../../mcp/tool-runtime-file-write-exec.js");
+const { writeFile } = await import("../../mcp/tool-runtime/tool-runtime-file-write-exec.js");
 
 describe("writeFile with an unresolvable writable root", () => {
   let realRoot: string;

@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   buildLongMemEvalEvidenceManifest,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceManifest
-} from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/provenance/evidence-manifest.js";
 import {
   makeShardDiagnostics,
   makeShardKpi,
@@ -18,9 +18,9 @@ import {
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { computeQuestionIdDigest } from "../../../longmemeval/selection/question-manifest.js";
-import { computeCohortAssignmentDigest } from "../../../longmemeval/selection/contract.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { computeQuestionIdDigest } from "../../../bench/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../../bench/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 import { syntheticExtractionClosure } from "../../longmemeval/extraction/extraction-closure-fixture.js";
 
@@ -171,6 +171,7 @@ function fixtureCodeProvenance(commitSha7: string) {
     gate_sha256: "a".repeat(64),
     gate_contract_path: "/tmp/frozen-contract.json",
     worktree_state_sha256: "b".repeat(64),
+    worktree_state_algorithm: "sha256-head-lf",
     worktree_clean: true,
     executed_dist: {
       algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -240,6 +241,8 @@ export async function setupShard(root: string, id: string, offset: number): Prom
     report_side_effects: undefined,
     questions: [{
       ...streamedQuestion(id),
+      gold_memory_ids: ["gold-a"],
+      gold_object_ids: ["gold-a"],
       hit_at_1: true,
       hit_at_5: true,
       hit_at_10: true,

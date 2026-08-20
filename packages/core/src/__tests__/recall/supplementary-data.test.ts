@@ -1,18 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
-import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
-import { withEmbeddingSimilarityScores } from "../../recall/coarse-filter/coarse-candidates.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
-  collectSupplementaryData,
-  SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY
-} from "../../recall/supplements/supplementary-data.js";
+  BankruptcyKind,
+  RuntimeMode
+} from "@do-soul/alaya-protocol";
+import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import { withEmbeddingSimilarityScores } from
+  "../../recall/coarse-filter/embedding/embedding-similarity-supplement.js";
+import { SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY } from "../../recall/supplements/supplementary-data.js";
+import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import {
-  createDependencies,
-  createMemoryEntry,
-  createTaskSurface
-} from "./recall-service-test-fixtures.js";
+  collectWith,
+  createEvidenceCapsule,
+  delay,
+  emptyGraphSupportPort,
+} from "./supplementary-data-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
+  it("seals an anchored query-time window into Selector state", async () => {
+    const supplementary = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "what happened in the last four months",
+      referenceTime: "2026-03-18T00:00:00.000Z"
+    });
+
+    expect(supplementary.queryTimeWindow).toEqual({
+      startMs: Date.UTC(2025, 11, 1),
+      endMs: Date.UTC(2026, 2, 19) - 1
+    });
+  });
+
   it("preserves finite zero embedding observations and rejects non-finite scores", async () => {
     const supplementary = await collectWith({
       candidates: [],
@@ -43,12 +60,10 @@ describe("collectSupplementaryData", () => {
     });
   });
 
-  // Coverage packing needs gist identity; diagnostics no longer gate the load.
   it("loads evidence gists for coverage selection even without diagnostic capture", async () => {
     const findByIds = vi.fn(async () => []);
     const candidate = createMemoryEntry({
-      object_id: "memory-evidence",
-      evidence_refs: ["evidence-1"]
+      object_id: "memory-evidence", evidence_refs: ["evidence-1"]
     });
 
     await collectWith({
@@ -74,6 +89,179 @@ describe("collectSupplementaryData", () => {
     // Still bounded to the evidence-FTS hit set (not every memory's full refs).
     expect(findByIds).toHaveBeenLastCalledWith("workspace-1", ["evidence-1"]);
     expect(findByIds).toHaveBeenCalledTimes(2);
+  });
+
+  it("projects the same direct-evidence owner document prepared by backfill", async () => {
+    const evidence = createEvidenceCapsule({
+      gist: "Conversation evidence gist.",
+      excerpt: "The original grounded conversation excerpt.",
+      source_hash: `sha256:garden-source-turn-fallback-v2:${"a".repeat(64)}`,
+      artifact_ref: "alaya:garden-turn-evidence:signal-1"
+    });
+    const candidate = createMemoryEntry({
+      object_id: "memory-grounded-evidence",
+      evidence_refs: [evidence.object_id]
+    });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds: vi.fn(async () => [evidence]),
+        findRecallQualifiedByIds: vi.fn(async () => [{
+          capsule: evidence,
+          verified_user_projection: false
+        }])
+      }
+    });
+
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
+      .toEqual([
+        {
+          evidenceRef: evidence.object_id,
+          documentIdentity: "owner",
+          content: evidence.excerpt,
+          projection: {
+            projection_id: null,
+            projection_kind: "owner",
+            matched_fact_key_forms: []
+          }
+        },
+        {
+          evidenceRef: evidence.object_id,
+          documentIdentity: "owner_gist_600",
+          content: evidence.gist,
+          projection: {
+            projection_id: null,
+            projection_kind: "owner",
+            matched_fact_key_forms: []
+          }
+        }
+      ]);
+
+    const gistOnly = createEvidenceCapsule({
+      object_id: "6c6b478a-3839-4a9b-833f-af2219281acc",
+      gist: "Only the grounded gist is available.",
+      excerpt: null,
+      source_hash: `sha256:garden-source-turn-fallback-v2:${"b".repeat(64)}`,
+      artifact_ref: "alaya:garden-turn-evidence:signal-2"
+    });
+    const gistOnlyResult = await collectWith({
+      candidates: [createMemoryEntry({ evidence_refs: [gistOnly.object_id] })],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds: vi.fn(async () => [gistOnly])
+      }
+    });
+    expect(Object.values(gistOnlyResult.evidenceSemanticDocumentsByMemoryId ?? {})[0])
+      .toEqual([expect.objectContaining({
+        documentIdentity: "owner_gist_600",
+        content: gistOnly.gist
+      })]);
+  });
+
+  it("collects proposed routing keys without promoting their authority", async () => {
+    const candidate = createMemoryEntry({ object_id: "memory-key" });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "What did Ada Lovelace work on?",
+      entityExtractionPort: {
+        extract: vi.fn(async () => [{
+          surface: "Ada Lovelace",
+          normalized: "ada lovelace",
+          kind: "proper_noun",
+          confidence: 0.9
+        }])
+      },
+      routingKeyProjectionPort: {
+        findByOwnerIds: vi.fn(async () => [{
+          owner_id: candidate.object_id,
+          owner_kind: "memory_entry",
+          source_signal_id: "signal-1",
+          independence_group: "source-event:event-1",
+          signal_kind: "potential_claim",
+          object_type: "fact",
+          reliability: 0.75,
+          proposed_entities: ["Ada Lovelace"],
+          proposed_preference: {
+            subject: null, predicate: null, object: null, category: null, polarity: null
+          },
+          temporal: { start: null, end: null, precision: null },
+          proposed_fact: "Ada worked on the analytical engine.",
+          source_version: "signal:signal-1:v1"
+        }])
+      }
+    });
+    const keys = result.routingKeysByOwnerIdentity?.get(
+      JSON.stringify(["memory_entry", candidate.object_id])
+    );
+
+    expect(keys?.map((key) => key.dimension)).toEqual(["entity", "semantic"]);
+    expect(keys?.every((key) => key.authority === "proposed_routing_only")).toBe(true);
+    expect(keys?.every((key) =>
+      key.independence_group === "source-event:event-1"
+    )).toBe(true);
+    expect(result.queryRoutingKeys?.some((key) =>
+      key.dimension === "entity" && key.normalized_value === "ada lovelace" &&
+      key.reliability === 0.9
+    )).toBe(true);
+    expect(result.keyActivationByOwnerIdentity?.get(
+      JSON.stringify(["memory_entry", candidate.object_id])
+    )?.proposal_activation).toBeCloseTo(0.675);
+  });
+
+  it("aggregates source-exact entity and relation producers into one query receipt", async () => {
+    const queryText = "Where did I buy a desk from IKEA?";
+    const result = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText,
+      entityExtractionPort: {
+        operator_id: "test_entity_parser_v1",
+        extract: async () => [{
+          surface: "IKEA",
+          normalized: "ikea",
+          kind: "proper_noun",
+          confidence: 0.9,
+          source_offset: [28, 32]
+        }]
+      },
+      queryFactFrameExtractionPort: {
+        operator_id: "test_query_frame_parser_v1",
+        extract: async () => [{
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "buy" },
+            { role: "value", text: "desk" },
+            { role: "qualifier", text: "IKEA" }
+          ]
+        }]
+      }
+    });
+
+    expect(result.queryFieldAttribution?.contributions).toHaveLength(2);
+    expect(result.queryFactFrameExtraction?.status).toBe("returned");
+    expect(result.queryFieldAttribution?.attributions).toEqual([
+      { query_atom_id: "lexical_term:buy", role: "relation" },
+      { query_atom_id: "lexical_term:ikea", role: "entity" }
+    ]);
+  });
+
+  it("keeps missing relation parsing capability explicit", async () => {
+    const result = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "Where did I buy a desk?"
+    });
+
+    expect(result.queryFactFrameExtraction).toEqual(expect.objectContaining({
+      status: "unavailable",
+      producer_operator_id: null,
+      frames: []
+    }));
   });
 
   it("bounds per-candidate graph support lookup concurrency", async () => {
@@ -202,6 +390,7 @@ describe("collectSupplementaryData", () => {
 
   it("preserves legacy graph results when the bulk read fails", async () => {
     const warn = vi.fn();
+    const degradationReasons = new Set<"graph_metrics_bulk_failed">();
     const candidate = createMemoryEntry({ object_id: "memory-a" });
     const graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]> = {
       countInboundSupports: vi.fn(async () => 0),
@@ -212,10 +401,16 @@ describe("collectSupplementaryData", () => {
       })
     };
 
-    const result = await collectWith({ candidates: [candidate], graphSupportPort, warn });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort,
+      warn,
+      degradationReasons
+    });
 
     expect(result.graphSupportCounts).toEqual({ "memory-a": 1.5 });
     expect(result.recallsEdgeCount).toBe(2);
+    expect(degradationReasons).toEqual(new Set(["graph_metrics_bulk_failed"]));
     expect(warn).toHaveBeenCalledWith(
       "bulk graph metrics lookup failed; using legacy lookups",
       expect.objectContaining({
@@ -226,57 +421,75 @@ describe("collectSupplementaryData", () => {
       })
     );
   });
+
+  it("invokes independent supplement ports in parallel without changing freeze shape", async () => {
+    const candidate = createMemoryEntry({
+      object_id: "memory-a",
+      evidence_refs: ["evidence-1"]
+    });
+    const started: string[] = [];
+    const release = new Map<string, () => void>();
+    const gate = (name: string) => new Promise<void>((resolve) => {
+      started.push(name);
+      release.set(name, resolve);
+    });
+    const countInboundRecallMetricsByMemoryId = vi.fn(async () => {
+      await gate("graph");
+      return new Map([["memory-a", { weightedEdgeCount: 1, recallCount: 2 }]]);
+    });
+    const getSnapshot = vi.fn(async () => {
+      await gate("budget");
+      return {
+        snapshot_at: "2026-03-23T00:00:00.000Z",
+        run_id: "run-1",
+        current_mode: RuntimeMode.LEAN,
+        bankruptcy_kind: BankruptcyKind.NONE,
+        pressure_ratio: 0,
+        trigger_summary: "ok",
+        active_dossier: null,
+        pending_proposal: null
+      };
+    });
+    const getStrengthByMemoryId = vi.fn(async () => {
+      await gate("plasticity");
+      return new Map([["memory-a", 0.5]]);
+    });
+    const findByIds = vi.fn(async () => {
+      await gate("evidence");
+      return [];
+    });
+
+    const pending = collectWith({
+      candidates: [candidate],
+      graphSupportPort: {
+        countInboundSupports: vi.fn(async () => 0),
+        countInboundEdgesWeighted: vi.fn(async () => 0),
+        countInboundRecalls: vi.fn(async () => 0),
+        countInboundRecallMetricsByMemoryId
+      },
+      budgetPenaltyPort: { getSnapshot },
+      pathPlasticityPort: { getStrengthByMemoryId },
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds
+      },
+      runId: "run-1",
+      coarseEvidenceFtsRanks: { "memory-a": 1 },
+      coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
+    });
+
+    await vi.waitFor(() => expect(started.sort()).toEqual(
+      ["budget", "evidence", "graph", "plasticity"].sort()
+    ));
+    for (const unlock of release.values()) unlock();
+    const result = await pending;
+
+    expect(countInboundRecallMetricsByMemoryId).toHaveBeenCalledTimes(1);
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+    expect(getStrengthByMemoryId).toHaveBeenCalledTimes(1);
+    expect(findByIds).toHaveBeenCalledTimes(1);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(result.graphSupportCounts).toEqual({ "memory-a": 1 });
+    expect(result.plasticityFactors).toEqual({ "memory-a": 0.5 });
+  });
 });
-
-async function collectWith(params: {
-  readonly candidates: Parameters<typeof collectSupplementaryData>[0]["candidates"];
-  readonly graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]>;
-  readonly warn?: RecallServiceDependencies["warn"];
-  readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
-  readonly captureAnswerFeatures?: boolean;
-  readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
-  readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
-}) {
-  const { dependencies } = createDependencies([]);
-  const service = new RecallService(dependencies);
-  return await collectSupplementaryData({
-    dependencies: {
-      ...dependencies,
-      graphSupportPort: params.graphSupportPort,
-      evidenceSearchPort: params.evidenceSearchPort
-    },
-    warn: params.warn ?? (() => undefined),
-    candidates: params.candidates,
-    workspaceId: "workspace-1",
-    runId: null,
-    queryText: null,
-    queryProbes: compileRecallQueryProbes(null),
-    policy: service.buildDefaultPolicy("chat", createTaskSurface().runtime_id),
-    coarseFtsRanks: {},
-    coarseTrigramFtsRanks: {},
-    coarseSynthesisFtsRanks: {},
-    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks ?? {},
-    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef ?? {},
-    coarseSourceProximityScores: {},
-    coarseSourceCohortKeys: {},
-    coarseStructuralScores: {},
-    coarseGraphExpansionScores: {},
-    coarseEntitySeedScores: {},
-    coarsePathExpansionScores: {},
-    coarsePathSuppressionScores: {},
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false
-  });
-}
-
-function emptyGraphSupportPort(): NonNullable<RecallServiceDependencies["graphSupportPort"]> {
-  return {
-    countInboundSupports: vi.fn(async () => 0),
-    countInboundEdgesWeighted: vi.fn(async () => 0)
-  };
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}

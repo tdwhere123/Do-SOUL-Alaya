@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   StorageTier,
+  RunMode,
+  RunState,
+  WorkspaceKind,
+  WorkspaceState,
   type EventLogEntry,
   type KarmaEvent,
   type MemoryEntry,
@@ -13,19 +17,12 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import {
-  RunMode,
-  RunState,
-  WorkspaceKind,
-  WorkspaceState
-} from "@do-soul/alaya-protocol";
 import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
 import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { buildEvidenceSupportVectors } from "../../recall/supplements/supplementary-data.js";
 import { computeIntegratedFloodScore } from "../../recall/scoring/integrated-flood-scoring.js";
 import { RECALL_FUSION_DEFAULT_WEIGHTS } from "../../recall/delivery/fusion-delivery-streams.js";
-import { resolveConformantEvidenceBeta } from "../../recall/scoring/conformant-fusion-scoring.js";
 import { resolvePolicy } from "../../recall/runtime/orchestration.js";
 import { matchesPrecomputedRankFilter } from "../../recall/runtime/recall-service-helpers.js";
 import type {
@@ -41,11 +38,6 @@ const RUN = "run-regression";
 const NOW = "2026-03-20T10:20:30.000Z";
 const QUERY = "how does staging rotate database credentials";
 
-const MANAGED_ENV = [
-  "ALAYA_RECALL_FACET_SLICE",
-  "ALAYA_RECALL_CONF_EVIDENCE_BETA"
-] as const;
-
 const databases = new Set<StorageDatabase>();
 
 afterEach(() => {
@@ -53,9 +45,6 @@ afterEach(() => {
     database.close();
   }
   databases.clear();
-  for (const name of MANAGED_ENV) {
-    delete process.env[name];
-  }
 });
 
 function createRealStorage(): SqliteMemoryEntryRepo {
@@ -155,6 +144,7 @@ function supplementary(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     evidenceSupportVectorsByMemoryId: buildEvidenceSupportVectors(entries),
     budgetPenaltyFactor: 0,
@@ -339,8 +329,7 @@ describe("formula and lifecycle regression net", () => {
     expect(candidate.fused_score).toBeCloseTo(candidate.per_axis_contribution!.object, 12);
   });
 
-  it("protects fuel gating: inactive reasons name missing slice, path, and evidence fuel", () => {
-    process.env.ALAYA_RECALL_FACET_SLICE = "1";
+  it("protects fuel gating: inactive reasons name missing path and evidence fuel", () => {
     const entry = createRecallFixtureEntry({
       object_id: "11111111-1111-4111-8111-111111111111",
       facet_tags: []
@@ -352,7 +341,7 @@ describe("formula and lifecycle regression net", () => {
         querySoughtFacets: ["location_place"]
       })
     });
-    expect(cold.diagnostics.slice_status).toBe("inactive:no_fuel");
+    expect(cold.diagnostics.slice_status).toBe("inactive:no_slice");
     expect(cold.diagnostics.path_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.evidence_status).toBe("inactive:pass_through");
     expect(cold.diagnostics.fuel_verified).toBe(false);
@@ -372,7 +361,7 @@ describe("formula and lifecycle regression net", () => {
     expect(warm.diagnostics.fuel_verified).toBe(true);
   });
 
-  it("protects formula assembly: evidence direct multiplier stays disabled until beta support fuel", () => {
+  it("protects formula assembly: evidence direct residual is additive and ungated from flood", () => {
     const entry = createRecallFixtureEntry({
       object_id: "33333333-3333-4333-8333-333333333333",
       evidence_refs: ["ev-a"]
@@ -394,7 +383,11 @@ describe("formula and lifecycle regression net", () => {
       })
     });
     expect(result.diagnostics.fuel_verified).toBe(false);
-    expect(result.score).toBeCloseTo(0.25, 12);
+    expect(result.diagnostics.e_direct_status).toBe("active");
+    expect(result.score).toBeCloseTo(
+      0.25 + 0.8 * (1 - 0.25),
+      12
+    );
 
     const withPathFuel = computeIntegratedFloodScore({
       entry,
@@ -404,18 +397,26 @@ describe("formula and lifecycle regression net", () => {
         pathInflowByTarget: inflow
       })
     });
-    expect(resolveConformantEvidenceBeta()).toBe(0);
-    expect(withPathFuel.diagnostics.e_direct_status).toBe("inactive:beta_disabled");
-    expect(withPathFuel.diagnostics.beta).toBe(0);
+    expect(withPathFuel.diagnostics.e_direct_status).toBe("active");
+    expect(withPathFuel.diagnostics.beta).toBe(1);
     expect(withPathFuel.score).toBeCloseTo(withPathFuel.diagnostics.final_score, 12);
-    const withoutMultiplier =
+    const lGate = 1 - withPathFuel.diagnostics.R_obj;
+    const expected =
       withPathFuel.diagnostics.R_obj +
+      withPathFuel.diagnostics.E_direct * lGate +
       withPathFuel.diagnostics.lambda *
         withPathFuel.diagnostics.omega *
         withPathFuel.diagnostics.Flood *
-        (1 - withPathFuel.diagnostics.R_obj);
-    expect(withPathFuel.score).toBeCloseTo(withoutMultiplier, 9);
-    expect(withPathFuel.score).not.toBeCloseTo(withoutMultiplier * (1 + 0.8), 6);
+        lGate;
+    expect(withPathFuel.score).toBeCloseTo(Math.min(1, expected), 9);
+    expect(withPathFuel.score).not.toBeCloseTo(
+      (withPathFuel.diagnostics.R_obj +
+        withPathFuel.diagnostics.lambda *
+          withPathFuel.diagnostics.omega *
+          withPathFuel.diagnostics.Flood *
+          lGate) * (1 + 0.8),
+      6
+    );
   });
 
   it("protects temporal/control placement: integrated flood target path does not add +T/+C", async () => {

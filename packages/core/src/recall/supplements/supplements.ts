@@ -1,4 +1,5 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { NO_STORED_VECTORS_DEGRADATION_REASON } from "../../embedding-recall/constants.js";
 import type {
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
@@ -152,6 +153,9 @@ export async function collectSynthesisCoarseCandidates(params: {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly policy: Readonly<RecallPolicy>;
+  readonly retrievalFieldBundle: Readonly<
+    import("../field/retrieval/retrieval-field-bundle.js").RecallRetrievalFieldBundle
+  >;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }): Promise<Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -172,6 +176,7 @@ export async function collectSynthesisCoarseCandidates(params: {
       queryText: params.queryText,
       queryProbes: params.queryProbes,
       synthesisSearchPort,
+      retrievalFieldBundle: params.retrievalFieldBundle,
       limit
     });
   } catch (error) {
@@ -349,7 +354,7 @@ async function precheckStoredVectorsForEmbeddingSupplement(
     : Object.freeze({
         handle: null,
         storedVectors: null,
-        degradedReason: null,
+        degradedReason: NO_STORED_VECTORS_DEGRADATION_REASON,
         preparedSupplementSupported: true
       });
 }

@@ -8,6 +8,8 @@ import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { MemoryDimensionSchema } from "./memory-entry.js";
 import { ControlPlaneObjectKind, ScopeClassSchema } from "./object-kind.js";
 
+export const MAX_TEMPORAL_RECALL_CANDIDATES = 500;
+
 export const DeterministicMatchConfigSchema = z
   .object({
     scope_filter: z.array(ScopeClassSchema).readonly().nullable(),
@@ -29,6 +31,8 @@ export const SemanticSupplementConfigSchema = z
   .object({
     enabled: z.boolean(),
     max_supplement: NonNegativeIntSchema,
+    // Optional shadow observation ceiling. Admission remains at max_supplement.
+    field_observation_max_depth: NonNegativeIntSchema.optional(),
     embedding_enabled: z.boolean().optional(),
     // Pure-semantic coarse-injection cap (pool-external, zero-lexical-overlap
     // neighbors the embedding stream injects) and the cosine floor gating them.
@@ -61,7 +65,6 @@ export const RecallBudgetsSchema = z
 export const FineAssessmentConfigSchema = z
   .object({
     budgets: RecallBudgetsSchema,
-    max_candidates: NonNegativeIntSchema.optional(),
     conflict_awareness: z.boolean()
   })
   .strict()

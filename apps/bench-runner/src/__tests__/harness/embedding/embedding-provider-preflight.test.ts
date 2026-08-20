@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const embedTexts = vi.fn(async () => [[0.25, 0.75]]);
 
-vi.mock("@do-soul/alaya-core", () => ({
+vi.mock("@do-soul/alaya-core", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@do-soul/alaya-core")>(),
   LocalOnnxEmbeddingClient: class {
     readonly modelId = "test-local-onnx";
     readonly embedTexts = embedTexts;

@@ -1,8 +1,60 @@
 import { z } from "zod";
-import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
+import {
+  QueryOsfSemanticCompletenessReceiptSchema,
+  RecallOriginPlaneSchema
+} from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
-import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
+import { refuseRetiredLocalCrossEncoderTreatment } from
+  "../strict-treatment-config.js";
+import {
+  RecallAnswerShapePlanSchema,
+  RecallAnswerSupportObservationSchema,
+  RecallCandidateAnswerSupportSchema,
+  RecallDeepHeadTraceSchema
+} from "./answer-trace-schema.js";
+import { CandidateActivationReceiptSchema } from
+  "./answer-trace/semantic-activation-schema.js";
+import {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  RecallMultiSeedGraphFanInDiagnosticsSchema,
+  RecallPacketPlanTraceSchema
+} from "./recall-diagnostics-support-schema.js";
+import { EvidenceEmbeddingDiagnosticsSchemaShape } from
+  "./evidence/evidence-scoring-schema.js";
+import {
+  RecallFloodEdgeTraceV1Schema,
+  RecallH1FuelCoverageSchemaShape,
+  RecallH1MaxProductSchema,
+  RecallH1OverlaySchema,
+  validateRecallH1FloodOverlayRelationship
+} from "./h1/recall-h1-diagnostics-schema.js";
+import { RecallCandidateSelectorObservationSchema } from
+  "./candidate-selector-observation-schema.js";
+import { FieldProjectionTraceSchema, RecallQueryConditionParitySchema } from
+  "./field/field-projection-diagnostics-schema.js";
+import {
+  RecallAdmissionAttemptDiagnosticSchema,
+  RecallEvidenceProjectionMatchReceiptSchema
+} from "./candidate-projection-diagnostics-schema.js";
+import { RecallFieldRefinementStopCertificateSchema, RecallFiniteFieldChannelCaptureSchema,
+  RecallQueryEntityExtractionCaptureSchema, RecallQueryFactFrameExtractionCaptureSchema,
+  RecallRetrievalFieldRefinementReceiptSchema } from "./field-capture-schema.js";
+import { OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompatibilityTraceSchema,
+  OpenSemanticFactorCompositionReceiptSchema, OpenSemanticFactorFormationCaptureSchema } from
+  "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
+export { RecallEvidenceProjectionMatchReceiptSchema } from
+  "./candidate-projection-diagnostics-schema.js";
+export {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  BenchEvidenceEmbeddingFailureClassSchema,
+  BenchEvidenceEmbeddingStatusSchema
+} from "./recall-diagnostics-support-schema.js";
+export { EvidenceCandidateScoringSelectionReceiptSchema } from
+  "./evidence/evidence-scoring-schema.js";
 
+const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
 const RecallFusionStreamRankSchema = z
   .object({
     lexical_fts: z.number().int().positive().nullable(),
@@ -21,7 +73,7 @@ const RecallFusionStreamRankSchema = z
     path_expansion: z.number().int().positive().nullable(),
     temporal_recency: z.number().int().positive().nullable(),
     workspace_activation: z.number().int().positive().nullable(),
-    facet_overlap: z.number().int().positive().nullable()
+    facet_overlap: z.number().int().positive().nullable().optional()
   })
   .strict()
   .readonly();
@@ -44,7 +96,7 @@ const RecallFusionStreamContributionSchema = z
     path_expansion: z.number().min(0),
     temporal_recency: z.number().min(0),
     workspace_activation: z.number().min(0),
-    facet_overlap: z.number().min(0)
+    facet_overlap: z.number().min(0).optional()
   })
   .strict()
   .readonly();
@@ -55,40 +107,6 @@ const RecallConformantAxisRankSchema = z
 
 const RecallConformantAxisContributionSchema = z
   .record(z.string(), z.number().min(0))
-  .readonly();
-
-const RecallFloodEdgeTraceV1Schema = z
-  .object({
-    schema_version: z.literal(1),
-    path_id: z.string().min(1),
-    relation_kind: z.string().min(1),
-    seed_object_id: z.string().min(1),
-    target_object_id: z.string().min(1),
-    input_potential: z.number().min(0),
-    edge_conductance: z.number(),
-    slice_compatibility: z.enum([
-      "not_evaluated",
-      "no_query_key",
-      "missing_source_key",
-      "missing_target_key",
-      "missing_source_and_target_key",
-      "no_slice_match",
-      "slice_match"
-    ]),
-    raw_transfer: z.number(),
-    capped_transfer: z.number().min(0),
-    decision: z.enum(["transferred", "rejected"]),
-    reason: z.enum([
-      "transferred",
-      "capped",
-      "self_loop",
-      "missing_edge_provenance",
-      "missing_or_zero_input",
-      "non_positive_conductance",
-      "no_slice_match"
-    ])
-  })
-  .strict()
   .readonly();
 
 const RecallIntegratedFloodCandidateDiagnosticsSchema = z
@@ -109,9 +127,13 @@ const RecallIntegratedFloodCandidateDiagnosticsSchema = z
     e_direct_status: z.string().min(1),
     fuel_verified: z.boolean(),
     edge_traces: z.array(RecallFloodEdgeTraceV1Schema).max(16).readonly().optional(),
-    edge_trace_truncated_count: z.number().int().nonnegative().optional()
+    edge_trace_truncated_count: z.number().int().nonnegative().optional(),
+    score_mode: z.literal("rrf_seeded_h1_max_product").optional(),
+    h1_max_product: RecallH1MaxProductSchema.optional(),
+    h1_overlay: RecallH1OverlaySchema.optional()
   })
   .strict()
+  .superRefine(validateRecallH1FloodOverlayRelationship)
   .readonly();
 
 const RecallFloodFuelCoverageSummarySchema = z
@@ -121,7 +143,8 @@ const RecallFloodFuelCoverageSummarySchema = z
     fuel_verified_count: z.number().int().nonnegative(),
     slice_active_count: z.number().int().nonnegative(),
     path_active_count: z.number().int().nonnegative(),
-    evidence_active_count: z.number().int().nonnegative()
+    evidence_active_count: z.number().int().nonnegative(),
+    ...RecallH1FuelCoverageSchemaShape
   })
   .strict()
   .readonly();
@@ -162,7 +185,11 @@ export const RecallCandidateAnswerFeaturesSchema = z
     preference_predicate: z.string().nullable(),
     preference_object: z.string().nullable(),
     preference_category: z.string().nullable(),
-    preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable()
+    preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable(),
+    answer_support: RecallCandidateAnswerSupportSchema.nullable().optional(),
+    answer_support_observations: z.array(
+      RecallAnswerSupportObservationSchema
+    ).readonly().optional()
   })
   .strict()
   .readonly();
@@ -171,7 +198,7 @@ const RecallCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     object_id: z.string().min(1),
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: RecallDiagnosticObjectKindSchema,
     created_at: z.string().min(1).optional(),
     facet_overlap: z.number().int().nonnegative().optional(),
     dimension: z.string().min(1).optional(),
@@ -181,6 +208,10 @@ const RecallCandidateDiagnosticSchema = z
     plane_winning_admission: z.string().min(1),
     pre_budget_rank: z.number().int().positive(),
     selection_order: z.number().int().positive(),
+    admission_attempts: z.array(RecallAdmissionAttemptDiagnosticSchema).readonly().default([]),
+    evidence_projection_matches: z.array(
+      RecallEvidenceProjectionMatchReceiptSchema
+    ).readonly().default([]),
     fused_rank: z.number().int().positive(),
     fused_score: z.number().min(0),
     answer_relevance_score: z.number().min(0).max(1).optional(),
@@ -205,6 +236,10 @@ const RecallCandidateDiagnosticSchema = z
     source_channels: z.array(z.string().min(1)).readonly(),
     path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
     answer_features: RecallCandidateAnswerFeaturesSchema.nullable().default(null),
+    deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
+    coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
+    selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
+    semantic_activation: CandidateActivationReceiptSchema.optional(),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),
@@ -226,7 +261,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     origin_plane: RecallOriginPlaneSchema,
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: RecallDiagnosticObjectKindSchema,
     object_id: z.string().min(1),
     coarse_index: z.number().int().nonnegative(),
     drop_reason: z.literal("fine_assessment_cap")
@@ -234,12 +269,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .strict()
   .readonly();
 
-// invariant: mirrors RecallTokenEconomy from
-// packages/core/src/recall/recall-service-types.ts. The bench harness captures
-// these per-recall figures so the longmemeval / locomo KPI summaries can
-// aggregate p50 / p95 / mean across questions. Measure-only — no field
-// gates ranking or admission.
-// see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
+// Mirrors core token-economy telemetry for measure-only run aggregation.
 export const RecallTokenEconomySchema = z
   .object({
     delivered_context_tokens_estimate: z.number().int().nonnegative(),
@@ -271,36 +301,16 @@ const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
 
 const RecallDegradationReasonSchema = z.enum([
   "evidence_fts_failed",
+  "evidence_candidate_embedding_failed",
   "synthesis_fts_failed",
   "embedding_coarse_injection_failed",
   "graph_expansion_failed",
-  "path_expansion_failed"
+  "path_expansion_failed",
+  "packet_plan_trace_capture_failed",
+  "entity_seed_lookup_failed",
+  "evidence_context_bulk_failed",
+  "graph_metrics_bulk_failed"
 ]);
-
-export const BenchAnswerRerankStatusSchema = z.enum([
-  "not_requested",
-  "not_applicable",
-  "returned",
-  "failed"
-]);
-
-export const BenchAnswerRerankFailureClassSchema = z.enum([
-  "invalid_score_count",
-  "invalid_score_value",
-  "service_error"
-]);
-
-// see also: packages/core/src/recall/recall-service-types.ts
-//   RecallMultiSeedGraphFanInDiagnostics
-const RecallMultiSeedGraphFanInDiagnosticsSchema = z
-  .object({
-    distinct_seeds: z.number().int().nonnegative(),
-    candidates_per_seed_p50: z.number().nonnegative(),
-    candidates_per_seed_p95: z.number().nonnegative(),
-    dedup_collisions: z.number().int().nonnegative()
-  })
-  .strict()
-  .readonly();
 
 export const BenchRecallDiagnosticsSchema = z
   .object({
@@ -327,16 +337,39 @@ export const BenchRecallDiagnosticsSchema = z
       })
       .strict()
       .readonly(),
+    retrieval_field_captures: z.array(RecallFiniteFieldChannelCaptureSchema).readonly().optional(),
+    retrieval_field_refinement_receipts:
+      z.array(RecallRetrievalFieldRefinementReceiptSchema).readonly().optional(),
+    field_refinement_stop_certificate:
+      RecallFieldRefinementStopCertificateSchema.optional(),
+    query_condition: RecallQueryConditionParitySchema.optional(),
+    query_entity_extraction: RecallQueryEntityExtractionCaptureSchema.optional(),
+    query_fact_frame_extraction:
+      RecallQueryFactFrameExtractionCaptureSchema.optional(),
+    query_open_semantic_factor_formation:
+      OpenSemanticFactorFormationCaptureSchema.optional(),
+    query_open_semantic_factor_completeness_receipt:
+      QueryOsfSemanticCompletenessReceiptSchema.optional(),
+    open_semantic_factor_compatibility_trace:
+      OpenSemanticFactorCompatibilityTraceSchema.optional(),
+    open_semantic_factor_composition:
+      OpenSemanticFactorCompositionReceiptSchema.optional(),
+    open_semantic_factor_activation:
+      OpenSemanticFactorActivationReceiptSchema.optional(),
+    answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),
     candidate_pool_count: z.number().int().nonnegative(),
     pre_budget_count: z.number().int().nonnegative(),
     delivered_count: z.number().int().nonnegative(),
+    packet_plan_trace: RecallPacketPlanTraceSchema.optional(),
+    field_projection_trace: FieldProjectionTraceSchema.optional(),
     embedding_provider_status: z.enum([
       "provider_returned",
       "provider_pending",
       "provider_failed",
-      "provider_not_requested"
+      "provider_not_requested",
+      "query_embedding_unusable"
     ]),
     embedding_supplement_status: z.enum([
       "disabled",
@@ -346,6 +379,7 @@ export const BenchRecallDiagnosticsSchema = z
       "not_attempted",
       "requested"
     ]).optional(),
+    ...EvidenceEmbeddingDiagnosticsSchemaShape,
     provider_degradation_reason: z.string().nullable(),
     answer_rerank_status: BenchAnswerRerankStatusSchema,
     answer_rerank_expected_count: z.number().int().nonnegative(),
@@ -362,9 +396,6 @@ export const BenchRecallDiagnosticsSchema = z
       RecallGraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:
       RecallGraphExpansionPlaneCountPerEdgeTypeSchema,
-    // Optional. Present when entity-derived seeds drove graph fan-in for
-    // this recall. see also: packages/core/src/recall/recall-service-types.ts
-    //   RecallMultiSeedGraphFanInDiagnostics
     multi_seed_graph_fan_in:
       RecallMultiSeedGraphFanInDiagnosticsSchema.optional(),
     fusion_breakdown: z
@@ -373,10 +404,9 @@ export const BenchRecallDiagnosticsSchema = z
           .object({
             candidate_key: z.string().min(1),
             object_id: z.string().min(1),
-            object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+            object_kind: RecallDiagnosticObjectKindSchema,
             origin_plane: RecallOriginPlaneSchema,
-            // Mirrors RecallFusionBreakdown.facet_overlap from core diagnostics.
-            facet_overlap: z.number().int().nonnegative(),
+            facet_overlap: z.number().int().nonnegative().optional(),
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),
             fused_score: z.number().min(0),
@@ -397,19 +427,9 @@ export const BenchRecallDiagnosticsSchema = z
     candidates: z.array(RecallCandidateDiagnosticSchema).readonly(),
     fine_assessment_pruned_candidates:
       z.array(FineAssessmentPrunedCandidateDiagnosticSchema).readonly(),
-    // Optional only for legacy/malformed diagnostics. Current RecallService
-    // emits token_economy on normal and degraded recall paths, and the bench
-    // aggregator drops absent blocks instead of admitting a `{0,0,0,0,0}`
-    // record that biases run-level mean / p50 distributions downward.
-    // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy,
-    // packages/core/src/recall/recall-service.ts (call site), and packages/core/src/recall/recall-service-types.ts
-    // (RecallDiagnostics.token_economy doc-comment).
+    // Optional for legacy diagnostics; absent telemetry is dropped from aggregates.
     token_economy: RecallTokenEconomySchema.optional(),
-    // Optional wall-clock per recall phase, mirrored from
-    // packages/core/src/recall/recall-service-types.ts RecallDiagnostics.
-    // Bench keeps it as opaque numeric telemetry for offline bottleneck
-    // localization and must accept new phase keys without widening the rest of
-    // the diagnostics contract.
+    // Phase names remain open while the enclosing diagnostics contract stays strict.
     phase_latency_ms: z.record(z.string(), z.number().nonnegative()).readonly().optional()
   })
   .strict()
@@ -424,15 +444,8 @@ export function parseBenchRecallDiagnosticsForRun(
 ): BenchRecallDiagnostics {
   const diagnostics = BenchRecallDiagnosticsSchema.parse(value);
   assertBiEncoderRunActivation(diagnostics, env);
-  const crossEncoderEnabled = readOptionalTreatmentBoolean(
-    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  );
-  if (crossEncoderEnabled === true) {
-    assertCrossEncoderTreatmentActivation(diagnostics);
-  } else if (crossEncoderEnabled === false) {
-    assertCrossEncoderControlInactive(diagnostics);
-  }
+  refuseRetiredLocalCrossEncoderTreatment(env);
+  assertCrossEncoderControlInactive(diagnostics);
   return diagnostics;
 }
 
@@ -445,45 +458,6 @@ function assertCrossEncoderControlInactive(
     diagnostics.answer_rerank_scored_count !== 0 ||
     diagnostics.answer_rerank_failure_class !== null
   ) {
-    throw new Error("cross-encoder control activation failed: reranking was observed");
-  }
-}
-
-function assertCrossEncoderTreatmentActivation(
-  diagnostics: BenchRecallDiagnostics
-): void {
-  if (diagnostics.answer_rerank_status === "not_applicable") {
-    assertRerankNotApplicable(diagnostics);
-    return;
-  }
-  if (diagnostics.answer_rerank_status !== "returned") {
-    throw new Error(
-      `cross-encoder treatment activation failed: status ${diagnostics.answer_rerank_status}`
-    );
-  }
-  if (
-    diagnostics.answer_rerank_expected_count <= 0 ||
-    diagnostics.answer_rerank_scored_count !== diagnostics.answer_rerank_expected_count ||
-    diagnostics.answer_rerank_failure_class !== null
-  ) {
-    throw new Error(
-      `cross-encoder treatment activation failed: expected ${diagnostics.answer_rerank_expected_count} scores but received ${diagnostics.answer_rerank_scored_count}`
-    );
-  }
-}
-
-function assertRerankNotApplicable(diagnostics: BenchRecallDiagnostics): void {
-  const normalizedQuery = diagnostics.query_probes.normalized_query;
-  const emptyQuery = normalizedQuery === null || normalizedQuery.trim().length === 0;
-  const emptyPool = diagnostics.candidate_pool_count === 0;
-  if (
-    (!emptyQuery && !emptyPool) ||
-    diagnostics.answer_rerank_expected_count !== 0 ||
-    diagnostics.answer_rerank_scored_count !== 0 ||
-    diagnostics.answer_rerank_failure_class !== null
-  ) {
-    throw new Error(
-      "cross-encoder treatment activation failed: not_applicable for a non-empty query and candidate pool"
-    );
+    throw new Error("retired cross-encoder reranking was observed");
   }
 }

@@ -81,6 +81,40 @@ describe("relative temporal windows", () => {
     });
   });
 
+  it("parses bounded lookbacks and colloquial offsets", () => {
+    expect(parseRelativeTemporalTerm("last four months")).toEqual({
+      kind: "lookback",
+      unit: "month",
+      amount: 4
+    });
+    expect(parseRelativeTemporalTerm("past three weeks")).toEqual({
+      kind: "lookback",
+      unit: "week",
+      amount: 3
+    });
+    expect(parseRelativeTemporalTerm("a week ago")).toEqual({
+      kind: "offset",
+      unit: "week",
+      amount: -1
+    });
+    expect(parseRelativeTemporalTerm("a couple of days ago")).toEqual({
+      kind: "offset",
+      unit: "day",
+      amount: -2
+    });
+  });
+
+  it("parses an explicitly contextualized month without inventing a year", () => {
+    expect(parseRelativeTemporalTerm("in the month of February")).toEqual({
+      kind: "named_month",
+      month0: 1
+    });
+    expect(parseRelativeTemporalTerm("in February")).toEqual({
+      kind: "named_month",
+      month0: 1
+    });
+  });
+
   it("resolves month and season boundaries in UTC", () => {
     const monthTerm = parseRelativeTemporalTerm("last month");
     const seasonTerm = parseRelativeTemporalTerm("this summer");
@@ -132,6 +166,31 @@ describe("relative temporal windows", () => {
     });
   });
 
+  it("resolves lookbacks as bounded calendar buckets through the anchor day", () => {
+    const term = parseRelativeTemporalTerm("last four months");
+    if (term === null) throw new Error("expected lookback term");
+    expect(resolveRelativeTemporalWindow(term, Date.parse("2023-05-17T08:30:00Z"))).toEqual({
+      startMs: Date.UTC(2023, 1, 1),
+      endMs: Date.UTC(2023, 4, 18) - 1,
+      precision: "range"
+    });
+  });
+
+  it("resolves a named month to its most recent non-future occurrence", () => {
+    const term = parseRelativeTemporalTerm("in February");
+    if (term === null) throw new Error("expected named month term");
+    expect(resolveRelativeTemporalWindow(term, Date.parse("2023-05-17T08:30:00Z"))).toEqual({
+      startMs: Date.UTC(2023, 1, 1),
+      endMs: Date.UTC(2023, 2, 1) - 1,
+      precision: "month"
+    });
+    expect(resolveRelativeTemporalWindow(term, Date.parse("2023-01-17T08:30:00Z"))).toEqual({
+      startMs: Date.UTC(2022, 1, 1),
+      endMs: Date.UTC(2022, 2, 1) - 1,
+      precision: "month"
+    });
+  });
+
   it("anchors this and next winter correctly during January", () => {
     const anchor = Date.parse("2026-01-15T12:00:00Z");
     const current = parseRelativeTemporalTerm("this winter");
@@ -176,6 +235,17 @@ describe("absolute calendar expressions", () => {
 
   it("does not interpret identifier segments as bare years", () => {
     expect(extractTemporalTerms("memory 11111111-1111-4111-8111-111111111111")).toEqual([]);
+  });
+
+  it("extracts contextual months, lookbacks, and colloquial offsets", () => {
+    expect(extractTemporalTerms(
+      "first in the month of February, across the last four months, a couple of days ago"
+    )).toEqual([
+      "in the month of February",
+      "last four months",
+      "a couple of days ago"
+    ]);
+    expect(extractTemporalTerms("we may revisit March 2024")).toEqual(["March 2024"]);
   });
 
   it("rejects month precision outside the supported year range", () => {

@@ -7,11 +7,15 @@ import { releaseHardGateAllowsLatestPassing } from
 import { buildReleaseGradePublic, makeSeedExtractionPath } from
   "./release-gates-fixture.js";
 
-it("does not expose an object-only LongMemEval evidence capability mint", () => {
+it("does not expose an object-only LongMemEval evidence capability mint", async () => {
   expect(publicApi).not.toHaveProperty("verifyLongMemEvalReleaseEvidence");
   expect(publicApi).not.toHaveProperty("loadLongMemEvalReleaseEvidence");
   expect(publicApi).not.toHaveProperty("loadLongMemEvalReleaseEvidenceFromAuthority");
   expect(publicApi).not.toHaveProperty("createLongMemEvalReleaseEvidenceAuthority");
+
+  const authorityApi = await import("../../authority.js");
+  expect(authorityApi).toHaveProperty("createLongMemEvalReleaseEvidenceAuthority");
+  expect(authorityApi).toHaveProperty("loadLongMemEvalReleaseEvidenceFromAuthority");
 
   const payload = buildReleaseGradePublic(makeSeedExtractionPath());
   const forgedContext = {

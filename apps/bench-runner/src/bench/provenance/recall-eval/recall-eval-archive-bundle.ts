@@ -1,0 +1,241 @@
+import type { KpiPayload } from "@do-soul/alaya-eval";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import {
+  buildLongMemEvalEvidenceManifest,
+  LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
+  renderLongMemEvalEvidenceManifest,
+  type LongMemEvalEvidenceArtifactInput
+} from "../evidence-manifest.js";
+import type { RecallEvalQuestionResult } from "../../lifecycle/recall-eval/recall-eval-contract.js";
+import type { RecallEvalRuntimeAttribution } from "../../lifecycle/recall-eval/recall-eval-runtime.js";
+import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
+import {
+  RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME
+} from "./recall-eval-diagnostics.js";
+import {
+  RECALL_EVAL_RANK_IDENTITY_FILENAME,
+  renderRecallEvalRankIdentity
+} from "./recall-eval-rank-identity.js";
+import {
+  LONGMEMEVAL_RUN_PROVENANCE_FILENAME,
+  renderLongMemEvalRunProvenance,
+  type LongMemEvalRunProvenance
+} from "../run.js";
+import {
+  resolveBenchDiagnosticsArtifactRoot
+} from "../../diagnostics/artifacts/diagnostics-artifacts.js";
+import {
+  prepareDiagnosticsArtifactStagingPath,
+  type StagedDiagnosticsArtifact
+} from "../../measurement/artifact-transaction.js";
+import type { WarmDerivedSnapshotBinding } from
+  "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+import type { RecallEvalSelectionBoundaryBinding } from
+  "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
+import type { RecallEvalDiagnosticsSpool } from "./recall-eval-diagnostics-spool.js";
+
+export interface RecallEvalArchiveBundle {
+  readonly sidecars: readonly { readonly filename: string; readonly contents: string }[];
+  readonly diagnosticsFilename: string;
+  readonly diagnosticsArtifact: StagedDiagnosticsArtifact & {
+    readonly identity: { readonly sha256: string; readonly bytes: number };
+  };
+}
+
+export interface RecallEvalArchiveInput {
+  readonly slug: string;
+  readonly historyRoot: string;
+  readonly payload: KpiPayload;
+  readonly report: string;
+  readonly findings: string | null;
+  readonly collected: readonly RecallEvalQuestionResult[];
+  readonly manifest: LongMemEvalSnapshotManifest;
+  readonly runtimeAttribution: RecallEvalRuntimeAttribution;
+  readonly offset: number;
+  readonly limit: number | null;
+  readonly runProvenance: LongMemEvalRunProvenance;
+  readonly expectedQuestionIdDigest: string;
+  readonly provenanceComplete: boolean;
+  readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
+  readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
+  readonly selectionBoundary?: RecallEvalSelectionBoundaryBinding;
+  readonly diagnosticsSpool: RecallEvalDiagnosticsSpool;
+}
+
+export async function buildRecallEvalArchiveBundle(
+  input: RecallEvalArchiveInput
+): Promise<RecallEvalArchiveBundle> {
+  const rankIdentity = renderRankIdentity(input);
+  const runProvenance = renderRunProvenance(input);
+  const diagnostics = await stageRecallEvalDiagnostics(input);
+  try {
+    const artifacts = buildArtifactInputs(
+      input, rankIdentity, runProvenance, diagnostics.identity
+    );
+    const evidence = buildLongMemEvalEvidenceManifest({
+      profile: "recall_eval", run: buildRunBinding(input), artifacts
+    });
+    return {
+      sidecars: [
+        { filename: RECALL_EVAL_RANK_IDENTITY_FILENAME, contents: rankIdentity },
+        { filename: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: runProvenance },
+        {
+          filename: LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
+          contents: renderLongMemEvalEvidenceManifest(evidence)
+        }
+      ],
+      diagnosticsFilename: RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
+      diagnosticsArtifact: {
+        ...diagnostics.artifact,
+        identity: diagnostics.identity
+      }
+    };
+  } catch (error) {
+    try {
+      await rm(diagnostics.artifact.stagedPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "recall-eval archive assembly failed"
+      );
+    }
+    throw error;
+  }
+}
+
+async function stageRecallEvalDiagnostics(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
+) {
+  const artifactRoot = resolveBenchDiagnosticsArtifactRoot(input.historyRoot);
+  const stagedPath = await prepareDiagnosticsArtifactStagingPath(
+    artifactRoot, `${input.slug}-recall-eval`
+  );
+  const finalPath = path.join(
+    artifactRoot, "public", input.slug, RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME
+  );
+  const runtime = {
+    embeddingSupplement: input.runtimeAttribution.embedding_supplement,
+    answerRerank: input.runtimeAttribution.answer_rerank
+  };
+  const identity = await writeStagedRecallEvalDiagnostics(
+    input, stagedPath, runtime
+  );
+  return { identity, artifact: { stagedPath, finalPath } };
+}
+
+async function writeStagedRecallEvalDiagnostics(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0],
+  stagedPath: string,
+  runtime: Readonly<{
+    embeddingSupplement: RecallEvalRuntimeAttribution["embedding_supplement"];
+    answerRerank: RecallEvalRuntimeAttribution["answer_rerank"];
+  }>
+) {
+  try {
+    return await input.diagnosticsSpool.writeGzipArtifact(stagedPath, {
+      retainedQuestions: input.collected,
+      ...runtime
+    });
+  } catch (primaryError) {
+    try {
+      await rm(stagedPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [primaryError, cleanupError],
+        "recall-eval diagnostics staging failed"
+      );
+    }
+    throw primaryError;
+  }
+}
+
+function renderRankIdentity(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
+): string {
+  return renderRecallEvalRankIdentity(input.collected.map((question) => ({
+    questionId: question.questionId,
+    deliveredObjects: question.diagnostics.delivered_results.map((result) => ({
+      object_id: result.object_id,
+      object_kind: result.object_kind ?? "memory_entry"
+    }))
+  })), {
+    expectedQuestionCount: input.manifest.question_count,
+    expectedQuestionIdDigest: input.manifest.question_id_digest ?? null,
+    requireFullSnapshotMatch:
+      input.manifest.attribution?.status === "attributed" &&
+      input.offset === 0 && input.limit === null,
+    ...(input.derivedEvidenceProjectionRebuild === undefined
+      ? {}
+      : {
+          derivedEvidenceProjectionRebuild:
+            input.derivedEvidenceProjectionRebuild
+        }),
+    ...(input.warmDerivedSnapshot === undefined
+      ? {}
+      : { warmDerivedSnapshot: input.warmDerivedSnapshot }),
+    ...(input.selectionBoundary === undefined
+      ? {}
+      : { selectionBoundary: input.selectionBoundary })
+  });
+}
+
+function renderRunProvenance(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
+): string {
+  return renderLongMemEvalRunProvenance(input.runProvenance);
+}
+
+function buildArtifactInputs(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0],
+  rankIdentity: string,
+  runProvenance: string,
+  diagnosticsIdentity: { readonly sha256: string; readonly bytes: number }
+): readonly LongMemEvalEvidenceArtifactInput[] {
+  return [
+    { role: "kpi", path: "kpi.json", contents: `${JSON.stringify(input.payload, null, 2)}\n` },
+    { role: "report", path: "report.md", contents: input.report },
+    ...(input.findings === null ? [] : [
+      { role: "findings" as const, path: "findings.md", contents: input.findings }
+    ]),
+    { role: "rank_identity", path: RECALL_EVAL_RANK_IDENTITY_FILENAME, contents: rankIdentity },
+    { role: "run_provenance", path: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: runProvenance },
+    {
+      role: "recall_eval_diagnostics",
+      path: RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
+      identity: diagnosticsIdentity
+    }
+  ];
+}
+
+function buildRunBinding(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
+) {
+  const datasetSha = input.payload.dataset.checksum_sha256;
+  if (datasetSha === undefined || !/^[a-f0-9]{64}$/u.test(datasetSha)) {
+    throw new Error("recall-eval evidence requires a bound dataset SHA-256");
+  }
+  const questionIdDigest = snapshotQuestionIdDigest(input.collected);
+  if (questionIdDigest !== input.expectedQuestionIdDigest) {
+    throw new Error("recall-eval evidence question slice drift");
+  }
+  return {
+    slug: input.slug,
+    bench_name: input.payload.bench_name,
+    split: input.payload.split,
+    run_at: input.payload.run_at,
+    alaya_commit: input.payload.alaya_commit,
+    dataset_sha256: datasetSha,
+    selection_manifest_sha256: null,
+    question_id_digest: questionIdDigest,
+    ...(input.payload.selection_contract === undefined
+      ? {}
+      : { selection_contract: input.payload.selection_contract }),
+    candidate_pool_complete: input.collected.length === input.payload.evaluated_count &&
+      input.collected.every((question) => question.diagnostics.candidate_pool_complete),
+    provenance_complete: input.provenanceComplete
+  };
+}

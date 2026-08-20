@@ -25,9 +25,23 @@ export {
   type RelationAssertionRepo
 } from "./relation-assertion-repo.js";
 export {
+  assertRelationProjectionCurrent,
+  isLegacyPathIndexUnbound,
+  isRelationProjectionReadable
+} from "./relation-assertion/projection-reader.js";
+export {
+  digestRelationFormationEventSource,
+  type RelationFormationEventSource
+} from "./relation-assertion/source-digest.js";
+export {
   SqliteTemporalPathProjectionReader,
+  TemporalProjectionGenerationMissingError,
   type TemporalProjectionReadOptions
 } from "./temporal-path-projection-reader.js";
+export {
+  SqliteSoftAssociationPathRepo,
+  type SoftAssociationPathReadOptions
+} from "./soft-association/index.js";
 export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,

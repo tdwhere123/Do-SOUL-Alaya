@@ -6,7 +6,9 @@ import {
   SqliteMemoryEntryRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { LocalOnnxEmbeddingClient } from "@do-soul/alaya-core";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
+import { LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR } from "../../ai/daemon-embedding-runtime-config.js";
 
 type RuntimeInput = Parameters<typeof createDaemonEmbeddingRuntime>[0];
 type HealthSvc = RuntimeInput["healthJournalService"];
@@ -87,6 +89,18 @@ function teardown(fixture: RuntimeFixture): void {
   fixture.database.close();
 }
 
+function createReadyLocalProvider(
+  embedTexts: () => Promise<readonly Float32Array[]> = async () => [new Float32Array([1])]
+) {
+  return {
+    providerKind: "local_onnx" as const,
+    modelId: "local/test-model",
+    schemaVersion: 1,
+    isAvailable: true,
+    embedTexts
+  };
+}
+
 const SAVED_ENV: Record<string, string | undefined> = {};
 const MANAGED_KEYS = [
   "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
@@ -131,7 +145,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
           eventLogRepo: fixture.eventLogRepo,
           healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
           memoryEntryRepo: fixture.memoryEntryRepo,
-          warn: fixture.warn as unknown as WarnFn
+          warn: fixture.warn as unknown as WarnFn,
+          embeddingProviderOverride: createReadyLocalProvider()
         });
 
         expect(defaultPolicyDecorator).toBeDefined();
@@ -169,7 +184,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         eventLogRepo: fixture.eventLogRepo,
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
-        warn: fixture.warn as unknown as WarnFn
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: createReadyLocalProvider()
       });
 
       expect(defaultPolicyDecorator).toBeDefined();
@@ -192,14 +208,14 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       expect(semantic.enabled).toBe(true);
       expect(semantic.injection_cap).toBe(3);
       expect(semantic.injection_similarity_floor).toBe(0.8);
-      expect(decorated.fine_assessment.max_candidates).toBe(113);
+      expect(decorated.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();
     }
   });
 
-  it("preserves an explicit larger fine budget and remains idempotent", async () => {
+  it("keeps candidate-field activation decoration idempotent", async () => {
     saveEnv();
     const fixture = buildFixture();
     try {
@@ -233,8 +249,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
             injection_cap: 3,
             injection_similarity_floor: 0.8
           }
-        },
-        fine_assessment: { ...base.fine_assessment, max_candidates: 300 }
+        }
       };
 
       const first = runtime.defaultPolicyDecorator!(explicit);
@@ -243,8 +258,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         injection_cap: 3,
         injection_similarity_floor: 0.8
       });
-      expect(first.fine_assessment.max_candidates).toBe(300);
-      expect(second.fine_assessment.max_candidates).toBe(300);
+      expect(first.fine_assessment).not.toHaveProperty("max_candidates");
+      expect(second.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();
@@ -280,17 +295,17 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       const online = runtime.defaultPolicyDecorator!(makeBasePolicy());
       expect(online.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
-      expect(online.fine_assessment.max_candidates).toBe(120);
+      expect(online.fine_assessment).not.toHaveProperty("max_candidates");
 
       available = false;
       const offline = runtime.defaultPolicyDecorator!(online);
       expect(offline.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(offline.fine_assessment.max_candidates).toBe(120);
+      expect(offline.fine_assessment).not.toHaveProperty("max_candidates");
 
       available = true;
       const restored = runtime.defaultPolicyDecorator!(offline);
       expect(restored.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
-      expect(restored.fine_assessment.max_candidates).toBe(120);
+      expect(restored.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();
@@ -460,10 +475,10 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
-  it("keeps local answer reranking opt-in and model-configurable", () => {
+  it("fails loud when local cross-encoder rerank is requested", () => {
     const fixture = buildFixture();
     try {
-      const disabled = createDaemonEmbeddingRuntime({
+      const unset = createDaemonEmbeddingRuntime({
         database: fixture.database,
         configEnv: new Map(),
         eventLogRepo: fixture.eventLogRepo,
@@ -471,7 +486,9 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
       });
-      const enabled = createDaemonEmbeddingRuntime({
+      expect(unset).not.toHaveProperty("answerRerankService");
+
+      expect(() => createDaemonEmbeddingRuntime({
         database: fixture.database,
         configEnv: new Map([
           ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "true"],
@@ -481,12 +498,39 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
-      });
-
-      expect(disabled.answerRerankService).toBeUndefined();
-      expect(enabled.answerRerankService?.modelId).toBe("local/test-reranker");
+      })).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
     } finally {
       teardown(fixture);
+    }
+  });
+
+  it("starts local ONNX extractor warmup without blocking runtime construction", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    const warmup = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "warmup")
+      .mockResolvedValue(undefined);
+    const embed = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "embedTexts")
+      .mockResolvedValue([new Float32Array([0.1])]);
+    try {
+      const runtime = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv: new Map([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]),
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn
+      });
+      expect(warmup).toHaveBeenCalledTimes(1);
+      expect(runtime.embeddingRecallService).toBeDefined();
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+    } finally {
+      warmup.mockRestore();
+      embed.mockRestore();
+      teardown(fixture);
+      restoreEnv();
     }
   });
 

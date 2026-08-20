@@ -10,6 +10,7 @@ import * as SchemaPrimitives from "../../shared/schema-primitives.js";
 import * as BudgetEvents from "../../events/budget.js";
 import * as ComputeRecallGardenEvents from "../../events/compute-recall-garden.js";
 import * as EventLogOrphanEvents from "../../events/event-log-orphan.js";
+import * as FieldGenerationEvents from "../../events/field-generation.js";
 import * as FileApprovalEvents from "../../events/file-approval.js";
 import * as GardenEvents from "../../events/garden.js";
 import * as GraphAuditorEvents from "../../events/graph-auditor.js";
@@ -72,6 +73,7 @@ const eventSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/events/budget.ts", exports: BudgetEvents },
   { module: "packages/protocol/src/events/compute-recall-garden.ts", exports: ComputeRecallGardenEvents },
   { module: "packages/protocol/src/events/event-log-orphan.ts", exports: EventLogOrphanEvents },
+  { module: "packages/protocol/src/events/field-generation.ts", exports: FieldGenerationEvents },
   { module: "packages/protocol/src/events/file-approval.ts", exports: FileApprovalEvents },
   { module: "packages/protocol/src/events/garden.ts", exports: GardenEvents },
   { module: "packages/protocol/src/events/graph-auditor.ts", exports: GraphAuditorEvents },

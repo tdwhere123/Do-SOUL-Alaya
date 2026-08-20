@@ -38,6 +38,19 @@ import {
   throwFirstRejected,
   unwrapSettled
 } from "./settle-parallel.js";
+import {
+  createTemporalWindowCandidateBudget,
+  type TemporalWindowCandidateBudget
+} from "../coarse-filter/temporal/temporal-window-candidates.js";
+import {
+  freezeCoarseStageResult,
+  freezeLexicalCoarseWithWarm
+} from "./coarse/freeze-coarse-results.js";
+import { admitFieldProjectionCandidates } from "./coarse/field-projection-admission.js";
+import type { RecallQueryEntityExtractionCapture } from
+  "../field/query-entity-attribution-producer.js";
+import type { RecallRetrievalFieldBundle } from
+  "../field/retrieval/retrieval-field-bundle.js";
 
 export type CoarseFilterResult = Awaited<ReturnType<typeof runCoarseFilter>>;
 export type EmbeddingCoarseInjectionResult = Awaited<ReturnType<typeof collectEmbeddingCoarseInjection>>;
@@ -51,7 +64,11 @@ type CoarseFilterOptions = Readonly<{
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
+  readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
+  readonly retrievalFieldBundle?: Readonly<RecallRetrievalFieldBundle>;
 }>;
 
 export interface CoarseStageResult {
@@ -71,11 +88,63 @@ export async function collectCoarseStage(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest
 ): Promise<CoarseStageResult> {
+  const temporalCandidateBudget = createTemporalWindowCandidateBudget(
+    prepared.policy.fine_assessment.budgets.max_entries
+  );
+  const lexical = await collectLexicalCoarseWithWarm(
+    context,
+    params,
+    prepared,
+    temporalCandidateBudget
+  );
+  const embeddingCoarseInjection = await collectEmbeddingInjection(
+    context,
+    params,
+    prepared,
+    lexical.lexicalCoarseCandidates
+  );
+  return freezeCoarseStageResult(
+    lexical,
+    embeddingCoarseInjection,
+    performance.now(),
+    combineEmbeddingInjection
+  );
+}
+
+interface LexicalCoarseWithWarm {
+  readonly recallPhaseStart: number;
+  readonly recallAfterCoarse: number;
+  readonly recallAfterSynthesis: number;
+  readonly coarseFilter: CoarseFilterResult;
+  readonly globalCoarseFilter: Awaited<ReturnType<typeof loadGlobalRecallCandidates>>;
+  readonly globalRecallClassifications: Parameters<
+    typeof recordGlobalRecallClassificationsSafely
+  >[0]["classifications"];
+  readonly lexicalCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
+}
+
+async function collectLexicalCoarseWithWarm(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
+): Promise<LexicalCoarseWithWarm> {
   const recallPhaseStart = performance.now();
-  const hotCoarseFilter = await collectHotCoarseFilter(context, params, prepared);
   const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
-  const coarseFilterPromise = settle(collectExpandedCoarseFilter(context, params, prepared, hotCoarseFilter));
   const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
+  const hotCoarseFilter = await collectHotCoarseFilter(
+    context,
+    params,
+    prepared,
+    temporalCandidateBudget
+  );
+  const coarseFilterPromise = settle(collectExpandedCoarseFilter(
+    context,
+    params,
+    prepared,
+    hotCoarseFilter,
+    temporalCandidateBudget
+  ));
   const [globalResult, coarseFilterResult] = await Promise.all([globalPromise, coarseFilterPromise]);
   throwFirstRejected([globalResult, coarseFilterResult]);
   const global = unwrapSettled(globalResult);
@@ -83,34 +152,42 @@ export async function collectCoarseStage(
   const recallAfterCoarse = performance.now();
   const synthesisCoarseFilter = unwrapSettled(await synthesisPromise);
   const recallAfterSynthesis = performance.now();
-  const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(coarseFilter, global.filteredCandidates, synthesisCoarseFilter);
-  const embeddingCoarseInjection = await collectEmbeddingInjection(context, params, prepared, lexicalCoarseCandidates);
-  const recallAfterEmbedding = performance.now();
-  return Object.freeze({
+  // Synthesis children belong in exclude/pool — inject only after lexical merge.
+  const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(
+    coarseFilter,
+    global.filteredCandidates,
+    synthesisCoarseFilter,
+    prepared.fieldProjectionMemories,
+    prepared.fieldProjectionSelection,
+    context.warn
+  );
+  return freezeLexicalCoarseWithWarm<LexicalCoarseWithWarm>({
     recallPhaseStart,
     recallAfterCoarse,
     recallAfterSynthesis,
-    recallAfterEmbedding,
-    coarseFilter: Object.freeze({ ...coarseFilter, synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks }),
-    globalCoarseFilter: global.raw,
-    globalRecallClassifications: global.classifications,
-    combinedCoarseCandidates: combineEmbeddingInjection(lexicalCoarseCandidates, embeddingCoarseInjection.candidates),
-    embeddingCoarseInjection
+    coarseFilter,
+    synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks,
+    global,
+    lexicalCoarseCandidates
   });
 }
-
 
 async function collectHotCoarseFilter(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  prepared: PreparedRecallRequest
+  prepared: PreparedRecallRequest,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
 ): Promise<CoarseFilterResult> {
   return collectCoarseFilter(context, params.workspaceId, prepared.policy.coarse_filter, prepared.queryText, {
     timeFilter: params.timeFilter,
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
     deliveryMaxEntries: prepared.policy.fine_assessment.budgets.max_entries,
-    pathProjectionAsOf: prepared.temporalProjectionAsOf
+    temporalCandidateBudget,
+    referenceTime: prepared.referenceTime,
+    pathProjectionAsOf: prepared.temporalProjectionAsOf,
+    queryEntityExtraction: prepared.queryEntityExtraction,
+    retrievalFieldBundle: prepared.retrievalFieldBundle
   });
 }
 
@@ -118,7 +195,8 @@ async function collectExpandedCoarseFilter(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  hotCoarseFilter: CoarseFilterResult
+  hotCoarseFilter: CoarseFilterResult,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
 ): Promise<CoarseFilterResult> {
   return expandTierCascade({
     coarseFilter: (workspaceId, config, queryText, options) => collectCoarseFilter(
@@ -126,7 +204,13 @@ async function collectExpandedCoarseFilter(
       workspaceId,
       config,
       queryText,
-      { ...options, pathProjectionAsOf: prepared.temporalProjectionAsOf }
+      {
+        ...options,
+        temporalCandidateBudget,
+        referenceTime: prepared.referenceTime,
+        pathProjectionAsOf: prepared.temporalProjectionAsOf,
+        retrievalFieldBundle: prepared.retrievalFieldBundle
+      }
     ),
     projectMappingPort: context.dependencies.projectMappingPort,
     mergeCoarseFilters,
@@ -136,6 +220,7 @@ async function collectExpandedCoarseFilter(
     fineAssessmentConfig: prepared.policy.fine_assessment,
     queryText: prepared.queryText,
     queryProbes: prepared.queryProbes,
+    queryEntityExtraction: prepared.queryEntityExtraction,
     hotCoarseFilter,
     hotCoarseCandidateCount: hotCoarseFilter.candidates.length,
     winnerMemoryIds: prepared.winnerMemoryIds,
@@ -209,6 +294,7 @@ async function collectSynthesisStage(
     queryText: prepared.queryText,
     queryProbes: prepared.queryProbes,
     policy: prepared.policy,
+    retrievalFieldBundle: prepared.retrievalFieldBundle,
     degradationReasons: context.degradationReasons
   });
 }
@@ -234,12 +320,16 @@ async function collectEmbeddingInjection(
 function mergeLexicalCoarseCandidates(
   coarseFilter: CoarseFilterResult,
   globalCandidates: readonly Readonly<CoarseRecallCandidate>[],
-  synthesisCoarseFilter: SynthesisCoarseResult
+  synthesisCoarseFilter: SynthesisCoarseResult,
+  fieldProjectionMemories: PreparedRecallRequest["fieldProjectionMemories"] | undefined,
+  fieldSelection: PreparedRecallRequest["fieldProjectionSelection"] | undefined,
+  warn: RecallExecutionContext["warn"]
 ): readonly Readonly<CoarseRecallCandidate>[] {
   return mergeCoarseCandidateMetadata([
     ...coarseFilter.candidates,
     ...globalCandidates,
-    ...synthesisCoarseFilter.candidates
+    ...synthesisCoarseFilter.candidates,
+    ...admitFieldProjectionCandidates(fieldProjectionMemories, fieldSelection, warn)
   ]);
 }
 
@@ -266,6 +356,17 @@ function mergeCoarseCandidatePair(
     representative.sourceChannels?.[0] ?? supplementary.sourceChannel;
   const firstAdmissionPlane = representative.firstAdmissionPlane ??
     representative.admissionPlanes?.[0] ?? supplementary.firstAdmissionPlane;
+  const verifiedUserSupportSource =
+    representative.verifiedUserSupportSource ??
+    supplementary.verifiedUserSupportSource;
+  const evidenceDocumentIdentity =
+    representative.evidenceDocumentIdentity ??
+    supplementary.evidenceDocumentIdentity;
+  const evidenceSourceIdentity =
+    representative.evidenceSourceIdentity ??
+    supplementary.evidenceSourceIdentity;
+  const evidenceSourceRole = representative.evidenceSourceRole ??
+    supplementary.evidenceSourceRole;
   return Object.freeze({
     ...representative,
     sourceChannels: uniqueStrings([
@@ -286,7 +387,17 @@ function mergeCoarseCandidatePair(
       ...(supplementary.pathExpansionSources ?? [])
     ]),
     ...(sourceChannel === undefined ? {} : { sourceChannel }),
-    ...(firstAdmissionPlane === undefined ? {} : { firstAdmissionPlane })
+    ...(firstAdmissionPlane === undefined ? {} : { firstAdmissionPlane }),
+    ...(verifiedUserSupportSource === undefined
+      ? {}
+      : { verifiedUserSupportSource }),
+    ...(evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity }),
+    ...(evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity }),
+    ...(evidenceSourceRole === undefined ? {} : { evidenceSourceRole })
   });
 }
 

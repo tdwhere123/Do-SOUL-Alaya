@@ -1,28 +1,50 @@
-export type RecallReadWorkerOperation =
-  | "ready"
-  | "memory.findByWorkspaceId"
-  | "memory.findRecallTierWindow"
-  | "memory.findByDimension"
-  | "memory.findByScopeClass"
-  | "memory.searchByKeyword"
-  | "memory.searchByKeywordWithinObjectIds"
-  | "memory.searchByKeywordWithinTier"
-  | "memory.searchManyByKeywordWithinObjectIds"
-  | "memory.searchByAnchorWithinObjectIds"
-  | "memory.searchByAnchorWithinTier"
-  | "memory.findByEvidenceRefs"
-  | "memory.findByIds"
-  | "evidence.searchByKeyword"
-  | "evidence.searchManyByKeyword"
-  | "evidence.findByIds"
-  | "evidence.findSourceAnchorsByIds"
-  | "synthesis.searchByKeyword"
-  | "synthesis.findByIds"
-  | "path.findByAnchors"
-  | "path.findByTimeConcernWindowDigests"
-  | "pathPlasticity.getStrengthByMemoryId"
-  | "constraints.findActive"
-  | "close";
+export const RECALL_READ_WORKER_OPERATIONS = [
+  "ready",
+  "memory.findByWorkspaceId",
+  "memory.findRecallTierWindow",
+  "memory.findByEventTimeWindow",
+  "memory.findByDimension",
+  "memory.findByScopeClass",
+  "memory.searchByKeyword",
+  "memory.searchByKeywordField",
+  "memory.searchByKeywordWithinObjectIds",
+  "memory.searchByKeywordWithinTier",
+  "memory.searchManyByKeywordWithinObjectIds",
+  "memory.searchByAnchorWithinObjectIds",
+  "memory.searchByAnchorWithinTier",
+  "memory.searchByAnchorField",
+  "memory.findByEvidenceRefs",
+  "memory.findBoundEvidenceRefs",
+  "memory.findByIds",
+  "evidence.searchByKeyword",
+  "evidence.searchByKeywordField",
+  "evidence.searchManyByKeywordField",
+  "evidence.findByIds",
+  "evidence.findRecallQualifiedByIds",
+  "evidence.findRecallQualifiedFactKeysByIds",
+  "evidence.findSourceAnchorsByIds",
+  "synthesis.searchByKeyword",
+  "synthesis.searchByKeywordField",
+  "synthesis.searchManyByKeywordField",
+  "synthesis.findByIds",
+  "path.findByAnchors",
+  "path.findByTimeConcernWindowDigests",
+  "pathPlasticity.getStrengthByMemoryId",
+  "constraints.findActive",
+  "close"
+] as const;
+
+export type RecallReadWorkerOperation = (typeof RECALL_READ_WORKER_OPERATIONS)[number];
+
+const RECALL_READ_WORKER_OPERATION_SET: ReadonlySet<string> = new Set(
+  RECALL_READ_WORKER_OPERATIONS
+);
+
+export function isRecallReadWorkerOperation(
+  value: unknown
+): value is RecallReadWorkerOperation {
+  return typeof value === "string" && RECALL_READ_WORKER_OPERATION_SET.has(value);
+}
 
 export interface RecallReadWorkerRequest {
   readonly id: number;

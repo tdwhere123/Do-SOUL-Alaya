@@ -11,7 +11,7 @@ import {
   openUrlWithSpawn,
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
-} from "../../cli/inspect.js";
+} from "../../cli/inspect/inspect.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -102,7 +102,7 @@ function stubWorkspaceDaemonFetch(
 
 describe("cli inspect", () => {
 
-  it("prints a loopback token URL after the inspector child is ready", async () => {
+  it("prints a loopback launch URL after the inspector child is ready", async () => {
     const child = new FakeInspectorChild();
     const stdout = new PassThrough();
     const stdoutChunks: string[] = [];
@@ -110,6 +110,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
       generateToken: () => "a".repeat(64),
+      generateLaunchCode: () => "c".repeat(32),
       startDaemonServer: async () => fakeDaemonServer(),
       spawnInspector: () => child,
       listWorkspaces: oneWorkspaceList()
@@ -127,8 +128,10 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe(
-      "http://127.0.0.1:5174/?workspaceId=ws-1#token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+      "http://127.0.0.1:5174/?workspaceId=ws-1&launch=cccccccccccccccccccccccccccccccc\n"
     );
+    expect(stdoutChunks.join("")).not.toContain("#token=");
+    expect(stdoutChunks.join("")).not.toContain("a".repeat(64));
   });
 
   it("surfaces inspector stderr when the child exits before ready", async () => {
@@ -179,7 +182,7 @@ describe("cli inspect", () => {
     expect(stderrChunks.join("")).toContain("port 5174 in use; try alaya inspect --port 5175");
   });
 
-  it("passes token and loopback port to the inspector child and treats open as best effort", async () => {
+  it("passes token, launch code, and loopback port to the inspector child and treats open as best effort", async () => {
     const child = new FakeInspectorChild();
     const stderr = new PassThrough();
     const stderrChunks: string[] = [];
@@ -189,6 +192,7 @@ describe("cli inspect", () => {
     const command = createInspectCommand({
       checkPortAvailable: async () => true,
       startDaemonServer: async () => fakeDaemonServer(),
+      generateLaunchCode: () => "d".repeat(32),
       spawnInspector: (input) => {
         spawned.push(input);
         return child;
@@ -215,12 +219,14 @@ describe("cli inspect", () => {
     expect(spawned).toMatchObject([
       {
         port: 5175,
-        token: "b".repeat(64)
+        token: "b".repeat(64),
+        launchCode: "d".repeat(32)
       }
     ]);
     expect(opened).toEqual([
-      "http://127.0.0.1:5175/?workspaceId=ws-1#token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "http://127.0.0.1:5175/?workspaceId=ws-1&launch=dddddddddddddddddddddddddddddddd"
     ]);
+    expect(opened[0]).not.toContain("#token=");
   });
 
   it("starts a loopback daemon and passes its URL to the inspector child", async () => {

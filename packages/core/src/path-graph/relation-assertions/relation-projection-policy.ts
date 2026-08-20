@@ -85,7 +85,7 @@ export function buildTemporalPathProjection(input: Readonly<{
       retirement_rule: "manual"
     },
     legitimacy: {
-      evidence_basis: input.assertion.evidence_ids,
+      evidence_basis: input.assertion.evidence_receipts.map((receipt) => receipt.evidence_id),
       governance_class: profile.governanceClass
     },
     created_at: input.assertion.admitted_at,

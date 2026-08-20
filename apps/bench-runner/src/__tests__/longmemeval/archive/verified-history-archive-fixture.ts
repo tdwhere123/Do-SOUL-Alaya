@@ -18,24 +18,24 @@ import {
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
   type LongMemEvalQuestionDiagnostic
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 import {
   buildLongMemEvalEvidenceManifest,
   LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput
-} from "../../../longmemeval/provenance/evidence-manifest.js";
+} from "../../../bench/provenance/evidence-manifest.js";
 import {
   createTestLongMemEvalDatasetAuthority,
   deriveLongMemEvalReleaseEvidenceAuthority
 } from "../../../longmemeval/ingestion/fetch.js";
 import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
-import { classifyLongMemEvalDatasetCohort } from "../../../longmemeval/selection/dataset-cohort.js";
+import { classifyLongMemEvalDatasetCohort } from "../../../bench/selection/dataset-cohort.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 
 const REPORT = "report\n";
@@ -314,6 +314,7 @@ function buildRunProvenance(payload: KpiPayload) {
       gate_sha256: "a".repeat(64),
       gate_contract_path: "/fixture/gate.json",
       worktree_state_sha256: "b".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf",
       worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",

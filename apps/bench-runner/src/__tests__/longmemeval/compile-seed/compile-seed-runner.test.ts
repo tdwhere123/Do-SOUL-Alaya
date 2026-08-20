@@ -20,13 +20,15 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
-  signalsEnvelope
+  providerBackedResult,
+  signalsEnvelope,
+  withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
@@ -81,6 +83,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." },
             {
@@ -130,7 +133,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("preserves trusted User and Assistant roles for source-locator extraction", async () => {
+  it("preserves trusted User assertions without exposing Assistant text", async () => {
     let userPrompt: Record<string, unknown> | null = null;
     const seeded: BenchSignalSeedInput[] = [];
     const runner = createCompileSeedRunner({
@@ -140,7 +143,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       extractorFactory: () => ({
         extract: async (input) => {
           userPrompt = JSON.parse(input.userPrompt) as Record<string, unknown>;
-          return { rawJson: JSON.stringify({ signals: [{
+          return providerBackedResult(JSON.stringify({ signals: [withOpenSemanticFactorGraph({
             signal_kind: "potential_claim",
             object_kind: "memory_entry",
             confidence: 0.9,
@@ -151,7 +154,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
               kind: "assertion_catalog",
               assertion_id: 1
             }
-          }] }) };
+          })] }));
         }
       })
     });
@@ -171,9 +174,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       ...SEED_CONTEXT
     });
 
-    expect(userPrompt?.source_spans).toEqual([
-      { span_id: 1, role: "user", text: "User: I moved to Berlin." },
-      { span_id: 2, role: "assistant", text: "Assistant: You moved to Berlin." }
+    expect(userPrompt?.source_assertions).toEqual([
+      { assertion_id: 1, text: "User: I moved to Berlin." }
     ]);
     expect(result.seeds).toHaveLength(1);
     expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
@@ -212,7 +214,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: corruptEnvelope })
+        extract: async () => providerBackedResult(corruptEnvelope)
       })
     });
 
@@ -258,7 +260,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: degenerate })
+        extract: async () => providerBackedResult(degenerate)
       })
     });
 
@@ -278,7 +280,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("does not synthesize a memory when official extraction finds no candidates", async () => {
+  it("preserves source evidence without synthesizing memory when extraction is empty", async () => {
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -289,7 +291,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"signals":[]}' })
+        extract: async () => providerBackedResult('{"signals":[]}')
       })
     });
 
@@ -298,10 +300,13 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       turnContent: "ok thanks",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
+      sourceEvidenceFallback: "trusted_source_turn",
       ...SEED_CONTEXT
     });
 
-    expect(result.seeds).toHaveLength(0);
+    expect(result.seeds).toEqual([
+      expect.objectContaining({ kind: "evidence_capsule" })
+    ]);
     expect(seeded).toHaveLength(0);
     expect(runner.stats.factsProduced).toBe(0);
     expect(runner.stats.offlineFallbacks).toBe(0);
@@ -389,7 +394,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       cacheRoot,
       allowLiveExtraction: true,
       extractorFactory: () => ({
-        extract: async () => ({ rawJson: '{"not_signals":[]}' })
+        extract: async () => providerBackedResult('{"not_signals":[]}')
       })
     });
     await expect(
@@ -404,7 +409,9 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(firstSeeded).toHaveLength(0);
     expect(firstRunner.stats.liveExtractionFailures).toBe(1);
 
-    const delegate = vi.fn(async () => ({ rawJson: signalsEnvelope([]) }));
+    const delegate = vi.fn<BenchSignalExtractor["extract"]>(
+      async () => providerBackedResult(signalsEnvelope([]))
+    );
     const seeded: BenchSignalSeedInput[] = [];
     const secondDaemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -427,6 +434,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
     expect(seeded).toHaveLength(0);
     expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
+    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(secondRunner.stats.cacheHits).toBe(0);
     expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);
@@ -454,6 +463,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Fact A.", matched: "Fact A." },
             { distilled: "Fact B.", matched: "Fact B." },

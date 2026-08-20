@@ -7,7 +7,6 @@ import {
 } from "../../config/index.js";
 import { buildExpandedKeywordQuery } from "../../recall/coarse-filter/coarse-candidates.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import { deriveQuerySoughtFacets } from "../../recall/query/query-facet-router.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -23,18 +22,19 @@ describe("recall query product semantics", () => {
       .toContain("last Saturday");
   });
 
-  it("routes relationship concepts through facets without lexical family fitting", () => {
+  it("routes relationship concepts as lexical demand, not closed-vocab facet slice keys", () => {
     const probes = compileRecallQueryProbes("Which relative joined the sibling graduation?");
     const expandedQuery = buildExpandedKeywordQuery(probes) ?? "";
-    expect(deriveQuerySoughtFacets(probes)).toContain("relationship_person");
+    expect(probes.lexical_terms).toEqual(expect.arrayContaining(["relative", "sibling"]));
     expect(expandedQuery.split(" ")).not.toEqual(expect.arrayContaining([
       "parent", "parents", "brother", "sister", "spouse", "wife"
     ]));
   });
 
-  it("does not interpret a business partner as a personal relationship", () => {
+  it("does not interpret a business partner as a personal relationship synonym", () => {
     const probes = compileRecallQueryProbes("Which business partner owns the integration?");
-    expect(deriveQuerySoughtFacets(probes)).not.toContain("relationship_person");
+    expect(probes.lexical_terms).toEqual(expect.arrayContaining(["partner"]));
+    expect(probes.expanded_terms).not.toEqual(expect.arrayContaining(["relative", "sibling"]));
   });
 
   it("keeps noun suffixes and irregular plurals free of fabricated stems", () => {
@@ -68,6 +68,7 @@ describe("recall embedding query contract", () => {
       scorePoolCandidates
     } satisfies RecallServiceEmbeddingRecallPort;
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds: vi.fn(async () => []) },
       embeddingRecallService

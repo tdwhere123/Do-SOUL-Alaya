@@ -12,9 +12,8 @@ import type { RecallSupplementaryData } from "../../recall/runtime/recall-servic
 import { resetCoreConfigForTests } from "../../config/install-core-config.js";
 
 const CONF_ENV = [
-  "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP",
-  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
-  "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY"
+  "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_FLOOD_CAP",
+  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE"
 ] as const;
 
 beforeEach(() => {
@@ -36,7 +35,8 @@ function emptyRecords(): RecallSupplementaryData {
     ftsRanks: {}, trigramFtsRanks: {}, synthesisFtsRanks: {}, evidenceFtsRanks: {},
     sourceProximityScores: {}, sourceCohortKeys: {}, structuralScores: {},
     graphExpansionScores: {}, entitySeedScores: {}, pathExpansionScores: {},
-    pathSuppressionScores: {}, embeddingSimilarityScores: {}, graphSupportCounts: {},
+    pathSuppressionScores: {}, embeddingSimilarityScores: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(), graphSupportCounts: {},
     budgetPenaltyFactor: 0, plasticityFactors: {}, graphAndPathColdScore: 0,
     recallsEdgeCount: 0, weightTransferAmount: 0, evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {}
@@ -194,60 +194,19 @@ describe("P2 — Φ path-flood identity (collapsePathInflow)", () => {
 });
 
 describe("single-hop SliceKey wiring", () => {
-  it("observes a typed event-time mismatch while default transfer stays enabled", () => {
+  it("withholds typed path transfer when the event-time fiber rejects the edge", () => {
     const context = sliceContext("2026-04-20T00:00:00.000Z");
-
-    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
-    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_slice_match",
-      decision: "transferred"
-    }));
-  });
-
-  it("keeps the default path value identical to explicit false", () => {
-    const defaultPath = sliceContext("2026-04-20T00:00:00.000Z").raByKey.get("target")?.path;
-    const explicitFalsePath = sliceContext("2026-04-20T00:00:00.000Z", false)
-      .raByKey.get("target")?.path;
-
-    expect(Object.is(defaultPath, explicitFalsePath)).toBe(true);
-  });
-
-  it("rejects the mismatched edge only when the call-level option is enabled", () => {
-    const context = sliceContext("2026-04-20T00:00:00.000Z", true);
 
     expect(context.raByKey.get("target")?.path).toBe(0);
     expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
       slice_compatibility: "no_slice_match",
       decision: "rejected",
       reason: "no_slice_match"
-    }));
-  });
-
-  it("rejects the mismatched edge when the internal env flag is enabled", () => {
-    process.env.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY = "on";
-
-    const context = sliceContext("2026-04-20T00:00:00.000Z");
-
-    expect(context.raByKey.get("target")?.path).toBe(0);
-    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
-      decision: "rejected",
-      reason: "no_slice_match"
-    }));
-  });
-
-  it("honors explicit false when the internal env flag is enabled", () => {
-    process.env.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY = "on";
-
-    const context = sliceContext("2026-04-20T00:00:00.000Z", false);
-
-    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
-    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
-      decision: "transferred"
     }));
   });
 
   it("transfers through a matching typed event-time slice", () => {
-    const context = sliceContext("2026-03-19T22:00:00.000Z", true);
+    const context = sliceContext("2026-03-19T22:00:00.000Z");
 
     expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
     expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
@@ -257,7 +216,7 @@ describe("single-hop SliceKey wiring", () => {
   });
 });
 
-function sliceContext(targetEventTime: string, enforceSliceCompatibility?: boolean) {
+function sliceContext(targetEventTime: string) {
   const seed = sliceEntry("seed", "2026-03-19T01:00:00.000Z");
   const target = sliceEntry("target", targetEventTime);
   return buildConformantAxisContext({
@@ -286,8 +245,7 @@ function sliceContext(targetEventTime: string, enforceSliceCompatibility?: boole
         }]
       }
     },
-    nowIso: "2026-03-20T00:00:00.000Z",
-    ...(enforceSliceCompatibility === undefined ? {} : { enforceSliceCompatibility })
+    nowIso: "2026-03-20T00:00:00.000Z"
   });
 }
 

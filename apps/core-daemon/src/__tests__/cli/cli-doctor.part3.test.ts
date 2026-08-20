@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 
-import { createDoctorCommand } from "../../cli/doctor.js";
+import { createDoctorCommand } from "../../cli/doctor/doctor.js";
 
 const STARTUP_STEPS = [
   "database",

@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 
 import {
-  createSelectedSliceKeyV1,
-  type SelectedSliceKeyV1
+  createSelectedSliceKeyV2,
+  type SelectedSliceKeyV2
 } from "../../recall/flood/slice-key-contract.js";
 import {
-  deriveMemorySliceKeysV1,
-  derivePathAnchorSliceKeysV1,
-  deriveQuerySliceKeysV1,
-  selectSliceCompatibilityV1
+  deriveMemorySliceKeysV2,
+  derivePathAnchorSliceKeysV2,
+  deriveQuerySliceKeysV2,
+  selectSliceCompatibilityV2
 } from "../../recall/flood/slice-key-selector.js";
 import {
   compileRecallQueryProbes,
@@ -20,11 +20,16 @@ function key(
   workspaceId: string,
   provenance: "query_probe" | "canonical_entity" | "object_anchor",
   freshness: "fresh" | "stale" = "fresh"
-): SelectedSliceKeyV1 {
-  return createSelectedSliceKeyV1({
+): SelectedSliceKeyV2 {
+  const query = provenance === "query_probe";
+  return createSelectedSliceKeyV2({
     workspace_id: workspaceId,
+    owner_id: query ? null : `${provenance}-owner`,
     dimension: "entity",
     value: "ada lovelace",
+    authority: query ? "derived_query" : "grounded",
+    reliability: 1,
+    independence_group: query ? `query:${workspaceId}` : `${provenance}:source`,
     provenance: { kind: provenance, source_ref: `${provenance}:ada` },
     source_version: "v1",
     freshness: { state: freshness, as_of_ms: 1_720_000_000_000 }
@@ -35,11 +40,16 @@ function routingKey(
   dimension: string,
   value: string,
   provenance: "query_probe" | "canonical_entity" | "facet_tag" | "event_time"
-): SelectedSliceKeyV1 {
-  return createSelectedSliceKeyV1({
+): SelectedSliceKeyV2 {
+  const query = provenance === "query_probe";
+  return createSelectedSliceKeyV2({
     workspace_id: "workspace-a",
+    owner_id: query ? null : `${provenance}-owner`,
     dimension,
     value,
+    authority: query ? "derived_query" : "grounded",
+    reliability: 1,
+    independence_group: query ? "query:workspace-a" : `${provenance}:source`,
     provenance: { kind: provenance, source_ref: `${provenance}:${value}` },
     source_version: "v1",
     freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
@@ -73,7 +83,7 @@ function memory(
 
 describe("slice-key selector", () => {
   it("passes through when the query has no fresh key", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [key("workspace-a", "query_probe", "stale")],
       sourceKeys: [key("workspace-a", "canonical_entity")],
       targetKeys: [key("workspace-a", "object_anchor")]
@@ -93,7 +103,7 @@ describe("slice-key selector", () => {
   ] as const)(
     "passes through when a routed endpoint projection is unavailable: %s / %s",
     (sourceKeys, targetKeys, reason) => {
-      expect(selectSliceCompatibilityV1({
+      expect(selectSliceCompatibilityV2({
         queryKeys: [key("workspace-a", "query_probe")],
         sourceKeys,
         targetKeys
@@ -102,7 +112,7 @@ describe("slice-key selector", () => {
   );
 
   it("accepts only a fresh three-way match", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [key("workspace-a", "query_probe")],
       sourceKeys: [key("workspace-a", "canonical_entity")],
       targetKeys: [key("workspace-a", "object_anchor")]
@@ -117,7 +127,7 @@ describe("slice-key selector", () => {
   });
 
   it("treats an off-workspace endpoint key as unavailable", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [key("workspace-a", "query_probe")],
       sourceKeys: [key("workspace-a", "canonical_entity")],
       targetKeys: [key("workspace-b", "object_anchor")]
@@ -131,7 +141,7 @@ describe("slice-key selector", () => {
   });
 
   it("rejects a comparable disjoint dimension even when another is unavailable", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [
         routingKey("time", "day:2026-03-19", "query_probe"),
         routingKey("entity", "ada", "query_probe"),
@@ -152,7 +162,7 @@ describe("slice-key selector", () => {
   });
 
   it("rejects comparable keys whose values are disjoint", () => {
-    expect(selectSliceCompatibilityV1({
+    expect(selectSliceCompatibilityV2({
       queryKeys: [routingKey("entity", "ada", "query_probe")],
       sourceKeys: [routingKey("entity", "ada", "canonical_entity")],
       targetKeys: [routingKey("entity", "grace", "canonical_entity")]
@@ -160,7 +170,7 @@ describe("slice-key selector", () => {
   });
 
   it("uses OR within a dimension and AND across routed dimensions", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [
         routingKey("time", "day:2026-03-19", "query_probe"),
         routingKey("entity", "ada", "query_probe"),
@@ -181,7 +191,7 @@ describe("slice-key selector", () => {
   });
 
   it("uses semantic facets only when the query has no strong key", () => {
-    const result = selectSliceCompatibilityV1({
+    const result = selectSliceCompatibilityV2({
       queryKeys: [routingKey("semantic", "travel", "query_probe")],
       sourceKeys: [routingKey("semantic", "travel", "facet_tag")],
       targetKeys: [routingKey("semantic", "travel", "facet_tag")]
@@ -194,7 +204,7 @@ describe("slice-key selector", () => {
 
 describe("slice-key read-time derivation", () => {
   it("keeps query facets and event time typed without routing on memory-entry ids", () => {
-    const keys = deriveQuerySliceKeysV1({
+    const keys = deriveQuerySliceKeysV2({
       workspaceId: "workspace-a",
       queryProbes: probes({
         normalized_query: "where was object_memory-1 on 2026-03-19",
@@ -206,7 +216,6 @@ describe("slice-key read-time derivation", () => {
 
     expect(keys.map(({ dimension, normalized_value }) => [dimension, normalized_value]))
       .toEqual([
-        ["semantic", "location_place"],
         ["time", "day:2026-03-19"],
         ["time", "month:2026-03"]
       ]);
@@ -218,7 +227,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("derives current memory projections without flattening event time into facets", () => {
-    const keys = deriveMemorySliceKeysV1({
+    const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         facet_tags: [
@@ -235,9 +244,6 @@ describe("slice-key read-time derivation", () => {
     expect(keys.map(({ dimension, normalized_value }) => [dimension, normalized_value]))
       .toEqual([
         ["entity", "ada lovelace"],
-        ["semantic", "food_dining"],
-        ["semantic", "location_place"],
-        ["space", "paris"],
         ["time", "day:2026-03-19"],
         ["time", "month:2026-03"]
       ]);
@@ -248,24 +254,24 @@ describe("slice-key read-time derivation", () => {
     ).toBe(true);
   });
 
-  it("does not infer space from an unvalued location facet", () => {
-    const keys = deriveMemorySliceKeysV1({
+  it("does not mint slice keys from unsupplied facet_tags", () => {
+    const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({ facet_tags: [{ facet: "location_place", value: "  " }] }),
       asOfMs: 1_773_964_800_000
     });
 
     expect(keys.some((item) => item.dimension === "space")).toBe(false);
-    expect(keys.some((item) => item.normalized_value === "location_place")).toBe(true);
+    expect(keys.some((item) => item.normalized_value === "location_place")).toBe(false);
   });
 
   it("fails closed for workspace mismatch and invalid or excessive intervals", () => {
-    const mismatched = deriveMemorySliceKeysV1({
+    const mismatched = deriveMemorySliceKeysV2({
       workspaceId: "workspace-b",
       entry: memory({ canonical_entities: ["ada"] }),
       asOfMs: 1_773_964_800_000
     });
-    const reversed = deriveMemorySliceKeysV1({
+    const reversed = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         event_time_start: "2026-03-20T00:00:00.000Z",
@@ -273,7 +279,7 @@ describe("slice-key read-time derivation", () => {
       }),
       asOfMs: 1_773_964_800_000
     });
-    const excessive = deriveMemorySliceKeysV1({
+    const excessive = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         event_time_start: "2000-01-01T00:00:00.000Z",
@@ -288,7 +294,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("uses month buckets for long bounded intervals", () => {
-    const keys = deriveMemorySliceKeysV1({
+    const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         event_time_start: "2026-01-01T00:00:00.000Z",
@@ -308,7 +314,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("retains typed Path anchor provenance without inventing shared endpoints", () => {
-    const objectKeys = derivePathAnchorSliceKeysV1({
+    const objectKeys = derivePathAnchorSliceKeysV2({
       workspaceId: "workspace-a",
       pathId: "path-1",
       side: "source",
@@ -316,7 +322,7 @@ describe("slice-key read-time derivation", () => {
       sourceVersion: "2026-03-20T00:00:00.000Z",
       asOfMs: 1_773_964_800_000
     });
-    const timeKeys = derivePathAnchorSliceKeysV1({
+    const timeKeys = derivePathAnchorSliceKeysV2({
       workspaceId: "workspace-a",
       pathId: "path-1",
       side: "target",
@@ -340,7 +346,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("rejects invalid query calendar months instead of normalizing them", () => {
-    const keys = deriveQuerySliceKeysV1({
+    const keys = deriveQuerySliceKeysV2({
       workspaceId: "workspace-a",
       queryProbes: probes({ date_terms: ["2026-13"] }),
       asOfMs: 1_773_964_800_000
@@ -350,7 +356,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("does not turn arbitrary lexical terms into entity or space keys", () => {
-    const keys = deriveQuerySliceKeysV1({
+    const keys = deriveQuerySliceKeysV2({
       workspaceId: "workspace-a",
       queryProbes: probes({
         normalized_query: "tell me about mysteryville",
@@ -364,7 +370,7 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("rebuilds from replacement and cleared projections without stale state", () => {
-    const original = deriveMemorySliceKeysV1({
+    const original = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         updated_at: "2026-03-19T00:00:00.000Z",
@@ -373,7 +379,7 @@ describe("slice-key read-time derivation", () => {
       }),
       asOfMs: 1_773_964_800_000
     });
-    const replaced = deriveMemorySliceKeysV1({
+    const replaced = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         updated_at: "2026-03-20T00:00:00.000Z",
@@ -382,7 +388,7 @@ describe("slice-key read-time derivation", () => {
       }),
       asOfMs: 1_773_964_800_000
     });
-    const cleared = deriveMemorySliceKeysV1({
+    const cleared = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         updated_at: "2026-03-21T00:00:00.000Z",
@@ -392,19 +398,19 @@ describe("slice-key read-time derivation", () => {
       asOfMs: 1_773_964_800_000
     });
 
-    expect(original.some((item) => item.normalized_value === "food_dining")).toBe(true);
+    expect(original.some((item) => item.normalized_value === "ada")).toBe(true);
     expect(replaced.some((item) => item.normalized_value === "food_dining")).toBe(false);
     expect(replaced.some((item) => item.normalized_value === "ada")).toBe(false);
     expect(cleared).toEqual([]);
   });
 
   it("matches query and memory event-time buckets through the same UTC representation", () => {
-    const queryKeys = deriveQuerySliceKeysV1({
+    const queryKeys = deriveQuerySliceKeysV2({
       workspaceId: "workspace-a",
       queryProbes: probes({ date_terms: ["2026-03-19"] }),
       asOfMs: 1_773_964_800_000
     });
-    const sourceKeys = deriveMemorySliceKeysV1({
+    const sourceKeys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         object_id: "memory-source",
@@ -412,7 +418,7 @@ describe("slice-key read-time derivation", () => {
       }),
       asOfMs: 1_773_964_800_000
     });
-    const targetKeys = deriveMemorySliceKeysV1({
+    const targetKeys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
         object_id: "memory-target",
@@ -421,40 +427,44 @@ describe("slice-key read-time derivation", () => {
       asOfMs: 1_773_964_800_000
     });
 
-    const result = selectSliceCompatibilityV1({ queryKeys, sourceKeys, targetKeys });
+    const result = selectSliceCompatibilityV2({ queryKeys, sourceKeys, targetKeys });
     expect(result.decision).toBe("compatible");
     expect(result.matches.map((match) => match.match_id)).toHaveLength(2);
   });
 
   it("does not turn internal memory-entry ids into query routing keys", () => {
-    const queryKeys = deriveQuerySliceKeysV1({
+    const queryKeys = deriveQuerySliceKeysV2({
       workspaceId: "workspace-a",
       queryProbes: probes({ object_ids: ["memory-source"] }),
       asOfMs: 1_773_964_800_000
     });
-    const sourceKeys = deriveMemorySliceKeysV1({
+    const sourceKeys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({ object_id: "memory-source" }),
       asOfMs: 1_773_964_800_000
     });
-    const targetKeys = deriveMemorySliceKeysV1({
+    const targetKeys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({ object_id: "memory-target" }),
       asOfMs: 1_773_964_800_000
     });
 
     expect(queryKeys).toEqual([]);
-    expect(selectSliceCompatibilityV1({ queryKeys, sourceKeys, targetKeys }).reason)
+    expect(selectSliceCompatibilityV2({ queryKeys, sourceKeys, targetKeys }).reason)
       .toBe("no_query_key");
   });
 
   it("is deterministic under query, source, and target input permutation", () => {
     const queryKeys = [
       key("workspace-a", "query_probe"),
-      createSelectedSliceKeyV1({
+      createSelectedSliceKeyV2({
         workspace_id: "workspace-a",
+        owner_id: null,
         dimension: "semantic",
         value: "travel",
+        authority: "derived_query",
+        reliability: 1,
+        independence_group: "query:workspace-a",
         provenance: { kind: "query_probe", source_ref: "query:travel" },
         source_version: "v1",
         freshness: { state: "fresh", as_of_ms: 1_720_000_000_000 }
@@ -463,8 +473,8 @@ describe("slice-key read-time derivation", () => {
     const sourceKeys = [key("workspace-a", "canonical_entity")];
     const targetKeys = [key("workspace-a", "object_anchor")];
 
-    const first = selectSliceCompatibilityV1({ queryKeys, sourceKeys, targetKeys });
-    const second = selectSliceCompatibilityV1({
+    const first = selectSliceCompatibilityV2({ queryKeys, sourceKeys, targetKeys });
+    const second = selectSliceCompatibilityV2({
       queryKeys: [...queryKeys].reverse(),
       sourceKeys: [...sourceKeys].reverse(),
       targetKeys: [...targetKeys].reverse()
@@ -474,20 +484,17 @@ describe("slice-key read-time derivation", () => {
   });
 
   it("uses the contract's locale-independent key identity ordering", () => {
-    const keys = deriveMemorySliceKeysV1({
+    const keys = deriveMemorySliceKeysV2({
       workspaceId: "workspace-a",
       entry: memory({
-        facet_tags: [
-          { facet: "ä" },
-          { facet: "z" }
-        ]
+        canonical_entities: ["ä", "z"]
       }),
       asOfMs: 1_773_964_800_000
     });
 
     expect(
       keys
-        .filter((item) => item.dimension === "semantic")
+        .filter((item) => item.dimension === "entity")
         .map((item) => item.normalized_value)
     ).toEqual(["z", "ä"]);
   });

@@ -1,3 +1,4 @@
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -30,8 +31,6 @@ const ACTIVATION_WINNER_ID = "22222222-2222-4222-8222-222222222222";
 const COVERAGE_NOVEL_ID = "44444444-4444-4444-8444-444444444444";
 const CE_TOP_ID = "55555555-5555-4555-8555-555555555555";
 const CE_HIGH_DUP_ID = "66666666-6666-4666-8666-666666666666";
-const CE_TIE_FUSION_TOP_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
-const CE_TIE_FUSION_LOW_ID = "00000000-0000-4000-8000-000000000000";
 const CE_FILLER_IDS = [
   "77777777-7777-4777-8777-777777777777",
   "88888888-8888-4888-8888-888888888888",
@@ -58,92 +57,40 @@ describe("final recall relevance ownership", () => {
     );
   });
 
-  it("lets a query-conditioned reranker replace both final order and scalar", () => {
+  it("does not let a dormant reranker map replace final order or scalar", () => {
     const answerScores = new Map([
       [`workspace_local:memory_entry:${FUSION_WINNER_ID}`, 0.1],
       [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.9]
     ]);
     const baseline = buildRelevanceFixture();
     const fixture = buildRelevanceFixture(answerScores);
-    const baselineFactors = new Map(
-      baseline.assessed.candidates.map((candidate) => [candidate.object_id, candidate.score_factors] as const)
-    );
 
     expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
+      .toEqual(baseline.assessed.candidates.map((candidate) => candidate.object_id));
     expect(fixture.assessed.candidates.map((candidate) => candidate.relevance_score))
-      .toEqual([0.9, 0.1]);
-    for (const candidate of fixture.assessed.candidates) {
-      const { relevance: _baselineRelevance, ...baselineSupportingFactors } =
-        baselineFactors.get(candidate.object_id) ?? { relevance: -1 };
-      const { relevance: _finalRelevance, ...finalSupportingFactors } =
-        candidate.score_factors ?? { relevance: -1 };
-      expect(finalSupportingFactors).toEqual(baselineSupportingFactors);
-      expect(candidate.score_factors?.relevance).toBe(candidate.relevance_score);
-    }
-    expect(fixture.assessed.candidates[0]?.selection_reason).toContain(
-      "Final query-conditioned answer relevance score 0.900000"
-    );
-    const answerWinner = fixture.assessed.diagnostics.find(
-      (candidate) => candidate.object_id === ACTIVATION_WINNER_ID
-    );
-    expect(answerWinner?.answer_relevance_rank).toBe(1);
-    expect(answerWinner?.answer_relevance_score).toBe(0.9);
-    expect(answerWinner?.score_factors.content_relevance).toBe(
-      baselineFactors.get(ACTIVATION_WINNER_ID)?.content_relevance
-    );
+      .toEqual(baseline.assessed.candidates.map((candidate) => candidate.relevance_score));
+    assertFusionOwnedCandidates(fixture.assessed);
   });
 
-  it("keeps CE final authority when bounded lightweight authority is requested", () => {
-    const answerScores = new Map([
-      [`workspace_local:memory_entry:${FUSION_WINNER_ID}`, 0.1],
-      [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.9]
-    ]);
-    const fixture = buildRelevanceFixture(answerScores, 0);
-
-    expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
-    expect(fixture.assessed.candidates.map((candidate) => candidate.relevance_score))
-      .toEqual([0.9, 0.1]);
-  });
-
-  it("keeps a CE-scored candidate ahead of an unscored fused fallback", () => {
+  it("does not promote a CE-scored candidate over an unscored fused fallback", () => {
     const answerScores = new Map([
       [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.01]
     ]);
+    const baseline = buildRelevanceFixture();
     const fixture = buildRelevanceFixture(answerScores);
 
     expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
-    expect(fixture.assessed.diagnostics.find(
-      (candidate) => candidate.object_id === ACTIVATION_WINNER_ID
-    )).toMatchObject({ answer_relevance_rank: 1, final_rank: 1, post_rank: 1 });
+      .toEqual(baseline.assessed.candidates.map((candidate) => candidate.object_id));
+    assertFusionOwnedCandidates(fixture.assessed);
   });
 
-  it("preserves the delivery authority's fused tie-break for equal CE scores", () => {
-    const memories = [
-      createMemory(CE_TIE_FUSION_LOW_ID, 0.1, [{ facet: "occupation_work" }]),
-      createMemory(CE_TIE_FUSION_TOP_ID, 0.95, [{ facet: "occupation_work" }])
-    ];
-    const baseline = assessMemories(memories);
-    const tied = assessMemories(memories, new Map(memories.map((memory) => [
-      `workspace_local:memory_entry:${memory.object_id}`,
-      0.5
-    ])));
-
-    expect(baseline.candidates[0]?.object_id).toBe(CE_TIE_FUSION_TOP_ID);
-    expect(tied.candidates.map((candidate) => candidate.object_id))
-      .toEqual(baseline.candidates.map((candidate) => candidate.object_id));
-    expect(tied.diagnostics.find((row) => row.object_id === CE_TIE_FUSION_TOP_ID))
-      .toMatchObject({ answer_relevance_rank: 1, final_rank: 1, post_rank: 1 });
-  });
-
-  it("keeps fused public_relevance final order after lightweight coverage packing when CE is off", () => {
+  it("keeps a unique semantic memory leader first while public relevance owns its scalar", () => {
     const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
     const basePolicy = buildPolicy();
     const assessed = fineAssess({
+    ...FIELD_PINS,
       candidates: [primary, redundant, novel].map(createCoarseCandidate),
       policy: {
         ...basePolicy,
@@ -171,38 +118,126 @@ describe("final recall relevance ownership", () => {
       warn: vi.fn()
     });
 
-    // Coverage may admit via deep-head; CE-off final packet restores fused order.
     expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID]);
+      .toEqual([COVERAGE_NOVEL_ID, FUSION_WINNER_ID]);
     expect(assessed.candidates.map((candidate) => candidate.relevance_score))
       .toEqual([
-        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
-        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
+        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score,
+        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score
       ]);
-    expect(assessed.candidates.map((candidate) => candidate.budget_state.remaining_entries))
+    expect(assessed.candidates.map((candidate) => candidate.budget_state?.remaining_entries))
       .toEqual([1, 0]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({
       rank_after_coverage_selector: 1,
-      final_rank: 2,
-      post_rank: 2
-    });
-    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
-      rank_after_coverage_selector: 2,
       final_rank: 1,
       post_rank: 1
     });
+    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
+      rank_after_coverage_selector: 2,
+      final_rank: 2,
+      post_rank: 2
+    });
   });
 
-  it("uses public relevance final order when deep-head is a no-op", () => {
-    // Emb+agreement cold → empty deep-head. Coverage packing can place a
-    // medium-fused novel ahead of a high-fused duplicate; fused public order
-    // must still bind the delivered packet (not coverage scramble).
+  it("preserves coverage order when the lightweight head has no semantic refinement", () => {
+    const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
+    const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
+    const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
+    const memories = [primary, redundant, novel];
+    const basePolicy = buildPolicy();
+    const evidenceScores = {
+      [FUSION_WINNER_ID]: 1,
+      [ACTIVATION_WINNER_ID]: 0.9,
+      [COVERAGE_NOVEL_ID]: 0.8
+    };
+    const assessed = fineAssess({
+    ...FIELD_PINS,
+      candidates: memories.map((memory) => ({
+        ...createCoarseCandidate(memory),
+        structuralScore: evidenceScores[memory.object_id] ?? 0
+      })),
+      policy: {
+        ...basePolicy,
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_entries: 3, max_total_tokens: 100, per_dimension_limits: null }
+        }
+      },
+      winnerMemoryIds: new Set(),
+      supplementaryData: {
+        ...createSupplementaryData(),
+        evidenceFtsRanks: evidenceScores,
+        structuralScores: evidenceScores,
+        evidenceGistsByMemoryId: {
+          [FUSION_WINNER_ID]: "shared gist",
+          [ACTIVATION_WINNER_ID]: "shared gist",
+          [COVERAGE_NOVEL_ID]: "novel gist"
+        }
+      },
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn()
+    });
+
+    expect(assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
+    expect(assessed.diagnostics.map((candidate) => candidate.final_rank))
+      .toEqual(assessed.diagnostics.map((candidate) =>
+        candidate.rank_after_coverage_selector
+      ));
+  });
+
+  it("keeps the live packet identical when deep diagnostic capture is enabled", () => {
+    const memories = [
+      createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]),
+      createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]),
+      createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }])
+    ];
+    const supplementaryData = {
+      ...createSupplementaryData(),
+      embeddingSimilarityScores: {
+        [FUSION_WINNER_ID]: 0.2,
+        [ACTIVATION_WINNER_ID]: 0.15,
+        [COVERAGE_NOVEL_ID]: 1
+      },
+      evidenceGistsByMemoryId: {
+        [FUSION_WINNER_ID]: "shared gist",
+        [ACTIVATION_WINNER_ID]: "shared gist",
+        [COVERAGE_NOVEL_ID]: "novel gist"
+      }
+    };
+    const assess = (captureAnswerFeatures: boolean) => fineAssess({
+    ...FIELD_PINS,
+      candidates: memories.map(createCoarseCandidate),
+      policy: buildPolicy(),
+      winnerMemoryIds: new Set(),
+      supplementaryData,
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn(),
+      captureAnswerFeatures
+    });
+
+    const baseline = assess(false);
+    const captured = assess(true);
+
+    expect(captured.candidates).toEqual(baseline.candidates);
+    expect(baseline.diagnostics[0]).not.toHaveProperty("deep_head_trace");
+    expect(captured.diagnostics.every((row) =>
+      row.deep_head_trace !== undefined &&
+      row.coverage_marginal_gain !== undefined
+    )).toBe(true);
+  });
+
+  it("does not let gist cover replace quality order", () => {
+    // Gist remains a receipt. Quality, not unique gist keys, owns packet order.
     const primary = createMemory(FUSION_WINNER_ID, 0.9, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.85, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.5, [{ facet: "location_place" }]);
     const basePolicy = buildPolicy();
     const assessed = fineAssess({
+    ...FIELD_PINS,
       candidates: [primary, redundant, novel].map(createCoarseCandidate),
       policy: {
         ...basePolicy,
@@ -228,30 +263,20 @@ describe("final recall relevance ownership", () => {
     expect(assessed.candidates.map((candidate) => candidate.object_id))
       .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
-    expect(diagnostics.get(COVERAGE_NOVEL_ID)?.rank_after_coverage_selector)
-      .toBeLessThan(diagnostics.get(ACTIVATION_WINNER_ID)?.rank_after_coverage_selector ?? 0);
     expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({ final_rank: 1, post_rank: 1 });
     expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
     expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
   });
 
-  it("restores CE relevance order after coverage admits a high-score duplicate late", () => {
+  it("does not restore CE relevance order after coverage-stage displacement", () => {
     const assessed = buildCoverageReorderedCeAssessment();
 
     expect(assessed.candidates.length).toBeGreaterThan(5);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     const highDup = diagnostics.get(CE_HIGH_DUP_ID);
-    expect(highDup?.rank_after_coverage_selector).toBeGreaterThan(5);
-    expect(highDup?.final_rank).toBeLessThanOrEqual(5);
-    expect(highDup?.final_rank).toBe(2);
-    expect(highDup?.post_rank).toBe(2);
-    expect(assessed.candidates.map((candidate) => candidate.relevance_score)).toEqual(
-      [...assessed.candidates]
-        .map((candidate) => candidate.relevance_score)
-        .sort((left, right) => right - left)
-    );
-    expect(assessed.candidates[0]?.object_id).toBe(CE_TOP_ID);
-    expect(assessed.candidates[1]?.object_id).toBe(CE_HIGH_DUP_ID);
+    expect(highDup?.rank_after_coverage_selector).toBe(2);
+    expect(highDup?.final_rank).toBe(highDup?.rank_after_coverage_selector);
+    expect(highDup?.post_rank).toBe(highDup?.final_rank);
   });
 
   it("uses only the injected clock when a retired benchmark env is present", () => {
@@ -260,6 +285,7 @@ describe("final recall relevance ownership", () => {
     });
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: () => NOW
     });
@@ -271,8 +297,7 @@ describe("final recall relevance ownership", () => {
 });
 
 function buildRelevanceFixture(
-  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>,
-  finalAuthorityMaxHeadDrop?: number
+  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>
 ) {
   const fusionWinner = createMemory(FUSION_WINNER_ID, 0.1, [
     { facet: "occupation_work" }, { facet: "location_place" }
@@ -281,28 +306,13 @@ function buildRelevanceFixture(
     { facet: "occupation_work" }
   ]);
   const assessed = fineAssess({
+    ...FIELD_PINS,
     candidates: [createCoarseCandidate(activationWinner), createCoarseCandidate(fusionWinner)],
     policy: buildPolicy(), winnerMemoryIds: new Set(),
     supplementaryData: createSupplementaryData(answerRelevanceScoresByCandidateKey), tokenEstimator: { estimate: () => 4 },
-    now: () => NOW, warn: vi.fn(),
-    finalAuthorityMaxHeadDrop
+    now: () => NOW, warn: vi.fn()
   });
   return { fusionWinner, activationWinner, assessed };
-}
-
-function assessMemories(
-  memories: readonly MemoryEntry[],
-  answerScores?: ReadonlyMap<string, number>
-): ReturnType<typeof fineAssess> {
-  return fineAssess({
-    candidates: memories.map(createCoarseCandidate),
-    policy: buildPolicy(),
-    winnerMemoryIds: new Set(),
-    supplementaryData: createSupplementaryData(answerScores),
-    tokenEstimator: { estimate: () => 4 },
-    now: () => NOW,
-    warn: vi.fn()
-  });
 }
 
 function buildCoverageReorderedCeAssessment(): ReturnType<typeof fineAssess> {
@@ -322,6 +332,7 @@ function buildCoverageReorderedCeAssessment(): ReturnType<typeof fineAssess> {
   ]);
   const basePolicy = buildPolicy();
   return fineAssess({
+    ...FIELD_PINS,
     candidates: memories.map(createCoarseCandidate),
     policy: { ...basePolicy, fine_assessment: { ...basePolicy.fine_assessment,
       budgets: { max_entries: 10, max_total_tokens: 200, per_dimension_limits: null } } },
@@ -435,6 +446,7 @@ function createSupplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},
@@ -453,6 +465,7 @@ function createSupplementaryData(
 function createRecallResult(candidates: RecallResult["candidates"]): RecallResult {
   return {
     candidates,
+    synthesis: { status: "absent" },
     active_constraints: [],
     active_constraints_count: 0,
     total_scanned: candidates.length,

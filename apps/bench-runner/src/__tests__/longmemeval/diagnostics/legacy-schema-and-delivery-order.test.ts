@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   renderDiagnosticsSidecar,
   stripReplayCandidatePoolsForGateWrite,
   summarizeLongMemEvalRecallEvidence
-} from "../../../longmemeval/diagnostics.js";
+} from "../../../bench/diagnostics.js";
 
 describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
   it("defaults omitted legacy graph expansion counters without weakening the strict sidecar schema", () => {
@@ -300,11 +300,13 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
           provider_pending: 0,
           provider_failed: 0,
           provider_not_requested: 1,
+          query_embedding_unusable: 0,
           unknown: 0,
           provider_returned_rate: 0,
           provider_pending_rate: 0,
           provider_failed_rate: 0,
           provider_not_requested_rate: 1,
+          query_embedding_unusable_rate: 0,
           unknown_rate: 0
         },
         questions: [question]

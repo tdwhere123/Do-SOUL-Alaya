@@ -12,6 +12,8 @@ import type {
   RecallFusionStream
 } from "../../recall/runtime/recall-service-types.js";
 
+const FUSION_PUBLIC = { replacePublicRelevance: false } as const;
+
 function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: "obj",
@@ -93,7 +95,7 @@ describe("applyDeliverySelection", () => {
       surfaceId: "independent-session"
     });
 
-    const result = applyDeliverySelection([...sameSession, independent]);
+    const result = applyDeliverySelection([...sameSession, independent], new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual([...sameSession, independent].map((candidate) => candidate.entry.object_id));
@@ -107,7 +109,7 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "second", fusedScore: 0.8, surfaceId: "sB" })
     ];
 
-    const result = applyDeliverySelection(candidates);
+    const result = applyDeliverySelection(candidates, new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual(["first", "second", "third"]);
@@ -132,7 +134,7 @@ describe("applyDeliverySelection", () => {
         fused: candidate.fusion.fused_score
       }] as const)
     );
-    const result = applyDeliverySelection(ordered);
+    const result = applyDeliverySelection(ordered, new Map(), FUSION_PUBLIC);
     for (const candidate of result.orderedCandidates) {
       expect(candidate.effectiveScore).toBe(beforeScores.get(candidate.entry.object_id)?.effective);
       expect(candidate.fusion.fused_score).toBe(beforeScores.get(candidate.entry.object_id)?.fused);
@@ -147,7 +149,7 @@ describe("applyDeliverySelection", () => {
       finalRelevanceScore: 1
     };
 
-    const result = applyDeliverySelection([staleAliasWinner, fusedWinner]);
+    const result = applyDeliverySelection([staleAliasWinner, fusedWinner], new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates[0]?.entry.object_id)
       .toBe("fused-winner");
@@ -160,10 +162,10 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "c", fusedScore: 0.98, surfaceId: "same" }),
       fusedCandidate({ objectId: "d", fusedScore: 0.97, surfaceId: "other" })
     ];
-    const expected = applyDeliverySelection(candidates).orderedCandidates
+    const expected = applyDeliverySelection(candidates, new Map(), FUSION_PUBLIC).orderedCandidates
       .map((candidate) => candidate.entry.object_id);
 
-    const actual = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[3]!, candidates[1]!])
+    const actual = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[3]!, candidates[1]!], new Map(), FUSION_PUBLIC)
       .orderedCandidates.map((candidate) => candidate.entry.object_id);
 
     expect(actual).toEqual(expected);
@@ -175,9 +177,9 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "c", fusedScore: 0.9, surfaceId: "other" }),
       fusedCandidate({ objectId: "a", fusedScore: 0.9, surfaceId: "same" })
     ];
-    const first = applyDeliverySelection(candidates).orderedCandidates
+    const first = applyDeliverySelection(candidates, new Map(), FUSION_PUBLIC).orderedCandidates
       .map((candidate) => candidate.entry.object_id);
-    const second = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[1]!])
+    const second = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[1]!], new Map(), FUSION_PUBLIC)
       .orderedCandidates.map((candidate) => candidate.entry.object_id);
 
     expect(first).toEqual(["a", "b", "c"]);
@@ -189,7 +191,7 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" }),
       fusedCandidate({ objectId: "b2", fusedScore: 0.8, surfaceId: "sB" })
     ];
-    const result = applyDeliverySelection(ordered);
+    const result = applyDeliverySelection(ordered, new Map(), FUSION_PUBLIC);
     expect(result.orderedCandidates[0]?.entry.object_id).toBe("a1");
     expect(result.rankByCandidateKey.get("workspace_local:memory_entry:a1")).toBe(1);
   });
@@ -222,7 +224,7 @@ describe("applyDeliverySelection", () => {
       })
     ];
 
-    const result = applyDeliverySelection(ordered);
+    const result = applyDeliverySelection(ordered, new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
       "a1",
@@ -250,7 +252,7 @@ describe("applyDeliverySelection", () => {
     });
     const nextUnique = fusedCandidate({ objectId: "next", fusedScore: 0.7 });
 
-    const result = applyDeliverySelection([nextUnique, alternate, preferred]);
+    const result = applyDeliverySelection([nextUnique, alternate, preferred], new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual(["shared", "shared", "next"]);
@@ -266,7 +268,7 @@ describe("applyDeliverySelection", () => {
       [answerFirst.fusion.candidate_key, 0.8]
     ]);
 
-    const result = applyDeliverySelection([fusedFirst, answerFirst], answerScores);
+    const result = applyDeliverySelection([fusedFirst, answerFirst], answerScores, { replacePublicRelevance: true });
 
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual(["answer-first", "fused-first"]);
@@ -280,7 +282,7 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "first", fusedScore: 0.9 })
     ];
 
-    const result = applyDeliverySelection(candidates, new Map());
+    const result = applyDeliverySelection(candidates, new Map(), FUSION_PUBLIC);
 
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual(["first", "second"]);

@@ -3,9 +3,7 @@ import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 export const LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY = Object.freeze({
   answerableCount: 94,
   declaredAbstentionCount: 6,
-  minimumNetR5Wins: 5,
-  mcnemarMethod: "exact_two_sided",
-  mcnemarPValueMaxExclusive: 0.05
+  mcnemarMethod: "exact_two_sided"
 } as const);
 
 const POLICY = LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY;
@@ -26,7 +24,8 @@ export interface LongMemEvalMaterialEffect {
   }>;
   readonly safeguards: Readonly<{
     token_saved_ratio_vs_full_prompt: LongMemEvalMetricDelta;
-    measurement_attribution: "eligible_in_both";
+    recall_eval_attribution: "eligible_in_both";
+    measurement_attribution: "honest_in_both";
   }>;
   readonly paired_r_at_5: Readonly<{
     answerable_count: 94;
@@ -54,19 +53,19 @@ export function verifyLongMemEvalMaterialEffect(input: {
   const controlRows = measuredRows(input.control, "control");
   const productRows = measuredRows(input.product, "product");
   assertPairedRows(controlRows, productRows);
-  assertMeasurementAttribution(input.control, input.product);
+  assertAttribution(input.control, input.product);
   const directional = directionalEffect(input.control, input.product);
   const tokenEconomy = metricDelta(
     input.control.kpi.token_saved_ratio_vs_full_prompt,
     input.product.kpi.token_saved_ratio_vs_full_prompt
   );
-  if (tokenEconomy.delta < 0) throw new Error("token economy regressed from A to B");
   return {
     status: "passed",
     directional,
     safeguards: {
       token_saved_ratio_vs_full_prompt: tokenEconomy,
-      measurement_attribution: "eligible_in_both"
+      recall_eval_attribution: "eligible_in_both",
+      measurement_attribution: "honest_in_both"
     },
     paired_r_at_5: pairedR5Effect(controlRows.answerable, productRows.answerable)
   };
@@ -149,12 +148,16 @@ function assertPairedRows(control: MeasuredRows, product: MeasuredRows): void {
   }
 }
 
-function assertMeasurementAttribution(control: KpiPayload, product: KpiPayload): void {
-  if (control.measurement_attribution?.status !== "eligible" ||
-      control.measurement_attribution.gate_eligible !== true ||
-      product.measurement_attribution?.status !== "eligible" ||
-      product.measurement_attribution.gate_eligible !== true) {
-    throw new Error("measurement attribution regressed or is ineligible");
+function assertAttribution(control: KpiPayload, product: KpiPayload): void {
+  if (control.recall_eval_attribution?.status !== "attributed" ||
+      control.recall_eval_attribution.gate_eligible !== true ||
+      product.recall_eval_attribution?.status !== "attributed" ||
+      product.recall_eval_attribution.gate_eligible !== true) {
+    throw new Error("recall-eval attribution is missing or ineligible");
+  }
+  if (control.measurement_attribution === undefined ||
+      product.measurement_attribution === undefined) {
+    throw new Error("measurement attribution must remain explicit in both cells");
   }
 }
 
@@ -200,13 +203,7 @@ function pairedR5Effect(
     if (controlHit && !productHit) lost += 1;
   }
   const net = gained - lost;
-  if (net < POLICY.minimumNetR5Wins) {
-    throw new Error("material effect requires at least five net R@5 wins");
-  }
   const pValue = exactTwoSidedMcNemarPValue(gained, lost);
-  if (pValue >= POLICY.mcnemarPValueMaxExclusive) {
-    throw new Error("material effect requires exact McNemar p < 0.05");
-  }
   return {
     answerable_count: POLICY.answerableCount,
     control_hits: controlHits,

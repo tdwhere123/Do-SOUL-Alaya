@@ -10,7 +10,7 @@ import {
 import {
   buildGardenTaskEvidenceFallbackSignalId,
   buildGardenTaskSignalId
-} from "../../garden/task-signal-id.js";
+} from "../../garden/support/task-signal-id.js";
 
 describe("post-turn evidence preservation decision", () => {
   it("detects evidence from actual created objects", () => {

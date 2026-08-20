@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  resolveEffectiveEmbeddingPosture,
   resolveSecretRef,
   type ResolveSecretError
 } from "@do-soul/alaya";
-import { resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
+import { parseSourceRefRobust, resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
@@ -13,7 +14,8 @@ import type {
 import { emitBenchHarnessWarning } from "./runtime/daemon-warnings.js";
 import {
   readOptionalOnnxThreadCount,
-  readOptionalTreatmentBoolean
+  readOptionalTreatmentBoolean,
+  refuseRetiredLocalCrossEncoderTreatment
 } from "../strict-treatment-config.js";
 import { planBenchDaemonConfigDirectory } from "./daemon-config-directory.js";
 
@@ -106,6 +108,7 @@ export function createBenchDaemonLaunchConfig(input: {
     reviewerCredentials,
     openAiSecretRef
   });
+  assertBenchEmbeddingModeMatchesEffective(input.embeddingMode, environment);
   return Object.freeze({
     dataDir: input.dataDir,
     configDir,
@@ -164,20 +167,11 @@ function buildBenchDaemonEnvironment(input: {
   setEnvironmentValue(environment, "HOME", join(input.dataDir, "home"));
   setEnvironmentValue(environment, "ALAYA_REVIEWER_IDENTITY", input.reviewerCredentials.identity);
   setEnvironmentValue(environment, "ALAYA_REVIEWER_TOKEN", input.reviewerCredentials.token);
-  copyTreatmentValue(environment, input.ambientEnv, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK");
-  copyTreatmentValue(environment, input.ambientEnv, "ALAYA_LOCAL_CROSS_ENCODER_MODEL");
   copyTreatmentValue(environment, input.ambientEnv, "ALAYA_RECALL_D2Q");
   copyTreatmentValue(environment, input.ambientEnv, "ALAYA_LOCAL_ONNX_THREADS");
-  const crossEnabled = readOptionalTreatmentBoolean(
-    input.ambientEnv.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  ) === true;
-  setEnvironmentValue(
-    environment,
-    "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
-    crossEnabled ? resolveLocalModelCacheRoot(input.ambientEnv, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR")
-      : input.ambientEnv.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR
-  );
+  setEnvironmentValue(environment, "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", undefined);
+  setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR", undefined);
+  setEnvironmentValue(environment, "ALAYA_LOCAL_CROSS_ENCODER_MODEL", undefined);
   setEnvironmentValue(
     environment,
     "ALAYA_RECALL_SOURCE_REF_ROBUST",
@@ -189,10 +183,7 @@ function buildBenchDaemonEnvironment(input: {
 function validateSavedTreatmentEnvironment(
   savedEnv: Partial<Record<string, string | undefined>>
 ): void {
-  readOptionalTreatmentBoolean(
-    savedEnv.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-  );
+  refuseRetiredLocalCrossEncoderTreatment(savedEnv);
   readOptionalTreatmentBoolean(savedEnv.ALAYA_RECALL_D2Q, "ALAYA_RECALL_D2Q");
   readOptionalOnnxThreadCount(savedEnv.ALAYA_LOCAL_ONNX_THREADS);
 }
@@ -259,7 +250,7 @@ function copyTreatmentValue(
 
 function resolveLocalModelCacheRoot(
   env: Readonly<Record<string, string | undefined>>,
-  explicitKey: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR" | "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR"
+  explicitKey: "ALAYA_LOCAL_EMBEDDING_CACHE_DIR"
 ): string {
   const explicit = env[explicitKey]?.trim();
   if (explicit) return resolve(explicit);
@@ -269,11 +260,20 @@ function resolveLocalModelCacheRoot(
 }
 
 export function resolveSourceRefRobust(raw: string | undefined): boolean {
-  const normalized = raw?.trim().toLowerCase();
-  if (normalized === undefined || normalized.length === 0) return true;
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  throw new Error("ALAYA_RECALL_SOURCE_REF_ROBUST must be true, false, 1, or 0");
+  return parseSourceRefRobust(raw);
+}
+
+export function assertBenchEmbeddingModeMatchesEffective(
+  embeddingMode: BenchEmbeddingMode,
+  environment: Readonly<Record<string, string | undefined>>
+): void {
+  if (embeddingMode !== "disabled") return;
+  const posture = resolveEffectiveEmbeddingPosture((key) => environment[key]);
+  if (posture.embeddingSupplementEnabled) {
+    throw new Error(
+      "bench embeddingMode=disabled but effective embedding supplement is on"
+    );
+  }
 }
 
 function setEnvValue(key: string, value: string | undefined): void {

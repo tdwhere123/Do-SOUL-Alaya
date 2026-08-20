@@ -6,7 +6,10 @@ import {
   SqliteMemoryEntryRepo
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
-import { readEmbeddingRuntimeConfig } from "../../ai/daemon-embedding-runtime-config.js";
+import {
+  LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR,
+  readEmbeddingRuntimeConfig
+} from "../../ai/daemon-embedding-runtime-config.js";
 
 function createRuntime(
   configEnv: ReadonlyMap<string, string>,
@@ -71,6 +74,25 @@ function isPolicyEnabled(runtime: ReturnType<typeof createDaemonEmbeddingRuntime
 }
 
 describe("daemon local embedding product default", () => {
+  it("shares persistent evidence vectors between Garden backfill and recall", async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig());
+    try {
+      expect(runtime.embeddingRecallService?.dependencies.evidenceDocumentEmbeddingRepo)
+        .toBeDefined();
+      await expect(runtime.embeddingBackfillHandler?.handle({
+        workspace_id: "workspace-1"
+      })).resolves.toMatchObject({
+        objectsAffected: [],
+        auditEntries: expect.arrayContaining([
+          "embedding_backfill_skipped:no_memories",
+          "evidence_embedding_backfill_skipped:no_documents"
+        ])
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([undefined, "true", "  TrUe  ", "1", " 1 "])(
     "enables the local provider after verified warmup for %s",
     async (configuredValue) => {
@@ -130,15 +152,30 @@ describe("daemon local embedding product default", () => {
   });
 
   it.each([
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "yes"],
     ["ALAYA_RECALL_D2Q", "enabled"]
   ])("rejects invalid %s boolean configuration", (name, value) => {
     expect(() => createRuntime(new Map([[name, value]]))).toThrow(new RegExp(name));
   });
 
+  it.each(["true", "1", "yes", "  TrUe  ", "on"])(
+    "fails loud when local cross-encoder rerank is set to %s",
+    (value) => {
+      expect(() => createRuntime(new Map([
+        ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", value]
+      ]))).toThrow(LOCAL_CROSS_ENCODER_RERANK_REMOVED_ERROR);
+    }
+  );
+
+  it("allows an explicit false local cross-encoder flag", () => {
+    expect(() => readEmbeddingRuntimeConfig(new Map([
+      ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0"]
+    ]), vi.fn())).not.toThrow();
+    expect(() => readEmbeddingRuntimeConfig(new Map([
+      ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "false"]
+    ]), vi.fn())).not.toThrow();
+  });
+
   it.each([
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "  TrUe  ", "localAnswerRerankEnabled", true],
-    ["ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK", "0", "localAnswerRerankEnabled", false],
     ["ALAYA_RECALL_D2Q", "1", "d2qEnabled", true],
     ["ALAYA_RECALL_D2Q", "  FaLsE  ", "d2qEnabled", false]
   ] as const)("parses strict %s=%s", (name, value, field, expected) => {
@@ -189,6 +226,8 @@ describe("daemon local embedding product default", () => {
   });
 
   it("keeps an explicitly selected API provider off unless the operator enables it", async () => {
+    const previousSecret = process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY;
+    process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY = "test-openai-embedding-key";
     const disabledEmbedTexts = vi.fn(async () => [new Float32Array([1])]);
     const disabled = createRuntime(
       new Map([["ALAYA_EMBEDDING_PROVIDER", "openai"]]),
@@ -196,7 +235,8 @@ describe("daemon local embedding product default", () => {
     );
     const enabled = createRuntime(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "openai"],
-      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "1"]
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "1"],
+      ["ALAYA_OPENAI_SECRET_REF", "env:ALAYA_TEST_OPENAI_EMBEDDING_KEY"]
     ]));
     try {
       await expect(disabled.runtime.providerWarmup).resolves.toBe("not_requested");
@@ -207,6 +247,8 @@ describe("daemon local embedding product default", () => {
     } finally {
       disabled.database.close();
       enabled.database.close();
+      if (previousSecret === undefined) delete process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY;
+      else process.env.ALAYA_TEST_OPENAI_EMBEDDING_KEY = previousSecret;
     }
   });
 
@@ -351,7 +393,7 @@ describe("daemon local embedding product default", () => {
       await warmupStarted;
       const pending = effectiveSharedProductPolicy(runtime);
       expect(pending.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(pending.fine_assessment.max_candidates).toBe(200);
+      expect(pending.fine_assessment).not.toHaveProperty("max_candidates");
 
       resolveWarmup([new Float32Array([1])]);
       await expect(runtime.providerWarmup).resolves.toBe("ready");
@@ -368,7 +410,7 @@ describe("daemon local embedding product default", () => {
       await expect(runtime.providerWarmup).resolves.toBe("failed");
       const failed = effectiveSharedProductPolicy(runtime);
       expect(failed.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(failed.fine_assessment.max_candidates).toBe(200);
+      expect(failed.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       database.close();
     }
@@ -384,8 +426,9 @@ describe("daemon local embedding product default", () => {
         injection_cap: 10,
         injection_similarity_floor: 0.5
       });
-      expect(ready.fine_assessment.max_candidates).toBe(210);
-      expect(runtime.defaultPolicyDecorator!(ready).fine_assessment.max_candidates).toBe(210);
+      expect(ready.fine_assessment).not.toHaveProperty("max_candidates");
+      expect(runtime.defaultPolicyDecorator!(ready).fine_assessment)
+        .not.toHaveProperty("max_candidates");
     } finally {
       database.close();
     }

@@ -11,7 +11,7 @@ import {
   openUrlWithSpawn,
   type BrowserOpenerChildProcess,
   type InspectorChildProcess
-} from "../../cli/inspect.js";
+} from "../../cli/inspect/inspect.js";
 
 import type { AlayaCliContext } from "../../cli/bridge.js";
 
@@ -133,7 +133,8 @@ describe("cli inspect", () => {
     setTimeout(() => childOk.emitExit(0, null), 10);
     const okResult = await okPromise;
     expect(okResult.exitCode).toBe(0);
-    expect(stdoutOkChunks.join("")).toContain("?workspaceId=explicit-ws#token=");
+    expect(stdoutOkChunks.join("")).toContain("?workspaceId=explicit-ws&launch=");
+    expect(stdoutOkChunks.join("")).not.toContain("#token=");
 
     const stderrMissing = new PassThrough();
     const stderrMissingChunks: string[] = [];
@@ -201,7 +202,8 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces/explicit-ws"]);
-      expect(stdoutChunks.join("")).toContain("?workspaceId=explicit-ws#token=");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=explicit-ws&launch=");
+      expect(stdoutChunks.join("")).not.toContain("#token=");
     } finally {
       daemon.restore();
     }

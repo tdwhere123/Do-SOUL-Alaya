@@ -1,8 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { TrustStateEventType, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
+import { WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
-import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { SqlitePathPlasticityWatermarkRepo } from "../../../repos/path/path-plasticity-watermark-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 
@@ -16,7 +14,7 @@ afterEach(() => {
 });
 
 describe("SqlitePathPlasticityWatermarkRepo", () => {
-  it("applies migration 060 and persists per-workspace watermarks", async () => {
+  it("persists per-workspace watermarks", async () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
@@ -31,9 +29,9 @@ describe("SqlitePathPlasticityWatermarkRepo", () => {
     });
 
     const migration = database.connection
-      .prepare("SELECT version FROM schema_version WHERE version = 60")
+      .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(migration?.version).toBe(60);
+    expect(migration?.version).toBe(8);
 
     expect(repo.findByWorkspaceId("workspace-1")).toBeNull();
     const created = repo.upsert({
@@ -62,54 +60,5 @@ describe("SqlitePathPlasticityWatermarkRepo", () => {
       last_processed_audit_event_id: null,
       updated_at: "2026-05-05T13:00:01.000Z"
     });
-  });
-
-  it("bootstraps existing workspaces from a safe 24h lookback instead of MAX raw usage reports", async () => {
-    const database = initDatabase({ filename: ":memory:" });
-    databases.add(database);
-    const workspaceRepo = new SqliteWorkspaceRepo(database);
-    const eventLogRepo = new SqliteEventLogRepo(database);
-    const repo = new SqlitePathPlasticityWatermarkRepo(database);
-    await workspaceRepo.create({
-      workspace_id: "workspace-usage",
-      name: "Usage Workspace",
-      root_path: "/tmp/usage",
-      workspace_kind: WorkspaceKind.LOCAL_REPO,
-      default_engine_binding: null,
-      workspace_state: WorkspaceState.ACTIVE
-    });
-    await eventLogRepo.append({
-      event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
-      entity_type: "trust_usage_proof",
-      entity_id: "delivery-future",
-      workspace_id: "workspace-usage",
-      run_id: null,
-      caused_by: "test",
-      payload_json: {
-        delivery_id: "delivery-future",
-        usage_state: "used",
-        used_object_ids: ["memory-1"],
-        reason: null,
-        reported_at: "2099-01-01T00:00:00.000Z"
-      }
-    });
-    database.connection
-      .prepare("DELETE FROM path_plasticity_watermark WHERE workspace_id = ?")
-      .run("workspace-usage");
-
-    const lowerBoundMs = Date.now() - 24 * 60 * 60 * 1000 - 2_000;
-    const migrationSql = await readFile(
-      new URL("../../../migrations/060-path-plasticity-watermark.sql", import.meta.url),
-      "utf8"
-    );
-    database.connection.exec(migrationSql);
-    const upperBoundMs = Date.now() - 24 * 60 * 60 * 1000 + 2_000;
-
-    const stored = repo.findByWorkspaceId("workspace-usage");
-    expect(stored).not.toBeNull();
-    const watermarkMs = Date.parse(stored?.last_processed_reported_at ?? "");
-    expect(watermarkMs).toBeGreaterThanOrEqual(lowerBoundMs);
-    expect(watermarkMs).toBeLessThanOrEqual(upperBoundMs);
-    expect(stored?.last_processed_reported_at).not.toBe("2099-01-01T00:00:00.000Z");
   });
 });

@@ -35,6 +35,25 @@ const RecallEvalAnswerRerankSchema = z.discriminatedUnion("enabled", [
   }).strict()
 ]);
 
+const EmbeddingCacheOverlayBindingSchema = z.object({
+  receipt_sha256: Sha256Schema,
+  overlay_sha256: Sha256Schema,
+  source_snapshot_db_sha256: Sha256Schema,
+  source_snapshot_manifest_sha256: Sha256Schema,
+  source_schema_version: z.number().int().positive(),
+  recall_pipeline_version: z.string().min(1),
+  memory_embedding_count: z.number().int().nonnegative(),
+  evidence_embedding_count: z.number().int().nonnegative(),
+  vector_space: z.object({
+    provider_kind: z.string().min(1),
+    model_id: z.string().min(1),
+    schema_version: z.number().int().positive(),
+    dimensions: z.number().int().positive(),
+    d2q_input: z.enum(["raw_content", "content_plus_hq"]),
+    model_artifact_sha256: Sha256Schema.nullable()
+  }).strict()
+}).strict();
+
 export const RecallEvalAttributionSchema = z.object({
   status: z.enum(["attributed", "legacy_unattributed"]),
   gate_eligible: z.boolean(),
@@ -48,6 +67,7 @@ export const RecallEvalAttributionSchema = z.object({
   onnx_model_artifact_sha256: Sha256Schema.nullable(),
   embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
   answer_rerank: RecallEvalAnswerRerankSchema.optional(),
+  embedding_cache_overlay: EmbeddingCacheOverlayBindingSchema.optional(),
   recall_config: z.object({
     schema_version: z.union([z.literal(1), z.literal(2)]),
     max_results: z.number().int().min(1).max(1_000),
@@ -133,14 +153,14 @@ export const RecallTokenEconomySchema = z
     // the candidates actually returned. Mirrors the chars/token heuristic
     // used by makeTokenEstimator in core.
     delivered_context_tokens_estimate: PerCallStatSchema,
-    // Coarse-pool size — the candidate count before the coarse→fine waist.
+    // Complete admitted candidate field before final selection.
     coarse_pool_size: PerCallStatSchema,
-    // Fine-assess evaluated count after coarse→fine prune (may be < coarse_pool_size).
+    // Current runs evaluate the complete field, so this equals coarse_pool_size.
     fine_evaluated: PerCallStatSchema,
-    // Coarse candidates dropped by the coarse→fine waist before scoring.
+    // Current runs emit zero; retained so hidden pre-selection deletion is observable.
     fine_pruned_count: PerCallStatSchema,
-    // Priority candidates excluded by the shared hard fine-assessment budget.
-    // Optional so archived v1 payloads remain readable; current runs emit it.
+    // Current runs emit zero because channel priority cannot delete candidates.
+    // Optional so archived v1 payloads remain readable.
     fine_priority_overflow_count: PerCallStatSchema.optional(),
     // Distinct fusion families with any member-stream hit (~5), not raw lane
     // count, across the pre-budget candidate set per recall.

@@ -3,7 +3,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
-import { parseProposalId, parseProposalReviewerAssignment, parseProposalReviewerAssignmentRow, parseProposalRow, parseProposedChanges, parseSourceDeliveryIds, parseWorkspaceId } from "./mappers.js";
+import { parseMemoryProposalOperation, parseProposalId, parseProposalReviewerAssignment, parseProposalReviewerAssignmentRow, parseProposalRow, parseProposedChanges, parseSourceDeliveryIds, parseWorkspaceId } from "./mappers.js";
 import { parseProposedPathRelation } from "./path-relations.js";
 import type { PendingProposalSummaryRow, ProposalReviewerAssignmentRow, ProposalRow } from "./rows.js";
 import type { ProposalStatements } from "./sqlite-proposal-statements.js";
@@ -42,6 +42,7 @@ export class ProposalReadQueries {
             proposal: parseProposalRow(row),
             workspace_id: row.workspace_id,
             run_id: row.run_id,
+            proposal_operation: parseMemoryProposalOperation(row.proposal_operation),
             target_object_kind: row.target_object_kind,
             reviewer_identity: row.reviewer_identity,
             reviewer_assignment: assignment,
@@ -313,6 +314,7 @@ const PENDING_SUMMARIES_SELECT_SQL = `
         p.workspace_id,
         p.run_id,
         p.reviewer_identity,
+        p.proposal_operation,
         p.target_object_kind,
         p.proposed_change_summary,
         p.proposed_changes,
@@ -335,6 +337,7 @@ function parsePendingProposalSummary(
     proposal_id: row.proposal_id,
     target_object_id: row.derived_from ?? row.runtime_id,
     target_object_kind: row.target_object_kind,
+    proposal_operation: parseMemoryProposalOperation(row.proposal_operation),
     created_at: row.created_at ?? row.last_updated_at,
     proposed_change_summary: row.proposed_change_summary,
     proposed_changes: parseProposedChanges(row.proposed_changes),

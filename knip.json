@@ -35,7 +35,11 @@
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "packages/storage": {
-      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/sqlite/write-queue/worker.ts",
+        "src/__tests__/**/*.test.ts"
+      ],
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "packages/core": {

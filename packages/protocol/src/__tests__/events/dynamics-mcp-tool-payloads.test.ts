@@ -250,6 +250,22 @@ describe("MCP tool request/response schemas", () => {
       ...baseResponse,
       degradation_reason: "cold_cascade_engaged"
     }).degradation_reason).toBe("cold_cascade_engaged");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "provider_missing"
+    }).degradation_reason).toBe("provider_missing");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "provider_unavailable"
+    }).degradation_reason).toBe("provider_unavailable");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "provider_failed"
+    }).degradation_reason).toBe("provider_failed");
+    expect(SoulMemorySearchResponseSchema.parse({
+      ...baseResponse,
+      degradation_reason: "no_stored_vectors"
+    }).degradation_reason).toBe("no_stored_vectors");
   });
 
   it("rejects unknown recall degradation_reason values", () => {

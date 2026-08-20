@@ -351,7 +351,7 @@ it("graduates cold-mode transfer by inbound RECALLS edge count and records audit
     }
   });
 
-it("orders identical memories by confidence sub-weight", async () => {
+it("keeps confidence sub-weight diagnostic when fusion evidence is identical", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-low-confidence",
@@ -382,7 +382,9 @@ it("orders identical memories by confidence sub-weight", async () => {
     expect(low).toBeDefined();
     expect(high?.score_factors?.confidence).toBeCloseTo(0.95);
     expect(low?.score_factors?.confidence).toBeCloseTo(0.2);
-    expect(high?.relevance_score ?? 0).toBeGreaterThan(low?.relevance_score ?? 0);
+    expect(high?.score_factors?.weighted_confidence ?? 0)
+      .toBeGreaterThan(low?.score_factors?.weighted_confidence ?? 0);
+    expect(high?.relevance_score).toBe(low?.relevance_score);
     expect(high?.relevance_score ?? -1).toBeLessThanOrEqual(1);
     expect(low?.relevance_score ?? 2).toBeGreaterThanOrEqual(0);
   });

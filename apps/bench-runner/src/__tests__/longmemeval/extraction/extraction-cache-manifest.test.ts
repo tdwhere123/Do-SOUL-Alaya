@@ -15,12 +15,12 @@ import {
   writeExtractionCacheManifest,
   type ExtractionCacheManifest,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
-import { hasCompleteExtractionFillAuthority } from "../../../longmemeval/extraction/fill/fill-authority.js";
+} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from "../../../bench/extraction/fill/fill-authority.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../longmemeval/extraction/content-closure.js";
+} from "../../../bench/extraction/content-closure.js";
 
 const BASE_MANIFEST: ExtractionCacheManifest = {
   schema_version: 1,
@@ -45,10 +45,9 @@ describe("extraction-cache-manifest", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-"));
   });
 
-  it("declares the trusted-role corpus component used by current cache keys", () => {
+  it("declares the optional role-corpus and catalog components used by current cache keys", () => {
     expect(EXTRACTION_CACHE_KEY_ALGO).toBe(
-      "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
-      "\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest)"
+      "sha256(model\\0requestProfile\\0systemPrompt\\0canonicalExtractionRequest)"
     );
   });
 
@@ -362,6 +361,18 @@ describe("extraction-cache-manifest", () => {
     );
   });
 
+  it("rejects invalid UTF-8 before manifest parsing", () => {
+    const valid = Buffer.from(JSON.stringify(BASE_MANIFEST), "utf8");
+    const invalid = Buffer.concat([
+      valid.subarray(0, valid.length - 1), Buffer.from([0xff, 0x7d])
+    ]);
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(extractionCacheManifestPath(cacheRoot), invalid);
+
+    expect(() => readExtractionCacheManifestIdentity(cacheRoot))
+      .toThrow(/not valid UTF-8/u);
+  });
+
   it.each([
     ["requested_turns", -1],
     ["requested_turns", 1.5],
@@ -428,6 +439,16 @@ describe("extraction-cache-manifest", () => {
     expect(() => resolveBenchExtractionModel({})).toThrow(
       /extraction model is unresolved/u
     );
+  });
+
+  it("resolveBenchExtractionModel remaps display aliases to the vendor id", () => {
+    expect(resolveBenchExtractionModel(
+      { OFFICIAL_API_GARDEN_MODEL: "Mimo-V2.5" }
+    )).toBe("mimo-v2.5");
+    expect(resolveBenchExtractionModel(
+      {},
+      { extraction_model: "mimo-v2-flash" }
+    )).toBe("mimo-v2.5");
   });
 });
 

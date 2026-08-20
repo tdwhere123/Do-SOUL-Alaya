@@ -120,6 +120,22 @@ describe("inspector routes", () => {
   });
 
 
+  it("allows unauthenticated launch-session exchange", async () => {
+    const app = createInspectorApp({
+      token: "secret-token",
+      launchCode: "launch-code"
+    });
+
+    const response = await app.request("/api/launch-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "launch-code" })
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ token: "secret-token" });
+  });
+
   it("serves static files, rejects traversal, and tolerates a missing frontend bundle", async () => {
     const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-static-"));
     await mkdir(path.join(staticRoot, "assets"));
@@ -130,7 +146,7 @@ describe("inspector routes", () => {
     expect((await app.request("/")).status).toBe(200);
     expect((await app.request("/api/status")).status).toBe(401);
     expect((await app.request("/api/status?token=token")).status).toBe(401);
-    expect(await (await app.request("/?workspaceId=ws1#token=token")).text()).toContain("<html>ok</html>");
+    expect(await (await app.request("/?workspaceId=ws1&launch=launch-code")).text()).toContain("<html>ok</html>");
     expect(await (await app.request("/assets/app.js")).text()).toContain("console.log");
     expect((await app.request("/..%2F..%2Fetc%2Fpasswd")).status).toBe(404);
 

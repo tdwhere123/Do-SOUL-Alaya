@@ -7,7 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { SignalService } from "@do-soul/alaya-core";
 
-import { createGardenSignalRefReplayPort } from "../../runtime/garden-signal-ref-replay.js";
+import { createGardenSignalRefReplayPort } from "../../runtime/garden-wiring/garden-signal-ref-replay.js";
 
 function buildSignal(): CandidateMemorySignal {
   return CandidateMemorySignalSchema.parse({

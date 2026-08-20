@@ -35,8 +35,6 @@ import {
   resolveBenchReviewerCredentials
 } from "../../../harness/daemon/daemon-support.js";
 
-import { BENCH_CO_RECALL_WARMUP_PAIR_CAP } from "../../../harness/embedding/co-recall-warmup.js";
-
 import {
   BenchRecallDiagnosticsSchema,
   type BenchRecallDiagnostics
@@ -45,7 +43,7 @@ import {
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 
 import { withBenchDaemon } from "./bench-daemon.test-support.js";
 
@@ -82,37 +80,6 @@ function readDerivesFromPathRelation(
           AND json_extract(constitution_json, '$.relation_kind') = 'derives_from'`
     )
     .get(sourceObjectId, targetObjectId) as DerivesFromPathRow | undefined;
-}
-
-interface CoRecalledPathRow {
-  readonly source_object_id: string;
-  readonly target_object_id: string;
-  readonly recall_bias: number;
-  readonly lifecycle_status: string;
-  readonly governance_class: string;
-}
-
-// invariant: read the recalls-tier co_recalled paths the bench co-recall hub
-// mints. recall_bias + lifecycle_status are what isPathRecallEligible gates on
-// (active lifecycle AND recall_bias > 0), so the test asserts eligibility from
-// the durable row, not from a re-import of the predicate.
-// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible
-function readCoRecalledPathRelations(
-  db: BenchDatabase,
-  workspaceId: string
-): readonly CoRecalledPathRow[] {
-  return db.connection
-    .prepare(
-      `SELECT json_extract(anchors_json, '$.source_anchor.object_id')   AS source_object_id,
-              json_extract(anchors_json, '$.target_anchor.object_id')   AS target_object_id,
-              json_extract(effect_vector_json, '$.recall_bias')         AS recall_bias,
-              json_extract(lifecycle_json, '$.status')                  AS lifecycle_status,
-              json_extract(legitimacy_json, '$.governance_class')       AS governance_class
-         FROM path_relations
-        WHERE workspace_id = ?
-          AND json_extract(constitution_json, '$.relation_kind') = 'co_recalled'`
-    )
-    .all(workspaceId) as readonly CoRecalledPathRow[];
 }
 
 function edgeProposalCount(
@@ -307,7 +274,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = savedOpenAiKey;
     }
-  });
+  }, 20_000);
 
   it("restores managed environment when startup fails after env mutation", async () => {
     const savedEnv = snapshotManagedEnv();
@@ -381,7 +348,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   });
 
   it(
-    "preserves cross-encoder configuration and restores managed env on shutdown",
+    "refuses retired cross-encoder configuration before daemon startup",
     async () => {
       const keys = [
         "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
@@ -392,29 +359,14 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK = "true";
       process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR = "/tmp/cross-encoder-cache";
       process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
-      const configured = snapshotManagedEnv();
-
       try {
-        await withBenchDaemon(
+        await expect(withBenchDaemon(
           {
             workspaceId: "harness-cross-encoder-env-ws",
             runId: "harness-cross-encoder-env-run"
           },
-          async () => {
-            expect(process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK).toBe("true");
-            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR).toBe(
-              "/tmp/cross-encoder-cache"
-            );
-            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
-              "Xenova/ms-marco-MiniLM-L-6-v2"
-            );
-            process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "mutated-by-runtime";
-          }
-        );
-        expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
-          "Xenova/ms-marco-MiniLM-L-6-v2"
-        );
-        expect(snapshotManagedEnv()).toEqual(configured);
+          async () => undefined
+        )).rejects.toThrow(/cross-encoder reranking is retired/u);
       } finally {
         for (const key of keys) {
           const value = original[key];

@@ -5,6 +5,15 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
+import {
+  parseRows,
+  readJsonColumn,
+  readNonEmptyStringField,
+  readNonNegativeIntField,
+  readNullableStringField,
+  readRecord,
+  type RowParser
+} from "../shared/parse-row.js";
 import { DEFAULT_REPO_LIST_PAGE_LIMIT, parsePageLimit, parsePageOffset } from "../shared/validators.js";
 import type { EventLogPageOptions } from "./event-log-types.js";
 
@@ -72,26 +81,71 @@ export const CONVERSATION_MESSAGE_EVENT_TYPES = [
   StreamingEventType.MESSAGE_COMPLETED
 ] as const;
 
-export function parseEventLogEntryRow(row: EventLogRow): EventLogEntry {
-  let payload: unknown;
+export const EventLogEntryRowParser: RowParser<EventLogEntry> = {
+  parse: parseEventLogEntryRow
+};
 
-  try {
-    payload = JSON.parse(row.payload_json);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to parse event payload JSON.", error);
-  }
-
+export function parseEventLogEntryRow(value: unknown): EventLogEntry {
+  const row = readRecord(value, "event log row");
   return parseEventLogEntry({
-    ...row,
-    payload_json: payload
+    event_id: row.event_id,
+    event_type: row.event_type,
+    entity_type: row.entity_type,
+    entity_id: row.entity_id,
+    workspace_id: row.workspace_id,
+    run_id: row.run_id,
+    caused_by: row.caused_by,
+    revision: row.revision,
+    payload_json: readJsonColumn(row, "payload_json"),
+    created_at: row.created_at
   });
 }
 
-export function parseEventLogEntry(entry: EventLogEntryCandidate): EventLogEntry {
+export function parseEventLogEntry(entry: unknown): EventLogEntry {
   try {
     return EventLogEntrySchema.parse(entry);
   } catch (error) {
     throw new StorageError("VALIDATION_FAILED", "Failed to validate event log entry.", error);
+  }
+}
+
+export const EventLogCursorStateRowParser: RowParser<EventLogCursorStateRow> = {
+  parse(value: unknown): EventLogCursorStateRow {
+    const record = readRecord(value, "event log cursor state row");
+    return {
+      cursor_exists: readNonNegativeIntField(record, "cursor_exists"),
+      events_up_to_cursor: readNonNegativeIntField(record, "events_up_to_cursor"),
+      latest_event_id: readNullableStringField(record, "latest_event_id")
+    };
+  }
+};
+
+export const EventIdRowParser: RowParser<Readonly<{ readonly event_id: string }>> = {
+  parse(value: unknown): Readonly<{ readonly event_id: string }> {
+    const record = readRecord(value, "event id row");
+    return { event_id: readNonEmptyStringField(record, "event_id") };
+  }
+};
+
+export const CreatedAtRowParser: RowParser<Readonly<{ readonly created_at: string }>> = {
+  parse(value: unknown): Readonly<{ readonly created_at: string }> {
+    const record = readRecord(value, "created at row");
+    return { created_at: readNonEmptyStringField(record, "created_at") };
+  }
+};
+
+export function wrapEventLogQueryError(message: string, error: unknown): StorageError {
+  if (error instanceof StorageError) {
+    return error;
+  }
+  return new StorageError("QUERY_FAILED", message, error);
+}
+
+export function queryEventLogRows(values: unknown, message: string): readonly EventLogEntry[] {
+  try {
+    return parseRows(values, EventLogEntryRowParser, "event log row");
+  } catch (error) {
+    throw wrapEventLogQueryError(message, error);
   }
 }
 

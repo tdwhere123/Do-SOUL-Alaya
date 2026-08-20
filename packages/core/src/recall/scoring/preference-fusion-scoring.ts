@@ -1,5 +1,4 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { classifyRecallIntent } from "../query/recall-query-plan.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { recallProjectionScoringEnabled } from "./temporal-fusion-scoring.js";
@@ -11,36 +10,48 @@ export function scorePreferenceProfileAlignment(
   if (!recallProjectionScoringEnabled()) {
     return 0;
   }
-  if (entry.dimension !== "preference" || classifyRecallIntent(queryProbes) !== "preference") {
+  if (!isTrustedPreferenceProfileOwner(entry) ||
+      !queryProbes.dimensions.includes("preference")) {
     return 0;
   }
-  const profileText = normalizeProfileText([
-    entry.preference_subject,
-    entry.preference_predicate,
+  const discriminativeProfileText = normalizeProfileText([
     entry.preference_object,
-    entry.preference_category,
-    entry.preference_polarity
+    entry.preference_category
   ]);
-  if (profileText.length === 0) {
-    return 0;
-  }
-  const overlap = scoreProfileTermOverlap(profileText, queryProbes);
+  const overlap = scoreProfileTermOverlap(discriminativeProfileText, queryProbes);
+  if (overlap === 0) return 0;
   const polarity = scorePolarityCue(entry.preference_polarity, queryProbes.normalized_query ?? "");
-  return clamp01(Math.max(overlap, polarity) + (profileText.includes("operator") ? 0.1 : 0));
+  return clamp01(
+    Math.max(overlap, polarity) + (entry.preference_subject === "operator" ? 0.1 : 0)
+  );
+}
+
+export function isTrustedPreferenceProfileOwner(
+  entry: Readonly<MemoryEntry>
+): boolean {
+  return (entry.source_kind === "user" && entry.formation_kind === "explicit") ||
+    (entry.source_kind === "compiler" && entry.formation_kind === "extracted") ||
+    (entry.source_kind === "seed" && entry.formation_kind === "explicit");
 }
 
 function scoreProfileTermOverlap(
   profileText: string,
   queryProbes: Readonly<RecallQueryProbes>
 ): number {
-  const terms = [...queryProbes.lexical_terms, ...queryProbes.expanded_terms]
+  const terms = queryProbes.lexical_terms
     .map((term) => term.trim().toLowerCase())
     .filter((term) => term.length >= 3);
   if (terms.length === 0) {
     return 0;
   }
-  const hits = terms.filter((term) => profileText.includes(term)).length;
+  const hits = terms.filter((term) => containsProfileTerm(profileText, term)).length;
   return hits === 0 ? 0 : Math.min(1, hits / Math.min(3, terms.length));
+}
+
+function containsProfileTerm(profileText: string, term: string): boolean {
+  return /\p{Script=Han}/u.test(term)
+    ? profileText.includes(term)
+    : ` ${profileText} `.includes(` ${term} `);
 }
 
 function scorePolarityCue(
@@ -60,5 +71,9 @@ function normalizeProfileText(values: readonly (string | null | undefined)[]): s
   return values
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .join(" ")
-    .toLowerCase();
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[_\p{Dash_Punctuation}\p{Punctuation}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }

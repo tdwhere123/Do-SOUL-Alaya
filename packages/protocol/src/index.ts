@@ -29,7 +29,14 @@ export * from "./soul/envelope.js";
 export * from "./soul/base-types.js";
 export * from "./soul/governance-subject.js";
 export * from "./soul/evidence-capsule.js";
+export * from "./soul/associative-fact-frame.js";
+export * from "./soul/open-semantic-factor-graph.js";
+export * from "./soul/query-osf-semantic-completeness.js";
+export * from "./soul/field-contract/index.js";
+export * from "./soul/verified-user-assertion-receipt.js";
+export * from "./soul/garden-source-turn-fallback-receipt.js";
 export * from "./soul/memory-entry.js";
+export * from "./soul/memory-object-key.js";
 export * from "./soul/global-memory-entry.js";
 export * from "./soul/synthesis-capsule.js";
 export * from "./soul/claim-form.js";
@@ -76,6 +83,7 @@ export * from "./soul/extension-descriptors.js";
 export * from "./soul/extension-descriptor-parsers.js";
 export * from "./soul/canonical-alias.js";
 export * from "./soul/path-anchor-identity.js";
+export * from "./soul/time-concern-window-digest.js";
 export * from "./soul/path-anchor-normalization.js";
 export * from "./soul/compute-routing.js";
 export * from "./soul/consolidation-types.js";
@@ -96,6 +104,7 @@ export * from "./workspace/files.js";
 export * from "./tools/file-tools.js";
 export * from "./config/app-config.js";
 export * from "./events/event-log.js";
+export * from "./events/field-generation.js";
 export * from "./events/workspace-run.js";
 export * from "./events/signal.js";
 export * from "./events/tool-worker.js";
@@ -144,10 +153,12 @@ export * from "./shared/read-error-message.js";
 export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
 export { deepFreeze } from "./shared/deep-freeze.js";
 export {
+  BOUNDED_JSON_OBJECT_MAX_CHARS,
   BoundedJsonObjectSchema,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,
+  PREFERENCE_FACT_MAX_CHARS,
   PositiveIntSchema
 } from "./shared/schema-primitives.js";
 export {

@@ -132,7 +132,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 type CapturedScheduler = (typeof hoisted.schedulers)[number];
 
@@ -185,12 +185,6 @@ describe("garden runtime path plasticity queue", () => {
   it("records a default-workspace Garden pass when no workspaces exist yet", async () => {
     const healthJournalAppend = vi.fn(async () => undefined);
     const runtime = createGardenRuntime(createRuntimeInput({
-      computeAndApplyPlasticity: vi.fn(async () => ({
-        reinforced: 0,
-        weakened: 0,
-        retired: 0,
-        affectedPathIds: []
-      })),
       healthJournalRepo: {
         append: healthJournalAppend
       } as unknown as GardenRuntimeInput["healthJournalRepo"],
@@ -231,12 +225,6 @@ describe("garden runtime path plasticity queue", () => {
     });
     const runtime = createGardenRuntime(
       createRuntimeInput({
-        computeAndApplyPlasticity: vi.fn(async () => ({
-          reinforced: 0,
-          weakened: 0,
-          retired: 0,
-          affectedPathIds: []
-        })),
         gardenDataPorts,
         pathRelationRepo: {
           findActive: vi.fn(async () => []),

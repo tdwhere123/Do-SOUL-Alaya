@@ -1,14 +1,5 @@
 import { ALAYA_SYSEXITS, type AlayaCliResult } from "../bridge.js";
-import {
-  applyProfileMutationPlan,
-  buildAttachProfileMutationPlan,
-  confirmProfileMutation,
-  renderProfileMutationPreview,
-  type ProfileMutationApplyOptions,
-  type ProfileMutationAuditWriter,
-  type ProfileMutationConfirmIo,
-  type ProfileMutationFs
-} from "../../attach/index.js";
+import { applyProfileMutationPlan, buildAttachProfileMutationPlan, confirmProfileMutation, renderProfileMutationPreview, type ProfileMutationApplyOptions, type ProfileMutationAuditWriter, type ProfileMutationConfirmIo, type ProfileMutationFs } from "../../attach/index.js";
 
 export interface TrustStateRecorderPort {
   recordInstalled(agent_target: string): Promise<void>;

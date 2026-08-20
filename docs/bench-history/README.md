@@ -5,18 +5,22 @@ sanitized live-check snapshots across every Alaya release that touches
 recall, embedding, tier, or governance behavior. It is the durable
 contract that v0.3.6 establishes for v0.3.7+ and beyond.
 
+KPI archives here are evidence, not the algorithm definition. Current
+recall target vs live: [`docs/handbook/recall.md`](../handbook/recall.md).
+Do not treat a dated `report.md` or baseline writeup as the live ranking
+recipe.
+
 v0.3.7 introduces the `live/strict-real` and `public-multiturn` archive
 **contracts and import commands**. The first archive entries under
 `docs/bench-history/live/` and `docs/bench-history/public-multiturn/`
 are follow-up work; if those directories are empty you are looking at
 a pre-Phase-B v0.3.7 checkout.
 
-v0.3.11's Tier 1 release archive surfaces are `public/`,
-`public-multiturn/`, `public-crossquestion/`, `public-locomo/`, and
-`live/`. `public-crossquestion` and `public-locomo` are current archive
-roots, not future placeholders: their runners write compact diagnostics
-sidecars into this tree and write full diagnostics outside the tracked
-archive root.
+Operator benches are LongMemEval-S (`public/`) and LoCoMo
+(`public-locomo/`). Historical `self`, `live`, `public-multiturn`, and
+`public-crossquestion` entries stay readable; those runners are
+retired. Current runners write compact diagnostics sidecars into this
+tree and write full diagnostics outside the tracked archive root.
 
 The premise: a single one-off benchmark number is theatre. A feedback
 loop — same harness, same data, diffed against previous baselines, with
@@ -60,14 +64,13 @@ belonged in the tracked tree).
 
 The standing QA + seeding config for baseline runs, so it is not re-litigated:
 
-- **QA answer + judge model = `gpt-5.4-nano` (both).** nano is the stronger
-  5.4-generation model; baseline QA does **not** match the older gpt-4o
-  "official" judge. Set via `OFFICIAL_API_GARDEN_QA_MODEL` and
-  `OFFICIAL_API_GARDEN_QA_JUDGE_MODEL`; QA routed through the Clash proxy shim
-  (`.do-it/bench-runs/scripts/proxy-preload.mjs`, `NODE_OPTIONS=--import …`).
-- **Seeding = distilled extraction cache** (`--extraction-cache-root
-  docs/bench-history/datasets/longmemeval-extraction-cache`, model
-  `gpt-5.4-nano`, `coverage=1` → cache hits, zero live extraction calls);
+- **QA answer + judge model = `Mimo-V2.5` (both).** Set via `ALAYA_QA_MODEL`
+  and `ALAYA_QA_JUDGE_MODEL`. Extraction and Garden official API use OpenCode
+  Go (`https://opencode.ai/zen/go/v1`) from
+  `.do-it/bench-env/mimo-v2.5-opencode-go.env`.
+- **Seeding = distilled extraction cache** (`ALAYA_BENCH_EXTRACTION_CACHE_ROOT`
+  from the same bench-env, model `Mimo-V2.5`, `coverage=1` → cache hits, zero
+  live extraction calls);
   daemon reconciliation `ALAYA_GARDEN_PROVIDER_KIND=local_heuristics`.
 - **Embedding** local ONNX `paraphrase-multilingual-MiniLM-L12-v2`
   (`--embedding env --embedding-provider local_onnx`,
@@ -82,15 +85,14 @@ The standing QA + seeding config for baseline runs, so it is not re-litigated:
 ## Why this exists
 
 - An external reader can re-run
-  `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self`,
-  and `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval`
-  to reproduce the tracked archive shape after `rtk pnpm build`.
-  `alaya-bench-runner longmemeval-multiturn` repeats LongMemEval recall
-  with `soul.report_context_usage`; `alaya-bench-runner live` is
-  operator-only re-archive plumbing for a newly generated local
-  live-check summary. The older `.do-it` live
-  histories have already been imported here and the raw run directories
-  are no longer kept in the repo checkout.
+  `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s`
+  and `rtk node apps/bench-runner/bin/alaya-bench-runner.mjs locomo`
+  to reproduce the tracked public archive shape after `rtk pnpm build`.
+  Historical `self`, `live`, `public-multiturn`, and
+  `public-crossquestion` entries stay readable; those runners are
+  retired. The older `.do-it` live histories have already been imported
+  here and the raw run directories are no longer kept in the repo
+  checkout.
 - Any PR that changes recall / embedding / tier / proposal behavior
   must attach a fresh entry here and link the diff vs. the previous
   baseline in the PR description.
@@ -359,7 +361,7 @@ restate a number, write a new entry.
 
 ## Known bench-harness stderr noise
 
-The `alaya-bench-runner self` and `alaya-bench-runner longmemeval` runs
+The `alaya-bench-runner longmemeval` and `alaya-bench-runner locomo` runs
 emit one `MODEL_TOOL candidate signal emitted without source_delivery_ids.`
 warning per seed. This is structural and intentional:
 
@@ -496,10 +498,7 @@ rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --varian
 #    rewrites latest-run*.json, and rewrites latest-passing*.json only
 #    when findings are absent, release hard gates pass, and the Tier 1
 #    archive is release-grade rather than smoke/staged diagnostics.
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs self
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant oracle --data-dir <shared-cache>/longmemeval
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-multiturn --variant s --rounds 3 --data-dir <shared-cache>/longmemeval
-rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval-crossquestion --variant s --data-dir <shared-cache>/longmemeval
+rtk node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval --variant s --data-dir <shared-cache>/longmemeval
 rtk node apps/bench-runner/bin/alaya-bench-runner.mjs locomo --data-dir <shared-cache>/locomo
 # Add --limit only for local smoke/diagnostic runs. Limited Tier 1
 # runs rewrite latest-run*.json but are not release baselines and do

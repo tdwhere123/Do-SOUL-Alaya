@@ -3,15 +3,19 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { noisyOrDecorrelate } from "./conformant-evidence-math.js";
 import { computeFloodEdgeTransfer } from "../flood/edge-transfer.js";
 import {
-  deriveMemorySliceKeysV1,
-  derivePathAnchorSliceKeysV1,
-  deriveQuerySliceKeysV1,
-  selectSliceCompatibilityV1
+  deriveMemorySliceKeysV2,
+  derivePathAnchorSliceKeysV2,
+  deriveQuerySliceKeysV2,
+  selectSliceCompatibilityV2
 } from "../flood/slice-key-selector.js";
 import type {
-  SliceCompatibilityV1
+  SliceCompatibilityV2
 } from "../flood/slice-key-selector.js";
-import type { SelectedSliceKeyV1 } from "../flood/slice-key-contract.js";
+import {
+  mergeSelectedSliceKeysV2,
+  type SelectedSliceKeyV2
+} from "../flood/slice-key-contract.js";
+import { projectedRoutingKeyOwnerIdentity } from "../flood/projected-routing-keys.js";
 import {
   resolveFusionContribution as resolveAdaptiveFusionContribution,
   type FusionContributionCandidate,
@@ -28,7 +32,6 @@ import type {
 import type { RecallFloodEdgeTraceV1 } from "../runtime/recall-service-types.js";
 import { isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import {
-  recallEnvFlagEnabled,
   readRecallUnitFloat
 } from "../../config/recall-env-access.js";
 
@@ -57,10 +60,6 @@ export function resolveConformantRhoEvidence(): number {
 
 export function resolveConformantPathWeight(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_W_PATH", 0.6);
-}
-
-export function resolveConformantEvidenceBeta(): number {
-  return readUnitEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0);
 }
 
 export function resolveConformantFloodCapPerSource(): number {
@@ -123,12 +122,12 @@ interface SeededConformantCandidate {
 }
 
 interface SliceSelectionContext {
-  readonly queryKeysByWorkspace: ReadonlyMap<string, readonly SelectedSliceKeyV1[]>;
-  readonly memoryKeysByWorkspaceObject: ReadonlyMap<string, readonly SelectedSliceKeyV1[]>;
+  readonly queryKeysByWorkspace: ReadonlyMap<string, readonly SelectedSliceKeyV2[]>;
+  readonly memoryKeysByWorkspaceObject: ReadonlyMap<string, readonly SelectedSliceKeyV2[]>;
   readonly asOfMs: number;
 }
 
-const EMPTY_SLICE_KEYS: readonly SelectedSliceKeyV1[] = Object.freeze([]);
+const EMPTY_SLICE_KEYS: readonly SelectedSliceKeyV2[] = Object.freeze([]);
 
 const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
   Object.freeze({ object: null, path: null, evidence: null, temporal: null, control: null });
@@ -188,7 +187,6 @@ export function buildConformantAxisContext(params: Readonly<{
   readonly resolved: ResolvedRecallFusionWeights;
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
-  readonly enforceSliceCompatibility?: boolean;
 }>): ConformantAxisContext {
   const rhoEvidence = resolveConformantRhoEvidence();
   const rhoPath = resolveConformantRhoPath();
@@ -200,15 +198,17 @@ export function buildConformantAxisContext(params: Readonly<{
   const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
   const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
   const edgeTraceByKey = new Map<string, Readonly<FloodEdgeTraceBundle>>();
-  const enforceSliceCompatibility = params.enforceSliceCompatibility
-    ?? recallEnvFlagEnabled("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY");
   for (const candidate of seeded) {
     recordCandidateAxes(candidate, rObjectById, params.supplementaryData, {
       rhoPath, capPerSource, capTotal, axisRankByKey, raByKey, edgeTraceByKey,
-      sliceSelection, enforceSliceCompatibility
+      sliceSelection
     });
   }
-  return Object.freeze({ axisRankByKey, raByKey, edgeTraceByKey });
+  return Object.freeze({
+    axisRankByKey,
+    raByKey,
+    edgeTraceByKey
+  });
 }
 
 function seedConformantCandidates(
@@ -247,22 +247,32 @@ function seedConformantCandidates(
 function buildSliceSelectionContext(
   params: Parameters<typeof buildConformantAxisContext>[0]
 ): Readonly<SliceSelectionContext> {
-  const queryKeysByWorkspace = new Map<string, readonly SelectedSliceKeyV1[]>();
-  const memoryKeysByWorkspaceObject = new Map<string, readonly SelectedSliceKeyV1[]>();
+  const queryKeysByWorkspace = new Map<string, readonly SelectedSliceKeyV2[]>();
+  const memoryKeysByWorkspaceObject = new Map<string, readonly SelectedSliceKeyV2[]>();
   const parsedAsOfMs = Date.parse(params.nowIso);
   const asOfMs = Number.isSafeInteger(parsedAsOfMs) ? parsedAsOfMs : 0;
   for (const { candidate } of params.candidates) {
     if (!isWorkspaceMemoryCandidate(candidate)) continue;
     const workspaceId = candidate.entry.workspace_id;
     if (!queryKeysByWorkspace.has(workspaceId)) {
-      queryKeysByWorkspace.set(workspaceId, deriveQuerySliceKeysV1({
-        workspaceId, queryProbes: params.supplementaryData.queryProbes,
-        asOfMs, nowIso: params.nowIso
-      }));
+      queryKeysByWorkspace.set(
+        workspaceId,
+        params.supplementaryData.queryRoutingKeys ?? deriveQuerySliceKeysV2({
+          workspaceId, queryProbes: params.supplementaryData.queryProbes,
+          asOfMs, nowIso: params.nowIso
+        })
+      );
     }
-    memoryKeysByWorkspaceObject.set(memoryProjectionKey(workspaceId, candidate.entry.object_id), deriveMemorySliceKeysV1({
+    const currentKeys = deriveMemorySliceKeysV2({
       workspaceId, entry: candidate.entry, asOfMs
-    }));
+    });
+    const projectedKeys = params.supplementaryData.routingKeysByOwnerIdentity?.get(
+      projectedRoutingKeyOwnerIdentity("memory_entry", candidate.entry.object_id)
+    ) ?? EMPTY_SLICE_KEYS;
+    memoryKeysByWorkspaceObject.set(
+      memoryProjectionKey(workspaceId, candidate.entry.object_id),
+      mergeSelectedSliceKeysV2(currentKeys, projectedKeys)
+    );
   }
   return Object.freeze({ queryKeysByWorkspace, memoryKeysByWorkspaceObject, asOfMs });
 }
@@ -271,22 +281,22 @@ function selectCompatibilityByPathId(
   inflow: readonly PathInflowEdge[] | undefined,
   target: Readonly<MemoryEntry>,
   context: Readonly<SliceSelectionContext>
-): ReadonlyMap<string, Readonly<SliceCompatibilityV1>> {
-  const result = new Map<string, Readonly<SliceCompatibilityV1>>();
+): ReadonlyMap<string, Readonly<SliceCompatibilityV2>> {
+  const result = new Map<string, Readonly<SliceCompatibilityV2>>();
   const workspaceId = target.workspace_id;
   const queryKeys = context.queryKeysByWorkspace.get(workspaceId) ?? EMPTY_SLICE_KEYS;
   const targetMemoryKeys = memoryKeysFor(context, workspaceId, target.object_id);
   for (const edge of inflow ?? []) {
     if (edge.pathId === undefined) continue;
-    const sourceKeys = mergeSliceKeys(
+    const sourceKeys = mergeSelectedSliceKeysV2(
       memoryKeysFor(context, workspaceId, edge.seedObjectId),
       pathAnchorKeys(edge, "source", workspaceId, context.asOfMs)
     );
-    const targetKeys = mergeSliceKeys(
+    const targetKeys = mergeSelectedSliceKeysV2(
       targetMemoryKeys,
       pathAnchorKeys(edge, "target", workspaceId, context.asOfMs)
     );
-    result.set(edge.pathId, selectSliceCompatibilityV1({
+    result.set(edge.pathId, selectSliceCompatibilityV2({
       queryKeys,
       sourceKeys,
       targetKeys
@@ -303,7 +313,7 @@ function memoryKeysFor(
   context: Readonly<SliceSelectionContext>,
   workspaceId: string,
   objectId: string
-): readonly SelectedSliceKeyV1[] {
+): readonly SelectedSliceKeyV2[] {
   return context.memoryKeysByWorkspaceObject.get(memoryProjectionKey(workspaceId, objectId))
     ?? EMPTY_SLICE_KEYS;
 }
@@ -313,12 +323,12 @@ function pathAnchorKeys(
   side: "source" | "target",
   workspaceId: string,
   asOfMs: number
-): readonly SelectedSliceKeyV1[] {
+): readonly SelectedSliceKeyV2[] {
   const anchor = side === "source" ? edge.seedAnchor : edge.targetAnchor;
   if (edge.pathId === undefined || edge.pathSourceVersion === undefined || anchor === undefined) {
     return EMPTY_SLICE_KEYS;
   }
-  return derivePathAnchorSliceKeysV1({
+  return derivePathAnchorSliceKeysV2({
     workspaceId,
     pathId: edge.pathId,
     side,
@@ -326,16 +336,6 @@ function pathAnchorKeys(
     sourceVersion: edge.pathSourceVersion,
     asOfMs
   });
-}
-
-function mergeSliceKeys(
-  left: readonly SelectedSliceKeyV1[],
-  right: readonly SelectedSliceKeyV1[]
-): readonly SelectedSliceKeyV1[] {
-  if (right.length === 0) return left;
-  const byId = new Map(left.map((key) => [key.key_id, key]));
-  for (const key of right) byId.set(key.key_id, key);
-  return Object.freeze([...byId.values()]);
 }
 
 function buildObjectPotentialById(
@@ -349,20 +349,21 @@ function buildObjectPotentialById(
   return result;
 }
 
+type CandidateAxisState = Readonly<{
+  rhoPath: number;
+  capPerSource: number;
+  capTotal: number;
+  axisRankByKey: Map<string, Readonly<Record<RecallConformantAxis, number | null>>>;
+  raByKey: Map<string, Readonly<Record<RecallConformantAxis, number>>>;
+  edgeTraceByKey: Map<string, Readonly<FloodEdgeTraceBundle>>;
+  sliceSelection: Readonly<SliceSelectionContext>;
+}>;
+
 function recordCandidateAxes(
   candidate: SeededConformantCandidate,
   rObjectById: ReadonlyMap<string, number>,
   supplementaryData: RecallSupplementaryData,
-  state: Readonly<{
-    rhoPath: number;
-    capPerSource: number;
-    capTotal: number;
-    axisRankByKey: Map<string, Readonly<Record<RecallConformantAxis, number | null>>>;
-    raByKey: Map<string, Readonly<Record<RecallConformantAxis, number>>>;
-    edgeTraceByKey: Map<string, Readonly<FloodEdgeTraceBundle>>;
-    sliceSelection: Readonly<SliceSelectionContext>;
-    enforceSliceCompatibility: boolean;
-  }>
+  state: CandidateAxisState
 ): void {
   const inflow = candidate.memorySupplementEligible
     ? supplementaryData.pathInflowByTarget?.[candidate.objectId]
@@ -373,17 +374,19 @@ function recordCandidateAxes(
   const transfer = computeFloodEdgeTransfer({
     inflow, targetObjectId: candidate.objectId, rObjectById,
     capPerSource: state.capPerSource, capTotal: state.capTotal, rhoPath: state.rhoPath,
-    sliceCompatibilityByPathId,
-    enforceSliceCompatibility: state.enforceSliceCompatibility
+    sliceCompatibilityByPathId
   });
   state.axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
   state.raByKey.set(candidate.candidateKey, Object.freeze({
-    object: candidate.object, path: quantize(transfer.value), evidence: candidate.evidence,
+    object: candidate.object,
+    path: quantize(transfer.value),
+    evidence: candidate.evidence,
     temporal: candidate.temporal, control: candidate.control
   }));
   if (inflow !== undefined && inflow.length > 0) {
     state.edgeTraceByKey.set(candidate.candidateKey, Object.freeze({
-      traces: transfer.traces, truncatedCount: transfer.truncatedCount
+      traces: transfer.traces,
+      truncatedCount: transfer.truncatedCount
     }));
   }
 }

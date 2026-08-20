@@ -9,19 +9,13 @@ import {
 } from "../coarse-filter/coarse-candidates.js";
 import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
-import type { RecallAdmissionPlane } from "../runtime/recall-service-types.js";
+import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   scoreEvidenceAnchorMatch,
   scoreQueryEvidenceMatch
 } from "../scoring/query-evidence-scoring.js";
 
-export type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string
-) => boolean;
+export type CoarseCandidateAdder = AddCoarseCandidate;
 
 export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly tierMemories: readonly Readonly<MemoryEntry>[];
@@ -30,35 +24,13 @@ export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
   readonly dynamicRecallCohortRadius: number;
+  readonly onSessionSurfaceCohortTruncated?: () => void;
 }>): void {
   addQueryEvidenceCandidates(params);
-  addFacetConceptCandidates(params);
   const seedContext = collectExpansionSeedContext(params);
   addEvidenceAnchorCandidates(params, seedContext.structuralSeeds);
   addDomainTagClusterCandidates(params, seedContext.structuralSeeds);
   addSessionSurfaceCohortCandidates(params, seedContext);
-}
-
-function addFacetConceptCandidates(params: Readonly<{
-  readonly tierMemories: readonly Readonly<MemoryEntry>[];
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
-  readonly dynamicRecallPlaneCap: number;
-}>): void {
-  const sought = new Set(deriveQuerySoughtFacets(params.queryProbes));
-  if (sought.size === 0) return;
-  const matches = params.tierMemories
-    .map((entry) => ({ entry, overlap: countFacetOverlap(entry, sought) }))
-    .filter(({ overlap }) => overlap > 0)
-    .sort((left, right) => right.overlap - left.overlap || compareMemoryEntries(left.entry, right.entry))
-    .slice(0, params.dynamicRecallPlaneCap);
-  for (const { entry } of matches) {
-    params.addCandidate(entry, "facet_concept", undefined, "facet_concept");
-  }
-}
-
-function countFacetOverlap(entry: Readonly<MemoryEntry>, sought: ReadonlySet<string>): number {
-  return new Set((entry.facet_tags ?? []).map(({ facet }) => facet).filter((facet) => sought.has(facet))).size;
 }
 
 function addQueryEvidenceCandidates(params: Readonly<{
@@ -171,6 +143,7 @@ function addSessionSurfaceCohortCandidates(
     readonly addCandidate: CoarseCandidateAdder;
     readonly dynamicRecallPlaneCap: number;
     readonly dynamicRecallCohortRadius: number;
+    readonly onSessionSurfaceCohortTruncated?: () => void;
   }>,
   seedContext: Readonly<{
     readonly seeds: readonly Readonly<MemoryEntry>[];
@@ -188,20 +161,24 @@ function addExactSessionSurfaceCohortCandidates(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
+  readonly onSessionSurfaceCohortTruncated?: () => void;
 }>): void {
   const querySurfaceIds = new Set(params.queryProbes.surface_ids);
   const queryRunIds = new Set(params.queryProbes.run_ids);
-  const exactCohortMatches = params.tierMemories
+  const allExactCohortMatches = params.tierMemories
     .filter((entry) =>
       (entry.surface_id !== null && querySurfaceIds.has(entry.surface_id)) ||
       (entry.run_id !== null && queryRunIds.has(entry.run_id))
     )
-    .sort(compareMemoryEntries)
-    .slice(0, params.dynamicRecallPlaneCap);
+    .sort(compareMemoryEntries);
+  if (allExactCohortMatches.length > params.dynamicRecallPlaneCap) {
+    params.onSessionSurfaceCohortTruncated?.();
+  }
+  const exactCohortMatches = allExactCohortMatches.slice(0, params.dynamicRecallPlaneCap);
   const exactCohortRatio =
     params.tierMemories.length === 0
       ? 0
-      : exactCohortMatches.length / params.tierMemories.length;
+      : allExactCohortMatches.length / params.tierMemories.length;
   if (exactCohortRatio <= 0.5) {
     for (const entry of exactCohortMatches) {
       params.addCandidate(entry, "session_surface_cohort", 0.8, "session_surface_cohort");

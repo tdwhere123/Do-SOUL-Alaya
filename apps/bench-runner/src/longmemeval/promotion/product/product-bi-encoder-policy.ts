@@ -59,7 +59,7 @@ export function assertProductDefaultBiEncoderRuntime(
       runtime.embedding_provider_kind !== "local_onnx" ||
       runtime.embedding_provider_label !== `local_onnx:${DEFAULT_LOCAL_ONNX_MODEL_ID}` ||
       runtime.onnx_threads !== null ||
-      runtime.answer_rerank?.enabled !== false) {
+      runtime.answer_rerank?.enabled === true) {
     throw new Error(`${context} differs from the product-default bi-encoder runtime`);
   }
 }

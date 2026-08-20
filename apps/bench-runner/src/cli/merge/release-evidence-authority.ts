@@ -1,5 +1,5 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
-  "@do-soul/alaya-eval/internal";
+  "@do-soul/alaya-eval/authority";
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
   type VerifiedLongMemEvalDatasetAuthority

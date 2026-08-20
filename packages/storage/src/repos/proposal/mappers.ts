@@ -1,8 +1,10 @@
 import {
   ProposalResolutionStateSchema,
+  MemoryProposalOperationSchema,
   ProposalSchema,
   PublicMemoryEntryMutableFieldsSchema,
   type MemoryEntryMutableFields,
+  type MemoryProposalOperation,
   type Proposal,
   type ProposalResolutionState
 } from "@do-soul/alaya-protocol";
@@ -157,6 +159,17 @@ export function parseProposalResolutionState(state: ProposalResolutionState): Pr
 
 export function parseProposalId(value: string): string {
   return parseNonEmptyString(value, "proposal_id");
+}
+
+export function parseMemoryProposalOperation(
+  value: MemoryProposalOperation | string | null
+): MemoryProposalOperation | null {
+  if (value === null) return null;
+  try {
+    return MemoryProposalOperationSchema.parse(value);
+  } catch (error) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate proposal operation.", error);
+  }
 }
 
 export function parseWorkspaceId(value: string): string {

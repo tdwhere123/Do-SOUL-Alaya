@@ -42,15 +42,13 @@ export function buildCredentiallessLongMemEvalWorkerEnv(
 export function buildLongMemEvalWorkerEnvOverrides(input: {
   readonly concurrency: number;
   readonly embeddingMode: LongMemEvalRunOptions["embeddingMode"];
-  readonly crossEncoderEnabled?: boolean;
   readonly shardRoot: string;
   readonly historyRoot: string;
 }): NodeJS.ProcessEnv {
   const overrides: NodeJS.ProcessEnv = {
     ALAYA_BENCH_ARTIFACT_ROOT: join(input.historyRoot, ".bench-artifacts")
   };
-  if (input.concurrency > 1 &&
-      (input.embeddingMode === "env" || input.crossEncoderEnabled === true)) {
+  if (input.concurrency > 1 && input.embeddingMode === "env") {
     overrides.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
     overrides.ALAYA_LOCAL_ONNX_LOCK_PATH = join(
       input.shardRoot,
@@ -127,6 +125,11 @@ function pushOptionalArgs(args: string[], opts: LongMemEvalRunOptions): void {
   pushOptionalArg(args, "--pinned-meta-root", opts.pinnedMetaRoot);
   pushOptionalArg(args, "--extraction-cache-root", opts.extractionCacheRoot);
   pushOptionalArg(args, "--promotion-contract", opts.promotionContractPath);
+  pushOptionalArg(
+    args,
+    "--expected-reconciliation-basis",
+    opts.expectedReconciliationBasis
+  );
 }
 
 function pushOptionalArg(

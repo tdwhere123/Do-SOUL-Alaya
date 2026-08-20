@@ -11,6 +11,7 @@ import {
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 
 import {
+  BULK_ENRICH_TEST_NOW,
   FakeEnrichPendingRepo,
   buildMemory,
   buildSignal,
@@ -112,7 +113,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 type Runtime = ReturnType<typeof createGardenRuntime>;
 
@@ -389,7 +390,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       enrichPendingRepo.claimBatch(
         "workspace-B",
         50,
-        new Date().toISOString(),
+        BULK_ENRICH_TEST_NOW,
         DYNAMICS_CONSTANTS.enrich.max_attempts
       )
     ).toHaveLength(0);

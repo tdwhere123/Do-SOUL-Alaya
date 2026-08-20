@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   collapsePathInflow,
   compareConformantAxisRa,
-  resolveConformantEvidenceBeta,
   resolveConformantFloodCapPerSource,
   resolveConformantFloodCapTotal,
   resolveConformantPathWeight
@@ -10,7 +9,6 @@ import {
 
 const CONFIG_ENV = [
   "ALAYA_RECALL_CONF_W_PATH",
-  "ALAYA_RECALL_CONF_EVIDENCE_BETA",
   "ALAYA_RECALL_CONF_FLOOD_CAP",
   "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL"
 ] as const;
@@ -54,7 +52,6 @@ describe("conformant fusion configuration", () => {
 
   it("defaults tunables to bounded compositional values", () => {
     expect(resolveConformantPathWeight()).toBe(0.6);
-    expect(resolveConformantEvidenceBeta()).toBe(0);
     expect(resolveConformantFloodCapPerSource()).toBe(1);
     expect(resolveConformantFloodCapTotal()).toBe(1);
   });

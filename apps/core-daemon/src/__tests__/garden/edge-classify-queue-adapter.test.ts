@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { EdgeClassifyTaskPayloadSchema, GardenTaskKind } from "@do-soul/alaya-protocol";
-import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
+import { StorageError, type GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
 import {
   buildEdgeClassifyTaskId,
   createEdgeClassifyQueueAdapter
-} from "../../garden/edge-classify-queue-adapter.js";
+} from "../../garden/support/edge-classify-queue-adapter.js";
 
 const enqueueFn = () =>
   vi.fn((_input: GardenTaskEnqueueInput): { readonly task_id: string } => ({ task_id: "x" }));
@@ -55,7 +55,8 @@ describe("edge-classify-queue-adapter", () => {
   it("dedups a pair already queued (findById hit -> no enqueue)", async () => {
     const enqueue = enqueueFn();
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => ({ id: "already-here" }) }
+      gardenTaskRepo: { enqueue, findById: () => ({ id: "already-here" }) },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await adapter.enqueueEdgeClassify(makeInput());
@@ -68,7 +69,20 @@ describe("edge-classify-queue-adapter", () => {
       throw new Error("UNIQUE constraint failed: garden_tasks.id");
     });
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => null }
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
+    });
+
+    await expect(adapter.enqueueEdgeClassify(makeInput())).resolves.toBeUndefined();
+  });
+
+  it("swallows a StorageError DUPLICATE_KEY race without throwing", async () => {
+    const enqueue = vi.fn(() => {
+      throw new StorageError("DUPLICATE_KEY", "Garden task edge_classify_x already exists.");
+    });
+    const adapter = createEdgeClassifyQueueAdapter({
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await expect(adapter.enqueueEdgeClassify(makeInput())).resolves.toBeUndefined();
@@ -79,7 +93,8 @@ describe("edge-classify-queue-adapter", () => {
       throw new Error("disk is full");
     });
     const adapter = createEdgeClassifyQueueAdapter({
-      gardenTaskRepo: { enqueue, findById: () => null }
+      gardenTaskRepo: { enqueue, findById: () => null },
+      now: () => "2026-05-07T00:00:00.000Z"
     });
 
     await expect(adapter.enqueueEdgeClassify(makeInput())).rejects.toThrow("disk is full");

@@ -32,7 +32,7 @@ vi.mock("../../recall/delivery/fine-assessment.js", async (importOriginal) => {
       return actual.fineAssess(...args);
     },
     prepareFineAssessment: (...args: Parameters<typeof actual.prepareFineAssessment>) => {
-      completeAssessmentCalls();
+      completeAssessmentCalls(...args);
       return actual.prepareFineAssessment(...args);
     },
     deliverFineAssessment: (...args: Parameters<typeof actual.deliverFineAssessment>) => {
@@ -49,35 +49,24 @@ describe("RecallService embedding request score snapshot", () => {
     fineAssessCalls.mockClear();
   });
 
-  it.each([
-    { label: "cross-off", crossEnabled: false, expectedRerankStatus: "not_requested" },
-    { label: "cross-on", crossEnabled: true, expectedRerankStatus: "returned" }
-  ] as const)("uses exclusive snapshot phases with $label", async ({
-    crossEnabled,
-    expectedRerankStatus
-  }) => {
+  it("uses exclusive snapshot phases without answer rerank", async () => {
     const memory = createMemoryEntry({
       object_id: "snapshot-pool-memory",
       content: "Snapshot query procedure"
     });
     const { dependencies } = createDependencies([memory]);
     const fixture = createExclusiveSnapshotPort(memory.object_id);
-    const answerRerankScore = vi.fn(async (_query: string, passages: readonly string[]) =>
-      passages.map(() => 0.75)
-    );
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
-      embeddingRecallService: fixture.port,
-      ...(crossEnabled ? { answerRerankService: { score: answerRerankScore } } : {})
+      embeddingRecallService: fixture.port
     });
     const run = await runSnapshotRecall(service, "Snapshot query", {
       maxSupplement: 5,
       injectionCap: 0
     });
 
-    expectExclusiveSnapshotContract(
-      fixture, run, memory.object_id, answerRerankScore, crossEnabled, expectedRerankStatus
-    );
+    expectExclusiveSnapshotContract(fixture, run, memory.object_id);
   });
 
   it("keeps built-in pool scoring when supplement and injection caps are zero", async () => {
@@ -126,6 +115,11 @@ describe("RecallService embedding request score snapshot", () => {
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(result.candidates.find((candidate) => candidate.object_id === memory.object_id)
       ?.score_factors?.embedding_similarity).toBeCloseTo(1, 5);
+    const finalPreparation = completeAssessmentCalls.mock.calls.at(-1)?.[0];
+    expect(finalPreparation?.supplementaryData.retrievalFieldSeal?.channels.find(
+      ({ channel_id }: { readonly channel_id: string }) =>
+        channel_id === "object_embedding_pool"
+    )).toMatchObject({ status: "complete", depth: 1 });
   });
 
   it("propagates only a valid non-positive vector as observed zero into deep-head ranking", async () => {
@@ -187,12 +181,8 @@ describe("RecallService embedding request score snapshot", () => {
     expect(candidates.get(invalid.object_id)?.score_factors?.embedding_similarity).toBeUndefined();
     expect(candidates.get(degenerate.object_id)?.score_factors?.embedding_similarity)
       .toBeUndefined();
-    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
-    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
-      deliveredIds.indexOf(invalid.object_id)
-    );
-    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
-      deliveredIds.indexOf(degenerate.object_id)
+    expect(new Set(result.candidates.map((candidate) => candidate.relevance_score))).toEqual(
+      new Set([result.candidates[0]!.relevance_score])
     );
   });
 
@@ -235,6 +225,7 @@ describe("RecallService embedding request score snapshot", () => {
     const { dependencies } = createDependencies([pooled]);
     const fixture = createNeighborSnapshotPort(pooled.object_id, neighbor);
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo: { ...dependencies.memoryRepo, findByIds: fixture.findByIds },
       embeddingRecallService: fixture.port
@@ -392,10 +383,7 @@ async function runSnapshotRecall(
 function expectExclusiveSnapshotContract(
   fixture: ReturnType<typeof createExclusiveSnapshotPort>,
   run: SnapshotRun,
-  memoryId: string,
-  answerRerankScore: ReturnType<typeof vi.fn>,
-  crossEnabled: boolean,
-  expectedRerankStatus: "not_requested" | "returned"
+  memoryId: string
 ): void {
   expect(fineAssessCalls).not.toHaveBeenCalled();
   expect(completeAssessmentCalls).toHaveBeenCalledOnce();
@@ -410,8 +398,7 @@ function expectExclusiveSnapshotContract(
   expect(fixture.scorePoolCandidates).not.toHaveBeenCalled();
   expect(run.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
   expect(run.result.diagnostics?.embedding_provider_status).toBe("provider_returned");
-  expect(run.result.diagnostics?.answer_rerank_status).toBe(expectedRerankStatus);
-  expect(answerRerankScore).toHaveBeenCalledTimes(crossEnabled ? 1 : 0);
+  expect(run.result.diagnostics?.answer_rerank_status).toBe("not_requested");
   expectExclusivePhaseLatency(run.result.diagnostics?.phase_latency_ms, run.elapsedMs);
   expect(run.result.candidates.find((candidate) => candidate.object_id === memoryId)
     ?.score_factors?.embedding_similarity).toBeCloseTo(0.91, 5);

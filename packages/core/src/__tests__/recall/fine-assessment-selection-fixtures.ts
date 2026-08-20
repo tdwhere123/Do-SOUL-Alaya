@@ -13,6 +13,21 @@ import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-de
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
+export const FIELD_PINS = {
+  workspace_id: "workspace-1",
+  generation_id: `sha256:${"c".repeat(64)}`,
+  condition_digest: `sha256:${"d".repeat(64)}`
+} as const;
+
+export function selectCandidates(
+  params: Parameters<typeof selectFineAssessmentCandidates>[0]
+): ReturnType<typeof selectFineAssessmentCandidates> {
+  return selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+    ...params
+  });
+}
+
 export function createRankedCandidate(
   objectId: string,
   fusedRank: number,
@@ -134,6 +149,7 @@ export function createSupplementaryData(
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: {},
@@ -142,6 +158,7 @@ export function createSupplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

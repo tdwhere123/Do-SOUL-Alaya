@@ -14,20 +14,21 @@ import {
 import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import type { VerifiedLongMemEvalDatasetAuthority } from "../ingestion/fetch.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "../runner.js";
-import { finalizeOwnedTempRoot } from "../lifecycle/owned-temp-root.js";
-import { throwLifecycleErrors } from "../lifecycle/errors.js";
-import { validateShardRunProvenancePlans } from "../provenance/shard-aggregate.js";
+import { finalizeOwnedTempRoot } from "../../bench/lifecycle/owned-temp-root.js";
+import { throwLifecycleErrors } from "../../bench/lifecycle/errors.js";
+import { validateShardRunProvenancePlans } from "../../bench/provenance/shard-aggregate.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
-} from "../diagnostics/spool.js";
-import { readOptionalTreatmentBoolean } from "../../harness/strict-treatment-config.js";
-import { loadQuestionManifestSelection } from "../selection/question-manifest.js";
+} from "../../bench/diagnostics/spool.js";
+import { refuseRetiredLocalCrossEncoderTreatment } from
+  "../../harness/strict-treatment-config.js";
+import { loadQuestionManifestSelection } from "../../bench/selection/question-manifest.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from
   "../../cli/merge/release-evidence-authority.js";
 import {
   LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME
-} from "../provenance/contract/extraction-authority-reference.js";
+} from "../../bench/provenance/contract/extraction-authority-reference.js";
 import {
   verifiedExpansionRunAuthority,
   type VerifiedExpansionRunAuthority
@@ -159,6 +160,7 @@ export async function runLongMemEvalConcurrent(
   opts: LongMemEvalRunOptions,
   deps: LongMemEvalConcurrencyDeps = {}
 ): Promise<LongMemEvalRunResult> {
+  refuseRetiredLocalCrossEncoderTreatment(process.env);
   validateLongMemEvalConcurrency(opts);
   const context = await prepareLongMemEvalConcurrentRun(opts, deps);
   let succeeded = false;
@@ -334,10 +336,6 @@ async function runLongMemEvalConcurrentWorker(
         ...buildLongMemEvalWorkerEnvOverrides({
           concurrency: context.concurrency,
           embeddingMode: context.opts.embeddingMode,
-          crossEncoderEnabled: readOptionalTreatmentBoolean(
-            process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-            "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-          ) === true,
           shardRoot: context.shardRoot,
           historyRoot: plan.historyRoot
         }),
@@ -408,11 +406,11 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
   };
 }
 
-function resolveDefaultBenchRunnerCliPath(): string {
+export function resolveDefaultBenchRunnerCliPath(): string {
   const fromEnv = process.env.ALAYA_BENCH_RUNNER_CLI?.trim();
   if (fromEnv !== undefined && fromEnv.length > 0) {
     return resolve(fromEnv);
   }
   const here = fileURLToPath(import.meta.url);
-  return resolve(here, "../../../bin/alaya-bench-runner.mjs");
+  return resolve(dirname(here), "../../../bin/alaya-bench-runner.mjs");
 }

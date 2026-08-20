@@ -1,3 +1,4 @@
+import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type {
   BenchPolicyShape,
   BenchSimulateReportMode,
@@ -15,7 +16,7 @@ import {
 } from "../harness/recall/recall-weight-overrides.js";
 import type { FetchResult } from "./ingestion/fetch.js";
 import type { LongMemEvalVariant } from "./ingestion/dataset.js";
-import type { QaChatFn } from "./qa/qa-chat.js";
+import type { QaChatFn } from "../bench/qa/qa-chat.js";
 import { finalizeLongMemEvalRun } from "./runner/archive/runner-archive.js";
 import {
   runLongMemEvalConcurrent,
@@ -26,7 +27,7 @@ import { prepareLongMemEvalRun } from "./runner/prepare-context.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
-} from "./diagnostics/spool.js";
+} from "../bench/diagnostics/spool.js";
 import { assertExpansionRunAuthority } from
   "./promotion/expansion/authority/expansion-run-authority.js";
 import type { LongMemEvalExpansionCapability } from
@@ -34,7 +35,9 @@ import type { LongMemEvalExpansionCapability } from
 export {
   buildLongMemEvalReportContextUsage,
   buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   resolveBenchEmbeddingProviderLabel,
   resolveLongMemEvalHitVerdict,
   runLongMemEvalRecallCycle,
@@ -81,11 +84,14 @@ export interface LongMemEvalRunOptions {
   // see also: apps/bench-runner/src/harness/daemon.ts startBenchDaemon
   //   (dataDirRoot)
   readonly dataDirRoot?: string;
-  // @anchor longmemeval-snapshot-out: when set, after the run completes the
-  // seeded DB is WAL-checkpointed + copied to this path, and the per-question
-  // scoring sidecar + a version-binding manifest are written beside it, so a
-  // later recall-eval --snapshot run skips both extraction and
-  // materialization. see also: apps/bench-runner/src/longmemeval/snapshot.ts
+  // Retain isolated per-question databases under dataDirRoot for bounded
+  // diagnostic audits; it never creates a promotable snapshot artifact.
+  readonly materializeQuestionDbs?: boolean;
+  // @anchor longmemeval-snapshot-out: when set, seed the full window then
+  // WAL-checkpoint + copy the DB to this path with sidecar + version-binding
+  // manifest. No producer-side recall pass — scores come from recall-eval /
+  // matrix cells against the sealed snapshot.
+  // see also: apps/bench-runner/src/longmemeval/snapshot.ts
   readonly snapshotOut?: string;
   // Override the extraction-cache root the run-start preflight validates and
   // the snapshot sidecar records provenance from (test-only). Production
@@ -101,8 +107,10 @@ export interface LongMemEvalRunOptions {
   // owns one daemon process; values > 1 fan out via child CLI processes and
   // merge shard archives into historyRoot.
   readonly concurrency?: number;
+  readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly promotionContractPath?: string;
+  readonly snapshotWriteAuthority?: "diagnostic" | "promotion";
 }
 
 export interface LongMemEvalRunResult {
@@ -113,6 +121,21 @@ export interface LongMemEvalRunResult {
   readonly diagnosticsPath: string | null;
   readonly payload: KpiPayload;
   readonly evidenceContext: VerifiedLongMemEvalEvidenceContext | null;
+}
+
+export interface LongMemEvalSnapshotMaterializationResult {
+  readonly snapshotPath: string;
+  readonly questionCount: number;
+}
+
+export type LongMemEvalRunOutcome =
+  | LongMemEvalRunResult
+  | LongMemEvalSnapshotMaterializationResult;
+
+export function isLongMemEvalSnapshotMaterializationResult(
+  result: LongMemEvalRunOutcome
+): result is LongMemEvalSnapshotMaterializationResult {
+  return "snapshotPath" in result;
 }
 
 /**
@@ -152,9 +175,19 @@ export interface LongMemEvalRunResult {
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions & { readonly snapshotOut: string }
+): Promise<LongMemEvalSnapshotMaterializationResult>;
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions & { readonly snapshotOut?: undefined }
+): Promise<LongMemEvalRunResult>;
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions
+): Promise<LongMemEvalRunOutcome>;
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
-): Promise<LongMemEvalRunResult> {
+): Promise<LongMemEvalRunOutcome> {
+  assertQuestionDatabaseMaterializationOptions(opts);
   await assertExpansionRunAuthority(opts);
   if (shouldFanOutLongMemEvalWorkers(opts)) {
     return runLongMemEvalConcurrent(opts);
@@ -164,10 +197,23 @@ export async function runLongMemEval(
   );
 }
 
+function assertQuestionDatabaseMaterializationOptions(opts: LongMemEvalRunOptions): void {
+  if (opts.materializeQuestionDbs !== true) return;
+  if (opts.dataDirRoot === undefined) {
+    throw new Error("question database materialization requires --data-dir-root");
+  }
+  if (opts.snapshotOut !== undefined) {
+    throw new Error("question database materialization cannot be combined with --snapshot-out");
+  }
+  if ((opts.concurrency ?? 1) !== 1) {
+    throw new Error("question database materialization requires concurrency 1");
+  }
+}
+
 async function runSingleLongMemEval(
   opts: LongMemEvalRunOptions,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LongMemEvalRunResult> {
+): Promise<LongMemEvalRunOutcome> {
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: opts.weightOverridesJson,
     envJson: process.env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV]
@@ -184,9 +230,15 @@ async function runSingleLongMemEval(
     diagnosticsSpool
   );
   const execution = await executeLongMemEvalRun(context);
+  if (opts.snapshotOut !== undefined) {
+    return {
+      snapshotPath: opts.snapshotOut,
+      questionCount: context.window.length
+    };
+  }
   return finalizeLongMemEvalRun({
     opts,
-    questionsLength: context.questions.length,
+    questionsLength: context.datasetQuestionCount,
     windowLength: context.window.length,
     datasetSha256: context.datasetSha256,
     datasetChecksumSource: context.datasetChecksumSource,
@@ -206,6 +258,7 @@ async function runSingleLongMemEval(
     recallWeightOverrides,
     questionFailures: execution.questionFailures,
     failedQuestionIds: execution.failedQuestionIds,
+    reconciliationBasis: execution.reconciliationBasis,
     diagnosticsSpool
   });
 }

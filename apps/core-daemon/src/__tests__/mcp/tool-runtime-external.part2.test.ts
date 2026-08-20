@@ -6,12 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CoreError } from "@do-soul/alaya-core";
 
-import { createExternalConversationToolExecutor } from "../../mcp/mcp-catalog.js";
+import { createExternalConversationToolExecutor } from "../../mcp/catalog/mcp-catalog.js";
 
 import {
   executeConversationToolOrThrow,
   handleConversationToolUse
-} from "../../mcp/tool-runtime.js";
+} from "../../mcp/tool-runtime/tool-runtime.js";
 
 import {
   cleanupToolRuntimeTempDirs,

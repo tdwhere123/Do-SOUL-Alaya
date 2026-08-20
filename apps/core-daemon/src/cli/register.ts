@@ -1,11 +1,9 @@
 /**
- * @internal Exposed via `@do-soul/alaya/cli/register` for the in-process
- * bench harness in `@do-soul/alaya-bench-runner`. Not a stability promise:
- * the export surface, symbol names, and signatures may change without a
- * deprecation period. If you rename or split this module, also update:
- *   - apps/core-daemon/package.json `exports."./cli/register"`
- *   - apps/bench-runner/src/harness/daemon.ts (the only known consumer)
- * @see apps/bench-runner/src/harness/daemon.ts
+ * @internal Unstable package export (`@do-soul/alaya/cli/register`).
+ * Not a stability promise: the export surface, symbol names, and
+ * signatures may change without a deprecation period. If you rename
+ * or split this module, also update the matching
+ * `apps/core-daemon/package.json` exports entry.
  */
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -15,8 +13,9 @@ import type { Readable, Writable } from "node:stream";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../attach/index.js";
 import type { AlayaDaemonRuntime } from "../index.js";
+import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
-import { runAlayaMcpStdioServer } from "../mcp/mcp-server.js";
+import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -27,16 +26,16 @@ import {
   buildProfileMutationAuditPath,
   resolveAlayaConfigDir,
   resolveAlayaConfigPaths
-} from "./config-files.js";
-import { createDoctorCommand } from "./doctor.js";
-import { resolveGardenComputeStatus } from "./garden-compute-status.js";
-import { readBuildInfo } from "../runtime/build-info.js";
-import { createInstallCommand } from "./install.js";
-import { createInspectCommand } from "./inspect.js";
+} from "./support/config-files.js";
+import { createDoctorCommand } from "./doctor/doctor.js";
+import { resolveGardenComputeStatus } from "./support/garden-compute-status.js";
+import { readBuildInfo } from "../runtime/daemon/support/build-info.js";
+import { createInstallCommand } from "./install/install.js";
+import { createInspectCommand } from "./inspect/inspect.js";
 import { createUpdateCommand } from "./update.js";
-import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity-runtime.js";
-import { createOperationCommandSpecs } from "./operations.js";
-import { createReviewCommand } from "./review.js";
+import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity/path-plasticity-runtime.js";
+import { createOperationCommandSpecs } from "./operations/operations.js";
+import { createReviewCommand } from "./review/review.js";
 import { createStatusCommand } from "./status.js";
 import { createSourceGroundingDefersCommand } from "./source-grounding-defers/command.js";
 import { createTemporalCutoverCommandSpec } from "./temporal-cutover.js";
@@ -45,8 +44,8 @@ import {
   ensureImplicitLocalWorkspace,
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
-} from "./workspace-context.js";
-export { resolveGardenComputeStatus } from "./garden-compute-status.js";
+} from "./support/workspace-context.js";
+export { resolveGardenComputeStatus } from "./support/garden-compute-status.js";
 
 export function registerAlayaCliCommands(
   bridge: AlayaCliBridge,
@@ -340,6 +339,7 @@ async function executeMcpCommand(
     ctx.stderr.write("Usage: mcp stdio\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
+  stripReviewerCredentialsFromAgentMcpEnv(ctx.env);
   const workspaceContext = resolveCliWorkspaceContext(ctx);
   await ensureImplicitLocalWorkspace(workspaceContext, runtime.services.workspaceService);
   const trustedRunId = await resolveTrustedCliRunId({

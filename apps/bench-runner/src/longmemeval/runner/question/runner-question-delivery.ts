@@ -1,11 +1,13 @@
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
 import { buildLongMemEvalSidecarKey, type LongMemEvalSidecarEntry } from "../runner-helpers.js";
-import { scoreQaQuestion, type QaDeliveredCandidate, type QaQuestionVerdict } from "../../qa/qa-harness.js";
-import type { QaChatFn } from "../../qa/qa-chat.js";
-import { selectRelevantMemories } from "../../qa/qa-llm-filter.js";
-import { buildQaSupportPack } from "../../qa/qa-support-pack.js";
+import { scoreQaQuestion, type QaDeliveredCandidate, type QaQuestionVerdict } from "../../../bench/qa/qa-harness.js";
+import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
+import { selectRelevantMemories } from "../../../bench/qa/qa-llm-filter.js";
+import { buildQaSupportPack } from "../../../bench/qa/qa-support-pack.js";
 import { normalizeQaDeliveryContent } from "./delivery/qa-delivery-content.js";
 import { dumpQaDeliveryDiagnostic } from "./delivery/qa-delivery-diagnostics.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../../../bench/diagnostics/gold-object-identities.js";
 
 const BENCH_PROFILE_ENV = "ALAYA_BENCH_PROFILE";
 export const WIDE_QA_DELIVERY_QUESTION_TYPES = new Set([
@@ -98,13 +100,14 @@ interface QaSourceCandidate extends QaDeliveredCandidate {
 }
 
 type QaCandidateLookup = (
-  objectKind: "memory_entry" | "synthesis_capsule",
+  objectKind: LongMemEvalSidecarEntry["objectKind"],
   objectId: string
 ) => QaSidecarContent | undefined;
 
 interface QaDeliveryCandidateSets {
   readonly deliveryCandidates: QaSourceCandidate[];
   readonly memoryEntryCandidates: QaSourceCandidate[];
+  readonly goldEligibleCandidates: QaSourceCandidate[];
   readonly goldOnly: QaSourceCandidate[];
 }
 
@@ -115,22 +118,32 @@ interface QaDeliveryCandidateSets {
  * the final delivered set from these. */
 export function buildQaDeliveredCandidates(input: {
   readonly results: readonly QaSourceRecallPointer[];
-  readonly goldMemoryIds: readonly string[];
+  readonly goldMemoryIds?: readonly string[];
+  readonly goldObjectIdentities?: readonly LongMemEvalGoldObjectIdentity[];
   readonly lookupMemoryEntry: (objectId: string) => QaSidecarContent | undefined;
   readonly lookupCandidate?: (
-    objectKind: "memory_entry" | "synthesis_capsule",
+    objectKind: LongMemEvalSidecarEntry["objectKind"],
     objectId: string
   ) => QaSidecarContent | undefined;
 }): QaDeliveryCandidateSets {
   const lookupCandidate = resolveQaCandidateLookup(input);
-  const memoryEntryRanks = indexMemoryEntryRanks(input.results);
+  const rankByIdentity = indexCandidateRanks(input.results);
+  const goldObjects = input.goldObjectIdentities ??
+    (input.goldMemoryIds ?? []).map((objectId) => ({
+      objectId,
+      objectKind: "memory_entry" as const
+    }));
+  const deliveryCandidates = buildDeliveryCandidates(input.results, lookupCandidate);
   return {
-    deliveryCandidates: buildDeliveryCandidates(input.results, lookupCandidate),
+    deliveryCandidates,
     memoryEntryCandidates: buildMemoryEntryCandidates(input.results, input.lookupMemoryEntry),
+    goldEligibleCandidates: deliveryCandidates.filter((candidate) =>
+      candidate.objectKind === "memory_entry" ||
+      candidate.objectKind === "evidence_capsule"),
     goldOnly: buildGoldOnlyCandidates(
-      input.goldMemoryIds,
-      input.lookupMemoryEntry,
-      memoryEntryRanks
+      goldObjects,
+      lookupCandidate,
+      rankByIdentity
     )
   };
 }
@@ -148,7 +161,8 @@ function buildDeliveryCandidates(
   const candidates: QaSourceCandidate[] = [];
   for (const [index, result] of results.entries()) {
     const objectKind = result.object_kind ?? "memory_entry";
-    if (objectKind !== "memory_entry" && objectKind !== "synthesis_capsule") continue;
+    if (objectKind !== "memory_entry" && objectKind !== "synthesis_capsule" &&
+        objectKind !== "evidence_capsule") continue;
     const entry = lookupCandidate(objectKind, result.object_id);
     candidates.push({
       objectId: result.object_id,
@@ -181,28 +195,32 @@ function buildMemoryEntryCandidates(
   return candidates;
 }
 
-function indexMemoryEntryRanks(
+function indexCandidateRanks(
   results: readonly QaSourceRecallPointer[]
 ): ReadonlyMap<string, number> {
   const ranks = new Map<string, number>();
   for (const [index, pointer] of results.entries()) {
-    if ((pointer.object_kind ?? "memory_entry") === "memory_entry") {
-      ranks.set(pointer.object_id, ranks.get(pointer.object_id) ?? index + 1);
-    }
+    const objectKind = pointer.object_kind ?? "memory_entry";
+    if (objectKind !== "memory_entry" && objectKind !== "evidence_capsule") continue;
+    const key = buildLongMemEvalSidecarKey(objectKind, pointer.object_id);
+    ranks.set(key, ranks.get(key) ?? index + 1);
   }
   return ranks;
 }
 
 function buildGoldOnlyCandidates(
-  goldMemoryIds: readonly string[],
-  lookupMemoryEntry: (objectId: string) => QaSidecarContent | undefined,
-  memoryEntryRanks: ReadonlyMap<string, number>
+  goldObjects: readonly LongMemEvalGoldObjectIdentity[],
+  lookupCandidate: QaCandidateLookup,
+  rankByIdentity: ReadonlyMap<string, number>
 ): QaSourceCandidate[] {
-  return goldMemoryIds.map((id) => {
-    const entry = lookupMemoryEntry(id);
-    const goldRank = memoryEntryRanks.get(id);
+  return goldObjects.map((gold) => {
+    const entry = lookupCandidate(gold.objectKind, gold.objectId);
+    const goldRank = rankByIdentity.get(
+      buildLongMemEvalSidecarKey(gold.objectKind, gold.objectId)
+    );
     return {
-      objectId: id,
+      objectId: gold.objectId,
+      objectKind: gold.objectKind,
       content: entry?.content ?? "",
       sessionId: entry?.sessionId ?? null,
       ...(goldRank === undefined ? {} : { sourceRank: goldRank }),
@@ -247,10 +265,12 @@ function buildQaSupportCandidatesFromSidecar(
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
 ): QaSourceCandidate[] {
   return [...sidecar.values()]
-    .filter((entry) => entry.objectKind === "memory_entry")
+    .filter((entry) =>
+      entry.objectKind === "memory_entry" ||
+      entry.objectKind === "evidence_capsule")
     .map((entry) => ({
       objectId: entry.objectId,
-      objectKind: "memory_entry" as const,
+      objectKind: entry.objectKind,
       content: entry.content ?? "",
       sessionId: entry.sessionId,
       ...(entry.eventDate === undefined ? {} : { eventDate: entry.eventDate })
@@ -292,7 +312,7 @@ export function createPhaseTimer(): PhaseTimer {
 
 interface QaDeliverySelection {
   readonly delivered: QaDeliveredCandidate[];
-  readonly memoryEntryCandidates: QaSourceCandidate[];
+  readonly goldEligibleCandidates: QaSourceCandidate[];
 }
 
 async function resolveQaDeliverySelection(input: {
@@ -300,6 +320,7 @@ async function resolveQaDeliverySelection(input: {
   readonly qaChat: QaChatFn;
   readonly results: readonly QaSourceRecallPointer[];
   readonly goldMemoryIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
 }): Promise<QaDeliverySelection> {
   const candidates = buildQaDeliveryCandidatesForQuestion(input);
@@ -309,13 +330,17 @@ async function resolveQaDeliverySelection(input: {
     candidates,
     goldOnlyRequested
   );
-  return { delivered, memoryEntryCandidates: candidates.memoryEntryCandidates };
+  return {
+    delivered,
+    goldEligibleCandidates: candidates.goldEligibleCandidates
+  };
 }
 
 function buildQaDeliveryCandidatesForQuestion(input: Parameters<typeof resolveQaDeliverySelection>[0]) {
   const candidates = buildQaDeliveredCandidates({
     results: input.results,
     goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities: input.goldObjectIdentities,
     lookupMemoryEntry: (objectId) =>
       input.sidecar.get(buildLongMemEvalSidecarKey("memory_entry", objectId)),
     lookupCandidate: (objectKind, objectId) =>
@@ -408,17 +433,19 @@ export async function scoreLongMemEvalQaIfRequested(input: {
   readonly isAbstention: boolean;
   readonly results: readonly { readonly object_id: string; readonly object_kind?: string | null }[];
   readonly goldMemoryIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
 }): Promise<QaQuestionVerdict | undefined> {
-  const { results, goldMemoryIds, sidecar, isAbstention } = input;
+  const { results, goldMemoryIds, goldObjectIdentities, sidecar, isAbstention } = input;
   if (input.qaChat === undefined) {
     return undefined;
   }
-  const { delivered, memoryEntryCandidates } = await resolveQaDeliverySelection({
+  const { delivered, goldEligibleCandidates } = await resolveQaDeliverySelection({
     question: input.question,
     qaChat: input.qaChat,
     results,
     goldMemoryIds,
+    goldObjectIdentities,
     sidecar
   });
   const qaVerdict = await scoreQaQuestion(
@@ -439,8 +466,8 @@ export async function scoreLongMemEvalQaIfRequested(input: {
       dumpPath: process.env.ALAYA_BENCH_QA_DUMP,
       question: input.question,
       qaVerdict,
-      goldMemoryIds,
-      memoryEntryCandidates,
+      goldObjectIdentities,
+      goldEligibleCandidates,
       delivered
     });
   }

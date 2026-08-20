@@ -8,6 +8,8 @@ import {
   type GardenCompileContext
 } from "../../garden/compute-provider.js";
 import type { SignalExtractor } from "../../garden/pi-mono-extractor.js";
+import { buildOfficialApiExtractionRequest } from "../../garden/official-api/extraction-request.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const fixturesDir = fileURLToPath(new URL("../fixtures/garden-extraction-golden/", import.meta.url));
 const fixturesUrl = new URL("../fixtures/garden-extraction-golden/", import.meta.url);
@@ -15,15 +17,14 @@ const fixturesUrl = new URL("../fixtures/garden-extraction-golden/", import.meta
 describe("garden-extraction-parser-parity", () => {
   it("parses golden provider JSON into the expected signal kind, object kind, and confidence", async () => {
     for (const fixture of await loadFixtures()) {
-      const rawJson = toProviderJson(fixture.expected);
+      const rawJson = toProviderJson(fixture.expected, fixture.turn.trim());
+      const context = createContext(fixture.turn);
       const extractor: SignalExtractor = {
         extract: async (input) => {
           expect(input.systemPrompt).toBe(OFFICIAL_API_SYSTEM_PROMPT);
-          expect(JSON.parse(input.userPrompt)).toMatchObject({
-            workspace_id: "workspace-1",
-            run_id: "run-1",
-            turn_content: fixture.turn.trim()
-          });
+          expect(JSON.parse(input.userPrompt)).toEqual(
+            buildOfficialApiExtractionRequest(fixture.turn, context.turn_messages)
+          );
           return { rawJson };
         }
       };
@@ -34,13 +35,13 @@ describe("garden-extraction-parser-parity", () => {
         generateSignalId: () => "signal-fixture"
       });
 
-      const actual = await provider.compile(fixture.turn, createContext(fixture.turn));
+      const actual = await provider.compile(fixture.turn, context);
 
       expect(actual).toHaveLength(fixture.expected.length);
       actual.forEach((signal, index) => {
         const expected = fixture.expected[index]!;
-        expect(signal.signal_kind).toBe(expected.signal_kind);
-        expect(signal.object_kind).toBe(expected.object_kind);
+        expect(signal.signal_kind).toBe("potential_semantic_observation");
+        expect(signal.object_kind).toBe("open_semantic_observation");
         expect(signal.confidence).toBeCloseTo(expected.confidence, 1);
         expect(signal.raw_payload.validation_result).toMatchObject({ status: "valid" });
       });
@@ -63,13 +64,13 @@ async function loadFixtures(): Promise<readonly {
   );
 }
 
-function toProviderJson(expected: readonly ExpectedSignal[]): string {
+function toProviderJson(expected: readonly ExpectedSignal[], source: string): string {
   return JSON.stringify({
-    signals: expected.map((signal, index) => ({
+    signals: expected.map((signal) => withOpenSemanticFactorGraph({
       signal_kind: signal.signal_kind,
       object_kind: signal.object_kind,
       confidence: signal.confidence,
-      matched_text: `fixture evidence ${index + 1}`,
+      matched_text: source,
       reason: "parser_parity_fixture"
     }))
   });

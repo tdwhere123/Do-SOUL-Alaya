@@ -118,6 +118,50 @@ describe("source proximity expansion", () => {
     expect(findByIds).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it("keeps the per-seed neighbor cutoff stable across activation jitter", async () => {
+    const seed = createMemoryEntry({
+      object_id: "seed",
+      content: "seed",
+      evidence_refs: ["doc-s1-t10"]
+    });
+    const dominant = Array.from({ length: 7 }, (_, index) => createMemoryEntry({
+      object_id: `dominant-${index}`,
+      content: `dominant-${index}`,
+      activation_score: 1,
+      evidence_refs: ["doc-s1-t11"]
+    }));
+    const alpha = createMemoryEntry({
+      object_id: "memory-z",
+      content: "alpha",
+      activation_score: 0.9324999723600726,
+      evidence_refs: ["doc-s1-t11"]
+    });
+    const beta = createMemoryEntry({
+      object_id: "memory-a",
+      content: "beta",
+      activation_score: 0.9324999994735418,
+      evidence_refs: ["doc-s1-t11"]
+    });
+    const drafts = new Map<string, CoarseCandidateDraft>([[seed.object_id, draft(seed)]]);
+    const admitted: string[] = [];
+
+    await addSourceProximityCandidates({
+      workspaceId: "workspace-1",
+      tierMemories: [seed, ...dominant, alpha, beta],
+      drafts,
+      addCandidate: (entry) => {
+        admitted.push(entry.object_id);
+        return true;
+      },
+      admissionLimit: 20,
+      robustSourceRefParsing: true,
+      warn: vi.fn()
+    });
+
+    expect(admitted).toContain("memory-z");
+    expect(admitted).not.toContain("memory-a");
+  });
 });
 
 interface FixtureSourceRefs {

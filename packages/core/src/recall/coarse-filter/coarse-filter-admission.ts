@@ -1,4 +1,8 @@
-import { type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
+import {
+  type MemoryEntry,
+  type RecallCandidate,
+  type RecallPolicy
+} from "@do-soul/alaya-protocol";
 import { clamp01, matchesDeterministicFilter } from "../runtime/recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
@@ -16,10 +20,20 @@ export type AddCoarseCandidate = (
   plane: RecallAdmissionPlane,
   structuralScore?: number,
   sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  entityConfidence?: number,
-  pathFlowScore?: number
+  metadata?: Readonly<CoarseCandidateAdmissionMetadata>
 ) => boolean;
+
+export interface CoarseCandidateAdmissionMetadata {
+  readonly pathExpansionSource?: RecallPathExpansionSourceDiagnostic;
+  readonly entityConfidence?: number;
+  readonly pathFlowScore?: number;
+  readonly objectKind?: RecallCandidate["object_kind"];
+  readonly answerRerankText?: string;
+  readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceIdentity?: string;
+  readonly evidenceSourceRole?: CoarseCandidateDraft["evidenceSourceRole"];
+  readonly verifiedUserSupportSource?: CoarseCandidateDraft["verifiedUserSupportSource"];
+}
 
 export interface CoarseCandidateAdderParams {
   readonly drafts: Map<string, CoarseCandidateDraft>;
@@ -38,9 +52,7 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
     plane,
     structuralScore = 0,
     sourceChannel,
-    pathExpansionSource,
-    entityConfidence,
-    pathFlowScore
+    metadata = {}
   ) {
     if (!shouldAdmitCoarseCandidate(params, entry, plane)) {
       return false;
@@ -57,8 +69,7 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
         current,
         evidenceStructuralScore,
         sourceChannel,
-        pathExpansionSource,
-        entityConfidence
+        metadata
       )
     );
     updateCoarseCandidateScores(
@@ -67,7 +78,7 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
       plane,
       planeScore,
       evidenceStructuralScore,
-      pathFlowScore
+      metadata.pathFlowScore
     );
     return !hadPlane;
   };
@@ -103,15 +114,35 @@ function buildNextCoarseCandidateDraft(
   current: CoarseCandidateDraft | undefined,
   evidenceStructuralScore: number,
   sourceChannel: string | undefined,
-  pathExpansionSource: RecallPathExpansionSourceDiagnostic | undefined,
-  entityConfidence: number | undefined
+  metadata: Readonly<CoarseCandidateAdmissionMetadata>
 ): CoarseCandidateDraft {
   const nextEntityConfidence =
-    plane === "entity_seed" && entityConfidence !== undefined
-      ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
+    plane === "entity_seed" && metadata.entityConfidence !== undefined
+      ? Math.max(current?.entityConfidence ?? 0, metadata.entityConfidence)
       : current?.entityConfidence;
+  const answerRerankText =
+    metadata.answerRerankText ?? current?.answerRerankText;
+  const evidenceDocumentIdentity =
+    metadata.evidenceDocumentIdentity ?? current?.evidenceDocumentIdentity;
+  const evidenceSourceIdentity =
+    metadata.evidenceSourceIdentity ?? current?.evidenceSourceIdentity;
+  const evidenceSourceRole = metadata.evidenceSourceRole ?? current?.evidenceSourceRole;
+  const verifiedUserSupportSource =
+    metadata.verifiedUserSupportSource ?? current?.verifiedUserSupportSource;
   return {
     entry,
+    ...(metadata.objectKind === undefined ? {} : { objectKind: metadata.objectKind }),
+    ...(answerRerankText === undefined ? {} : { answerRerankText }),
+    ...(evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity }),
+    ...(evidenceSourceIdentity === undefined
+      ? {}
+      : { evidenceSourceIdentity }),
+    ...(evidenceSourceRole === undefined ? {} : { evidenceSourceRole }),
+    ...(verifiedUserSupportSource === undefined
+      ? {}
+      : { verifiedUserSupportSource }),
     admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
     firstAdmissionPlane: current?.firstAdmissionPlane ?? plane,
     sourceChannels: uniqueStrings([
@@ -121,7 +152,7 @@ function buildNextCoarseCandidateDraft(
     structuralScore: Math.max(current?.structuralScore ?? 0, evidenceStructuralScore),
     pathExpansionSources: uniquePathExpansionSources([
       ...(current?.pathExpansionSources ?? []),
-      ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
+      ...(metadata.pathExpansionSource === undefined ? [] : [metadata.pathExpansionSource])
     ]),
     ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
   };

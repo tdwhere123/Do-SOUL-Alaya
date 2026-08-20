@@ -108,30 +108,23 @@ SemVer major. Offline migration may read a prior version to construct a
 new copy; runtime formation and recall must fail closed rather than
 operate a compatibility mixture.
 
-## Recall Routing Projections
+## Recall algorithm
 
-`PathRelation` is the derived, governed current/as-of conditional-routing
-projection. It is rebuilt from accepted `RelationAssertion` records and
-their appended EventLog resolutions; it is not a durable relation claim
-or historical record. Flood transfer is a query-time decision to carry
-potential along one directed edge under the current routing conditions.
-The object's `fused_score` is the aggregate projection produced after
-those edge decisions; it is not the flood or a new durable fact.
+Do not implement recall from flood / SliceKey / fused-score prose.
+The algorithm is the UGAF read path. The live runtime now connects pinned
+field-generation candidate admission, graph/PathRelation expansion, Slice
+compatibility, attributed path/evidence flood, and one Select_Gamma admission
+walk. Owner and current closure boundary:
 
-SliceKey is a workspace-scoped, versioned, rebuildable routing view over
-existing projections. Its seed taxonomy is extensible and keeps typed
-provenance: event time stays a time interval or bucket, canonical entities
-and object anchors stay typed identities, spatial values stay spatial, and
-`facet_tags` contribute semantic facets rather than acting as a universal
-container. Query-time compatibility is the intersection of query, source,
-and target keys. A query with no valid key follows the neutral existing path;
-a keyed query with no three-way match may reject only the experimental edge
-decision, never rewrite the underlying evidence or `RelationAssertion`.
+[`recall.md`](recall.md)
 
-Single-edge transfer is the required baseline. Any bounded two-edge traversal
-must be earned by miss evidence, remain deterministic and budgeted, and pass
-the same governance and release gates; it is not implied by the existence of
-projected paths.
+`PathRelation` remains a derived current/as-of routing projection over
+immutable `RelationAssertion` history (invariant §12). That ontology
+constraint does not by itself prove any query-time path. Connectedness is
+established only by the live producer-to-consumer evidence recorded in
+`recall.md`, including live F3-only membership and full legal `slice_key`
+visibility. The pre-UGAF wording is archived at
+`docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
 
 ## Package Shape
 
@@ -145,8 +138,9 @@ packages/core            business logic, state transitions, EventLog
                          RecallService, GreenService, governance services
 packages/soul            SOUL kernel, Garden, heuristics, maintenance
                          roles (Auditor / Janitor / Librarian / Scheduler)
-packages/engine-gateway  provider adapters (OpenAI / Anthropic / custom)
-                         and MCP bridge (routing only)
+packages/engine-gateway  provider adapters and the shared execution authority
+                         for attempts, retry, timeout, response, and usage;
+                         plus the MCP bridge
 packages/eval            benchmark KPI schemas, history diff/report utilities,
                          release gates, and metric helpers grouped by domain
 ```
@@ -169,6 +163,13 @@ Forbidden:
 - `packages/* -> apps/*`
 - business or governance logic in `engine-gateway`
 - direct package-to-package imports across the dependency direction
+
+Provider consumers inject or call `executeProviderChatCompletion`; they may
+declare operation budgets and response policy but do not own transport retry,
+HTTP parsing, or completion classification. A provider-backed extraction cache
+write is admissible only with a versioned completion witness. Cache-only replay
+uses an exact canonical request manifest and a provider-absent receipt rather
+than inferring authority from credentials, a model name, or a key subset.
 
 ## Surface Shape
 
@@ -216,14 +217,23 @@ HTTP startup fails closed, while managed temporary startup must opt in and pass
 that token directly to its child Inspector process. The daemon never silently
 persists a generated credential.
 
+Remote daemon bind (`ALAYA_ALLOW_REMOTE_DAEMON=1` with non-loopback
+`DAEMON_HOST`) is break-glass only: a single `ALAYA_REQUEST_TOKEN` is not
+sufficient for multi-host exposure, desktop originless bypass is disabled, and
+loopback remains the supported default.
+
 ## Runtime Write Model
 
-State-changing runtime writes follow:
+EventPublisher-owned runtime transitions stay EventLog-first:
 
 ```text
 EventLog append -> DB update -> audit row -> in-process notification
                                               (RuntimeNotifier listeners)
 ```
+
+Field formation, projection-generation, and causal-usage writes use
+the verified persist-then-audit order: persist the receipt, then append
+EventLog from a separate audit helper. Audit still precedes broadcast.
 
 Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
@@ -241,7 +251,7 @@ export interface RuntimeNotifier {
 `EventPublisher` calls `notifyEntry` after every successful
 `EventLog.append` + DB mutate, never before. `notify` is reserved for
 already-decoded `Phase0Event` payloads (e.g. run-scoped listeners that
-do not need the full envelope). Phase 4 daemon wiring instantiates one
+do not need the full envelope). Daemon wiring instantiates one
 concrete `RuntimeNotifier` and registers it on `EventPublisher` at
 startup step 3 of `Daemon Startup Ordering` below.
 
@@ -282,7 +292,11 @@ review finding:
    - HealthJournalService, EventPublisher
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`)
+   - RecallService (needs Memory + Embedding repos; fusion, delivery,
+     graph-expansion, path-relation, field-generation, and diagnostics helpers
+     live under `packages/core/src/recall/`). Helper presence is not
+     connectedness. Current HEAD has live field/path/Slice/flood/Select_Gamma
+     wiring, including live F3-only membership; see [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
@@ -340,16 +354,21 @@ typed payload:
 
 | Resolution | Outcome |
 |---|---|
-| `confirm` | Atomic CAS transition `draft → active` on the target claim via `ClaimService.transitionLifecycle`, then the typed `soul.resolution.confirm_applied` audit row is appended. CAS first, audit second: the race loser observes a zero-row update and returns `QUERY_FAILED` before any audit append. |
+| `confirm` | Atomically appends the lifecycle, resolution, and proof-effect audits, persists the allowed effect decision, and applies the CAS transition `draft → active` through `ClaimService.transitionLifecycle`. |
 | `reject` | Terminates the claim. `applyReject` covers all six starting states including `DRAFT`. |
-| `correct` | Records a corrected payload and emits the typed audit. |
-| `stale` | Marks the claim subject as no longer current. |
-| `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp; replaces the retired `cooldown_until` field on `SynthesisCapsule`. |
+| `correct` | An allowed proof effect persists predecessor and successor receipt identities together with the typed audit carrying the correction payload. The target claim remains immutable; the successor receipt is the durable governed correction effect. |
+| `stale` | Transitions an active memory entry to `dormant`; replay against an already non-active entry is a no-op. |
+| `defer` | Writes a `DeferredObligation` carrying the re-entry timestamp. Its mutation, obligation audit, and typed resolution audit share one EventPublisher transaction. |
 | `not_relevant` | Records that the warning was inspected but did not apply to the current task. |
 
-The handler is at `apps/core-daemon/src/mcp-memory/resolve-handler.ts`;
-the typed dispatcher is `packages/core/src/governance/resolution-service.ts`.
-The `assertDeliveryInScope` check requires the `target_object_id` to
+Only `confirm` with an applied, allowed governed effect records positive
+causal usage for the delivered source objects. Reject, correct, stale, defer,
+not-relevant, deny, and no-op outcomes never reinforce paths.
+
+The handler is at `apps/core-daemon/src/mcp-memory/tool/resolve-handler.ts`;
+the typed dispatcher is
+`packages/core/src/governance/proposals/resolution-service.ts`.
+The delivery-scope check requires the `target_object_id` to
 be a direct member of the agent's delivered_object_ids or to be
 reachable indirectly through the `claimSourceReader` port (so a
 delivered memory's draft claim form is in-scope without delivering
@@ -361,12 +380,16 @@ the target from result array position.
 ### Route 2 — Out-of-band Proposal
 
 The explicit host-assertion path is unchanged from v0.3.8:
-`soul.propose_memory_update` enters a pending Proposal;
+`soul.propose_memory_update` enters a pending `memory_update` or
+`privacy_erase` Proposal;
 `soul.review_memory_proposal` (or the Inspector "Promote to
 strictly_governed" button, which posts a typed `path_relation`
-Proposal) accepts or rejects. Accepted proposals apply through
-`MemoryService.validateUpdate` inside an atomic proposal / storage
-transaction. Rejected proposals leave durable memory untouched.
+Proposal) accepts or rejects. Accepted memory updates apply through
+`MemoryService.validateUpdate`. Accepted privacy erasures pass through the
+proof-carrying hard-effect authority before the storage-owned source-closure
+erase barrier. The effect decision, canonical barrier identity, proposal
+decision, mutation, and EventLog audit share one transaction; rejection leaves
+durable memory untouched and never becomes an erase request.
 
 ### Agent-side classification — `GovernancePolicy`
 

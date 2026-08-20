@@ -26,6 +26,7 @@ import {
 import { ProposalConnectionHost } from "./proposal-connection-host.js";
 import { ProposalCreateWorkflow } from "./proposal-create-workflow.js";
 import { ProposalReadQueries } from "./proposal-read-queries.js";
+import { acceptPendingPrivacyEraseWithEvents } from "./privacy/accept-workflow.js";
 import { type ProposalRow } from "./rows.js";
 import {
   type AcceptedMemoryUpdateInput,
@@ -44,6 +45,7 @@ import {
   type ProposalReviewerAssignment,
   type ProposalReviewerAssignmentInput,
   type ScopedProposal,
+  type TransactionBoundProposalMutation,
   type UpdatePendingResolutionOptions
 } from "./types.js";
 
@@ -63,6 +65,10 @@ export class SqliteProposalRepo implements ProposalRepo {
     this.connectionHost = new ProposalConnectionHost(db);
     this.createWorkflow = new ProposalCreateWorkflow(this.connectionHost);
     this.readQueries = new ProposalReadQueries(db, this.connectionHost);
+  }
+
+  public get transactionScope(): object {
+    return this.db;
   }
 
   public async create(input: ProposalCreateInput): Promise<Readonly<Proposal>> {
@@ -273,6 +279,30 @@ export class SqliteProposalRepo implements ProposalRepo {
         error
       );
     }
+  }
+
+  public async acceptPendingPrivacyEraseWithEvents(
+    proposalId: string,
+    updatedAt: string,
+    events: readonly ProposalResolutionEventInput[],
+    mutation: TransactionBoundProposalMutation,
+    options: UpdatePendingResolutionOptions = {}
+  ): Promise<Readonly<{
+    readonly proposal: Readonly<Proposal>;
+    readonly events: readonly EventLogEntry[];
+  }>> {
+    return await acceptPendingPrivacyEraseWithEvents(
+      {
+        transactionScope: this.transactionScope,
+        connectionHost: this.connectionHost,
+        createPendingResolutionFailure: (id) => this.createPendingResolutionFailure(id)
+      },
+      proposalId,
+      updatedAt,
+      events,
+      mutation,
+      options
+    );
   }
 
   public async acceptPendingMemoryUpdateWithEvents(

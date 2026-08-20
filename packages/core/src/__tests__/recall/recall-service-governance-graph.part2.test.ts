@@ -93,6 +93,7 @@ it("gates same-relation hop-2 chain extension while keeping heterogeneous associ
       return out;
     });
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort: { findByAnchors }
     });
@@ -189,6 +190,7 @@ it("does not count graph diagnostics for neighbors rejected by deterministic fil
       })
     };
     const service = new RecallService({
+    testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       pathExpansionPort
     });

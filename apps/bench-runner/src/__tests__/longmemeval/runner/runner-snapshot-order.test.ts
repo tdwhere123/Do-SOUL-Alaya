@@ -3,15 +3,18 @@ import {
   drainAuditedAsyncSideEffects,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
-import { createLongMemEvalSelectionContractFromAssignments } from "../../../longmemeval/selection/contract.js";
+import { createLongMemEvalSelectionContractFromAssignments } from "../../../bench/selection/contract.js";
 import { executeLongMemEvalRun } from "../../../longmemeval/runner/runner-execution.js";
 import type { LongMemEvalRunContext } from "../../../longmemeval/runner/prepare-context.js";
 import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import { emptySeedFuelInventory } from
+  "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
   prepare: vi.fn(),
+  prepareSnapshot: vi.fn(),
   recall: vi.fn(),
   runQuestion: vi.fn(),
   startDaemon: vi.fn(),
@@ -19,9 +22,15 @@ const mocks = vi.hoisted(() => ({
   quiesce: vi.fn(),
   buildProvenance: vi.fn(),
   writeSnapshot: vi.fn(),
-  snapshotAuthority: vi.fn()
+  snapshotAuthority: vi.fn(),
+  snapshotAuthorityProof: vi.fn(),
+  checkpoint: vi.fn(),
+  fieldCheckpoint: vi.fn()
 }));
 const QUESTION_IDS = ["first", "second"] as const;
+const EXTRACTION_CACHE_PREFLIGHT_PROOF = Object.freeze({
+  kind: "sentinel-extraction-cache-preflight-proof"
+});
 
 interface SnapshotPolicyDrift {
   readonly policyShape?: "chat";
@@ -34,26 +43,28 @@ interface SnapshotPolicyDrift {
 vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: mocks.startDaemon
 }));
-vi.mock("../../../longmemeval/extraction/seed-fuel/seed-fuel-collector.js", () => ({
+vi.mock("../../../bench/extraction/seed-fuel/seed-fuel-collector.js", () => ({
   collectBenchSeedFuelInventory: mocks.collectInventory
 }));
-vi.mock("../../../longmemeval/snapshot/quiescence.js", () => ({
+vi.mock("../../../bench/snapshot/quiescence.js", () => ({
   awaitLongMemEvalSnapshotQuiescence: mocks.quiesce
 }));
 vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({
   prepareLongMemEvalQuestion: mocks.prepare,
+  prepareLongMemEvalSnapshotQuestion: mocks.prepareSnapshot,
   runLongMemEvalQuestion: mocks.runQuestion,
   runPreparedLongMemEvalQuestion: mocks.recall
 }));
 vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
   writeRecallEvalSnapshot: mocks.writeSnapshot
 }));
-vi.mock("../../../longmemeval/provenance/run.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../longmemeval/provenance/run.js")>(),
+vi.mock("../../../bench/provenance/run.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../bench/provenance/run.js")>(),
   buildLongMemEvalRunProvenance: mocks.buildProvenance
 }));
-vi.mock("../../../longmemeval/snapshot/current/current-substrate-authority.js", () => ({
-  assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority
+vi.mock("../../../bench/snapshot/current/current-substrate-authority.js", () => ({
+  assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority,
+  assertCurrentPostFillCacheAuthorityProof: mocks.snapshotAuthorityProof
 }));
 
 beforeEach(() => {
@@ -61,11 +72,22 @@ beforeEach(() => {
   mocks.events.length = 0;
   mocks.startDaemon.mockImplementation(async () => ({
     dataDir: "/tmp/runner-snapshot-order",
-    shutdown: vi.fn(async () => mocks.events.push("shutdown"))
+    runtime: {
+      services: {
+        reconciliationBasisStatus: { enabled: false }
+      }
+    },
+    shutdown: vi.fn(async () => mocks.events.push("shutdown")),
+    checkpointFieldProjection: mocks.fieldCheckpoint,
+    checkpointRelationProjection: mocks.checkpoint
   }));
   mocks.prepare.mockImplementation(async ({ question }) => {
     mocks.events.push(`prepare:${question.question_id}`);
     return preparedQuestion(question.question_id);
+  });
+  mocks.prepareSnapshot.mockImplementation(async ({ question }) => {
+    mocks.events.push(`prepare:${question.question_id}`);
+    return { questionId: question.question_id };
   });
   mocks.recall.mockImplementation(async ({ question }) => {
     mocks.events.push(`recall:${question.question_id}`);
@@ -73,6 +95,12 @@ beforeEach(() => {
   });
   mocks.quiesce.mockImplementation(async () => {
     mocks.events.push("quiescence");
+  });
+  mocks.fieldCheckpoint.mockImplementation(async () => {
+    mocks.events.push("field-checkpoint");
+  });
+  mocks.checkpoint.mockImplementation(async () => {
+    mocks.events.push("checkpoint");
   });
   mocks.collectInventory.mockImplementation(async () => {
     mocks.events.push("inventory");
@@ -86,6 +114,7 @@ beforeEach(() => {
     mocks.events.push("snapshot");
   });
   mocks.snapshotAuthority.mockImplementation(() => undefined);
+  mocks.snapshotAuthorityProof.mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -93,22 +122,43 @@ afterEach(() => {
 });
 
 describe("LongMemEval snapshot execution ordering", () => {
-  it("freezes the full seed window before the first recall or report phase", async () => {
+  it("freezes the full seed window and writes the snapshot without a recall pass", async () => {
     const result = await executeLongMemEvalRun(snapshotContext());
 
+    expect(mocks.startDaemon).toHaveBeenCalledWith(expect.objectContaining({
+      fieldProjectionAdmissionMode: "explicit_checkpoint",
+      relationProjectionAdmissionMode: "explicit_checkpoint"
+    }));
     expect(mocks.events).toEqual([
       "prepare:first",
       "prepare:second",
       "quiescence",
-      "inventory",
+      "field-checkpoint",
+      "checkpoint",
       "provenance",
       "snapshot",
-      "recall:first",
-      "recall:second",
       "shutdown"
     ]);
-    expect(result.collected.map((row) => row.questionId)).toEqual(["first", "second"]);
+    expect(result.collected).toEqual([]);
+    expect(result.seedFuelInventory).toEqual(emptySeedFuelInventory());
+    expect(mocks.collectInventory).not.toHaveBeenCalled();
+    expect(mocks.recall).not.toHaveBeenCalled();
     expect(mocks.runQuestion).not.toHaveBeenCalled();
+  });
+
+  it("uses the snapshot-only preparer and forwards snapshot questions", async () => {
+    mocks.prepare.mockRejectedValue(
+      new Error("snapshot execution retained the generic prepared-question graph")
+    );
+
+    await expect(executeLongMemEvalRun(snapshotContext())).resolves.toBeDefined();
+
+    expect(mocks.prepareSnapshot).toHaveBeenCalledTimes(QUESTION_IDS.length);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.writeSnapshot.mock.calls[0]?.[0].snapshotQuestions).toEqual([
+      { questionId: "first" },
+      { questionId: "second" }
+    ]);
   });
 
   it("shuts down without freezing when producer quiescence fails", async () => {
@@ -132,7 +182,7 @@ describe("LongMemEval snapshot execution ordering", () => {
 
   it("does not freeze when a real audited producer side effect rejects", async () => {
     vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
-    mocks.prepare.mockImplementationOnce(async ({ question }) => {
+    mocks.prepareSnapshot.mockImplementationOnce(async ({ question }) => {
       mocks.events.push(`prepare:${question.question_id}`);
       scheduleAuditedAsyncSideEffect(Promise.reject(new Error("producer write failed")), {
         source: "runner-snapshot-order",
@@ -143,7 +193,7 @@ describe("LongMemEval snapshot execution ordering", () => {
         warningCode: "ALAYA_FIXTURE_SIDE_EFFECT_FAILED",
         warningMessage: "fixture producer side effect failed"
       });
-      return preparedQuestion(question.question_id);
+      return { questionId: question.question_id };
     });
     mocks.quiesce.mockImplementationOnce(async () => {
       mocks.events.push("quiescence");
@@ -204,7 +254,7 @@ describe("LongMemEval snapshot execution ordering", () => {
   });
 
   it("rejects an ineligible substrate before starting the producer daemon", async () => {
-    mocks.snapshotAuthority.mockImplementationOnce(() => {
+    mocks.snapshotAuthorityProof.mockImplementationOnce(() => {
       throw new Error("post-fill benchmark requires a complete v3 extraction manifest");
     });
 
@@ -212,6 +262,21 @@ describe("LongMemEval snapshot execution ordering", () => {
       .rejects.toThrow(/complete v3 extraction manifest/u);
     expect(mocks.startDaemon).not.toHaveBeenCalled();
     expect(mocks.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reuses the seed runner preflight proof without rescanning cache shards", async () => {
+    await executeLongMemEvalRun(snapshotContext());
+
+    expect(mocks.snapshotAuthorityProof).toHaveBeenCalledTimes(1);
+    expect(mocks.snapshotAuthorityProof.mock.calls[0]?.[0]).toMatchObject({
+      proof: EXTRACTION_CACHE_PREFLIGHT_PROOF,
+      cacheRoot: "/tmp/cache",
+      datasetSha256: "d".repeat(64),
+      requiredTurnContents: [],
+      requiredExtractionTurns: [],
+      requiredQuestionWindow: { offset: 0, limit: 2 }
+    });
+    expect(mocks.snapshotAuthority).not.toHaveBeenCalled();
   });
 });
 
@@ -225,6 +290,7 @@ function snapshotContext(drift: SnapshotPolicyDrift = {}): LongMemEvalRunContext
       haystack_sessions: []
     })) as
       unknown as LongMemEvalRunContext["window"],
+    datasetQuestionCount: QUESTION_IDS.length,
     datasetSha256: "d".repeat(64),
     datasetChecksumSource: "fixture",
     datasetSourcePath: "/tmp/dataset.json",
@@ -243,7 +309,10 @@ function snapshotContext(drift: SnapshotPolicyDrift = {}): LongMemEvalRunContext
     policyShape: drift.policyShape ?? "stress",
     simulateReport: drift.simulateReport ?? "none",
     recallOptions: { maxResults: 10, conflictAwareness: true },
-    seedRunner: { stats: seedStats() } as unknown as
+    seedRunner: {
+      stats: seedStats(),
+      extractionCachePreflightProof: EXTRACTION_CACHE_PREFLIGHT_PROOF
+    } as unknown as
       LongMemEvalRunContext["seedRunner"],
     captureSnapshot: true,
     extractionCacheRoot: "/tmp/cache",

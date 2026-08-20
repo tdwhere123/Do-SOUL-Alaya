@@ -13,7 +13,7 @@ export function createUnscoredMaterializedSeedError(input: {
 }): UnscoredMaterializedSeedError {
   const detail = input.cause instanceof Error ? input.cause.message : String(input.cause);
   const error = new Error(
-    `bench seed accept failed after memory_entry=${input.memoryId} materialized; ` +
+    `bench seed finalization failed after memory_entry=${input.memoryId} materialized; ` +
       `refusing to score a run with recallable unscored seed memory: ${detail}`
   ) as UnscoredMaterializedSeedError;
   error.name = "UnscoredMaterializedSeedError";

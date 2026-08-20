@@ -2,23 +2,26 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EMPTY_RELATION_HISTORY_DIGEST } from "@do-soul/alaya-protocol";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
-export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 108;
+export const TEMPORAL_OFFLINE_MIGRATION_VERSION = 7;
 
 export type TemporalDatabaseMode = "runtime" | "fresh-bootstrap" | "candidate";
 
-const TEMPORAL_ASSERTION_SCHEMA_GENERATION = "relation_assertion_v1";
-const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v1";
+const TEMPORAL_ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
+const TEMPORAL_ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
 const TEMPORAL_PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
 const TEMPORAL_BOOTSTRAP_GENERATION = "temporal-bootstrap-empty-v1";
 const TEMPORAL_PROJECTION_POLICY_ID = "relation-path-projection-v1";
 const TEMPORAL_PROJECTION_POLICY_SHA256 = "f68603e497a8d762e5d0ed96e8cd9608475794ccef92c6c3fbc37b76daea7ee7";
-const EMPTY_TEMPORAL_HISTORY_DIGEST = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const EMPTY_TEMPORAL_PROJECTION_AS_OF = "1970-01-01T00:00:00.000Z";
+const EMPTY_TEMPORAL_PROJECTION_DIGEST = createHash("sha256")
+  .update(Buffer.alloc(0))
+  .digest("hex");
 
 export function resolveTemporalDatabaseMode(
   filename: string,
@@ -191,9 +194,9 @@ export function migrateLegacyPathRelationsToTemporalCandidate(
     TEMPORAL_PROJECTION_SCHEMA_GENERATION,
     TEMPORAL_PROJECTION_POLICY_ID,
     TEMPORAL_PROJECTION_POLICY_SHA256,
-    EMPTY_TEMPORAL_HISTORY_DIGEST,
+    EMPTY_RELATION_HISTORY_DIGEST,
     EMPTY_TEMPORAL_PROJECTION_AS_OF,
-    EMPTY_TEMPORAL_HISTORY_DIGEST,
+    EMPTY_TEMPORAL_PROJECTION_DIGEST,
     migratedAt,
     migratedAt
   );
@@ -212,8 +215,8 @@ export function migrateLegacyPathRelationsToTemporalCandidate(
     EMPTY_TEMPORAL_PROJECTION_AS_OF,
     TEMPORAL_PROJECTION_POLICY_ID,
     TEMPORAL_PROJECTION_POLICY_SHA256,
-    EMPTY_TEMPORAL_HISTORY_DIGEST,
-    EMPTY_TEMPORAL_HISTORY_DIGEST,
+    EMPTY_RELATION_HISTORY_DIGEST,
+    EMPTY_TEMPORAL_PROJECTION_DIGEST,
     options.selectionRequired ? 1 : 0,
     migratedAt
   );

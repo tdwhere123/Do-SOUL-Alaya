@@ -128,7 +128,7 @@ function resolveEffectiveScoreContext(params: EffectiveScoreParams): EffectiveSc
   const additiveWeights = resolveAdditiveScoringWeights(params.policy);
   const objectKind = params.objectKind ?? "memory_entry";
   const isGlobalCandidate = params.originPlane === "global";
-  const isSynthesisCandidate = objectKind === "synthesis_capsule";
+  const isMemoryCandidate = objectKind === "memory_entry";
   return Object.freeze({
     ...params,
     scoreMultiplier: params.scoreMultiplier ?? 1,
@@ -140,7 +140,7 @@ function resolveEffectiveScoreContext(params: EffectiveScoreParams): EffectiveSc
       params.supplementaryData.graphAndPathColdScore,
       additiveWeights.PATH_PLASTICITY_WEIGHT
     ),
-    canUseMemorySupplement: !isGlobalCandidate && !isSynthesisCandidate
+    canUseMemorySupplement: !isGlobalCandidate && isMemoryCandidate
   });
 }
 
@@ -320,6 +320,7 @@ export function resolveEffectiveActivationWeights(
 
 const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
   "lexical",
+  "temporal_window",
   "facet_concept",
   "source_proximity",
   "path_expansion",

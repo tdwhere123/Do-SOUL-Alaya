@@ -12,18 +12,18 @@ import type {
   TaskSurfaceBuilder,
   WorkspaceService
 } from "@do-soul/alaya-core";
-import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
-import type { ClaimRouteServices } from "../../routes/governance/claims.js";
-import type { ConflictMatrixRouteServices } from "../../routes/governance/conflict-matrix.js";
+import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
+import type { ClaimRouteServices } from "../../routes/governance/matrix/claims.js";
+import type { ConflictMatrixRouteServices } from "../../routes/governance/matrix/conflict-matrix.js";
 import type { ConfigRouteServices } from "../../routes/workspace/config.js";
-import type { EvidenceRouteServices } from "../../routes/memory/evidence.js";
-import type { GlobalMemoryRouteServices } from "../../routes/memory/global-memory.js";
-import type { MemoryRouteServices } from "../../routes/memory/memories.js";
-import type { ProposalRouteServices } from "../../routes/governance/proposals-types.js";
-import type { RecallRouteServices } from "../../routes/memory/recall.js";
-import type { RunRouteServices } from "../../routes/workspace/runs.js";
+import type { EvidenceRouteServices } from "../../routes/memory/entries/evidence.js";
+import type { GlobalMemoryRouteServices } from "../../routes/memory/entries/global-memory.js";
+import type { MemoryRouteServices } from "../../routes/memory/entries/memories.js";
+import type { ProposalRouteServices } from "../../routes/governance/proposals/proposals-types.js";
+import type { RecallRouteServices } from "../../routes/memory/recall/recall.js";
+import type { RunRouteServices } from "../../routes/workspace/run-snapshot/runs.js";
 import type { SignalRouteServices } from "../../routes/workspace/signals.js";
-import type { SynthesisRouteServices } from "../../routes/memory/syntheses.js";
+import type { SynthesisRouteServices } from "../../routes/memory/entries/syntheses.js";
 import type { WorkspaceRouteServices } from "../../routes/workspace/workspaces.js";
 import { implementPort, type LooseStub } from "./implement-port.js";
 

@@ -6,6 +6,7 @@ import {
   type FtsKeywordSearchRow
 } from "../keyword-search.js";
 import type { MemoryEntrySearchWorkflowHost } from "../search-workflows.js";
+import { MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL } from "../semantic-tie-order.js";
 import type { MemoryEntryKeywordSearchResult } from "../types.js";
 import { freezeKeywordSearchResults } from "../search/freeze-keyword-results.js";
 
@@ -72,7 +73,7 @@ function searchAnchorFtsLaneWithinTier(
       AND memory_entries.storage_tier = ?
       AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
       AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-    ORDER BY raw_rank ASC, ${table}.object_id ASC
+    ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, ${table}.object_id ASC
     LIMIT ?
   `).all(workspaceId, matchExpression, tier, limit) as readonly FtsKeywordSearchRow[];
 }

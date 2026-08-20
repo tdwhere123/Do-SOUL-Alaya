@@ -1,17 +1,18 @@
 import type { ManifestationState, MemoryEntry } from "@do-soul/alaya-protocol";
 import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
-import { facetOverlapCountFor, facetSliceEnabled } from "../delivery/fusion-delivery-streams.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
+import { RECALL_FLOOD_EDGE_REASONS } from
+  "../runtime/recall-service-types.js";
 import type {
   FloodAxisInactiveReason,
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics,
+  RecallFloodEdgeTraceV1,
+  RecallPathInflowAvailability,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
-import {
-  resolveConformantEvidenceBeta,
-  resolveConformantPathWeight
-} from "./conformant-fusion-scoring.js";
+import { resolveConformantPathWeight } from "./conformant-fusion-scoring.js";
+import { resolveSliceAxis } from "./flood-slice-axis.js";
 
 export type {
   FloodAxisInactiveReason,
@@ -56,30 +57,22 @@ function manifestationOmega(
   }
 }
 
-// Slice pass_through / no_slice mean "gate open" (feature off or no query facets),
-// unlike path pass_through which means "no path graph present" and withholds fuel.
-function resolveSliceAxis(
-  entry: Readonly<MemoryEntry>,
-  querySoughtFacets: readonly string[] | undefined
+function resolvePathAxis(
+  rawPath: number,
+  hasInflow: boolean,
+  availability: RecallPathInflowAvailability | undefined,
+  eligible: boolean
 ): ResolvedFloodFuelAxis {
-  if (!facetSliceEnabled()) {
-    return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
+  if (!eligible) {
+    // Capsules are outside the path-transfer population.
+    return { value: 1, status: "inactive:not_applicable", countsAsFuel: false };
   }
-  if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return { value: 1, status: "inactive:no_slice", countsAsFuel: true };
+  if (availability === "unavailable") {
+    return { value: 0, status: "inactive:index_unavailable", countsAsFuel: false };
   }
-  const overlap = facetOverlapCountFor(entry, querySoughtFacets);
-  if (overlap === 0) {
-    return { value: 0, status: "inactive:no_fuel", countsAsFuel: false };
+  if (availability === "storage_error") {
+    return { value: 0, status: "inactive:storage_error", countsAsFuel: false };
   }
-  return {
-    value: clamp01(overlap / querySoughtFacets.length),
-    status: "active",
-    countsAsFuel: true
-  };
-}
-
-function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodFuelAxis {
   if (!hasInflow) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
@@ -155,17 +148,21 @@ interface ResolvedIntegratedFloodScore {
   readonly lGate: number;
 }
 
+// Identity residual scale: an env beta was a forever-off multiplier.
+const EVIDENCE_RESIDUAL_SCALE = 1;
+
 function resolveIntegratedFloodScore(
   params: IntegratedFloodScoreParams
 ): ResolvedIntegratedFloodScore {
   const lambda = resolveConformantPathWeight();
-  const beta = resolveConformantEvidenceBeta();
+  const beta = EVIDENCE_RESIDUAL_SCALE;
   const memorySupplementEligible = params.memorySupplementEligible ?? true;
-  const slice = resolveSliceAxis(params.entry, params.supplementaryData.querySoughtFacets);
+  const slice = resolveSliceAxis(params.entry, params.supplementaryData);
   const path = resolvePathAxis(
     params.axisInputs.A_path,
-    memorySupplementEligible &&
-      hasPathInflow(params.entry.object_id, params.supplementaryData)
+    hasPathInflow(params.entry.object_id, params.supplementaryData),
+    params.supplementaryData.pathInflowAvailability,
+    memorySupplementEligible
   );
   const evidence = resolveEvidenceAxis(
     params.axisInputs.B_evidence,
@@ -182,7 +179,7 @@ function resolveIntegratedFloodScore(
   );
   const eDirect = clamp01(params.axisInputs.B_evidence);
   const eDirectStatus: FloodAxisInactiveReason =
-    beta <= 0 ? "inactive:beta_disabled" : eDirect > 0 ? "active" : "inactive:no_evidence";
+    eDirect > 0 ? "active" : "inactive:no_evidence";
   const base = clamp01(params.axisInputs.R_obj);
   const lGate = structuralLikelihoodGate(base);
   return {
@@ -192,11 +189,14 @@ function resolveIntegratedFloodScore(
 }
 
 function computeFinalFloodScore(resolved: ResolvedIntegratedFloodScore): number {
-  // invariant: flood activation cannot demote the pass-through base.
-  return clamp01(resolved.fuelVerified
-    ? (resolved.base + resolved.lambda * resolved.omega * resolved.flood * resolved.lGate) *
-      (1 + resolved.beta * resolved.eDirect)
-    : resolved.base);
+  // invariant: flood and evidence residuals cannot demote the pass-through base.
+  const evidenceResidual = resolved.eDirect > 0
+    ? resolved.beta * resolved.eDirect * resolved.lGate
+    : 0;
+  const floodBonus = resolved.fuelVerified
+    ? resolved.lambda * resolved.omega * resolved.flood * resolved.lGate
+    : 0;
+  return clamp01(resolved.base + evidenceResidual + floodBonus);
 }
 
 function buildIntegratedFloodDiagnostics(
@@ -263,6 +263,67 @@ export function buildFloodFuelCoverageSummary(
     fuel_verified_count: fuelVerifiedCount,
     slice_active_count: sliceActiveCount,
     path_active_count: pathActiveCount,
-    evidence_active_count: evidenceActiveCount
+    evidence_active_count: evidenceActiveCount,
+    ...buildH1CoverageSummary(diagnostics)
   });
+}
+
+function buildH1CoverageSummary(
+  diagnostics: readonly IntegratedFloodCandidateDiagnostics[]
+): Pick<
+  FloodFuelCoverageSummary,
+  "h1_candidate_count" | "h1_transferable_count" |
+  "h1_edge_winner_count" | "h1_direct_winner_count" |
+  "h1_overlay_applied_count" |
+  "h1_evaluated_edge_count" | "h1_seed_overlap_edge_count" |
+  "h1_transferred_edge_count" | "h1_rejected_edge_count" |
+  "h1_newly_admitted_frontier_target_count" | "h1_reason_counts"
+> {
+  const h1Rows = diagnostics.flatMap((row) =>
+    row.h1_max_product === undefined ? [] : [row.h1_max_product]);
+  const reasonCounts = emptyH1ReasonCounts();
+  for (const row of h1Rows) {
+    for (const reason of RECALL_FLOOD_EDGE_REASONS) {
+      reasonCounts[reason] += row.transition_counts.reason_counts[reason];
+    }
+  }
+  const edgeWinners = h1Rows.filter((row) => row.winner === "edge").length;
+  return Object.freeze({
+    h1_candidate_count: h1Rows.length,
+    h1_transferable_count: h1Rows.filter(
+      (row) => row.strongest_transfer > 0
+    ).length,
+    h1_edge_winner_count: edgeWinners,
+    h1_direct_winner_count: h1Rows.length - edgeWinners,
+    h1_overlay_applied_count: diagnostics.filter(
+      (row) => row.h1_overlay?.applied === true
+    ).length,
+    h1_evaluated_edge_count: sumTransitions(h1Rows, "evaluated_edge_count"),
+    h1_seed_overlap_edge_count: sumTransitions(h1Rows, "seed_overlap_edge_count"),
+    h1_transferred_edge_count: sumTransitions(h1Rows, "transferred_edge_count"),
+    h1_rejected_edge_count: sumTransitions(h1Rows, "rejected_edge_count"),
+    h1_newly_admitted_frontier_target_count: h1Rows.filter(
+      (row) => row.frontier_admitted
+    ).length,
+    h1_reason_counts: Object.freeze(reasonCounts)
+  });
+}
+
+function emptyH1ReasonCounts(): Record<
+  RecallFloodEdgeTraceV1["reason"],
+  number
+> {
+  return Object.fromEntries(
+    RECALL_FLOOD_EDGE_REASONS.map((reason) => [reason, 0])
+  ) as Record<RecallFloodEdgeTraceV1["reason"], number>;
+}
+
+function sumTransitions(
+  rows: readonly NonNullable<
+    IntegratedFloodCandidateDiagnostics["h1_max_product"]
+  >[],
+  key: "evaluated_edge_count" | "seed_overlap_edge_count" |
+    "transferred_edge_count" | "rejected_edge_count"
+): number {
+  return rows.reduce((sum, row) => sum + row.transition_counts[key], 0);
 }

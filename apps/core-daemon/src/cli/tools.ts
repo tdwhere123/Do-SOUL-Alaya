@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   listAlayaMemoryTools
-} from "../mcp-memory/tool-catalog.js";
+} from "../mcp-memory/tool/tool-catalog.js";
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolHandler
-} from "../mcp-memory/tool-handler.js";
+} from "../mcp-memory/tool/tool-handler.js";
 import {
   ALAYA_SYSEXITS,
   type AlayaCliArgsSchema,
@@ -19,7 +19,7 @@ import {
   type RunWorkspaceLookupPort,
   resolveTrustedCliRunId,
   resolveCliWorkspaceContext
-} from "./workspace-context.js";
+} from "./support/workspace-context.js";
 
 export interface ToolsCommandDependencies {
   readonly handler: McpMemoryToolHandler;

@@ -6,12 +6,31 @@ export function scoreQueryEvidenceMatch(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>
 ): number {
+  return scoreQueryEvidenceSurfaces(
+    entry.content,
+    [...entry.domain_tags, ...entry.evidence_refs].join(" "),
+    queryProbes
+  );
+}
+
+export function scoreQueryEvidenceContent(
+  content: string,
+  queryProbes: Readonly<RecallQueryProbes>
+): number {
+  return scoreQueryEvidenceSurfaces(content, "", queryProbes);
+}
+
+function scoreQueryEvidenceSurfaces(
+  contentRaw: string,
+  metadataRaw: string,
+  queryProbes: Readonly<RecallQueryProbes>
+): number {
   if (queryProbes.normalized_query === null || queryProbes.lexical_terms.length === 0) {
     return 0;
   }
 
-  const content = normalizeEvidenceText(entry.content);
-  const metadata = normalizeEvidenceText([...entry.domain_tags, ...entry.evidence_refs].join(" "));
+  const content = normalizeEvidenceText(contentRaw);
+  const metadata = normalizeEvidenceText(metadataRaw);
   const termNeedles = compileEvidenceNeedles(queryProbes.lexical_terms.slice(0, 32));
   const hitStats = collectEvidenceTermHitStats(termNeedles, content, metadata);
   if (hitStats.hitWeight === 0) {

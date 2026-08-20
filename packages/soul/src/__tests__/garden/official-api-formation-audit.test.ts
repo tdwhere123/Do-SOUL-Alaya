@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { createTimeConcernWindowDigest } from "@do-soul/alaya-protocol";
 import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CREATED_AT = "2026-07-17T00:00:00.000Z";
 const SOURCE_OBSERVED_AT = "2026-07-16T12:00:00.000Z";
 
-const validSignal = {
+const validSignal = withOpenSemanticFactorGraph({
   signal_kind: "potential_claim",
   object_kind: "decision",
   confidence: 0.7,
   matched_text: "We decided to ship on Friday."
-};
+});
 
 function auditInput(overrides: Partial<Parameters<typeof auditOfficialApiSignalFormation>[0]> = {}) {
   return {
@@ -37,9 +39,21 @@ describe("auditOfficialApiSignalFormation", () => {
       disposition: "admitted",
       stage: "formation",
       reason: "formed",
+      temporal_projection_audit: {
+        status: "unavailable",
+        reason: "temporal_projection_missing"
+      },
       signal: {
         signal_id: "audit-0",
-        created_at: CREATED_AT
+        created_at: CREATED_AT,
+        signal_kind: "potential_claim",
+        object_kind: "decision",
+        raw_payload: {
+          temporal_projection_audit: {
+            status: "unavailable",
+            reason: "temporal_projection_missing"
+          }
+        }
       }
     });
     expect(result.entries[1]).toEqual({
@@ -47,6 +61,25 @@ describe("auditOfficialApiSignalFormation", () => {
       disposition: "invalid",
       stage: "parse",
       reason: "entry_schema_invalid"
+    });
+  });
+
+  it("anchors relative time paths to source observation instead of creation time", () => {
+    const relativeSignal = withOpenSemanticFactorGraph({
+      ...validSignal,
+      matched_text: "We decided yesterday."
+    });
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({ signals: [relativeSignal] }),
+      turn_content: "We decided yesterday."
+    }));
+
+    expect(result.entries[0]?.signal?.raw_payload.time_concern).toEqual({
+      matched_text: "yesterday",
+      window_digest: createTimeConcernWindowDigest(
+        "2026-07-15T00:00:00.000Z",
+        "2026-07-15T23:59:59.999Z"
+      )
     });
   });
 
@@ -124,6 +157,111 @@ describe("auditOfficialApiSignalFormation", () => {
       disposition: "rejected",
       stage: "grounding",
       reason: expect.any(String)
+    });
+  });
+
+  it("forms a grounded candidate while preserving graph projection failure", () => {
+    const { semantic_factor_graph: _graph, ...withoutGraph } = validSignal;
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({ signals: [withoutGraph] })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "admitted",
+      stage: "formation",
+      reason: "formed",
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      },
+      signal: {
+        raw_payload: {
+          semantic_factor_graph_projection: {
+            status: "unavailable",
+            reason: "semantic_factor_graph_missing"
+          }
+        }
+      }
+    });
+    expect(result.entries[0]?.signal?.raw_payload).not.toHaveProperty(
+      "semantic_factor_graph"
+    );
+  });
+
+  it("rejects graphless entries when the frozen contract requires OSF", () => {
+    const { semantic_factor_graph: _graph, ...withoutGraph } = validSignal;
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({ signals: [withoutGraph] }),
+      require_semantic_factor_graph: true
+    }));
+
+    expect(result.entries[0]).toEqual({
+      index: 0,
+      disposition: "invalid",
+      stage: "parse",
+      reason: "semantic_factor_graph_required",
+      semantic_factor_graph_projection: {
+        status: "unavailable",
+        reason: "semantic_factor_graph_missing"
+      }
+    });
+  });
+
+  it("preserves the exact projection reason when grounding removes a valid graph", () => {
+    const graph = validSignal.semantic_factor_graph as {
+      readonly factors: readonly Readonly<Record<string, unknown>>[];
+    };
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [{
+          ...validSignal,
+          semantic_factor_graph: {
+            ...graph,
+            factors: graph.factors.map((factor) => ({
+              ...factor,
+              surface: "Call me Ash.",
+              semantic_identity: "call"
+            }))
+          }
+        }]
+      })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "admitted",
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_not_source_grounded"
+      },
+      signal: {
+        raw_payload: {
+          semantic_factor_graph_projection: {
+            status: "rejected",
+            reason: "semantic_factor_graph_not_source_grounded"
+          }
+        }
+      }
+    });
+  });
+
+  it("retains graph projection failure when grounding rejects the candidate", () => {
+    const result = auditOfficialApiSignalFormation(auditInput({
+      raw_json: JSON.stringify({
+        signals: [{
+          ...validSignal,
+          matched_text: "Call me Ash.",
+          semantic_factor_graph: {}
+        }]
+      })
+    }));
+
+    expect(result.entries[0]).toMatchObject({
+      disposition: "rejected",
+      stage: "grounding",
+      semantic_factor_graph_projection: {
+        status: "rejected",
+        reason: "semantic_factor_graph_invalid_shape"
+      }
     });
   });
 });

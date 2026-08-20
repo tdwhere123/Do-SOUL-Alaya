@@ -1,10 +1,12 @@
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
-import { resolveSourceAssertion, type SourceAssertionResolution } from "./source-assertion.js";
+import { createHash } from "node:crypto";
 import {
-  locatorAssertionUniquelyCommitsToQuote,
-  parseOfficialApiSourceLocator,
-  resolveOfficialApiSourceLocator
-} from "./source-locator.js";
+  parseVerifiedUserAssertionSourceHash,
+  verifyVerifiedUserAssertionSourceHash,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
+import type { SourceAssertionResolution } from "./source-assertion.js";
+import { resolvePreferenceAwareSourceGrounding } from "./preference-profile.js";
+import { parseOfficialApiSourceLocator } from "./source-locator.js";
 
 export type GardenSignalGrounding = SourceAssertionResolution | {
   readonly status: "rejected";
@@ -14,38 +16,78 @@ export type GardenSignalGrounding = SourceAssertionResolution | {
 export function resolveGardenSignalGrounding(
   signal: CandidateMemorySignal
 ): GardenSignalGrounding {
+  const receipt = readGardenVerifiedUserAssertionReceipt(signal);
+  if (receipt !== null) return { status: "grounded", assertion: receipt.assertion };
+  if (Object.hasOwn(signal.raw_payload, "verified_user_assertion_source_hash")) {
+    return { status: "rejected", reason: "source_grounding_rejected" };
+  }
   return resolveGardenRawPayloadGrounding(signal.raw_payload);
+}
+
+export function readGardenVerifiedUserAssertionReceipt(
+  signal: Readonly<CandidateMemorySignal>
+): Readonly<{ readonly assertion: string; readonly sourceHash: string }> | null {
+  if (signal.source !== "garden_compile") return null;
+  const rawPayload = signal.raw_payload;
+  const sourceHash = readString(rawPayload.verified_user_assertion_source_hash);
+  if (parseVerifiedUserAssertionSourceHash(sourceHash) === null) return null;
+  const grounding = readRecord(rawPayload.source_grounding);
+  const assertion = readString(rawPayload.source_assertion);
+  const fullTurn = readExactString(rawPayload.full_turn_content);
+  if (assertion === null || fullTurn === null || !fullTurn.includes(assertion) ||
+      grounding?.version !== 1 || grounding.status !== "grounded" ||
+      grounding.content_basis !== "source_assertion" ||
+      readString(grounding.source_assertion) !== assertion ||
+      readString(rawPayload.matched_text) !== assertion ||
+      readString(rawPayload.distilled_fact) !== assertion) {
+    return null;
+  }
+  const sourceLocator = parseOfficialApiSourceLocator(rawPayload.source_locator);
+  if (sourceLocator === null || !verifyVerifiedUserAssertionSourceHash(sourceHash, {
+    signal_id: signal.signal_id,
+    source_locator: sourceLocator,
+    workspace_id: signal.workspace_id,
+    run_id: signal.run_id,
+    surface_id: signal.surface_id,
+    source_assertion: assertion,
+    source_corpus: fullTurn
+  }, sha256)) return null;
+  const liveGrounding = resolveGardenRawPayloadGrounding(rawPayload);
+  if (liveGrounding.status !== "grounded" || liveGrounding.assertion !== assertion) {
+    return null;
+  }
+  return { assertion, sourceHash: sourceHash! };
 }
 
 export function resolveGardenRawPayloadGrounding(
   rawPayload: CandidateMemorySignal["raw_payload"]
 ): GardenSignalGrounding {
   const grounding = readRecord(rawPayload.source_grounding);
-  if (grounding?.status === "rejected") {
-    return { status: "rejected", reason: "source_grounding_rejected" };
-  }
   const proposedMatch = readString(rawPayload.proposed_matched_text) ??
+    readString(grounding?.proposed_matched_text) ??
     readString(rawPayload.matched_text);
   // Product trusts only full_turn_content; bench must project into that key at seed.
   const fullTurn = readString(rawPayload.full_turn_content);
-  if (Object.hasOwn(rawPayload, "source_locator")) {
-    const locator = parseOfficialApiSourceLocator(rawPayload.source_locator);
-    if (fullTurn === null || locator === null || proposedMatch === null) {
-      return { status: "rejected", reason: "source_grounding_rejected" };
-    }
-    const resolution = resolveOfficialApiSourceLocator(fullTurn, locator);
-    const storedAssertion = readString(rawPayload.source_assertion) ??
-      readString(rawPayload.matched_text);
-    if (resolution.status === "rejected" || storedAssertion !== resolution.assertion ||
-        !locatorAssertionUniquelyCommitsToQuote(fullTurn, resolution.assertion, proposedMatch)) {
-      return { status: "rejected", reason: "source_grounding_rejected" };
-    }
-    return resolution;
+  if (fullTurn === null || proposedMatch === null) {
+    return { status: "rejected", reason: "source_grounding_missing" };
   }
-  if (fullTurn !== null && proposedMatch !== null) {
-    return resolveSourceAssertion(fullTurn, proposedMatch);
+  if (Object.hasOwn(rawPayload, "source_locator") &&
+      parseOfficialApiSourceLocator(rawPayload.source_locator) === null) {
+    return { status: "rejected", reason: "source_grounding_rejected" };
   }
-  return { status: "rejected", reason: "source_grounding_missing" };
+  const resolution = resolvePreferenceAwareSourceGrounding({
+    proposal: rawPayload.preference_profile,
+    sourceCorpus: fullTurn,
+    proposedMatch,
+    ...(Object.hasOwn(rawPayload, "source_locator")
+      ? { sourceLocator: rawPayload.source_locator }
+      : {})
+  }).resolution;
+  if (resolution.status === "rejected") return resolution;
+  const storedAssertion = readString(rawPayload.source_assertion);
+  return storedAssertion !== null && storedAssertion !== resolution.assertion
+    ? { status: "rejected", reason: "source_grounding_rejected" }
+    : resolution;
 }
 
 export function requiresGardenSourceGrounding(signal: CandidateMemorySignal): boolean {
@@ -54,6 +96,14 @@ export function requiresGardenSourceGrounding(signal: CandidateMemorySignal): bo
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readExactString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {

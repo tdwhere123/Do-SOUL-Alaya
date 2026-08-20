@@ -15,6 +15,9 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../recall/runtime/query/field-query-session.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import {
   REAL_SQLITE_TEST_RUN_ID,
@@ -64,6 +67,8 @@ function buildRecallService(params: {
 
   const memoryRepo = params.memoryEntryRepo;
   const deps: RecallServiceDependencies = {
+    testOnlyAllowInMemoryFieldQuerySession: true,
+    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
     now: () => "2026-05-16T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     memoryRepo: {
@@ -71,7 +76,9 @@ function buildRecallService(params: {
       findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
       findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
       searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
+      searchByKeywordField: memoryRepo.searchByKeywordField.bind(memoryRepo),
       searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
+      searchByAnchorField: memoryRepo.searchByAnchorField.bind(memoryRepo),
       findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
     },
     slotRepo: {
@@ -83,6 +90,8 @@ function buildRecallService(params: {
     },
     evidenceSearchPort: {
       searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
+      searchByKeywordField:
+        params.evidenceCapsuleRepo.searchByKeywordField.bind(params.evidenceCapsuleRepo),
       findByIds: (workspaceId: string, evidenceObjectIds: readonly string[]) =>
         params.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds)
     }
@@ -158,6 +167,63 @@ function createEvidenceCapsule(overrides: Partial<EvidenceCapsule>): EvidenceCap
 }
 
 describe("RecallService integration (real SQLite + FTS5)", () => {
+  it("delivers every planted gold for a multi-fact lexical query through coarse FTS", async () => {
+    const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRealStorage();
+
+    const golds = [
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a1",
+        content: "Office wifi passphrase is ZebraQuiltNine."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a2",
+        content: "Backup vault unlock PIN is 448291."
+      },
+      {
+        object_id: "00000000-0000-4000-8000-0000000000a3",
+        content: "On-call rotation starter is Mina Voss."
+      }
+    ] as const;
+    for (const gold of golds) {
+      await memoryEntryRepo.create(createMemoryEntry({
+        object_id: gold.object_id,
+        content: gold.content,
+        activation_score: 0.2
+      }));
+    }
+    for (let index = 0; index < 4; index += 1) {
+      await memoryEntryRepo.create(createMemoryEntry({
+        object_id: `00000000-0000-4000-8000-0000000000b${index}`,
+        content: `Unrelated kettle descaling interval note ${index}.`,
+        activation_score: 0.95
+      }));
+    }
+
+    const recallService = buildRecallService({ memoryEntryRepo, evidenceCapsuleRepo });
+    const result = await recallService.recall({
+      taskSurface: createTaskSurface(
+        "ZebraQuiltNine wifi passphrase, 448291 vault unlock PIN, and on-call rotation starter Mina Voss"
+      ),
+      workspaceId: WS,
+      runId: RUN,
+      strategy: "build",
+      policyOverride: withMaxEntries(recallService, 5)
+    });
+
+    const deliveredIds = result.candidates.map((row) => row.object_id);
+    const goldIds = golds.map((gold) => gold.object_id);
+    expect(goldIds.every((id) => deliveredIds.includes(id))).toBe(true);
+    expect(result.coarse_filter_count).toBeGreaterThanOrEqual(goldIds.length);
+    expect(result.degradation_reason).toBeNull();
+    for (const goldId of goldIds) {
+      const diagnostic = result.diagnostics?.candidates.find((item) => item.object_id === goldId);
+      expect(diagnostic?.admission_planes).toContain("lexical");
+    }
+
+    database.close();
+    databases.delete(database);
+  });
+
   it("places a lexically matching gold memory in the top five recalled candidates", async () => {
     const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRealStorage();
 

@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildOfficialApiExtractionRequest,
   OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
@@ -20,7 +22,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../longmemeval/compile-seed.js";
+} from "../../../bench/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -28,7 +30,9 @@ import {
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
   makeSeed,
-  signalsEnvelope
+  providerBackedResult,
+  signalsEnvelope,
+  withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
@@ -79,6 +83,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: JSON.stringify({
             signals: [
               {
@@ -102,7 +107,7 @@ describe("compile() signal-drop count is observable", () => {
                 matched_text: "Closing sentence",
                 distilled_fact: "Survivor two."
               }
-            ]
+            ].map(withOpenSemanticFactorGraph)
           })
         })
       })
@@ -151,8 +156,9 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           // The model envelope carries 3 raw signals. The middle one is
-          // malformed — its signal_kind is not a recognised enum value —
+          // malformed — its confidence is not numeric —
           // so parseOfficialApiSignalEntry returns null and it never
           // reaches compile(). The two well-formed entries survive.
           rawJson: JSON.stringify({
@@ -165,9 +171,9 @@ describe("compile() signal-drop count is observable", () => {
                 distilled_fact: "Survivor one."
               },
               {
-                signal_kind: "not_a_real_signal_kind",
+                signal_kind: "potential_preference",
                 object_kind: "user_preference",
-                confidence: 0.9,
+                confidence: "not-a-confidence",
                 matched_text: "Malformed span",
                 distilled_fact: "Malformed entry."
               },
@@ -178,7 +184,7 @@ describe("compile() signal-drop count is observable", () => {
                 matched_text: "Closing span",
                 distilled_fact: "Survivor two."
               }
-            ]
+            ].map(withOpenSemanticFactorGraph)
           })
         })
       })
@@ -238,6 +244,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Survivor.", matched: "Intro span" },
             { distilled: "Absent.", matched: "Middle span" },
@@ -298,6 +305,7 @@ describe("compile() signal-drop count is observable", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
+          ...providerBackedResult(""),
           rawJson: signalsEnvelope([{ distilled: "Created but unaccepted.", matched: "Intro span" }])
         })
       })
@@ -377,7 +385,7 @@ describe("extraction cache write is atomic", () => {
     // visibly partial. The write-tmp-then-rename discipline means the final
     // shard is always whole, parseable JSON with the complete raw_json.
     const bigRawJson = JSON.stringify({
-      signals: Array.from({ length: 200 }, (_, i) => ({
+      signals: Array.from({ length: 200 }, (_, i) => withOpenSemanticFactorGraph({
         signal_kind: "potential_preference",
         object_kind: "user_preference",
         confidence: 0.9,
@@ -388,7 +396,12 @@ describe("extraction cache write is atomic", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({
         rawJson: bigRawJson,
-        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 },
+        responseMetadata: {
+          finishReason: "stop",
+          maxOutputTokens: 2048,
+          completionContractVersion: 1,
+          completionWitness: "message"
+        },
         usage: { inputTokens: 17, outputTokens: 23, totalTokens: 40 }
       }))
     };
@@ -401,7 +414,10 @@ describe("extraction cache write is atomic", () => {
       },
       cacheRoot
     });
-    await extractor.extract({ systemPrompt: "sys", userPrompt: "atomic-turn" });
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest("Atomic turn persists a complete shard.", [])
+    );
+    await extractor.extract({ systemPrompt: "sys", userPrompt });
 
     const cacheKey = createHash("sha256")
       .update("test-model", "utf8")
@@ -410,7 +426,7 @@ describe("extraction cache write is atomic", () => {
       .update("\u0000", "utf8")
       .update("sys", "utf8")
       .update("\u0000", "utf8")
-      .update("atomic-turn", "utf8")
+      .update(userPrompt, "utf8")
       .digest("hex");
     const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
     const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
@@ -421,6 +437,8 @@ describe("extraction cache write is atomic", () => {
     expect(onDisk.response_metadata).toEqual({
       finish_reason: "stop",
       max_output_tokens: 2048,
+      completion_contract_version: 1,
+      completion_witness: "message",
       usage: { input_tokens: 17, output_tokens: 23, total_tokens: 40 }
     });
 
@@ -437,7 +455,7 @@ describe("extraction cache write is atomic", () => {
     });
     const second = await reread.extract({
       systemPrompt: "sys",
-      userPrompt: "atomic-turn"
+      userPrompt
     });
     expect(second.rawJson).toBe(bigRawJson);
     expect(delegate.extract).toHaveBeenCalledTimes(1);

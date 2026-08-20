@@ -1,12 +1,7 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../../cli/index.js";
 
 describe("bench-runner CLI", () => {
-  const canonicalSlugPattern = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
-
   let originalStdoutWrite: typeof process.stdout.write;
   let originalStderrWrite: typeof process.stderr.write;
   let stdoutBuf: string;
@@ -32,11 +27,22 @@ describe("bench-runner CLI", () => {
     process.stderr.write = originalStderrWrite;
   });
 
-  it("mentions controlled-replay in help output", async () => {
+  it("mentions the live LongMemEval-S and LoCoMo surfaces in help output", async () => {
     const exitCode = await runCli(["--help"]);
 
     expect(exitCode).toBe(0);
-    expect(stdoutBuf).toContain("controlled-replay");
+    expect(stdoutBuf).toContain("longmemeval [--variant");
+    expect(stdoutBuf).toContain("locomo [--limit");
+    expect(stdoutBuf).toContain("provider-preflight");
+    expect(stdoutBuf).toContain(
+      "provider-preflight --mode replay --request-manifest <json>"
+    );
+    expect(stdoutBuf).toContain("s       longmemeval_s (operator bench)");
+    expect(stdoutBuf).not.toContain("controlled-replay");
+    expect(stdoutBuf).not.toContain("longmemeval-multiturn");
+    expect(stdoutBuf).not.toContain("mimo-preflight");
+    expect(stdoutBuf).not.toContain("capture-parity");
+    expect(stdoutBuf).not.toContain("selection-order-ledger");
     expect(stdoutBuf).toContain("--policy-shape stress|chat");
     expect(stdoutBuf).toContain("--simulate-report none|always-used|gold-only|mixed");
     expect(stdoutBuf).toContain("--weights '<json>'");
@@ -49,34 +55,58 @@ describe("bench-runner CLI", () => {
     const exitCode = await runCli(["--help"]);
 
     expect(exitCode).toBe(0);
+    expect(stdoutBuf).toContain("diagnostic-loop --work-root <dir>");
     expect(stdoutBuf).toContain("extraction-fill");
+    expect(stdoutBuf).not.toContain("recover-extraction-attempt-ledger");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
-    expect(stdoutBuf).toContain("--legacy-manifest-sha256 <sha>");
-    expect(stdoutBuf).toContain("--legacy-dataset-sha256 <sha>");
+    expect(stdoutBuf).toContain("--experiment");
+    expect(stdoutBuf).toContain("--embedding-cache-overlay <receipt.json>");
+    expect(stdoutBuf).toContain("--query-semantic-factor-cache <json>");
     expect(stdoutBuf).toContain("--concurrency N");
-    expect(stdoutBuf).toContain("--direct-deepseek-500-operator <operator>");
-    expect(stdoutBuf).toContain("--direct-newapi-deepseek-500-operator <operator>");
+    expect(stdoutBuf).not.toContain("--direct-deepseek-500-operator");
+    expect(stdoutBuf).not.toContain("--direct-newapi-deepseek-500-operator");
+    expect(stdoutBuf).not.toContain("--legacy-snapshot");
+    expect(stdoutBuf).not.toContain("--legacy-manifest-sha256");
+    expect(stdoutBuf).not.toContain("--legacy-dataset-sha256");
+    expect(stdoutBuf).not.toContain("--catalog-refill-allowlist");
+    expect(stdoutBuf).not.toContain("--promotion-contract");
     expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
 
-  it("documents the extraction cache audit", async () => {
-    const exitCode = await runCli(["--help"]);
-
-    expect(exitCode).toBe(0);
-    expect(stdoutBuf).toContain("audit-extraction-cache");
-    expect(stdoutBuf).toContain("--rebuild-cache-root <new-root>");
-    expect(stdoutBuf).toContain("--cache-audit-output <new-dir>");
-    expect(stdoutBuf).toContain("--target-model <model>");
-    expect(stdoutBuf).toContain("--target-model-family <family>");
-    expect(stdoutBuf).toContain("--target-request-profile <profile>");
-    expect(stdoutBuf).toContain("--target-provider-url <url>");
+  it("does not advertise retired campaign commands", async () => {
+    expect(await runCli(["--help"])).toBe(0);
+    expect(stdoutBuf).not.toContain("authorize-longmemeval-matrix");
+    expect(stdoutBuf).not.toContain("audit-extraction-cache");
+    expect(stdoutBuf).not.toContain("materialize-audited-extraction-target");
+    expect(stdoutBuf).not.toContain("fact-frame-formation-audit");
+    expect(stdoutBuf).not.toContain("retrofit-object-keys");
+    expect(stdoutBuf).not.toContain("query-semantic-factor-cache-fill");
+    expect(stdoutBuf).not.toContain("embedding-cache-overlay-build");
   });
 
-  it("dispatches the extraction cache audit command", async () => {
-    const exitCode = await runCli(["audit-extraction-cache"]);
+  it("does not dispatch stopped extraction ledger recovery", async () => {
+    expect(await runCli(["recover-extraction-attempt-ledger"])).toBe(2);
+    expect(stderrBuf).toContain(
+      "unknown command 'recover-extraction-attempt-ledger'"
+    );
+  });
 
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toContain("alaya-bench-runner audit-extraction-cache:");
+  it("does not dispatch retired campaign commands", async () => {
+    for (const command of [
+      "authorize-longmemeval-matrix",
+      "audit-extraction-cache",
+      "materialize-audited-extraction-target",
+      "fact-frame-formation-audit",
+      "retrofit-object-keys",
+      "query-semantic-factor-cache-fill",
+      "embedding-cache-overlay-build",
+      "capture-parity",
+      "selection-order-ledger"
+    ]) {
+      stderrBuf = "";
+      expect(await runCli([command])).toBe(2);
+      expect(stderrBuf).toContain(`unknown command '${command}'`);
+    }
   });
 
   it("recall-eval without --snapshot exits 2 with an actionable message", async () => {
@@ -84,25 +114,6 @@ describe("bench-runner CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/--snapshot <db> required/);
-  });
-
-  it("requires both external trust anchors for a legacy snapshot", async () => {
-    const exitCode = await runCli([
-      "recall-eval", "--snapshot", "/tmp/legacy.db", "--legacy-snapshot"
-    ]);
-
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/requires --data-dir, --legacy-manifest-sha256, and --legacy-dataset-sha256/u);
-  });
-
-  it("rejects orphan legacy trust anchors on the current snapshot path", async () => {
-    const exitCode = await runCli([
-      "recall-eval", "--snapshot", "/tmp/current.db",
-      "--legacy-manifest-sha256", "a".repeat(64)
-    ]);
-
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/legacy SHA-256 flags require --legacy-snapshot/u);
   });
 
   it("rejects invalid embedding modes instead of silently disabling embeddings", async () => {
@@ -144,6 +155,13 @@ describe("bench-runner CLI", () => {
     expect(stderrBuf).toMatch(/only valid for continuation extraction commands/u);
   });
 
+  it("rejects experiment mode on unrelated commands", async () => {
+    const exitCode = await runCli(["longmemeval", "--experiment"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--experiment is only valid for recall-eval/u);
+  });
+
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {
     const exitCode = await runCli([
       "longmemeval",
@@ -154,51 +172,4 @@ describe("bench-runner CLI", () => {
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/activation_weights_phase4b must sum to 1\.0/);
   });
-
-  it(
-    "controlled-replay writes a controlled-replay.json archive under a temp history root",
-    async () => {
-      const historyRoot = await mkdtemp(join(tmpdir(), "alaya-controlled-replay-cli-"));
-
-      const exitCode = await runCli(["controlled-replay", "--history-root", historyRoot]);
-
-      expect(exitCode).toBe(0);
-      expect(stdoutBuf).toContain("Controlled replay");
-      expect(stdoutBuf).toContain("Native health: ok");
-      const archivePath = stdoutBuf.match(/Archive: (.+controlled-replay\.json)/)?.[1];
-      expect(archivePath).toBeDefined();
-      expect(archivePath).toContain(join(historyRoot, "controlled-replay"));
-      expect(basename(dirname(archivePath!))).toMatch(canonicalSlugPattern);
-      const archive = JSON.parse(await readFile(archivePath!, "utf8")) as {
-        readonly scenarios: readonly { readonly label: string }[];
-        readonly contribution_suspects: readonly unknown[];
-        readonly metrics: {
-          readonly cold_warm_delta: unknown;
-        };
-        readonly native_health_gates: {
-          readonly verdict: "ok" | "fail";
-          readonly gates: readonly unknown[];
-        };
-        readonly evidence: {
-          readonly harness_mode: string;
-          readonly recall_path: string;
-        };
-      };
-      expect(archive.scenarios.map((scenario) => scenario.label)).toEqual([
-        "uniform-fact",
-        "rotated-kind",
-        "stress-policy-max10-conflict-true",
-        "chat-policy-max10-conflict-false",
-        "cold-report-context-usage-none",
-        "warm-report-context-usage-mixed"
-      ]);
-      expect(archive.contribution_suspects).toHaveLength(3);
-      expect(archive.metrics.cold_warm_delta).toBeDefined();
-      expect(archive.native_health_gates.verdict).toBe("ok");
-      expect(archive.native_health_gates.gates).toHaveLength(4);
-      expect(archive.evidence.harness_mode).toBe("mcp_propose_review");
-      expect(archive.evidence.recall_path).toBe("production_recall_service");
-    },
-    180_000
-  );
 });

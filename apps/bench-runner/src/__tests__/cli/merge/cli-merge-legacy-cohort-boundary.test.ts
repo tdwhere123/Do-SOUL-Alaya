@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { LongMemEvalDiagnosticsSidecar } from
-  "../../../longmemeval/diagnostics.js";
+  "../../../bench/diagnostics.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+  "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   classifyQuestionMeasurementCohort,
   classifyQuestionMeasurementStatus
 } from
-  "../../../longmemeval/measurement/question-validity.js";
+  "../../../bench/measurement/question-validity.js";
 import { validateQuestionMeasurementStatus } from
-  "../../../longmemeval/measurement/question-measurement-status.js";
+  "../../../bench/measurement/question-measurement-status.js";
 import { buildMergedLongMemEvalDiagnosticsSidecar } from
   "../../../cli/merge-sidecar.js";
 import { question, streamedQuestion } from "./cli-merge-evidence-fixture.js";
@@ -43,6 +43,40 @@ describe("legacy merge cohort boundary", () => {
       legacyDiagnostic: true,
       cohortLedger: diagnostic.cohort_ledger!
     })).toBe("evaluator_identity_unscorable");
+  });
+
+  it("preserves legacy evidence-only identity without claiming a memory emission", () => {
+    const {
+      cohort_ledger: _currentLedger,
+      gold_memory_ids: _goldMemoryIds,
+      ...legacy
+    } = question("q-legacy-evidence");
+    const legacyEvidenceQuestion = {
+      ...legacy,
+      gold_memory_ids: [],
+      gold_evidence_ids: ["evidence-1"],
+      gold_object_ids: ["evidence-1"]
+    };
+    const shard = makeShardDiagnostics({ questions: [legacyEvidenceQuestion] }) as
+      unknown as LongMemEvalDiagnosticsSidecar;
+    const diagnostic = buildMergedLongMemEvalDiagnosticsSidecar(
+      makeShardKpi(),
+      [shard],
+      { report_side_effects: null, scored_recall_evidence: null }
+    ).sidecar.questions[0]!;
+
+    expect(diagnostic.cohort_ledger).toMatchObject({
+      measurement_evidence_mode: "legacy_synthesized",
+      extraction_materialization: {
+        status: "evidence_preserved",
+        emitted_memory_count: 0,
+        reason: null
+      },
+      evaluator_gold_identity: {
+        status: "present",
+        object_ids: ["evidence-1"]
+      }
+    });
   });
 });
 

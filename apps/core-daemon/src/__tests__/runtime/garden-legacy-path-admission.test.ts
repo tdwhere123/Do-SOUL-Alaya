@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createEdgeProposalMaintenance } from "../../garden/scheduler-edge-proposals.js";
-import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler-runtime-types.js";
+import { createEdgeProposalMaintenance } from "../../garden/scheduler/scheduler-edge-proposals.js";
+import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler/scheduler-runtime-types.js";
 import {
   createGardenEdgeProposalReconcileDeferralPort,
   deferGardenBootstrapPathReconciliation
-} from "../../runtime/garden-legacy-path-admission.js";
+} from "../../runtime/garden-wiring/garden-legacy-path-admission.js";
 
 describe("Garden legacy path admission fences", () => {
   it("runs the formal edge-proposal scheduler seam without invoking accepted-proposal legacy minting", async () => {

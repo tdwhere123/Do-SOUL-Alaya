@@ -1,23 +1,26 @@
-import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
+import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
 import {
-  inspectExtractionAuthority,
-  readCurrentExtractionAuthorityRevision
-} from "../../../longmemeval/extraction/authority/inspection.js";
-import {
-  createExtractionAuthorityReceipt,
-  writeExtractionAuthorityReceipt
-} from "../../../longmemeval/extraction/authority/receipt.js";
-import {
+  buildAuthorityQuestion as question,
   buildExtractionFillQuestion,
+  buildGroundedSignalResponse as signalResponse,
   EXTRACTION_FILL_VARIANT,
-  registerExtractionFillHooks
+  providerBackedExtractionResult,
+  registerExtractionFillHooks,
+  setExtractionCredentialFixture as setCredentialFixture
 } from "./fixture.js";
+import {
+  batchedFact,
+  mutateFirstRawShard as mutateFirstRawShardAt,
+  singleSessionBatchedQuestion,
+  writeAuthorityReceipt as writeAuthorityReceiptAt,
+  writeCanonicalSFixtureDataset as writeCanonicalSFixtureDatasetAt,
+  writeFixtureData as writeFixtureDataAt
+} from "./authority-runtime/fixture.js";
 
 let cacheRoot: string;
 let dataDir: string;
@@ -73,16 +76,17 @@ describe("extraction authority runtime", () => {
     expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
   });
 
-  it("executes only the matching authority and persists exact usage telemetry", async () => {
+  it("resumes provider and deterministic shards under one authority closure", async () => {
     setCredentialFixture();
-    await writeFixtureDataset([question("q001", "alpha", "decoy")]);
+    await writeFixtureDataset([buildExtractionFillQuestion(
+      "q001", "I completed alpha.", "Hello."
+    )]);
     const receiptPath = await writeAuthorityReceipt({});
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return {
-        rawJson: '{"signals":[]}',
+      return providerBackedExtractionResult(signalResponse(input.userPrompt), {
         usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 }
-      };
+      });
     });
 
     const result = await runExtractionFill({
@@ -95,14 +99,14 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(2);
+    expect(extract).toHaveBeenCalledOnce();
     expect(result.authorityTelemetry).toMatchObject({
-      attempts: 2,
+      attempts: 1,
       successfulShards: 2,
       telemetry: {
-        inputTokens: 6,
-        outputTokens: 4,
-        totalTokens: 10,
+        inputTokens: 3,
+        outputTokens: 2,
+        totalTokens: 5,
         usageUnavailableRequests: 0
       }
     });
@@ -117,24 +121,24 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(2);
+    expect(extract).toHaveBeenCalledOnce();
     expect(resumed.authorityTelemetry).toMatchObject({
-      attempts: 2,
+      attempts: 1,
       successfulShards: 2,
-      telemetry: { totalTokens: 10 }
+      telemetry: { totalTokens: 5 }
     });
   });
 
   it("runs a bounded question prefix without narrowing or finalizing its authority window", async () => {
     setCredentialFixture();
     await writeFixtureDataset([
-      question("q001", "alpha", "decoy"),
+      buildExtractionFillQuestion("q001", batchedFact(), "I completed decoy."),
       question("q002", "beta", "distraction")
     ]);
     const receiptPath = await writeAuthorityReceipt({});
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return providerBackedExtractionResult(signalResponse(input.userPrompt));
     });
 
     const batch = await runExtractionFill({
@@ -148,16 +152,16 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(2);
+    expect(extract).toHaveBeenCalledTimes(3);
     expect(batch).toMatchObject({
-      requestedTurns: 2,
-      newlyExtracted: 2,
+      requestedTurns: 3,
+      newlyExtracted: 3,
       coverage: 1,
       manifest: {
         fill_status: "in_progress",
-        expected_turns: 4,
-        cached_turns: 2,
-        coverage: 0.5
+        expected_turns: 5,
+        cached_turns: 3,
+        coverage: 0.6
       }
     });
 
@@ -171,8 +175,35 @@ describe("extraction authority runtime", () => {
       log: () => undefined
     });
 
-    expect(extract).toHaveBeenCalledTimes(4);
+    expect(extract).toHaveBeenCalledTimes(5);
     expect(completed.manifest.fill_status).toBe("complete");
+  });
+
+  it("limits a one-key probe to its target inside a multi-key source turn", async () => {
+    setCredentialFixture();
+    await writeFixtureDataset([singleSessionBatchedQuestion("q001")]);
+    const probePath = await writeAuthorityReceipt({ action: "probe" });
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return providerBackedExtractionResult(signalResponse(input.userPrompt));
+    });
+
+    const probe = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: probePath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledOnce();
+    expect(probe).toMatchObject({
+      requestedTurns: 1,
+      newlyExtracted: 1,
+      manifest: { expected_turns: 2, cached_turns: 1, coverage: 0.5 }
+    });
   });
 
   it("keeps the one-key probe ledger separate from its fresh fill lineage", async () => {
@@ -181,7 +212,7 @@ describe("extraction authority runtime", () => {
     const probePath = await writeAuthorityReceipt({ action: "probe" });
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return providerBackedExtractionResult(signalResponse(input.userPrompt));
     });
 
     const probe = await runExtractionFill({
@@ -230,7 +261,7 @@ describe("extraction authority runtime", () => {
         retryMode: input.retryMode,
         assertionCount: prompt.source_assertions?.length ?? 0
       });
-      return { rawJson: '{"signals":[]}' };
+      return providerBackedExtractionResult('{"signals":[]}');
     });
 
     const probe = await runExtractionFill({
@@ -269,13 +300,13 @@ describe("extraction authority runtime", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
-  it("rejects a mutation of a ledger-recorded success before any resumed delegate", async () => {
+  it("rejects a mutation of a provider-backed shard before any resumed delegate", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const receiptPath = await writeAuthorityReceipt({});
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return providerBackedExtractionResult(signalResponse(input.userPrompt));
     });
     await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -358,7 +389,9 @@ describe("extraction authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: () => undefined
     });
     const receiptPath = await writeAuthorityReceipt({});
@@ -395,7 +428,9 @@ describe("extraction authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      extractorFactory: () => ({
+        extract: async () => providerBackedExtractionResult('{"signals":[]}')
+      }),
       log: (message) => {
         if (!interrupted && message.includes("1/2")) {
           interrupted = true;
@@ -421,85 +456,31 @@ describe("extraction authority runtime", () => {
   });
 });
 
-function setCredentialFixture(): void {
-  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:E0_TEST_GARDEN_KEY");
-  vi.stubEnv("E0_TEST_GARDEN_KEY", "test-key");
-}
-
-function question(id: string, fact: string, decoy: string): LongMemEvalQuestion {
-  return buildExtractionFillQuestion(id, `User: ${fact}`, `User: ${decoy}`);
-}
-
 async function writeAuthorityReceipt(input: {
   readonly limit?: number;
   readonly action?: "probe" | "fill";
   readonly variant?: typeof EXTRACTION_FILL_VARIANT | "longmemeval_s";
 }): Promise<string> {
-  const action = input.action ?? "fill";
-  const variant = input.variant ?? EXTRACTION_FILL_VARIANT;
-  const inspection = await inspectExtractionAuthority({
-    variant,
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-    cacheRoot,
-    dataDir,
-    pinnedMetaRoot,
-    revision: readCurrentExtractionAuthorityRevision(),
-    action
-  });
-  const receipt = createExtractionAuthorityReceipt({
-    action,
-    observation: inspection.observation,
-    outputTokenCap: { field: "max_tokens", value: 512 },
-    priceEstimate: {
-      inputUsdPerMillion: 1,
-      outputUsdPerMillion: 2,
-      maximumInputTokensPerAttempt: 300
-    },
-    diskFloorBytes: 0,
-    inspection: inspectionSummary(inspection),
-    ...(action === "probe" ? { probeKey: inspection.missingKeys[0] } : {})
-  });
-  const path = join(cacheRoot, `authority-receipt-${action}.json`);
-  writeExtractionAuthorityReceipt(path, receipt);
-  return path;
+  return writeAuthorityReceiptAt({ cacheRoot, dataDir, pinnedMetaRoot }, input);
 }
 
 async function writeCanonicalSFixtureDataset(
   questions: readonly LongMemEvalQuestion[]
 ): Promise<void> {
-  await writeFixtureDataset(questions);
-  writeFixtureData(questions, "longmemeval_s");
-}
-
-function inspectionSummary(inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>) {
-  return {
-    writerLock: inspection.writerLock,
-    disk: inspection.disk,
-    credentialStatus: inspection.credentialStatus,
-    modelReadiness: inspection.modelReadiness
-  };
+  await writeCanonicalSFixtureDatasetAt(
+    { cacheRoot, dataDir, pinnedMetaRoot },
+    writeFixtureDataset,
+    questions
+  );
 }
 
 function writeFixtureData(
   questions: readonly LongMemEvalQuestion[],
   variant = EXTRACTION_FILL_VARIANT
 ): void {
-  const raw = JSON.stringify(questions);
-  const sha256 = createHash("sha256").update(raw, "utf8").digest("hex");
-  writeFileSync(join(dataDir, `${variant}.json`), raw, "utf8");
-  writeFileSync(join(pinnedMetaRoot, `${variant}.meta.json`), JSON.stringify({
-    name: variant,
-    sha256,
-    question_count: questions.length
-  }), "utf8");
+  writeFixtureDataAt({ dataDir, pinnedMetaRoot }, questions, variant);
 }
 
 function mutateFirstRawShard(): void {
-  const prefix = readdirSync(cacheRoot).find((entry) => /^[0-9a-f]{2}$/u.test(entry));
-  if (prefix === undefined) throw new Error("expected a cached extraction shard");
-  const file = readdirSync(join(cacheRoot, prefix)).find((entry) => entry.endsWith(".json"));
-  if (file === undefined) throw new Error("expected a cached extraction shard file");
-  const path = join(cacheRoot, prefix, file);
-  const shard = JSON.parse(readFileSync(path, "utf8")) as { raw_json: string };
-  writeFileSync(path, JSON.stringify({ ...shard, raw_json: '{"signals":[],"mutated":true}' }), "utf8");
+  mutateFirstRawShardAt(cacheRoot);
 }
