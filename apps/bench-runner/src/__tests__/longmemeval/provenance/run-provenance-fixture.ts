@@ -57,6 +57,7 @@ export async function createRunProvenanceFixture(roots: string[]) {
     env: createRunProvenanceEnvironment(paths.modelCacheRoot),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
+    measureGitState: stubDirtyGitState,
     datasetSha256: authority.manifest.dataset_sha256,
     selection: authority.selection,
     reconciliationBasis: "rule_only"
@@ -162,6 +163,7 @@ export async function buildFixtureRunProvenanceSidecar(
     env: createRunProvenanceEnvironment(fixture.modelCacheRoot, false),
     runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
     computeExecutedDistIdentity: fakeExecutedDistIdentity,
+    measureGitState: stubDirtyGitState,
     datasetSha256: fixture.manifest.dataset_sha256,
     selection: fixture.selection,
     reconciliationBasis: "rule_only"
@@ -201,6 +203,16 @@ export async function fakeExecutedDistIdentity() {
     sha256: "2".repeat(64),
     file_count: 17
   } as const;
+}
+
+async function stubDirtyGitState() {
+  return {
+    commitSha: "05d98df" + "0".repeat(33),
+    commitSha7: "05d98df",
+    worktreeStateSha256: "c".repeat(64),
+    worktreeStateAlgorithm: "sha256-worktree-state-v3" as const,
+    worktreeClean: false
+  };
 }
 
 export { EXTRACTION_CLOSURE };

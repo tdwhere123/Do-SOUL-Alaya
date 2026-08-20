@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertRecordedRunCodeIdentity,
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   LONGMEMEVAL_RUN_PROVENANCE_FILENAME
@@ -32,7 +33,9 @@ describe("LongMemEval run provenance", () => {
     expect(provenance.code).toEqual({
       commit_sha7: "05d98df",
       gate_sha256: null,
-      worktree_state_sha256: null,
+      worktree_state_sha256: "c".repeat(64),
+      worktree_state_algorithm: "sha256-worktree-state-v3",
+      worktree_clean: false,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
         sha256: "2".repeat(64),
@@ -182,6 +185,20 @@ describe("LongMemEval run provenance", () => {
     }).success).toBe(false);
 
     expect(isLongMemEvalRunProvenanceGateEligible(provenance)).toBe(false);
+    expect(() => assertRecordedRunCodeIdentity(provenance.code)).not.toThrow();
+    expect(() => assertRecordedRunCodeIdentity({
+      ...provenance.code,
+      worktree_state_sha256: null
+    })).toThrow(/worktree and executed-dist identity/u);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      code: {
+        commit_sha7: provenance.code.commit_sha7,
+        gate_sha256: null,
+        worktree_state_sha256: null,
+        executed_dist: provenance.code.executed_dist
+      }
+    }).success).toBe(true);
     const currentProvenance = LongMemEvalRunProvenanceSchema.parse({
       ...provenance,
       code: {
@@ -190,10 +207,20 @@ describe("LongMemEval run provenance", () => {
         gate_contract_path: "/tmp/frozen-contract.json",
         gate_sha256: "d".repeat(64),
         worktree_state_sha256: "1".repeat(64),
+        worktree_state_algorithm: "sha256-head-lf",
         worktree_clean: true
       }
     });
     expect(isLongMemEvalRunProvenanceGateEligible(currentProvenance)).toBe(true);
+    const { worktree_state_algorithm: _algorithm, ...legacyCode } = currentProvenance.code;
+    const legacyWithoutAlgorithm = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      code: legacyCode
+    });
+    expect(legacyWithoutAlgorithm.code.worktree_state_algorithm).toBeUndefined();
+    expect(isLongMemEvalRunProvenanceGateEligible(legacyWithoutAlgorithm)).toBe(false);
+    expect(() => assertRecordedRunCodeIdentity(legacyWithoutAlgorithm.code))
+      .toThrow(/algorithm/u);
     const currentCache = currentProvenance.extraction_cache;
     if (currentCache?.schema_version !== 3) {
       throw new Error("current provenance fixture must use extraction schema v3");

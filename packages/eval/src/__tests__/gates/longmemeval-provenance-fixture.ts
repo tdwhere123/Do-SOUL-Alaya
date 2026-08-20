@@ -281,6 +281,7 @@ function runCode() {
     ...promotionCode(),
     gate_sha256: "d".repeat(64),
     gate_contract_path: "/tmp/promotion.json",
+    worktree_state_algorithm: "sha256-head-lf" as const,
     worktree_clean: true
   };
 }

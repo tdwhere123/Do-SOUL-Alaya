@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import {
+  isHistoryEntrySlug,
+  KpiPayloadSchema,
+  type KpiPayload
+} from "@do-soul/alaya-eval";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
   "../../../bench/archive/archive-evidence.js";
 import {
@@ -66,7 +70,7 @@ export async function readShardPayloadPlan(
     shardRoot,
     path.relative(shardRoot, pointerPath)
   );
-  if (typeof pointer.slug !== "string" || !CANONICAL_SLUG.test(pointer.slug)) {
+  if (typeof pointer.slug !== "string" || !isHistoryEntrySlug(pointer.slug)) {
     throw new Error(
       `shard ${shardRoot} ${path.basename(pointerPath)} missing slug`
     );
@@ -337,8 +341,6 @@ async function readContainedJson<T>(root: string, reference: string): Promise<T>
 }
 
 const MAX_INLINE_DIAGNOSTICS_BYTES = 64 * 1024 * 1024;
-const CANONICAL_SLUG = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/u;
-
 async function* questionsFromArray(
   questions: readonly LongMemEvalQuestionDiagnostic[]
 ): AsyncGenerator<LongMemEvalQuestionDiagnostic> {

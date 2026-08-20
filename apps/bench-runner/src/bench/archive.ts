@@ -1,7 +1,6 @@
 import {
   buildDiffVsPrevious,
   diffKpis,
-  entrySlug,
   readLatest,
   renderFindings,
   renderReport,
@@ -20,6 +19,12 @@ import {
   appendSeedExtractionReleaseBlockerToReport
 } from "./extraction/seed-fuel/seed-extraction-release-blocker.js";
 import type { BenchCampaignIdentity, BenchRunResult } from "./types.js";
+import {
+  composeArchiveHistorySlug,
+  resolveArchiveGitState,
+  type ArchiveGitIdentityInput
+} from "./provenance/identity/archive-git-identity.js";
+import { assertMeasuredGitCommit } from "./provenance/identity/run-code-identity.js";
 
 export async function writeBenchArchive(input: {
   readonly identity: BenchCampaignIdentity;
@@ -28,10 +33,17 @@ export async function writeBenchArchive(input: {
   readonly commitSha7: string;
   readonly payload: KpiPayload;
   readonly diagnosticsPayload: LongMemEvalDiagnosticsSidecar;
-}): Promise<BenchRunResult> {
+} & ArchiveGitIdentityInput): Promise<BenchRunResult> {
   const layout: HistoryLayout = { historyRoot: input.historyRoot };
   const previous = await applyBaselineDiff(layout, input);
-  const slug = entrySlug(input.runAt, input.commitSha7);
+  // Generic bench archives have no run-provenance sidecar; git is measured once for the slug.
+  const recorded = await resolveArchiveGitState(input);
+  assertMeasuredGitCommit(input.commitSha7, recorded);
+  const slug = composeArchiveHistorySlug({
+    runAt: input.runAt,
+    commitSha7: input.commitSha7,
+    recorded
+  });
   const documents = renderArchiveDocuments(input.payload, previous);
   const entry = await writeEntry(
     layout,

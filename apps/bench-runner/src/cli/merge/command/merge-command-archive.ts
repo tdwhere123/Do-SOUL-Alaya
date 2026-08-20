@@ -2,7 +2,6 @@ import {
   benchArchiveDiscriminator,
   buildDiffVsPrevious,
   diffKpis,
-  entrySlug,
   readLatest,
   renderFindings,
   renderReport,
@@ -67,6 +66,11 @@ import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evi
 import { publishMergedArchive } from "../archive-publisher.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/authority";
+import {
+  composeArchiveHistorySlug,
+  resolveArchiveGitState,
+  type ArchiveGitIdentityInput
+} from "../../../bench/provenance/identity/archive-git-identity.js";
 
 type ShardDiagnostics = ShardArchiveRef["diagnostics"];
 type PreviousKpiPayload = Awaited<ReturnType<typeof readLatest>>;
@@ -88,7 +92,7 @@ export async function writeMergedLongMemEvalArchive(input: {
   readonly requestedConcurrency?: number;
   readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
-}): Promise<WrittenMergedLongMemEvalArchive> {
+} & ArchiveGitIdentityInput): Promise<WrittenMergedLongMemEvalArchive> {
   const trustedRequestedConcurrency = resolveMergedRequestedConcurrency({
     requestedConcurrency: input.requestedConcurrency,
     shardCount: input.shardArchiveRefs.length,
@@ -101,11 +105,16 @@ export async function writeMergedLongMemEvalArchive(input: {
     withCacheReadiness(input.build.payload, shardDiagnostics),
     input.build
   );
-  const slug = entrySlug(
-    input.build.runAt,
-    input.build.commitSha7,
-    benchArchiveDiscriminator(input.build.policyShape, input.build.simulateReport)
-  );
+  // Merge sidecar provenance is shard-sourced; merge-time git is measured once for the slug.
+  const recorded = await resolveArchiveGitState(input);
+  const slug = composeArchiveHistorySlug({
+    runAt: input.build.runAt,
+    commitSha7: input.build.commitSha7,
+    policyDiscriminator: benchArchiveDiscriminator(
+      input.build.policyShape, input.build.simulateReport
+    ),
+    recorded
+  });
   const archive = await buildMergedArchiveSidecars({
     layout,
     historyRoot: input.historyRoot,

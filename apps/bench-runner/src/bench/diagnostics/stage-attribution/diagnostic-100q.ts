@@ -26,7 +26,7 @@ export interface Diagnostic100QQuestion {
 }
 
 export interface Diagnostic100QComparison {
-  readonly schema_version: 4;
+  readonly schema_version: 5;
   readonly kind: "diagnostic_100q_f0f2_vs_cached_f3";
   readonly physical_calls: 0;
   readonly five_hundred_q_closed: true;
@@ -83,7 +83,7 @@ export function compareF0F2VsCachedF3(input: {
   const evaluatedCount = controlById.size;
   const exposedDenominatorGate = buildExposedDenominatorGate(evaluatedCount, exposedCount);
   return {
-    schema_version: 4,
+    schema_version: 5,
     kind: "diagnostic_100q_f0f2_vs_cached_f3",
     physical_calls: 0,
     five_hundred_q_closed: DIAGNOSTIC_500Q_CLOSED,

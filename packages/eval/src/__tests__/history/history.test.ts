@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   entrySlug,
+  joinSlugDiscriminators,
   listEntries,
   policyShapeSlug,
   readEntry,
@@ -50,6 +51,58 @@ describe("history archive", () => {
       .toBe("2026-05-14T103045Z-abcdef0-policy-stress");
     expect(entrySlug(runAt, "abcdef0", "policy-chat"))
       .toBe("2026-05-14T103045Z-abcdef0-policy-chat");
+    expect(joinSlugDiscriminators("policy-stress", "wt-aa11bb22cc33"))
+      .toBe("policy-stress-wt-aa11bb22cc33");
+    expect(joinSlugDiscriminators("policy-stress", `wt-${"aa".repeat(32)}`))
+      .toBe(`policy-stress-wt-${"aa".repeat(32)}`);
+    expect(joinSlugDiscriminators(undefined, undefined)).toBeUndefined();
+    expect(entrySlug(runAt, "9e331fa")).toBe("2026-05-14T103045Z-9e331fa");
+  });
+
+  it("round-trips dirty worktree history slugs without colliding planted states", async () => {
+    const runAt = new Date("2026-05-14T10:30:45.000Z");
+    const firstSlug = entrySlug(
+      runAt,
+      "9e331fa",
+      joinSlugDiscriminators("policy-stress", `wt-${"aa".repeat(32)}`)
+    );
+    const secondSlug = entrySlug(
+      runAt,
+      "9e331fa",
+      joinSlugDiscriminators("policy-stress", `wt-${"bb".repeat(32)}`)
+    );
+    expect(firstSlug).toBe(`2026-05-14T103045Z-9e331fa-policy-stress-wt-${"aa".repeat(32)}`);
+    expect(secondSlug).not.toBe(firstSlug);
+    const first = await writeEntry(layout, "self", firstSlug, buildPayload("9e331fa"), "# a\n", null);
+    const second = await writeEntry(layout, "self", secondSlug, buildPayload("9e331fa"), "# b\n", null);
+    expect(await listEntries(layout, "self")).toEqual([firstSlug, secondSlug]);
+    expect(first.kpiPath).toContain(firstSlug);
+    expect(second.kpiPath).toContain(secondSlug);
+    expect(await readEntry(layout, "self", firstSlug)).not.toBeNull();
+    expect(await readEntry(layout, "self", secondSlug)).not.toBeNull();
+  });
+
+  it("lists and writes both legacy 12-hex and current 64-hex dirty slugs", async () => {
+    const runAt = new Date("2026-05-14T10:30:45.000Z");
+    const legacySlug = entrySlug(
+      runAt,
+      "9e331fa",
+      joinSlugDiscriminators("policy-stress", "wt-aa11bb22cc33")
+    );
+    const currentSlug = entrySlug(
+      runAt,
+      "9e331fa",
+      joinSlugDiscriminators("policy-stress", `wt-${"aa".repeat(32)}`)
+    );
+    expect(legacySlug).toBe("2026-05-14T103045Z-9e331fa-policy-stress-wt-aa11bb22cc33");
+    expect(currentSlug).toBe(
+      `2026-05-14T103045Z-9e331fa-policy-stress-wt-${"aa".repeat(32)}`
+    );
+    await writeEntry(layout, "self", legacySlug, buildPayload("9e331fa"), "# legacy\n", null);
+    await writeEntry(layout, "self", currentSlug, buildPayload("9e331fa"), "# current\n", null);
+    expect(await listEntries(layout, "self")).toEqual([legacySlug, currentSlug]);
+    expect(await readEntry(layout, "self", legacySlug)).not.toBeNull();
+    expect(await readEntry(layout, "self", currentSlug)).not.toBeNull();
   });
 
 

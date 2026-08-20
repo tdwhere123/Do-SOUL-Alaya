@@ -1,23 +1,23 @@
 import { z } from "zod";
-import type { LongMemEvalRunOptions } from "../../longmemeval/runner.js";
+import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
 import { resolveEffectiveExtractionCacheRoot } from
-  "../compile-seed/compile-seed-config.js";
+  "../../compile-seed/compile-seed-config.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES,
   readExtractionCacheManifestIdentity
-} from "../extraction/cache/extraction-cache-manifest.js";
+} from "../../extraction/cache/extraction-cache-manifest.js";
 import { EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS } from
-  "../extraction/fill/fill-authority.js";
+  "../../extraction/fill/fill-authority.js";
 import { LongMemEvalExpansionLineageSchema } from
-  "../../longmemeval/promotion/expansion/lineage/expansion-lineage-schema.js";
+  "../../../longmemeval/promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
-  "../../longmemeval/promotion/expansion/lineage/expansion-source-anchor-schema.js";
+  "../../../longmemeval/promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import {
   redactSupplementalSourceBinding,
   SupplementalSourceProvenanceBindingSchema
-} from "../extraction/cache/supplemental-source-receipt.js";
-import { redactProvenanceUrl } from "./paired-environment.js";
+} from "../../extraction/cache/supplemental-source-receipt.js";
+import { redactProvenanceUrl } from "../paired-environment.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 

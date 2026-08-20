@@ -12,6 +12,8 @@ import {
   RecallCandidateAnswerSupportSchema,
   RecallDeepHeadTraceSchema
 } from "./answer-trace-schema.js";
+import { CandidateActivationReceiptSchema } from
+  "./answer-trace/semantic-activation-schema.js";
 import {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
@@ -237,6 +239,7 @@ const RecallCandidateDiagnosticSchema = z
     deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
     coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
     selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
+    semantic_activation: CandidateActivationReceiptSchema.optional(),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),

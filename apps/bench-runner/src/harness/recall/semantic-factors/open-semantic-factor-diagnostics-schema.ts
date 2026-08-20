@@ -1,3 +1,4 @@
+import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { z } from "zod";
 import { OpenSemanticFactorFormationCaptureSchema } from "@do-soul/alaya-protocol";
 
@@ -64,13 +65,14 @@ const CompatibilityReceiptSchema = z.object({
 }).strict().readonly();
 
 export const OpenSemanticFactorCompatibilityTraceSchema = z.object({
-  schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_factor_compatibility_trace_v1"),
+  schema_version: z.literal(2),
+  operator_id: z.literal("open_semantic_factor_compatibility_trace_v2"),
   query_capture_digest: DigestSchema,
   observed_evidence_count: CountSchema,
   matchable_evidence_count: CountSchema,
   evaluated_evidence_count: CountSchema,
   unavailable_evidence_ids: StringArraySchema,
+  unevaluated_evidence_ids: StringArraySchema,
   incomparable_seal: z.enum(["none", "ineligible", "unavailable", "rejected"]),
   truncated: z.boolean(),
   entries: z.array(z.object({
@@ -78,7 +80,14 @@ export const OpenSemanticFactorCompatibilityTraceSchema = z.object({
     receipt: CompatibilityReceiptSchema
   }).strict().readonly()).readonly(),
   trace_digest: DigestSchema
-}).strict().readonly();
+}).strict().superRefine((trace, context) => {
+  if (!compatibilityTraceContractHolds(trace)) {
+    context.addIssue({
+      code: "custom",
+      message: "open semantic factor compatibility trace contract mismatch"
+    });
+  }
+}).readonly();
 
 const CompositionSolutionSchema = z.object({
   result_bindings: z.array(z.object({
@@ -96,8 +105,8 @@ const CompositionSolutionSchema = z.object({
 }).strict().readonly();
 
 export const OpenSemanticFactorCompositionReceiptSchema = z.object({
-  schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_factor_composition_v1"),
+  schema_version: z.literal(2),
+  operator_id: z.literal("open_semantic_factor_composition_v2"),
   status: CompositionStatusSchema,
   compatibility_trace_digest: DigestSchema,
   query_capture_digest: DigestSchema,
@@ -130,11 +139,15 @@ export const OpenSemanticFactorCompositionReceiptSchema = z.object({
     }).strict().readonly()).readonly()
   }).strict().readonly()).readonly(),
   receipt_digest: DigestSchema
-}).strict().readonly();
+}).strict().superRefine((receipt, context) => {
+  if (!receiptDigestHolds(receipt)) {
+    context.addIssue({ code: "custom", message: "composition receipt digest mismatch" });
+  }
+}).readonly();
 
 export const OpenSemanticFactorActivationReceiptSchema = z.object({
-  schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_solution_membership_activation_v1"),
+  schema_version: z.literal(2),
+  operator_id: z.literal("open_semantic_solution_membership_activation_v2"),
   status: CompositionStatusSchema,
   composition_receipt_digest: DigestSchema,
   entry_count: CountSchema,
@@ -149,6 +162,59 @@ export const OpenSemanticFactorActivationReceiptSchema = z.object({
   missing_evidence_policy: z.literal("no_op"),
   ranking_effect: z.literal("candidate_attribution"),
   receipt_digest: DigestSchema
-}).strict().readonly();
+}).strict().superRefine((receipt, context) => {
+  if (!receiptDigestHolds(receipt)) {
+    context.addIssue({ code: "custom", message: "activation receipt digest mismatch" });
+  }
+}).readonly();
 
 export { OpenSemanticFactorFormationCaptureSchema };
+
+function compatibilityTraceContractHolds(trace: {
+  readonly observed_evidence_count: number;
+  readonly matchable_evidence_count: number;
+  readonly evaluated_evidence_count: number;
+  readonly unavailable_evidence_ids: readonly string[];
+  readonly unevaluated_evidence_ids: readonly string[];
+  readonly incomparable_seal: "none" | "ineligible" | "unavailable" | "rejected";
+  readonly truncated: boolean;
+  readonly entries: readonly {
+    readonly evidence_id: string;
+    readonly receipt: { readonly [key: string]: unknown };
+  }[];
+  readonly trace_digest: string;
+}): boolean {
+  const remainderBudget = trace.observed_evidence_count - trace.matchable_evidence_count;
+  const evaluatedIds = new Set(trace.entries.map((entry) => entry.evidence_id));
+  const unevaluated = new Set(trace.unevaluated_evidence_ids);
+  return trace.evaluated_evidence_count === trace.entries.length &&
+    evaluatedIds.size === trace.entries.length &&
+    trace.entries.every((entry) => receiptDigestHolds(entry.receipt)) &&
+    trace.matchable_evidence_count >= trace.evaluated_evidence_count &&
+    trace.observed_evidence_count >= trace.matchable_evidence_count &&
+    uniqueSortedDisjoint(trace.unavailable_evidence_ids, evaluatedIds) &&
+    uniqueSortedDisjoint(trace.unevaluated_evidence_ids, evaluatedIds) &&
+    trace.unevaluated_evidence_ids.length === remainderBudget &&
+    trace.unavailable_evidence_ids.every((evidenceId) => unevaluated.has(evidenceId)) &&
+    (trace.incomparable_seal === "none") ===
+      (trace.observed_evidence_count === trace.matchable_evidence_count &&
+        trace.unevaluated_evidence_ids.length === 0) &&
+    trace.truncated === (trace.matchable_evidence_count > trace.evaluated_evidence_count) &&
+    receiptDigestHolds(trace);
+}
+
+function receiptDigestHolds(receipt: { readonly [key: string]: unknown }): boolean {
+  const digest = receipt.trace_digest ?? receipt.receipt_digest;
+  const { trace_digest: _trace, receipt_digest: _receipt, ...body } = receipt;
+  return digest === digestRecallFieldIdentity(body);
+}
+
+function uniqueSortedDisjoint(
+  ids: readonly string[],
+  excluded: ReadonlySet<string>
+): boolean {
+  return ids.every((evidenceId, index) =>
+    evidenceId.trim().length > 0 &&
+    (index === 0 || ids[index - 1]! < evidenceId) &&
+    !excluded.has(evidenceId));
+}

@@ -11,7 +11,7 @@ import {
 import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID =
-  "open_semantic_solution_membership_activation_v1";
+  "open_semantic_solution_membership_activation_v2";
 
 export type OpenSemanticFactorActivationObservation = Readonly<{
   readonly evidence_id: string;
@@ -22,7 +22,7 @@ export type OpenSemanticFactorActivationObservation = Readonly<{
 }>;
 
 export type OpenSemanticFactorActivationReceipt = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly operator_id: typeof OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID;
   readonly status: OpenSemanticFactorCompositionReceipt["status"];
   readonly composition_receipt_digest: RecallFieldDigest;
@@ -46,7 +46,7 @@ export function materializeOpenSemanticFactorActivation(params: Readonly<{
   });
   const entries = buildActivationEntries(composition, params.trace);
   const body = Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_ACTIVATION_OPERATOR_ID,
     status: composition.status,
     composition_receipt_digest: composition.receipt_digest,
@@ -60,6 +60,22 @@ export function materializeOpenSemanticFactorActivation(params: Readonly<{
     ...body,
     receipt_digest: digestRecallFieldIdentity(body)
   });
+}
+
+export function verifyOpenSemanticFactorActivation(params: Readonly<{
+  readonly activation: Readonly<OpenSemanticFactorActivationReceipt>;
+  readonly composition: Readonly<OpenSemanticFactorCompositionReceipt>;
+  readonly trace: Readonly<OpenSemanticFactorCompatibilityTrace>;
+  readonly query_capture: Readonly<OpenSemanticFactorFormationCapture>;
+}>): OpenSemanticFactorActivationReceipt {
+  const expected = materializeOpenSemanticFactorActivation(params);
+  const { receipt_digest: _digest, ...body } = params.activation;
+  if (expected.receipt_digest !== params.activation.receipt_digest ||
+      digestRecallFieldIdentity(body) !== params.activation.receipt_digest ||
+      params.activation.composition_receipt_digest !== params.composition.receipt_digest) {
+    throw new Error("open semantic factor activation receipt digest mismatch");
+  }
+  return params.activation;
 }
 
 function buildActivationEntries(
@@ -113,4 +129,3 @@ function compatibilityFraction(
   if (receipt.query_proposition_count <= 0) return 0;
   return receipt.matched_query_proposition_count / receipt.query_proposition_count;
 }
-

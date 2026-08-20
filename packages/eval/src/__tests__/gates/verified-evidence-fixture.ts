@@ -165,6 +165,7 @@ function runProvenance(payload: KpiPayload) {
       gate_sha256: "a".repeat(64),
       gate_contract_path: "/fixture/gate.json",
       worktree_state_sha256: "b".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf" as const,
       worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",

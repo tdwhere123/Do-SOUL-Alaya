@@ -118,6 +118,7 @@ export function provenance(
       gate_sha256: "d".repeat(64),
       gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "1".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf",
       worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",

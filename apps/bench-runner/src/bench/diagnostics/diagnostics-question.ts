@@ -84,6 +84,7 @@ function buildReplayCandidate(
     coverage_marginal_gain: candidate.coverageMarginalGain,
     selector_observation: candidate.selectorObservation,
     path_suppression_score: candidate.pathSuppressionScore,
+    semantic_activation: candidate.semanticActivation ?? null,
     score_factors: {
       ...(candidate.scoreFactors ?? {}),
       ...(candidate.facetOverlap === null

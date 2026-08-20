@@ -150,7 +150,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
-    expect(pointer.slug).toMatch(/-policy-chat-report-mixed$/);
+    expect(pointer.slug).toMatch(/-policy-chat-report-mixed(?:-wt-[0-9a-f]{64})?$/);
 
     const merged = JSON.parse(
       await readFile(

@@ -5,6 +5,8 @@ import {
   resolvedDiagnosticLoopIdentityDigest,
   type ResolvedDiagnosticLoopIdentity
 } from "./authority/identity.js";
+import { CACHED_F3_EXPOSURE_POLICY } from
+  "../diagnostics/stage-attribution/exposure/contract.js";
 import { isDiagnosticLoopMode, type DiagnosticLoopMode } from "./phases.js";
 import { assertDiagnosticLoopIdentity, isSha256Hex, sha256Utf8 } from "./identity.js";
 
@@ -119,10 +121,13 @@ function isExposurePolicy(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, [
     "schema_version", "kind", "declared_minimum_rate", "candidate_attribution_required",
     "control_non_exposure_required"
-  ]) && value.schema_version === 2 &&
-    value.kind === "cached_f3_exposed_denominator_policy" &&
-    value.declared_minimum_rate === 1 && value.candidate_attribution_required === true &&
-    value.control_non_exposure_required === true;
+  ]) && value.schema_version === CACHED_F3_EXPOSURE_POLICY.schema_version &&
+    value.kind === CACHED_F3_EXPOSURE_POLICY.kind &&
+    value.declared_minimum_rate === CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate &&
+    value.candidate_attribution_required ===
+      CACHED_F3_EXPOSURE_POLICY.candidate_attribution_required &&
+    value.control_non_exposure_required ===
+      CACHED_F3_EXPOSURE_POLICY.control_non_exposure_required;
 }
 
 function isRequest(value: unknown): boolean {

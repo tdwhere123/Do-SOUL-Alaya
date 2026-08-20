@@ -2,6 +2,7 @@ import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
 import type { LongMemEvalSelectionContractIdentity } from
   "../../selection/contract.js";
 import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
+import type { MeasuredGitState } from "../contract/frozen-code-contract.js";
 import {
   verifiedExpansionRunAuthority
 } from "../../../longmemeval/promotion/expansion/authority/expansion-run-authority.js";
@@ -39,6 +40,8 @@ export async function buildArchiveRunProvenanceBundle(input: {
   readonly datasetSha256: string;
   readonly selection: LongMemEvalSelectionContractIdentity;
   readonly reconciliationBasis?: EffectiveReconciliationBasis;
+  readonly recordedGitState?: MeasuredGitState;
+  readonly measureGitState?: (checkoutRoot: string) => Promise<MeasuredGitState>;
 }): Promise<ArchiveRunProvenanceBundle> {
   const full = await buildLongMemEvalRunProvenance(input);
   const fullContents = renderLongMemEvalRunProvenance(full);

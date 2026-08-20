@@ -28,6 +28,8 @@ import {
 import type { DiagnosticCandidateIdentityMode } from "../candidate-identity.js";
 import { readCandidateSelectorObservation } from
   "./candidate-selector-observation-reader.js";
+import { CandidateActivationReceiptSchema } from
+  "../../../harness/recall/answer-trace/semantic-activation-schema.js";
 import { readDiagnosticLabelArray } from
   "./candidate-readers/source-label-reader.js";
 export { buildObjectIdentityKey } from "../candidate-identity.js";
@@ -130,6 +132,10 @@ function readCandidateRow(
   if (record.selector_observation != null && selectorObservation === null) return null;
   const pathSuppressionScore = readNumber(record.path_suppression_score);
   if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
+  const parsedActivation = record.semantic_activation == null
+    ? null
+    : CandidateActivationReceiptSchema.safeParse(record.semantic_activation);
+  if (parsedActivation !== null && !parsedActivation.success) return null;
   const admissionAttempts = DiagnosticAdmissionAttemptsSchema.safeParse(
     record.admission_attempts ?? []
   );
@@ -153,6 +159,7 @@ function readCandidateRow(
     coverageMarginalGain,
     selectorObservation,
     pathSuppressionScore,
+    semanticActivation: parsedActivation?.data ?? null,
     ...readCandidateDelivery(record)
   };
   return {

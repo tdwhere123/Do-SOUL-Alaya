@@ -46,6 +46,7 @@ import {
   type RecallEvalRunContext
 } from "./recall-eval-run-context.js";
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
+import { recordedWorktreeIdentityForSlug } from "../../provenance/identity/history-code-slug.js";
 import {
   captureRecallEvalQuestion,
   finalizeRecallEvalSelectionBoundarySpool,
@@ -393,7 +394,10 @@ async function stageRecallEvalArtifacts(
   prepared: Awaited<ReturnType<typeof prepareRecallEvalArtifacts>>,
   selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
 ) {
-  const slug = buildRecallEvalArchiveSlug(context);
+  const slug = buildRecallEvalArchiveSlug({
+    ...context,
+    ...recordedWorktreeIdentityForSlug(prepared.evidence.runProvenance.code)
+  });
   const report = renderRecallEvalReport(
     prepared.payload, prepared.previous, prepared.diff
   );

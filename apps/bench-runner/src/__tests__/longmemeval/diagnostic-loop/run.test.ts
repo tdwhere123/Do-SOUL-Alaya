@@ -442,7 +442,7 @@ function forgedExposureReceipt() {
     proposition_match_count: 1
   };
   return sealTreatmentExposureReceipt({
-    schema_version: 3, kind: "cached_f3_treatment_exposure", question_id: "forged",
+    schema_version: 4, kind: "cached_f3_treatment_exposure", question_id: "forged",
     evidence_chain: { linked: true },
     control_non_exposure: { observed: true, formation_status: null, compatible_count: 0,
       composition_status: null, activation_status: null, activated_evidence_count: 0,
@@ -454,6 +454,9 @@ function forgedExposureReceipt() {
       ...activationBody, receipt_digest: digestRecallFieldIdentity(activationBody)
     } }], candidate_keys: ["candidate:f3"], activated_evidence_ids: ["e1"] },
     membership_delta: { observed: true, changed: false, added_candidate_keys: [], removed_candidate_keys: [] },
+    candidate_pool: { control_complete: true, treatment_complete: true },
+    query_probe_delta: { observed: false, changed: false, added_expanded_terms: [], removed_expanded_terms: [] },
+    retrieval_channel_delta: { observed: false, changed: false, changed_channels: [] },
     outcome: { control: { stage: "S5", hit_at_5: true }, treatment: { stage: "S5", hit_at_5: true } },
     exposure_status: "exposed"
   });

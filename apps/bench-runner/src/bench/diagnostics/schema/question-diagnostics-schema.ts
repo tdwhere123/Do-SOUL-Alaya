@@ -12,6 +12,8 @@ import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
 import { RecallCandidateSelectorObservationSchema } from
   "../../../harness/recall/candidate-selector-observation-schema.js";
+import { CandidateActivationReceiptSchema } from
+  "../../../harness/recall/answer-trace/semantic-activation-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 import { LongMemEvalMissClassificationSchema } from
   "../miss/miss-classification-schema.js";
@@ -40,6 +42,8 @@ import {
 } from "./diagnostics-schema-base.js";
 import { OpenSemanticFactorCandidateActivationsSchema } from
   "./field/open-semantic-candidate-activation-schema.js";
+import { archiveStaleOpenSemanticFactorFields } from
+  "./field/open-semantic-factor-archive.js";
 
 const DeliveryStageActionSchema = z.enum([
   "noop",
@@ -146,6 +150,7 @@ const LongMemEvalReplayCandidateSchema = z
     coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
     selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
+    semantic_activation: CandidateActivationReceiptSchema.nullable().optional(),
     score_factors: DiagnosticScoreFactorsSchema
   })
   .readonly();
@@ -290,8 +295,9 @@ export const LongMemEvalGoldDiagnosticSchema = z
   })
   .readonly();
 
-export const LongMemEvalQuestionDiagnosticSchema = z
-  .object({
+export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
+  archiveStaleOpenSemanticFactorFields,
+  z.object({
     question_id: z.string(),
     question_type: z.string().nullable().default(null),
     is_abstention: z.boolean().default(false),
@@ -360,6 +366,10 @@ export const LongMemEvalQuestionDiagnosticSchema = z
       .default([]),
     query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
     ...LongMemEvalFieldDiagnosticSchemaShape,
+    open_semantic_factor_archive: z.object({
+      replayable: z.literal(false),
+      reason: z.literal("stale_schema")
+    }).strict().readonly().nullable().optional(),
     open_semantic_factor_candidate_activations:
       OpenSemanticFactorCandidateActivationsSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
@@ -382,4 +392,5 @@ export const LongMemEvalQuestionDiagnosticSchema = z
   .superRefine((diagnostic, context) => {
     validatePersistedQuestionMeasurement(diagnostic, context);
   })
-  .readonly();
+  .readonly()
+);

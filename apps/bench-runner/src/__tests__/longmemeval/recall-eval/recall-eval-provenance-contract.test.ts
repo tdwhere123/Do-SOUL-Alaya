@@ -27,6 +27,7 @@ import {
   buildSnapshotExtractionSummary
 } from "../../../bench/snapshot/extraction-authority.js";
 import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
+import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 
 const archived = LongMemEvalRunProvenanceSchema.parse(provenance(false));
 const EXTRACTION_CLOSURE = syntheticExtractionClosure({
@@ -122,10 +123,11 @@ function withFrozenCode(
     ...provenance,
     code: {
       ...provenance.code,
-      commit_sha: "05d98df" + "0".repeat(33),
+      commit_sha: provenance.code.commit_sha7 + "0".repeat(33),
       gate_sha256: "d".repeat(64),
       gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "1".repeat(64),
+      worktree_state_algorithm: "sha256-head-lf",
       worktree_clean: true
     }
   });
@@ -205,6 +207,7 @@ describe("recall-eval provenance producer contract", () => {
     await writeFile(join(modelRoot, "Xenova", "test", "model.onnx"), "bi", "utf8");
     try {
       const biSha = await resolveLocalArtifactTreeSha256(modelRoot, "Xenova/test");
+      const currentCommitSha7 = resolveBenchCommitSha7();
       const build = async (): Promise<LongMemEvalRunProvenance> => {
         const built = await buildRecallEvalRunProvenance({
           manifest: manifest(),
@@ -213,7 +216,7 @@ describe("recall-eval provenance producer contract", () => {
           evaluatedCount: dataset.length,
           offset: 0,
           limit: null,
-          commitSha7: "05d98df",
+          commitSha7: currentCommitSha7,
           env: env(modelRoot),
           computeExecutedDistIdentity: async () => ({
             algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -265,7 +268,7 @@ describe("recall-eval provenance producer contract", () => {
         evaluatedCount: dataset.length - 1,
         offset: 0,
         limit: dataset.length - 1,
-        commitSha7: "05d98df",
+        commitSha7: currentCommitSha7,
         env: env(modelRoot),
         computeExecutedDistIdentity: async () => ({
           algorithm: "sha256-reachable-path-file-sha256-v1",
@@ -290,7 +293,7 @@ describe("recall-eval provenance producer contract", () => {
         evaluatedCount: dataset.length,
         offset: 0,
         limit: null,
-        commitSha7: "05d98df",
+        commitSha7: currentCommitSha7,
         env: {
           ...env(modelRoot),
           ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "7".repeat(64),
@@ -309,7 +312,7 @@ describe("recall-eval provenance producer contract", () => {
         evaluatedCount: dataset.length,
         offset: 0,
         limit: null,
-        commitSha7: "05d98df",
+        commitSha7: currentCommitSha7,
         env: env(modelRoot),
         computeExecutedDistIdentity: async () => null
       })).rejects.toThrow(/executed dist closure/u);

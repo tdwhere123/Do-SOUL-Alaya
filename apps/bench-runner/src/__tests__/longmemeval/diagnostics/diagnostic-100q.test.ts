@@ -6,7 +6,7 @@ import {
 } from "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
 import { buildTreatmentExposureReceipts } from
   "../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
-import { sealTreatmentExposureReceipt } from
+import { sealTreatmentExposureReceipt, CACHED_F3_EXPOSURE_POLICY } from
   "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
 import { assertTreatmentExposureReceipt } from
   "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
@@ -65,6 +65,7 @@ describe("diagnostic 100Q stage map", () => {
       ]
     });
     expect(comparison.physical_calls).toBe(0);
+    expect(comparison.schema_version).toBe(5);
     expect(comparison.five_hundred_q_closed).toBe(true);
     expect(comparison.membership_improved).toEqual(["q-improved"]);
     expect(comparison.still_missing).toEqual(["q-still"]);
@@ -122,7 +123,7 @@ describe("diagnostic 100Q stage map", () => {
     };
     const composition = {
       ...(base.open_semantic_factor_composition as Record<string, unknown>),
-      status: "no_match",
+      status: "unavailable",
       solution_count: 0,
       solutions: []
     };
@@ -132,7 +133,7 @@ describe("diagnostic 100Q stage map", () => {
       open_semantic_factor_composition: composition,
       open_semantic_factor_activation: {
         ...(base.open_semantic_factor_activation as Record<string, unknown>),
-        status: "no_match",
+        status: "unavailable",
         entries: []
       },
       open_semantic_factor_candidate_activations: []
@@ -149,7 +150,17 @@ describe("diagnostic 100Q stage map", () => {
       treatmentExposure: receipts
     });
 
-    expect(receipts[0]?.exposure_status).toBe("not_exercised");
+    expect(compatibility.entries).toEqual([]);
+    expect(receipts[0]).toMatchObject({
+      exposure_status: "not_exercised",
+      formation: { status: "formed" },
+      compatible_evidence: { compatible_count: 0 },
+      composition: { status: "unavailable", solution_count: 0 },
+      activation: { status: "unavailable", activated_evidence_count: 0 }
+    });
+    expect(receipts[0]?.composition.status).not.toBe("no_match");
+    expect(receipts[0]?.activation.status).not.toBe("no_match");
+    expect(() => assertTreatmentExposureReceipt(receipts[0]!)).not.toThrow();
     expect(comparison.not_exercised).toEqual(["q-no-compatible"]);
     expect(comparison.still_missing).toEqual([]);
   });
@@ -285,6 +296,74 @@ describe("diagnostic 100Q stage map", () => {
     await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
       /treatment exposure receipt/u
     );
+
+    await writeFile(path, JSON.stringify({ ...comparison, schema_version: 4 }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /lacks the cached F3 exposure contract/u
+    );
+  });
+
+  it("rejects a planted self-consistent rate below the current exposure policy", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diagnostic-100q-rate-policy-"));
+    const path = join(root, "comparison.json");
+    const comparison = compareF0F2VsCachedF3({
+      control: [
+        row({ question_id: "q-exposed", stage: 5, proof: "budget_drop" }),
+        row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })
+      ],
+      treatment: [
+        row({ question_id: "q-exposed", stage: 5, proof: "budget_drop" }),
+        row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })
+      ],
+      treatmentExposure: [
+        exposure("q-exposed", "exposed", false),
+        exposure("q-unexposed", "not_exercised", false)
+      ]
+    });
+    expect(CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate).toBe(1);
+    expect(comparison.exposed_denominator_gate.declared_minimum_rate).toBe(
+      CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate
+    );
+    expect(comparison.exposed_denominator_gate.actual_rate).toBe(0.5);
+    expect(comparison.exposed_denominator_gate.passed).toBe(false);
+
+    const planted = {
+      ...comparison,
+      causal_comparison_status: "eligible" as const,
+      exposed_denominator_gate: {
+        ...comparison.exposed_denominator_gate,
+        declared_minimum_rate: 0.5,
+        passed: true
+      }
+    };
+    await writeFile(path, JSON.stringify(planted));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /current exposure policy/u
+    );
+
+    await writeFile(path, JSON.stringify({
+      ...planted,
+      exposed_denominator_gate: {
+        ...planted.exposed_denominator_gate,
+        passed: false
+      },
+      causal_comparison_status: "inconclusive"
+    }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /current exposure policy/u
+    );
+
+    await writeFile(path, JSON.stringify({
+      ...comparison,
+      exposed_denominator_gate: {
+        ...comparison.exposed_denominator_gate,
+        passed: true
+      },
+      causal_comparison_status: "eligible"
+    }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /exposed denominator does not match its receipts/u
+    );
   });
 
   it.each([
@@ -340,7 +419,7 @@ function exposure(
   }
 ) {
   return sealTreatmentExposureReceipt({
-    schema_version: 3 as const,
+    schema_version: 4 as const,
     kind: "cached_f3_treatment_exposure" as const,
     question_id: questionId,
     evidence_chain: { linked: exposureStatus !== "inconclusive" },
@@ -360,6 +439,9 @@ function exposure(
     activation: { status: exposureStatus === "exposed" ? "composed" : "unavailable", activated_evidence_count: exposureStatus === "exposed" ? 1 : 0 },
     candidate_attribution: candidateAttribution(exposureStatus === "exposed"),
     membership_delta: { observed: true, changed, added_candidate_keys: changed ? ["candidate:f3"] : [], removed_candidate_keys: [] },
+    candidate_pool: { control_complete: true, treatment_complete: true },
+    query_probe_delta: { observed: false, changed: false, added_expanded_terms: [], removed_expanded_terms: [] },
+    retrieval_channel_delta: { observed: false, changed: false, changed_channels: [] },
     outcome,
     exposure_status: exposureStatus
   });

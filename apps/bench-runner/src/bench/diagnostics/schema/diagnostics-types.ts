@@ -18,6 +18,10 @@ import {
   RecallAnswerShapePlanSchema,
   RecallDeepHeadTraceSchema
 } from "../../../harness/recall/answer-trace-schema.js";
+import { CandidateActivationReceiptSchema } from
+  "../../../harness/recall/answer-trace/semantic-activation-schema.js";
+import type { OpenSemanticFactorArchive } from
+  "./field/open-semantic-factor-archive.js";
 import type { BenchRecallDiagnostics } from "../../../harness/recall/recall-diagnostics-schema.js";
 import type { DeliveryMissDropReason } from "../miss/delivery-miss-taxonomy.js";
 import type { RecallCandidate, RecallOriginPlane } from "@do-soul/alaya-protocol";
@@ -49,6 +53,9 @@ export type DiagnosticCandidateAnswerFeatures = z.infer<
 >;
 export type DiagnosticSelectorObservation = z.infer<
   typeof RecallCandidateSelectorObservationSchema
+>;
+export type DiagnosticCandidateSemanticActivation = z.infer<
+  typeof CandidateActivationReceiptSchema
 >;
 export type DiagnosticAdmissionAttempt = Readonly<{
   readonly pass: "final_selector";
@@ -115,6 +122,7 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly coverage_marginal_gain: number | null;
   readonly selector_observation: DiagnosticSelectorObservation | null;
   readonly path_suppression_score: number | null;
+  readonly semantic_activation?: DiagnosticCandidateSemanticActivation | null;
   readonly score_factors: DiagnosticScoreFactors;
 }>;
 
@@ -373,6 +381,7 @@ export interface NarrowRecallDiagnostics {
     NonNullable<BenchRecallDiagnostics["open_semantic_factor_composition"]> | null;
   readonly openSemanticFactorActivation:
     NonNullable<BenchRecallDiagnostics["open_semantic_factor_activation"]> | null;
+  readonly openSemanticFactorArchive: OpenSemanticFactorArchive | null;
   readonly answerShapePlan: DiagnosticAnswerShapePlan | null;
   readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;
@@ -459,6 +468,7 @@ export interface CandidateDiagnostic {
   readonly coverageMarginalGain: number | null;
   readonly selectorObservation: DiagnosticSelectorObservation | null;
   readonly pathSuppressionScore: number | null;
+  readonly semanticActivation?: DiagnosticCandidateSemanticActivation | null;
   readonly coverageSelectorAction: DeliveryStageAction | null;
   readonly sessionCoverageAction: DeliveryStageAction | null;
   readonly sessionKey: string | null;

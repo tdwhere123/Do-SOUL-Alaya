@@ -16,6 +16,12 @@ import { OpenSemanticFactorActivationReceiptSchema,
 import { readDiagnosticQueryProbes, readStringArray } from
   "../../artifacts/diagnostics-candidate-readers.js";
 import type { NarrowRecallDiagnostics } from "../diagnostics-types.js";
+import {
+  isStaleOpenSemanticFactorField,
+  openSemanticFactorArchiveMarker,
+  type OpenSemanticFactorArchive,
+  type OpenSemanticFactorCutoverWireKey
+} from "./open-semantic-factor-archive.js";
 
 type DiagnosticFields = Pick<NarrowRecallDiagnostics,
   | "queryProbes" | "retrievalFieldCaptures" | "retrievalFieldRefinementReceipts"
@@ -23,7 +29,8 @@ type DiagnosticFields = Pick<NarrowRecallDiagnostics,
   | "queryFactFrameExtraction" | "queryOpenSemanticFactorFormation"
   | "queryOpenSemanticFactorCompletenessReceipt"
   | "openSemanticFactorCompatibilityTrace" | "openSemanticFactorComposition"
-  | "openSemanticFactorActivation" | "answerShapePlan" | "querySoughtFacets">;
+  | "openSemanticFactorActivation" | "openSemanticFactorArchive"
+  | "answerShapePlan" | "querySoughtFacets">;
 
 export function readDiagnosticFields(
   record: Readonly<Record<string, unknown>>
@@ -31,22 +38,53 @@ export function readDiagnosticFields(
   const readers = diagnosticFieldReaders();
   const values = Object.fromEntries(Object.entries(readers).map(([key, reader]) =>
     [key, reader(record)]
-  )) as unknown as DiagnosticFields;
-  return Object.entries(readers).some(([key]) =>
-    invalidPresentField(record, values, key as keyof DiagnosticFields)
-  ) ? null : values;
+  )) as unknown as Omit<DiagnosticFields, "openSemanticFactorArchive">;
+  const openSemanticFactorArchive = readOpenSemanticFactorArchive(record, values);
+  if (Object.entries(readers).some(([key]) =>
+    invalidPresentField(record, values, key as keyof typeof values)
+  )) return null;
+  return { ...values, openSemanticFactorArchive };
 }
 
 function invalidPresentField(
   record: Readonly<Record<string, unknown>>,
-  values: DiagnosticFields,
-  key: keyof DiagnosticFields
+  values: Omit<DiagnosticFields, "openSemanticFactorArchive">,
+  key: keyof Omit<DiagnosticFields, "openSemanticFactorArchive">
 ): boolean {
-  const wireValue = record[diagnosticFieldWireKey(key)];
+  const wireKey = diagnosticFieldWireKey(key);
+  const wireValue = record[wireKey];
   if (wireValue === undefined || (key === "answerShapePlan" && wireValue === null)) {
     return false;
   }
-  return values[key] === null;
+  if (values[key] !== null) return false;
+  return !isStaleCutoverField(wireKey, wireValue);
+}
+
+function readOpenSemanticFactorArchive(
+  record: Readonly<Record<string, unknown>>,
+  values: Omit<DiagnosticFields, "openSemanticFactorArchive">
+): OpenSemanticFactorArchive | null {
+  const stale = (
+    ["openSemanticFactorCompatibilityTrace", "openSemanticFactorComposition",
+      "openSemanticFactorActivation"] as const
+  ).some((key) => {
+    const wireKey = diagnosticFieldWireKey(key) as OpenSemanticFactorCutoverWireKey;
+    const wireValue = record[wireKey];
+    return wireValue != null && values[key] === null &&
+      isStaleOpenSemanticFactorField(wireValue, wireKey);
+  });
+  return stale ? openSemanticFactorArchiveMarker() : null;
+}
+
+function isStaleCutoverField(wireKey: string, wireValue: unknown): boolean {
+  return wireKey in {
+    open_semantic_factor_compatibility_trace: true,
+    open_semantic_factor_composition: true,
+    open_semantic_factor_activation: true
+  } && isStaleOpenSemanticFactorField(
+    wireValue,
+    wireKey as OpenSemanticFactorCutoverWireKey
+  );
 }
 
 function diagnosticFieldReaders() {

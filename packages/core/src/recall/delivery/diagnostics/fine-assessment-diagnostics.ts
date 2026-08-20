@@ -12,6 +12,8 @@ import type {
   RecallCandidateDropReason,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
+import { resolveRecallCandidateSemanticActivation } from
+  "../../scoring/activation/candidate-semantic-activation-context.js";
 import { selectRecallAdmissionAttributionPlane } from "../../scoring/scoring.js";
 import { buildRecallCandidateAnswerFeatures } from "../fine-assessment-answer-features.js";
 import { buildCandidateSelectorObservation } from
@@ -56,6 +58,7 @@ export function createFineAssessmentDiagnostic(
       context.supplementaryData
     ),
     ...buildFusionDiagnosticFields(candidate),
+    ...copySemanticActivation(candidate, candidateKey, context),
     final_rank: finalRank,
     post_rank: finalRank,
     in_final_packet: droppedReason === null,
@@ -74,6 +77,20 @@ export function createFineAssessmentDiagnostic(
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
   });
+}
+
+function copySemanticActivation(
+  candidate: FineAssessmentCandidate,
+  candidateKey: string,
+  context: FineAssessmentSelectionContext
+) {
+  return {
+    semantic_activation: resolveRecallCandidateSemanticActivation(
+      candidate,
+      context.supplementaryData,
+      candidateKey
+    )
+  };
 }
 
 function collectEvidenceProjectionMatches(

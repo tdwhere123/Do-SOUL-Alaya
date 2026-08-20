@@ -15,7 +15,7 @@ const CandidateActivationObservationSchema = z.object({
 
 export const CandidateActivationReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.string().min(1),
+  operator_id: z.literal("candidate_semantic_max_v1"),
   state: z.enum(["observed", "absent", "ineligible", "invalid"]),
   score: z.number().min(0).max(1).nullable(),
   winner: z.object({

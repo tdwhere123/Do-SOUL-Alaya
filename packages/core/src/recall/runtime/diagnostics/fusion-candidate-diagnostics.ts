@@ -1,5 +1,7 @@
 import type { MemoryEntry, RecallCandidate, RecallOriginPlane, RecallScoreFactors } from
   "@do-soul/alaya-protocol";
+import type { CandidateActivationReceipt } from
+  "../../scoring/candidate-semantic-activation.js";
 import type { RecallCandidateSelectorObservation } from
   "./candidate-selector-observation.js";
 import type {
@@ -105,6 +107,8 @@ export interface RecallCandidateDiagnostic {
   readonly coverage_marginal_gain?: number;
   // Capture-only upstream state; delivery never reads this field.
   readonly selector_observation?: Readonly<RecallCandidateSelectorObservation>;
+  // Optional so older dumps still parse; do not add a parallel fusion stream.
+  readonly semantic_activation?: CandidateActivationReceipt;
   readonly path_suppression_score: number;
   // Live delivery-stage ranks (1-based). Provenance only — never feeds ranking.
   readonly rank_after_fusion?: number;

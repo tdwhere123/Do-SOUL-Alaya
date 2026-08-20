@@ -101,8 +101,8 @@ describe("open semantic factor candidate attribution", () => {
 
 function composedActivation(truncated: boolean): OpenSemanticFactorActivationReceipt {
   return {
-    schema_version: 1,
-    operator_id: "open_semantic_solution_membership_activation_v1",
+    schema_version: 2,
+    operator_id: "open_semantic_solution_membership_activation_v2",
     status: "composed",
     composition_receipt_digest: "sha256:composition",
     entry_count: 2,

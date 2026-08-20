@@ -15,6 +15,7 @@ export type TreatmentExposureStatus = "exposed" | "not_exercised" | "inconclusiv
 export type TreatmentExposureStage = "S0" | "S1" | "S2" | "S3" | "S4" | "S5";
 export type TreatmentFormationStatus = "formed" | "ineligible" | "unavailable" | "rejected" | null;
 export type TreatmentCompositionStatus = "composed" | "no_match" | "ineligible" | "unavailable" | "rejected" | null;
+type RetrievalChannelStatus = "complete" | "truncated" | "unavailable" | "ineligible";
 
 export interface ControlNonExposureWitness {
   readonly observed: boolean;
@@ -27,8 +28,41 @@ export interface ControlNonExposureWitness {
   readonly pure: boolean;
 }
 
+interface TreatmentExposureMembershipDelta {
+  readonly observed: boolean;
+  readonly changed: boolean;
+  readonly added_candidate_keys: readonly string[];
+  readonly removed_candidate_keys: readonly string[];
+}
+
+interface TreatmentExposureCandidatePool {
+  readonly control_complete: boolean | null;
+  readonly treatment_complete: boolean;
+}
+
+interface TreatmentExposureQueryProbeDelta {
+  readonly observed: boolean;
+  readonly changed: boolean;
+  readonly added_expanded_terms: readonly string[];
+  readonly removed_expanded_terms: readonly string[];
+}
+
+interface TreatmentExposureChannelChange {
+  readonly channel_id: string;
+  readonly control_status: RetrievalChannelStatus | null;
+  readonly treatment_status: RetrievalChannelStatus | null;
+  readonly control_depth: number | null;
+  readonly treatment_depth: number | null;
+}
+
+interface TreatmentExposureRetrievalChannelDelta {
+  readonly observed: boolean;
+  readonly changed: boolean;
+  readonly changed_channels: readonly TreatmentExposureChannelChange[];
+}
+
 export interface TreatmentExposureReceiptBody {
-  readonly schema_version: 3;
+  readonly schema_version: 4;
   readonly kind: "cached_f3_treatment_exposure";
   readonly question_id: string;
   readonly evidence_chain: { readonly linked: boolean };
@@ -42,12 +76,10 @@ export interface TreatmentExposureReceiptBody {
     readonly candidate_keys: readonly string[];
     readonly activated_evidence_ids: readonly string[];
   };
-  readonly membership_delta: {
-    readonly observed: boolean;
-    readonly changed: boolean;
-    readonly added_candidate_keys: readonly string[];
-    readonly removed_candidate_keys: readonly string[];
-  };
+  readonly membership_delta: TreatmentExposureMembershipDelta;
+  readonly candidate_pool: TreatmentExposureCandidatePool;
+  readonly query_probe_delta: TreatmentExposureQueryProbeDelta;
+  readonly retrieval_channel_delta: TreatmentExposureRetrievalChannelDelta;
   readonly outcome: {
     readonly control: { readonly stage: TreatmentExposureStage; readonly hit_at_5: boolean };
     readonly treatment: { readonly stage: TreatmentExposureStage; readonly hit_at_5: boolean };
@@ -85,7 +117,13 @@ function isReceiptConsistent(receipt: TreatmentExposureReceipt): boolean {
       receipt.composition.status === null || receipt.activation.status === null)) return false;
   if (receipt.compatible_evidence.compatible_count > 0 && receipt.formation.status !== "formed") return false;
   return isControlValid(receipt.control_non_exposure) &&
-    isCandidateAttributionValid(receipt.candidate_attribution) && isMembershipValid(receipt) &&
+    isCandidateAttributionValid(receipt.candidate_attribution) &&
+    isObservedDeltaValid(receipt.membership_delta, receipt.membership_delta.added_candidate_keys,
+      receipt.membership_delta.removed_candidate_keys) &&
+    isObservedDeltaValid(receipt.query_probe_delta, receipt.query_probe_delta.added_expanded_terms,
+      receipt.query_probe_delta.removed_expanded_terms) &&
+    isRetrievalChannelDeltaValid(receipt.retrieval_channel_delta) &&
+    isCandidatePoolValid(receipt) &&
     isOutcomeValid(receipt) && receipt.exposure_status === deriveTreatmentExposureStatus(receipt);
 }
 
@@ -93,14 +131,17 @@ function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
   if (!isRecord(value) || !hasExactKeys(value, [
     "schema_version", "kind", "question_id", "evidence_chain", "control_non_exposure",
     "formation", "compatible_evidence", "composition", "activation", "candidate_attribution",
-    "membership_delta", "outcome", "exposure_status", "receipt_digest"
+    "membership_delta", "candidate_pool", "query_probe_delta", "retrieval_channel_delta",
+    "outcome", "exposure_status", "receipt_digest"
   ])) return false;
-  return value.schema_version === 3 && value.kind === "cached_f3_treatment_exposure" &&
+  return value.schema_version === 4 && value.kind === "cached_f3_treatment_exposure" &&
     isNonEmptyString(value.question_id) && isDigest(value.receipt_digest) &&
     isBooleanBox(value.evidence_chain, "linked") && isControlWitness(value.control_non_exposure) &&
     isStatusBox(value.formation, true) && isCountBox(value.compatible_evidence, "compatible_count") &&
     isComposition(value.composition) && isActivation(value.activation) &&
     isCandidateAttribution(value.candidate_attribution) && isMembership(value.membership_delta) &&
+    isCandidatePool(value.candidate_pool) && isQueryProbeDelta(value.query_probe_delta) &&
+    isRetrievalChannelDelta(value.retrieval_channel_delta) &&
     isOutcome(value.outcome) && isExposureStatus(value.exposure_status);
 }
 
@@ -148,10 +189,44 @@ function isActivation(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, ["status", "activated_evidence_count"]) &&
     isCompositionStatus(value.status) && isCount(value.activated_evidence_count);
 }
-function isMembership(value: unknown): boolean {
-  return isRecord(value) && hasExactKeys(value, ["observed", "changed", "added_candidate_keys", "removed_candidate_keys"]) &&
+function isMembership(value: unknown): value is TreatmentExposureMembershipDelta {
+  return isObservedStringDelta(value, "added_candidate_keys", "removed_candidate_keys");
+}
+function isCandidatePool(value: unknown): value is TreatmentExposureCandidatePool {
+  return isRecord(value) && hasExactKeys(value, ["control_complete", "treatment_complete"]) &&
+    (value.control_complete === null || typeof value.control_complete === "boolean") &&
+    typeof value.treatment_complete === "boolean";
+}
+function isCandidatePoolValid(receipt: TreatmentExposureReceipt): boolean {
+  return (receipt.candidate_pool.control_complete === null) ===
+    !receipt.membership_delta.observed;
+}
+function isQueryProbeDelta(value: unknown): value is TreatmentExposureQueryProbeDelta {
+  return isObservedStringDelta(value, "added_expanded_terms", "removed_expanded_terms");
+}
+function isObservedStringDelta(
+  value: unknown,
+  addedKey: string,
+  removedKey: string
+): value is { observed: boolean; changed: boolean; [key: string]: unknown } {
+  return isRecord(value) && hasExactKeys(value, ["observed", "changed", addedKey, removedKey]) &&
     typeof value.observed === "boolean" && typeof value.changed === "boolean" &&
-    isSortedUniqueStrings(value.added_candidate_keys) && isSortedUniqueStrings(value.removed_candidate_keys);
+    isSortedUniqueStrings(value[addedKey]) && isSortedUniqueStrings(value[removedKey]);
+}
+function isRetrievalChannelDelta(value: unknown): value is TreatmentExposureRetrievalChannelDelta {
+  return isRecord(value) && hasExactKeys(value, ["observed", "changed", "changed_channels"]) &&
+    typeof value.observed === "boolean" && typeof value.changed === "boolean" &&
+    isChangedChannels(value.changed_channels);
+}
+function isChangedChannels(value: unknown): value is readonly TreatmentExposureChannelChange[] {
+  if (!Array.isArray(value) || !value.every(isChangedChannel)) return false;
+  return isSortedUniqueStrings(value.map((entry) => entry.channel_id));
+}
+function isChangedChannel(value: unknown): value is TreatmentExposureChannelChange {
+  return isRecord(value) && hasExactKeys(value, [
+    "channel_id", "control_status", "treatment_status", "control_depth", "treatment_depth"
+  ]) && isNonEmptyString(value.channel_id) && isChannelStatus(value.control_status) &&
+    isChannelStatus(value.treatment_status) && isDepth(value.control_depth) && isDepth(value.treatment_depth);
 }
 function isOutcome(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, ["control", "treatment"]) && isArmOutcome(value.control) && isArmOutcome(value.treatment);
@@ -161,11 +236,21 @@ function isArmOutcome(value: unknown): boolean {
     ["S0", "S1", "S2", "S3", "S4", "S5"].includes(value.stage as never) && typeof value.hit_at_5 === "boolean";
 }
 
-function isMembershipValid(receipt: TreatmentExposureReceipt): boolean {
-  const membership = receipt.membership_delta;
-  const keys = [...membership.added_candidate_keys, ...membership.removed_candidate_keys];
-  return membership.changed === (membership.observed && keys.length > 0) &&
-    new Set(keys).size === keys.length && (membership.observed || keys.length === 0);
+function isObservedDeltaValid(
+  delta: { readonly observed: boolean; readonly changed: boolean },
+  added: readonly string[],
+  removed: readonly string[]
+): boolean {
+  const keys = [...added, ...removed];
+  return delta.changed === (delta.observed && keys.length > 0) &&
+    new Set(keys).size === keys.length && (delta.observed || keys.length === 0);
+}
+function isRetrievalChannelDeltaValid(delta: TreatmentExposureRetrievalChannelDelta): boolean {
+  return delta.changed === (delta.observed && delta.changed_channels.length > 0) &&
+    (delta.observed || delta.changed_channels.length === 0) &&
+    delta.changed_channels.every((channel) =>
+      channel.control_status !== channel.treatment_status ||
+      channel.control_depth !== channel.treatment_depth);
 }
 function isOutcomeValid(receipt: TreatmentExposureReceipt): boolean {
   const changed = receipt.outcome.control.hit_at_5 !== receipt.outcome.treatment.hit_at_5;
@@ -186,6 +271,13 @@ function isCompositionStatus(value: unknown): value is TreatmentCompositionStatu
 }
 function isExposureStatus(value: unknown): value is TreatmentExposureStatus {
   return value === "exposed" || value === "not_exercised" || value === "inconclusive";
+}
+function isChannelStatus(value: unknown): value is RetrievalChannelStatus | null {
+  return value === null ||
+    value === "complete" || value === "truncated" || value === "unavailable" || value === "ineligible";
+}
+function isDepth(value: unknown): value is number | null {
+  return value === null || isCount(value);
 }
 function isSortedUniqueStrings(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every(isNonEmptyString) && value.every((entry, index) => index === 0 || value[index - 1]! < entry);

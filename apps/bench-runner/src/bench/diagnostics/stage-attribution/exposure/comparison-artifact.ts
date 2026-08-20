@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import {
   assertTreatmentExposureReceipt,
+  CACHED_F3_EXPOSURE_POLICY,
   type TreatmentExposureReceipt,
   type TreatmentExposureStage
 } from "./contract.js";
@@ -36,7 +37,7 @@ function isComparisonShape(value: unknown): value is Diagnostic100QComparison {
     "not_exercised", "inconclusive", "treatment_exposure_receipts",
     "causal_comparison_status", "exposed_denominator_gate"
   ])) return false;
-  return value.schema_version === 4 &&
+  return value.schema_version === 5 &&
     value.kind === "diagnostic_100q_f0f2_vs_cached_f3" &&
     value.physical_calls === 0 && value.five_hundred_q_closed === true &&
     isStageCounts(value.control_misses) && isStageCounts(value.treatment_misses) &&
@@ -56,8 +57,11 @@ function assertGateAndStatus(
 ): void {
   const exposedCount = receipts.filter((row) => row.exposure_status === "exposed").length;
   const rate = receipts.length === 0 ? 0 : exposedCount / receipts.length;
-  const passed = receipts.length > 0 && rate === 1;
   const gate = comparison.exposed_denominator_gate;
+  if (gate.declared_minimum_rate !== CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate) {
+    throw new Error("diagnostic 100Q exposed denominator does not match current exposure policy");
+  }
+  const passed = receipts.length > 0 && rate >= gate.declared_minimum_rate;
   if (gate.evaluated_count !== receipts.length || gate.exposed_count !== exposedCount ||
       gate.actual_rate !== rate || gate.passed !== passed ||
       comparison.causal_comparison_status !== (passed ? "eligible" : "inconclusive")) {
@@ -127,10 +131,13 @@ function isExposureGate(value: unknown): value is Diagnostic100QComparison["expo
     "exposed_count", "actual_rate", "passed"
   ])) return false;
   return value.schema_version === 1 && value.kind === "cached_f3_exposed_denominator_gate" &&
-    value.declared_minimum_rate === 1 && isCount(value.evaluated_count) &&
-    isCount(value.exposed_count) && typeof value.actual_rate === "number" &&
-    Number.isFinite(value.actual_rate) && value.actual_rate >= 0 && value.actual_rate <= 1 &&
+    isRate(value.declared_minimum_rate) && isCount(value.evaluated_count) &&
+    isCount(value.exposed_count) && isRate(value.actual_rate) &&
     typeof value.passed === "boolean";
+}
+
+function isRate(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 function isStageCounts(value: unknown): value is Readonly<Record<TreatmentExposureStage, number>> {

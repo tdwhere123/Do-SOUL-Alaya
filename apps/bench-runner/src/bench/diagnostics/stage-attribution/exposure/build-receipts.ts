@@ -38,12 +38,18 @@ function buildReceipt(input: {
   const { control, treatment } = input;
   const evidence = treatmentEvidence(treatment);
   const body: TreatmentExposureReceiptBody = {
-    schema_version: 3,
+    schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: treatment.question_id,
     ...evidence,
     control_non_exposure: controlWitness(control),
     membership_delta: membershipDelta(control, treatment),
+    candidate_pool: {
+      control_complete: control === undefined ? null : control.candidate_pool_complete === true,
+      treatment_complete: treatment.candidate_pool_complete === true
+    },
+    query_probe_delta: queryProbeDelta(control, treatment),
+    retrieval_channel_delta: retrievalChannelDelta(control, treatment),
     outcome: {
       control: stageOutcome(input.controlStage),
       treatment: stageOutcome(input.treatmentStage)
@@ -163,18 +169,110 @@ function membershipDelta(
   control: LongMemEvalQuestionDiagnostic | undefined,
   treatment: LongMemEvalQuestionDiagnostic
 ) {
-  const observed = control?.candidate_pool_complete === true &&
-    treatment.candidate_pool_complete;
-  const controlKeys = new Set(topFiveCandidateKeys(control));
-  const treatmentKeys = new Set(topFiveCandidateKeys(treatment));
-  const added = [...treatmentKeys].filter((key) => !controlKeys.has(key)).sort(compareCodeUnits);
-  const removed = [...controlKeys].filter((key) => !treatmentKeys.has(key)).sort(compareCodeUnits);
+  // Truncated pools still have a delivered Top-5; completeness is a separate coverage claim.
+  const { observed, changed, added, removed } = stringSetDiff(
+    control !== undefined,
+    topFiveCandidateKeys(control),
+    topFiveCandidateKeys(treatment)
+  );
+  return {
+    observed,
+    changed,
+    added_candidate_keys: added,
+    removed_candidate_keys: removed
+  };
+}
+
+function queryProbeDelta(
+  control: LongMemEvalQuestionDiagnostic | undefined,
+  treatment: LongMemEvalQuestionDiagnostic
+) {
+  const controlTerms = expandedTerms(control);
+  const treatmentTerms = expandedTerms(treatment);
+  const { observed, changed, added, removed } = stringSetDiff(
+    controlTerms !== null && treatmentTerms !== null,
+    controlTerms ?? [],
+    treatmentTerms ?? []
+  );
+  return {
+    observed,
+    changed,
+    added_expanded_terms: added,
+    removed_expanded_terms: removed
+  };
+}
+
+function retrievalChannelDelta(
+  control: LongMemEvalQuestionDiagnostic | undefined,
+  treatment: LongMemEvalQuestionDiagnostic
+) {
+  const controlChannels = channelMap(control);
+  const treatmentChannels = channelMap(treatment);
+  const observed = controlChannels !== null && treatmentChannels !== null;
+  if (!observed) return { observed: false, changed: false, changed_channels: [] };
+  const changed_channels = [...new Set([...controlChannels.keys(), ...treatmentChannels.keys()])]
+    .sort(compareCodeUnits)
+    .flatMap((channel_id) => {
+      const left = controlChannels.get(channel_id);
+      const right = treatmentChannels.get(channel_id);
+      const row = {
+        channel_id,
+        control_status: left?.status ?? null,
+        treatment_status: right?.status ?? null,
+        control_depth: left?.depth ?? null,
+        treatment_depth: right?.depth ?? null
+      };
+      return row.control_status === row.treatment_status &&
+        row.control_depth === row.treatment_depth ? [] : [row];
+    });
+  return { observed: true, changed: changed_channels.length > 0, changed_channels };
+}
+
+function stringSetDiff(
+  observed: boolean,
+  controlValues: readonly string[],
+  treatmentValues: readonly string[]
+) {
+  const controlSet = new Set(controlValues);
+  const treatmentSet = new Set(treatmentValues);
+  const added = observed
+    ? [...treatmentSet].filter((value) => !controlSet.has(value)).sort(compareCodeUnits)
+    : [];
+  const removed = observed
+    ? [...controlSet].filter((value) => !treatmentSet.has(value)).sort(compareCodeUnits)
+    : [];
   return {
     observed,
     changed: observed && (added.length > 0 || removed.length > 0),
-    added_candidate_keys: observed ? added : [],
-    removed_candidate_keys: observed ? removed : []
+    added,
+    removed
   };
+}
+
+function expandedTerms(
+  diagnostic: LongMemEvalQuestionDiagnostic | undefined
+): readonly string[] | null {
+  const terms = diagnostic?.query_probes?.expanded_terms;
+  return Array.isArray(terms) ? terms : null;
+}
+
+function channelMap(diagnostic: LongMemEvalQuestionDiagnostic | undefined) {
+  if (diagnostic?.retrieval_field_captures == null) return null;
+  const mapped = new Map<string, {
+    readonly status: "complete" | "truncated" | "unavailable" | "ineligible";
+    readonly depth: number;
+  }>();
+  for (const capture of diagnostic.retrieval_field_captures) {
+    const channelId = capture.channel.channel_id;
+    if (mapped.has(channelId)) {
+      throw new Error(`duplicate retrieval channel_id: ${channelId}`);
+    }
+    mapped.set(channelId, {
+      status: capture.channel.status,
+      depth: capture.channel.depth
+    });
+  }
+  return mapped;
 }
 
 function compareCodeUnits(left: string, right: string): number {

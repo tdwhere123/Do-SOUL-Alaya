@@ -11,7 +11,7 @@ import {
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
 import { ExtractionCacheIdentityBaseSchema } from
-  "../provenance/extraction-cache-identity.js";
+  "../provenance/identity/extraction-cache-identity.js";
 import { LongMemEvalExpansionLineageSchema } from
   "../../longmemeval/promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from

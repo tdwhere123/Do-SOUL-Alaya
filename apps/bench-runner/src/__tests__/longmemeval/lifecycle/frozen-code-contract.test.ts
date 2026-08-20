@@ -1,20 +1,16 @@
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { resolveFrozenCodeIdentity } from "../../../bench/provenance/contract/frozen-code-contract.js";
+import {
+  createFrozenCodeFixtureHarness,
+  git,
+  sha256,
+  writeContract,
+  type FrozenCodeFixture
+} from "./frozen-code-contract-fixture.js";
 
-const execFileAsync = promisify(execFile);
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) =>
-    rm(root, { recursive: true, force: true })
-  ));
-});
+const { cleanRepository } = createFrozenCodeFixtureHarness();
 
 describe("frozen code contract", () => {
   it("measures the contract, HEAD, and clean worktree instead of trusting env", async () => {
@@ -38,6 +34,7 @@ describe("frozen code contract", () => {
       gateContractPath: fixture.contractPath,
       gateSha256: gateSha,
       worktreeStateSha256: fixture.worktreeSha,
+      worktreeStateAlgorithm: "sha256-head-lf",
       worktreeClean: true
     });
   });
@@ -161,45 +158,8 @@ describe("frozen code contract", () => {
   });
 });
 
-async function cleanRepository(): Promise<{
-  readonly root: string;
-  readonly head: string;
-  readonly worktreeSha: string;
-  readonly contractPath: string;
-}> {
-  const root = await mkdtemp(join(tmpdir(), "frozen-code-contract-"));
-  roots.push(root);
-  await git(root, "init", "--quiet");
-  await git(root, "config", "user.name", "Bench Test");
-  await git(root, "config", "user.email", "bench@example.invalid");
-  await writeFile(join(root, ".gitignore"), "contract.json\n", "utf8");
-  await git(root, "add", ".gitignore");
-  await git(root, "commit", "--quiet", "-m", "fixture");
-  const head = (await git(root, "rev-parse", "HEAD")).trim();
-  const worktreeSha = sha256(`${head}\n`);
-  const contractPath = join(root, "contract.json");
-  await writeContract(contractPath, head, worktreeSha);
-  return { root, head, worktreeSha, contractPath };
-}
-
-async function writeContract(path: string, head: string, worktreeSha: string): Promise<void> {
-  await writeFile(path, `${JSON.stringify({
-    schema_version: 1,
-    code: {
-      commit_sha: head,
-      commit_sha7: head.slice(0, 7),
-      worktree_state_sha256: worktreeSha
-    }
-  })}\n`, "utf8");
-}
-
-async function git(root: string, ...args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", root, ...args]);
-  return stdout;
-}
-
 function resolve(
-  fixture: Awaited<ReturnType<typeof cleanRepository>>,
+  fixture: FrozenCodeFixture,
   expectedCommitSha7 = fixture.head.slice(0, 7)
 ) {
   return resolveFrozenCodeIdentity({
@@ -207,8 +167,4 @@ function resolve(
     expectedCommitSha7,
     env: { ALAYA_BENCH_GATE_CONTRACT_PATH: fixture.contractPath }
   });
-}
-
-function sha256(value: string | Buffer): string {
-  return createHash("sha256").update(value).digest("hex");
 }

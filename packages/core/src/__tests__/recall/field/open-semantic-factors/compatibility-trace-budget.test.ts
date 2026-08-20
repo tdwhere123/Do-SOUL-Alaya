@@ -96,10 +96,6 @@ describe("open semantic compatibility evaluation budget", () => {
       truncated: false,
       incomparable_seal: "unavailable"
     });
-    expect(materializeOpenSemanticFactorComposition({
-      trace,
-      query_capture: query
-    }).status).toBe("unavailable");
   });
 
   it("names qualified evidence whose semantic formation is unavailable", () => {
@@ -115,14 +111,41 @@ describe("open semantic compatibility evaluation budget", () => {
       matchable_evidence_count: 0,
       evaluated_evidence_count: 0,
       unavailable_evidence_ids: ["evidence-missing"],
+      unevaluated_evidence_ids: ["evidence-missing"],
       incomparable_seal: "unavailable",
       truncated: false
     });
     expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
-    expect(materializeOpenSemanticFactorComposition({
-      trace,
-      query_capture: query
-    }).status).toBe("unavailable");
+  });
+
+  it("lists observed unformed evidence without evaluating it or minting a receipt", () => {
+    const query = queryGraph();
+    const unavailableId = "coupon-source";
+    const incompatibleId = "sunday-card";
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: {
+        [unavailableId]: unavailableEvidence(),
+        [incompatibleId]: disjointEvidence()
+      }
+    });
+
+    expect(trace.schema_version).toBe(2);
+    expect(trace.unavailable_evidence_ids).toEqual([]);
+    expect(trace.entries.map((entry) => entry.evidence_id)).toEqual([incompatibleId]);
+    expect(trace.entries[0]?.receipt.status).toBe("incompatible");
+    expect(trace.unevaluated_evidence_ids).toEqual([unavailableId]);
+    expect(trace).toMatchObject({
+      observed_evidence_count: 2,
+      matchable_evidence_count: 1,
+      evaluated_evidence_count: 1,
+      truncated: false,
+      incomparable_seal: "unavailable"
+    });
+    expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
+    expect(() => verifyOpenSemanticFactorCompatibilityTrace(
+      retargetUnevaluated(trace, [incompatibleId, unavailableId])
+    )).toThrow("open semantic factor compatibility trace contract mismatch");
   });
 
   it("preserves a rejected query seal when evidence is unavailable", () => {
@@ -188,6 +211,7 @@ describe("open semantic compatibility evaluation budget", () => {
         observed_evidence_count: 1,
         matchable_evidence_count: 0,
         evaluated_evidence_count: 0,
+        unevaluated_evidence_ids: ["e-formed"],
         truncated: false,
         incomparable_seal: query.status
       });
@@ -211,6 +235,47 @@ describe("open semantic compatibility evaluation budget", () => {
       retargetSeal(complete, "unavailable")
     )).toThrow("open semantic factor compatibility trace contract mismatch");
   });
+
+  it.each([
+    ["omitted remainder id", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, [])],
+    ["renamed remainder id", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, trace.unevaluated_evidence_ids.map((id) =>
+        id === "named-missing" ? "renamed-remainder" : id
+      ))],
+    ["unsorted remainder ids", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, [...trace.unevaluated_evidence_ids].reverse())],
+    ["duplicate remainder id", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, [
+        ...trace.unevaluated_evidence_ids,
+        ...trace.unevaluated_evidence_ids
+      ])],
+    ["overlapping evaluated id", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, [
+        ...trace.unevaluated_evidence_ids,
+        trace.entries[0]!.evidence_id
+      ])],
+    ["bad remainder count", (trace: OpenSemanticFactorCompatibilityTrace) =>
+      retargetUnevaluated(trace, [...trace.unevaluated_evidence_ids, "extra-remainder"])],
+    ["bad digest", (trace: OpenSemanticFactorCompatibilityTrace) => Object.freeze({
+      ...trace,
+      trace_digest: digestRecallFieldIdentity({ forged: true })
+    })]
+  ] as const)("rejects a resealed v2 trace with %s", (_name, mutate) => {
+    const query = queryGraph();
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: {
+        "coupon-source": unavailableEvidence(),
+        "later-source": unavailableEvidence(),
+        "sunday-card": disjointEvidence()
+      },
+      unavailable_evidence_ids: ["named-missing"]
+    });
+
+    expect(() => verifyOpenSemanticFactorCompatibilityTrace(mutate(trace)))
+      .toThrow("open semantic factor compatibility trace contract mismatch");
+  });
 });
 
 function retargetSeal(
@@ -219,6 +284,18 @@ function retargetSeal(
 ): OpenSemanticFactorCompatibilityTrace {
   const { trace_digest: _digest, ...body } = trace;
   const nextBody = Object.freeze({ ...body, incomparable_seal });
+  return Object.freeze({
+    ...nextBody,
+    trace_digest: digestRecallFieldIdentity(nextBody)
+  });
+}
+
+function retargetUnevaluated(
+  trace: OpenSemanticFactorCompatibilityTrace,
+  unevaluated_evidence_ids: readonly string[]
+): OpenSemanticFactorCompatibilityTrace {
+  const { trace_digest: _digest, ...body } = trace;
+  const nextBody = Object.freeze({ ...body, unevaluated_evidence_ids });
   return Object.freeze({
     ...nextBody,
     trace_digest: digestRecallFieldIdentity(nextBody)

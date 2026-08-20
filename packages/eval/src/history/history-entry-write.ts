@@ -17,6 +17,7 @@ import {
   writePointer
 } from "./history-files.js";
 import type { HistoryEntry, HistoryLayout } from "./history.js";
+import { isHistoryEntrySlug } from "./history-slug.js";
 
 export interface HistorySidecar {
   readonly filename: string;
@@ -155,7 +156,7 @@ function assertEntrySlug(slug: string): void {
   if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
     throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
   }
-  if (!SLUG_PATTERN.test(slug)) {
+  if (!isHistoryEntrySlug(slug)) {
     throw new Error(
       `invalid slug: '${slug}' must match <YYYY-MM-DDTHHMMSSZ>-<sha7+> (use entrySlug helper)`
     );
@@ -244,5 +245,3 @@ async function linkOrCopy(source: string, destination: string): Promise<void> {
     await copyFile(source, destination);
   }
 }
-
-const SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}(?:-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)?$/;

@@ -8,8 +8,10 @@ import {
   fakeExecutedDistIdentity,
   registerRunProvenanceRootCleanup
 } from "./run-provenance-fixture.js";
+import { resolveBenchCommitSha7 } from "../../../shared/version.js";
 
 const roots = registerRunProvenanceRootCleanup();
+const currentCommitSha7 = resolveBenchCommitSha7();
 
 describe("LongMemEval run provenance", () => {
 
@@ -34,7 +36,7 @@ describe("LongMemEval run provenance", () => {
         embeddingMode: "disabled"
       },
       evaluatedCount: 0,
-      commitSha7: "05d98df",
+      commitSha7: currentCommitSha7,
       embeddingProviderLabel: "disabled",
       env: {
         ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "f".repeat(64),
@@ -52,7 +54,7 @@ describe("LongMemEval run provenance", () => {
         embeddingMode: "disabled"
       },
       evaluatedCount: 0,
-      commitSha7: "05d98df",
+      commitSha7: currentCommitSha7,
       embeddingProviderLabel: "disabled",
       env: { ALAYA_LOCAL_ONNX_THREADS: "128" },
       computeExecutedDistIdentity: fakeExecutedDistIdentity

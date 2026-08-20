@@ -87,7 +87,12 @@ vi.mock(
 vi.mock(
   "../../../bench/provenance/recall-eval/recall-eval-run.js",
   () => ({
-    buildRecallEvalRunProvenance: vi.fn(async () => ({})),
+    buildRecallEvalRunProvenance: vi.fn(async () => ({
+      code: {
+        worktree_clean: true,
+        worktree_state_sha256: "aa".repeat(32)
+      }
+    })),
     isRecallEvalRunEvidenceEligible: vi.fn(() => false)
   })
 );

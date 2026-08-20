@@ -1,12 +1,19 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
+import {
+  measureGitState,
+  type MeasuredGitState
+} from "./worktree-state-measure.js";
+import { WORKTREE_STATE_ALGORITHM_HEAD_LF } from "./worktree-state-frame.js";
 
-const execFileAsync = promisify(execFile);
+export {
+  measureGitState,
+  type MeasuredGitState
+} from "./worktree-state-measure.js";
+
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const FrozenCodeSchema = z.object({
   commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
@@ -42,19 +49,13 @@ const SnapshotReuseBindingSchema = z.object({
   producer: SnapshotReuseProducerSchema
 }).strict();
 
-export interface MeasuredGitState {
-  readonly commitSha: string;
-  readonly commitSha7: string;
-  readonly worktreeStateSha256: string;
-  readonly worktreeClean: boolean;
-}
-
 export interface FrozenCodeIdentity {
   readonly commitSha: string;
   readonly commitSha7: string;
   readonly gateContractPath: string;
   readonly gateSha256: string;
   readonly worktreeStateSha256: string;
+  readonly worktreeStateAlgorithm: typeof WORKTREE_STATE_ALGORITHM_HEAD_LF;
   readonly worktreeClean: true;
 }
 
@@ -86,6 +87,7 @@ export async function resolveFrozenCodeIdentity(input: {
     commitSha: measured.commitSha,
     commitSha7: measured.commitSha7,
     worktreeStateSha256: measured.worktreeStateSha256,
+    worktreeStateAlgorithm: WORKTREE_STATE_ALGORITHM_HEAD_LF,
     gateContractPath: contractPath,
     gateSha256,
     worktreeClean: true
@@ -145,34 +147,6 @@ function parseContract(raw: Buffer, path: string): z.infer<typeof FrozenContract
   } catch (cause) {
     throw new Error(`invalid frozen gate contract at ${path}`, { cause });
   }
-}
-
-export async function measureGitState(
-  checkoutRoot: string,
-  options: { readonly allowDirty?: boolean } = {}
-): Promise<MeasuredGitState> {
-  const [rootResult, headResult, statusResult] = await Promise.all([
-    execFileAsync("git", ["-C", checkoutRoot, "rev-parse", "--show-toplevel"]),
-    execFileAsync("git", ["-C", checkoutRoot, "rev-parse", "HEAD"]),
-    execFileAsync("git", [
-      "-C", checkoutRoot, "status", "--porcelain=v1", "--untracked-files=normal"
-    ])
-  ]);
-  if (resolve(rootResult.stdout.trim()) !== resolve(checkoutRoot)) {
-    throw new Error("provenance checkout root is not the current git worktree root");
-  }
-  const commitSha = headResult.stdout.trim();
-  if (!/^[a-f0-9]{40}$/u.test(commitSha)) throw new Error("git HEAD is not a commit SHA");
-  const worktreeClean = statusResult.stdout.length === 0;
-  if (!worktreeClean && options.allowDirty !== true) {
-    throw new Error("benchmark worktree is not clean");
-  }
-  return {
-    commitSha,
-    commitSha7: commitSha.slice(0, 7),
-    worktreeStateSha256: sha256(headResult.stdout + statusResult.stdout),
-    worktreeClean
-  };
 }
 
 function assertContractMatches(

@@ -110,7 +110,7 @@ describe("merge-longmemeval release gates", () => {
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
-    expect(pointer.slug).toMatch(/-policy-chat$/);
+    expect(pointer.slug).toMatch(/-policy-chat(?:-wt-[0-9a-f]{64})?$/);
 
     const merged = JSON.parse(
       await readFile(
