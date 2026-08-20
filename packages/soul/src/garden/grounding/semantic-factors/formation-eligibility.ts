@@ -1,7 +1,8 @@
-import type {
-  CandidateMemorySignal,
-  OpenSemanticFactorFormationProposal,
-  OpenSemanticFactorGraphProposal
+import {
+  groundOpenSemanticFactorGraph,
+  type CandidateMemorySignal,
+  type OpenSemanticFactorFormationProposal,
+  type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 import {
   hasGroundedAssertionReceipt,
@@ -62,7 +63,8 @@ function classifySourceBoundGraph(
   if (assertion === null || !hasGroundedAssertionReceipt(rawPayload, assertion)) {
     return rejected("source_grounding_rejected");
   }
-  if (inspected.graph.source_kind !== "evidence") {
+  const grounded = groundOpenSemanticFactorGraph(inspected.graph, assertion);
+  if (grounded === null || grounded.source_kind !== "evidence") {
     return rejected("semantic_factor_graph_not_source_grounded");
   }
   return Object.freeze({

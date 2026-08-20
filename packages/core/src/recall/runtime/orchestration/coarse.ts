@@ -97,7 +97,7 @@ export type AssessCoarseFilterParams = Readonly<{
   >;
   readonly querySemanticFactorCompletenessReceipt?: Readonly<
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
-  >;
+  > | null;
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;

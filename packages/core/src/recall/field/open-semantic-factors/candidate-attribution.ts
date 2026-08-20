@@ -46,9 +46,9 @@ export function attributeOpenSemanticFactorActivations(params: Readonly<{
     const body = Object.freeze({
       schema_version: 1 as const,
       operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
-      state: entries.some((entry) => entry.state === "reconstructed")
-        ? "reconstructed" as const
-        : "observed" as const,
+      state: entries.some((entry) => entry.state === "observed")
+        ? "observed" as const
+        : "reconstructed" as const,
       score: Math.max(...entries.map((entry) => entry.activation)),
       evidence_ids: Object.freeze(evidenceIds),
       solution_count: Math.max(...entries.map((entry) => entry.solution_count)),

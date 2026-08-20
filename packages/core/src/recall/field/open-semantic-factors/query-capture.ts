@@ -18,7 +18,7 @@ export async function captureCertifiedRecallQueryOpenSemanticFactors(params: Rea
   readonly obligation: Readonly<QueryFactFrameOsfObligation> | null;
   readonly port?: OpenSemanticFactorExtractionPort;
   readonly prepared_capture?: Readonly<OpenSemanticFactorFormationCapture>;
-  readonly prepared_receipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
+  readonly prepared_receipt?: Readonly<QueryOsfSemanticCompletenessReceipt> | null;
   readonly on_failure?: (error: unknown) => void;
 }>): Promise<Readonly<{
   formation: OpenSemanticFactorFormationCapture;
@@ -83,9 +83,9 @@ function verifyPreparedCertified(params: Readonly<{
   query_text: string;
   obligation: Readonly<QueryFactFrameOsfObligation>;
   prepared_capture?: Readonly<OpenSemanticFactorFormationCapture>;
-  prepared_receipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
+  prepared_receipt?: Readonly<QueryOsfSemanticCompletenessReceipt> | null;
 }>) {
-  if (params.prepared_capture === undefined || params.prepared_receipt === undefined) {
+  if (params.prepared_capture === undefined || params.prepared_receipt == null) {
     return unavailableCertified(params.query_text);
   }
   const formation = materializePreparedCapture({

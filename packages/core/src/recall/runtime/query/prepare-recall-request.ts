@@ -37,9 +37,8 @@ export async function prepareRecallRequest(
   time: PreparedRecallRequest["time"]
 ): Promise<PreparedRecallRequest> {
   const queryText = normalizeQueryText(params.taskSurface.display_name);
-  const semanticCapture = await certifyPreparedSemanticCapture(
-    context, params, queryText
-  );
+  const certified = await certifyPreparedSemanticCapture(context, params, queryText);
+  const semanticCapture = certified?.formation;
   const seed = prepareQuerySeed(context, params, time, queryText, semanticCapture);
   const captured = capturePreparedRequestCondition({
     workspaceId: params.workspaceId,
@@ -54,7 +53,7 @@ export async function prepareRecallRequest(
   });
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
   return await loadPinnedPreparedRequest({
-    context, params, time, seed, captured, releaseProjectionPin
+    context, params, time, seed, captured, certified, releaseProjectionPin
   });
 }
 
@@ -64,9 +63,10 @@ async function loadPinnedPreparedRequest(input: Readonly<{
   time: PreparedRecallRequest["time"];
   seed: ReturnType<typeof prepareQuerySeed>;
   captured: ReturnType<typeof capturePreparedRequestCondition>;
+  certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>;
   releaseProjectionPin: () => void;
 }>): Promise<PreparedRecallRequest> {
-  const { context, params, time, seed, captured, releaseProjectionPin } = input;
+  const { context, params, time, seed, captured, certified, releaseProjectionPin } = input;
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
     projectionPinLease = startProjectionPinLeaseGuard({
@@ -99,7 +99,11 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       fieldProjectionSelection: fieldSelection,
       projectionPin: captured.pin,
       projectionPinLease,
-      releaseProjectionPin
+      releaseProjectionPin,
+      querySemanticFactorFormationCapture: certified?.formation,
+      querySemanticFactorCompletenessReceipt: certified === undefined
+        ? undefined
+        : certified.receipt
     });
   } catch (error) {
     cleanupFailedPreparation({ context, projectionPinLease,
@@ -176,8 +180,7 @@ async function certifyPreparedSemanticCapture(
   params: RecallExecutionParams,
   queryText: string | null
 ) {
-  if (queryText === null || params.querySemanticFactorFormationCapture === undefined ||
-      params.querySemanticFactorCompletenessReceipt === undefined) return undefined;
+  if (queryText === null) return undefined;
   const factFrameCapture = await captureRecallQueryFactFrames({
     query_text: queryText,
     port: context.dependencies.queryFactFrameExtractionPort
@@ -185,12 +188,19 @@ async function certifyPreparedSemanticCapture(
   const obligation = deriveQueryFactFrameOsfObligation({
     query_text: queryText, fact_frame_capture: factFrameCapture
   });
-  const certified = await captureCertifiedRecallQueryOpenSemanticFactors({
-    query_text: queryText, obligation,
+  return await captureCertifiedRecallQueryOpenSemanticFactors({
+    query_text: queryText,
+    obligation,
+    port: context.dependencies.openSemanticFactorExtractionPort,
     prepared_capture: params.querySemanticFactorFormationCapture,
-    prepared_receipt: params.querySemanticFactorCompletenessReceipt
+    prepared_receipt: params.querySemanticFactorCompletenessReceipt,
+    on_failure: (error) => context.warn("query open semantic factor extraction failed", {
+      workspace_id: params.workspaceId,
+      operation: "query_open_semantic_factor_extraction",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    })
   });
-  return certified.receipt === null ? undefined : certified.formation;
 }
 
 async function loadPreparationInputs(

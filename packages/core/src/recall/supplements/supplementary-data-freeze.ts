@@ -54,7 +54,7 @@ export interface CollectSupplementaryDataParams {
   >;
   readonly querySemanticFactorCompletenessReceipt?: Readonly<
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
-  >;
+  > | null;
   readonly policy: Readonly<RecallPolicy>;
   readonly coarseFtsRanks: Readonly<Record<string, number>>;
   readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;

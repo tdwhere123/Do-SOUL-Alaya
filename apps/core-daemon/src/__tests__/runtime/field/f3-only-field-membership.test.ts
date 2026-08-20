@@ -80,9 +80,43 @@ describe("F3-only field membership", () => {
     expect(diagnostic?.admission_planes).toEqual(["activation"]);
     expect(diagnostic?.plane_winning_admission).toBe("activation");
   });
+
+  it("admits F3 membership from live query certification at prepare", async () => {
+    const extractCertifiedQuery = vi.fn(async (
+      sourceText: string,
+      obligation: Parameters<typeof certifyQueryOsfSemanticCompleteness>[0]["obligation"]
+    ) => {
+      const graph = queryGraph(sourceText);
+      const receipt = certifyQueryOsfSemanticCompleteness({
+        query_text: sourceText, graph, obligation,
+        producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+        sha256: fieldContractSha256
+      });
+      return receipt === null ? null : {
+        schema_version: 1 as const,
+        producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+        graph,
+        semantic_completeness_receipt: receipt
+      };
+    });
+    const runtime = await openF3Recall({
+      openSemanticFactorExtractionPort: {
+        operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+        extract: async () => null,
+        extractCertifiedQuery
+      }
+    });
+    const result = await runtime.recall.recall(recallRequest(QUERY));
+    expect(extractCertifiedQuery).toHaveBeenCalledOnce();
+    expect(result.diagnostics?.query_open_semantic_factor_formation?.status).toBe("formed");
+    expect(result.diagnostics?.query_probes.expanded_terms).toContain(F3_IDENTITY);
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([MEMORY_ID]);
+  });
 });
 
-async function openF3Recall() {
+async function openF3Recall(
+  extra?: Parameters<typeof createPlantedRecall>[0]["extra"]
+) {
   const database = planted.openMemoryDatabase();
   const field = composeField(database);
   await createF3Evidence(database, field);
@@ -94,7 +128,8 @@ async function openF3Recall() {
     memory,
     memoryRepo,
     recall: createPlantedRecall({ database, field, memoryRepo, extra: {
-      queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor()
+      queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
+      ...extra
     } })
   };
 }

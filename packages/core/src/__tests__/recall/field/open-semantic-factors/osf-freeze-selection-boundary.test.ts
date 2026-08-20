@@ -69,7 +69,7 @@ describe("OSF freeze to selection-boundary attribution", () => {
       score: expect.any(Number)
     });
     expect(activations.get("workspace_local:memory_entry:join-memory"))
-      .toMatchObject({ state: "reconstructed" });
+      .toMatchObject({ state: "observed" });
     expect(activations.get(partnerKey)?.score).toBeGreaterThan(0);
     assertBoundary(activations);
   });

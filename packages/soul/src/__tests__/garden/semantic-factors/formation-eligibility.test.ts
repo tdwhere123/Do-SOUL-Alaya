@@ -92,6 +92,21 @@ describe("open semantic factor formation eligibility", () => {
     });
   });
 
+  it("rejects a source_kind evidence graph that cannot ground in the assertion", () => {
+    const graph = semanticGraph();
+    expect(classifyOpenSemanticFactorFormationEligibility(groundedPayload({
+      semantic_factor_graph: {
+        ...graph,
+        factors: graph.factors.map((factor) => factor.factor_id === "object"
+          ? { ...factor, surface: "NotInSource" }
+          : factor)
+      }
+    }))).toEqual({
+      kind: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
+  });
+
   it("does not reconstruct a proposal from a gold-shaped extra graph field", () => {
     expect(classifyOpenSemanticFactorFormationEligibility(groundedPayload({
       gold_semantic_factor_graph: semanticGraph(),

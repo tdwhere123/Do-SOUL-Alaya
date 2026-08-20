@@ -56,6 +56,19 @@ describe("certified recall query OSF capture", () => {
     });
   });
 
+  it("does not live-extract after prepare already certified an unavailable receipt", async () => {
+    const obligation = await queryObligation();
+    const port = new StatefulPort(completeGraph(), obligation);
+    await expect(captureCertifiedRecallQueryOpenSemanticFactors({
+      query_text: QUERY, obligation, port,
+      prepared_capture: materializeOpenSemanticFactorFormation({
+        source_kind: "query", source_text: QUERY
+      }),
+      prepared_receipt: null
+    })).resolves.toMatchObject({ formation: { status: "unavailable" }, receipt: null });
+    expect(port.calls).toBe(0);
+  });
+
   it("preserves the extraction port receiver for stateful implementations", async () => {
     const obligation = await queryObligation();
     const graph = completeGraph();

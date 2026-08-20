@@ -61,6 +61,56 @@ describe("open semantic factor candidate attribution", () => {
     expect(() => assertOpenSemanticCandidateActivations(data)).not.toThrow();
   });
 
+  it("keeps observed cover when mixed reconstructed partners share a candidate", () => {
+    const activations = attributeOpenSemanticFactorActivations({
+      candidates: [candidate(createMemoryEntry({
+        object_id: "memory-mixed",
+        evidence_refs: ["evidence-a", "evidence-b"]
+      }))],
+      activation: composedActivation(false, {
+        evidence_id: "evidence-b",
+        state: "reconstructed",
+        activation: 0.5,
+        solution_count: 1,
+        proposition_match_count: 1
+      })
+    });
+
+    expect([...activations.values()][0]).toEqual(expect.objectContaining({
+      state: "observed",
+      score: 1,
+      evidence_ids: ["evidence-a", "evidence-b"]
+    }));
+  });
+
+  it("attributes reconstructed-only members without observed cover", () => {
+    const activations = attributeOpenSemanticFactorActivations({
+      candidates: [candidate(createMemoryEntry({
+        object_id: "memory-reconstructed",
+        evidence_refs: ["evidence-b"]
+      }))],
+      activation: composedActivation(false, {
+        evidence_id: "evidence-a",
+        state: "reconstructed",
+        activation: 0.4,
+        solution_count: 1,
+        proposition_match_count: 0
+      }, {
+        evidence_id: "evidence-b",
+        state: "reconstructed",
+        activation: 0.5,
+        solution_count: 1,
+        proposition_match_count: 1
+      })
+    });
+
+    expect([...activations.values()][0]).toEqual(expect.objectContaining({
+      state: "reconstructed",
+      score: 0.5,
+      evidence_ids: ["evidence-b"]
+    }));
+  });
+
   it("does not promote partial or non-composed searches", () => {
     const candidates = [candidate(createMemoryEntry({
       object_id: "memory-1",
@@ -118,30 +168,36 @@ describe("open semantic factor candidate attribution", () => {
   });
 });
 
-function composedActivation(truncated: boolean): OpenSemanticFactorActivationReceipt {
+function composedActivation(
+  truncated: boolean,
+  ...entryOverrides: OpenSemanticFactorActivationReceipt["entries"]
+): OpenSemanticFactorActivationReceipt {
+  const defaults: OpenSemanticFactorActivationReceipt["entries"] = [
+    {
+      evidence_id: "evidence-a",
+      state: "observed",
+      activation: 1,
+      solution_count: 2,
+      proposition_match_count: 2
+    },
+    {
+      evidence_id: "evidence-b",
+      state: "observed",
+      activation: 1,
+      solution_count: 3,
+      proposition_match_count: 1
+    }
+  ];
+  const overrides = new Map(entryOverrides.map((entry) => [entry.evidence_id, entry]));
+  const entries = defaults.map((entry) => overrides.get(entry.evidence_id) ?? entry);
   return {
     schema_version: 2,
     operator_id: "open_semantic_solution_membership_activation_v2",
     status: "composed",
     composition_receipt_digest: "sha256:composition",
-    entry_count: 2,
+    entry_count: entries.length,
     truncated,
-    entries: [
-      {
-        evidence_id: "evidence-a",
-        state: "observed",
-        activation: 1,
-        solution_count: 2,
-        proposition_match_count: 2
-      },
-      {
-        evidence_id: "evidence-b",
-        state: "observed",
-        activation: 1,
-        solution_count: 3,
-        proposition_match_count: 1
-      }
-    ],
+    entries,
     missing_evidence_policy: "no_op",
     ranking_effect: "candidate_attribution",
     receipt_digest: "sha256:activation"

@@ -120,6 +120,12 @@ export interface PreparedRecallRequest {
   readonly projectionPin: ProjectionPin;
   readonly projectionPinLease: import("./query/projection-pin-lease.js").ProjectionPinLeaseGuard;
   readonly releaseProjectionPin: () => void;
+  readonly querySemanticFactorFormationCapture?: Readonly<
+    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
+  >;
+  readonly querySemanticFactorCompletenessReceipt?: Readonly<
+    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
+  > | null;
 }
 
 type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];

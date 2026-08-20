@@ -171,9 +171,12 @@ function buildCoarseAssessmentParams(
     queryProbes: prepared.queryProbes,
     queryEntityExtraction: prepared.queryEntityExtraction,
     querySemanticFactorFormationCapture:
+      prepared.querySemanticFactorFormationCapture ??
       params.querySemanticFactorFormationCapture,
     querySemanticFactorCompletenessReceipt:
-      params.querySemanticFactorCompletenessReceipt,
+      prepared.querySemanticFactorCompletenessReceipt === undefined
+        ? params.querySemanticFactorCompletenessReceipt
+        : prepared.querySemanticFactorCompletenessReceipt,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
