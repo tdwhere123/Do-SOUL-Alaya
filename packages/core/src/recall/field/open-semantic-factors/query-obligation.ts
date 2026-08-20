@@ -1,14 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
   QueryFactFrameOsfObligationSchema,
   queryFactFrameOsfObligationPreimage,
   type QueryFactFrameOsfObligation
 } from "@do-soul/alaya-protocol";
-import {
-  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
-  traceRuleBasedQueryFactFrame
-} from "../../../shared/query-fact-frame-extraction-rules.js";
+import { traceRuleBasedQueryFactFrame } from
+  "../../../shared/query-fact-frame-extraction-rules.js";
 import {
   verifyRecallQueryFactFrameExtractionCapture,
   type RecallQueryFactFrameExtractionCapture
@@ -23,20 +22,24 @@ export function deriveQueryFactFrameOsfObligation(input: Readonly<{
   const trace = traceRuleBasedQueryFactFrame(input.query_text);
   if (capture.status !== "returned" || capture.frames.length !== 1 ||
       capture.producer_operator_id !== RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID ||
-      trace?.binaryLayout === null || trace?.binaryLayout === undefined ||
+      trace?.osfLayout === null || trace?.osfLayout === undefined ||
       !captureMatchesTrace(capture.frames[0]!, trace.frame)) {
     return null;
   }
   const body = {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
     query_digest: digest(input.query_text),
     fact_frame_producer_operator_id: capture.producer_operator_id,
     fact_frame_capture_digest: capture.capture_digest,
-    predicate: obligationSlot(trace.binaryLayout.predicate, 0),
-    subject: obligationSlot(trace.binaryLayout.subject, 0),
-    value: obligationSlot(trace.binaryLayout.value, 1),
-    arity: 2 as const
+    predicate: obligationSlot(trace.osfLayout.predicate, 0),
+    subject: obligationSlot(trace.osfLayout.subject, 0),
+    constraints: trace.osfLayout.constraints.map((constraint, index) =>
+      obligationSlot(constraint, index + 1)),
+    value: obligationSlot(
+      trace.osfLayout.value, trace.osfLayout.constraints.length + 1
+    ),
+    arity: trace.osfLayout.constraints.length + 2
   };
   return QueryFactFrameOsfObligationSchema.parse({
     ...body,

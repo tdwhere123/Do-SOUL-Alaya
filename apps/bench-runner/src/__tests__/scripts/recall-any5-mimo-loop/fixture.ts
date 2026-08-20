@@ -207,11 +207,11 @@ export function replayReceiptFixture(): Readonly<Record<string, unknown>> {
     evidence_prompt_sha256:
       "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a",
     query_prompt_sha256:
-      "da13495a266e25890113ae8a1f5560c88fd26026d1432217592728482cd88c70",
+      "eeb420decb4cb05958f4fe5d3bcd73dfdff37d88dce0ac364cc628e0d46d2074",
     evidence_request_template_sha256:
       "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
     query_request_template_sha256:
-      "92dea9f910b9d06abdc54af40444602bca23041b43eda4aa9a93c92a557e0aa2"
+      "649ea5aca1bcfc427433e708afe5428d44f070ab315deed1a9f614177de7db00"
   };
 }
 

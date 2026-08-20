@@ -12,7 +12,7 @@ describe("open semantic factor diagnostics schema cutover", () => {
     const trace = coreCompatibilityTrace();
 
     expect(trace.entries[0]?.receipt.operator_id)
-      .toBe("open_semantic_factor_compatibility_v4");
+      .toBe("open_semantic_factor_compatibility_v5");
     expect(OpenSemanticFactorCompatibilityTraceSchema.parse(trace)).toEqual(trace);
   });
 
@@ -46,7 +46,7 @@ function coreCompatibilityTrace() {
 function resealAsLegacyV3(trace: ReturnType<typeof coreCompatibilityTrace>) {
   const legacy = structuredClone(trace);
   const receipt = legacy.entries[0]!.receipt;
-  Reflect.set(receipt, "operator_id", "open_semantic_factor_compatibility_v3");
+  Reflect.set(receipt, "operator_id", "open_semantic_factor_compatibility_v4");
   const { receipt_digest: _receiptDigest, ...receiptBody } = receipt;
   Reflect.set(receipt, "receipt_digest", digestRecallFieldIdentity(receiptBody));
   const { trace_digest: _traceDigest, ...traceBody } = legacy;

@@ -159,7 +159,7 @@ function runtimeAttribution(biSha: string): RecallEvalRuntimeAttribution {
     query_semantic_factor_cache: {
       schema_version: 3,
       cache_content_sha256: `sha256:${"3".repeat(64)}`,
-      compiler_operator_id: "open_semantic_factor_query_compiler_v7",
+      compiler_operator_id: "open_semantic_factor_query_compiler_v8",
       system_prompt_sha256: `sha256:${"4".repeat(64)}`,
       request_template_sha256: `sha256:${"6".repeat(64)}`,
       model_id: "DeepSeek-V4-Flash",

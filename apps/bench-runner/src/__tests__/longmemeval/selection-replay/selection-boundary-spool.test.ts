@@ -143,14 +143,14 @@ describe("LongMemEval selection-boundary spool", () => {
     spools.push(spool);
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-v2.ndjson.gz");
-    const boundaryV4 = largeCapturedBoundaryV4();
+    const boundaryV5 = largeCapturedBoundaryV5();
     const capture = spool.beginQuestion("question-v2");
-    capture.observer(boundaryV4);
+    capture.observer(boundaryV5);
     await capture.commit();
     expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(2 * 1024 * 1024);
     await spool.writeGzipArtifact(artifactPath);
 
-    expect(boundaryV4.schema_version).toBe(4);
+    expect(boundaryV5.schema_version).toBe(5);
     await expect(
       realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
     ).resolves.toMatchObject({ recordCount: 1, questionCount: 1 });
@@ -166,7 +166,7 @@ describe("LongMemEval selection-boundary spool", () => {
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-unicode.ndjson.gz");
     const candidate = createRankedCandidate("candidate-unicode", 1, 0.9);
-    const boundaryV4 = capturedBoundaryV4([{
+    const boundaryV5 = capturedBoundaryV5([{
       ...candidate,
       entry: {
         ...candidate.entry,
@@ -174,7 +174,7 @@ describe("LongMemEval selection-boundary spool", () => {
       }
     }]);
     const encoded = `${JSON.stringify(
-      record("question-unicode", 0, true, boundaryV4)
+      record("question-unicode", 0, true, boundaryV5)
     )}\n`;
 
     expect(encoded).toContain("\u2028");
@@ -203,7 +203,7 @@ describe("LongMemEval selection-boundary spool", () => {
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-truncated.ndjson.gz");
     const capture = spool.beginQuestion("question-truncated");
-    capture.observer(largeCapturedBoundaryV4());
+    capture.observer(largeCapturedBoundaryV5());
     await capture.commit();
     expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(1024 * 1024);
     await truncate(rawSpoolPath(spool), 1024 * 1024);
@@ -376,7 +376,7 @@ function boundary(seed: string): FineAssessmentSelectionBoundaryCase {
   } as unknown as FineAssessmentSelectionBoundaryCase;
 }
 
-function capturedBoundaryV4(
+function capturedBoundaryV5(
   candidates = [
     createRankedCandidate("candidate-1", 1, 0.9),
     createRankedCandidate("candidate-2", 2, 0.8)
@@ -407,9 +407,9 @@ function capturedBoundaryV4(
   return captured;
 }
 
-function largeCapturedBoundaryV4(): FineAssessmentSelectionBoundaryCase {
+function largeCapturedBoundaryV5(): FineAssessmentSelectionBoundaryCase {
   const content = "x".repeat(60 * 1024);
-  return capturedBoundaryV4(Array.from({ length: 36 }, (_, index) => {
+  return capturedBoundaryV5(Array.from({ length: 36 }, (_, index) => {
     const candidate = createRankedCandidate(
       `candidate-${index + 1}`,
       index + 1,

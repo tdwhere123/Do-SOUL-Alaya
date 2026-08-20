@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
   verifyOpenSemanticFactorFormationCapture,
   type OpenSemanticFactor,
   type OpenSemanticFactorFormationCapture,
@@ -25,7 +26,7 @@ export type {
 } from "./argument-alignment.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID =
-  "open_semantic_factor_compatibility_v4";
+  "open_semantic_factor_compatibility_v5";
 
 export type OpenSemanticPropositionMatch = Readonly<{
   readonly query_proposition_id: string;
@@ -73,7 +74,11 @@ export function materializeOpenSemanticFactorCompatibility(params: Readonly<{
   if (evidence.graph.source_kind !== "evidence" || query.graph.source_kind !== "query") {
     throw new Error("open semantic factor compatibility source kind mismatch");
   }
-  const { candidates, matches } = matchGraphs(evidence.graph, query.graph);
+  const { candidates, matches } = matchGraphs(
+    evidence.graph,
+    query.graph,
+    query.producer_operator_id === QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID
+  );
   const matchedQueryPropositions = new Set(
     matches.map((match) => match.query_proposition_id)
   );
@@ -104,7 +109,8 @@ export function verifyOpenSemanticFactorCompatibilityReceipt(params: Readonly<{
 
 function matchGraphs(
   evidence: Readonly<OpenSemanticFactorGraph>,
-  query: Readonly<OpenSemanticFactorGraph>
+  query: Readonly<OpenSemanticFactorGraph>,
+  requireExactPositions: boolean
 ): Readonly<{
   readonly candidates: readonly Readonly<OpenSemanticPropositionMatch>[];
   readonly matches: readonly Readonly<OpenSemanticPropositionMatch>[];
@@ -122,7 +128,8 @@ function matchGraphs(
     evidencePropositions: evidence.propositions,
     queryPropositions: query.propositions,
     evidenceFactors,
-    queryFactors
+    queryFactors,
+    requireExactPositions
   });
   const matches = selectConsistentMatches({
     candidates: matchCandidates,
@@ -180,6 +187,7 @@ function enumerateMatchCandidates(params: Readonly<{
   readonly queryPropositions: readonly Readonly<OpenSemanticProposition>[];
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly requireExactPositions: boolean;
 }>): readonly PropositionMatchCandidate[] {
   const candidates = params.queryPropositions.flatMap((query) =>
     params.evidencePropositions.flatMap((evidence) =>
@@ -188,7 +196,8 @@ function enumerateMatchCandidates(params: Readonly<{
         query,
         evidenceFactors: params.evidenceFactors,
         queryFactors: params.queryFactors,
-        variableBindings: new Map()
+        variableBindings: new Map(),
+        requireExactPositions: params.requireExactPositions
       })
     )
   );
@@ -215,7 +224,12 @@ function matchPropositions(params: Readonly<{
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly variableBindings: ReadonlyMap<string, string>;
+  readonly requireExactPositions: boolean;
 }>): readonly PropositionMatchCandidate[] {
+  if (params.requireExactPositions && (
+    !hasCertifiedQueryArgumentLayout(params.query) ||
+    params.evidence.arguments.length !== params.query.arguments.length
+  )) return [];
   const evidencePredicate = params.evidenceFactors.get(params.evidence.predicate_factor_id);
   const queryPredicate = params.queryFactors.get(params.query.predicate_factor_id);
   if (evidencePredicate === undefined || queryPredicate === undefined ||
@@ -233,6 +247,21 @@ function matchPropositions(params: Readonly<{
     }),
     variableBindings: alignment.variableBindings
   }));
+}
+
+function hasCertifiedQueryArgumentLayout(
+  query: Readonly<OpenSemanticProposition>
+): boolean {
+  const resultArguments = query.arguments.filter((argument) =>
+    argument.reference_kind === "variable");
+  if (resultArguments.length !== 1) return false;
+  const result = resultArguments[0];
+  if (result?.position !== query.arguments.length - 1) return false;
+  return query.arguments.every((argument, index) =>
+    argument.position === index &&
+    (index === query.arguments.length - 1
+      ? argument.reference_kind === "variable"
+      : argument.reference_kind === "factor"));
 }
 
 function freezeReceipt(

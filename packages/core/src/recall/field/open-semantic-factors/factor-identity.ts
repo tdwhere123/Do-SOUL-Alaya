@@ -24,6 +24,15 @@ export function openSemanticFactorsOverlap(
   return false;
 }
 
+export function openSemanticFactorSurfacesEqual(
+  left: Readonly<OpenSemanticFactor>,
+  right: Readonly<OpenSemanticFactor>
+): boolean {
+  const leftSurface = normalizeMemoryObjectKeySurface(left.surface);
+  return leftSurface.length > 0 &&
+    leftSurface === normalizeMemoryObjectKeySurface(right.surface);
+}
+
 export function openSemanticFactorSetsOverlap(
   left: readonly Readonly<OpenSemanticFactor>[],
   right: readonly Readonly<OpenSemanticFactor>[]

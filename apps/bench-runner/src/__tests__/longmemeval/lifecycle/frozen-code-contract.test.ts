@@ -97,7 +97,7 @@ describe("frozen code contract", () => {
     expect(((error as Error).cause as NodeJS.ErrnoException).code).toBe("ELOOP");
 
     await writeFile(fixture.contractPath, `${JSON.stringify({
-      schema_version: 4,
+      schema_version: 5,
       code: {
         commit_sha: fixture.head,
         commit_sha7: fixture.head.slice(0, 7),

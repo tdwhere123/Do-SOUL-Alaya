@@ -1,5 +1,6 @@
 import {
   AssociativeFactFrameSchema,
+  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
   type AssociativeFactFrame,
   type AssociativeFactSlot,
   type AssociativeFactSlotRole
@@ -20,24 +21,24 @@ import {
   type FactFrameSourceToken
 } from "./fact-frame-grammar/source-text.js";
 
-export const RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID =
-  "rule_based_query_fact_frame_extractor_v1";
-
 type SubjectSpan = Readonly<{
   readonly text: string;
   readonly startIndex: number;
   readonly nextIndex: number;
 }>;
 
-export type RuleBasedBinaryQueryLayout = Readonly<{
+export type RuleBasedQueryOsfLayout = Readonly<{
   readonly value: Readonly<{ surface: string; source_span: readonly [number, number] }>;
   readonly subject: Readonly<{ surface: string; source_span: readonly [number, number] }>;
   readonly predicate: Readonly<{ surface: string; source_span: readonly [number, number] }>;
+  readonly constraints: readonly Readonly<{
+    surface: string; source_span: readonly [number, number]
+  }>[];
 }>;
 
 type QueryFactFrameParseTrace = Readonly<{
   readonly frame: Readonly<AssociativeFactFrame>;
-  readonly binaryLayout: RuleBasedBinaryQueryLayout | null;
+  readonly osfLayout: RuleBasedQueryOsfLayout | null;
 }>;
 
 export class RuleBasedQueryFactFrameExtractor
@@ -73,7 +74,10 @@ function parseInterrogativeFactFrameTrace(query: string): QueryFactFrameParseTra
     return parseDoSupportFrame(query, tokens, auxiliaryIndex + 1, value, auxiliaryIndex);
   }
   const parsed = parseCopularFrame(query, tokens, auxiliaryIndex + 1, value);
-  return parsed === null ? null : { frame: parsed, binaryLayout: null };
+  return parsed === null ? null : {
+    frame: parsed,
+    osfLayout: copularOsfLayout(query, tokens, auxiliaryIndex)
+  };
 }
 
 function parseDoSupportFrame(
@@ -101,26 +105,25 @@ function parseDoSupportFrame(
   if (parsed === null) return null;
   return {
     frame: parsed,
-    binaryLayout: binaryLayout(query, tokens, auxiliaryIndex, subject, relationIndex)
+    osfLayout: doSupportOsfLayout(query, tokens, auxiliaryIndex, subject, relationIndex)
   };
 }
 
-function binaryLayout(
+function doSupportOsfLayout(
   query: string,
   tokens: readonly FactFrameSourceToken[],
   auxiliaryIndex: number,
   subject: SubjectSpan,
   relationIndex: number
-): RuleBasedBinaryQueryLayout | null {
-  const tail = tokens.slice(relationIndex + 1);
+): RuleBasedQueryOsfLayout | null {
   const valueTokens = tokens.slice(0, auxiliaryIndex);
   if (valueTokens.filter((token) => WH_WORDS.has(token.normalized)).length !== 1 ||
       valueTokens.some((token) => token.normalized === "and" || token.normalized === "or") ||
-      relationIndex !== subject.nextIndex ||
-      (tail.length > 0 &&
-       (tail.length !== 1 || !TERMINAL_COMPLEMENT_MARKERS.has(tail[0]!.normalized)))) {
+      relationIndex !== subject.nextIndex) {
     return null;
   }
+  const constraints = doSupportTailConstraints(query, tokens, relationIndex, valueTokens);
+  if (constraints === null) return null;
   const valueStart = tokens[0]!;
   const valueEnd = tokens[auxiliaryIndex - 1]!;
   const subjectStart = tokens[subject.startIndex]!;
@@ -129,8 +132,32 @@ function binaryLayout(
   return Object.freeze({
     value: span(query, valueStart.start, valueEnd.end),
     subject: span(query, subjectStart.start, subjectEnd.end),
-    predicate: span(query, predicate.start, predicate.end)
+    predicate: span(query, predicate.start, predicate.end),
+    constraints
   });
+}
+
+function doSupportTailConstraints(
+  query: string,
+  tokens: readonly FactFrameSourceToken[],
+  relationIndex: number,
+  valueTokens: readonly FactFrameSourceToken[]
+): RuleBasedQueryOsfLayout["constraints"] | null {
+  const tail = tokens.slice(relationIndex + 1);
+  if (tail.length === 0) return Object.freeze([]);
+  if (tail.length === 1 && TERMINAL_COMPLEMENT_MARKERS.has(tail[0]!.normalized)) {
+    return Object.freeze([]);
+  }
+  if (valueTokens.length !== 1 || valueTokens[0]!.normalized !== "where") return null;
+  const linkerIndex = tail.findIndex(({ normalized }) => TAIL_CONSTRAINT_LINKERS.has(normalized));
+  if (linkerIndex < 1 || linkerIndex >= tail.length - 1 ||
+      tail.slice(linkerIndex + 1).some(({ normalized }) =>
+        TAIL_CONSTRAINT_LINKERS.has(normalized) || CLAUSE_BOUNDARIES.has(normalized))) {
+    return null;
+  }
+  return Object.freeze([
+    span(query, tail[0]!.start, tail[tail.length - 1]!.end)
+  ]);
 }
 
 function span(query: string, start: number, end: number) {
@@ -159,8 +186,7 @@ function parseCopularFrame(
   const relations = selectRelationTokens(tokens, subject.nextIndex, tokens.length);
   if (relations.length === 0) return null;
   return frame([
-    slot("value", value),
-    slot("subject", subject.text),
+    slot("value", value), slot("subject", subject.text),
     ...relations.map((token) => slot("relation", token.text))
   ]);
 }
@@ -178,10 +204,37 @@ function parseRelationBeforeSubjectFrame(
     return null;
   }
   return frame([
-    slot("value", value),
-    ...relations.map((token) => slot("relation", token.text)),
+    slot("value", value), ...relations.map((token) => slot("relation", token.text)),
     slot("subject", subject.text)
   ]);
+}
+
+function copularOsfLayout(
+  query: string,
+  tokens: readonly FactFrameSourceToken[],
+  auxiliaryIndex: number
+): RuleBasedQueryOsfLayout | null {
+  const valueTokens = tokens.slice(0, auxiliaryIndex);
+  const subjectTokens = tokens.slice(auxiliaryIndex + 1);
+  if (!isCopularMeasureLayout(valueTokens, subjectTokens)) return null;
+  const auxiliary = tokens[auxiliaryIndex]!;
+  return Object.freeze({
+    value: span(query, valueTokens[0]!.start, valueTokens[1]!.end),
+    subject: span(query, subjectTokens[0]!.start, subjectTokens.at(-1)!.end),
+    predicate: span(query, auxiliary.start, auxiliary.end),
+    constraints: Object.freeze([])
+  });
+}
+
+function isCopularMeasureLayout(
+  valueTokens: readonly FactFrameSourceToken[],
+  subjectTokens: readonly FactFrameSourceToken[]
+): boolean {
+  return valueTokens.length === 2 && valueTokens[0]!.normalized === "how" &&
+    COPULAR_MEASURE_WORDS.has(valueTokens[1]!.normalized) &&
+    subjectTokens.length >= 2 && subjectTokens.length <= MAX_COPULAR_SUBJECT_TOKENS &&
+    !subjectTokens.some(({ normalized }) => NEGATIONS.has(normalized) ||
+      CLAUSE_BOUNDARIES.has(normalized) || normalized === "and" || normalized === "or");
 }
 
 function takeSubject(
@@ -304,9 +357,12 @@ const MAX_VALUE_PREFIX_TOKENS = 4;
 const MAX_SUBJECT_TOKENS = 4;
 const MAX_RELATION_TOKENS = 3;
 const MAX_QUALIFIER_TOKENS = 3;
+const MAX_COPULAR_SUBJECT_TOKENS = 6;
 const TERMINAL_COMPLEMENT_MARKERS: ReadonlySet<string> = new Set([
   "with", "about"
 ]);
+const TAIL_CONSTRAINT_LINKERS: ReadonlySet<string> = new Set(["on"]);
+const COPULAR_MEASURE_WORDS: ReadonlySet<string> = new Set(["long"]);
 const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
   text: "", normalized: "", start: 0, end: 0
 });

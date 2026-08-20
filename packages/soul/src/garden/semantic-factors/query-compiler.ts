@@ -8,6 +8,7 @@ import {
   QueryFactFrameOsfObligationSchema,
   QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
   QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
   queryFactFrameOsfObligationPreimage,
   OpenSemanticFactorGraphProposalSchema,
   certifyQueryOsfSemanticCompleteness,
@@ -31,7 +32,7 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   "Preserve each predicate's semantic argument order; relation-local binding names need not match source evidence graphs.",
   "Place every WH phrase or other requested unknown as the structural variable in the exact predicate argument position it asks for; never append it as an extra argument or substitute it for a different participant.",
   "The full requested or WH phrase belongs exclusively to one variable; never emit a factor for that variable or any substring inside its surface.",
-  "Keep every explicit non-WH participant or constraint in its original position-preserving factor argument.",
+  "Keep every explicit non-WH participant or constraint in its required position-preserving factor argument.",
   "Follow required_graph_layout mechanically: predicate and factor entries must be factors, variable entries must be variables, and only an entry with result:true may appear in result_variable_ids.",
   'Structure example only: {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
 ].join(" ");
@@ -42,7 +43,7 @@ export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
   "Use exact contiguous source surfaces and omit character offsets; the runtime grounds surfaces.",
   "Represent every requested unknown as a structural variable and list its id in result_variable_ids.",
   "Keep dependent propositions together and preserve all explicit query constraints.",
-  "The supplied semantic completeness obligation and required_graph_layout are authoritative; satisfy the exact binary layout or return no usable graph.",
+  "The supplied semantic completeness obligation and required_graph_layout are authoritative; satisfy the exact ordered layout or return no usable graph.",
   "Do not emit world ontology categories, fixed roles, answer-family labels, aliases, or gold-derived vocabulary.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ].join(" ");
@@ -105,7 +106,7 @@ export function buildOpenSemanticFactorQueryUserPrompt(
   obligation: Readonly<QueryFactFrameOsfObligation>
 ): string {
   return JSON.stringify({
-    schema_version: 4,
+    schema_version: 5,
     source_kind: "query",
     source_text: sourceText,
     semantic_completeness_obligation: obligation,
@@ -124,6 +125,12 @@ function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) 
         surface: obligation.subject.surface,
         result: false as const
       },
+      ...obligation.constraints.map((constraint) => ({
+        position: constraint.position,
+        node_kind: "factor" as const,
+        surface: constraint.surface,
+        result: false as const
+      })),
       {
         position: obligation.value.position,
         node_kind: "variable" as const,
@@ -139,14 +146,15 @@ function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) 
 export function openSemanticFactorQueryRequestTemplatePreimage(): string {
   const sourceText = "What did A give?";
   const body = {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
     query_digest: prefixedSha256(sourceText),
-    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v1",
+    fact_frame_producer_operator_id: RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
     fact_frame_capture_digest: prefixedSha256(`capture:${sourceText}`),
     predicate: { surface: "give", source_span: [11, 15] as [number, number], position: 0 },
     subject: { surface: "A", source_span: [9, 10] as [number, number], position: 0 },
     value: { surface: "What", source_span: [0, 4] as [number, number], position: 1 },
+    constraints: [],
     arity: 2 as const
   };
   const obligation = QueryFactFrameOsfObligationSchema.parse({

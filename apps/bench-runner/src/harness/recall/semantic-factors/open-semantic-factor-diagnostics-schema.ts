@@ -44,7 +44,7 @@ const PropositionMatchSchema = z.object({
 
 const CompatibilityReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_factor_compatibility_v4"),
+  operator_id: z.literal("open_semantic_factor_compatibility_v5"),
   status: z.enum([
     "compatible",
     "incompatible",

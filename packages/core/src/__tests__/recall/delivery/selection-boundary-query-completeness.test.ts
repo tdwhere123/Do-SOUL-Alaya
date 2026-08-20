@@ -59,7 +59,7 @@ describe("selection boundary query completeness authority", () => {
   });
 
   it("rejects the prior boundary schema", async () => {
-    const old = { ...await certifiedBoundary(), schema_version: 3 };
+    const old = { ...await certifiedBoundary(), schema_version: 4 };
     expect(() => replayFineAssessmentSelectionBoundary(old as never)).toThrow();
   });
 });

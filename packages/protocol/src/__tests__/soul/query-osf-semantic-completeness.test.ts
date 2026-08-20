@@ -22,7 +22,31 @@ describe("query OSF semantic completeness", () => {
 
   it("certifies the correct binary result-variable layout", () => {
     expect(certify(binary("factor", "subject", "variable", "answer")))
-      .toMatchObject({ operator_id: "query_osf_semantic_completeness_v1", arity: 2 });
+      .toMatchObject({ operator_id: "query_osf_semantic_completeness_v2", arity: 2 });
+  });
+
+  it("certifies ordered constraints and rejects their omission or reversal", () => {
+    const query = "Where did I redeem a $5 coupon on coffee creamer?";
+    const obligation = constrainedObligation(query);
+    const graph = constrainedGraph();
+    expect(certifyQueryOsfSemanticCompleteness({
+      query_text: query, graph, obligation,
+      producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
+    })).toMatchObject({ arity: 3, constraints: obligation.constraints });
+    expect(certifyQueryOsfSemanticCompleteness({
+      query_text: query,
+      graph: { ...graph, propositions: [{ ...graph.propositions[0]!,
+        arguments: graph.propositions[0]!.arguments.slice(0, 2) }] },
+      obligation, producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
+    })).toBeNull();
+    expect(certifyQueryOsfSemanticCompleteness({
+      query_text: query,
+      graph: { ...graph, propositions: [{ ...graph.propositions[0]!, arguments: [
+        graph.propositions[0]!.arguments[1]!, graph.propositions[0]!.arguments[0]!,
+        graph.propositions[0]!.arguments[2]!
+      ] }] },
+      obligation, producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
+    })).toBeNull();
   });
 
   it("rejects an explicit third argument", () => {
@@ -70,23 +94,52 @@ function obligation() {
 function obligationFor(query: string, slots: Readonly<{
   predicate: { surface: string; source_span: readonly [number, number]; position: 0 };
   subject: { surface: string; source_span: readonly [number, number]; position: 0 };
-  value: { surface: string; source_span: readonly [number, number]; position: 1 };
+  value: { surface: string; source_span: readonly [number, number]; position: number };
+  constraints?: readonly {
+    surface: string; source_span: readonly [number, number]; position: number
+  }[];
 }>) {
+  const constraints = slots.constraints ?? [];
   const body = {
-    schema_version: 1 as const,
-    operator_id: "query_fact_frame_osf_obligation_v1" as const,
+    schema_version: 2 as const,
+    operator_id: "query_fact_frame_osf_obligation_v2" as const,
     query_digest: digest(query),
-    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v1",
+    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v2",
     fact_frame_capture_digest: digest("capture"),
     predicate: slots.predicate,
     subject: slots.subject,
     value: slots.value,
-    arity: 2 as const
+    constraints,
+    arity: constraints.length + 2
   };
   return QueryFactFrameOsfObligationSchema.parse({
     ...body,
     obligation_digest: digest(queryFactFrameOsfObligationPreimage(body))
   });
+}
+
+function constrainedObligation(query: string) {
+  return obligationFor(query, {
+    predicate: { surface: "redeem", source_span: [12, 18], position: 0 },
+    subject: { surface: "I", source_span: [10, 11], position: 0 },
+    constraints: [
+      { surface: "a $5 coupon on coffee creamer", source_span: [19, 48], position: 1 }
+    ],
+    value: { surface: "Where", source_span: [0, 5], position: 2 }
+  });
+}
+
+function constrainedGraph() {
+  return {
+    schema_version: 2 as const, source_kind: "query" as const,
+    factors: [factor("predicate", "redeem", "redeem"), factor("subject", "I", "i"),
+      factor("constraint", "a $5 coupon on coffee creamer", "coupon on coffee creamer")],
+    variables: [{ variable_id: "answer", surface: "Where" }],
+    result_variable_ids: ["answer"],
+    propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
+      arguments: [argument(0, "factor", "subject"), argument(1, "factor", "constraint"),
+        argument(2, "variable", "answer")] }]
+  };
 }
 
 function certifyRepeated(

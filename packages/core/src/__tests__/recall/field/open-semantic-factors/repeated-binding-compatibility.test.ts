@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { materializeOpenSemanticFactorFormation } from
   "../../../../semantic/open-semantic-factor-formation.js";
 import { materializeOpenSemanticFactorCompatibility } from
@@ -74,7 +75,84 @@ describe("open semantic repeated binding compatibility", () => {
       }]
     });
   });
+
+  it("requires exact arity for a current certified query producer", () => {
+    const receipt = materializeOpenSemanticFactorCompatibility({
+      evidence_capture: parallelEvidence(),
+      query_capture: parallelQuery("obtained", QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID)
+    });
+    expect(receipt).toMatchObject({
+      status: "incompatible",
+      proposition_match_candidates: []
+    });
+  });
+
+  it("requires exact surface at a certified constraint position", () => {
+    const tail = "a $5 coupon on coffee creamer";
+    const query = constrainedQuery(tail);
+    expect(materializeOpenSemanticFactorCompatibility({
+      evidence_capture: constrainedEvidence(tail),
+      query_capture: query
+    }).status).toBe("compatible");
+
+    const receipt = materializeOpenSemanticFactorCompatibility({
+      evidence_capture: constrainedEvidence("a $5 coupon on tea"),
+      query_capture: query
+    });
+
+    expect(receipt).toMatchObject({
+      status: "incompatible",
+      proposition_match_candidates: []
+    });
+  });
 });
+
+function constrainedEvidence(tailSurface: string) {
+  return formation("evidence", `I redeemed ${tailSurface} at Target.`, {
+    schema_version: 2,
+    source_kind: "evidence",
+    factors: [
+      factor("subject", "I", "i"),
+      factor("predicate", "redeemed", "redeem"),
+      factor("tail", tailSurface, "coupon"),
+      factor("location", "Target", "target")
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "redeem-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        argument(0, "subject", "factor", "subject"),
+        argument(1, "constraint", "factor", "tail"),
+        argument(2, "location", "factor", "location")
+      ]
+    }]
+  });
+}
+
+function constrainedQuery(tailSurface: string) {
+  return formation("query", `Where did I redeem ${tailSurface}?`, {
+    schema_version: 2,
+    source_kind: "query",
+    factors: [
+      factor("subject", "I", "i"),
+      factor("predicate", "redeem", "redeem"),
+      factor("tail", tailSurface, "coupon")
+    ],
+    variables: [{ variable_id: "answer", surface: "Where" }],
+    result_variable_ids: ["answer"],
+    propositions: [{
+      proposition_id: "redeem-query",
+      predicate_factor_id: "predicate",
+      arguments: [
+        argument(0, "subject", "factor", "subject"),
+        argument(1, "constraint", "factor", "tail"),
+        argument(2, "location", "variable", "answer")
+      ]
+    }]
+  }, QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID);
+}
 
 function parallelEvidence() {
   return formation("evidence", "I use Atlas and Gaia.", {
@@ -100,7 +178,7 @@ function parallelEvidence() {
   });
 }
 
-function parallelQuery(bindingIdentity: string) {
+function parallelQuery(bindingIdentity: string, producerOperatorId?: string) {
   return formation("query", "What do I use?", {
     schema_version: 2,
     source_kind: "query",
@@ -118,20 +196,21 @@ function parallelQuery(bindingIdentity: string) {
         argument(1, bindingIdentity, "variable", "answer")
       ]
     }]
-  });
+  }, producerOperatorId);
 }
 
 function formation(
   sourceKind: "evidence" | "query",
   sourceText: string,
-  graph: unknown
+  graph: unknown,
+  producerOperatorId = "open-factor-test-producer-v1"
 ) {
   return materializeOpenSemanticFactorFormation({
     source_kind: sourceKind,
     source_text: sourceText,
     proposal: {
       schema_version: 1,
-      producer_operator_id: "open-factor-test-producer-v1",
+      producer_operator_id: producerOperatorId,
       source_text: sourceText,
       graph
     }

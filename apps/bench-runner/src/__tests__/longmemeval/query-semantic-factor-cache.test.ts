@@ -52,7 +52,7 @@ describe("query semantic factor cache", () => {
 
       expect(loaded.binding.entry_count).toBe(1);
       expect(loaded.binding.compiler_operator_id)
-        .toBe("open_semantic_factor_query_compiler_v7");
+        .toBe("open_semantic_factor_query_compiler_v8");
       expect(loaded.binding.request_template_sha256)
         .toBe(prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE));
       expect(loaded.captures_by_source_text.get(sourceText)).toEqual(capture);
@@ -62,7 +62,7 @@ describe("query semantic factor cache", () => {
     }
   });
 
-  it("rejects an honestly resealed prior v6 compiler cache", async () => {
+  it("rejects an honestly resealed prior v7 compiler cache", async () => {
     const sourceText = SOURCES[0];
     const capture = materializeOpenSemanticFactorFormation({
       source_kind: "query",
@@ -78,7 +78,7 @@ describe("query semantic factor cache", () => {
         receipt: null
       }]
     });
-    const legacy = resealLegacyV6(cache);
+    const legacy = resealLegacyV7(cache);
     const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-cache-"));
     const outputPath = join(root, "query-cache.json");
     try {
@@ -424,12 +424,12 @@ function responseSchemaFailure(): Error {
   return error;
 }
 
-function resealLegacyV6(cache: unknown): unknown {
+function resealLegacyV7(cache: unknown): unknown {
   const legacy = structuredClone(cache) as Record<string, unknown>;
-  legacy.compiler_operator_id = "open_semantic_factor_query_compiler_v6";
+  legacy.compiler_operator_id = "open_semantic_factor_query_compiler_v7";
   legacy.system_prompt_sha256 =
-    "sha256:c3bbc7867fa4bcb7258e97c3eb905d14b4d8e9c73a5f53d3a5c122daa4a7e14e";
-  legacy.request_template_sha256 = "sha256:63fc3a8f49176784141251b719d3568c089184abe317f10e0cd0fd06dbbf84d6";
+    "sha256:da13495a266e25890113ae8a1f5560c88fd26026d1432217592728482cd88c70";
+  legacy.request_template_sha256 = "sha256:92dea9f910b9d06abdc54af40444602bca23041b43eda4aa9a93c92a557e0aa2";
   const { cache_content_sha256: _cacheDigest, ...cacheBody } = legacy;
   legacy.cache_content_sha256 = prefixedSha256(stableStringify(cacheBody));
   return legacy;

@@ -8,11 +8,13 @@ import {
 } from "./open-semantic-factor-graph.js";
 
 export const QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID =
-  "query_fact_frame_osf_obligation_v1" as const;
+  "query_fact_frame_osf_obligation_v2" as const;
 export const QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID =
-  "query_osf_semantic_completeness_v1" as const;
+  "query_osf_semantic_completeness_v2" as const;
 export const QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v7" as const;
+  "open_semantic_factor_query_compiler_v8" as const;
+export const RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID =
+  "rule_based_query_fact_frame_extractor_v2" as const;
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const SlotSchema = z.object({
@@ -22,7 +24,7 @@ const SlotSchema = z.object({
 }).strict().readonly();
 
 export const QueryFactFrameOsfObligationSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   operator_id: z.literal(QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID),
   query_digest: DigestSchema,
   fact_frame_producer_operator_id: z.string().min(1),
@@ -30,12 +32,13 @@ export const QueryFactFrameOsfObligationSchema = z.object({
   predicate: SlotSchema,
   subject: SlotSchema,
   value: SlotSchema,
-  arity: z.literal(2),
+  constraints: z.array(SlotSchema).max(1).readonly(),
+  arity: z.number().int().min(2).max(3),
   obligation_digest: DigestSchema
-}).strict().readonly();
+}).strict().superRefine(validateObligationLayout).readonly();
 
 export const QueryOsfSemanticCompletenessReceiptSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   operator_id: z.literal(QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID),
   query_digest: DigestSchema,
   fact_frame_producer_operator_id: z.string().min(1),
@@ -46,10 +49,11 @@ export const QueryOsfSemanticCompletenessReceiptSchema = z.object({
   predicate: SlotSchema,
   subject: SlotSchema,
   value: SlotSchema,
-  arity: z.literal(2),
+  constraints: z.array(SlotSchema).max(1).readonly(),
+  arity: z.number().int().min(2).max(3),
   osf_graph_digest: DigestSchema,
   receipt_digest: DigestSchema
-}).strict().readonly();
+}).strict().superRefine(validateObligationLayout).readonly();
 
 export type QueryFactFrameOsfObligation =
   z.infer<typeof QueryFactFrameOsfObligationSchema>;
@@ -67,7 +71,18 @@ export type SemanticCompletenessSha256 = (preimage: string) => string;
 export function queryFactFrameOsfObligationPreimage(value: Omit<
   QueryFactFrameOsfObligation, "obligation_digest"
 >): string {
-  return JSON.stringify(value);
+  return JSON.stringify({
+    schema_version: value.schema_version,
+    operator_id: value.operator_id,
+    query_digest: value.query_digest,
+    fact_frame_producer_operator_id: value.fact_frame_producer_operator_id,
+    fact_frame_capture_digest: value.fact_frame_capture_digest,
+    predicate: value.predicate,
+    subject: value.subject,
+    value: value.value,
+    constraints: value.constraints,
+    arity: value.arity
+  });
 }
 
 export function queryOsfSemanticCompletenessReceiptPreimage(value: Omit<
@@ -89,7 +104,7 @@ export function certifyQueryOsfSemanticCompleteness(input: Readonly<{
   const grounded = resolveGroundedGraph(input.graph, input.query_text);
   if (grounded === null || !graphSatisfiesObligation(grounded, obligation)) return null;
   const body = {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
     query_digest: obligation.query_digest,
     fact_frame_producer_operator_id: obligation.fact_frame_producer_operator_id,
@@ -100,6 +115,7 @@ export function certifyQueryOsfSemanticCompleteness(input: Readonly<{
     predicate: obligation.predicate,
     subject: obligation.subject,
     value: obligation.value,
+    constraints: obligation.constraints,
     arity: obligation.arity,
     osf_graph_digest: digest(JSON.stringify(grounded), input.sha256)
   };
@@ -141,16 +157,45 @@ function graphSatisfiesObligation(
   const predicate = graph.factors.find(({ factor_id }) =>
     factor_id === proposition.predicate_factor_id);
   const subject = proposition.arguments.find(({ position }) => position === 0);
-  const value = proposition.arguments.find(({ position }) => position === 1);
+  const result = proposition.arguments.find(({ position }) =>
+    position === obligation.value.position);
   return proposition.arguments.length === obligation.arity &&
     nodeMatches(predicate, obligation.predicate) &&
     subject?.reference_kind === "factor" &&
     nodeMatches(graph.factors.find(({ factor_id }) =>
       factor_id === subject.reference_id), obligation.subject) &&
-    value?.reference_kind === "variable" &&
-    graph.result_variable_ids[0] === value.reference_id &&
+    constraintsMatch(graph, proposition.arguments, obligation.constraints) &&
+    result?.reference_kind === "variable" &&
+    graph.result_variable_ids[0] === result.reference_id &&
     nodeMatches(graph.variables.find(({ variable_id }) =>
-      variable_id === value.reference_id), obligation.value);
+      variable_id === result.reference_id), obligation.value);
+}
+
+function constraintsMatch(
+  graph: OpenSemanticFactorGraph,
+  args: OpenSemanticFactorGraph["propositions"][number]["arguments"],
+  constraints: QueryFactFrameOsfObligation["constraints"]
+): boolean {
+  return constraints.every((constraint) => {
+    const argument = args.find(({ position }) => position === constraint.position);
+    return argument?.reference_kind === "factor" &&
+      nodeMatches(graph.factors.find(({ factor_id }) =>
+        factor_id === argument.reference_id), constraint);
+  });
+}
+
+function validateObligationLayout(
+  value: { subject: { position: number }; value: { position: number };
+    constraints: readonly { position: number }[]; arity: number },
+  context: z.RefinementCtx
+): void {
+  const positions = value.constraints.map(({ position }) => position);
+  const expected = positions.every((position, index) => position === index + 1) &&
+    value.subject.position === 0 && value.value.position === positions.length + 1 &&
+    value.arity === positions.length + 2;
+  if (!expected) context.addIssue({
+    code: "custom", message: "query OSF obligation positions do not match arity"
+  });
 }
 
 function nodeMatches(

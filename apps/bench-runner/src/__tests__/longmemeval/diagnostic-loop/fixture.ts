@@ -136,7 +136,7 @@ async function trackingMissLedgerDetails(
     passed: false
   };
   await writeFile(paths.missLedger!, `${JSON.stringify({
-    schema_version: 4,
+    schema_version: 5,
     kind: "diagnostic_100q_f0f2_vs_cached_f3",
     physical_calls: 0,
     five_hundred_q_closed: true,

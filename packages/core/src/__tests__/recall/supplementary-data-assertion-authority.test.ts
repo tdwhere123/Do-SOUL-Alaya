@@ -76,7 +76,7 @@ describe("collectSupplementaryData assertion authority", () => {
 
     expect(result.queryOpenSemanticFactorFormation).toMatchObject({ status: "formed" });
     expect(result.queryOpenSemanticFactorCompletenessReceipt).toMatchObject({
-      operator_id: "query_osf_semantic_completeness_v1",
+      operator_id: "query_osf_semantic_completeness_v2",
       subject: { surface: "I", position: 0 },
       value: { surface: "What", position: 1 }
     });

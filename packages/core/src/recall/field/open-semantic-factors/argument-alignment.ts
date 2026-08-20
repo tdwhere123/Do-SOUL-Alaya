@@ -3,7 +3,10 @@ import type {
   OpenSemanticFactor,
   OpenSemanticProposition
 } from "@do-soul/alaya-protocol";
-import { openSemanticFactorsOverlap } from "./factor-identity.js";
+import {
+  openSemanticFactorSurfacesEqual,
+  openSemanticFactorsOverlap
+} from "./factor-identity.js";
 
 export const OPEN_SEMANTIC_ARGUMENT_ALIGNMENT_LIMIT = 256;
 
@@ -41,6 +44,7 @@ export function enumerateOpenSemanticArgumentAlignments(params: Readonly<{
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly variableBindings: ReadonlyMap<string, string>;
+  readonly requireExactPositions?: boolean;
 }>): readonly Readonly<OpenSemanticArgumentAlignment>[] {
   const alignments: OpenSemanticArgumentAlignment[] = [];
   searchArgumentAlignments({
@@ -59,6 +63,7 @@ function searchArgumentAlignments(params: Readonly<{
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly variableBindings: ReadonlyMap<string, string>;
+  readonly requireExactPositions?: boolean;
   readonly queryIndex: number;
   readonly usedEvidencePositions: ReadonlySet<number>;
   readonly mappings: readonly Readonly<OpenSemanticFactorArgumentMapping>[];
@@ -79,7 +84,8 @@ function searchArgumentAlignments(params: Readonly<{
     if (evidenceFactor === undefined) continue;
     const mapped = mapArgument(
       queryArgument, evidenceArgument, evidenceFactor,
-      params.queryFactors, params.variableBindings
+      params.queryFactors, params.variableBindings,
+      isCertifiedConstraintArgument(params.query, queryArgument, params.requireExactPositions)
     );
     if (mapped === null) continue;
     searchArgumentAlignments({
@@ -99,6 +105,7 @@ function selectEvidenceArguments(
   params: Readonly<{
     readonly evidence: Readonly<OpenSemanticProposition>;
     readonly usedEvidencePositions: ReadonlySet<number>;
+    readonly requireExactPositions?: boolean;
   }>,
   queryArgument: Readonly<OpenSemanticArgument>
 ): readonly Readonly<OpenSemanticArgument>[] {
@@ -109,6 +116,7 @@ function selectEvidenceArguments(
   if (positional === undefined) return [];
   const structurallyEligible = factorArguments.filter((argument) =>
     argument.binding_identity === positional.binding_identity);
+  if (params.requireExactPositions === true) return [positional];
   return structurallyEligible.filter((argument) =>
     !params.usedEvidencePositions.has(argument.position));
 }
@@ -118,7 +126,8 @@ function mapArgument(
   evidenceArgument: Readonly<OpenSemanticArgument>,
   evidenceFactor: Readonly<OpenSemanticFactor>,
   queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>,
-  currentVariableBindings: ReadonlyMap<string, string>
+  currentVariableBindings: ReadonlyMap<string, string>,
+  requireExactSurface: boolean
 ): Readonly<{
   mapping: OpenSemanticFactorArgumentMapping;
   variableBindings: ReadonlyMap<string, string>;
@@ -137,6 +146,7 @@ function mapArgument(
   }
   const queryFactor = queryFactors.get(queryArgument.reference_id);
   if (queryFactor === undefined ||
+      requireExactSurface && !openSemanticFactorSurfacesEqual(queryFactor, evidenceFactor) ||
       !openSemanticFactorsOverlap(queryFactor, evidenceFactor)) return null;
   return Object.freeze({
     mapping: freezeArgumentMapping(
@@ -144,6 +154,20 @@ function mapArgument(
     ),
     variableBindings: new Map(currentVariableBindings)
   });
+}
+
+function isCertifiedConstraintArgument(
+  query: Readonly<OpenSemanticProposition>,
+  argument: Readonly<OpenSemanticArgument>,
+  requireExactPositions?: boolean
+): boolean {
+  if (requireExactPositions !== true || argument.reference_kind !== "factor" ||
+      argument.position === 0) return false;
+  const resultArguments = query.arguments.filter((candidate) =>
+    candidate.reference_kind === "variable");
+  if (resultArguments.length !== 1) return true;
+  const resultPosition = resultArguments[0]?.position;
+  return resultPosition === undefined || argument.position < resultPosition;
 }
 
 function freezeArgumentMapping(

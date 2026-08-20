@@ -69,12 +69,12 @@ function assertSelectionBoundaryEnvelope(
   if (schemaVersion === 2) {
     throwSelectionBoundaryFidelityMismatch(
       "legacy selection boundary schema_version=2 is non-authoritative; " +
-      "versioned Select_Gamma selection receipt requires schema_version=4"
+      "versioned query completeness receipt requires schema_version=5"
     );
   }
-  if (schemaVersion !== 4) {
+  if (schemaVersion !== 5) {
     throwSelectionBoundaryFidelityMismatch(
-      `expected schema_version=4, actual ${String(schemaVersion)}`
+      `expected schema_version=5, actual ${String(schemaVersion)}`
     );
   }
   assertSelectionBoundaryJsonValue(boundary);

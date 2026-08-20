@@ -30,7 +30,7 @@ describe("open semantic factor query compiler", () => {
       graph: queryGraph(), semantic_completeness_receipt: expect.any(Object)
     });
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
-    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v7");
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v8");
     const request = extractor.extract.mock.calls[0]?.[0];
     assertCompilerRequest(extractor.extract, request);
     assertPromptContract(request);
@@ -109,6 +109,23 @@ describe("open semantic factor query compiler", () => {
     await expect(compiler.compile("What degree did I graduate with?", g5QueryObligation()))
       .resolves.toMatchObject({ graph: g5CorrectedQueryGraph() });
   });
+
+  it("renders every grounded constraint before the unique result variable", async () => {
+    const query = "Where did I redeem a $5 coupon on coffee creamer?";
+    const obligation = constrainedObligation(query);
+    const extractor = responseExtractor(constrainedGraph());
+    const compiler = createOpenSemanticFactorQueryCompiler({ extractor });
+    await expect(compiler.compile(query, obligation)).resolves.toMatchObject({
+      graph: constrainedGraph()
+    });
+    const userPrompt = JSON.parse(extractor.extract.mock.calls[0]![0].userPrompt);
+    expect(userPrompt.required_graph_layout.arguments).toEqual([
+      { position: 0, node_kind: "factor", surface: "I", result: false },
+      { position: 1, node_kind: "factor",
+        surface: "a $5 coupon on coffee creamer", result: false },
+      { position: 2, node_kind: "variable", surface: "Where", result: true }
+    ]);
+  });
 });
 
 type ExtractRequest = Parameters<SignalExtractor["extract"]>[0];
@@ -120,7 +137,7 @@ function assertCompilerRequest(
   expect(extract).toHaveBeenCalledWith(expect.objectContaining({
     systemPrompt: OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
     userPrompt: JSON.stringify({
-      schema_version: 4,
+      schema_version: 5,
       source_kind: "query",
       source_text: QUERY,
       semantic_completeness_obligation: QUERY_OBLIGATION,
@@ -172,11 +189,11 @@ function assertRequestTemplateContract(): void {
     required_graph_layout: Record<string, unknown>;
   };
   expect(template).toMatchObject({
-    schema_version: 4, source_kind: "query", source_text: "What did A give?",
+    schema_version: 5, source_kind: "query", source_text: "What did A give?",
     semantic_completeness_obligation: {
-      operator_id: "query_fact_frame_osf_obligation_v1",
+      operator_id: "query_fact_frame_osf_obligation_v2",
       subject: { surface: "A", position: 0 },
-      value: { surface: "What", position: 1 }, arity: 2
+      value: { surface: "What", position: 1 }, constraints: [], arity: 2
     },
     required_graph_layout: {
       schema_version: 1,
@@ -253,17 +270,51 @@ function obligation(
   valueSpan: readonly [number, number]
 ): QueryFactFrameOsfObligation {
   const body = {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
     query_digest: digest(query),
-    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v1",
+    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v2",
     fact_frame_capture_digest: digest(`capture:${query}`),
     predicate: { surface: predicate, source_span: predicateSpan, position: 0 },
     subject: { surface: subject, source_span: subjectSpan, position: 0 },
     value: { surface: value, source_span: valueSpan, position: 1 },
+    constraints: [],
     arity: 2 as const
   };
   return { ...body, obligation_digest: digest(queryFactFrameOsfObligationPreimage(body)) };
+}
+
+function constrainedObligation(query: string): QueryFactFrameOsfObligation {
+  const body = {
+    schema_version: 2 as const,
+    operator_id: QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+    query_digest: digest(query),
+    fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v2",
+    fact_frame_capture_digest: digest(`capture:${query}`),
+    predicate: { surface: "redeem", source_span: [12, 18] as const, position: 0 },
+    subject: { surface: "I", source_span: [10, 11] as const, position: 0 },
+    constraints: [
+      { surface: "a $5 coupon on coffee creamer",
+        source_span: [19, 48] as const, position: 1 }
+    ],
+    value: { surface: "Where", source_span: [0, 5] as const, position: 2 },
+    arity: 3
+  };
+  return { ...body, obligation_digest: digest(queryFactFrameOsfObligationPreimage(body)) };
+}
+
+function constrainedGraph() {
+  return {
+    schema_version: 2 as const, source_kind: "query" as const,
+    factors: [factor("predicate", "redeem", "redeem"), factor("subject", "I", "i"),
+      factor("constraint", "a $5 coupon on coffee creamer", "coupon on coffee creamer")],
+    variables: [{ variable_id: "answer", surface: "Where" }],
+    result_variable_ids: ["answer"],
+    propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
+      arguments: [argument(0, "factor", "subject", "agent"),
+        argument(1, "factor", "constraint", "constraint"),
+        argument(2, "variable", "answer", "location")] }]
+  };
 }
 
 function digest(value: string): string {

@@ -140,7 +140,7 @@ describe("open semantic compatibility evaluation budget", () => {
     expect(verifyOpenSemanticFactorCompatibilityTrace(trace)).toBe(trace);
   });
 
-  it("rejects a resealed trace containing a legacy v3 compatibility receipt", () => {
+  it("rejects a resealed trace containing a legacy v4 compatibility receipt", () => {
     const query = queryGraph();
     const current = materializeOpenSemanticFactorCompatibilityTrace({
       query_capture: query,
@@ -148,7 +148,7 @@ describe("open semantic compatibility evaluation budget", () => {
     });
     const legacy = resealNestedCompatibilityOperator(
       current,
-      "open_semantic_factor_compatibility_v3"
+      "open_semantic_factor_compatibility_v4"
     );
 
     expect(() => verifyOpenSemanticFactorCompatibilityTrace(legacy))
