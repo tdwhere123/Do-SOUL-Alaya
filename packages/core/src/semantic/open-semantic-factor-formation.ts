@@ -13,12 +13,16 @@ export function materializeOpenSemanticFactorFormation(params: Readonly<{
   readonly source_kind: "evidence" | "query";
   readonly source_text: string | null;
   readonly proposal?: unknown;
+  readonly negative_status?: Exclude<OpenSemanticFactorFormationCapture["status"], "formed">;
 }>): OpenSemanticFactorFormationCapture {
   const source = params.source_text;
   if (source === null || source.trim().length === 0) {
     return createCapture("ineligible", null, null, null);
   }
   const sourceSha256 = `sha256:${sha256(source)}`;
+  if (params.negative_status !== undefined) {
+    return createCapture(params.negative_status, null, sourceSha256, null);
+  }
   if (params.proposal === undefined) {
     return createCapture("unavailable", null, sourceSha256, null);
   }

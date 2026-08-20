@@ -8,7 +8,7 @@ import {
   type EventLogEntry,
   type FactorIncidencePort,
   type FieldContractSha256,
-  type OpenSemanticFactorFormationProposal,
+  type OpenSemanticFactorFormationAdmission,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
@@ -31,7 +31,7 @@ export async function createEvidenceCapsule(input: Readonly<{
   >;
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
   readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
   readonly evidenceCapsuleRepo: {
     create(
       capsule: EvidenceCapsule,
@@ -101,7 +101,7 @@ function planOptionalFormation(
   input: Readonly<{
     readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
     readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-    readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+    readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
     readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
     readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
@@ -124,7 +124,8 @@ function planOptionalFormation(
     });
     return planEvidenceFormation({
       evidence,
-      searchProjections: []
+      searchProjections: [],
+      semanticFactorProposal: input.semanticFactorProposal
     });
   }
 }

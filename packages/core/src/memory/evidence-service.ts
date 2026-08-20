@@ -12,8 +12,8 @@ import {
   type EventLogEntry,
   type FactorIncidencePort,
   type FieldContractSha256,
+  type OpenSemanticFactorFormationAdmission,
   type OpenSemanticFactorFormationCapture,
-  type OpenSemanticFactorFormationProposal,
   type SourceAdmissionPort,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
@@ -161,7 +161,7 @@ export class EvidenceService {
     input: EvidenceCapsuleInput,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
     factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
-    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
+    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>
   ): Promise<Readonly<EvidenceCapsule>> {
     return await createEvidenceCapsule({
       capsuleInput: input,

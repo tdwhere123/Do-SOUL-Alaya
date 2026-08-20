@@ -36,7 +36,7 @@ describe("query-only hydration gap warnings", () => {
 
     const trace = result.diagnostics?.field_projection_trace;
     expect(trace?.candidate_keys).toEqual([EVIDENCE_ID, UNBOUND_EVIDENCE_ID]);
-    expect(fieldProjectionIds(result)).toEqual([LIVE_B_ID, MEMORY_ID]);
+    expect(fieldProjectionIds(result)).toEqual([MEMORY_ID, LIVE_B_ID]);
     expect(trace).not.toHaveProperty("selected_but_unbound");
     expect(trace).not.toHaveProperty("hydrated_but_dropped");
     expect(warnings).toEqual([

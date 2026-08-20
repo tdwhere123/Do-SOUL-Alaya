@@ -7,6 +7,8 @@ import {
 } from "../../bench/provider/catalog.js";
 import { probeProviderProtocol } from "../../bench/provider/protocol-probe.js";
 import { proveProviderZeroCallReplay } from "../../bench/provider/replay-proof.js";
+import { resolveDiagnosticLoopIdentity } from
+  "../../bench/diagnostic-loop/authority/identity.js";
 import { verifyProviderPreflightReplayReceiptBinding } from
   "../../bench/provider/replay-receipt.js";
 import { retireObsoleteCache } from "../../bench/provider/retire-obsolete-cache.js";
@@ -63,7 +65,13 @@ async function runReplay(args: ReadonlyArray<string>): Promise<0> {
   assertCacheOnlyEnvironment(process.env);
   const verifiedManifest = await verifyCanonicalReplayRequestManifest(requestManifest);
   const request = verifiedManifest.request;
-  const proof = proveProviderZeroCallReplay({ request });
+  const identity = await resolveDiagnosticLoopIdentity(request);
+  const proof = await proveProviderZeroCallReplay({
+    request,
+    ...(identity.query_factor_cache === undefined
+      ? {}
+      : { expectedFileSha256: identity.query_factor_cache.file_sha256 })
+  });
   const receipt = verifyProviderPreflightReplayReceiptBinding({
     schema_version: 2,
     kind: "provider_preflight_replay_receipt",

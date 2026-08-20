@@ -12,8 +12,10 @@ import { hasCompleteExtractionFillAuthority } from
   "../../extraction/fill/fill-authority.js";
 import type { ExtractionContentClosureIndex } from
   "../../extraction/content-closure.js";
-import { readQuerySemanticFactorCache } from
+import { bindQuerySemanticFactorCacheFileToRequest } from
   "../../query-factors/query-semantic-factor-cache.js";
+import type { DiagnosticQueryFactorCacheIdentity } from
+  "../../query-factors/query-semantic-factor-cache-identity.js";
 import {
   snapshotExtractionAuthorityPath,
   snapshotManifestPath,
@@ -86,7 +88,7 @@ export interface ResolvedDiagnosticLoopIdentity {
   readonly request: DiagnosticLoopIdentity;
   readonly extraction_cache?: DiagnosticExtractionCacheIdentity;
   readonly snapshot?: DiagnosticSnapshotIdentity;
-  readonly query_factor_cache?: Readonly<Record<string, unknown>>;
+  readonly query_factor_cache?: DiagnosticQueryFactorCacheIdentity;
   readonly treatment_exposure_policy: typeof CACHED_F3_EXPOSURE_POLICY;
 }
 
@@ -111,7 +113,7 @@ export async function resolveDiagnosticLoopIdentity(
     : await resolveSnapshotIdentity(request.snapshotPath, request.variant);
   const query = request.treatmentFactorCachePath === undefined
     ? undefined
-    : await resolveQueryFactorCacheIdentity(request.treatmentFactorCachePath);
+    : await resolveQueryFactorCacheIdentity(request);
   return {
     schema_version: 3,
     canonical_mode: "cache_only",
@@ -256,15 +258,20 @@ function readSnapshotAuthority(snapshotPath: string) {
   );
 }
 
-async function resolveQueryFactorCacheIdentity(path: string) {
-  const canonicalPath = realpathSync(resolve(path));
-  const loaded = await readQuerySemanticFactorCache({
-    path: canonicalPath,
-    required_source_texts: []
-  });
+async function resolveQueryFactorCacheIdentity(
+  request: DiagnosticLoopRequest
+): Promise<DiagnosticQueryFactorCacheIdentity> {
+  const path = request.treatmentFactorCachePath;
+  if (path === undefined) {
+    throw new Error("query semantic factor cache path is required");
+  }
+  if (request.snapshotPath === undefined) {
+    throw new Error("query semantic factor cache current bind requires a request source set");
+  }
+  const bound = await bindQuerySemanticFactorCacheFileToRequest(path, request);
   return {
-    path: canonicalPath,
-    file_sha256: await sha256File(canonicalPath),
-    ...loaded.binding
+    path: resolve(path),
+    file_sha256: bound.file_sha256,
+    ...bound.binding
   };
 }

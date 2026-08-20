@@ -126,6 +126,32 @@ export const OpenSemanticFactorFormationProposalSchema = z.object({
 }).strict().readonly();
 export type OpenSemanticFactorFormationProposal =
   z.infer<typeof OpenSemanticFactorFormationProposalSchema>;
+export const OpenSemanticFactorFormationRejectedAdmissionSchema = z.object({
+  kind: z.literal("rejected")
+}).strict().readonly();
+export type OpenSemanticFactorFormationRejectedAdmission =
+  z.infer<typeof OpenSemanticFactorFormationRejectedAdmissionSchema>;
+export const OpenSemanticFactorFormationAdmissionSchema = z.union([
+  OpenSemanticFactorFormationProposalSchema,
+  OpenSemanticFactorFormationRejectedAdmissionSchema
+]);
+export type OpenSemanticFactorFormationAdmission =
+  z.infer<typeof OpenSemanticFactorFormationAdmissionSchema>;
+export const OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION = Object.freeze({
+  kind: "rejected" as const
+});
+
+export function isRejectedOpenSemanticFactorFormationAdmission(
+  value: unknown
+): value is OpenSemanticFactorFormationRejectedAdmission {
+  return OpenSemanticFactorFormationRejectedAdmissionSchema.safeParse(value).success;
+}
+
+export function isOpenSemanticFactorFormationProposal(
+  value: unknown
+): value is OpenSemanticFactorFormationProposal {
+  return OpenSemanticFactorFormationProposalSchema.safeParse(value).success;
+}
 
 export const OpenSemanticFactorFormationStatusSchema = z.enum([
   "formed",

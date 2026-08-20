@@ -20,7 +20,7 @@ describe("open semantic factor diagnostics schema cutover", () => {
     const trace = coreCompatibilityTrace();
 
     expect(trace.entries[0]?.receipt.operator_id)
-      .toBe("open_semantic_factor_compatibility_v5");
+      .toBe("open_semantic_factor_compatibility_v6");
     expect(trace.operator_id).toBe("open_semantic_factor_compatibility_trace_v2");
     expect(trace.schema_version).toBe(2);
     expect(OpenSemanticFactorCompatibilityTraceSchema.parse(trace)).toEqual(trace);
@@ -141,6 +141,17 @@ describe("open semantic factor diagnostics schema cutover", () => {
       operator_id: "open_semantic_solution_membership_activation_v1"
     }).success).toBe(false);
     expect(trace.schema_version).toBe(2);
+  });
+
+  it("rejects a pairwise receipt that claims the join operator", () => {
+    const current = coreCompatibilityTrace();
+    const forged = structuredClone(current);
+    const match = forged.entries[0]?.receipt.proposition_matches[0] ??
+      forged.entries[0]?.receipt.proposition_match_candidates[0];
+    expect(match).toBeDefined();
+    match!.predicate_alignment.operator_id = "source_bound_join_identity_v1";
+    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(forged).success)
+      .toBe(false);
   });
 });
 

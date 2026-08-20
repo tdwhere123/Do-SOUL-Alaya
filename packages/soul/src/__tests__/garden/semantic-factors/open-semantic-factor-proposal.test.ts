@@ -7,6 +7,8 @@ import {
   GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
   buildOpenSemanticFactorFormationProposal
 } from "../../../garden/grounding/semantic-factors/formation-proposal.js";
+import { classifyOpenSemanticFactorFormationEligibility } from
+  "../../../garden/grounding/semantic-factors/formation-eligibility.js";
 
 const SOURCE = "I used Atlas for research.";
 
@@ -72,6 +74,19 @@ describe("open semantic factor formation proposal", () => {
     });
     expect(grounded.audit).toMatchObject({
       reasons: expect.arrayContaining(["proposed_semantic_factor_graph_not_source_grounded"])
+    });
+    expect(buildOpenSemanticFactorFormationProposal({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      semantic_factor_graph_projection: grounded.draft.semantic_factor_graph_projection
+    })).toBeUndefined();
+    expect(classifyOpenSemanticFactorFormationEligibility({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      semantic_factor_graph_projection: grounded.draft.semantic_factor_graph_projection
+    })).toEqual({
+      kind: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
     });
   });
 

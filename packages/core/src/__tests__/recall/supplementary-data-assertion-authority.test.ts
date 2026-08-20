@@ -102,6 +102,67 @@ describe("collectSupplementaryData assertion authority", () => {
     expect(result.evidenceSemanticActivationsByCandidateKey.size).toBe(0);
   });
 
+  it("keeps rejected evidence formation attributed and out of matchable OSF", async () => {
+    const evidenceText = "I used Atlas.";
+    const queryText = "What did I use?";
+    const evidence = createEvidenceCapsule({
+      gist: `User: ${evidenceText}`,
+      excerpt: evidenceText
+    });
+    const candidate = createMemoryEntry({
+      object_id: "memory-rejected-osf",
+      content: evidenceText,
+      evidence_refs: [evidence.object_id]
+    });
+    const rejected = materializeOpenSemanticFactorFormation({
+      source_kind: "evidence",
+      source_text: evidenceText,
+      negative_status: "rejected"
+    });
+
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText,
+      openSemanticFactorExtractionPort: {
+        operator_id: "test_open_semantic_factor_v1",
+        extract: async () => null,
+        extractCertifiedQuery: async (sourceText, obligation) => {
+          const graph = binaryUseQuerySemanticGraph();
+          const receipt = certifyQueryOsfSemanticCompleteness({
+            query_text: sourceText, graph, obligation,
+            producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+            sha256: (value) => createHash("sha256").update(value, "utf8").digest("hex")
+          });
+          return receipt === null ? null : {
+            schema_version: 1,
+            producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+            graph,
+            semantic_completeness_receipt: receipt
+          };
+        }
+      },
+      evidenceSearchPort: {
+        searchByKeyword: async () => [],
+        findByIds: async () => [evidence],
+        findRecallQualifiedByIds: async () => [{
+          capsule: evidence,
+          verified_user_projection: false,
+          semantic_factor_formation: rejected
+        }],
+        findRecallQualifiedFactKeysByIds: async () => []
+      }
+    });
+
+    expect(rejected).toMatchObject({ status: "rejected", graph: null });
+    expect(result.semanticFactorFormationsByEvidenceId[evidence.object_id]).toEqual(rejected);
+    expect(result.openSemanticFactorCompatibilityTrace).toMatchObject({
+      incomparable_seal: "rejected",
+      matchable_evidence_count: 0,
+      entries: []
+    });
+  });
+
   it("derives a unique User assertion receipt from the loaded evidence capsule", async () => {
     const content = "Over a year of uncertainty was really tough.";
     const evidence = createEvidenceCapsule({

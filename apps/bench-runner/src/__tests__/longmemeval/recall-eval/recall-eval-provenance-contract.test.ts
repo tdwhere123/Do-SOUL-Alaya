@@ -2,7 +2,13 @@ import { arch, platform } from "node:os";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { createLongMemEvalSelectionContractIdentity } from "@do-soul/alaya-eval";
+import {
+  OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
+  OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
+} from "@do-soul/alaya-soul";
 import { describe, expect, it } from "vitest";
 import {
   buildRecallEvalRunProvenance,
@@ -159,11 +165,12 @@ function runtimeAttribution(biSha: string): RecallEvalRuntimeAttribution {
       conflictAwareness: true
     }),
     query_semantic_factor_cache: {
-      schema_version: 3,
+      schema_version: 4,
       cache_content_sha256: `sha256:${"3".repeat(64)}`,
-      compiler_operator_id: "open_semantic_factor_query_compiler_v8",
-      system_prompt_sha256: `sha256:${"4".repeat(64)}`,
-      request_template_sha256: `sha256:${"6".repeat(64)}`,
+      compiler_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
+      request_profile: "mimo-v2.5-nonthinking-v1",
+      system_prompt_sha256: promptSha256(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
+      request_template_sha256: promptSha256(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE),
       model_id: "DeepSeek-V4-Flash",
       provider_url_sha256: `sha256:${"5".repeat(64)}`,
       source_set_sha256: `sha256:${"7".repeat(64)}`,
@@ -189,6 +196,10 @@ function runtimeAttribution(biSha: string): RecallEvalRuntimeAttribution {
       producer_schema_migration_version: 1
     }
   };
+}
+
+function promptSha256(value: string): string {
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
 function env(modelRoot: string): Readonly<Record<string, string>> {
@@ -332,5 +343,23 @@ describe("recall-eval provenance producer contract", () => {
     } finally {
       await rm(modelRoot, { recursive: true, force: true });
     }
+  });
+
+  it("reads schema 3 query-cache identity as archive provenance only", () => {
+    const current = runtimeAttribution("b".repeat(64)).query_semantic_factor_cache!;
+    const { request_profile: _profile, ...legacyBody } = current;
+    const legacy = { ...legacyBody, schema_version: 3 as const };
+    const parsed = LongMemEvalRunProvenanceSchema.parse({
+      ...archived,
+      runtime: { ...archived.runtime, query_semantic_factor_cache: legacy }
+    });
+    expect(parsed.runtime.query_semantic_factor_cache).toEqual(legacy);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...archived,
+      runtime: {
+        ...archived.runtime,
+        query_semantic_factor_cache: { ...current, request_profile: undefined }
+      }
+    }).success).toBe(false);
   });
 });

@@ -41,7 +41,7 @@ describe("recall answer-shape selection capture", () => {
       expect(row).not.toHaveProperty("selector_observation");
     }
     const boundary = materializeFineAssessmentSelectionBoundary(pendingCaptures[0]!);
-    expect(boundary.schema_version).toBe(2);
+    expect(boundary.schema_version).toBe(5);
     expect(boundary.expected.pre_projection?.admission_actions.length)
       .toBeGreaterThan(0);
   });

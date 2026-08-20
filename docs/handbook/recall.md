@@ -4,11 +4,16 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation anchor: package `0.3.11`, committed HEAD `263c6600` on
-2026-08-19. The provider, cache-admission, replay, and diagnostic authority
-boundaries at that commit passed architecture and standards review, the root
-build, and the full repository test suite. This is not a KPI-promotion claim.
-The earlier `10da1318` B-arm dump remains historical benchmark evidence only.
+Current documentation identity: package `0.3.11`. Committed HEAD is
+`b329325` (`Fix merged archive identity fixture`, 2026-08-20). Encoded
+architecture contracts for gates 1–6 live on an **uncommitted dirty tree**
+based on that commit; they are not a frozen commit pin.
+`HANDBOOK_COMMIT_PIN_PENDING_CLEAN_INTEGRATION_COMMIT` — see
+`.do-it/plans/recall-any5-evidence-first.md`. Live owners are the modules
+named under Current live path. Historical review evidence at `263c6600`
+(2026-08-19) remains a prior documentation anchor, not this tree's identity.
+This is not a KPI-promotion claim. The earlier `10da1318` B-arm dump remains
+historical benchmark evidence only.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime

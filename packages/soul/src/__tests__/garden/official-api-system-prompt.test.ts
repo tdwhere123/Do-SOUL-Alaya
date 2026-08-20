@@ -107,6 +107,16 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_subject"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"preference_polarity"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"evidence_polarity"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      'When the argument is a duration measure, binding_identity must be "duration"'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "When it is a location or place participant, binding_identity must be \"location\""
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Other open role names remain allowed");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "Names other than the structural tokens duration and location stay open text"
+    );
   });
 
   it("defines confidence as a bounded JSON number rather than a label", () => {

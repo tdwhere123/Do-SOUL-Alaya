@@ -18,6 +18,11 @@ import {
   resolvePreferenceAwareSourceGrounding
 } from "@do-soul/alaya-soul";
 import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
+import { omitGoldPrefixedFields } from "./compile-gold-fields.js";
+import {
+  compileSourceBoundSemanticFactorFields,
+  omitCompileSemanticFactorFields
+} from "./compile-semantic-factor.js";
 
 export interface CompileSourceGroundingIdentity {
   readonly workspaceId: string;
@@ -26,6 +31,18 @@ export interface CompileSourceGroundingIdentity {
 }
 
 export function attachCompileSourceGrounding(
+  rawPayload: Readonly<Record<string, unknown>>,
+  signalInput: BenchSignalSeedInput,
+  identity?: Readonly<CompileSourceGroundingIdentity>
+): Record<string, unknown> {
+  return omitGoldPrefixedFields(compileAttachedSourceGrounding(
+    rawPayload,
+    signalInput,
+    identity
+  )) as Record<string, unknown>;
+}
+
+function compileAttachedSourceGrounding(
   rawPayload: Readonly<Record<string, unknown>>,
   signalInput: BenchSignalSeedInput,
   identity?: Readonly<CompileSourceGroundingIdentity>
@@ -217,7 +234,7 @@ function buildGroundedCompilePayload(
     )
     : [];
   return {
-    ...input.safePayload,
+    ...omitCompileSemanticFactorFields(input.safePayload),
     ...(input.verifiedAssertion === null || input.identity === undefined
       ? {}
       : {
@@ -251,7 +268,8 @@ function buildGroundedCompilePayload(
         input.proposal.proposed_preference_profile,
         groundedPreferenceProfile
       )
-    }
+    },
+    ...compileSourceBoundSemanticFactorFields(input.safePayload, assertion)
   };
 }
 
@@ -389,10 +407,11 @@ function rejectedPayload(
   reason: string
 ): Record<string, unknown> {
   return {
-    ...safePayload,
+    ...omitCompileSemanticFactorFields(safePayload),
     full_turn_content: sourceCorpus,
     proposed_matched_text: proposal.proposed_matched_text,
-    source_grounding: { ...proposal, status: "rejected", content_basis: "none", reasons: [reason] }
+    source_grounding: { ...proposal, status: "rejected", content_basis: "none", reasons: [reason] },
+    ...compileSourceBoundSemanticFactorFields(safePayload, null)
   };
 }
 

@@ -1,4 +1,6 @@
 import type { RecallEvalRuntimeAttribution } from "../../lifecycle/recall-eval/recall-eval-runtime.js";
+import { inspectQuerySemanticFactorCacheIdentity } from
+  "../../query-factors/query-semantic-factor-cache-identity.js";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
 import { bindSnapshotRunProvenanceAuthority } from
   "../../snapshot/run-provenance.js";
@@ -156,6 +158,8 @@ function sameCurrentTreatment(
     JSON.stringify(runtime.embedding_supplement) ===
       JSON.stringify(attribution.embedding_supplement) &&
     JSON.stringify(runtime.answer_rerank) === JSON.stringify(attribution.answer_rerank) &&
+    isGateQueryCacheIdentity(runtime.query_semantic_factor_cache) &&
+    isGateQueryCacheIdentity(attribution.query_semantic_factor_cache) &&
     JSON.stringify(runtime.query_semantic_factor_cache) ===
       JSON.stringify(attribution.query_semantic_factor_cache) &&
     JSON.stringify(runtime.embedding_cache_overlay) ===
@@ -165,6 +169,10 @@ function sameCurrentTreatment(
     recallConfig.conflict_awareness === attribution.recall_config.conflict_awareness &&
     recallConfig.effective_config_sha256 ===
       attribution.recall_config.effective_config_sha256;
+}
+
+function isGateQueryCacheIdentity(value: unknown): boolean {
+  return value === undefined || inspectQuerySemanticFactorCacheIdentity(value).kind === "current";
 }
 
 function withoutExtractionCacheRoot(

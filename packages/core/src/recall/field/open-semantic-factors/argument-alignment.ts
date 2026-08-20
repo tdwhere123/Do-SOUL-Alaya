@@ -1,12 +1,14 @@
 import type {
   OpenSemanticArgument,
   OpenSemanticFactor,
-  OpenSemanticProposition
+  OpenSemanticProposition,
+  OpenSemanticVariable
 } from "@do-soul/alaya-protocol";
 import {
   openSemanticFactorSurfacesEqual,
   openSemanticFactorsOverlap
 } from "./factor-identity.js";
+import { isLocationResultSurface, isTemporalFactor } from "./join/identity.js";
 
 export const OPEN_SEMANTIC_ARGUMENT_ALIGNMENT_LIMIT = 256;
 
@@ -43,6 +45,7 @@ export function enumerateOpenSemanticArgumentAlignments(params: Readonly<{
   readonly query: Readonly<OpenSemanticProposition>;
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly queryVariables?: ReadonlyMap<string, Readonly<OpenSemanticVariable>>;
   readonly variableBindings: ReadonlyMap<string, string>;
   readonly requireExactPositions?: boolean;
 }>): readonly Readonly<OpenSemanticArgumentAlignment>[] {
@@ -62,6 +65,7 @@ function searchArgumentAlignments(params: Readonly<{
   readonly query: Readonly<OpenSemanticProposition>;
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly queryVariables?: ReadonlyMap<string, Readonly<OpenSemanticVariable>>;
   readonly variableBindings: ReadonlyMap<string, string>;
   readonly requireExactPositions?: boolean;
   readonly queryIndex: number;
@@ -79,15 +83,17 @@ function searchArgumentAlignments(params: Readonly<{
     return;
   }
   const candidates = selectEvidenceArguments(params, queryArgument);
+  let advanced = false;
   for (const evidenceArgument of candidates) {
     const evidenceFactor = params.evidenceFactors.get(evidenceArgument.reference_id);
     if (evidenceFactor === undefined) continue;
     const mapped = mapArgument(
       queryArgument, evidenceArgument, evidenceFactor,
-      params.queryFactors, params.variableBindings,
+      params.queryFactors, params.queryVariables, params.variableBindings,
       isCertifiedConstraintArgument(params.query, queryArgument, params.requireExactPositions)
     );
     if (mapped === null) continue;
+    advanced = true;
     searchArgumentAlignments({
       ...params,
       queryIndex: params.queryIndex + 1,
@@ -97,6 +103,12 @@ function searchArgumentAlignments(params: Readonly<{
         evidenceArgument.position
       ]),
       mappings: [...params.mappings, mapped.mapping]
+    });
+  }
+  if (!advanced && isOptionalLocationResult(params.queryVariables, queryArgument)) {
+    searchArgumentAlignments({
+      ...params,
+      queryIndex: params.queryIndex + 1
     });
   }
 }
@@ -121,11 +133,21 @@ function selectEvidenceArguments(
     !params.usedEvidencePositions.has(argument.position));
 }
 
+function isOptionalLocationResult(
+  queryVariables: ReadonlyMap<string, Readonly<OpenSemanticVariable>> | undefined,
+  queryArgument: Readonly<OpenSemanticArgument>
+): boolean {
+  if (queryArgument.reference_kind !== "variable" || queryVariables === undefined) return false;
+  const variable = queryVariables.get(queryArgument.reference_id);
+  return variable !== undefined && isLocationResultSurface(variable.surface);
+}
+
 function mapArgument(
   queryArgument: Readonly<OpenSemanticArgument>,
   evidenceArgument: Readonly<OpenSemanticArgument>,
   evidenceFactor: Readonly<OpenSemanticFactor>,
   queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>,
+  queryVariables: ReadonlyMap<string, Readonly<OpenSemanticVariable>> | undefined,
   currentVariableBindings: ReadonlyMap<string, string>,
   requireExactSurface: boolean
 ): Readonly<{
@@ -133,6 +155,11 @@ function mapArgument(
   variableBindings: ReadonlyMap<string, string>;
 }> | null {
   if (queryArgument.reference_kind === "variable") {
+    const variable = queryVariables?.get(queryArgument.reference_id);
+    if (variable !== undefined && isLocationResultSurface(variable.surface) &&
+        isTemporalFactor(evidenceFactor)) {
+      return null;
+    }
     const variableBindings = new Map(currentVariableBindings);
     const prior = variableBindings.get(queryArgument.reference_id);
     if (prior !== undefined && prior !== evidenceFactor.semantic_identity) return null;
@@ -170,7 +197,7 @@ function isCertifiedConstraintArgument(
   return resultPosition === undefined || argument.position < resultPosition;
 }
 
-function freezeArgumentMapping(
+export function freezeArgumentMapping(
   queryArgument: Readonly<OpenSemanticArgument>,
   evidenceArgument: Readonly<OpenSemanticArgument>,
   evidenceFactor: Readonly<OpenSemanticFactor>,

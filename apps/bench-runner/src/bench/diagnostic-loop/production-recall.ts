@@ -20,6 +20,7 @@ import { resolveSnapshotIdentity } from "./authority/identity.js";
 import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { sha256File } from "../snapshot/integrity.js";
 import { missLedgerContentIdentity } from "./miss-ledger-authority.js";
+import { recordedQueryCacheFileSha256 } from "./run-state.js";
 
 export async function runProductionRecallPhase(
   context: DiagnosticLoopPhaseContext,
@@ -74,10 +75,23 @@ async function executeRecallEvaluation(
     ...(context.request.limit === undefined ? {} : { limit: context.request.limit }),
     ...(context.request.offset === undefined ? {} : { offset: context.request.offset }),
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
-    ...(arm === "treatment"
-      ? { querySemanticFactorCachePath: context.request.treatmentFactorCachePath }
-      : {})
+    ...treatmentRecallCacheOptions(context, arm)
   });
+}
+
+function treatmentRecallCacheOptions(
+  context: DiagnosticLoopPhaseContext,
+  arm: "control" | "treatment"
+): Pick<
+  Parameters<typeof runRecallEval>[0],
+  "querySemanticFactorCachePath" | "querySemanticFactorCacheFileSha256"
+> {
+  if (arm !== "treatment") return {};
+  const recorded = recordedQueryCacheFileSha256(context.workRoot);
+  return {
+    querySemanticFactorCachePath: context.request.treatmentFactorCachePath,
+    ...(recorded === undefined ? {} : { querySemanticFactorCacheFileSha256: recorded })
+  };
 }
 
 function assertRecallCompleted(

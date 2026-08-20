@@ -20,6 +20,11 @@ export const OPEN_SEMANTIC_FACTOR_CURRENT_OPERATORS = {
   }
 } as const;
 
+const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_RECEIPT = {
+  schemaVersion: 1,
+  operatorId: "open_semantic_factor_compatibility_v6"
+} as const;
+
 export type OpenSemanticFactorCutoverWireKey =
   keyof typeof OPEN_SEMANTIC_FACTOR_CURRENT_OPERATORS;
 
@@ -30,8 +35,29 @@ export function isStaleOpenSemanticFactorField(
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const expected = OPEN_SEMANTIC_FACTOR_CURRENT_OPERATORS[wireKey];
   const record = value as Readonly<Record<string, unknown>>;
-  return record.schema_version !== expected.schemaVersion ||
-    record.operator_id !== expected.operatorId;
+  if (record.schema_version !== expected.schemaVersion ||
+      record.operator_id !== expected.operatorId) {
+    return true;
+  }
+  return wireKey === "open_semantic_factor_compatibility_trace" &&
+    hasNestedStaleCompatibilityReceipt(record);
+}
+
+function hasNestedStaleCompatibilityReceipt(
+  trace: Readonly<Record<string, unknown>>
+): boolean {
+  const entries = trace.entries;
+  if (!Array.isArray(entries)) return false;
+  return entries.some((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const receipt = (entry as Readonly<Record<string, unknown>>).receipt;
+    if (receipt === null || typeof receipt !== "object" || Array.isArray(receipt)) {
+      return false;
+    }
+    const record = receipt as Readonly<Record<string, unknown>>;
+    return record.schema_version !== OPEN_SEMANTIC_FACTOR_COMPATIBILITY_RECEIPT.schemaVersion ||
+      record.operator_id !== OPEN_SEMANTIC_FACTOR_COMPATIBILITY_RECEIPT.operatorId;
+  });
 }
 
 export function openSemanticFactorArchiveMarker(): OpenSemanticFactorArchive {

@@ -257,6 +257,107 @@ describe("LongMemEval open semantic factor diagnostics", () => {
       reason: "stale_schema"
     });
   });
+
+  it("archives a v2 trace whose nested compatibility receipt is still v5", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-nested-v5-receipt",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: {
+        query_probes: {
+          normalized_query: "where",
+          object_ids: [],
+          subject_hints: [],
+          evidence_refs: [],
+          run_ids: [],
+          surface_ids: [],
+          file_paths: [],
+          command_names: [],
+          package_names: [],
+          task_refs: [],
+          dimensions: [],
+          scope_classes: [],
+          domain_tags: [],
+          lexical_terms: [],
+          expanded_terms: ["where"],
+          phrases: [],
+          char_ngrams: [],
+          date_terms: []
+        },
+        open_semantic_factor_compatibility_trace: {
+          schema_version: 2,
+          operator_id: "open_semantic_factor_compatibility_trace_v2",
+          query_capture_digest: captureDigest,
+          observed_evidence_count: 1,
+          matchable_evidence_count: 1,
+          evaluated_evidence_count: 1,
+          unavailable_evidence_ids: [],
+          unevaluated_evidence_ids: [],
+          incomparable_seal: "none",
+          truncated: false,
+          entries: [{
+            evidence_id: "stale-nested",
+            receipt: {
+              schema_version: 1,
+              operator_id: "open_semantic_factor_compatibility_v5",
+              status: "compatible",
+              evidence_capture_digest: captureDigest,
+              query_capture_digest: captureDigest,
+              evidence_graph_digest: null,
+              query_graph_digest: null,
+              query_proposition_count: 1,
+              matched_query_proposition_count: 1,
+              proposition_match_candidates: [],
+              proposition_matches: [],
+              receipt_digest: captureDigest
+            }
+          }],
+          trace_digest: captureDigest
+        },
+        candidates: [{
+          candidate_key: "workspace_local:memory_entry:kept",
+          object_id: "kept",
+          object_kind: "memory_entry",
+          origin_plane: "workspace_local",
+          fused_rank: 1,
+          fused_score: 0.5,
+          final_rank: 1
+        }],
+        total_scanned: 1,
+        candidate_pool_count: 1,
+        pre_budget_count: 1,
+        delivered_count: 1,
+        embedding_provider_status: "provider_not_requested",
+        embedding_supplement_status: "disabled",
+        provider_degradation_reason: null,
+        answer_rerank_status: "not_requested",
+        answer_rerank_expected_count: 0,
+        answer_rerank_scored_count: 0,
+        answer_rerank_failure_class: null,
+        graph_expansion_plane_count_per_hop: [0, 0],
+        graph_expansion_plane_count_per_edge_type: {
+          derives_from: 0, recalls: 0, supports: 0
+        },
+        fusion_breakdown: []
+      } }
+    });
+
+    expect(row.query_probes?.expanded_terms).toEqual(["where"]);
+    expect(row.candidates).toHaveLength(1);
+    expect(row.open_semantic_factor_compatibility_trace).toBeNull();
+    expect(row.open_semantic_factor_composition).toBeNull();
+    expect(row.open_semantic_factor_activation).toBeNull();
+    expect(row.open_semantic_factor_archive).toEqual({
+      replayable: false,
+      reason: "stale_schema"
+    });
+  });
 });
 
 function sealTrace<T extends Record<string, unknown>>(body: T) {

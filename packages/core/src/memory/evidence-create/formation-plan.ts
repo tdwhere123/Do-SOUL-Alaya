@@ -7,6 +7,9 @@ import {
   type EvidenceSearchProjection,
   type FactorIncidencePort,
   type FieldContractSha256,
+  isOpenSemanticFactorFormationProposal,
+  isRejectedOpenSemanticFactorFormationAdmission,
+  type OpenSemanticFactorFormationAdmission,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationProposal,
   type SourceAdmissionPort,
@@ -54,7 +57,7 @@ export function planEvidenceFormation(input: Readonly<{
   readonly evidence: Readonly<EvidenceCapsule>;
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
   readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
   readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
 }> & EvidenceFieldFormationPorts): EvidenceFormationPlan {
   return planFormationViews(input);
@@ -73,7 +76,7 @@ function planFormationViews(input: Readonly<{
   readonly evidence: Readonly<EvidenceCapsule>;
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
   readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
   readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
 }>): EvidenceFormationPlan {
   const supplied = input.searchProjections.map((projection) =>
@@ -94,11 +97,23 @@ function planFormationViews(input: Readonly<{
     semanticFormation: materializeOpenSemanticFactorFormation({
       source_kind: "evidence",
       source_text: input.evidence.excerpt,
-      ...(input.semanticFactorProposal === undefined
-        ? {}
-        : { proposal: input.semanticFactorProposal })
+      ...semanticFormationInput(input.semanticFactorProposal)
     })
   };
+}
+
+function semanticFormationInput(
+  admission: Readonly<OpenSemanticFactorFormationAdmission> | undefined
+): Readonly<{
+  readonly proposal?: Readonly<OpenSemanticFactorFormationProposal>;
+  readonly negative_status?: "rejected";
+}> {
+  if (admission === undefined) return {};
+  if (isRejectedOpenSemanticFactorFormationAdmission(admission)) {
+    return { negative_status: "rejected" };
+  }
+  if (isOpenSemanticFactorFormationProposal(admission)) return { proposal: admission };
+  return {};
 }
 
 function assertCallerSearchProjectionAuthority(

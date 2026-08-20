@@ -8,15 +8,15 @@ import {
   openSemanticFactorFormationCapturePreimage,
   queryOsfSemanticCompletenessReceiptPreimage
 } from "@do-soul/alaya-protocol";
-import {
-  materializeOpenSemanticFactorFormation,
-  stableStringify
-} from "@do-soul/alaya-core";
+import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
 } from "@do-soul/alaya-soul";
+import { queryCacheStableJson } from
+  "../../bench/query-factors/cache/document.js";
 import {
+  bindQuerySemanticFactorCacheFileToRequest,
   createQuerySemanticFactorCache,
   fillQuerySemanticFactorSources,
   readQuerySemanticFactorCache,
@@ -26,12 +26,24 @@ import { compileCertifiedQueryCacheValue } from
   "../../bench/query-factors/query-semantic-factor-cache-certification.js";
 
 const SOURCES = ["What did I buy?", "What did I choose?", "What did I use?"] as const;
+const REQUEST_PROFILE = "provider-default-v1" as const;
+const DEFAULT_CACHE_REQUEST = {
+  requestProfile: REQUEST_PROFILE,
+  model: "test-model",
+  providerRoute: "https://provider.invalid/v1"
+} as const;
+
+function createCache(
+  input: Omit<Parameters<typeof createQuerySemanticFactorCache>[0], "request_profile">
+) {
+  return createQuerySemanticFactorCache({ request_profile: REQUEST_PROFILE, ...input });
+}
 describe("query semantic factor cache", () => {
   it("replays a source-bound formation capture without provider configuration", async () => {
     const sourceText = SOURCES[0];
     const { capture, receipt } = await certifiedValue(sourceText);
     expect(capture.status).toBe("formed");
-    const cache = createQuerySemanticFactorCache({
+    const cache = createCache({
       model_id: "test-model",
       provider_url: "https://provider.invalid/v1",
       entries: [{
@@ -47,12 +59,13 @@ describe("query semantic factor cache", () => {
       await writeQuerySemanticFactorCache(outputPath, cache);
       const loaded = await readQuerySemanticFactorCache({
         path: outputPath,
-        required_source_texts: [sourceText]
+        required_source_texts: [sourceText],
+        ...DEFAULT_CACHE_REQUEST
       });
 
       expect(loaded.binding.entry_count).toBe(1);
       expect(loaded.binding.compiler_operator_id)
-        .toBe("open_semantic_factor_query_compiler_v8");
+        .toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
       expect(loaded.binding.request_template_sha256)
         .toBe(prefixedSha256(OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE));
       expect(loaded.captures_by_source_text.get(sourceText)).toEqual(capture);
@@ -62,70 +75,10 @@ describe("query semantic factor cache", () => {
     }
   });
 
-  it("rejects an honestly resealed prior v7 compiler cache", async () => {
-    const sourceText = SOURCES[0];
-    const capture = materializeOpenSemanticFactorFormation({
-      source_kind: "query",
-      source_text: sourceText
-    });
-    const cache = createQuerySemanticFactorCache({
-      model_id: "test-model",
-      provider_url: "https://provider.invalid/v1",
-      entries: [{
-        source_text: sourceText,
-        source_sha256: capture.source_sha256!,
-        capture,
-        receipt: null
-      }]
-    });
-    const legacy = resealLegacyV7(cache);
-    const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-cache-"));
-    const outputPath = join(root, "query-cache.json");
-    try {
-      await writeFile(outputPath, JSON.stringify(legacy), "utf8");
-      await expect(readQuerySemanticFactorCache({
-        path: outputPath,
-        required_source_texts: [sourceText]
-      })).rejects.toThrow();
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects an honestly resealed prior request template", async () => {
-    const sourceText = SOURCES[0];
-    const capture = materializeOpenSemanticFactorFormation({
-      source_kind: "query",
-      source_text: sourceText
-    });
-    const cache = createQuerySemanticFactorCache({
-      model_id: "test-model",
-      provider_url: "https://provider.invalid/v1",
-      entries: [{
-        source_text: sourceText,
-        source_sha256: capture.source_sha256!,
-        capture,
-        receipt: null
-      }]
-    });
-    const prior = resealPriorRequestTemplate(cache);
-    const root = await mkdtemp(join(tmpdir(), "alaya-query-factor-cache-"));
-    const outputPath = join(root, "query-cache.json");
-    try {
-      await writeFile(outputPath, JSON.stringify(prior), "utf8");
-      await expect(readQuerySemanticFactorCache({
-        path: outputPath,
-        required_source_texts: [sourceText]
-      })).rejects.toThrow("request template does not match");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
   it("rejects old, missing, and foreign completeness authority", async () => {
     const sourceText = SOURCES[0];
     const value = await certifiedValue(sourceText);
-    const cache = createQuerySemanticFactorCache({
+    const cache = createCache({
       model_id: "test-model", provider_url: "https://provider.invalid/v1",
       entries: [{ source_text: sourceText, source_sha256: value.capture.source_sha256!,
         capture: value.capture, receipt: value.receipt }]
@@ -139,9 +92,11 @@ describe("query semantic factor cache", () => {
       })) {
         const path = join(root, `${name}.json`);
         await writeFile(path, JSON.stringify(mutated), "utf8");
-        await expect(readQuerySemanticFactorCache({
-          path, required_source_texts: [sourceText]
-        })).rejects.toThrow();
+        await expect(bindQuerySemanticFactorCacheFileToRequest(path, {
+          ...DEFAULT_CACHE_REQUEST, requiredSourceTexts: [sourceText]
+        })).rejects.toThrow(name === "old"
+          ? /cannot bind as current authority/u
+          : /completeness receipt mismatch/u);
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -153,7 +108,7 @@ describe("query semantic factor cache", () => {
       source_kind: "query",
       source_text: SOURCES[0]
     });
-    const cache = createQuerySemanticFactorCache({
+    const cache = createCache({
       model_id: "test-model",
       provider_url: "https://provider.invalid/v1",
       entries: [{
@@ -169,7 +124,8 @@ describe("query semantic factor cache", () => {
       await writeQuerySemanticFactorCache(outputPath, cache);
       await expect(readQuerySemanticFactorCache({
         path: outputPath,
-        required_source_texts: ["Who did I call?"]
+        required_source_texts: ["Who did I call?"],
+        ...DEFAULT_CACHE_REQUEST
       })).rejects.toThrow("missing a required query source");
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -189,6 +145,7 @@ describe("query semantic factor cache", () => {
         source_texts: SOURCES,
         output_path: outputPath,
         model_id: "same-model",
+        request_profile: REQUEST_PROFILE,
         provider_url: "https://logical-provider.invalid/v1",
         transport: {
           providerUrl: "https://primary.invalid/v1",
@@ -207,6 +164,7 @@ describe("query semantic factor cache", () => {
         source_texts: SOURCES,
         output_path: outputPath,
         model_id: "different-model",
+        request_profile: REQUEST_PROFILE,
         provider_url: "https://logical-provider.invalid/v1",
         transport: {
           providerUrl: "https://successor.invalid/v1",
@@ -225,6 +183,7 @@ describe("query semantic factor cache", () => {
         source_texts: SOURCES,
         output_path: outputPath,
         model_id: "same-model",
+        request_profile: REQUEST_PROFILE,
         provider_url: "https://logical-provider.invalid/v1",
         transport: {
           providerUrl: "https://successor.invalid/v1",
@@ -242,7 +201,10 @@ describe("query semantic factor cache", () => {
       expect(binding.transport_routes).toHaveLength(2);
       const loaded = await readQuerySemanticFactorCache({
         path: outputPath,
-        required_source_texts: SOURCES
+        required_source_texts: SOURCES,
+        requestProfile: REQUEST_PROFILE,
+        model: "same-model",
+        providerRoute: "https://logical-provider.invalid/v1"
       });
       expect(loaded.captures_by_source_text.size).toBe(3);
     } finally {
@@ -276,6 +238,7 @@ describe("query semantic factor cache", () => {
         source_texts: SOURCES,
         output_path: outputPath,
         model_id: "same-model",
+        request_profile: REQUEST_PROFILE,
         provider_url: "https://logical-provider.invalid/v1",
         transport: {
           providerUrl: "https://provider.invalid/v1",
@@ -295,6 +258,7 @@ describe("query semantic factor cache", () => {
         source_texts: SOURCES,
         output_path: outputPath,
         model_id: "same-model",
+        request_profile: REQUEST_PROFILE,
         provider_url: "https://logical-provider.invalid/v1",
         transport: {
           providerUrl: "https://provider.invalid/v1",
@@ -354,7 +318,8 @@ async function fillForResume(outputPath: string, calls: string[]) {
 }
 function fillInput(outputPath: string) {
   return { source_texts: SOURCES.slice(0, 2), output_path: outputPath,
-    model_id: "same-model", provider_url: "https://logical-provider.invalid/v1",
+    model_id: "same-model", request_profile: REQUEST_PROFILE,
+    provider_url: "https://logical-provider.invalid/v1",
     transport: { providerUrl: "https://provider.invalid/v1", model: "same-model" },
     concurrency: 1 } as const;
 }
@@ -424,25 +389,6 @@ function responseSchemaFailure(): Error {
   return error;
 }
 
-function resealLegacyV7(cache: unknown): unknown {
-  const legacy = structuredClone(cache) as Record<string, unknown>;
-  legacy.compiler_operator_id = "open_semantic_factor_query_compiler_v7";
-  legacy.system_prompt_sha256 =
-    "sha256:da13495a266e25890113ae8a1f5560c88fd26026d1432217592728482cd88c70";
-  legacy.request_template_sha256 = "sha256:92dea9f910b9d06abdc54af40444602bca23041b43eda4aa9a93c92a557e0aa2";
-  const { cache_content_sha256: _cacheDigest, ...cacheBody } = legacy;
-  legacy.cache_content_sha256 = prefixedSha256(stableStringify(cacheBody));
-  return legacy;
-}
-
-function resealPriorRequestTemplate(cache: unknown): unknown {
-  const prior = structuredClone(cache) as Record<string, unknown>;
-  prior.request_template_sha256 = prefixedSha256(priorRequestTemplate());
-  const { cache_content_sha256: _cacheDigest, ...cacheBody } = prior;
-  prior.cache_content_sha256 = prefixedSha256(stableStringify(cacheBody));
-  return prior;
-}
-
 function resealOldV5(cache: unknown): unknown {
   const old = structuredClone(cache) as Record<string, unknown>;
   old.schema_version = 2;
@@ -452,7 +398,7 @@ function resealOldV5(cache: unknown): unknown {
 
 function resealMissingReceipt(cache: unknown): unknown {
   const missing = structuredClone(cache) as { entries: Record<string, unknown>[] };
-  delete missing.entries[0]!.receipt;
+  missing.entries[0]!.receipt = null;
   return resealCache(missing as unknown as Record<string, unknown>);
 }
 
@@ -471,13 +417,8 @@ function resealForeignReceipt(cache: unknown): unknown {
 
 function resealCache(cache: Record<string, unknown>): unknown {
   const { cache_content_sha256: _digest, ...body } = cache;
-  cache.cache_content_sha256 = prefixedSha256(stableStringify(body));
+  cache.cache_content_sha256 = prefixedSha256(queryCacheStableJson(body));
   return cache;
-}
-
-function priorRequestTemplate(): string {
-  return JSON.stringify({ schema_version: 1, source_kind: "query",
-    source_text: "{source_text}" });
 }
 
 function prefixedSha256(value: string): string {

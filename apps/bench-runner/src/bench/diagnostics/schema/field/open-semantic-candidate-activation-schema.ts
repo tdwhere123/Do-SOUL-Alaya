@@ -1,10 +1,13 @@
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
+import { OpenSemanticFactorActivationStateSchema } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 
+// Activation state is the protocol leaf; do not fork a bench-only literal.
+// Authority-lane phase schema is a different operator family — do not copy it here.
 const ReceiptSchema = z.object({
   schema_version: z.literal(1),
   operator_id: z.literal("open_semantic_factor_candidate_activation_v1"),
-  state: z.literal("observed"),
+  state: OpenSemanticFactorActivationStateSchema,
   score: z.number().finite().gt(0).max(1),
   evidence_ids: z.array(z.string().min(1)).min(1),
   solution_count: z.number().int().positive(),

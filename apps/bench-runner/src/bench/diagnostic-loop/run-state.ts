@@ -9,6 +9,8 @@ import { CACHED_F3_EXPOSURE_POLICY } from
   "../diagnostics/stage-attribution/exposure/contract.js";
 import { isDiagnosticLoopMode, type DiagnosticLoopMode } from "./phases.js";
 import { assertDiagnosticLoopIdentity, isSha256Hex, sha256Utf8 } from "./identity.js";
+import { isCurrentQueryFactorCacheRunIdentity } from
+  "../query-factors/query-semantic-factor-cache-identity.js";
 
 export interface DiagnosticLoopRunRecord {
   readonly schema_version: 4;
@@ -36,6 +38,12 @@ const REQUEST_OPTIONAL_KEYS = [
 
 export function runRecordPath(workRoot: string): string {
   return join(workRoot, "run.json");
+}
+
+export function recordedQueryCacheFileSha256(workRoot: string): string | undefined {
+  const path = runRecordPath(workRoot);
+  if (!existsSync(path)) return undefined;
+  return readRunRecord(path).identity.query_factor_cache?.file_sha256;
 }
 
 export function persistRunRecord(input: {
@@ -183,28 +191,7 @@ function optionalExtractionBinding(value: unknown): boolean {
 }
 
 function optionalQueryCache(value: unknown): boolean {
-  if (value === undefined || !isRecord(value)) return value === undefined;
-  const required = [
-    "path", "file_sha256", "schema_version", "cache_content_sha256",
-    "compiler_operator_id", "system_prompt_sha256", "model_id",
-    "provider_url_sha256", "source_set_sha256", "entry_count"
-  ];
-  const allowed = [...required, "transport_routes"];
-  return hasRequiredAllowedKeys(value, required, ["transport_routes"]) &&
-    Object.keys(value).every((key) => allowed.includes(key)) &&
-    required.filter((key) => !["schema_version", "entry_count"].includes(key))
-      .every((key) => typeof value[key] === "string") &&
-    (value.schema_version === 1 || value.schema_version === 2) &&
-    isCount(value.entry_count) &&
-    validTransportRoutes(value.schema_version, value.transport_routes);
-}
-
-function validTransportRoutes(version: unknown, value: unknown): boolean {
-  if (version === 1) return value === undefined;
-  return Array.isArray(value) && value.length > 0 && value.every((route) =>
-    isRecord(route) && hasExactKeys(route, ["provider_url_sha256", "model"]) &&
-    typeof route.provider_url_sha256 === "string" &&
-    typeof route.model === "string" && route.model.length > 0);
+  return value === undefined || isCurrentQueryFactorCacheRunIdentity(value);
 }
 
 function exactTypedObject(

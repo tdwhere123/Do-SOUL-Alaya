@@ -3,6 +3,10 @@ import {
   OpenSemanticFactorCandidateActivationsSchema,
   type OpenSemanticFactorCandidateActivationEntry
 } from "../../schema/field/open-semantic-candidate-activation-schema.js";
+import {
+  PRODUCT_PHASES,
+  type ProductPhaseLedger
+} from "../../phase/phase-authority.js";
 
 export const CACHED_F3_EXPOSURE_POLICY = {
   schema_version: 2 as const,
@@ -84,6 +88,7 @@ export interface TreatmentExposureReceiptBody {
     readonly control: { readonly stage: TreatmentExposureStage; readonly hit_at_5: boolean };
     readonly treatment: { readonly stage: TreatmentExposureStage; readonly hit_at_5: boolean };
   };
+  readonly product_phase_ledger: ProductPhaseLedger;
   readonly exposure_status: TreatmentExposureStatus;
 }
 export interface TreatmentExposureReceipt extends TreatmentExposureReceiptBody {
@@ -124,7 +129,8 @@ function isReceiptConsistent(receipt: TreatmentExposureReceipt): boolean {
       receipt.query_probe_delta.removed_expanded_terms) &&
     isRetrievalChannelDeltaValid(receipt.retrieval_channel_delta) &&
     isCandidatePoolValid(receipt) &&
-    isOutcomeValid(receipt) && receipt.exposure_status === deriveTreatmentExposureStatus(receipt);
+    isOutcomeValid(receipt) && isPhaseLedger(receipt.product_phase_ledger) &&
+    receipt.exposure_status === deriveTreatmentExposureStatus(receipt);
 }
 
 function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
@@ -132,7 +138,7 @@ function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
     "schema_version", "kind", "question_id", "evidence_chain", "control_non_exposure",
     "formation", "compatible_evidence", "composition", "activation", "candidate_attribution",
     "membership_delta", "candidate_pool", "query_probe_delta", "retrieval_channel_delta",
-    "outcome", "exposure_status", "receipt_digest"
+    "outcome", "product_phase_ledger", "exposure_status", "receipt_digest"
   ])) return false;
   return value.schema_version === 4 && value.kind === "cached_f3_treatment_exposure" &&
     isNonEmptyString(value.question_id) && isDigest(value.receipt_digest) &&
@@ -142,7 +148,8 @@ function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
     isCandidateAttribution(value.candidate_attribution) && isMembership(value.membership_delta) &&
     isCandidatePool(value.candidate_pool) && isQueryProbeDelta(value.query_probe_delta) &&
     isRetrievalChannelDelta(value.retrieval_channel_delta) &&
-    isOutcome(value.outcome) && isExposureStatus(value.exposure_status);
+    isOutcome(value.outcome) && isPhaseLedger(value.product_phase_ledger) &&
+    isExposureStatus(value.exposure_status);
 }
 
 function isControlWitness(value: unknown): value is ControlNonExposureWitness {
@@ -263,6 +270,16 @@ function hasCompleteExposure(receipt: TreatmentExposureReceiptBody): boolean {
     receipt.activation.status === "composed" && receipt.activation.activated_evidence_count > 0 &&
     receipt.candidate_attribution.entries.length > 0;
 }
+function isPhaseLedger(value: unknown): value is ProductPhaseLedger {
+  if (!isRecord(value) || !hasExactKeys(value, PRODUCT_PHASES)) return false;
+  return PRODUCT_PHASES.every((phase) => {
+    const record = value[phase];
+    return isRecord(record) && record.phase === phase &&
+      (record.authority === "product" || record.authority === "diagnostic_only" ||
+        record.authority === "not_observed");
+  });
+}
+
 function isFormationStatus(value: unknown): value is TreatmentFormationStatus {
   return ["formed", "ineligible", "unavailable", "rejected", null].includes(value as never);
 }

@@ -4,6 +4,11 @@ import { proveCacheOnlyExtraction } from "./cache-only.js";
 import { DiagnosticLoopFailure } from "./failures.js";
 import { sha256Utf8 } from "./identity.js";
 import {
+  assertBoundQuerySemanticFactorCacheFileDigest,
+  bindQuerySemanticFactorCacheFileToRequest
+} from "../query-factors/query-semantic-factor-cache.js";
+import { recordedQueryCacheFileSha256 } from "./run-state.js";
+import {
   runProductionMissLedgerPhase,
   runProductionRecallPhase
 } from "./production-recall.js";
@@ -56,16 +61,33 @@ function credentialless(
   };
 }
 
-export function runPreflightPhase(
+export async function runPreflightPhase(
   context: DiagnosticLoopPhaseContext,
   env: Readonly<Record<string, string | undefined>>
-): DiagnosticLoopPhaseResult {
+): Promise<DiagnosticLoopPhaseResult> {
   assertCacheOnlyEnvironment(env);
   if (context.request.worker && env.ALAYA_GARDEN_PROVIDER_KIND !== "host_worker") {
     throw new DiagnosticLoopFailure({
       phase: "preflight",
       classification: "infrastructure",
       message: "worker smoke/run requires ALAYA_GARDEN_PROVIDER_KIND=host_worker",
+      resumeCommand: ""
+    });
+  }
+  try {
+    const path = context.request.treatmentFactorCachePath;
+    if (path !== undefined) {
+      await bindQuerySemanticFactorCacheFileToRequest(path, context.request);
+      const recorded = recordedQueryCacheFileSha256(context.workRoot);
+      if (recorded !== undefined) {
+        assertBoundQuerySemanticFactorCacheFileDigest(path, recorded);
+      }
+    }
+  } catch (error) {
+    throw new DiagnosticLoopFailure({
+      phase: "preflight",
+      classification: "authority",
+      message: error instanceof Error ? error.message : String(error),
       resumeCommand: ""
     });
   }
@@ -117,7 +139,7 @@ export function runAuthorityCachePhase(
   return {
     contentIdentity: sha256Utf8(JSON.stringify({
       model: manifest.extraction_model,
-      requestProfile: "request_profile" in manifest ? manifest.request_profile : "",
+      requestProfile: manifest.request_profile,
       datasetRevision: manifest.dataset_revision,
       promptDigest: manifest.system_prompt_sha256
     })),
@@ -144,8 +166,7 @@ function manifestMismatches(
   if (manifest.system_prompt_sha256 !== request.promptDigest) {
     mismatches.push("prompt_digest");
   }
-  if (manifest.request_profile !== undefined &&
-      manifest.request_profile !== request.requestProfile) {
+  if (manifest.request_profile !== request.requestProfile) {
     mismatches.push("request_profile");
   }
   return mismatches;

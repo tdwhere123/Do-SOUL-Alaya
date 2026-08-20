@@ -79,6 +79,20 @@ export async function verifyQuerySemanticFactorCacheEntry(
   await verifyCertifiedQueryCacheValue(sourceText, value);
 }
 
+export async function assertQuerySemanticFactorCacheEntries(
+  entries: readonly Readonly<{
+    source_text: string;
+    capture: OpenSemanticFactorFormationCapture;
+    receipt: QueryOsfSemanticCompletenessReceipt | null;
+  }>[]
+): Promise<void> {
+  for (const entry of entries) {
+    await verifyQuerySemanticFactorCacheEntry(entry.source_text, {
+      capture: entry.capture, receipt: entry.receipt
+    });
+  }
+}
+
 function assertCaptureIntegrity(
   sourceText: string,
   capture: Readonly<OpenSemanticFactorFormationCapture>

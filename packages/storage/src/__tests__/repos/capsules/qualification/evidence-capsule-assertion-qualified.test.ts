@@ -98,6 +98,25 @@ describe("verified assertion evidence qualification", () => {
     }]);
   });
 
+  it("returns a rejected semantic factor formation without reconstructing a graph", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("cccccccc-3333-4333-8333-cccccccccccc");
+    const semanticFormation = rejectedSemanticFactorFormationCapture();
+    await repo.create(capsule, [], undefined, semanticFormation);
+    await persistAssertionProof(database, capsule);
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [ownerMatch(capsule.object_id)]
+    )).resolves.toEqual([{
+      capsule,
+      verified_user_projection: false,
+      semantic_factor_formation: semanticFormation
+    }]);
+    expect(semanticFormation.graph).toBeNull();
+    expect(semanticFormation.status).toBe("rejected");
+  });
+
   it("fails closed when the semantic factor formation receipt is corrupt", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("cccccccc-2222-4222-8222-cccccccccccc");
@@ -347,6 +366,23 @@ function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
     source_sha256: `sha256:${createHash("sha256").update(ASSERTION, "utf8").digest("hex")}`,
     graph
   };
+  return digestCapture(body);
+}
+
+function rejectedSemanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
+  return digestCapture({
+    schema_version: 1,
+    operator_id: OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+    status: "rejected",
+    producer_operator_id: null,
+    source_sha256: `sha256:${createHash("sha256").update(ASSERTION, "utf8").digest("hex")}`,
+    graph: null
+  });
+}
+
+function digestCapture(
+  body: OpenSemanticFactorFormationCaptureBody
+): OpenSemanticFactorFormationCapture {
   return {
     ...body,
     capture_digest: `sha256:${createHash("sha256")

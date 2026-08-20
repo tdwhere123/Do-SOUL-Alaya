@@ -43,6 +43,8 @@ import {
   type EffectiveRecallOptions
 } from "../../provenance/effective-recall-config.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import type { QuerySemanticFactorCacheBinding } from
+  "../../query-factors/query-semantic-factor-cache-identity.js";
 import {
   rebuildEvidenceSearchProjectionsOnWorkingCopy,
   type EvidenceSearchProjectionRebuildReport
@@ -105,21 +107,7 @@ export interface RecallEvalRuntimeAttribution {
     evaluated_count: number;
     question_id_digest: string;
   }>;
-  readonly query_semantic_factor_cache?: Readonly<{
-    schema_version: 3;
-    cache_content_sha256: string;
-    compiler_operator_id: string;
-    system_prompt_sha256: string;
-    request_template_sha256: string;
-    model_id: string;
-    provider_url_sha256: string;
-    source_set_sha256: string;
-    entry_count: number;
-    transport_routes?: readonly Readonly<{
-      provider_url_sha256: string;
-      model: string;
-    }>[];
-  }>;
+  readonly query_semantic_factor_cache?: QuerySemanticFactorCacheBinding;
   readonly embedding_cache_overlay?: EmbeddingCacheOverlayBinding;
   readonly hydration_binding?: Readonly<{
     dataset_sha256: string;

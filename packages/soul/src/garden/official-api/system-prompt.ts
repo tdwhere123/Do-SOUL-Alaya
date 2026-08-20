@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  OPEN_SEMANTIC_DURATION_ROLE,
+  OPEN_SEMANTIC_LOCATION_ROLE
+} from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
 
 export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 1;
@@ -70,13 +74,18 @@ const HISTORICAL_GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".'
 ]);
 
+export const OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS = Object.freeze([
+  "binding_identity is a concise, relation-local name. Names other than the structural tokens duration and location stay open text; they are not a fixed role list or a cross-graph identity. Use the same name for repeated parallel values of one relation-local binding.",
+  `When the argument is a duration measure, binding_identity must be "${OPEN_SEMANTIC_DURATION_ROLE}". When it is a location or place participant, binding_identity must be "${OPEN_SEMANTIC_LOCATION_ROLE}". Other open role names remain allowed.`
+]);
+
 export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   'Each factor is {"factor_id":LOCAL_ID,"surface":EXACT_SUBSTRING,"semantic_identity":CANONICAL_TEXT}; add "source_occurrence":N only when selecting a repeated surface after its first occurrence.',
   'semantic_identity is NFKC lowercase text: use a stable lemma for predicates and a stable source-supported name or phrase for other factors, so morphological variants such as "bought" and "buy" share an identity.',
   "Keep a factor as a whole phrase when finer decomposition would add inference or lose its meaning.",
   'Each proposition is {"proposition_id":LOCAL_ID,"predicate_factor_id":FACTOR_ID,"arguments":[...]}; every argument is {"position":N,"binding_identity":OPEN_NAME,"reference_kind":"factor" or "variable","reference_id":LOCAL_ID}.',
   "Argument positions start at 0 and are contiguous, and preserve the predicate's semantic argument order.",
-  "binding_identity is a concise, relation-local canonical name; it is open text, not a fixed role list or a cross-graph identity. Use the same name for repeated parallel values of one relation-local binding.",
+  ...OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS,
   "Every factor must be used as a predicate or argument. Reuse one factor in multiple propositions when the same source phrase has the same meaning.",
   "Do not emit alternative, explanatory, or otherwise unused nodes; an unreferenced factor or variable makes the entire graph invalid.",
   "Each factor or variable surface must own a non-overlapping exact source span; never emit a node for text contained inside another emitted node.",

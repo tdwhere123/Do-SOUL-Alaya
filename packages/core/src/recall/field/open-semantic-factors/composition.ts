@@ -72,6 +72,10 @@ export type OpenSemanticFactorCompositionReceipt = Readonly<{
 export function materializeOpenSemanticFactorComposition(params: Readonly<{
   readonly trace: Readonly<OpenSemanticFactorCompatibilityTrace>;
   readonly query_capture: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly evidence_formations?: Readonly<Record<
+    string,
+    Readonly<OpenSemanticFactorFormationCapture>
+  >>;
 }>): OpenSemanticFactorCompositionReceipt {
   const trace = verifyOpenSemanticFactorCompatibilityTrace(params.trace);
   const query = verifyCapture(params.query_capture);
@@ -79,7 +83,9 @@ export function materializeOpenSemanticFactorComposition(params: Readonly<{
     throw new Error("open semantic factor composition query identity mismatch");
   }
   const search = query.status === "formed" && query.graph?.source_kind === "query"
-    ? searchOpenSemanticFactorCompositions(query.graph, trace)
+    ? searchOpenSemanticFactorCompositions(
+      query.graph, trace, params.evidence_formations
+    )
     : emptyOpenSemanticFactorSearch(trace.truncated);
   const bindings = Object.freeze(
     search.observations.slice(0, OPEN_SEMANTIC_FACTOR_BINDING_LIMIT)
@@ -118,6 +124,10 @@ export function verifyOpenSemanticFactorComposition(params: Readonly<{
   readonly receipt: Readonly<OpenSemanticFactorCompositionReceipt>;
   readonly trace: Readonly<OpenSemanticFactorCompatibilityTrace>;
   readonly query_capture: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly evidence_formations?: Readonly<Record<
+    string,
+    Readonly<OpenSemanticFactorFormationCapture>
+  >>;
 }>): OpenSemanticFactorCompositionReceipt {
   const expected = materializeOpenSemanticFactorComposition(params);
   if (expected.receipt_digest !== params.receipt.receipt_digest ||

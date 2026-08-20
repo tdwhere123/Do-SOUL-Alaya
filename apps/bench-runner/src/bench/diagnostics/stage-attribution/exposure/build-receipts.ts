@@ -9,6 +9,7 @@ import {
 } from "./contract.js";
 import { mapQuestionToDiagnosticStage } from "../diagnostic-100q.js";
 import type { QuestionStageRow } from "../types.js";
+import { assertProductPhaseAuthority } from "../../phase/phase-authority.js";
 
 export function buildTreatmentExposureReceipts(input: {
   readonly control: readonly LongMemEvalQuestionDiagnostic[];
@@ -36,11 +37,14 @@ function buildReceipt(input: {
   readonly treatmentStage: QuestionStageRow;
 }): TreatmentExposureReceipt {
   const { control, treatment } = input;
+  if (control !== undefined) assertProductPhaseAuthority(control);
+  const ledger = assertProductPhaseAuthority(treatment);
   const evidence = treatmentEvidence(treatment);
   const body: TreatmentExposureReceiptBody = {
     schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: treatment.question_id,
+    product_phase_ledger: ledger,
     ...evidence,
     control_non_exposure: controlWitness(control),
     membership_delta: membershipDelta(control, treatment),

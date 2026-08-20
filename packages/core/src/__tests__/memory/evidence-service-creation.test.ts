@@ -61,6 +61,49 @@ describe("EvidenceService creation", () => {
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
   });
 
+  it("persists explicit rejected semantic formation without a graph", async () => {
+    const { service, create } = createCreationHarness();
+
+    await service.create(
+      createEvidenceInput({ excerpt: "I use Atlas for research." }),
+      [],
+      undefined,
+      { kind: "rejected" }
+    );
+
+    expect(create.mock.calls[0]?.[3]).toMatchObject({
+      status: "rejected",
+      graph: null,
+      producer_operator_id: null
+    });
+  });
+
+  it.each([
+    { status: "unavailable" },
+    { status: "rejected" },
+    { graph: { schema_version: 2 } },
+    { status: "rejected", graph: { schema_version: 2 } },
+    { kind: "rejected", graph: { schema_version: 2 } },
+    { kind: "unavailable" }
+  ] as const)("does not treat a malformed admission object as rejected or formed", async (malformed) => {
+    const { service, create } = createCreationHarness();
+
+    await service.create(
+      createEvidenceInput({ excerpt: "I use Atlas for research." }),
+      [],
+      undefined,
+      malformed as never
+    );
+
+    expect(create.mock.calls[0]?.[3]).toMatchObject({
+      status: "unavailable",
+      graph: null,
+      producer_operator_id: null
+    });
+    expect(create.mock.calls[0]?.[3]).not.toMatchObject({ status: "rejected" });
+    expect(create.mock.calls[0]?.[3]).not.toMatchObject({ status: "formed" });
+  });
+
   it("normalizes only verified atomic assertion evidence", async () => {
     const fallback = createCreationHarness();
     await fallback.service.create(createEvidenceInput({

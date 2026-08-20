@@ -1,6 +1,7 @@
-import type {
-  CandidateMemorySignal,
-  EvidenceSearchProjection
+import {
+  OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION,
+  type CandidateMemorySignal,
+  type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
 import type {
   EvidenceMaterializationInput,
@@ -8,8 +9,8 @@ import type {
 } from "../contracts.js";
 import { buildFactFrameFormationProposal } from
   "../../grounding/fact-frame/search-projections.js";
-import { buildOpenSemanticFactorFormationProposal } from
-  "../../grounding/semantic-factors/formation-proposal.js";
+import { classifyOpenSemanticFactorFormationEligibility } from
+  "../../grounding/semantic-factors/formation-eligibility.js";
 
 export async function createSignalEvidence(
   service: EvidenceMaterializationPort,
@@ -17,14 +18,16 @@ export async function createSignalEvidence(
   input: EvidenceMaterializationInput,
   searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
 ) {
-  const proposal = buildFactFrameFormationProposal(signal.raw_payload);
-  const semanticProposal = buildOpenSemanticFactorFormationProposal(
-    signal.raw_payload
-  );
+  const factProposal = buildFactFrameFormationProposal(signal.raw_payload);
+  const eligibility = classifyOpenSemanticFactorFormationEligibility(signal.raw_payload);
   return await service.create(
     input,
     searchProjections ?? [],
-    proposal,
-    semanticProposal
+    factProposal,
+    eligibility.kind === "propose"
+      ? eligibility.proposal
+      : eligibility.kind === "rejected"
+        ? OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION
+        : undefined
   );
 }

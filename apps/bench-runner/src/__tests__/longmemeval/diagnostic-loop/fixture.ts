@@ -308,14 +308,19 @@ async function trackingSnapshotResult(
 
 export async function writeDiagnosticSnapshotFixture(
   root: string,
-  name: string
+  name: string,
+  questionText?: string
 ): Promise<string> {
   const snapshotPath = join(root, `${name}.db`);
   initDatabase({ filename: snapshotPath }).close();
   const dbBytes = await readFile(snapshotPath);
-  const sidecarBytes = Buffer.from(
-    `${JSON.stringify(currentSnapshotSidecarFor("q-1"), null, 2)}\n`, "utf8"
-  );
+  const sidecar = currentSnapshotSidecarFor("q-1");
+  if (questionText !== undefined) {
+    sidecar.questions = sidecar.questions.map((question) => ({
+      ...question, question: questionText
+    }));
+  }
+  const sidecarBytes = Buffer.from(`${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
   const authorityBytes = renderSnapshotExtractionAuthority(
     currentSnapshotExtractionAuthority()
   );
@@ -343,13 +348,15 @@ export async function writeQueryFactorCacheFixture(
   path: string,
   sourceText: string
 ): Promise<void> {
+  const identity = loopIdentity();
   const capture = materializeOpenSemanticFactorFormation({
     source_kind: "query",
     source_text: sourceText
   });
   await writeQuerySemanticFactorCache(path, createQuerySemanticFactorCache({
-    model_id: "mimo-v2.5",
-    provider_url: "https://provider.invalid/v1",
+    model_id: identity.model,
+    request_profile: identity.requestProfile as "mimo-v2.5-nonthinking-v1",
+    provider_url: identity.providerRoute,
     entries: [{ source_text: sourceText, source_sha256: capture.source_sha256!, capture }]
   }));
 }

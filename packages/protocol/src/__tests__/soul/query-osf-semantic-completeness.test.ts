@@ -35,6 +35,15 @@ describe("query OSF semantic completeness", () => {
     })).toMatchObject({ arity: 3, constraints: obligation.constraints });
     expect(certifyQueryOsfSemanticCompleteness({
       query_text: query,
+      graph: { ...graph, propositions: [{ ...graph.propositions[0]!, arguments: [
+        graph.propositions[0]!.arguments[0]!,
+        graph.propositions[0]!.arguments[1]!,
+        { ...graph.propositions[0]!.arguments[2]!, binding_identity: "slot-2" }
+      ] }] },
+      obligation, producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
+    })).toBeNull();
+    expect(certifyQueryOsfSemanticCompleteness({
+      query_text: query,
       graph: { ...graph, propositions: [{ ...graph.propositions[0]!,
         arguments: graph.propositions[0]!.arguments.slice(0, 2) }] },
       obligation, producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID, sha256
@@ -138,7 +147,7 @@ function constrainedGraph() {
     result_variable_ids: ["answer"],
     propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
       arguments: [argument(0, "factor", "subject"), argument(1, "factor", "constraint"),
-        argument(2, "variable", "answer")] }]
+        argument(2, "variable", "answer", "location")] }]
   };
 }
 
@@ -200,8 +209,13 @@ function factor(id: string, surface: string, semantic: string, occurrence?: numb
     ...(occurrence === undefined ? {} : { source_occurrence: occurrence }) };
 }
 
-function argument(position: number, kind: "factor" | "variable", id: string) {
-  return { position, binding_identity: `slot-${position}`,
+function argument(
+  position: number,
+  kind: "factor" | "variable",
+  id: string,
+  bindingIdentity = `slot-${position}`
+) {
+  return { position, binding_identity: bindingIdentity,
     reference_kind: kind, reference_id: id };
 }
 

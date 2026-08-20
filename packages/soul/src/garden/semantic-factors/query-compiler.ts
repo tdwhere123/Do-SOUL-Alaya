@@ -9,6 +9,7 @@ import {
   QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
   QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
   RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
+  classifyQueryObligationStructuralRole,
   queryFactFrameOsfObligationPreimage,
   OpenSemanticFactorGraphProposalSchema,
   certifyQueryOsfSemanticCompleteness,
@@ -16,8 +17,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { SignalExtractor } from "../pi-mono-extractor.js";
 import { withWallClockTimeout } from "../wall-clock-timeout.js";
-import { OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS } from
-  "../official-api/system-prompt.js";
+import {
+  OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS,
+  OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS
+} from "../official-api/system-prompt.js";
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID =
   QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID;
@@ -34,7 +37,8 @@ const OPEN_SEMANTIC_FACTOR_QUERY_RESPONSE_CONTRACT = [
   "The full requested or WH phrase belongs exclusively to one variable; never emit a factor for that variable or any substring inside its surface.",
   "Keep every explicit non-WH participant or constraint in its required position-preserving factor argument.",
   "Follow required_graph_layout mechanically: predicate and factor entries must be factors, variable entries must be variables, and only an entry with result:true may appear in result_variable_ids.",
-  'Structure example only: {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.'
+  'Structure example only: {"semantic_factor_graph":{"schema_version":2,"source_kind":"query","factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"}],"variables":[{"variable_id":"answer","surface":"Who"}],"result_variable_ids":["answer"],"propositions":[{"proposition_id":"query","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"variable","reference_id":"answer"}]}]}}.',
+  ...OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS
 ].join(" ");
 
 export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
@@ -44,7 +48,7 @@ export const OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT = [
   "Represent every requested unknown as a structural variable and list its id in result_variable_ids.",
   "Keep dependent propositions together and preserve all explicit query constraints.",
   "The supplied semantic completeness obligation and required_graph_layout are authoritative; satisfy the exact ordered layout or return no usable graph.",
-  "Do not emit world ontology categories, fixed roles, answer-family labels, aliases, or gold-derived vocabulary.",
+  "Do not emit world ontology categories, answer-family labels, aliases, or gold-derived vocabulary.",
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ].join(" ");
 
@@ -114,6 +118,11 @@ export function buildOpenSemanticFactorQueryUserPrompt(
   });
 }
 
+function structuralRoleField(valueSurface: string): { binding_identity?: string } {
+  const role = classifyQueryObligationStructuralRole(valueSurface);
+  return role === null ? {} : { binding_identity: role };
+}
+
 function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) {
   return {
     schema_version: 1 as const,
@@ -135,7 +144,8 @@ function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) 
         position: obligation.value.position,
         node_kind: "variable" as const,
         surface: obligation.value.surface,
-        result: true as const
+        result: true as const,
+        ...structuralRoleField(obligation.value.surface)
       }
     ],
     arity: obligation.arity,

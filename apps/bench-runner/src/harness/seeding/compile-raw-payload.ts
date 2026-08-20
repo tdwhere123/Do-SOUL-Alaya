@@ -9,6 +9,7 @@ import {
   parseOfficialApiSemanticFactorGraphProjectionAudit,
   parseOfficialApiSourceLocator
 } from "@do-soul/alaya-soul";
+import { omitGoldPrefixedFields } from "./compile-gold-fields.js";
 
 const PREFERENCE_FIELD_MAX_CHARS = 1_024;
 const PREFERENCE_PROFILE_OMITTED_REASON =
@@ -91,7 +92,7 @@ export function projectCompileRawPayload(
   }
   addStructuredProjection(projection, rawPayload);
   const serialized = canonicalJsonString(rawPayload);
-  return fitProjectedPayload({
+  return omitGoldPrefixedFields(fitProjectedPayload({
     ...projection,
     bench_source_raw_payload_projected: true,
     bench_source_raw_payload_key_count: Object.keys(rawPayload).length,
@@ -99,7 +100,7 @@ export function projectCompileRawPayload(
     bench_source_raw_payload_sha256: `sha256:${createHash("sha256")
       .update(serialized, "utf8")
       .digest("hex")}`
-  });
+  })) as Record<string, unknown>;
 }
 
 function addStructuredProjection(
@@ -124,7 +125,9 @@ function addStructuredProjection(
   if (preferenceProfile !== null) projection.preference_profile = preferenceProfile;
   if (sourceGrounding !== null) projection.source_grounding = sourceGrounding;
   if (sourceLocator !== null) projection.source_locator = sourceLocator;
-  if (semanticFactorGraph.success) {
+  if (semanticFactorGraph.success &&
+      semanticFactorGraphProjection?.status !== "rejected" &&
+      semanticFactorGraphProjection?.status !== "unavailable") {
     projection.semantic_factor_graph = semanticFactorGraph.data;
   }
   if (semanticFactorGraphProjection !== null) {

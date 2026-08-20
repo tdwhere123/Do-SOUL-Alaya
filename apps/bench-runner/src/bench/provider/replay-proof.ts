@@ -2,6 +2,13 @@ import { assertSourceBoundF3SealCurrent, sourceBoundF3Seal } from "@do-soul/alay
 import { proveCacheOnlyExtraction } from "../diagnostic-loop/cache-only.js";
 import type { DiagnosticLoopRequest } from "../diagnostic-loop/types.js";
 import {
+  assertQuerySemanticFactorCacheMatchesRequest
+} from "../query-factors/query-semantic-factor-cache-identity.js";
+import {
+  assertBoundQuerySemanticFactorCacheFileDigest,
+  bindQuerySemanticFactorCacheFileToRequest
+} from "../query-factors/query-semantic-factor-cache.js";
+import {
   EXTRACTION_REQUEST_PROFILES,
   type ExtractionRequestProfile
 } from "../extraction/request-profile.js";
@@ -11,17 +18,21 @@ import {
   resolveVendorModel
 } from "./catalog.js";
 
-export function proveProviderZeroCallReplay(input: {
+export async function proveProviderZeroCallReplay(input: {
   readonly request: DiagnosticLoopRequest;
-}): {
+  readonly expectedFileSha256?: string;
+}): Promise<{
   readonly physical_calls: 0;
   readonly profile: ExtractionRequestProfile;
   readonly evidence_prompt_sha256: string;
   readonly query_prompt_sha256: string;
   readonly evidence_request_template_sha256: string;
   readonly query_request_template_sha256: string;
-} {
+}> {
   assertSourceBoundF3SealCurrent();
+  if (input.request.requestedKeys.length === 0) {
+    throw new Error("provider replay requires a non-empty request key set");
+  }
   if (isObsoleteRequestProfile(input.request.requestProfile)) {
     throw new Error(
       `provider replay refuses obsolete request profile ${input.request.requestProfile}`
@@ -42,6 +53,7 @@ export function proveProviderZeroCallReplay(input: {
   if (proof.physicalCalls !== 0) {
     throw new Error("provider replay is not cache-only");
   }
+  await assertReplayQueryCacheAuthority(input.request, input.expectedFileSha256);
   const seal = sourceBoundF3Seal();
   return {
     physical_calls: 0,
@@ -58,4 +70,21 @@ function requireKnownRequestProfile(value: string): ExtractionRequestProfile {
     return value as ExtractionRequestProfile;
   }
   throw new Error(`unsupported request profile '${value}'`);
+}
+
+async function assertReplayQueryCacheAuthority(
+  request: DiagnosticLoopRequest,
+  expectedFileSha256: string | undefined
+): Promise<void> {
+  if (request.treatmentFactorCachePath === undefined) return;
+  const bound = await bindQuerySemanticFactorCacheFileToRequest(
+    request.treatmentFactorCachePath,
+    request
+  );
+  assertQuerySemanticFactorCacheMatchesRequest(bound.binding, request);
+  if (expectedFileSha256 !== undefined) {
+    assertBoundQuerySemanticFactorCacheFileDigest(
+      request.treatmentFactorCachePath, expectedFileSha256
+    );
+  }
 }

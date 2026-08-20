@@ -1,7 +1,13 @@
-import type { OpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
+import type { OpenSemanticFactorFormationCapture, OpenSemanticFactorGraph } from
+  "@do-soul/alaya-protocol";
 import type { OpenSemanticPropositionMatch } from "./compatibility.js";
 import type { OpenSemanticFactorCompatibilityTrace } from
   "./compatibility-trace.js";
+import {
+  OPEN_SEMANTIC_SOURCE_BOUND_JOIN_OPERATOR_ID,
+  type OpenSemanticJoinPropositionMatch
+} from "./join/identity.js";
+import { enumerateCrossTurnJoinPartners } from "./join/partners.js";
 import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_BINDING_LIMIT = 256;
@@ -46,7 +52,7 @@ export type OpenSemanticFactorCompositionSearch = Readonly<{
 
 type AttributedMatch = Readonly<{
   readonly evidence_id: string;
-  readonly match: Readonly<OpenSemanticPropositionMatch>;
+  readonly match: Readonly<OpenSemanticPropositionMatch | OpenSemanticJoinPropositionMatch>;
 }>;
 
 type SolutionPropositionMatch =
@@ -54,7 +60,8 @@ type SolutionPropositionMatch =
 
 export function searchOpenSemanticFactorCompositions(
   query: Readonly<OpenSemanticFactorGraph>,
-  trace: Readonly<OpenSemanticFactorCompatibilityTrace>
+  trace: Readonly<OpenSemanticFactorCompatibilityTrace>,
+  reconstructionFormations?: Readonly<Record<string, Readonly<OpenSemanticFactorFormationCapture>>>
 ): OpenSemanticFactorCompositionSearch {
   const candidates = collectAttributedMatches(trace);
   const queryPropositionIds = query.propositions
@@ -64,9 +71,12 @@ export function searchOpenSemanticFactorCompositions(
   const observations = new Map<string, OpenSemanticFactorBindingObservation>();
   const state = { steps: 0, truncated: trace.truncated };
   searchSolutions({
+    query,
     queryPropositionIds,
     resultVariableIds: query.result_variable_ids,
     candidates,
+    reconstructionFormations,
+    allowedEvidenceIds: new Set(trace.entries.map((entry) => entry.evidence_id)),
     queryIndex: 0,
     variableBindings: new Map(),
     usedEvidencePropositions: new Set(),
@@ -99,9 +109,14 @@ export function uniqueSortedStrings(values: readonly string[]): readonly string[
 }
 
 function searchSolutions(params: Readonly<{
+  readonly query: Readonly<OpenSemanticFactorGraph>;
   readonly queryPropositionIds: readonly string[];
   readonly resultVariableIds: readonly string[];
   readonly candidates: readonly AttributedMatch[];
+  readonly reconstructionFormations?: Readonly<
+    Record<string, Readonly<OpenSemanticFactorFormationCapture>>
+  >;
+  readonly allowedEvidenceIds: ReadonlySet<string>;
   readonly queryIndex: number;
   readonly variableBindings: ReadonlyMap<string, string>;
   readonly usedEvidencePropositions: ReadonlySet<string>;
@@ -118,7 +133,7 @@ function searchSolutions(params: Readonly<{
   params.state.steps += 1;
   const queryPropositionId = params.queryPropositionIds[params.queryIndex];
   if (queryPropositionId === undefined) {
-    recordSolution(params);
+    completeSelectedSolution(params);
     return;
   }
   for (const candidate of params.candidates) {
@@ -142,6 +157,57 @@ function searchSolutions(params: Readonly<{
     ...params,
     queryIndex: params.queryIndex + 1
   });
+}
+
+function completeSelectedSolution(params: Readonly<{
+  readonly query: Readonly<OpenSemanticFactorGraph>;
+  readonly resultVariableIds: readonly string[];
+  readonly reconstructionFormations?: Readonly<
+    Record<string, Readonly<OpenSemanticFactorFormationCapture>>
+  >;
+  readonly allowedEvidenceIds: ReadonlySet<string>;
+  readonly variableBindings: ReadonlyMap<string, string>;
+  readonly selected: readonly AttributedMatch[];
+  readonly solutions: Map<string, OpenSemanticFactorCompositionSolution>;
+  readonly observations: Map<string, OpenSemanticFactorBindingObservation>;
+}>): void {
+  if (resultVariablesBound(params.resultVariableIds, params.variableBindings)) {
+    recordSolution(params);
+    return;
+  }
+  if (params.reconstructionFormations === undefined || params.selected.length === 0) return;
+  for (const selected of params.selected) {
+    if (!isPairwiseConstraintMatch(selected.match)) continue;
+    for (const partner of enumerateCrossTurnJoinPartners({
+      query: params.query,
+      queryPropositionId: selected.match.query_proposition_id,
+      constraintMatch: selected.match,
+      constraintEvidenceId: selected.evidence_id,
+      evidenceFormations: params.reconstructionFormations,
+      allowedEvidenceIds: params.allowedEvidenceIds
+    })) {
+      const variableBindings = mergeCandidateBindings(
+        params.variableBindings,
+        partner.match
+      );
+      if (variableBindings === null ||
+          !resultVariablesBound(params.resultVariableIds, variableBindings)) {
+        continue;
+      }
+      recordSolution({
+        ...params,
+        variableBindings,
+        selected: [...params.selected, partner]
+      });
+    }
+  }
+}
+
+function resultVariablesBound(
+  resultVariableIds: readonly string[],
+  variableBindings: ReadonlyMap<string, string>
+): boolean {
+  return resultVariableIds.every((variableId) => variableBindings.has(variableId));
 }
 
 function recordSolution(params: Readonly<{
@@ -191,9 +257,15 @@ function collectAttributedMatches(
     compareText(left.match.evidence_proposition_id, right.match.evidence_proposition_id)));
 }
 
+function isPairwiseConstraintMatch(
+  match: Readonly<OpenSemanticPropositionMatch | OpenSemanticJoinPropositionMatch>
+): match is Readonly<OpenSemanticPropositionMatch> {
+  return match.predicate_alignment.operator_id !== OPEN_SEMANTIC_SOURCE_BOUND_JOIN_OPERATOR_ID;
+}
+
 function mergeCandidateBindings(
   current: ReadonlyMap<string, string>,
-  match: Readonly<OpenSemanticPropositionMatch>
+  match: Readonly<OpenSemanticPropositionMatch | OpenSemanticJoinPropositionMatch>
 ): ReadonlyMap<string, string> | null {
   const merged = new Map(current);
   for (const mapping of match.argument_mappings) {

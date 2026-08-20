@@ -30,7 +30,7 @@ describe("open semantic factor query compiler", () => {
       graph: queryGraph(), semantic_completeness_receipt: expect.any(Object)
     });
     expect(compiler.operator_id).toBe(OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID);
-    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v8");
+    expect(compiler.operator_id).toBe("open_semantic_factor_query_compiler_v9");
     const request = extractor.extract.mock.calls[0]?.[0];
     assertCompilerRequest(extractor.extract, request);
     assertPromptContract(request);
@@ -123,7 +123,8 @@ describe("open semantic factor query compiler", () => {
       { position: 0, node_kind: "factor", surface: "I", result: false },
       { position: 1, node_kind: "factor",
         surface: "a $5 coupon on coffee creamer", result: false },
-      { position: 2, node_kind: "variable", surface: "Where", result: true }
+      { position: 2, node_kind: "variable", surface: "Where", result: true,
+        binding_identity: "location" }
     ]);
   });
 });
@@ -172,7 +173,10 @@ function assertPromptContract(request: ExtractRequest | undefined): void {
     "belongs exclusively to one variable",
     "any substring inside its surface",
     "Follow required_graph_layout mechanically",
-    "only an entry with result:true may appear in result_variable_ids"
+    "only an entry with result:true may appear in result_variable_ids",
+    'When the argument is a duration measure, binding_identity must be "duration"',
+    'When it is a location or place participant, binding_identity must be "location"',
+    "Other open role names remain allowed"
   ];
   for (const phrase of requiredPhrases) {
     expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).toContain(phrase);
@@ -180,6 +184,15 @@ function assertPromptContract(request: ExtractRequest | undefined): void {
   expect(request?.responseSchemaRetryInstruction).toContain(completeEnvelope);
   expect(request?.responseSchemaRetryInstruction).toContain(
     "Follow required_graph_layout mechanically"
+  );
+  expect(request?.responseSchemaRetryInstruction).toContain(
+    'When the argument is a duration measure, binding_identity must be "duration"'
+  );
+  expect(request?.responseSchemaRetryInstruction).toContain(
+    "Other open role names remain allowed"
+  );
+  expect(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT).not.toContain(
+    "Do not emit world ontology categories, fixed roles"
   );
 }
 

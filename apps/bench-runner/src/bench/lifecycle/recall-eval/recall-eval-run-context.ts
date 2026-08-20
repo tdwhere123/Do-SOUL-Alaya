@@ -54,9 +54,15 @@ import type { LongMemEvalSelectionBoundarySpool } from
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import {
-  readQuerySemanticFactorCache,
+  assertBoundQuerySemanticFactorCacheFileDigest,
+  bindQuerySemanticFactorCacheFileToRequest,
+  loadedQuerySemanticFactorCacheFromBound,
   type LoadedQuerySemanticFactorCache
 } from "../../query-factors/query-semantic-factor-cache.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from
+  "../../extraction/cache/extraction-cache-manifest.js";
+import { isCurrentExtractionRequestProfile } from
+  "../../extraction/request-profile.js";
 import { buildExpectedEmbeddingCacheOverlayBinding } from
   "../../snapshot/recall-eval/embedding-cache-overlay/runtime-binding.js";
 import type { RecallEvalMemoryProfile } from
@@ -265,10 +271,7 @@ async function prepareRecallEvalAttribution(
   const window = selectWindow(bundle.sidecar.questions, options);
   const querySemanticFactorCache = options.querySemanticFactorCachePath === undefined
     ? null
-    : await readQuerySemanticFactorCache({
-        path: options.querySemanticFactorCachePath,
-        required_source_texts: window.map((question) => question.question)
-      });
+    : await bindRecallEvalQuerySemanticFactorCache(options, bundle);
   const baseRuntimeAttribution = await buildRecallEvalRuntimeAttribution(
     bundle.manifest,
     daemonLaunch.environment,
@@ -286,6 +289,41 @@ async function prepareRecallEvalAttribution(
     }
   );
   return { window, querySemanticFactorCache, baseRuntimeAttribution };
+}
+
+export async function bindRecallEvalQuerySemanticFactorCache(
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle
+): Promise<LoadedQuerySemanticFactorCache> {
+  const path = options.querySemanticFactorCachePath;
+  const authority = bundle.extractionAuthority;
+  const provenance = bundle.manifest.extraction_provenance;
+  if (path === undefined || authority === null) {
+    throw new Error("recall-eval query cache current bind requires snapshot extraction authority");
+  }
+  if (provenance == null ||
+      provenance.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
+    throw new Error("recall-eval query cache current bind requires current snapshot extraction provenance");
+  }
+  if (authority.request_profile !== provenance.request_profile ||
+      authority.extraction_model !== provenance.extraction_model) {
+    throw new Error("recall-eval query cache current bind has mismatched extraction identity");
+  }
+  if (!isCurrentExtractionRequestProfile(authority.request_profile)) {
+    throw new Error("recall-eval query cache request profile is not current authority");
+  }
+  const bound = await bindQuerySemanticFactorCacheFileToRequest(path, {
+    requestProfile: authority.request_profile,
+    model: authority.extraction_model,
+    providerRoute: provenance.provider_url,
+    snapshotPath: options.snapshotDbPath
+  });
+  if (options.querySemanticFactorCacheFileSha256 !== undefined) {
+    assertBoundQuerySemanticFactorCacheFileDigest(
+      path, options.querySemanticFactorCacheFileSha256
+    );
+  }
+  return loadedQuerySemanticFactorCacheFromBound(bound);
 }
 
 function buildBoundRecallEvalRunContext(input: Readonly<{

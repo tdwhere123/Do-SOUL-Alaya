@@ -1,6 +1,9 @@
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { z } from "zod";
-import { OpenSemanticFactorFormationCaptureSchema } from "@do-soul/alaya-protocol";
+import {
+  OpenSemanticFactorActivationStateSchema,
+  OpenSemanticFactorFormationCaptureSchema
+} from "@do-soul/alaya-protocol";
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const IdSchema = z.string().min(1);
@@ -38,14 +41,19 @@ const PropositionMatchSchema = z.object({
   predicate_alignment: z.object({
     query_factor_id: IdSchema,
     evidence_factor_id: IdSchema,
-    operator_id: z.literal("exact_semantic_identity_v1")
+    operator_id: z.enum([
+      "exact_semantic_identity_v1",
+      "duration_measure_binding_v1"
+    ])
   }).strict().readonly(),
   argument_mappings: z.array(ArgumentMappingSchema).readonly()
 }).strict().readonly();
 
+// Pairwise receipts stay v6; join operator is not a pairwise predicate.
+// Authority-lane phase schema is not copied here — merge on this operator literal.
 const CompatibilityReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal("open_semantic_factor_compatibility_v5"),
+  operator_id: z.literal("open_semantic_factor_compatibility_v6"),
   status: z.enum([
     "compatible",
     "incompatible",
@@ -154,7 +162,7 @@ export const OpenSemanticFactorActivationReceiptSchema = z.object({
   truncated: z.boolean(),
   entries: z.array(z.object({
     evidence_id: IdSchema,
-    state: z.literal("observed"),
+    state: OpenSemanticFactorActivationStateSchema,
     activation: z.number().gt(0).max(1),
     solution_count: CountSchema,
     proposition_match_count: CountSchema

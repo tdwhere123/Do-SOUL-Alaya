@@ -5,7 +5,10 @@ import {
 import type { CoarseRecallCandidate, RecallSupplementaryData } from
   "../../runtime/recall-service-types.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "../field-identity.js";
-import type { OpenSemanticFactorActivationReceipt } from "./activation.js";
+import type {
+  OpenSemanticFactorActivationReceipt,
+  OpenSemanticFactorActivationState
+} from "./activation.js";
 import { compareText } from "../../../shared/compare-text.js";
 
 export const OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID =
@@ -14,7 +17,7 @@ export const OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID =
 export type OpenSemanticFactorCandidateActivation = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID;
-  readonly state: "observed";
+  readonly state: OpenSemanticFactorActivationState;
   readonly score: number;
   readonly evidence_ids: readonly string[];
   readonly solution_count: number;
@@ -43,7 +46,9 @@ export function attributeOpenSemanticFactorActivations(params: Readonly<{
     const body = Object.freeze({
       schema_version: 1 as const,
       operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
-      state: "observed" as const,
+      state: entries.some((entry) => entry.state === "reconstructed")
+        ? "reconstructed" as const
+        : "observed" as const,
       score: Math.max(...entries.map((entry) => entry.activation)),
       evidence_ids: Object.freeze(evidenceIds),
       solution_count: Math.max(...entries.map((entry) => entry.solution_count)),

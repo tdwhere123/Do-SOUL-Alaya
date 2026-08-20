@@ -47,6 +47,7 @@ export interface RecallEvalOptions {
   readonly factFrameRetrofitLedgerPath?: string;
   readonly seedExtractionSystemPromptPath?: string;
   readonly querySemanticFactorCachePath?: string;
+  readonly querySemanticFactorCacheFileSha256?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
   readonly captureOpenSemanticFactorCandidateActivations?: boolean;

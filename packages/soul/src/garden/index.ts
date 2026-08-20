@@ -52,6 +52,8 @@ export {
   buildOfficialApiExtractionRequests,
   computeOfficialApiSourceCorpusIdentity,
   parseOfficialApiSemanticFactorGraphProjectionAudit,
+  inspectOfficialApiSemanticFactorGraphProjection,
+  projectOfficialApiSemanticFactorGraph,
   parseOfficialApiSignals,
   parseOfficialApiExtractionRequest,
   salvageRawSignalElements,
@@ -65,6 +67,7 @@ export {
   type OfficialApiSignalFormationAuditInput,
   type OfficialApiSignalFormationAuditResult,
   type OfficialApiExtractionRequest,
+  type OfficialApiSemanticFactorGraphFields,
   type OfficialApiSemanticFactorGraphProjectionAudit,
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
@@ -82,7 +85,9 @@ export {
   SELECTED_SOURCE_BOUND_F3_CAPABILITY,
   SOURCE_BOUND_F3_PROMPT_ASKS,
   SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
+  SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
+  SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
   assertSourceBoundF3SealCurrent,
   sourceBoundF3Seal
 } from "./semantic-factors/source-bound-seal.js";
@@ -128,6 +133,10 @@ export {
   GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
   buildOpenSemanticFactorFormationProposal
 } from "./grounding/semantic-factors/formation-proposal.js";
+export {
+  classifyOpenSemanticFactorFormationEligibility,
+  type OpenSemanticFactorFormationEligibility
+} from "./grounding/semantic-factors/formation-eligibility.js";
 export {
   SignalExtractorError,
   createPiMonoExtractor,

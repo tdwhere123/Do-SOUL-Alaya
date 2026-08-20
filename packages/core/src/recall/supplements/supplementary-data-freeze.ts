@@ -105,7 +105,9 @@ export function freezeSupplementaryData(
     });
   const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
     trace: openSemanticFactorCompatibilityTrace,
-    query_capture: querySemanticFactorFormation.formation
+    query_capture: querySemanticFactorFormation.formation,
+    // Omitted formations cannot reconstruct a join from compatibility receipts.
+    evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
   });
   return Object.freeze({
     queryProbes: params.queryProbes,
@@ -124,7 +126,8 @@ export function freezeSupplementaryData(
     openSemanticFactorActivation: materializeOpenSemanticFactorActivation({
       composition: openSemanticFactorComposition,
       trace: openSemanticFactorCompatibilityTrace,
-      query_capture: querySemanticFactorFormation.formation
+      query_capture: querySemanticFactorFormation.formation,
+      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
     }),
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,

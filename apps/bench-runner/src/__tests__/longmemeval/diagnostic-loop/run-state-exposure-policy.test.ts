@@ -4,15 +4,21 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CACHED_F3_EXPOSURE_POLICY } from
   "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
-import { resolveDiagnosticLoopIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
+import {
+  resolveDiagnosticLoopIdentity,
+  resolvedDiagnosticLoopIdentityDigest
+} from "../../../bench/diagnostic-loop/authority/identity.js";
 import {
   persistRunRecord,
   readRunRecord,
   runRecordDigest,
   runRecordPath
 } from "../../../bench/diagnostic-loop/run-state.js";
-import { loopRequest } from "./fixture.js";
+import {
+  loopRequest,
+  writeDiagnosticSnapshotFixture,
+  writeQueryFactorCacheFixture
+} from "./fixture.js";
 
 const roots: string[] = [];
 
@@ -51,5 +57,43 @@ describe("diagnostic-loop run-state exposure policy", () => {
     }, null, 2)}\n`);
 
     expect(() => readRunRecord(path)).toThrow(/invalid diagnostic-loop run record/iu);
+  });
+
+  it("rejects archived query-cache schema 1/2 as current run-state authority", async () => {
+    const workRoot = await mkdtemp(join(tmpdir(), "run-state-query-cache-"));
+    roots.push(workRoot);
+    const snapshot = await writeDiagnosticSnapshotFixture(workRoot, "run-state-cache");
+    const cachePath = join(workRoot, "query-cache.json");
+    await writeQueryFactorCacheFixture(cachePath, "Question q-1?");
+    const identity = await resolveDiagnosticLoopIdentity(loopRequest({
+      snapshotPath: snapshot,
+      treatmentFactorCachePath: cachePath
+    }));
+    persistRunRecord({ workRoot, identity, mode: "run", argv: [] });
+    const path = runRecordPath(workRoot);
+    expect(readRunRecord(path).identity.query_factor_cache?.schema_version).toBe(4);
+
+    for (const schema_version of [1, 2]) {
+      const record = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      const query = {
+        ...(record.identity as { query_factor_cache: Record<string, unknown> })
+          .query_factor_cache,
+        schema_version
+      };
+      const identity = {
+        ...(record.identity as Record<string, unknown>),
+        query_factor_cache: query
+      };
+      const { run_record_digest: _digest, ...body } = {
+        ...record,
+        identity,
+        identity_digest: resolvedDiagnosticLoopIdentityDigest(identity as never)
+      };
+      await writeFile(path, `${JSON.stringify({
+        ...body,
+        run_record_digest: runRecordDigest(body as never)
+      }, null, 2)}\n`);
+      expect(() => readRunRecord(path)).toThrow(/invalid diagnostic-loop run record/iu);
+    }
   });
 });

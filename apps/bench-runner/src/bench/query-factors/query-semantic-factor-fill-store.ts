@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -8,11 +8,20 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { ExtractionTransportProvenance } from
   "../extraction/transport-route.js";
+import { CURRENT_EXTRACTION_REQUEST_PROFILES } from
+  "../extraction/request-profile.js";
+import {
+  QUERY_SEMANTIC_FACTOR_FILL_IDENTITY_SCHEMA_VERSION,
+  queryCachePrefixedSha256,
+  queryCacheSha256Hex
+} from "./query-semantic-factor-cache-identity.js";
+import { queryCacheStableJson } from "./cache/document.js";
 
 const Sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const FillIdentitySchema = z.object({
-  schema_version: z.literal(2),
+  schema_version: z.literal(QUERY_SEMANTIC_FACTOR_FILL_IDENTITY_SCHEMA_VERSION),
   compiler_operator_id: z.string().min(1),
+  request_profile: z.enum(CURRENT_EXTRACTION_REQUEST_PROFILES),
   system_prompt_sha256: Sha256Schema,
   request_template_sha256: Sha256Schema,
   model_id: z.string().min(1),
@@ -127,7 +136,7 @@ async function readShard(
   const shard = FillShardSchema.parse(JSON.parse(raw));
   if (shard.fill_identity_sha256 !== identityDigest ||
       shard.source_text !== sourceText ||
-      shard.source_sha256 !== prefixedSha256(sourceText)) {
+      shard.source_sha256 !== queryCachePrefixedSha256(sourceText)) {
     throw new Error("query semantic factor partial shard identity mismatch");
   }
   return shard;
@@ -144,19 +153,11 @@ async function writeAtomicExclusive(path: string, content: string): Promise<void
 }
 
 function shardPath(root: string, sourceText: string): string {
-  return join(root, `${sha256(sourceText)}.json`);
+  return join(root, `${queryCacheSha256Hex(sourceText)}.json`);
 }
 
 function digestIdentity(identity: QuerySemanticFactorFillIdentity): string {
-  return prefixedSha256(JSON.stringify(identity));
-}
-
-function prefixedSha256(value: string): string {
-  return `sha256:${sha256(value)}`;
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
+  return queryCachePrefixedSha256(queryCacheStableJson(identity));
 }
 
 function isAlreadyExists(error: unknown): boolean {

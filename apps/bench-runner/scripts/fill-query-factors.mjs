@@ -6,6 +6,8 @@ import { resolveCompileSeedExtractionConfig } from
   "../dist/bench/compile-seed/compile-seed-config.js";
 import { fillQuerySemanticFactorSources } from
   "../dist/bench/query-factors/query-semantic-factor-cache.js";
+import { currentQueryCacheRequestProfile } from
+  "../dist/bench/query-factors/query-semantic-factor-cache-identity.js";
 import { resolveExtractionTransportRoute } from
   "../dist/bench/extraction/transport-route.js";
 import { EXTRACTION_REQUEST_TIMEOUT_MS } from
@@ -44,6 +46,7 @@ const binding = await fillQuerySemanticFactorSources({
   source_texts: sourceTexts,
   output_path: outputPath,
   model_id: config.model,
+  request_profile: currentQueryCacheRequestProfile(config.requestProfile),
   provider_url: config.providerUrl,
   transport: resolveExtractionTransportRoute(config),
   concurrency: 8,

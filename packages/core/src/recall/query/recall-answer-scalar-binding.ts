@@ -1,6 +1,13 @@
 import type { RecallAnswerShape, RecallAnswerShapePlan } from "./recall-answer-shape-plan.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { splitLexicalTokens } from "./recall-query-probes.js";
+import { DURATION_VALUE_SOURCE } from "./duration-unit-family.js";
+
+export {
+  DURATION_AMOUNT_SOURCE,
+  DURATION_UNIT_SOURCE,
+  DURATION_VALUE_SOURCE
+} from "./duration-unit-family.js";
 
 export type RecallScalarEventStatus = "asserted" | "prospective" | "negated" | "reversed";
 export type RecallScalarTimeStatus = "not_requested" | "compatible" | "conflicted" | "unknown";
@@ -26,8 +33,6 @@ const PLACE_VALUE_CUES = [
   /\b(?:located|based)\s+in\s+(?:the\s+)?(?<value>[\p{L}\p{N}][\p{L}\p{N}'’_-]*%?)/giu,
   /\b(?:going|went|travelled|traveled|visited|stayed)\s+to\s+(?:the\s+)?(?<value>[\p{L}\p{N}][\p{L}\p{N}'’_-]*%?)/giu
 ] as const;
-const DURATION_VALUE_SOURCE =
-  String.raw`\b(?:(?:over|under|about|around|nearly|more\s+than|less\s+than)\s+)?(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|a|an|half)\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b`;
 const DURATION_VALUE_CUE = new RegExp(DURATION_VALUE_SOURCE, "iu");
 const LEADING_DURATION_VALUE_CUE = new RegExp(`^\\s*${DURATION_VALUE_SOURCE}`, "iu");
 const NON_PLACE_VALUES = new Set([

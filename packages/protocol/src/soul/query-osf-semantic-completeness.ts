@@ -6,13 +6,17 @@ import {
   type OpenSemanticFactorGraph,
   type OpenSemanticFactorGraphProposal
 } from "./open-semantic-factor-graph.js";
+import {
+  classifyQueryObligationStructuralRole,
+  isOpenSemanticStructuralRole
+} from "./open-semantic-structural-role.js";
 
 export const QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID =
   "query_fact_frame_osf_obligation_v2" as const;
 export const QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID =
   "query_osf_semantic_completeness_v2" as const;
 export const QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID =
-  "open_semantic_factor_query_compiler_v8" as const;
+  "open_semantic_factor_query_compiler_v9" as const;
 export const RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID =
   "rule_based_query_fact_frame_extractor_v2" as const;
 
@@ -159,6 +163,7 @@ function graphSatisfiesObligation(
   const subject = proposition.arguments.find(({ position }) => position === 0);
   const result = proposition.arguments.find(({ position }) =>
     position === obligation.value.position);
+  const requiredRole = classifyQueryObligationStructuralRole(obligation.value.surface);
   return proposition.arguments.length === obligation.arity &&
     nodeMatches(predicate, obligation.predicate) &&
     subject?.reference_kind === "factor" &&
@@ -168,7 +173,9 @@ function graphSatisfiesObligation(
     result?.reference_kind === "variable" &&
     graph.result_variable_ids[0] === result.reference_id &&
     nodeMatches(graph.variables.find(({ variable_id }) =>
-      variable_id === result.reference_id), obligation.value);
+      variable_id === result.reference_id), obligation.value) &&
+    (requiredRole === null ||
+      isOpenSemanticStructuralRole(result.binding_identity, requiredRole));
 }
 
 function constraintsMatch(

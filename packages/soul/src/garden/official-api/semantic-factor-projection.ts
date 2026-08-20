@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import {
   OpenSemanticFactorGraphProposalSchema,
+  groundOpenSemanticFactorGraph,
   type OpenSemanticFactorGraphProposal
 } from "@do-soul/alaya-protocol";
 
@@ -79,6 +80,36 @@ export function inspectOfficialApiSemanticFactorGraphProjection(
         reason: classifySemanticFactorGraphRejection(parsed.error)
       })
     });
+}
+
+export type OfficialApiSemanticFactorGraphFields = Readonly<{
+  readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
+  readonly semantic_factor_graph_projection?: OfficialApiSemanticFactorGraphProjectionAudit;
+}>;
+
+export function projectOfficialApiSemanticFactorGraph(
+  graph: unknown,
+  assertion: string | null
+): OfficialApiSemanticFactorGraphFields {
+  const inspected = inspectOfficialApiSemanticFactorGraphProjection(graph);
+  if (inspected.audit !== undefined) {
+    return Object.freeze({ semantic_factor_graph_projection: inspected.audit });
+  }
+  if (assertion === null) return notSourceGrounded();
+  const grounded = groundOpenSemanticFactorGraph(inspected.graph, assertion);
+  if (grounded === null || grounded.source_kind !== "evidence") {
+    return notSourceGrounded();
+  }
+  return Object.freeze({ semantic_factor_graph: inspected.graph });
+}
+
+function notSourceGrounded(): OfficialApiSemanticFactorGraphFields {
+  return Object.freeze({
+    semantic_factor_graph_projection: Object.freeze({
+      status: "rejected" as const,
+      reason: "semantic_factor_graph_not_source_grounded" as const
+    })
+  });
 }
 
 export function parseOfficialApiSemanticFactorGraphProjectionAudit(

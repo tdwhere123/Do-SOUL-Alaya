@@ -1,7 +1,4 @@
-import {
-  groundAssociativeFactFrame,
-  groundOpenSemanticFactorGraph
-} from "@do-soul/alaya-protocol";
+import { groundAssociativeFactFrame } from "@do-soul/alaya-protocol";
 import type {
   OfficialApiPreferenceProfileDraft,
   OfficialApiSignalDraft
@@ -14,6 +11,7 @@ import {
   preferenceProfileGroundingRemovalReason,
   resolvePreferenceAwareSourceGrounding
 } from "../grounding/preference-profile.js";
+import { projectOfficialApiSemanticFactorGraph } from "./semantic-factor-projection.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
 
 interface OfficialApiSourceGroundingProposal {
@@ -66,14 +64,13 @@ export function groundOfficialApiDraft(
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
   const preferenceProfile = preferenceGrounding.preferenceProfile;
   const factFrame = groundAssociativeFactFrame(draft.fact_frame, assertion) ?? undefined;
-  const semanticFactorGraph = groundEvidenceSemanticFactorGraph(
+  const projected = projectOfficialApiSemanticFactorGraph(
     draft.semantic_factor_graph,
     assertion
   );
-  const semanticFactorGraphProjection = resolveGroundedGraphProjection(
-    draft,
-    semanticFactorGraph
-  );
+  const semanticFactorGraph = projected.semantic_factor_graph;
+  const semanticFactorGraphProjection = draft.semantic_factor_graph_projection ??
+    projected.semantic_factor_graph_projection;
   const reasons = groundingReasons(draft, assertion, canonicalEntities,
     preferenceProfile, factFrame, semanticFactorGraph);
   return {
@@ -178,10 +175,12 @@ function rejectedGrounding(
     semantic_factor_graph_projection: _semanticFactorGraphProjection,
     ...safeDraft
   } = draft;
-  const semanticFactorGraphProjection = resolveGroundedGraphProjection(
-    draft,
-    undefined
+  const projected = projectOfficialApiSemanticFactorGraph(
+    draft.semantic_factor_graph,
+    null
   );
+  const semanticFactorGraphProjection = draft.semantic_factor_graph_projection ??
+    projected.semantic_factor_graph_projection;
   return {
     status: "rejected",
     draft: Object.freeze({
@@ -208,22 +207,6 @@ function rejectedGrounding(
       reasons: Object.freeze([reason])
     })
   };
-}
-
-function resolveGroundedGraphProjection(
-  draft: OfficialApiSignalDraft,
-  groundedGraph: OfficialApiSignalDraft["semantic_factor_graph"]
-): OfficialApiSignalDraft["semantic_factor_graph_projection"] {
-  if (draft.semantic_factor_graph_projection !== undefined) {
-    return draft.semantic_factor_graph_projection;
-  }
-  if (draft.semantic_factor_graph === undefined || groundedGraph !== undefined) {
-    return undefined;
-  }
-  return Object.freeze({
-    status: "rejected",
-    reason: "semantic_factor_graph_not_source_grounded"
-  });
 }
 
 function groundingReasons(
@@ -254,14 +237,6 @@ function groundingReasons(
     reasons.push("proposed_semantic_factor_graph_not_source_grounded");
   }
   return reasons;
-}
-
-function groundEvidenceSemanticFactorGraph(
-  proposal: OfficialApiSignalDraft["semantic_factor_graph"],
-  assertion: string
-): OfficialApiSignalDraft["semantic_factor_graph"] {
-  const graph = groundOpenSemanticFactorGraph(proposal, assertion);
-  return graph?.source_kind === "evidence" ? proposal : undefined;
 }
 
 function groundCanonicalEntities(

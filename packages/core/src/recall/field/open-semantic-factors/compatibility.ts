@@ -5,7 +5,8 @@ import {
   type OpenSemanticFactor,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorGraph,
-  type OpenSemanticProposition
+  type OpenSemanticProposition,
+  type OpenSemanticVariable
 } from "@do-soul/alaya-protocol";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../field-identity.js";
@@ -17,6 +18,11 @@ import {
   openSemanticFactorSetsOverlap,
   openSemanticFactorsOverlap
 } from "./factor-identity.js";
+import { OPEN_SEMANTIC_DURATION_MEASURE_OPERATOR_ID } from "./duration/measure.js";
+import {
+  enumerateDurationMeasureMatches,
+  isCopularDurationMeasureQuery
+} from "./duration/relation.js";
 import { compareText } from "../../../shared/compare-text.js";
 
 export type {
@@ -26,7 +32,7 @@ export type {
 } from "./argument-alignment.js";
 
 export const OPEN_SEMANTIC_FACTOR_COMPATIBILITY_OPERATOR_ID =
-  "open_semantic_factor_compatibility_v5";
+  "open_semantic_factor_compatibility_v6";
 
 export type OpenSemanticPropositionMatch = Readonly<{
   readonly query_proposition_id: string;
@@ -34,7 +40,9 @@ export type OpenSemanticPropositionMatch = Readonly<{
   readonly predicate_alignment: Readonly<{
     readonly query_factor_id: string;
     readonly evidence_factor_id: string;
-    readonly operator_id: "exact_semantic_identity_v1";
+    readonly operator_id:
+      | "exact_semantic_identity_v1"
+      | typeof OPEN_SEMANTIC_DURATION_MEASURE_OPERATOR_ID;
   }>;
   readonly argument_mappings: readonly Readonly<OpenSemanticFactorArgumentMapping>[];
 }>;
@@ -115,20 +123,22 @@ function matchGraphs(
   readonly candidates: readonly Readonly<OpenSemanticPropositionMatch>[];
   readonly matches: readonly Readonly<OpenSemanticPropositionMatch>[];
 }> {
-  // Proposition search cannot produce matches without a shared factor token.
-  if (!openSemanticFactorSetsOverlap(evidence.factors, query.factors)) {
+  const queryFactors = indexFactors(query.factors);
+  // Copular duration queries share a subject, not a predicate token, with listen/duration evidence.
+  if (!openSemanticFactorSetsOverlap(evidence.factors, query.factors) &&
+      !isCopularDurationMeasureQuery(query, queryFactors)) {
     return Object.freeze({
       candidates: Object.freeze([]),
       matches: Object.freeze([])
     });
   }
   const evidenceFactors = indexFactors(evidence.factors);
-  const queryFactors = indexFactors(query.factors);
   const matchCandidates = enumerateMatchCandidates({
     evidencePropositions: evidence.propositions,
     queryPropositions: query.propositions,
     evidenceFactors,
     queryFactors,
+    queryGraph: query,
     requireExactPositions
   });
   const matches = selectConsistentMatches({
@@ -187,22 +197,54 @@ function enumerateMatchCandidates(params: Readonly<{
   readonly queryPropositions: readonly Readonly<OpenSemanticProposition>[];
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly queryGraph: Readonly<OpenSemanticFactorGraph>;
   readonly requireExactPositions: boolean;
 }>): readonly PropositionMatchCandidate[] {
+  const queryVariables = indexVariables(params.queryGraph.variables);
   const candidates = params.queryPropositions.flatMap((query) =>
-    params.evidencePropositions.flatMap((evidence) =>
-      matchPropositions({
+    params.evidencePropositions.flatMap((evidence) => [
+      ...matchPropositions({
         evidence,
         query,
         evidenceFactors: params.evidenceFactors,
         queryFactors: params.queryFactors,
+        queryVariables,
         variableBindings: new Map(),
         requireExactPositions: params.requireExactPositions
+      }),
+      ...durationMeasureCandidates({
+        queryGraph: params.queryGraph,
+        evidence,
+        query,
+        evidenceFactors: params.evidenceFactors,
+        queryFactors: params.queryFactors
       })
-    )
+    ])
   );
   return Object.freeze(candidates.sort((left, right) =>
     comparePropositionMatches(left.match, right.match)));
+}
+
+function durationMeasureCandidates(params: Readonly<{
+  readonly queryGraph: Readonly<OpenSemanticFactorGraph>;
+  readonly evidence: Readonly<OpenSemanticProposition>;
+  readonly query: Readonly<OpenSemanticProposition>;
+  readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+}>): readonly PropositionMatchCandidate[] {
+  return enumerateDurationMeasureMatches(params).map((match) => Object.freeze({
+    match: Object.freeze({
+      query_proposition_id: match.query_proposition_id,
+      evidence_proposition_id: match.evidence_proposition_id,
+      predicate_alignment: Object.freeze({
+        query_factor_id: match.query_predicate_factor_id,
+        evidence_factor_id: match.evidence_predicate_factor_id,
+        operator_id: OPEN_SEMANTIC_DURATION_MEASURE_OPERATOR_ID
+      }),
+      argument_mappings: match.mappings
+    }),
+    variableBindings: match.variableBindings
+  }));
 }
 
 function mergeVariableBindings(
@@ -223,6 +265,7 @@ function matchPropositions(params: Readonly<{
   readonly query: Readonly<OpenSemanticProposition>;
   readonly evidenceFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
   readonly queryFactors: ReadonlyMap<string, Readonly<OpenSemanticFactor>>;
+  readonly queryVariables: ReadonlyMap<string, Readonly<OpenSemanticVariable>>;
   readonly variableBindings: ReadonlyMap<string, string>;
   readonly requireExactPositions: boolean;
 }>): readonly PropositionMatchCandidate[] {
@@ -319,6 +362,12 @@ function indexFactors(
   factors: readonly Readonly<OpenSemanticFactor>[]
 ): ReadonlyMap<string, Readonly<OpenSemanticFactor>> {
   return new Map(factors.map((factor) => [factor.factor_id, factor]));
+}
+
+function indexVariables(
+  variables: readonly Readonly<OpenSemanticVariable>[]
+): ReadonlyMap<string, Readonly<OpenSemanticVariable>> {
+  return new Map(variables.map((variable) => [variable.variable_id, variable]));
 }
 
 function comparePropositions(

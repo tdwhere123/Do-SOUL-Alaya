@@ -7,13 +7,24 @@ import {
   type RecallQueryProbes
 } from "./recall-query-probes.js";
 
+export function queryFactorFtsExtraEligibility(
+  capture: Readonly<OpenSemanticFactorFormationCapture> | undefined
+): "formed" | "not_formed" {
+  // FTS extras are seeded in prepareQuerySeed before composition exists.
+  if (capture === undefined || capture.status !== "formed" || capture.graph === null) {
+    return "not_formed";
+  }
+  return "formed";
+}
+
 export function extendQueryProbesWithOpenSemanticFactors(
   probes: Readonly<RecallQueryProbes>,
   capture: Readonly<OpenSemanticFactorFormationCapture> | undefined
 ): Readonly<RecallQueryProbes> {
-  if (capture === undefined || capture.status !== "formed" || capture.graph === null) {
+  if (queryFactorFtsExtraEligibility(capture) === "not_formed") {
     return probes;
   }
+  if (capture === undefined || capture.graph === null) return probes;
   const present = new Set(
     [...probes.lexical_terms, ...probes.expanded_terms].map(normalizeMemoryObjectKeySurface)
   );

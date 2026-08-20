@@ -6,7 +6,7 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "../official-api/system-prompt.js";
 import { officialApiExtractionRequestTemplatePreimage } from
   "../official-api/extraction-request.js";
 import { GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID } from
-  "../grounding/semantic-factors/formation-proposal.js";
+  "../grounding/semantic-factors/formation-eligibility.js";
 import {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
@@ -34,9 +34,9 @@ export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
 ] as const;
 
 export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 =
-  "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a";
+  "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
 export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
-  "eeb420decb4cb05958f4fe5d3bcd73dfdff37d88dce0ac364cc628e0d46d2074";
+  "25033bb695b7c5128661339f3547bb3aae1ba2c360d11917f03cde19d6e28b02";
 export const SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256 =
   "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396";
 export const SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256 =

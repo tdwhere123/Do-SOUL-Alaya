@@ -5,9 +5,10 @@ import { EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION } from "./effective-recall-confi
 import { ExtractionCacheIdentitySchema } from "./identity/extraction-cache-identity.js";
 import { SourceAssertionSupplementBindingSchema } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
+import { QuerySemanticFactorCacheProvenanceIdentitySchema } from
+  "../query-factors/query-semantic-factor-cache-identity.js";
 
 export const runProvenanceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
-const PrefixedSha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 export const ExecutedDistIdentitySchema = z.object({
   algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),
   sha256: runProvenanceSha256Schema,
@@ -36,21 +37,6 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
     d2q_input: z.literal("raw_content")
   }).strict()
 ]);
-const QuerySemanticFactorCacheIdentitySchema = z.object({
-  schema_version: z.literal(3),
-  cache_content_sha256: PrefixedSha256Schema,
-  compiler_operator_id: z.string().min(1),
-  system_prompt_sha256: PrefixedSha256Schema,
-  request_template_sha256: PrefixedSha256Schema,
-  model_id: z.string().min(1),
-  provider_url_sha256: PrefixedSha256Schema,
-  source_set_sha256: PrefixedSha256Schema,
-  entry_count: z.number().int().nonnegative(),
-  transport_routes: z.array(z.object({
-    provider_url_sha256: PrefixedSha256Schema,
-    model: z.string().min(1)
-  }).strict().readonly()).readonly().optional()
-}).strict().readonly();
 const EmbeddingCacheOverlayBindingSchema = z.object({
   receipt_sha256: runProvenanceSha256Schema,
   overlay_sha256: runProvenanceSha256Schema,
@@ -95,7 +81,7 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     onnx_model_artifact_sha256: runProvenanceSha256Schema.optional(),
     embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
     answer_rerank: AnswerRerankRuntimeProvenanceSchema.optional(),
-    query_semantic_factor_cache: QuerySemanticFactorCacheIdentitySchema.optional(),
+    query_semantic_factor_cache: QuerySemanticFactorCacheProvenanceIdentitySchema.optional(),
     embedding_cache_overlay: EmbeddingCacheOverlayBindingSchema.optional(),
     reconciliation_basis: z.enum(["rule_only", "garden_llm"]).optional(),
     paired_env: z.record(z.string(), z.string()),

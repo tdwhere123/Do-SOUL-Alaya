@@ -227,6 +227,38 @@ describe("EvidenceService source formation", () => {
     ]));
   });
 
+  it("does not persist F3 lineage for rejected or unavailable semantic formation", async () => {
+    const source = "Atlas supports research.";
+    for (const admission of [{ kind: "rejected" } as const, undefined]) {
+      const stores = createInMemoryFieldStores();
+      const { service, create } = createCreationHarness({
+        fieldStores: stores,
+        sha256: fieldSha256
+      });
+
+      await service.create(
+        createEvidenceInput({ excerpt: source }),
+        [],
+        undefined,
+        admission
+      );
+
+      expect(create.mock.calls[0]?.[3]).toMatchObject({
+        status: admission === undefined ? "unavailable" : "rejected",
+        graph: null,
+        producer_operator_id: null
+      });
+      expect(
+        stores.listFactors("workspace-1").filter((factor) => factor.family === "f3")
+      ).toEqual([]);
+      expect(stores.getJob("workspace-1", hashDerivationJobId({
+        purpose: "f3_semantic_capture",
+        operator_id: "structured_open_semantic_factor_v1",
+        input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
+      }, fieldSha256))).toBeNull();
+    }
+  });
+
   it("persists root evidence when optional projection planning is invalid", async () => {
     const stores = createInMemoryFieldStores();
     const { service, create } = createCreationHarness({

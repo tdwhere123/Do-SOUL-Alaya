@@ -15,11 +15,24 @@ import {
   CLAUSE_BOUNDARIES,
   WH_WORDS
 } from "./fact-frame-grammar/clause-boundaries.js";
+import { isCjkSegmentationCandidate, warmCjkSegmentation } from
+  "./cjk-segmentation.js";
+import { parseCjkInterrogativeFactFrame } from
+  "./fact-frame-grammar/cjk-interrogative.js";
 import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
   type FactFrameSourceToken
 } from "./fact-frame-grammar/source-text.js";
+import { COPULAR_MEASURE_WORDS } from "./fact-frame-grammar/result-slots.js";
+
+export {
+  COPULAR_MEASURE_WORDS,
+  isRuleBasedCopularMeasureValue,
+  isRuleBasedCopularPredicate,
+  isRuleBasedGenericSpeaker,
+  isRuleBasedLocationResultValue
+} from "./fact-frame-grammar/result-slots.js";
 
 type SubjectSpan = Readonly<{
   readonly text: string;
@@ -50,6 +63,7 @@ implements QueryFactFrameExtractionPort {
     options?: Readonly<{ readonly maxFrames?: number }>
   ): Promise<readonly Readonly<AssociativeFactFrame>[]> {
     if ((options?.maxFrames ?? 1) <= 0) return Object.freeze([]);
+    if (isCjkSegmentationCandidate(query)) await warmCjkSegmentation();
     const trace = parseInterrogativeFactFrameTrace(query);
     return trace === null ? Object.freeze([]) : Object.freeze([trace.frame]);
   }
@@ -63,7 +77,10 @@ export function traceRuleBasedQueryFactFrame(
 
 function parseInterrogativeFactFrameTrace(query: string): QueryFactFrameParseTrace | null {
   const tokens = tokenizeFactFrameSource(query);
-  if (tokens.length < 3 || !WH_WORDS.has(tokens[0]!.normalized)) return null;
+  if (tokens.length < 3) return null;
+  if (!WH_WORDS.has(tokens[0]!.normalized)) {
+    return parseCjkInterrogativeFactFrame(query, tokens);
+  }
   const auxiliaryIndex = tokens.findIndex(
     (token, index) => index > 0 && AUXILIARIES.has(token.normalized)
   );
@@ -362,7 +379,6 @@ const TERMINAL_COMPLEMENT_MARKERS: ReadonlySet<string> = new Set([
   "with", "about"
 ]);
 const TAIL_CONSTRAINT_LINKERS: ReadonlySet<string> = new Set(["on"]);
-const COPULAR_MEASURE_WORDS: ReadonlySet<string> = new Set(["long"]);
 const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
   text: "", normalized: "", start: 0, end: 0
 });

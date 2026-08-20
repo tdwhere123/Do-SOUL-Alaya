@@ -6,8 +6,15 @@ import { buildExpandedKeywordQuery } from
   "../../recall/coarse-filter/coarse-candidates.js";
 import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
-import { extendQueryProbesWithOpenSemanticFactors } from
+import {
+  extendQueryProbesWithOpenSemanticFactors,
+  queryFactorFtsExtraEligibility
+} from
   "../../recall/query/query-factor-expanded-terms.js";
+import { materializeOpenSemanticFactorCompatibilityTrace } from
+  "../../recall/field/open-semantic-factors/compatibility-trace.js";
+import { materializeOpenSemanticFactorComposition } from
+  "../../recall/field/open-semantic-factors/composition.js";
 
 describe("query-factor expanded terms", () => {
   it("adds formed query-factor identities that the surface query does not already carry", () => {
@@ -93,6 +100,107 @@ describe("query-factor expanded terms", () => {
     expect(probes.expanded_terms).not.toContain("in japan");
     expect(buildExpandedKeywordQuery(probes)?.split(/\s+/u)).toContain("japan");
     expect(buildExpandedKeywordQuery(probes)?.split(/\s+/u)).not.toContain("in");
+  });
+
+  it("keeps formed extras eligible after composition no_match on both diagnostic arms", () => {
+    const queryText = "How long is my daily commute to work?";
+    const formed = formedQueryCapture(queryText, [
+      ["copula.be", "is", "be"],
+      ["subject.commute", "my daily commute to work", "daily commute"]
+    ]);
+    const disjoint = materializeOpenSemanticFactorFormation({
+      source_kind: "evidence",
+      source_text: "Alice likes tea.",
+      proposal: {
+        schema_version: 1,
+        producer_operator_id: "open-factor-test-producer-v1",
+        source_text: "Alice likes tea.",
+        graph: {
+          schema_version: 2,
+          source_kind: "evidence",
+          factors: [
+            { factor_id: "alice", surface: "Alice", semantic_identity: "alice" },
+            { factor_id: "likes", surface: "likes", semantic_identity: "like" },
+            { factor_id: "tea", surface: "tea", semantic_identity: "tea" }
+          ],
+          variables: [],
+          result_variable_ids: [],
+          propositions: [{
+            proposition_id: "likes-tea",
+            predicate_factor_id: "likes",
+            arguments: [
+              {
+                position: 0,
+                binding_identity: "agent",
+                reference_kind: "factor",
+                reference_id: "alice"
+              },
+              {
+                position: 1,
+                binding_identity: "object",
+                reference_kind: "factor",
+                reference_id: "tea"
+              }
+            ]
+          }]
+        }
+      }
+    });
+    const composition = materializeOpenSemanticFactorComposition({
+      trace: materializeOpenSemanticFactorCompatibilityTrace({
+        query_capture: formed,
+        evidence_formations: { disjoint }
+      }),
+      query_capture: formed
+    });
+    const treatment = extendQueryProbesWithOpenSemanticFactors(
+      compileRecallQueryProbes(queryText), formed
+    );
+    const control = extendQueryProbesWithOpenSemanticFactors(
+      compileRecallQueryProbes(queryText), undefined
+    );
+
+    expect(composition.status).toBe("no_match");
+    expect(queryFactorFtsExtraEligibility(formed)).toBe("formed");
+    expect(queryFactorFtsExtraEligibility(undefined)).toBe("not_formed");
+    expect(treatment.expanded_terms).toEqual(expect.arrayContaining(["daily commute"]));
+    expect(control.expanded_terms).not.toContain("daily commute");
+    const added = treatment.expanded_terms.filter((term) =>
+      !control.expanded_terms.includes(term));
+    expect({
+      treatment_formation: formed.status,
+      treatment_composition: composition.status,
+      added_expanded_terms: added
+    }).toMatchObject({
+      treatment_formation: "formed",
+      treatment_composition: "no_match",
+      added_expanded_terms: expect.arrayContaining(["daily commute"])
+    });
+  });
+
+  it.each([
+    "rejected",
+    "unavailable",
+    "ineligible"
+  ] as const)("does not admit extras from a %s capture", (status) => {
+    const queryText = "How long is my daily commute to work?";
+    const capture = status === "ineligible"
+      ? materializeOpenSemanticFactorFormation({ source_kind: "query", source_text: null })
+      : status === "unavailable"
+        ? materializeOpenSemanticFactorFormation({
+          source_kind: "query",
+          source_text: queryText
+        })
+        : materializeOpenSemanticFactorFormation({
+          source_kind: "query",
+          source_text: queryText,
+          proposal: { schema_version: 1, producer_operator_id: "x", source_text: "other" }
+        });
+    expect(capture.status).toBe(status);
+    expect(queryFactorFtsExtraEligibility(capture)).toBe("not_formed");
+    expect(extendQueryProbesWithOpenSemanticFactors(
+      compileRecallQueryProbes(queryText), capture
+    )).toEqual(compileRecallQueryProbes(queryText));
   });
 });
 

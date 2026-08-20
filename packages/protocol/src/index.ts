@@ -31,6 +31,8 @@ export * from "./soul/governance-subject.js";
 export * from "./soul/evidence-capsule.js";
 export * from "./soul/associative-fact-frame.js";
 export * from "./soul/open-semantic-factor-graph.js";
+export * from "./soul/open-semantic-factor-activation-state.js";
+export * from "./soul/open-semantic-structural-role.js";
 export * from "./soul/query-osf-semantic-completeness.js";
 export * from "./soul/field-contract/index.js";
 export * from "./soul/verified-user-assertion-receipt.js";

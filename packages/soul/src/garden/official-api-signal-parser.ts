@@ -165,11 +165,14 @@ const OpenOfficialApiSignalEntrySchema = z.object({
 
 export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
 export type {
+  OfficialApiSemanticFactorGraphFields,
   OfficialApiSemanticFactorGraphProjectionAudit,
   OfficialApiSemanticFactorGraphProjectionReason
 } from "./official-api/semantic-factor-projection.js";
 export {
-  parseOfficialApiSemanticFactorGraphProjectionAudit
+  inspectOfficialApiSemanticFactorGraphProjection,
+  parseOfficialApiSemanticFactorGraphProjectionAudit,
+  projectOfficialApiSemanticFactorGraph
 } from "./official-api/semantic-factor-projection.js";
 export {
   inspectRawOfficialApiSignalElements,

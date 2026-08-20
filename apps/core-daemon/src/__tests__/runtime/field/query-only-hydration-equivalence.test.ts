@@ -69,7 +69,7 @@ describe("query-only field hydration equivalence", () => {
     const directContract = fieldRecallContract(directRecall);
     expect(fieldRecallContract(dispatchedRecall)).toEqual(directContract);
     expect(directContract.candidate_keys).toEqual([EVIDENCE_ID]);
-    expect(directContract.field_projection_ids).toEqual([LIVE_B_ID, MEMORY_ID]);
+    expect(directContract.field_projection_ids).toEqual([MEMORY_ID, LIVE_B_ID]);
     expect(new Set(directContract.field_projection_ids)).toEqual(new Set([MEMORY_ID, LIVE_B_ID]));
     expect(directContract.receipts?.[EVIDENCE_ID]?.length).toBeGreaterThan(0);
     for (const omittedId of OMITTED_MEMORY_IDS) {

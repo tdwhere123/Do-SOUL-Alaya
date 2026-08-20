@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
+  SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
+  SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
+  SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256
+} from "@do-soul/alaya-soul";
 import { writeLongMemEvalFixtureDataset, buildLongMemEvalFixtureQuestion } from
   "../../longmemeval/longmemeval-fixture.js";
 import { prepareExtractionFillWindow } from
@@ -59,14 +65,10 @@ describe("canonical cache-only replay process", () => {
       key_count: prepared.fixture.keys.length,
       request_manifest_sha256: prepared.manifest.request_manifest_sha256,
       cache_manifest_sha256: prepared.fixture.manifestSha256,
-      evidence_prompt_sha256:
-        "3ccba91b3cfc4cee74edfee4672b880d870f320fb94124bad9c1ffb8ce60ef3a",
-      query_prompt_sha256:
-        "eeb420decb4cb05958f4fe5d3bcd73dfdff37d88dce0ac364cc628e0d46d2074",
-      evidence_request_template_sha256:
-        "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
-      query_request_template_sha256:
-        "649ea5aca1bcfc427433e708afe5428d44f070ab315deed1a9f614177de7db00"
+      evidence_prompt_sha256: SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
+      query_prompt_sha256: SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
+      evidence_request_template_sha256: SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
+      query_request_template_sha256: SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256
     });
     await expect(runReplayConsumer(
       prepared.requestPath,

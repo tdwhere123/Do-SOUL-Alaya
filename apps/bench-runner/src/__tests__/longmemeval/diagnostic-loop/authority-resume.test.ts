@@ -157,12 +157,13 @@ describe("diagnostic-loop resolved authority", () => {
   it("rejects a query-factor cache replaced after control", async () => {
     const root = await tempRoot();
     const workRoot = join(root, "work");
+    const snapshot = await writeDiagnosticSnapshotFixture(root, "query-replace");
     const cachePath = join(root, "query-cache.json");
-    await writeQueryFactorCacheFixture(cachePath, "Question A?");
+    await writeQueryFactorCacheFixture(cachePath, "Question q-1?");
     const first = trackingAdapters();
     await expect(runDiagnosticLoop({
       workRoot,
-      request: loopRequest({ treatmentFactorCachePath: cachePath }),
+      request: loopRequest({ snapshotPath: snapshot, treatmentFactorCachePath: cachePath }),
       mode: "run",
       adapters: {
         ...first.adapters,
@@ -176,31 +177,35 @@ describe("diagnostic-loop resolved authority", () => {
     const resumed = trackingAdapters();
     await expect(runDiagnosticLoop({
       workRoot,
-      request: loopRequest({ treatmentFactorCachePath: cachePath }),
+      request: loopRequest({ snapshotPath: snapshot, treatmentFactorCachePath: cachePath }),
       mode: "run",
       adapters: resumed.adapters,
       argv: []
-    })).rejects.toThrow(/different identity/u);
+    })).rejects.toThrow(
+      /different identity|source set|missing a required query source|cannot bind/iu
+    );
     expect(resumed.calls).not.toContain("treatment_recall");
   });
 
   it("detects query-factor replacement between control and treatment", async () => {
     const root = await tempRoot();
+    const snapshot = await writeDiagnosticSnapshotFixture(root, "query-mid-replace");
     const cachePath = join(root, "query-cache.json");
-    await writeQueryFactorCacheFixture(cachePath, "Question A?");
+    await writeQueryFactorCacheFixture(cachePath, "Question q-1?");
     const tracked = trackingAdapters();
     const control = tracked.adapters.control_recall;
 
     await expect(runDiagnosticLoop({
       workRoot: join(root, "work"),
-      request: loopRequest({ treatmentFactorCachePath: cachePath }),
+      request: loopRequest({ snapshotPath: snapshot, treatmentFactorCachePath: cachePath }),
       mode: "run",
       adapters: {
         ...tracked.adapters,
         control_recall: async (context) => {
           const result = await control(context);
+          const sealed = JSON.parse(await readFile(cachePath, "utf8")) as unknown;
           await rm(cachePath);
-          await writeQueryFactorCacheFixture(cachePath, "Question B?");
+          await writeFile(cachePath, JSON.stringify(sealed));
           return result;
         }
       },

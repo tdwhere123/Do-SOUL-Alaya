@@ -1,3 +1,5 @@
+import { OpenSemanticFactorActivationStateSchema } from
+  "@do-soul/alaya-protocol";
 import { digestRecallFieldIdentity } from
   "../../../field/field-identity.js";
 import type { SerializedRecallSupplementaryData } from
@@ -22,7 +24,7 @@ export function assertOpenSemanticCandidateActivations(
 function isValidReceipt(value: unknown): boolean {
   if (!isRecord(value) || value.schema_version !== 1 ||
       value.operator_id !== "open_semantic_factor_candidate_activation_v1" ||
-      value.state !== "observed" ||
+      !OpenSemanticFactorActivationStateSchema.safeParse(value.state).success ||
       typeof value.score !== "number" ||
       !Number.isFinite(value.score) ||
       value.score <= 0 ||

@@ -97,6 +97,25 @@ describe("open semantic factor candidate attribution", () => {
       ]]
     })).toThrow(/selection boundary fidelity mismatch/u);
   });
+
+  it("rejects an unknown activation state at the selection boundary", () => {
+    const activations = attributeOpenSemanticFactorActivations({
+      candidates: [candidate(createMemoryEntry({
+        object_id: "memory-1",
+        evidence_refs: ["evidence-a"]
+      }))],
+      activation: composedActivation(false)
+    });
+    const receipt = activations.values().next().value;
+    expect(() => assertOpenSemanticCandidateActivations({
+      openSemanticFactorCandidateActivationsByCandidateKey: [[
+        "workspace_local:memory_entry:memory-1",
+        { ...receipt, state: "inferred" }
+      ]]
+    } as SerializedRecallSupplementaryData)).toThrow(
+      /selection boundary fidelity mismatch/u
+    );
+  });
 });
 
 function composedActivation(truncated: boolean): OpenSemanticFactorActivationReceipt {

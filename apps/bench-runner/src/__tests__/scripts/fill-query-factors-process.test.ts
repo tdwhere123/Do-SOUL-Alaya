@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { currentQueryCacheRequestProfile } from
+  "../../bench/query-factors/query-semantic-factor-cache-identity.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)),
@@ -27,7 +29,7 @@ describe("fill-query-factors process operator", () => {
     const cache = JSON.parse(await readFile(result.outputPath, "utf8"));
     expect(cache.entries[0]).toMatchObject({
       capture: { status: "formed" },
-      receipt: { query_producer_operator_id: "open_semantic_factor_query_compiler_v8" }
+      receipt: { query_producer_operator_id: "open_semantic_factor_query_compiler_v9" }
     });
     const request = JSON.parse(await readFile(result.requestPath, "utf8"));
     const body = JSON.parse(request.body);
@@ -35,6 +37,18 @@ describe("fill-query-factors process operator", () => {
     expect(userPrompt.semantic_completeness_obligation).toMatchObject({
       operator_id: "query_fact_frame_osf_obligation_v2", constraints: [], arity: 2
     });
+    expect(cache.request_profile).toBe(
+      currentQueryCacheRequestProfile("provider-default-v1")
+    );
+    expect(await readFile(SCRIPT, "utf8")).toContain(
+      "currentQueryCacheRequestProfile(config.requestProfile)"
+    );
+  });
+
+  it("exits nonzero on an archived request profile", async () => {
+    const result = await run("success", "deepseek-v4-nonthinking-v1");
+    expect(result.exitCode).not.toBe(0);
+    expect(existsSync(result.outputPath)).toBe(false);
   });
 
   it("exits nonzero on terminal provider failure and preserves resumable state", async () => {
@@ -45,7 +59,10 @@ describe("fill-query-factors process operator", () => {
   });
 });
 
-async function run(mode: "success" | "provider-error") {
+async function run(
+  mode: "success" | "provider-error",
+  requestProfile = "provider-default-v1"
+) {
   const questionsPath = join(root, "questions.json");
   const outputPath = join(root, "query-cache.json");
   const requestPath = join(root, "request.json");
@@ -58,7 +75,7 @@ async function run(mode: "success" | "provider-error") {
       QUERY_FACTOR_SCRIPT_PATH: SCRIPT,
       OFFICIAL_API_GARDEN_PROVIDER_URL: "https://fixture.invalid/v1",
       OFFICIAL_API_GARDEN_MODEL: "fixture-model",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: requestProfile,
       ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:QUERY_FACTOR_PROCESS_KEY",
       QUERY_FACTOR_PROCESS_KEY: "fixture-key" },
     stdio: ["ignore", "pipe", "pipe"]

@@ -6,7 +6,7 @@ import {
   type EvidenceSearchProjection,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
-  type OpenSemanticFactorFormationProposal,
+  type OpenSemanticFactorFormationAdmission,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
   type RelationValidity,
@@ -159,7 +159,7 @@ export interface EvidenceMaterializationPort {
     input: EvidenceMaterializationInput,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
     factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
-    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationProposal>
+    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>
   ): Promise<MaterializationCreatedObject>;
 }
 
