@@ -144,16 +144,17 @@ describe("archive git identity is measured once", () => {
     const measurer = mutatingMeasurer();
     try {
       const loaded = await loadMergeShards([shard], spool);
+      const build = buildMergedLongMemEvalPayload(loaded);
       const written = await writeMergedLongMemEvalArchive({
         historyRoot: path.join(root, "history"),
-        build: buildMergedLongMemEvalPayload(loaded),
+        build,
         shardArchiveRefs: loaded.archiveRefs,
         diagnosticsSpool: spool,
         recordedGitState: fakeGitState("aa".repeat(32), "deadbee"),
         measureGitState: measurer.measure
       });
       expect(measurer.calls).toBe(0);
-      expect(written.slug).toContain("-9e331fa-");
+      expect(written.slug).toContain(`-${build.commitSha7}-`);
       expect(written.slug).not.toContain("-deadbee-");
       expect(written.slug).toContain(`wt-${"aa".repeat(32)}`);
       expect(written.slug).not.toContain(`wt-${"bb".repeat(32)}`);
