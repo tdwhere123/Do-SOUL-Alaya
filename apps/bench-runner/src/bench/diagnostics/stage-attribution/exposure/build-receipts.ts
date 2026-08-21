@@ -10,6 +10,7 @@ import {
 import { mapQuestionToDiagnosticStage } from "../diagnostic-100q.js";
 import type { QuestionStageRow } from "../types.js";
 import { assertProductPhaseAuthority } from "../../phase/phase-authority.js";
+import { isAbstentionDiagnostic } from "../../abstention.js";
 
 export function buildTreatmentExposureReceipts(input: {
   readonly control: readonly LongMemEvalQuestionDiagnostic[];
@@ -20,7 +21,11 @@ export function buildTreatmentExposureReceipts(input: {
   const controlById = new Map(input.control.map((row) => [row.question_id, row]));
   const controlStages = new Map(input.controlStages.map((row) => [row.question_id, row]));
   const treatmentStages = new Map(input.treatmentStages.map((row) => [row.question_id, row]));
+  for (const treatment of input.treatment) {
+    assertConsistentAbstentionPairing(controlById.get(treatment.question_id), treatment);
+  }
   return input.treatment
+    .filter((treatment) => !isAbstentionDiagnostic(treatment))
     .map((treatment) => buildReceipt({
       control: controlById.get(treatment.question_id),
       treatment,
@@ -167,6 +172,15 @@ function requireStage(
   const row = rows.get(questionId);
   if (row === undefined) throw new Error(`missing ${arm} stage row for ${questionId}`);
   return row;
+}
+
+function assertConsistentAbstentionPairing(
+  control: LongMemEvalQuestionDiagnostic | undefined,
+  treatment: LongMemEvalQuestionDiagnostic
+) {
+  if (control === undefined) return;
+  if (isAbstentionDiagnostic(control) === isAbstentionDiagnostic(treatment)) return;
+  throw new Error(`inconsistent abstention pairing for ${treatment.question_id}`);
 }
 
 function membershipDelta(

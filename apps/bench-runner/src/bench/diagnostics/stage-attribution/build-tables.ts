@@ -1,5 +1,5 @@
 import type { LongMemEvalQuestionDiagnostic } from "../schema/diagnostics-types.js";
-import { isAbstentionQuestionId } from "../abstention.js";
+import { isAbstentionDiagnostic } from "../abstention.js";
 import {
   classifyGoldObjectStage,
   classifyQuestionStage,
@@ -49,7 +49,7 @@ export function buildStageAttributionTables(input: {
 
   for (const question of input.questions) {
     evaluated += 1;
-    if (isAbstention(question)) continue;
+    if (isAbstentionDiagnostic(question)) continue;
     scorable += 1;
     const accounted = accumulateQuestionAttribution(question, {
       questionRows,
@@ -165,12 +165,4 @@ function accumulateQuestionAttribution(
     deliveryOrder: isDeliveryOrderDrop(question),
     goldAll: question.gold.length
   };
-}
-
-function isAbstention(question: LongMemEvalQuestionDiagnostic): boolean {
-  return (
-    question.is_abstention === true ||
-    isAbstentionQuestionId(question.question_id) ||
-    question.cohort_ledger?.dataset_cohort === "abstention"
-  );
 }

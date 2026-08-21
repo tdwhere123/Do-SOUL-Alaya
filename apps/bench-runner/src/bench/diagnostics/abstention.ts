@@ -1,6 +1,6 @@
 /**
- * @anchor longmemeval-abstention — fail-closed scoring for the
- * LongMemEval-S abstention questions (`question_id` ending `_abs`).
+ * @anchor longmemeval-abstention — fail-closed scoring and diagnostic
+ * exclusion for LongMemEval-S abstention questions.
  *
  * An abstention question's haystack genuinely does NOT contain the answer,
  * so the correct agent behaviour is to abstain. Such a question has empty
@@ -8,8 +8,12 @@
  * independently calibrated abstention judge, so these rows are unscorable and
  * must never add to a recall numerator. Fused margin remains diagnostic only.
  *
- * Answerable-question recall@1/5/10 semantics are untouched: this module is
- * only consulted for rows whose id satisfies {@link isAbstentionQuestionId}.
+ * {@link isAbstentionDiagnostic} is the three-way diagnostic predicate:
+ * `is_abstention`, question_id suffix `_abs`, or cohort `abstention`.
+ * Stage tables, exposure receipts, and miss taxonomy share that predicate.
+ *
+ * Recall scoring routes by {@link isAbstentionQuestionId} only. That suffix
+ * boundary is intentional and does not define diagnostic exclusion.
  *
  * see also: apps/bench-runner/src/longmemeval/runner.ts — scoring call site
  * see also: apps/bench-runner/src/longmemeval/diagnostics.ts
@@ -18,6 +22,17 @@
 /** True iff the question id marks a LongMemEval abstention question. */
 export function isAbstentionQuestionId(questionId: string): boolean {
   return questionId.endsWith("_abs");
+}
+
+/** Stage tables and exposure receipts must exclude the same unscorable twins. */
+export function isAbstentionDiagnostic(question: {
+  readonly question_id: string;
+  readonly is_abstention?: boolean;
+  readonly cohort_ledger?: { readonly dataset_cohort?: string };
+}): boolean {
+  return question.is_abstention === true ||
+    isAbstentionQuestionId(question.question_id) ||
+    question.cohort_ledger?.dataset_cohort === "abstention";
 }
 
 /**

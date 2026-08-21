@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isAbstentionDiagnostic,
   isAbstentionQuestionId,
   resolvePremiseInvalid,
   scoreAbstentionQuestion
@@ -90,6 +91,15 @@ describe("LongMemEval abstention scoring (fail-closed until calibrated)", () => 
     expect(isAbstentionQuestionId("0862e8bf_abs")).toBe(true);
     expect(isAbstentionQuestionId("76d63226")).toBe(false);
     expect(isAbstentionQuestionId("gpt4_59c863d7")).toBe(false);
+    expect(isAbstentionDiagnostic({ question_id: "0862e8bf_abs" })).toBe(true);
+    expect(isAbstentionDiagnostic({ question_id: "0862e8bf" })).toBe(false);
+    expect(isAbstentionDiagnostic({
+      question_id: "0862e8bf", is_abstention: true
+    })).toBe(true);
+    expect(isAbstentionDiagnostic({
+      question_id: "0862e8bf",
+      cohort_ledger: { dataset_cohort: "abstention" }
+    })).toBe(true);
   });
 
   it("keeps premise_invalid always false via the invariant helper", () => {

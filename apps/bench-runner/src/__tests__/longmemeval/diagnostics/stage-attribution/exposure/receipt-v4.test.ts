@@ -209,6 +209,59 @@ describe("treatment exposure receipt v4", () => {
     });
   });
 
+  it("skips LongMemEval abstention twins that stage tables leave unscored", () => {
+    const answerable = arm({
+      questionId: "0862e8bf", poolComplete: true, topFive: ["candidate:a"]
+    });
+    const abstention = arm({
+      questionId: "0862e8bf_abs", poolComplete: true, topFive: ["candidate:a"]
+    });
+    const bothSides = buildTreatmentExposureReceipts({
+      control: [answerable, abstention],
+      treatment: [answerable, abstention],
+      controlStages: [stage("0862e8bf", true)],
+      treatmentStages: [stage("0862e8bf", true)]
+    });
+    const treatmentOnlyTwin = buildTreatmentExposureReceipts({
+      control: [answerable],
+      treatment: [answerable, abstention],
+      controlStages: [stage("0862e8bf", true)],
+      treatmentStages: [stage("0862e8bf", true)]
+    });
+    const controlOnlyTwin = buildTreatmentExposureReceipts({
+      control: [answerable, abstention],
+      treatment: [answerable],
+      controlStages: [stage("0862e8bf", true)],
+      treatmentStages: [stage("0862e8bf", true)]
+    });
+
+    expect(bothSides.map((receipt) => receipt.question_id)).toEqual(["0862e8bf"]);
+    expect(treatmentOnlyTwin.map((receipt) => receipt.question_id)).toEqual(["0862e8bf"]);
+    expect(controlOnlyTwin.map((receipt) => receipt.question_id)).toEqual(["0862e8bf"]);
+    expect(() => assertTreatmentExposureReceipt(bothSides[0]!)).not.toThrow();
+  });
+
+  it("still fail-closes when a non-abstention treatment row has no stage row", () => {
+    const answerable = arm({
+      questionId: "0862e8bf", poolComplete: true, topFive: ["candidate:a"]
+    });
+    const other = arm({
+      questionId: "58bf7951", poolComplete: true, topFive: ["candidate:a"]
+    });
+    expect(() => buildTreatmentExposureReceipts({
+      control: [answerable, other],
+      treatment: [answerable, other],
+      controlStages: [stage("0862e8bf", true)],
+      treatmentStages: [stage("0862e8bf", true), stage("58bf7951", true)]
+    })).toThrow(/missing control stage row for 58bf7951/u);
+    expect(() => buildTreatmentExposureReceipts({
+      control: [answerable, other],
+      treatment: [answerable, other],
+      controlStages: [stage("0862e8bf", true), stage("58bf7951", true)],
+      treatmentStages: [stage("0862e8bf", true)]
+    })).toThrow(/missing treatment stage row for 58bf7951/u);
+  });
+
   it("fails closed on duplicate retrieval channel_id rows", () => {
     const channel = {
       channel_id: "lexical_expanded_trigram",

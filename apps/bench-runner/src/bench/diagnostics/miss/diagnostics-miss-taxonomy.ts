@@ -9,6 +9,7 @@ import type {
 import type { LongMemEvalSeedDropReasons } from "../../extraction/seed-fuel/seed-drop-reasons.js";
 import { classifyQuestionMeasurementStatus } from "../../measurement/question-validity.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
+import { isAbstentionDiagnostic } from "../abstention.js";
 
 type MutableMissTaxonomySummary = Record<LongMemEvalMissTaxonomy, number>;
 
@@ -148,7 +149,7 @@ export function readQuestionMissTaxonomy(
     goldObjectIds: readGoldObjectIds(question),
     gold: question.gold,
     diagnosticsAvailable: question.recall_diagnostics_present,
-    isAbstention: question.question_id.endsWith("_abs"),
+    isAbstention: isAbstentionDiagnostic(question),
     seedDropReasons: question.seed_drop_reasons
   });
 }
