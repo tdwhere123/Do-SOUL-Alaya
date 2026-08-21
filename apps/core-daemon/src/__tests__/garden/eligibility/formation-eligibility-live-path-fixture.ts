@@ -15,7 +15,8 @@ import {
   fieldContractSha256
 } from "@do-soul/alaya-core";
 import {
-  buildEvidenceInput,
+  InMemoryHandoffGapHandler,
+  MaterializationRouter,
   verifyOfficialApiSourceLocatorBinding
 } from "@do-soul/alaya-soul";
 import {
@@ -26,8 +27,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { readStoredSemanticFactorFormation } from
   "../../../../../../packages/storage/src/repos/capsules/qualification/semantic-factor-formation-read.js";
-import { createSignalEvidence } from
-  "../../../../../../packages/soul/src/garden/materialization-router/evidence/create-signal-evidence.js";
 import { createMemoryEntry } from
   "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import {
@@ -75,6 +74,14 @@ export async function openEligibilityRuntime(): Promise<EligibilityLiveRuntime> 
     sha256: fieldContractSha256,
     fieldStores: field.stores
   });
+  const router = new MaterializationRouter({
+    evidenceService,
+    memoryService: stubMaterializationCreate("memory_entry", "memory-1"),
+    synthesisService: stubMaterializationCreate("synthesis_capsule", "synthesis-1"),
+    claimService: stubMaterializationCreate("claim_form", "claim-1"),
+    handoffGapHandler: new InMemoryHandoffGapHandler(),
+    fullTurnEvidenceExcerpt: true
+  });
   return {
     field,
     evidenceRepo,
@@ -84,28 +91,16 @@ export async function openEligibilityRuntime(): Promise<EligibilityLiveRuntime> 
       signalRepo: new SqliteSignalRepo(database),
       runtimeNotifier,
       postTriageMaterializer: {
-        materialize: async (signal, context) => {
-          const created = await createSignalEvidence(
-            evidenceService,
-            signal,
-            buildEvidenceInput(signal, undefined, {
-              fullTurnExcerpt: true,
-              context
-            })
-          );
-          return {
-            signal_id: signal.signal_id,
-            target_kind: "evidence_only",
-            routing_reason: "eligibility live path",
-            created_objects: [{
-              object_kind: created.object_kind,
-              object_id: created.object_id
-            }],
-            success: true
-          };
-        }
+        materialize: async (signal, context) =>
+          await router.materializeSignal(signal, context)
       }
     })
+  };
+}
+
+function stubMaterializationCreate(object_kind: string, object_id: string) {
+  return {
+    create: async () => ({ object_kind, object_id })
   };
 }
 
@@ -158,6 +153,15 @@ export function assertionSignal(
     },
     created_at: CLOCK
   };
+}
+
+// invariant: a present hash that cannot rebuild is router source-grounding
+// defer, not eligibility. Drop the key to reach createSignalEvidence.
+export function withoutVerifiedAssertionHash(
+  signal: CandidateMemorySignal
+): CandidateMemorySignal {
+  const { verified_user_assertion_source_hash: _, ...raw_payload } = signal.raw_payload;
+  return { ...signal, raw_payload };
 }
 
 function verifiedAssertionHash(signalId: string): string {

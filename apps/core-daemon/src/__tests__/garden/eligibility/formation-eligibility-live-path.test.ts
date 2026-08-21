@@ -12,7 +12,8 @@ import {
   openEligibilityRuntime,
   readDurableFormation,
   readQualifiedCapture,
-  readQualifiedEvidence
+  readQualifiedEvidence,
+  withoutVerifiedAssertionHash
 } from "./formation-eligibility-live-path-fixture.js";
 
 const QUALIFIED_NEGATIVE_CASES = [
@@ -65,10 +66,10 @@ describe("formation eligibility live producer to consumer path", () => {
     }
   );
 
-  it("keeps rejected grounding durable but fail-closed at qualification", async () => {
+  it("defers garden_compile rejected grounding when the verified hash cannot rebuild", async () => {
     const runtime = await openEligibilityRuntime();
-    const received = await runtime.signalService.receiveSignal(
-      assertionSignal("signal-grounding-rejected", {
+    await expect(runtime.signalService.receiveSignal(
+      assertionSignal("signal-grounding-rejected-hashed", {
         semantic_factor_graph: binaryUseEvidenceSemanticGraph(),
         source_grounding: {
           version: 1,
@@ -77,6 +78,23 @@ describe("formation eligibility live producer to consumer path", () => {
           reasons: ["source_grounding_rejected"]
         }
       })
+    )).rejects.toMatchObject({ subCode: "PORT_UNAVAILABLE" });
+    expect(await readQualifiedEvidence(runtime.evidenceRepo, EVIDENCE_ID)).toEqual([]);
+    expect(readDurableFormation(runtime.database, EVIDENCE_ID)).toBeUndefined();
+  });
+
+  it("keeps rejected grounding durable but fail-closed at qualification", async () => {
+    const runtime = await openEligibilityRuntime();
+    const received = await runtime.signalService.receiveSignal(
+      withoutVerifiedAssertionHash(assertionSignal("signal-grounding-rejected", {
+        semantic_factor_graph: binaryUseEvidenceSemanticGraph(),
+        source_grounding: {
+          version: 1,
+          status: "rejected",
+          content_basis: "none",
+          reasons: ["source_grounding_rejected"]
+        }
+      }))
     );
     expect(received.triage_result).toBe("accepted");
     expect(createdEvidenceId(received)).toBe(EVIDENCE_ID);
