@@ -4,14 +4,14 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation identity: package `0.3.11`. Committed HEAD is
-`b329325` (`Fix merged archive identity fixture`, 2026-08-20). Encoded
-architecture contracts for gates 1–6 live on an **uncommitted dirty tree**
-based on that commit; they are not a frozen commit pin.
-`HANDBOOK_COMMIT_PIN_PENDING_CLEAN_INTEGRATION_COMMIT` — see
-`.do-it/plans/recall-any5-evidence-first.md`. Live owners are the modules
-named under Current live path. Historical review evidence at `263c6600`
-(2026-08-19) remains a prior documentation anchor, not this tree's identity.
+Current documentation identity: package `0.3.11`. Architecture
+implementation pin is `baa6e35b` (`Close recall architecture authority
+gaps`). That commit encodes gates 1–6. Live documentation identity is
+this commit (`Pin recall documentation identity after architecture
+integration`). Integration base is `b329325`. Historical review evidence
+at `263c6600` (2026-08-19) remains prior documentation context. Live
+owners are the modules named under Current live path. Canary identity is
+this live HEAD — see `.do-it/plans/recall-any5-evidence-first.md`.
 This is not a KPI-promotion claim. The earlier `10da1318` B-arm dump remains
 historical benchmark evidence only.
 
