@@ -115,6 +115,31 @@ function buildActivationEntries(
       return fraction > 0 ? [[evidenceId, fraction] as const] : [];
     })
   );
+  const supportByEvidenceId = buildEvidenceSupportMap(composition);
+  return Object.freeze([...supportByEvidenceId]
+    .sort(([left], [right]) => compareText(left, right))
+    .flatMap(([evidenceId, support]) => {
+      const pairwise = isPairwiseMatched(receiptByEvidenceId.get(evidenceId));
+      const activation = resolveJoinActivation(
+        fractionByEvidenceId.get(evidenceId),
+        inheritedConstraintFraction(
+          evidenceId, composition, receiptByEvidenceId, fractionByEvidenceId
+        ),
+        pairwise
+      );
+      return activation === null ? [] : [Object.freeze({
+        evidence_id: evidenceId,
+        state: pairwise ? "observed" as const : "reconstructed" as const,
+        activation,
+        solution_count: support.solutionCount,
+        proposition_match_count: support.propositionMatches.size
+      })];
+    }));
+}
+
+function buildEvidenceSupportMap(
+  composition: Readonly<OpenSemanticFactorCompositionReceipt>
+) {
   const supportByEvidenceId = new Map<string, {
     solutionCount: number;
     propositionMatches: Set<string>;
@@ -135,25 +160,7 @@ function buildActivationEntries(
       supportByEvidenceId.set(evidenceId, support);
     }
   }
-  return Object.freeze([...supportByEvidenceId]
-    .sort(([left], [right]) => compareText(left, right))
-    .flatMap(([evidenceId, support]) => {
-      const pairwise = isPairwiseMatched(receiptByEvidenceId.get(evidenceId));
-      const activation = resolveJoinActivation(
-        fractionByEvidenceId.get(evidenceId),
-        inheritedConstraintFraction(
-          evidenceId, composition, receiptByEvidenceId, fractionByEvidenceId
-        ),
-        pairwise
-      );
-      return activation === null ? [] : [Object.freeze({
-        evidence_id: evidenceId,
-        state: pairwise ? "observed" as const : "reconstructed" as const,
-        activation,
-        solution_count: support.solutionCount,
-        proposition_match_count: support.propositionMatches.size
-      })];
-    }));
+  return supportByEvidenceId;
 }
 
 function isPairwiseMatched(

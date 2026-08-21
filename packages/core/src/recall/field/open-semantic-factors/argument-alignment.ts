@@ -83,6 +83,20 @@ function searchArgumentAlignments(params: Readonly<{
     return;
   }
   const candidates = selectEvidenceArguments(params, queryArgument);
+  const advanced = advanceArgumentMatches(params, queryArgument, candidates);
+  if (!advanced && isOptionalLocationResult(params.queryVariables, queryArgument)) {
+    searchArgumentAlignments({
+      ...params,
+      queryIndex: params.queryIndex + 1
+    });
+  }
+}
+
+function advanceArgumentMatches(
+  params: Parameters<typeof searchArgumentAlignments>[0],
+  queryArgument: Readonly<OpenSemanticArgument>,
+  candidates: readonly Readonly<OpenSemanticArgument>[]
+): boolean {
   let advanced = false;
   for (const evidenceArgument of candidates) {
     const evidenceFactor = params.evidenceFactors.get(evidenceArgument.reference_id);
@@ -105,12 +119,7 @@ function searchArgumentAlignments(params: Readonly<{
       mappings: [...params.mappings, mapped.mapping]
     });
   }
-  if (!advanced && isOptionalLocationResult(params.queryVariables, queryArgument)) {
-    searchArgumentAlignments({
-      ...params,
-      queryIndex: params.queryIndex + 1
-    });
-  }
+  return advanced;
 }
 
 function selectEvidenceArguments(

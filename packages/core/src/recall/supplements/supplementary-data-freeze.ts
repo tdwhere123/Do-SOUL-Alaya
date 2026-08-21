@@ -96,19 +96,10 @@ export function freezeSupplementaryData(
   >
 ): RecallSupplementaryData {
   const queryTimeWindow = resolveQueryTimeWindow(params);
-  const openSemanticFactorCompatibilityTrace =
-    materializeOpenSemanticFactorCompatibilityTrace({
-      query_capture: querySemanticFactorFormation.formation,
-      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
-      unavailable_evidence_ids:
-        evidenceAndGovernance.semanticFactorFormationUnavailableEvidenceIds
-    });
-  const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
-    trace: openSemanticFactorCompatibilityTrace,
-    query_capture: querySemanticFactorFormation.formation,
-    // Omitted formations cannot reconstruct a join from compatibility receipts.
-    evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
-  });
+  const semanticSupplements = buildOpenSemanticFactorSupplements(
+    querySemanticFactorFormation,
+    evidenceAndGovernance
+  );
   return Object.freeze({
     queryProbes: params.queryProbes,
     queryFactFrameExtraction: queryFieldAttribution.factFrameCapture,
@@ -121,31 +112,12 @@ export function freezeSupplementaryData(
     }),
     semanticFactorFormationsByEvidenceId:
       evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
-    openSemanticFactorCompatibilityTrace,
-    openSemanticFactorComposition,
-    openSemanticFactorActivation: materializeOpenSemanticFactorActivation({
-      composition: openSemanticFactorComposition,
-      trace: openSemanticFactorCompatibilityTrace,
-      query_capture: querySemanticFactorFormation.formation,
-      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
-    }),
+    ...semanticSupplements,
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,
     queryRoutingKeys: routingKeySupplement.queryKeys,
     keyActivationByOwnerIdentity: routingKeySupplement.activationByOwnerIdentity,
-    ftsRanks: params.coarseFtsRanks,
-    trigramFtsRanks: params.coarseTrigramFtsRanks,
-    synthesisFtsRanks: params.coarseSynthesisFtsRanks,
-    evidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    evidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
-    evidenceProjectionMatchesByRef: params.coarseEvidenceProjectionMatchesByRef,
-    sourceProximityScores: params.coarseSourceProximityScores,
-    sourceCohortKeys: params.coarseSourceCohortKeys,
-    structuralScores: params.coarseStructuralScores,
-    graphExpansionScores: params.coarseGraphExpansionScores,
-    entitySeedScores: params.coarseEntitySeedScores,
-    pathExpansionScores: params.coarsePathExpansionScores,
-    pathSuppressionScores: params.coarsePathSuppressionScores,
+    ...extractCoarseRankings(params),
     embeddingSimilarityScores: Object.freeze({}),
     evidenceSemanticActivationsByCandidateKey: new Map(),
     openSemanticFactorCandidateActivationsByCandidateKey: new Map(),
@@ -166,6 +138,54 @@ export function freezeSupplementaryData(
     pathInflowAvailability: evidenceAndGovernance.pathInflowAvailability,
     querySoughtFacets
   });
+}
+
+function buildOpenSemanticFactorSupplements(
+  querySemanticFactorFormation: Awaited<
+    ReturnType<typeof captureCertifiedRecallQueryOpenSemanticFactors>
+  >,
+  evidenceAndGovernance: Readonly<EvidenceAndGovernanceSupplement>
+) {
+  const openSemanticFactorCompatibilityTrace =
+    materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: querySemanticFactorFormation.formation,
+      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+      unavailable_evidence_ids:
+        evidenceAndGovernance.semanticFactorFormationUnavailableEvidenceIds
+    });
+  const openSemanticFactorComposition = materializeOpenSemanticFactorComposition({
+    trace: openSemanticFactorCompatibilityTrace,
+    query_capture: querySemanticFactorFormation.formation,
+    evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
+  });
+  return {
+    openSemanticFactorCompatibilityTrace,
+    openSemanticFactorComposition,
+    openSemanticFactorActivation: materializeOpenSemanticFactorActivation({
+      composition: openSemanticFactorComposition,
+      trace: openSemanticFactorCompatibilityTrace,
+      query_capture: querySemanticFactorFormation.formation,
+      evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
+    })
+  };
+}
+
+function extractCoarseRankings(params: CollectSupplementaryDataParams) {
+  return {
+    ftsRanks: params.coarseFtsRanks,
+    trigramFtsRanks: params.coarseTrigramFtsRanks,
+    synthesisFtsRanks: params.coarseSynthesisFtsRanks,
+    evidenceFtsRanks: params.coarseEvidenceFtsRanks,
+    evidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.coarseEvidenceProjectionMatchesByRef,
+    sourceProximityScores: params.coarseSourceProximityScores,
+    sourceCohortKeys: params.coarseSourceCohortKeys,
+    structuralScores: params.coarseStructuralScores,
+    graphExpansionScores: params.coarseGraphExpansionScores,
+    entitySeedScores: params.coarseEntitySeedScores,
+    pathExpansionScores: params.coarsePathExpansionScores,
+    pathSuppressionScores: params.coarsePathSuppressionScores
+  };
 }
 
 function resolveQueryTimeWindow(

@@ -87,6 +87,18 @@ export function materializeOpenSemanticFactorComposition(params: Readonly<{
       query.graph, trace, params.evidence_formations
     )
     : emptyOpenSemanticFactorSearch(trace.truncated);
+  const body = buildCompositionReceiptBody(query, trace, search);
+  return Object.freeze({
+    ...body,
+    receipt_digest: digestRecallFieldIdentity(body)
+  });
+}
+
+function buildCompositionReceiptBody(
+  query: Readonly<OpenSemanticFactorFormationCapture>,
+  trace: Readonly<OpenSemanticFactorCompatibilityTrace>,
+  search: ReturnType<typeof searchOpenSemanticFactorCompositions>
+) {
   const bindings = Object.freeze(
     search.observations.slice(0, OPEN_SEMANTIC_FACTOR_BINDING_LIMIT)
   );
@@ -96,7 +108,7 @@ export function materializeOpenSemanticFactorComposition(params: Readonly<{
   const truncated = search.truncated ||
     search.observations.length > bindings.length ||
     search.solutions.length > solutions.length;
-  const body = Object.freeze({
+  return Object.freeze({
     schema_version: 2 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
     status: classifyOpenSemanticFactorCompositionStatus({
@@ -113,10 +125,6 @@ export function materializeOpenSemanticFactorComposition(params: Readonly<{
     bindings,
     solutions,
     variable_collections: collectVariableCollections(solutions)
-  });
-  return Object.freeze({
-    ...body,
-    receipt_digest: digestRecallFieldIdentity(body)
   });
 }
 
