@@ -102,6 +102,13 @@ export function currentQueryCacheRequestProfile(
 }
 
 function queryCacheProviderRouteSha256(providerRoute: string): string {
+  // Snapshot provenance persists redactProvenanceUrl(url); hashing that digest again cannot match a once-sealed cache.
+  if (PrefixedSha256Schema.safeParse(providerRoute).success) {
+    return providerRoute;
+  }
+  if (providerRoute.startsWith("sha256:")) {
+    throw new Error("query semantic factor cache provider route digest is malformed");
+  }
   return prefixedSha256(providerRoute);
 }
 

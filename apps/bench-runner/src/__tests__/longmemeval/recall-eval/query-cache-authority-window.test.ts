@@ -29,10 +29,12 @@ import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor
 } from "../snapshot/current-snapshot-fixture.js";
+import { redactProvenanceUrl } from "../../../bench/provenance/paired-environment.js";
 
 const COUNT = 100;
 const FORMED = "What did I buy?";
 const WINDOW = { offset: 97, limit: 3 } as const;
+const RAW_PROVIDER_ROUTE = "https://provider.invalid/v1";
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -88,11 +90,28 @@ describe("recall-eval query cache authority window", () => {
     await expect(bindRecallEvalQuerySemanticFactorCache(options, bundle))
       .rejects.toThrow(/missing a required query source|source set/u);
   });
+
+  it("binds a once-sealed cache when snapshot provenance already redacted the route", async () => {
+    const root = await tempRoot();
+    const snapshotDbPath = join(root, "snapshot.db");
+    await writeFile(`${snapshotDbPath}.sidecar.json`, `${JSON.stringify(sidecar(COUNT))}\n`);
+    const cachePath = join(root, "query-cache.json");
+    const { cache } = await cacheFor(COUNT, RAW_PROVIDER_ROUTE);
+    await writeQuerySemanticFactorCache(cachePath, cache);
+    const redacted = redactProvenanceUrl(RAW_PROVIDER_ROUTE);
+    const bundle = identityBundle(liveBundle(), { provider_url: redacted });
+    const bound = await bindRecallEvalQuerySemanticFactorCache({
+      snapshotDbPath, variant: "longmemeval_s", historyRoot: root,
+      querySemanticFactorCachePath: cachePath, ...WINDOW
+    }, bundle);
+    expect(bound.binding.provider_url_sha256).toBe(redacted);
+    expect(bound.binding.entry_count).toBe(COUNT);
+  });
 });
 
 function liveBundle(): RecallEvalSnapshotBundle {
   const extractionAuthority = currentSnapshotExtractionAuthority();
-  return {
+  return identityBundle({
     snapshotDbPath: "",
     manifest: currentSnapshotManifestFor("q-1"),
     sidecar: sidecar(COUNT),
@@ -100,7 +119,7 @@ function liveBundle(): RecallEvalSnapshotBundle {
     snapshotManifestSha256: null,
     datasetSha256: null,
     measurementForQuestion: null
-  };
+  }, { provider_url: redactProvenanceUrl(RAW_PROVIDER_ROUTE) });
 }
 
 function identityBundle(
@@ -128,7 +147,7 @@ function identityBundle(
   };
 }
 
-async function cacheFor(count: number) {
+async function cacheFor(count: number, providerUrl?: string) {
   const authority = currentSnapshotExtractionAuthority();
   const provenance = currentSnapshotManifestFor("q-1").extraction_provenance;
   if (provenance === undefined || provenance.schema_version !== 3) {
@@ -140,7 +159,7 @@ async function cacheFor(count: number) {
     cache: createQuerySemanticFactorCache({
       model_id: authority.extraction_model,
       request_profile: authority.request_profile,
-      provider_url: provenance.provider_url,
+      provider_url: providerUrl ?? RAW_PROVIDER_ROUTE,
       entries: Array.from({ length: count }, (_, index) => {
         const source_text = questionText(index);
         if (formed !== undefined && source_text === FORMED) {

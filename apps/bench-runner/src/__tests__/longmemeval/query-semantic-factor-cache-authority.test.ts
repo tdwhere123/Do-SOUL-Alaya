@@ -28,6 +28,7 @@ import {
   assertQuerySemanticFactorCacheMatchesRequest,
   inspectQuerySemanticFactorCacheIdentity
 } from "../../bench/query-factors/query-semantic-factor-cache-identity.js";
+import { redactProvenanceUrl } from "../../bench/provenance/paired-environment.js";
 
 const SOURCE = "What did I buy?";
 const PROFILE = "provider-default-v1" as const;
@@ -91,6 +92,25 @@ describe("query semantic factor cache authority", () => {
     })).toThrow(/model/u);
     expect(() => assertQuerySemanticFactorCacheMatchesRequest(loaded.binding, {
       requestProfile: PROFILE, model: "test-model", providerRoute: "other-route"
+    })).toThrow(/provider route/u);
+  });
+
+  it("compares an already-redacted snapshot route as a digest, not a second hash", async () => {
+    const rawRoute = "https://provider.invalid/v1";
+    const loaded = await readMutated(currentCache());
+    const redacted = redactProvenanceUrl(rawRoute);
+    expect(redacted).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(redacted).not.toBe(rawRoute);
+    assertQuerySemanticFactorCacheMatchesRequest(loaded.binding, {
+      requestProfile: PROFILE, model: "test-model", providerRoute: redacted
+    });
+    expect(() => assertQuerySemanticFactorCacheMatchesRequest(loaded.binding, {
+      requestProfile: PROFILE, model: "test-model", providerRoute: "sha256:not-a-digest"
+    })).toThrow(/malformed/u);
+    expect(() => assertQuerySemanticFactorCacheMatchesRequest(loaded.binding, {
+      requestProfile: PROFILE,
+      model: "test-model",
+      providerRoute: redactProvenanceUrl("https://other-provider.invalid/v1")
     })).toThrow(/provider route/u);
   });
 

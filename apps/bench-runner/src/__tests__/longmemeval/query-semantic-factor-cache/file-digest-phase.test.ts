@@ -35,8 +35,10 @@ import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor
 } from "../snapshot/current-snapshot-fixture.js";
+import { redactProvenanceUrl } from "../../../bench/provenance/paired-environment.js";
 
 const SOURCE = "What did I buy?";
+const RAW_PROVIDER_ROUTE = "https://provider.invalid/v1";
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -93,7 +95,10 @@ describe("query cache file digest phase rebind", () => {
     const cachePath = join(root, "query-cache.json");
     await writeFormedCache(cachePath, SOURCE, "snapshot");
     const authority = currentSnapshotExtractionAuthority();
-    const provenance = currentSnapshotManifestFor("q-1").extraction_provenance!;
+    const provenance = {
+      ...currentSnapshotManifestFor("q-1").extraction_provenance!,
+      provider_url: redactProvenanceUrl(RAW_PROVIDER_ROUTE)
+    };
     const first = await bindQuerySemanticFactorCacheFileToRequest(cachePath, {
       requestProfile: authority.request_profile,
       model: authority.extraction_model,
@@ -102,7 +107,10 @@ describe("query cache file digest phase rebind", () => {
     });
     const bundle = {
       snapshotDbPath,
-      manifest: currentSnapshotManifestFor("q-1"),
+      manifest: {
+        ...currentSnapshotManifestFor("q-1"),
+        extraction_provenance: provenance
+      },
       sidecar: { schema_version: 2 as const, variant: "longmemeval_s" as const, questions: [] },
       extractionAuthority: authority,
       snapshotManifestSha256: null,
@@ -172,7 +180,7 @@ function snapshotSeal() {
   return {
     model_id: authority.extraction_model,
     request_profile: authority.request_profile,
-    provider_url: provenance.provider_url
+    provider_url: RAW_PROVIDER_ROUTE
   };
 }
 
