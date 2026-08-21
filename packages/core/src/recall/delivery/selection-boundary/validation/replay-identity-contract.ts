@@ -48,7 +48,7 @@ export const CAPTURED_VS_LIVE_ASSERTIONS = Object.freeze({
   candidate_order: {
     class: "output",
     site: "selection-boundary-composition.ts:assertCandidateOrder",
-    reason: "Delivery sorts by live deep-head scores when scores exist."
+    reason: "Delivery sorts by fused order unless observed embedding rescores the pool."
   },
   delivery_rank: {
     class: "output",

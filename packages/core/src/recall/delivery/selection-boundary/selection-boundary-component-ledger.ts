@@ -47,7 +47,7 @@ import type {
 } from "./selection-boundary-component-ledger-types.js";
 
 const LEDGER_UNITS = Object.freeze({
-  fused_score: "flood_integrated_final",
+  fused_score: "family_max_rrf_object",
   rrf_family_contribution: "rrf_rank_ballot",
   agreements: "unit_interval",
   embedding_signal: "unit_interval_or_null",

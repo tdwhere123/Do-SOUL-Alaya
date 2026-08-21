@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("computeIntegratedFloodScore", () => {
-  it("adds evidence as an additive residual even when flood fuel is closed", () => {
+  it("keeps ranking scalar at R_obj when evidence residual is diagnostic and flood fuel is closed", () => {
     const entry = createMemoryEntry({
       object_id: "33333333-3333-4333-8333-333333333333",
       evidence_refs: ["ev-a"]
@@ -32,13 +32,11 @@ describe("computeIntegratedFloodScore", () => {
         }
       })
     });
-    const lGate = structuralLikelihoodGate(0.25);
     expect(result.diagnostics.fuel_verified).toBe(false);
     expect(result.diagnostics.e_direct_status).toBe("active");
     expect(result.diagnostics.E_direct).toBeCloseTo(0.8, 12);
     expect(result.diagnostics.beta).toBe(1);
-    expect(result.score).toBeCloseTo(0.25 + 0.8 * lGate, 12);
-    expect(result.score).toBeGreaterThan(0.25);
+    expect(result.score).toBeCloseTo(0.25, 12);
   });
 
   it("diagnostic names match the integrated flood contract", () => {
@@ -94,19 +92,15 @@ describe("computeIntegratedFloodScore", () => {
       axisInputs: { R_obj: rObj, A_path: 0.5, B_evidence: 0.8 },
       supplementaryData: data
     });
-    const { omega, Flood, lambda, beta } = result.diagnostics;
+    const { omega, beta } = result.diagnostics;
     expect(result.diagnostics.fuel_verified).toBe(true);
     expect(omega).toBeLessThan(1);
     expect(beta).toBe(1);
-    expect(result.score).toBeGreaterThanOrEqual(rObj);
-    const lGate = structuralLikelihoodGate(rObj);
-    expect(result.score).toBeCloseTo(
-      rObj + 0.8 * lGate + lambda * omega * Flood * lGate,
-      12
-    );
+    expect(result.diagnostics.Flood).toBeGreaterThan(0);
+    expect(result.score).toBeCloseTo(rObj, 12);
   });
 
-  it("applies L-gate: high R_obj shrinks flood bonus toward zero", () => {
+  it("keeps ranking scalar at R_obj independent of L-gate flood bonus", () => {
     const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const target = createMemoryEntry({
@@ -134,12 +128,9 @@ describe("computeIntegratedFloodScore", () => {
     });
     expect(low.diagnostics.fuel_verified).toBe(true);
     expect(high.diagnostics.fuel_verified).toBe(true);
-    const lowBonus = low.score - 0.2;
-    const highBonus = high.score - 0.9;
-    expect(lowBonus).toBeGreaterThan(highBonus);
+    expect(low.score).toBeCloseTo(0.2, 12);
+    expect(high.score).toBeCloseTo(0.9, 12);
     expect(structuralLikelihoodGate(0.9)).toBeCloseTo(0.1, 12);
-    expect(high.score).toBe(1);
-    expect(highBonus).toBeCloseTo(0.1, 12);
   });
 
   it("clamps an active non-default flood score and diagnostics to one", () => {
@@ -165,8 +156,8 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("active");
     expect(result.diagnostics.fuel_verified).toBe(true);
     expect(result.diagnostics.Flood).toBe(1);
-    expect(result.score).toBe(1);
-    expect(result.diagnostics.final_score).toBe(1);
+    expect(result.score).toBe(0.2);
+    expect(result.diagnostics.final_score).toBe(0.2);
   });
 
   it("fails non-finite path fuel closed without changing the base score", () => {

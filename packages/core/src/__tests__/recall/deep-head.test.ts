@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { orderByCoverageMarginalGain } from "../../recall/delivery/coverage-selection.js";
 import { applyDeliverySelection } from
   "../../recall/delivery/delivery-selection.js";
+import { composeFineAssessmentDeepHeadDelivery } from
+  "../../recall/delivery/fine-assessment-deep-head.js";
 import {
   computeLightweightDeepHeadScores,
   resolveDeepHeadAssessment,
@@ -219,8 +221,14 @@ describe("deep head", () => {
         embedding: index === 39 ? 1 : 0.1
       })
     );
-    const scores = computeLightweightDeepHeadScores(candidates, emptySupplementary());
-    const result = applyDeliverySelection(candidates, scores, {
+    const assessment = resolveDeepHeadAssessment({
+      candidates,
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary()
+    });
+    expect(assessment.embeddingObserved).toBe(true);
+    const composed = composeFineAssessmentDeepHeadDelivery(assessment);
+    const result = applyDeliverySelection(candidates, composed.orderScores, {
       replacePublicRelevance: false
     });
     const orderedIds = result.orderedCandidates.map((candidate) => candidate.entry.object_id);

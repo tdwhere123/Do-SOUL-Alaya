@@ -8,6 +8,7 @@ import {
 } from "../fine-assessment-delivery-branch.js";
 import {
   resolveFineAssessmentDeepHead,
+  composeFineAssessmentDeepHeadDelivery,
   type DeepHeadAssessmentResolver
 } from "../fine-assessment-deep-head.js";
 import {
@@ -110,7 +111,8 @@ function reconstructCounterfactualComposition(
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores
   });
-  const delivery = applyDeliverySelection(candidates, deepHead.scores, {
+  const composed = composeFineAssessmentDeepHeadDelivery(deepHead);
+  const delivery = applyDeliverySelection(candidates, composed.orderScores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates(

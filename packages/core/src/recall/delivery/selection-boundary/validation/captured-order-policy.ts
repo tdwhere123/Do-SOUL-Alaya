@@ -15,7 +15,7 @@ export function assertCapturedOrderPolicy(
   const capturedOrder = input.final_order_after_coverage;
   const capturedDrop = input.max_head_drop_after_coverage;
   if (capturedOrder === undefined && capturedDrop === undefined) return;
-  const expectedOrder = resolveCapturedOrder(deepHead);
+  const expectedOrder = resolveCapturedOrder();
   const dropPermitted = deepHead.embeddingObserved && deepHead.scores.size > 0;
   if (capturedOrder !== expectedOrder ||
       (capturedDrop !== undefined && (!dropPermitted ||
@@ -24,9 +24,6 @@ export function assertCapturedOrderPolicy(
   }
 }
 
-function resolveCapturedOrder(
-  deepHead: RecallDeepHeadAssessment
-): CapturedOrder {
-  if (deepHead.scores.size === 0) return "public_relevance";
-  return deepHead.embeddingObserved ? "public_relevance" : "coverage";
+function resolveCapturedOrder(): CapturedOrder {
+  return "public_relevance";
 }

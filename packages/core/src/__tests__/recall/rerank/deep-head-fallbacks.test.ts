@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { DeliverySelectionCandidate } from
   "../../../recall/delivery/delivery-selection.js";
+import { composeFineAssessmentDeepHeadDelivery } from
+  "../../../recall/delivery/fine-assessment-deep-head.js";
 import { applyDeliverySelection } from
   "../../../recall/delivery/delivery-selection.js";
 import { orderByCoverageMarginalGain } from
   "../../../recall/delivery/coverage-selection.js";
-import { computeLightweightDeepHeadScores } from
-  "../../../recall/rerank/deep-head.js";
+import {
+  computeLightweightDeepHeadScores,
+  resolveDeepHeadAssessment
+} from "../../../recall/rerank/deep-head.js";
 import { emptySupplementary, fusedCandidate } from "./deep-head-fixtures.js";
 
 describe("deep head fallbacks", () => {
@@ -131,12 +135,24 @@ describe("deep head fallbacks", () => {
     expect(scores.get(conflictOnly.fusion.candidate_key)!)
       .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);
 
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [seed, lexicalRescue, conflictOnly, lexicalPeer],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        evidenceFtsRanks: { "lexical-peer": 1, "lexical-rescue": 0.2,
+          "path-seed": 0.3, "conflict-only": 0.01 },
+        structuralScores: { "lexical-peer": 1, "lexical-rescue": 0.2,
+          "path-seed": 0.3, "conflict-only": 0.01 }
+      })
+    });
+    expect(assessment.embeddingObserved).toBe(false);
+    const composed = composeFineAssessmentDeepHeadDelivery(assessment);
     const result = applyDeliverySelection(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer], scores,
+      [seed, lexicalRescue, conflictOnly, lexicalPeer], composed.orderScores,
       { replacePublicRelevance: false }
     );
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["lexical-peer", "path-seed", "lexical-rescue", "conflict-only"]);
+      .toEqual(["path-seed", "lexical-rescue", "conflict-only", "lexical-peer"]);
   });
 
   it("keeps field-only baselines in the existing fused order", () => {

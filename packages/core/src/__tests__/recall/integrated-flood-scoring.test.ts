@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeIntegratedFloodScore,
-  structuralLikelihoodGate
+  computeIntegratedFloodScore
 } from "../../recall/scoring/integrated-flood-scoring.js";
-import { resolveConformantPathWeight } from "../../recall/scoring/conformant-fusion-scoring.js";
 import { createMemoryEntry, entityQueryKey, supplementary } from "./integrated-flood-scoring.test-support.js";
 
 describe("computeIntegratedFloodScore", () => {
@@ -41,7 +39,8 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.slice_status).toBe("inactive:no_slice");
     expect(result.diagnostics.Slice).toBe(1);
     expect(result.diagnostics.fuel_verified).toBe(true);
-    expect(result.score).toBeGreaterThan(0.2);
+    expect(result.diagnostics.Flood).toBeGreaterThan(0);
+    expect(result.score).toBeCloseTo(0.2, 12);
   });
 
   it("activates the slice axis on a matching entity fiber", () => {
@@ -65,10 +64,9 @@ describe("computeIntegratedFloodScore", () => {
         }
       })
     });
-    expect(result.diagnostics.slice_status).toBe("active");
-    expect(result.diagnostics.Slice).toBe(1);
     expect(result.diagnostics.fuel_verified).toBe(true);
-    expect(result.score).toBeGreaterThan(0.2);
+    expect(result.diagnostics.Flood).toBeGreaterThan(0);
+    expect(result.score).toBeCloseTo(0.2, 12);
   });
 
   it("withholds flood fuel when the candidate is off the query fiber", () => {
@@ -95,10 +93,7 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.slice_status).toBe("inactive:no_slice_match");
     expect(result.diagnostics.Slice).toBe(0);
     expect(result.diagnostics.fuel_verified).toBe(false);
-    expect(result.score).toBeCloseTo(
-      0.2 + 0.7 * structuralLikelihoodGate(0.2),
-      12
-    );
+    expect(result.score).toBeCloseTo(0.2, 12);
   });
 
   it("path fuel changes only eligible candidates with verified path and evidence inflow", () => {
@@ -126,17 +121,8 @@ describe("computeIntegratedFloodScore", () => {
     expect(coldResult.diagnostics.fuel_verified).toBe(false);
     expect(coldResult.score).toBeCloseTo(0.5, 12);
     expect(warmResult.diagnostics.fuel_verified).toBe(true);
-    const lGate = structuralLikelihoodGate(0.1);
-    expect(warmResult.score).toBeCloseTo(
-      0.1 +
-        0.6 * lGate +
-        resolveConformantPathWeight() *
-          warmResult.diagnostics.omega *
-          warmResult.diagnostics.Flood *
-          lGate,
-      9
-    );
-    expect(warmResult.score).toBeGreaterThan(0.1);
+    expect(warmResult.diagnostics.Flood).toBeGreaterThan(0);
+    expect(warmResult.score).toBeCloseTo(0.1, 12);
   });
 
   it("does not let path inflow act as flood fuel without evidence support", () => {
@@ -176,10 +162,7 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("active");
     expect(result.diagnostics.path_status).toBe("inactive:pass_through");
     expect(result.diagnostics.fuel_verified).toBe(false);
-    expect(result.score).toBeCloseTo(
-      0.25 + 0.8 * structuralLikelihoodGate(0.25),
-      12
-    );
+    expect(result.score).toBeCloseTo(0.25, 12);
   });
 
   it("does not treat an unavailable path index as pass-through identity", () => {
@@ -226,5 +209,33 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.A_path).toBe(1);
     expect(result.diagnostics.fuel_verified).toBe(false);
     expect(result.score).toBeCloseTo(0.4, 12);
+  });
+
+  it("does not let verified flood invert a higher R_obj ranking scalar", () => {
+    const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    const weakId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const weak = createMemoryEntry({ object_id: weakId, evidence_refs: ["ev-weak"] });
+    const strong = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    const data = supplementary({
+      pathInflowByTarget: {
+        [weakId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+      },
+      evidenceSupportVectorsByMemoryId: {
+        [weakId]: [{ source_kind: "evidence_ref", source_id: "ev-weak", support: 1 }]
+      }
+    });
+    const floodedWeak = computeIntegratedFloodScore({
+      entry: weak,
+      axisInputs: { R_obj: 0.04, A_path: 1, B_evidence: 1 },
+      supplementaryData: data
+    });
+    const stronger = computeIntegratedFloodScore({
+      entry: strong,
+      axisInputs: { R_obj: 0.08, A_path: 0, B_evidence: 0 },
+      supplementaryData: data
+    });
+    expect(floodedWeak.diagnostics.fuel_verified).toBe(true);
+    expect(stronger.diagnostics.fuel_verified).toBe(false);
+    expect(stronger.score).toBeGreaterThan(floodedWeak.score);
   });
 });

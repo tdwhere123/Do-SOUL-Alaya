@@ -239,8 +239,16 @@ describe("conformant compositional combine (real SQLite)", () => {
     });
     expect(withInflow.get(keyOf(objectId(2)))!.per_axis_contribution!.path).toBeGreaterThan(0);
     expect(withInflow.get(keyOf(objectId(2)))!.flood_potential!.fuel_verified).toBe(true);
-    expect(withInflow.get(keyOf(objectId(2)))!.fused_score)
-      .toBeGreaterThan(without.get(keyOf(objectId(2)))!.fused_score);
+    expect(withInflow.get(keyOf(objectId(2)))!.flood_potential!.Flood)
+      .toBeGreaterThan(without.get(keyOf(objectId(2)))!.flood_potential!.Flood ?? 0);
+    expect(withInflow.get(keyOf(objectId(2)))!.fused_score).toBeCloseTo(
+      withInflow.get(keyOf(objectId(2)))!.flood_potential!.R_obj,
+      12
+    );
+    expect(without.get(keyOf(objectId(2)))!.fused_score).toBeCloseTo(
+      without.get(keyOf(objectId(2)))!.flood_potential!.R_obj,
+      12
+    );
   });
 
   it("does not multiply R_O for repeated projections from one family", async () => {
@@ -266,7 +274,8 @@ describe("conformant compositional combine (real SQLite)", () => {
     const targetLifted = withInflow.get(keyOf(target.id))!;
     expect(targetLifted.per_axis_contribution!.path).toBeGreaterThan(0);
     expect(targetLifted.flood_potential!.fuel_verified).toBe(true);
-    expect(targetLifted.fused_score).toBeGreaterThan(targetNoInflow.fused_score);
+    expect(targetLifted.fused_score).toBeCloseTo(targetLifted.flood_potential!.R_obj, 12);
+    expect(targetNoInflow.fused_score).toBeCloseTo(targetNoInflow.flood_potential!.R_obj, 12);
   });
 
   it("path flood carries no free vote: inflow from a zero-base source lifts nothing", async () => {
@@ -464,7 +473,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("integrated flood score adds the evidence residual on top of flood", async () => {
+  it("integrated flood ranking scalar stays R_obj when evidence residual is diagnostic", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const spec: CandidateSpec = { id: objectId(2), lexical: 1, evidenceSupports: [0.5, 0.5] };
     const candidate = (await runFusion(GENERIC_QUERY, [seed, spec], {
@@ -476,12 +485,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(flood.beta).toBe(1);
     expect(flood.e_direct_status).toBe("active");
     expect(flood.fuel_verified).toBe(true);
-    const lGate = 1 - flood.R_obj;
-    const expected =
-      flood.R_obj +
-      flood.E_direct * lGate +
-      flood.lambda * flood.omega * flood.Flood * lGate;
-    expect(candidate.fused_score).toBeCloseTo(expected, 9);
-    expect(flood.final_score).toBeCloseTo(expected, 9);
+    expect(candidate.fused_score).toBeCloseTo(flood.R_obj, 9);
+    expect(flood.final_score).toBeCloseTo(flood.R_obj, 9);
   });
 });

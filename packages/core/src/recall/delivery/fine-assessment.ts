@@ -22,7 +22,7 @@ import {
 import { applyDeliverySelection } from "./delivery-selection.js";
 import { resolveFineAssessmentDeliveryBranch } from
   "./fine-assessment-delivery-branch.js";
-import { resolveFineAssessmentDeepHead } from
+import { resolveFineAssessmentDeepHead, composeFineAssessmentDeepHeadDelivery } from
   "./fine-assessment-deep-head.js";
 import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
 import {
@@ -124,11 +124,11 @@ export function deliverFineAssessment(
     supplementaryData: params.supplementaryData,
     captureAnswerFeatures: params.captureAnswerFeatures
   });
-  const deepHeadScores = deepHead.scores;
+  const composed = composeFineAssessmentDeepHeadDelivery(deepHead);
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores
   });
-  const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
+  const delivery = applyDeliverySelection(preparation.candidates, composed.orderScores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates({
@@ -142,10 +142,8 @@ export function deliverFineAssessment(
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: delivery.rankByCandidateKey,
     finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
-    // Pack by deep-head scores even when public relevance stays fused — otherwise
-    // coverage undoes the lightweight reorder by re-ranking on fused_score.
-    coverageRelevanceByCandidateKey: deepHeadScores,
-    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
+    coverageRelevanceByCandidateKey: composed.coverageRelevance,
+    coverageRelevanceUpperBound: composed.coverageRelevanceUpperBound,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
     answerShapePlan: params.answerShapePlan,

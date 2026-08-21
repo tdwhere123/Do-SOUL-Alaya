@@ -66,9 +66,10 @@ assessment
   collect routing keys, evidence support, path inflow, governance,
   semantic activation, and field receipts
   -> effective object scoring
-  -> family-max RRF fusion
-  -> integrated Slice/path/evidence flood refinement
-  -> deep-head relevance
+  -> family-max RRF fusion (ranking scalar is R_obj)
+  -> integrated Slice/path/evidence flood (diagnostics and Gamma cover;
+     does not enter the ranking scalar)
+  -> deep-head relevance (rescores the pool only when embedding is observed)
   -> Select_Gamma under eligibility, source, lineage, dimension,
      max-entry, and token constraints
   -> ordered ContextPack and selection-boundary receipt
@@ -101,8 +102,8 @@ The principal owners are:
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. They can also activate already-admitted candidates. F3 remains rebuildable routing, not durable truth. |
-| Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool. It never authorizes durable truth. |
-| Integrated flood | Live | Flood requires Slice, path, and evidence fuel; the pass-through object score cannot be demoted. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
+| Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
+| Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
 | `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |

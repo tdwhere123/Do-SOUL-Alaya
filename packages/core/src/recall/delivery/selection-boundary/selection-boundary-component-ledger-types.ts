@@ -40,7 +40,7 @@ export type SelectedEmbeddingSource =
   | "none";
 
 export type ComponentLedgerUnits = Readonly<{
-  readonly fused_score: "flood_integrated_final";
+  readonly fused_score: "family_max_rrf_object";
   readonly rrf_family_contribution: "rrf_rank_ballot";
   readonly agreements: "unit_interval";
   readonly embedding_signal: "unit_interval_or_null";

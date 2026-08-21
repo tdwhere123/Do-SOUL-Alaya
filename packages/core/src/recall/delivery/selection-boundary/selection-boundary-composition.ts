@@ -8,7 +8,7 @@ import {
   resolveFineAssessmentDeliveryBranch,
   type FineAssessmentDeliveryBranch
 } from "../fine-assessment-delivery-branch.js";
-import { resolveFineAssessmentDeepHead } from
+import { resolveFineAssessmentDeepHead, composeFineAssessmentDeepHeadDelivery } from
   "../fine-assessment-deep-head.js";
 import type {
   RecallDeepHeadAssessment,
@@ -114,7 +114,8 @@ function prepareComposition(
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores
   });
-  const delivery = applyDeliverySelection(candidates, deepHead.scores, {
+  const composed = composeFineAssessmentDeepHeadDelivery(deepHead);
+  const delivery = applyDeliverySelection(candidates, composed.orderScores, {
     replacePublicRelevance: branch.replacePublicRelevance
   });
   assertCapturedVsLive(capturedScoreFidelity, "captured_order_policy", () => {
@@ -153,6 +154,7 @@ export function buildCompositionSelectionParams(
   packetCandidates: FineAssessmentSelectionParams["orderedCandidates"] | null =
     restoreCapturedPacketCandidates(input)
 ): FineAssessmentSelectionParams {
+  const composed = composeFineAssessmentDeepHeadDelivery(deepHead);
   return {
     workspace_id: input.workspace_id,
     orderedCandidates: delivery.orderedCandidates,
@@ -162,8 +164,8 @@ export function buildCompositionSelectionParams(
     tokenEstimator,
     rankByCandidateKey: delivery.rankByCandidateKey,
     finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
-    coverageRelevanceByCandidateKey: deepHead.scores,
-    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt,
+    coverageRelevanceByCandidateKey: composed.coverageRelevance,
+    coverageRelevanceUpperBound: composed.coverageRelevanceUpperBound,
     answerRelevanceRankByCandidateKey:
       delivery.answerRelevanceRankByCandidateKey,
     ...(input.capture_answer_features === undefined ? {} : {
@@ -232,9 +234,10 @@ function assertCompositionDeepHeadInputs(
   deepHead: RecallDeepHeadAssessment,
   capturedScoreFidelity: CapturedScoreFidelityMode
 ): void {
+  const composed = composeFineAssessmentDeepHeadDelivery(deepHead);
   assertCapturedVsLive(capturedScoreFidelity, "coverage_relevance", () => {
     assertNumberMapEquals(
-      deepHead.scores,
+      composed.coverageRelevance,
       input.coverage_relevance_by_candidate_key,
       "coverage_relevance"
     );
@@ -243,7 +246,7 @@ function assertCompositionDeepHeadInputs(
     capturedScoreFidelity,
     "coverage_relevance_upper_bound",
     () => {
-      if (selectionBoundaryJsonSha256(deepHead.relevanceUpperBoundReceipt) !==
+      if (selectionBoundaryJsonSha256(composed.coverageRelevanceUpperBound) !==
           selectionBoundaryJsonSha256(
             input.coverage_relevance_upper_bound ?? null
           )) {

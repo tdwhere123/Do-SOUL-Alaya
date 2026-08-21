@@ -63,7 +63,7 @@ describe("fine-assessment component ledger", () => {
     const first = ledger.candidates[0]!;
 
     expect(ledger.schema_version).toBe(1);
-    expect(ledger.units.fused_score).toBe("flood_integrated_final");
+    expect(ledger.units.fused_score).toBe("family_max_rrf_object");
     expect(ledger.units.rrf_family_contribution).toBe("rrf_rank_ballot");
     expect(first.sources.evidence_fts.state).toBe("observed_positive");
     expect(first.sources.lexical_fts.state).toBe("observed_positive");

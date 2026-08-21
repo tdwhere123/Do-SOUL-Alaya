@@ -189,14 +189,9 @@ function resolveIntegratedFloodScore(
 }
 
 function computeFinalFloodScore(resolved: ResolvedIntegratedFloodScore): number {
-  // invariant: flood and evidence residuals cannot demote the pass-through base.
-  const evidenceResidual = resolved.eDirect > 0
-    ? resolved.beta * resolved.eDirect * resolved.lGate
-    : 0;
-  const floodBonus = resolved.fuelVerified
-    ? resolved.lambda * resolved.omega * resolved.flood * resolved.lGate
-    : 0;
-  return clamp01(resolved.base + evidenceResidual + floodBonus);
+  // Ranking scalar is family-max R_obj. Path/evidence residuals stay diagnostic;
+  // adding them at object-score scale inverted higher-R_obj candidates.
+  return clamp01(resolved.base);
 }
 
 function buildIntegratedFloodDiagnostics(

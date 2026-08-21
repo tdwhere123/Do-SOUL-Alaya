@@ -361,7 +361,7 @@ describe("formula and lifecycle regression net", () => {
     expect(warm.diagnostics.fuel_verified).toBe(true);
   });
 
-  it("protects formula assembly: evidence direct residual is additive and ungated from flood", () => {
+  it("protects formula assembly: ranking scalar stays R_obj while evidence residual is diagnostic", () => {
     const entry = createRecallFixtureEntry({
       object_id: "33333333-3333-4333-8333-333333333333",
       evidence_refs: ["ev-a"]
@@ -384,10 +384,7 @@ describe("formula and lifecycle regression net", () => {
     });
     expect(result.diagnostics.fuel_verified).toBe(false);
     expect(result.diagnostics.e_direct_status).toBe("active");
-    expect(result.score).toBeCloseTo(
-      0.25 + 0.8 * (1 - 0.25),
-      12
-    );
+    expect(result.score).toBeCloseTo(0.25, 12);
 
     const withPathFuel = computeIntegratedFloodScore({
       entry,
@@ -399,24 +396,9 @@ describe("formula and lifecycle regression net", () => {
     });
     expect(withPathFuel.diagnostics.e_direct_status).toBe("active");
     expect(withPathFuel.diagnostics.beta).toBe(1);
+    expect(withPathFuel.diagnostics.Flood).toBeGreaterThan(0);
+    expect(withPathFuel.score).toBeCloseTo(withPathFuel.diagnostics.R_obj, 12);
     expect(withPathFuel.score).toBeCloseTo(withPathFuel.diagnostics.final_score, 12);
-    const lGate = 1 - withPathFuel.diagnostics.R_obj;
-    const expected =
-      withPathFuel.diagnostics.R_obj +
-      withPathFuel.diagnostics.E_direct * lGate +
-      withPathFuel.diagnostics.lambda *
-        withPathFuel.diagnostics.omega *
-        withPathFuel.diagnostics.Flood *
-        lGate;
-    expect(withPathFuel.score).toBeCloseTo(Math.min(1, expected), 9);
-    expect(withPathFuel.score).not.toBeCloseTo(
-      (withPathFuel.diagnostics.R_obj +
-        withPathFuel.diagnostics.lambda *
-          withPathFuel.diagnostics.omega *
-          withPathFuel.diagnostics.Flood *
-          lGate) * (1 + 0.8),
-      6
-    );
   });
 
   it("protects temporal/control placement: integrated flood target path does not add +T/+C", async () => {
