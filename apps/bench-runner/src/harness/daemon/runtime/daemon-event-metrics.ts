@@ -167,8 +167,8 @@ export async function queryEdgeProposalKpiRows(
 // @anchor BENCH_FAST_PRAGMA: bench-only SQLite tuning layered on top of the
 // production storage hardening (packages/storage/src/sqlite/db.ts already sets
 // journal_mode=WAL + synchronous=NORMAL + foreign_keys + busy_timeout). The
-// bench harness adds two pragmas that production deliberately leaves at
-// default because they change the durability vs throughput tradeoff:
+// bench harness adds pragmas that production deliberately leaves at default
+// because they change the durability vs throughput / RSS tradeoff:
 //
 //   temp_store=FILE         — FTS/sort/GROUP BY temp B-trees spill to disk.
 //                             temp_store=MEMORY forces them into RAM that is
@@ -180,10 +180,18 @@ export async function queryEdgeProposalKpiRows(
 //                             for headroom and is the safe default for full
 //                             runs. Override with ALAYA_BENCH_TEMP_STORE=memory
 //                             for short throughput-bound runs that fit in RAM.
-//   cache_size=-65536       — 64 MiB page cache (negative = KiB). Default is
-//                             ~2 MiB which is too small for the bench
-//                             hot-set; production leaves it small for
-//                             desktop multi-process coexistence.
+//   cache_size=-N           — page cache in KiB (negative). Auto is ~1/4 of
+//                             the live DB file, floored at 64 MiB (-65536)
+//                             so small DBs keep the historical working
+//                             set, and capped at 1 GiB (-1048576) so a
+//                             multi-GB snapshot cannot pin the whole file.
+//                             Override with ALAYA_BENCH_CACHE_SIZE_KIB
+//                             (positive KiB, applied as a negative pragma).
+//   mmap_size=N             — OS file mapping for read-heavy recall-eval.
+//                             min(file size, SQLITE_MAX_MMAP_SIZE default
+//                             0x7fff0000) once the DB is at least the 64 MiB
+//                             cache floor; smaller files keep SQLite's
+//                             default (typically 0).
 //
 // Gated by ALAYA_BENCH_FAST_PRAGMA env (default: ON for bench harness; set
 // "0"/"false" to opt out). Production `apps/core-daemon` does not call this

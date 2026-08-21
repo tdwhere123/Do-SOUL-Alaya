@@ -79,7 +79,7 @@ describe("SqliteConflictMatrixRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(8);
+    expect(migration?.version).toBe(9);
   });
 
   it("creates and finds an edge by id", async () => {

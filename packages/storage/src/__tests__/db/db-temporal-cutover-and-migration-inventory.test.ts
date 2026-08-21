@@ -63,7 +63,7 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(8);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(9);
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,

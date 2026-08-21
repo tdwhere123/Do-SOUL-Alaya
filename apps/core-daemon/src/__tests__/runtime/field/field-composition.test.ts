@@ -14,7 +14,12 @@ import {
   hashSourceRecordId,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import {
+  fieldContractSha256,
+  INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT,
+  parseProjectionGenerationArtifacts,
+  type SourceProjectionSliceKey
+} from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -82,8 +87,14 @@ describe("field composition", () => {
     expect(second.generation_id).toBe(first.generation_id);
     expect(active?.generation_id).toBe(first.generation_id);
     expect(active?.status).toBe("active");
-    expect(fieldRepos.generations.readArtifacts("workspace-1", first.generation_id))
-      .not.toBeNull();
+    const stored = fieldRepos.generations.readArtifacts("workspace-1", first.generation_id);
+    expect(stored).not.toBeNull();
+    const storedGraph = JSON.parse(stored!.artifacts_json) as {
+      readonly artifacts_format?: string;
+      readonly slice_keys: ReadonlyArray<{ readonly source_state?: unknown }>;
+    };
+    expect(storedGraph.artifacts_format).toBe(INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT);
+    expect(storedGraph.slice_keys[0]?.source_state).toBeUndefined();
     const activated = database.connection.prepare(`
       SELECT COUNT(*) AS n FROM event_log WHERE event_type = ? AND workspace_id = ?
     `).get(
@@ -179,12 +190,12 @@ describe("field composition", () => {
     const next = projectionLifecycle.rebuild(
       "workspace-1", "2026-08-16T00:02:00.000Z"
     );
-    const artifacts = JSON.parse(fieldRepos.generations.readArtifacts(
+    const artifacts = parseStoredArtifacts(fieldRepos.generations.readArtifacts(
       "workspace-1",
       next.generation_id
-    )!.artifacts_json) as { slice_keys: Array<{ source_state: unknown }> };
+    )!);
     expect(next.generation_id).not.toBe(first.generation_id);
-    expect(artifacts.slice_keys[0]?.source_state).toMatchObject({
+    expect(sourceStateOf(artifacts.slice_keys[0])).toMatchObject({
       lifecycle_state: "active",
       governance_state: "ordinary_evidence",
       evidence_transitions: [expect.objectContaining({
@@ -236,10 +247,10 @@ describe("field composition", () => {
     const current = projectionLifecycle.rebuild(
       "workspace-1", "2026-08-16T00:02:00.000Z"
     );
-    const artifacts = JSON.parse(fieldRepos.generations.readArtifacts(
+    const artifacts = parseStoredArtifacts(fieldRepos.generations.readArtifacts(
       "workspace-1", current.generation_id
-    )!.artifacts_json) as { slice_keys: Array<{ source_state: unknown }> };
-    expect(artifacts.slice_keys[0]?.source_state).toMatchObject({
+    )!);
+    expect(sourceStateOf(artifacts.slice_keys[0])).toMatchObject({
       lifecycle_state: "active",
       evidence_transitions: [expect.objectContaining({
         kind: "lifecycle",
@@ -336,6 +347,22 @@ function openComposition() {
       sha256: fieldContractSha256
     })
   };
+}
+
+function parseStoredArtifacts(row: Readonly<{
+  readonly generation_id: string;
+  readonly artifact_digest: string;
+  readonly artifacts_json: string;
+}>) {
+  return parseProjectionGenerationArtifacts(
+    JSON.parse(row.artifacts_json),
+    row.generation_id,
+    row.artifact_digest
+  );
+}
+
+function sourceStateOf(key: unknown) {
+  return (key as SourceProjectionSliceKey | undefined)?.source_state;
 }
 
 function seedProjectionSource(
