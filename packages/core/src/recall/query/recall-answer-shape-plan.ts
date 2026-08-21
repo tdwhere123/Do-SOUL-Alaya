@@ -1,3 +1,9 @@
+import { CJK_COPULAR_MEASURE_FORMS } from
+  "../../shared/fact-frame-grammar/cjk-interrogative-forms.js";
+import {
+  COPULAR_MEASURE_WORDS,
+  isRuleBasedCopularMeasureValue
+} from "../../shared/fact-frame-grammar/result-slots.js";
 import { isRecallScalarRelationTerm } from "./recall-answer-scalar-binding.js";
 import {
   splitLexicalTokens,
@@ -22,8 +28,18 @@ export interface RecallAnswerShapePlan {
 }
 
 const PLACE_CUE = /\bwhere\b/iu;
-const DURATION_CUE =
-  /\bhow long\b|\bhow many\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b/iu;
+// Unit WH ("how many hours/months") is COUNT_CUE; duration is copular-measure only.
+const ENGLISH_COPULAR_MEASURE_CUE = new RegExp(
+  String.raw`\bhow\s+(?:${[...COPULAR_MEASURE_WORDS].join("|")})\b`,
+  "iu"
+);
+const CJK_COPULAR_MEASURE_CUE = new RegExp(
+  [...CJK_COPULAR_MEASURE_FORMS]
+    .slice()
+    .sort((left, right) => right.length - left.length || left.localeCompare(right))
+    .join("|"),
+  "u"
+);
 const DISTINCT_ENTITIES_CUE = /\bhow many\s+(?:different|distinct|unique)\b/iu;
 const SUM_CUE =
   /\bhow much\s+total\b|\btotal\s+(?:money|amount|cost)\b|\b(?:sum|total)\b.{0,32}\b(?:spent|paid|expenses?|costs?)\b/iu;
@@ -73,30 +89,43 @@ export function recallAnswerShapeSupportsSingleSemanticLeader(
 
 function detectAnswerShapes(text: string): readonly RecallAnswerShape[] {
   const shapes: RecallAnswerShape[] = [];
+  const durationCue = matchCopularMeasureCue(text);
   if (PLACE_CUE.test(text)) shapes.push("place");
-  if (DURATION_CUE.test(text)) shapes.push("duration");
+  if (durationCue !== undefined) shapes.push("duration");
   if (DISTINCT_ENTITIES_CUE.test(text)) {
     shapes.push("distinct_entities");
   } else if (SUM_CUE.test(text)) {
     shapes.push("sum");
-  } else if (COUNT_CUE.test(text) && !DURATION_CUE.test(text)) {
+  } else if (COUNT_CUE.test(text) && durationCue === undefined) {
     shapes.push("count");
   }
   return shapes;
 }
 
 function answerCueTerms(text: string): ReadonlySet<string> {
-  const patterns = [
+  const fromPatterns = [
     PLACE_CUE,
-    DURATION_CUE,
     DISTINCT_ENTITIES_CUE,
     SUM_CUE,
     COUNT_CUE
-  ];
-  return new Set(patterns.flatMap((pattern) => {
+  ].flatMap((pattern) => {
     const match = pattern.exec(text)?.[0];
     return match === undefined ? [] : splitLexicalTokens(match);
-  }));
+  });
+  const duration = matchCopularMeasureCue(text);
+  return new Set(
+    duration === undefined
+      ? fromPatterns
+      : [...fromPatterns, ...splitLexicalTokens(duration)]
+  );
+}
+
+function matchCopularMeasureCue(text: string): string | undefined {
+  const english = text.match(ENGLISH_COPULAR_MEASURE_CUE)?.[0];
+  if (english !== undefined && isRuleBasedCopularMeasureValue(english)) return english;
+  const cjk = text.match(CJK_COPULAR_MEASURE_CUE)?.[0];
+  if (cjk !== undefined && isRuleBasedCopularMeasureValue(cjk)) return cjk;
+  return undefined;
 }
 
 function emptyPlan(

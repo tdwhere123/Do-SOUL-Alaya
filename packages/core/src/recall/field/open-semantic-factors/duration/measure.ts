@@ -1,14 +1,6 @@
 import { normalizeMemoryObjectKeySurface, type OpenSemanticFactor } from
   "@do-soul/alaya-protocol";
 import {
-  isRuleBasedCopularPredicate,
-  isRuleBasedGenericSpeaker
-} from "../../../../shared/query-fact-frame-extraction-rules.js";
-import {
-  factFrameWordPiecesCoverRun,
-  tokenizeFactFrameWordPieces
-} from "../../../../shared/fact-frame-grammar/source-text.js";
-import {
   DURATION_AMOUNT_SOURCE,
   DURATION_UNIT_SOURCE,
   DURATION_VALUE_SOURCE,
@@ -17,8 +9,7 @@ import {
   parseDurationAmount,
   type DurationUnit
 } from "../../../../recall/query/duration-unit-family.js";
-import { isAdmittedLexicalTerm, splitLexicalTokens } from
-  "../../../../recall/query/recall-query-probes.js";
+import { leftoverGenericSpeakerContentTokens } from "./subject.js";
 
 export const OPEN_SEMANTIC_DURATION_MEASURE_OPERATOR_ID =
   "duration_measure_binding_v1" as const;
@@ -32,10 +23,12 @@ const HYPHEN_EXTENT = new RegExp(
   String.raw`\b(?<amount>${DURATION_AMOUNT_SOURCE})-(?<unit>${DURATION_UNIT_SOURCE})\b`,
   "giu"
 );
-export function isBePredicate(factor: Readonly<OpenSemanticFactor>): boolean {
-  return isRuleBasedCopularPredicate(factor.surface) ||
-    isRuleBasedCopularPredicate(factor.semantic_identity);
-}
+const AMOUNT_UNIT_LEXEME = new RegExp(
+  String.raw`^(?<amount>${DURATION_AMOUNT_SOURCE})(?:\s+an|个)?(?:-|\s*)(?<unit>${DURATION_UNIT_SOURCE})$`,
+  "iu"
+);
+const EXTENT_QUALIFIER_PREFIX =
+  /^(?:over|under|about|around|nearly|more\s+than|less\s+than)\s+/iu;
 
 export function parseDurationExtent(text: string): ParsedDurationExtent | null {
   const normalized = normalizeMemoryObjectKeySurface(text);
@@ -61,19 +54,6 @@ export function isPureDurationExtentFactor(factor: Readonly<OpenSemanticFactor>)
     leftoverContentTokens(factor.semantic_identity, parsed).length === 0;
 }
 
-export function sourceBoundSubjectCoversQuery(
-  queryFactor: Readonly<OpenSemanticFactor>,
-  evidenceFactor: Readonly<OpenSemanticFactor>
-): boolean {
-  if (isGenericSpeakerFactor(queryFactor) || isGenericSpeakerFactor(evidenceFactor)) {
-    return false;
-  }
-  const queryTokens = subjectWordPieces(queryFactor);
-  if (queryTokens.length === 0) return false;
-  const evidenceTokens = subjectWordPieces(evidenceFactor);
-  return factFrameWordPiecesCoverRun(queryTokens, evidenceTokens);
-}
-
 function parseExtentMatch(
   match: RegExpMatchArray,
   source: string
@@ -97,43 +77,17 @@ function namedExtentGroups(
 }
 
 function lexemeGroups(lexeme: string): Readonly<{ amount?: string; unit?: string }> {
-  const stripped = lexeme.replace(
-    /^(?:over|under|about|around|nearly|more\s+than|less\s+than)\s+/iu,
-    ""
-  );
-  const match = new RegExp(
-    String.raw`^(?<amount>${DURATION_AMOUNT_SOURCE})(?:\s+an|个)?(?:-|\s*)(?<unit>${DURATION_UNIT_SOURCE})$`,
-    "iu"
-  ).exec(stripped);
-  return match?.groups ?? {};
+  const stripped = lexeme.replace(EXTENT_QUALIFIER_PREFIX, "");
+  return AMOUNT_UNIT_LEXEME.exec(stripped)?.groups ?? {};
 }
 
 function leftoverContentTokens(
   text: string,
   extent: ParsedDurationExtent
 ): readonly string[] {
-  return contentTokensFromText(text).filter((token) => !tokenCoversExtent(token, extent));
-}
-
-function subjectWordPieces(factor: Readonly<OpenSemanticFactor>): readonly string[] {
-  return uniqueTokens([
-    ...wordPiecesFromText(factor.surface),
-    ...wordPiecesFromText(factor.semantic_identity)
-  ]);
-}
-
-function wordPiecesFromText(text: string): readonly string[] {
-  return tokenizeFactFrameWordPieces(text).filter((token) =>
-    isAdmittedLexicalTerm(token) && !isRuleBasedGenericSpeaker(token));
-}
-
-function contentTokensFromText(text: string): readonly string[] {
-  return splitLexicalTokens(text).filter((token) =>
-    isAdmittedLexicalTerm(token) && !isRuleBasedGenericSpeaker(token));
-}
-
-function isGenericSpeakerFactor(factor: Readonly<OpenSemanticFactor>): boolean {
-  return subjectWordPieces(factor).length === 0;
+  return leftoverGenericSpeakerContentTokens(text).filter(
+    (token) => !tokenCoversExtent(token, extent)
+  );
 }
 
 function tokenCoversExtent(token: string, extent: ParsedDurationExtent): boolean {
@@ -142,10 +96,7 @@ function tokenCoversExtent(token: string, extent: ParsedDurationExtent): boolean
   if (normalizeDurationUnit(token) === extent.unit) return true;
   const hyphen = `${extent.amount}-${extent.unit}`;
   if (token === hyphen || token === `${hyphen}s`) return true;
-  const exact = new RegExp(
-    `^(?<amount>${DURATION_AMOUNT_SOURCE})(?:\\s+an|个)?(?:-|\\s*)(?<unit>${DURATION_UNIT_SOURCE})$`,
-    "iu"
-  ).exec(token);
+  const exact = AMOUNT_UNIT_LEXEME.exec(token);
   if (exact === null) return false;
   const parsed = parseExtentMatch(exact, token);
   return parsed !== null && sameExtent(parsed, extent);
@@ -153,8 +104,4 @@ function tokenCoversExtent(token: string, extent: ParsedDurationExtent): boolean
 
 function sameExtent(left: ParsedDurationExtent, right: ParsedDurationExtent): boolean {
   return left.amount === right.amount && left.unit === right.unit;
-}
-
-function uniqueTokens(tokens: readonly string[]): readonly string[] {
-  return Object.freeze([...new Set(tokens)]);
 }

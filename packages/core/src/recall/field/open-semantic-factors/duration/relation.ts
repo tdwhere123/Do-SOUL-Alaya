@@ -9,14 +9,20 @@ import {
   freezeArgumentMapping,
   type OpenSemanticFactorArgumentMapping
 } from "../argument-alignment.js";
-import { isRuleBasedCopularMeasureValue } from
-  "../../../../shared/query-fact-frame-extraction-rules.js";
 import {
-  isBePredicate,
+  isRuleBasedCopularMeasureValue,
+  isRuleBasedCopularPredicate
+} from "../../../../shared/query-fact-frame-extraction-rules.js";
+import {
   isPureDurationExtentFactor,
-  parseDurationExtent,
-  sourceBoundSubjectCoversQuery
+  parseDurationExtent
 } from "./measure.js";
+import { sourceBoundSubjectCoversQuery } from "./subject.js";
+
+function isBePredicate(factor: Readonly<OpenSemanticFactor>): boolean {
+  return isRuleBasedCopularPredicate(factor.surface) ||
+    isRuleBasedCopularPredicate(factor.semantic_identity);
+}
 
 type DurationMeasureMatch = Readonly<{
   readonly query_proposition_id: string;

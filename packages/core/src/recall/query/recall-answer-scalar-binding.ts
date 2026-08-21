@@ -3,12 +3,6 @@ import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { splitLexicalTokens } from "./recall-query-probes.js";
 import { DURATION_VALUE_SOURCE } from "./duration-unit-family.js";
 
-export {
-  DURATION_AMOUNT_SOURCE,
-  DURATION_UNIT_SOURCE,
-  DURATION_VALUE_SOURCE
-} from "./duration-unit-family.js";
-
 export type RecallScalarEventStatus = "asserted" | "prospective" | "negated" | "reversed";
 export type RecallScalarTimeStatus = "not_requested" | "compatible" | "conflicted" | "unknown";
 export type RecallScalarTargetStatus = "bound" | "partial" | "missing";

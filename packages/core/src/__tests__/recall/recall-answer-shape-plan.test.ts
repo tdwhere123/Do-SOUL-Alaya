@@ -8,7 +8,10 @@ describe("recall answer-shape plan", () => {
   it.each([
     ["Where did I buy my new bookshelf from?", "place"],
     ["How long did I wait for the decision on my asylum application?", "duration"],
-    ["How many months did I wait for the decision?", "duration"],
+    ["How many months did I wait for the decision?", "count"],
+    ["How many hours is my commute?", "count"],
+    ["每天上班通勤要多久？", "duration"],
+    ["每天上班通勤要多长时间？", "duration"],
     ["How many different doctors did I visit?", "distinct_entities"],
     ["How much total money have I spent on bike expenses?", "sum"],
     ["How many places did I visit?", "count"]
