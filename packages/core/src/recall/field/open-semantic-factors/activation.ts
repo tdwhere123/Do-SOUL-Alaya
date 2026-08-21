@@ -96,9 +96,9 @@ export function verifyOpenSemanticFactorActivation(params: Readonly<{
 export function resolveJoinActivation(
   own: number | undefined,
   constraint: number | undefined,
-  pairwiseMatched: boolean
+  constraintReceiptMatched: boolean
 ): number | null {
-  if (pairwiseMatched) return own === undefined ? null : own;
+  if (constraintReceiptMatched) return own === undefined ? null : own;
   return constraint === undefined ? null : constraint;
 }
 
