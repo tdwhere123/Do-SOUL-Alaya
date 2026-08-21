@@ -84,7 +84,7 @@ export interface DiagnosticLoopAdapters {
 }
 
 export interface DiagnosticLoopCheckpoint {
-  readonly schema_version: 2;
+  readonly schema_version: 3;
   readonly kind: "diagnostic_loop_checkpoint";
   readonly phase: DiagnosticLoopPhase;
   readonly status: "completed" | "failed";
@@ -115,5 +115,6 @@ export interface DiagnosticLoopRunInput {
   readonly fromPhase?: DiagnosticLoopPhase;
   readonly adapters: DiagnosticLoopAdapters;
   readonly argv: readonly string[];
+  readonly gate7UnlockPath?: string;
   readonly now?: () => string;
 }

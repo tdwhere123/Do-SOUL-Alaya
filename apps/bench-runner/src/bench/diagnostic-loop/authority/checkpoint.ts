@@ -20,6 +20,8 @@ import { rebuildDiagnostic100QComparison } from
   "../../diagnostics/stage-attribution/exposure/rebuild-comparison.js";
 import type { Diagnostic100QComparison } from
   "../../diagnostics/stage-attribution/diagnostic-100q.js";
+import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
+  "../../diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import {
   missLedgerContentIdentity,
   summarizeMissLedgerCheckpoint
@@ -71,11 +73,14 @@ async function assertMissLedgerArtifact(
   if (!isDeepStrictEqual(artifact, source)) {
     throw new Error("diagnostic-loop miss-ledger source authority mismatch");
   }
-  if (!isDeepStrictEqual(
-    checkpoint.details.exposed_denominator_gate,
-    artifact.exposed_denominator_gate
-  )) {
-    throw new Error("diagnostic-loop miss-ledger exposure gate authority mismatch");
+  if (!isDeepStrictEqual(checkpoint.details.exposure_sli, artifact.exposure_sli) ||
+      !isDeepStrictEqual(
+        checkpoint.details.gate7_polarity_matrix, artifact.gate7_polarity_matrix
+      ) ||
+      !isDeepStrictEqual(
+        checkpoint.details.diagnostic_100q_unlock, artifact.diagnostic_100q_unlock
+      )) {
+    throw new Error("diagnostic-loop miss-ledger exposure contract authority mismatch");
   }
   return source;
 }
@@ -124,26 +129,37 @@ async function assertReportArtifact(
   if (diagnosticAuthorityDigest(parsed) !== checkpoint.content_identity) {
     throw new Error("diagnostic-loop report checkpoint artifact authority mismatch");
   }
-  if (comparison !== undefined && !isReportPromotionBound(parsed, missLedger, comparison)) {
-    throw new Error("diagnostic-loop report promotion authority mismatch");
+  if (isRecord(parsed) && parsed.schema_version === 3) {
+    throw new Error(
+      "historical diagnostic-loop report cannot be reinterpreted as current gate authority"
+    );
+  }
+  if (missLedger === undefined || comparison === undefined) {
+    throw new Error("diagnostic-loop report unlock/promotion authority is incomplete");
+  }
+  if (!isReportUnlockPromotionBound(parsed, missLedger, comparison)) {
+    throw new Error("diagnostic-loop report unlock/promotion authority mismatch");
   }
 }
 
-function isReportPromotionBound(
+function isReportUnlockPromotionBound(
   value: unknown,
   missLedger: DiagnosticLoopCheckpoint | undefined,
   comparison: Diagnostic100QComparison
 ): boolean {
-  if (!isRecord(value) || value.schema_version !== 3 ||
+  if (!isRecord(value) || value.schema_version !== 4 ||
       value.kind !== "diagnostic_loop_report") return false;
   const promotion = value.diagnostic_100q_promotion;
+  const unlock = value.diagnostic_100q_unlock;
   const parsedLedger = value.miss_ledger;
   if (!isRecord(promotion) || !isRecord(parsedLedger)) return false;
-  const passed = comparison.exposed_denominator_gate.passed;
-  return promotion.eligible === passed && promotion.reason === (passed
-    ? "exposed_denominator_gate_passed" : "exposed_denominator_gate_not_passed") &&
+  return promotion.eligible === DIAGNOSTIC_100Q_KPI_PROMOTION.eligible &&
+    promotion.reason === DIAGNOSTIC_100Q_KPI_PROMOTION.reason &&
+    isDeepStrictEqual(unlock, comparison.diagnostic_100q_unlock) &&
     isDeepStrictEqual(value.miss_ledger, summarizeMissLedgerCheckpoint(missLedger)) &&
-    isDeepStrictEqual(parsedLedger.exposed_denominator_gate, comparison.exposed_denominator_gate);
+    isDeepStrictEqual(parsedLedger.exposure_sli, comparison.exposure_sli) &&
+    isDeepStrictEqual(parsedLedger.gate7_polarity_matrix, comparison.gate7_polarity_matrix) &&
+    isDeepStrictEqual(parsedLedger.diagnostic_100q_unlock, comparison.diagnostic_100q_unlock);
 }
 
 function isEvaluationSlice(value: unknown): boolean {

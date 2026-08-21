@@ -52,9 +52,12 @@ export function checkpointDigest(
 }
 
 export function readCheckpoint(path: string): DiagnosticLoopCheckpoint {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  assertCheckpointShape(parsed, path);
-  const checkpoint = parsed;
+  return parseCheckpoint(JSON.parse(readFileSync(path, "utf8")), path);
+}
+
+export function parseCheckpoint(value: unknown, path: string): DiagnosticLoopCheckpoint {
+  assertCheckpointShape(value, path);
+  const checkpoint = value;
   const { checkpoint_digest: actual, ...body } = checkpoint;
   if (actual !== checkpointDigest(body)) {
     throw new Error(`diagnostic-loop checkpoint digest mismatch: ${path}`);
@@ -66,8 +69,14 @@ function assertCheckpointShape(
   value: unknown,
   path: string
 ): asserts value is DiagnosticLoopCheckpoint {
+  if (isRecord(value) && value.schema_version === 2) {
+    throw new Error(
+      `historical diagnostic-loop checkpoint cannot be reinterpreted as current gate authority: ${path}`
+    );
+  }
   if (!isRecord(value) || !hasExactKeys(value, CHECKPOINT_KEYS) ||
-      value.schema_version !== 2 || value.kind !== "diagnostic_loop_checkpoint" ||
+      !isCurrentCheckpointSchema(value.schema_version) ||
+      value.kind !== "diagnostic_loop_checkpoint" ||
       typeof value.phase !== "string" || !isDiagnosticLoopPhase(value.phase) ||
       (value.status !== "completed" && value.status !== "failed") ||
       !isDigest(value.identity_digest) || !isDigest(value.content_identity) ||
@@ -130,6 +139,10 @@ function isIsoTimestamp(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function isCurrentCheckpointSchema(value: unknown): value is 3 {
+  return value === 3;
 }
 
 function isCount(value: unknown): value is number {

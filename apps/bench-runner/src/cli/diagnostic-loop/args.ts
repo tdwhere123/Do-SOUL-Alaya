@@ -33,6 +33,7 @@ export interface DiagnosticLoopArgs {
   readonly mode: DiagnosticLoopMode;
   readonly fromPhase?: DiagnosticLoopPhase;
   readonly requestManifestPath?: string;
+  readonly gate7UnlockPath?: string;
   readonly request: DiagnosticLoopRequest;
 }
 
@@ -51,6 +52,9 @@ export function parseDiagnosticLoopArgs(
       mode,
       ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
       requestManifestPath: parsed.requestManifest,
+      ...(parsed.gate7Unlock === undefined ? {} : {
+        gate7UnlockPath: path.resolve(parsed.gate7Unlock)
+      }),
       request: operationalOverrides(manifest.request, parsed, mode)
     };
   }
@@ -77,6 +81,9 @@ function parseScalarArgs(
     workRoot: path.resolve(parsed.workRoot!),
     mode,
     ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
+    ...(parsed.gate7Unlock === undefined ? {} : {
+      gate7UnlockPath: path.resolve(parsed.gate7Unlock)
+    }),
     request: {
       datasetRevision: parsed.datasetRevision!,
       requestedKeys,
@@ -128,6 +135,7 @@ interface RawArgs {
   historyRoot?: string;
   dataDir?: string;
   requestManifest?: string;
+  gate7Unlock?: string;
 }
 
 function readArgs(args: ReadonlyArray<string>): RawArgs {
@@ -179,7 +187,8 @@ function consumeToken(
       assignString(parsed, args, index, token, "--snapshot-out", "snapshotOut") ||
       assignString(parsed, args, index, token, "--query-semantic-factor-cache", "treatmentFactorCache") ||
       assignString(parsed, args, index, token, "--history-root", "historyRoot") ||
-      assignString(parsed, args, index, token, "--data-dir", "dataDir")) {
+      assignString(parsed, args, index, token, "--data-dir", "dataDir") ||
+      assignString(parsed, args, index, token, "--gate7-unlock", "gate7Unlock")) {
     return nextIndex(index, token);
   }
   if (token === "--worker") {

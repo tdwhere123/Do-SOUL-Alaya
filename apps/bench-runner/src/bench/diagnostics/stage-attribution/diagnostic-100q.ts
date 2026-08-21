@@ -1,9 +1,20 @@
 import type { QuestionStageRow } from "./types.js";
 import {
-  CACHED_F3_EXPOSURE_POLICY,
   assertTreatmentExposureReceipt,
   type TreatmentExposureReceipt
 } from "./exposure/contract.js";
+import {
+  buildDiagnostic100QUnlock,
+  type Diagnostic100QUnlock
+} from "./exposure/diagnostic-unlock.js";
+import {
+  buildCachedF3ExposureSli,
+  type CachedF3ExposureSli
+} from "./exposure/exposure-sli.js";
+import {
+  evaluateGate7PolarityMatrix,
+  type Gate7PolarityMatrixVerdict
+} from "./exposure/gate7-polarity-matrix.js";
 
 export const DIAGNOSTIC_100Q_STAGES = [
   "S0",
@@ -26,7 +37,7 @@ export interface Diagnostic100QQuestion {
 }
 
 export interface Diagnostic100QComparison {
-  readonly schema_version: 5;
+  readonly schema_version: 6;
   readonly kind: "diagnostic_100q_f0f2_vs_cached_f3";
   readonly physical_calls: 0;
   readonly five_hundred_q_closed: true;
@@ -38,15 +49,9 @@ export interface Diagnostic100QComparison {
   readonly inconclusive: readonly string[];
   readonly treatment_exposure_receipts: readonly TreatmentExposureReceipt[];
   readonly causal_comparison_status: "eligible" | "inconclusive";
-  readonly exposed_denominator_gate: {
-    readonly schema_version: 1;
-    readonly kind: "cached_f3_exposed_denominator_gate";
-    readonly declared_minimum_rate: number;
-    readonly evaluated_count: number;
-    readonly exposed_count: number;
-    readonly actual_rate: number;
-    readonly passed: boolean;
-  };
+  readonly exposure_sli: CachedF3ExposureSli;
+  readonly gate7_polarity_matrix: Gate7PolarityMatrixVerdict;
+  readonly diagnostic_100q_unlock: Diagnostic100QUnlock;
 }
 
 export function mapQuestionToDiagnosticStage(
@@ -77,36 +82,31 @@ export function compareF0F2VsCachedF3(input: {
   assertSameQuestionSet(controlById, treatmentById, "treatment stage rows");
   assertSameQuestionSet(controlById, exposureById, "treatment exposure receipts");
   const classification = classifyComparison(controlById, treatmentById, exposureById);
-  const exposedCount = input.treatmentExposure.filter(
-    (receipt) => receipt.exposure_status === "exposed"
-  ).length;
-  const evaluatedCount = controlById.size;
-  const exposedDenominatorGate = buildExposedDenominatorGate(evaluatedCount, exposedCount);
+  const receipts = [...input.treatmentExposure]
+    .sort((left, right) => left.question_id.localeCompare(right.question_id));
+  const exposureSli = buildCachedF3ExposureSli(receipts);
+  const polarityMatrix = evaluateGate7PolarityMatrix(receipts);
+  const unlock = buildDiagnostic100QUnlock(polarityMatrix);
   return {
-    schema_version: 5,
+    schema_version: 6,
     kind: "diagnostic_100q_f0f2_vs_cached_f3",
     physical_calls: 0,
     five_hundred_q_closed: DIAGNOSTIC_500Q_CLOSED,
     ...classification,
-    treatment_exposure_receipts: [...input.treatmentExposure]
-      .sort((left, right) => left.question_id.localeCompare(right.question_id)),
-    causal_comparison_status: exposedDenominatorGate.passed ? "eligible" : "inconclusive",
-    exposed_denominator_gate: exposedDenominatorGate
+    treatment_exposure_receipts: receipts,
+    causal_comparison_status: deriveCausalStatus(polarityMatrix, exposureSli),
+    exposure_sli: exposureSli,
+    gate7_polarity_matrix: polarityMatrix,
+    diagnostic_100q_unlock: unlock
   };
 }
 
-function buildExposedDenominatorGate(evaluatedCount: number, exposedCount: number) {
-  const actualRate = evaluatedCount === 0 ? 0 : exposedCount / evaluatedCount;
-  return {
-    schema_version: 1 as const,
-    kind: "cached_f3_exposed_denominator_gate" as const,
-    declared_minimum_rate: CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate,
-    evaluated_count: evaluatedCount,
-    exposed_count: exposedCount,
-    actual_rate: actualRate,
-    passed: evaluatedCount > 0 &&
-      actualRate >= CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate
-  };
+export function deriveCausalStatus(
+  matrix: Gate7PolarityMatrixVerdict,
+  sli: CachedF3ExposureSli
+): "eligible" | "inconclusive" {
+  if (matrix.applicable) return matrix.passed ? "eligible" : "inconclusive";
+  return sli.denominator_count > 0 ? "eligible" : "inconclusive";
 }
 
 function indexExposureReceipts(

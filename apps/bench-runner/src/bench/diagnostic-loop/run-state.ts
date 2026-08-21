@@ -127,11 +127,16 @@ function isResolvedIdentity(value: unknown): value is ResolvedDiagnosticLoopIden
 
 function isExposurePolicy(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, [
-    "schema_version", "kind", "declared_minimum_rate", "candidate_attribution_required",
-    "control_non_exposure_required"
+    "schema_version", "kind", "denominator_kind", "named_negative_control_ids",
+    "candidate_attribution_required", "control_non_exposure_required"
   ]) && value.schema_version === CACHED_F3_EXPOSURE_POLICY.schema_version &&
     value.kind === CACHED_F3_EXPOSURE_POLICY.kind &&
-    value.declared_minimum_rate === CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate &&
+    value.denominator_kind === CACHED_F3_EXPOSURE_POLICY.denominator_kind &&
+    Array.isArray(value.named_negative_control_ids) &&
+    value.named_negative_control_ids.length ===
+      CACHED_F3_EXPOSURE_POLICY.named_negative_control_ids.length &&
+    value.named_negative_control_ids.every((id, index) =>
+      id === CACHED_F3_EXPOSURE_POLICY.named_negative_control_ids[index]) &&
     value.candidate_attribution_required ===
       CACHED_F3_EXPOSURE_POLICY.candidate_attribution_required &&
     value.control_non_exposure_required ===

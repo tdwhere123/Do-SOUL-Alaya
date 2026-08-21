@@ -6,6 +6,8 @@ import {
 } from "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
 import { CACHED_F3_EXPOSURE_POLICY } from
   "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
+  "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { readDiagnostic100QComparisonArtifact } from
   "../../../bench/diagnostics/stage-attribution/exposure/comparison-artifact.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -58,18 +60,21 @@ describe("diagnostic 100Q stage map", () => {
       ]
     });
     expect(comparison.physical_calls).toBe(0);
-    expect(comparison.schema_version).toBe(5);
+    expect(comparison.schema_version).toBe(6);
     expect(comparison.five_hundred_q_closed).toBe(true);
     expect(comparison.membership_improved).toEqual(["q-improved"]);
     expect(comparison.still_missing).toEqual(["q-still"]);
     expect(comparison.not_exercised).toEqual([]);
     expect(comparison.inconclusive).toEqual([]);
-    expect(comparison.exposed_denominator_gate).toMatchObject({
-      declared_minimum_rate: 1,
+    expect(comparison.exposure_sli).toMatchObject({
+      denominator_kind: "formed_osf_answerable",
+      denominator_count: 2,
       exposed_count: 2,
-      evaluated_count: 2,
-      passed: true
+      rate: 1
     });
+    expect(comparison.diagnostic_100q_unlock.eligible).toBe(false);
+    expect(comparison.diagnostic_100q_unlock.reason).toBe("not_gate7_canary_window");
+    expect(DIAGNOSTIC_100Q_KPI_PROMOTION.eligible).toBe(false);
     expect(comparison.causal_comparison_status).toBe("eligible");
     expect(comparison.control_misses.S3).toBe(1);
     expect(comparison.treatment_misses.S4).toBe(1);
@@ -84,7 +89,13 @@ describe("diagnostic 100Q stage map", () => {
 
     expect(comparison.still_missing).toEqual([]);
     expect(comparison.not_exercised).toEqual(["q-unexposed"]);
-    expect(comparison.exposed_denominator_gate.passed).toBe(false);
+    expect(comparison.exposure_sli).toMatchObject({
+      denominator_kind: "formed_osf_answerable",
+      denominator_count: 0,
+      exposed_count: 0,
+      excluded: { unavailable_or_ineligible_count: 1 }
+    });
+    expect(comparison.diagnostic_100q_unlock.eligible).toBe(false);
     expect(comparison.causal_comparison_status).toBe("inconclusive");
   });
 
@@ -119,8 +130,8 @@ describe("diagnostic 100Q stage map", () => {
     );
   });
 
-  it("rejects a planted self-consistent rate below the current exposure policy", async () => {
-    const root = await mkdtemp(join(tmpdir(), "diagnostic-100q-rate-policy-"));
+  it("rejects a planted SLI or unlock that does not match receipts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diagnostic-100q-sli-policy-"));
     const path = join(root, "comparison.json");
     const comparison = compareF0F2VsCachedF3({
       control: [
@@ -136,49 +147,32 @@ describe("diagnostic 100Q stage map", () => {
         exposure("q-unexposed", "not_exercised", false)
       ]
     });
-    expect(CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate).toBe(1);
-    expect(comparison.exposed_denominator_gate.declared_minimum_rate).toBe(
-      CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate
+    expect(CACHED_F3_EXPOSURE_POLICY.denominator_kind).toBe("formed_osf_answerable");
+    expect(comparison.exposure_sli.denominator_kind).toBe(
+      CACHED_F3_EXPOSURE_POLICY.denominator_kind
     );
-    expect(comparison.exposed_denominator_gate.actual_rate).toBe(0.5);
-    expect(comparison.exposed_denominator_gate.passed).toBe(false);
+    expect(comparison.exposure_sli.rate).toBe(1);
+    expect(comparison.exposure_sli.denominator_count).toBe(1);
+    expect(comparison.diagnostic_100q_unlock.eligible).toBe(false);
 
-    const planted = {
+    await writeFile(path, JSON.stringify({
       ...comparison,
-      causal_comparison_status: "eligible" as const,
-      exposed_denominator_gate: {
-        ...comparison.exposed_denominator_gate,
-        declared_minimum_rate: 0.5,
-        passed: true
+      exposure_sli: { ...comparison.exposure_sli, rate: 0.5, denominator_count: 2 }
+    }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /exposure contracts do not match their receipts/u
+    );
+
+    await writeFile(path, JSON.stringify({
+      ...comparison,
+      diagnostic_100q_unlock: {
+        ...comparison.diagnostic_100q_unlock,
+        eligible: true,
+        reason: "gate7_polarity_matrix_passed"
       }
-    };
-    await writeFile(path, JSON.stringify(planted));
-    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
-      /current exposure policy/u
-    );
-
-    await writeFile(path, JSON.stringify({
-      ...planted,
-      exposed_denominator_gate: {
-        ...planted.exposed_denominator_gate,
-        passed: false
-      },
-      causal_comparison_status: "inconclusive"
     }));
     await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
-      /current exposure policy/u
-    );
-
-    await writeFile(path, JSON.stringify({
-      ...comparison,
-      exposed_denominator_gate: {
-        ...comparison.exposed_denominator_gate,
-        passed: true
-      },
-      causal_comparison_status: "eligible"
-    }));
-    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
-      /exposed denominator does not match its receipts/u
+      /exposure contracts do not match their receipts/u
     );
   });
 

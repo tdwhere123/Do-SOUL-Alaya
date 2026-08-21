@@ -81,6 +81,7 @@ describe("diagnostic-loop run", () => {
       };
       readonly shared_substrate: { readonly cache_identity: string };
       readonly diagnostic_100q_promotion: { readonly eligible: boolean; readonly reason: string };
+      readonly diagnostic_100q_unlock: { readonly eligible: boolean; readonly reason: string };
     };
     const extraction = JSON.parse(await readFile(
       join(workRoot, "checkpoints", "extraction.json"), "utf8"
@@ -94,7 +95,13 @@ describe("diagnostic-loop run", () => {
     });
     expect(report.diagnostic_100q_promotion).toEqual({
       eligible: false,
-      reason: "exposed_denominator_gate_not_passed"
+      reason: "not_a_kpi_promotion_gate"
+    });
+    expect(report).toMatchObject({
+      diagnostic_100q_unlock: {
+        eligible: false,
+        reason: "not_gate7_canary_window"
+      }
     });
   });
 

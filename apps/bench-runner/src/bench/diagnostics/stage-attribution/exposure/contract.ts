@@ -7,11 +7,13 @@ import {
   PRODUCT_PHASES,
   type ProductPhaseLedger
 } from "../../phase/phase-authority.js";
+import { GATE7_NAMED_NEGATIVE_CONTROL_IDS } from "./gate7-canary-ids.js";
 
 export const CACHED_F3_EXPOSURE_POLICY = {
-  schema_version: 2 as const,
-  kind: "cached_f3_exposed_denominator_policy" as const,
-  declared_minimum_rate: 1,
+  schema_version: 3 as const,
+  kind: "cached_f3_exposure_sli_policy" as const,
+  denominator_kind: "formed_osf_answerable" as const,
+  named_negative_control_ids: GATE7_NAMED_NEGATIVE_CONTROL_IDS,
   candidate_attribution_required: true,
   control_non_exposure_required: true
 };

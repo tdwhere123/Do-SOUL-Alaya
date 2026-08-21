@@ -19,6 +19,8 @@ export function summarizeMissLedgerCheckpoint(
     content_identity: checkpoint.content_identity,
     artifact_paths: checkpoint.artifact_paths,
     physical_calls: checkpoint.physical_calls,
-    exposed_denominator_gate: checkpoint.details.exposed_denominator_gate
+    exposure_sli: checkpoint.details.exposure_sli,
+    gate7_polarity_matrix: checkpoint.details.gate7_polarity_matrix,
+    diagnostic_100q_unlock: checkpoint.details.diagnostic_100q_unlock
   };
 }

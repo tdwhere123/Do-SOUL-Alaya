@@ -28,6 +28,16 @@ describe("recall-any5-mimo-loop", () => {
     });
   });
 
+  it("refuses limit>3 with confirm-window but no Gate 7 unlock token", async () => {
+    await chmod(script, 0o755);
+    await expect(execFileAsync("bash", [
+      script, "diagnostic", "--limit", "100", "--confirm-window", "100"
+    ], { timeout: 10_000 })).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining("without --gate7-unlock")
+    });
+  });
+
   describe("diagnostic snapshot reuse", () => {
     let tmpDir: string;
 
@@ -52,6 +62,24 @@ describe("recall-any5-mimo-loop", () => {
       ]);
       expect(flagValue(argv, "--snapshot")).toBe(harness.snapshot);
       expect(argv).not.toContain("--snapshot-out");
+      await expectCacheOnlyLoopEnv(harness, argv);
+    });
+
+    it("forwards --gate7-unlock on a confirmed 100Q window", async () => {
+      const harness = await writeOperatorLoopHarness(tmpDir);
+      const unlock = path.join(tmpDir, "gate7-3q");
+      await writeFile(unlock, "");
+      const argv = await invokeDiagnosticLoop(harness, [
+        "--limit",
+        "100",
+        "--confirm-window",
+        "100",
+        "--gate7-unlock",
+        unlock,
+        "--work-root",
+        harness.workRoot
+      ]);
+      expect(flagValue(argv, "--gate7-unlock")).toBe(unlock);
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
@@ -192,6 +220,21 @@ describe("recall-any5-mimo-loop", () => {
       const harness = await writeOperatorLoopHarness(tmpDir, workName);
       await writeParseableRecallCheckpoint(harness.workRoot, payload);
       await expectRejectedBeforeLoop(harness, diagnosticArgs(harness, reuse), "invalid");
+    });
+
+    it("rejects a historical v2 recall checkpoint as archive-only", async () => {
+      const harness = await writeOperatorLoopHarness(tmpDir, "historical-v2");
+      await writeParseableRecallCheckpoint(harness.workRoot, {
+        schema_version: 2,
+        kind: "diagnostic_loop_checkpoint",
+        phase: "control_recall",
+        status: "failed"
+      });
+      await expectRejectedBeforeLoop(
+        harness,
+        diagnosticArgs(harness, false),
+        "historical diagnostic-loop checkpoint"
+      );
     });
 
     it("refuses default diagnostic when work snapshot.db already exists", async () => {

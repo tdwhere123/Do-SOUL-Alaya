@@ -1,11 +1,17 @@
 import { readFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
   assertTreatmentExposureReceipt,
-  CACHED_F3_EXPOSURE_POLICY,
   type TreatmentExposureReceipt,
   type TreatmentExposureStage
 } from "./contract.js";
-import type { Diagnostic100QComparison } from "../diagnostic-100q.js";
+import {
+  deriveCausalStatus,
+  type Diagnostic100QComparison
+} from "../diagnostic-100q.js";
+import { buildDiagnostic100QUnlock } from "./diagnostic-unlock.js";
+import { buildCachedF3ExposureSli } from "./exposure-sli.js";
+import { evaluateGate7PolarityMatrix } from "./gate7-polarity-matrix.js";
 
 const STAGES: readonly TreatmentExposureStage[] = ["S0", "S1", "S2", "S3", "S4", "S5"];
 
@@ -18,6 +24,11 @@ export async function readDiagnostic100QComparisonArtifact(
 }
 
 function assertComparison(value: unknown): asserts value is Diagnostic100QComparison {
+  if (isRecord(value) && value.schema_version === 5) {
+    throw new Error(
+      "historical diagnostic 100Q comparison cannot be reinterpreted as current gate authority"
+    );
+  }
   if (!isComparisonShape(value)) {
     throw new Error("diagnostic 100Q artifact lacks the cached F3 exposure contract");
   }
@@ -35,9 +46,10 @@ function isComparisonShape(value: unknown): value is Diagnostic100QComparison {
     "schema_version", "kind", "physical_calls", "five_hundred_q_closed",
     "control_misses", "treatment_misses", "membership_improved", "still_missing",
     "not_exercised", "inconclusive", "treatment_exposure_receipts",
-    "causal_comparison_status", "exposed_denominator_gate"
+    "causal_comparison_status", "exposure_sli", "gate7_polarity_matrix",
+    "diagnostic_100q_unlock"
   ])) return false;
-  return value.schema_version === 5 &&
+  return value.schema_version === 6 &&
     value.kind === "diagnostic_100q_f0f2_vs_cached_f3" &&
     value.physical_calls === 0 && value.five_hundred_q_closed === true &&
     isStageCounts(value.control_misses) && isStageCounts(value.treatment_misses) &&
@@ -48,24 +60,23 @@ function isComparisonShape(value: unknown): value is Diagnostic100QComparison {
     Array.isArray(value.treatment_exposure_receipts) &&
     (value.causal_comparison_status === "eligible" ||
       value.causal_comparison_status === "inconclusive") &&
-    isExposureGate(value.exposed_denominator_gate);
+    isRecord(value.exposure_sli) && isRecord(value.gate7_polarity_matrix) &&
+    isRecord(value.diagnostic_100q_unlock);
 }
 
 function assertGateAndStatus(
   comparison: Diagnostic100QComparison,
   receipts: readonly TreatmentExposureReceipt[]
 ): void {
-  const exposedCount = receipts.filter((row) => row.exposure_status === "exposed").length;
-  const rate = receipts.length === 0 ? 0 : exposedCount / receipts.length;
-  const gate = comparison.exposed_denominator_gate;
-  if (gate.declared_minimum_rate !== CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate) {
-    throw new Error("diagnostic 100Q exposed denominator does not match current exposure policy");
-  }
-  const passed = receipts.length > 0 && rate >= gate.declared_minimum_rate;
-  if (gate.evaluated_count !== receipts.length || gate.exposed_count !== exposedCount ||
-      gate.actual_rate !== rate || gate.passed !== passed ||
-      comparison.causal_comparison_status !== (passed ? "eligible" : "inconclusive")) {
-    throw new Error("diagnostic 100Q exposed denominator does not match its receipts");
+  const sli = buildCachedF3ExposureSli(receipts);
+  const matrix = evaluateGate7PolarityMatrix(receipts);
+  const unlock = buildDiagnostic100QUnlock(matrix);
+  const causal = deriveCausalStatus(matrix, sli);
+  if (!isDeepStrictEqual(comparison.exposure_sli, sli) ||
+      !isDeepStrictEqual(comparison.gate7_polarity_matrix, matrix) ||
+      !isDeepStrictEqual(comparison.diagnostic_100q_unlock, unlock) ||
+      comparison.causal_comparison_status !== causal) {
+    throw new Error("diagnostic 100Q exposure contracts do not match their receipts");
   }
 }
 
@@ -123,21 +134,6 @@ function assertUniqueQuestionIds(receipts: readonly TreatmentExposureReceipt[]):
   if (new Set(ids).size !== ids.length) {
     throw new Error("diagnostic 100Q contains duplicate treatment exposure receipts");
   }
-}
-
-function isExposureGate(value: unknown): value is Diagnostic100QComparison["exposed_denominator_gate"] {
-  if (!isRecord(value) || !hasExactKeys(value, [
-    "schema_version", "kind", "declared_minimum_rate", "evaluated_count",
-    "exposed_count", "actual_rate", "passed"
-  ])) return false;
-  return value.schema_version === 1 && value.kind === "cached_f3_exposed_denominator_gate" &&
-    isRate(value.declared_minimum_rate) && isCount(value.evaluated_count) &&
-    isCount(value.exposed_count) && isRate(value.actual_rate) &&
-    typeof value.passed === "boolean";
-}
-
-function isRate(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 function isStageCounts(value: unknown): value is Readonly<Record<TreatmentExposureStage, number>> {

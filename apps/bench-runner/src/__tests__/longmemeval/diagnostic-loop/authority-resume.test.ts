@@ -317,7 +317,7 @@ describe("diagnostic-loop resolved authority", () => {
       await expect(runDiagnosticLoop({
         workRoot, request: loopRequest(), mode: "report-only",
         adapters: trackingAdapters().adapters, argv: []
-      })).rejects.toThrow(/report promotion authority mismatch/iu);
+      })).rejects.toThrow(/unlock\/promotion authority mismatch/iu);
     }
   );
 });

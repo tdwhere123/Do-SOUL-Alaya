@@ -1,0 +1,115 @@
+{
+  "q2_query": {
+    "source_kind": "query",
+    "source_text": "How long is my daily commute to work?",
+    "source_sha256": "sha256:092f4e554cd2fc97f90d1dce7badab62d9779c64d596789beef74fd878e2d64c",
+    "producer_operator_id": "open_semantic_factor_query_compiler_v9",
+    "capture_digest": "sha256:f1b2ee4dd954a374f857b26d83d1d5be3cd31d95c398a82cdeacb3bba6f84acb",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "query",
+      "result_variable_ids": ["duration"],
+      "propositions": [{
+        "proposition_id": "query",
+        "predicate_factor_id": "predicate",
+        "arguments": [
+          {"position": 0, "binding_identity": "subject", "reference_kind": "factor", "reference_id": "subject"},
+          {"position": 1, "binding_identity": "duration", "reference_kind": "variable", "reference_id": "duration"}
+        ]
+      }],
+      "factors": [
+        {"surface": "is", "source_span": [9, 11], "factor_id": "predicate", "semantic_identity": "be"},
+        {"surface": "my daily commute to work", "source_span": [12, 36], "factor_id": "subject", "semantic_identity": "my daily commute to work"}
+      ],
+      "variables": [
+        {"surface": "How long", "source_span": [0, 8], "variable_id": "duration"}
+      ]
+    }
+  },
+  "q2_evidence": {
+    "source_kind": "evidence",
+    "source_text": "I've been listening to audiobooks during my daily commute, which takes 45 minutes each way.",
+    "source_sha256": "sha256:a3779296fb1bd14cbfab5cf005e40b220edf393e1b891681b6b44c760020b457",
+    "producer_operator_id": "garden_source_bound_open_semantic_factor_v3",
+    "capture_digest": "sha256:43ad191d8db5cc9b4fd524a0508c8c800217c9178db01d257fceb957acf621fc",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "evidence",
+      "result_variable_ids": [],
+      "propositions": [{
+        "proposition_id": "activity",
+        "predicate_factor_id": "listen",
+        "arguments": [
+          {"position": 0, "binding_identity": "activity", "reference_kind": "factor", "reference_id": "listen"},
+          {"position": 1, "binding_identity": "location", "reference_kind": "factor", "reference_id": "commute"},
+          {"position": 2, "binding_identity": "duration", "reference_kind": "factor", "reference_id": "duration"}
+        ]
+      }],
+      "factors": [
+        {"surface": "listening to audiobooks", "source_span": [10, 33], "factor_id": "listen", "semantic_identity": "listen to audiobook"},
+        {"surface": "daily commute", "source_span": [44, 57], "factor_id": "commute", "semantic_identity": "daily commute"},
+        {"surface": "45 minutes each way", "source_span": [71, 90], "factor_id": "duration", "semantic_identity": "45 minutes each way"}
+      ],
+      "variables": []
+    }
+  },
+  "q3_query": {
+    "source_kind": "query",
+    "source_text": "Where did I redeem a $5 coupon on coffee creamer?",
+    "source_sha256": "sha256:117c159b9968f5a32a76d74a797f1de8c5eac4d9523c5f3419323cdf706814a2",
+    "producer_operator_id": "open_semantic_factor_query_compiler_v9",
+    "capture_digest": "sha256:bb9c558e99acaf799b24ee5a21225e2c70692bbede13e45fe92f37ebc74f7926",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "query",
+      "result_variable_ids": ["answer"],
+      "propositions": [{
+        "proposition_id": "query",
+        "predicate_factor_id": "predicate",
+        "arguments": [
+          {"position": 0, "binding_identity": "redeemer", "reference_kind": "factor", "reference_id": "subject"},
+          {"position": 1, "binding_identity": "item", "reference_kind": "factor", "reference_id": "constraint"},
+          {"position": 2, "binding_identity": "location", "reference_kind": "variable", "reference_id": "answer"}
+        ]
+      }],
+      "factors": [
+        {"surface": "I", "source_span": [10, 11], "factor_id": "subject", "semantic_identity": "i"},
+        {"surface": "redeem", "source_span": [12, 18], "factor_id": "predicate", "semantic_identity": "redeem"},
+        {"surface": "a $5 coupon on coffee creamer", "source_span": [19, 48], "factor_id": "constraint", "semantic_identity": "a $5 coupon on coffee creamer"}
+      ],
+      "variables": [
+        {"surface": "Where", "source_span": [0, 5], "variable_id": "answer"}
+      ]
+    }
+  },
+  "q3_evidence": {
+    "source_kind": "evidence",
+    "source_text": "I actually redeemed a $5 coupon on coffee creamer last Sunday",
+    "source_sha256": "sha256:12f5e612a81967e2a44773b429192199afbdc36823c86536aa4dd4e5e9b0b9a0",
+    "producer_operator_id": "garden_source_bound_open_semantic_factor_v3",
+    "capture_digest": "sha256:a40a42d45499e70481225fba5b95f6b1e301ad2c9457124a6f44affde759ef54",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "evidence",
+      "result_variable_ids": [],
+      "propositions": [{
+        "proposition_id": "redeem_event",
+        "predicate_factor_id": "redeem",
+        "arguments": [
+          {"position": 0, "binding_identity": "agent", "reference_kind": "factor", "reference_id": "agent"},
+          {"position": 1, "binding_identity": "object", "reference_kind": "factor", "reference_id": "coupon"},
+          {"position": 2, "binding_identity": "target", "reference_kind": "factor", "reference_id": "item"},
+          {"position": 3, "binding_identity": "duration", "reference_kind": "factor", "reference_id": "time"}
+        ]
+      }],
+      "factors": [
+        {"surface": "I", "source_span": [0, 1], "factor_id": "agent", "semantic_identity": "i"},
+        {"surface": "redeemed", "source_span": [11, 19], "factor_id": "redeem", "semantic_identity": "redeem"},
+        {"surface": "a $5 coupon", "source_span": [20, 31], "factor_id": "coupon", "semantic_identity": "a $5 coupon"},
+        {"surface": "coffee creamer", "source_span": [35, 49], "factor_id": "item", "semantic_identity": "coffee creamer"},
+        {"surface": "last Sunday", "source_span": [50, 61], "factor_id": "time", "semantic_identity": "last sunday"}
+      ],
+      "variables": []
+    }
+  }
+}

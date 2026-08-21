@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +10,7 @@ import {
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256
 } from "@do-soul/alaya-soul";
+import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
 
 export const execFileAsync = promisify(execFile);
 export const script = path.resolve(
@@ -239,8 +239,8 @@ async function writeRecallCheckpoint(
   const dir = path.join(workRoot, "checkpoints");
   await mkdir(dir, { recursive: true });
   const body = {
-    schema_version: 2,
-    kind: "diagnostic_loop_checkpoint",
+    schema_version: 3 as const,
+    kind: "diagnostic_loop_checkpoint" as const,
     phase,
     status,
     identity_digest: DIGEST,
@@ -268,13 +268,10 @@ async function writeRecallCheckpoint(
       }
     },
     completed_at: "2026-08-19T00:00:00.000Z"
-  } as const;
-  const checkpoint_digest = createHash("sha256")
-    .update(JSON.stringify(body), "utf8")
-    .digest("hex");
+  };
   await writeFile(
     path.join(dir, `${phase}.json`),
-    `${JSON.stringify({ ...body, checkpoint_digest })}\n`,
+    `${JSON.stringify({ ...body, checkpoint_digest: checkpointDigest(body) })}\n`,
     "utf8"
   );
 }

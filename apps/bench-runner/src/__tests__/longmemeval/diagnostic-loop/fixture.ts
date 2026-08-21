@@ -10,6 +10,8 @@ import type { DiagnosticLoopPhase } from "../../../bench/diagnostic-loop/phases.
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { compareF0F2VsCachedF3 } from
+  "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import {
@@ -126,34 +128,18 @@ async function trackingMissLedgerDetails(
   context: Parameters<DiagnosticLoopAdapters["preflight"]>[0],
   paths: Readonly<Record<string, string>>
 ) {
-  const gate = {
-    schema_version: 1,
-    kind: "cached_f3_exposed_denominator_gate",
-    declared_minimum_rate: 1,
-    evaluated_count: 0,
-    exposed_count: 0,
-    actual_rate: 0,
-    passed: false
-  };
-  await writeFile(paths.missLedger!, `${JSON.stringify({
-    schema_version: 5,
-    kind: "diagnostic_100q_f0f2_vs_cached_f3",
-    physical_calls: 0,
-    five_hundred_q_closed: true,
-    control_misses: { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 },
-    treatment_misses: { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 },
-    membership_improved: [],
-    still_missing: [],
-    not_exercised: [],
-    inconclusive: [],
-    treatment_exposure_receipts: [],
-    causal_comparison_status: "inconclusive",
-    exposed_denominator_gate: gate
-  })}\n`, "utf8");
+  const comparison = compareF0F2VsCachedF3({
+    control: [],
+    treatment: [],
+    treatmentExposure: []
+  });
+  await writeFile(paths.missLedger!, `${JSON.stringify(comparison)}\n`, "utf8");
   return {
     ...sharedSubstrateIdentities(context),
     artifact_sha256: await sha256File(paths.missLedger!),
-    exposed_denominator_gate: gate
+    exposure_sli: comparison.exposure_sli,
+    gate7_polarity_matrix: comparison.gate7_polarity_matrix,
+    diagnostic_100q_unlock: comparison.diagnostic_100q_unlock
   };
 }
 
@@ -348,16 +334,24 @@ export async function writeQueryFactorCacheFixture(
   path: string,
   sourceText: string
 ): Promise<void> {
+  await writeQueryFactorCacheEntries(path, [sourceText]);
+}
+
+export async function writeQueryFactorCacheEntries(
+  path: string,
+  sourceTexts: readonly string[]
+): Promise<void> {
   const identity = loopIdentity();
-  const capture = materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: sourceText
-  });
   await writeQuerySemanticFactorCache(path, createQuerySemanticFactorCache({
     model_id: identity.model,
     request_profile: identity.requestProfile as "mimo-v2.5-nonthinking-v1",
     provider_url: identity.providerRoute,
-    entries: [{ source_text: sourceText, source_sha256: capture.source_sha256!, capture }]
+    entries: sourceTexts.map((source_text) => {
+      const capture = materializeOpenSemanticFactorFormation({
+        source_kind: "query", source_text
+      });
+      return { source_text, source_sha256: capture.source_sha256!, capture };
+    })
   }));
 }
 

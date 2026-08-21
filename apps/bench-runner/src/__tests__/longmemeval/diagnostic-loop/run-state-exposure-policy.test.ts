@@ -27,8 +27,8 @@ afterEach(async () => {
 });
 
 describe("diagnostic-loop run-state exposure policy", () => {
-  it("persists the policy home and fail-closes when declared_minimum_rate drifts", async () => {
-    expect(CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate).toBe(1);
+  it("persists the policy home and fail-closes when denominator_kind drifts", async () => {
+    expect(CACHED_F3_EXPOSURE_POLICY.denominator_kind).toBe("formed_osf_answerable");
     const workRoot = await mkdtemp(join(tmpdir(), "run-state-policy-"));
     roots.push(workRoot);
     const identity = await resolveDiagnosticLoopIdentity(loopRequest());
@@ -47,7 +47,7 @@ describe("diagnostic-loop run-state exposure policy", () => {
         ...(record.identity as Record<string, unknown>),
         treatment_exposure_policy: {
           ...CACHED_F3_EXPOSURE_POLICY,
-          declared_minimum_rate: CACHED_F3_EXPOSURE_POLICY.declared_minimum_rate - 1
+          denominator_kind: "all_evaluated_questions"
         }
       }
     };

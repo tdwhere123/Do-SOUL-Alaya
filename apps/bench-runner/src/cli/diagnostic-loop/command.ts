@@ -33,6 +33,9 @@ export async function runDiagnosticLoopCommand(
       request: parsed.request,
       mode: parsed.mode,
       ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
+      ...(parsed.gate7UnlockPath === undefined ? {} : {
+        gate7UnlockPath: parsed.gate7UnlockPath
+      }),
       adapters: deps.adapters ?? createProductionDiagnosticLoopAdapters(),
       argv: args
     });

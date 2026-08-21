@@ -15,6 +15,7 @@ const QUERY_TEXT = "How long is my daily commute to work?";
 const LISTEN_TEXT =
   "I've been listening to audiobooks on my 45-minute daily commute to work.";
 const DURATION_TEXT = "My daily commute to work takes 45 minutes each way.";
+// Capability fixture only: live commute evidence does not include query "to work".
 
 describe("duration measure source-bound relation", () => {
   it("binds a copular how-long query to listen/duration evidence without rewriting is", () => {

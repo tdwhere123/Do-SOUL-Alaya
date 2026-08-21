@@ -12,11 +12,11 @@ SMALL_WINDOW_CEILING=3
 
 usage() {
   cat <<'EOF'
-usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--snapshot PATH]
+usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--gate7-unlock PATH] [--snapshot PATH]
 
   --limit is required. Windows larger than 3 also need --confirm-window equal
-  to that limit. 100Q is refused unless you pass --confirm-window 100 after a
-  1-3Q proof.
+  to that limit and --gate7-unlock <3q-work-root> from a current Gate 7
+  polarity-matrix pass. That unlock is diagnostic-only, not an Any@5 KPI.
 
   replay             cache-only provider-preflight + full-window zero-call proof
   query-factor-fill  live query-compiler fill (API). Needs credentials.
@@ -39,6 +39,7 @@ WORK_ROOT=""
 SEED_DB=""
 SNAPSHOT=""
 SNAPSHOT_FLAG=0
+GATE7_UNLOCK=""
 TEMP_REQUEST_FILE=""
 TEMP_RECEIPT_FILE=""
 
@@ -65,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --limit) LIMIT="${2:-}"; shift 2 ;;
     --offset) OFFSET="${2:-}"; shift 2 ;;
     --confirm-window) CONFIRM_WINDOW="${2:-}"; shift 2 ;;
+    --gate7-unlock) GATE7_UNLOCK="${2:-}"; shift 2 ;;
     --work-root) WORK_ROOT="${2:-}"; shift 2 ;;
     --seed-db) SEED_DB="${2:-}"; shift 2 ;;
     --snapshot)
@@ -84,8 +86,13 @@ done
 [[ "$COMMAND" == "inspect-seed" ]] || [[ -n "$LIMIT" ]] || die "--limit is required"
 if [[ "$COMMAND" != "inspect-seed" ]]; then
   [[ "$LIMIT" =~ ^[0-9]+$ ]] && [[ "$LIMIT" -gt 0 ]] || die "--limit must be a positive integer"
-  if [[ "$LIMIT" -gt "$SMALL_WINDOW_CEILING" && "$CONFIRM_WINDOW" != "$LIMIT" ]]; then
-    die "refusing limit=$LIMIT (>$SMALL_WINDOW_CEILING) without --confirm-window $LIMIT"
+  if [[ "$LIMIT" -gt "$SMALL_WINDOW_CEILING" ]]; then
+    if [[ "$CONFIRM_WINDOW" != "$LIMIT" ]]; then
+      die "refusing limit=$LIMIT (>$SMALL_WINDOW_CEILING) without --confirm-window $LIMIT"
+    fi
+    if [[ -z "$GATE7_UNLOCK" ]]; then
+      die "refusing limit=$LIMIT without --gate7-unlock <3q-work-root>"
+    fi
   fi
 fi
 if [[ "$SNAPSHOT_FLAG" -eq 1 && "$COMMAND" != "diagnostic" ]]; then
@@ -218,6 +225,9 @@ invoke_cache_only_diagnostic() {
   local extra=()
   if [[ -f "$qcache" ]]; then
     extra+=(--query-semantic-factor-cache "$qcache")
+  fi
+  if [[ -n "$GATE7_UNLOCK" ]]; then
+    extra+=(--gate7-unlock "$GATE7_UNLOCK")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
   rtk node "$BIN" diagnostic-loop \

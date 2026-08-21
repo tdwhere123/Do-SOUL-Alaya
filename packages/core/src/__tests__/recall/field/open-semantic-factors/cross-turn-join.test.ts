@@ -17,6 +17,7 @@ const REDEEM_TEXT =
 const TARGET_TEXT = "I shopped at Target.";
 const COUPON_TARGET_TEXT =
   "I used a $5 coupon on coffee creamer at Target.";
+// Capability fixture only: live coupon evidence has no formed location partner.
 const PHRASE_DIFF_TEXT =
   "I used the $5 coupon on coffee creamer at Target.";
 const GOLD_TEXT = "I redeemed a $5 coupon on coffee creamer at Target.";

@@ -8,6 +8,8 @@ import type {
   DiagnosticLoopIdentity,
   DiagnosticLoopPhaseResult
 } from "./types.js";
+import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
+  "../diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { summarizeMissLedgerCheckpoint } from "./miss-ledger-authority.js";
 
 export function writeDiagnosticLoopReport(input: {
@@ -35,7 +37,7 @@ function buildReport(input: {
   const treatment = requireCompleted(input.checkpoints, "treatment_recall");
   assertSharedSubstrate(control, treatment);
   return {
-    schema_version: 3,
+    schema_version: 4,
     kind: "diagnostic_loop_report",
     identity_digest: input.identityDigest,
     identity: {
@@ -58,7 +60,8 @@ function buildReport(input: {
     control: summarizeArm(control),
     treatment: summarizeArm(treatment),
     miss_ledger: summarizeMissLedgerCheckpoint(input.checkpoints.get("miss_ledger")),
-    diagnostic_100q_promotion: summarizePromotion(input.checkpoints.get("miss_ledger")),
+    diagnostic_100q_unlock: summarizeUnlock(input.checkpoints.get("miss_ledger")),
+    diagnostic_100q_promotion: DIAGNOSTIC_100Q_KPI_PROMOTION,
     shared_substrate: {
       cache_identity: control.details.cache_identity,
       snapshot_identity: control.details.snapshot_identity
@@ -118,14 +121,9 @@ function summarizeArm(checkpoint: DiagnosticLoopCheckpoint): Readonly<Record<str
   };
 }
 
-function summarizePromotion(
+function summarizeUnlock(
   checkpoint: DiagnosticLoopCheckpoint | undefined
-): Readonly<Record<string, unknown>> {
-  const gate = checkpoint?.details.exposed_denominator_gate as
-    { readonly passed?: unknown } | undefined;
-  return {
-    eligible: gate?.passed === true,
-    reason: gate?.passed === true ? "exposed_denominator_gate_passed" :
-      "exposed_denominator_gate_not_passed"
-  };
+): Readonly<Record<string, unknown>> | null {
+  const unlock = checkpoint?.details.diagnostic_100q_unlock;
+  return unlock === undefined ? null : unlock as Readonly<Record<string, unknown>>;
 }
