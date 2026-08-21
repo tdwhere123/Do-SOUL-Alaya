@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   hasGroundedAssertionReceipt,
+  readRecord,
   readTrimmedText
 } from "../source-assertion/grounded-assertion-receipt.js";
 
@@ -36,10 +37,4 @@ function readProposedFrame(
   const grounding = readRecord(rawPayload.source_grounding);
   const proposed = AssociativeFactFrameSchema.safeParse(grounding?.proposed_fact_frame);
   return proposed.success ? proposed.data : null;
-}
-
-function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
 }

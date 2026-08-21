@@ -119,17 +119,19 @@ function buildActivationEntries(
   return Object.freeze([...supportByEvidenceId]
     .sort(([left], [right]) => compareText(left, right))
     .flatMap(([evidenceId, support]) => {
-      const pairwise = isPairwiseMatched(receiptByEvidenceId.get(evidenceId));
+      const receiptMatched = constraintReceiptMatched(
+        receiptByEvidenceId.get(evidenceId)
+      );
       const activation = resolveJoinActivation(
         fractionByEvidenceId.get(evidenceId),
         inheritedConstraintFraction(
           evidenceId, composition, receiptByEvidenceId, fractionByEvidenceId
         ),
-        pairwise
+        receiptMatched
       );
       return activation === null ? [] : [Object.freeze({
         evidence_id: evidenceId,
-        state: pairwise ? "observed" as const : "reconstructed" as const,
+        state: receiptMatched ? "observed" as const : "reconstructed" as const,
         activation,
         solution_count: support.solutionCount,
         proposition_match_count: support.propositionMatches.size
@@ -163,7 +165,7 @@ function buildEvidenceSupportMap(
   return supportByEvidenceId;
 }
 
-function isPairwiseMatched(
+function constraintReceiptMatched(
   receipt: OpenSemanticFactorCompatibilityTrace["entries"][number]["receipt"] | undefined
 ): boolean {
   return receipt !== undefined &&
@@ -184,7 +186,7 @@ function inheritedConstraintFraction(
     if (!solution.evidence_ids.includes(evidenceId)) continue;
     for (const otherId of solution.evidence_ids) {
       if (otherId === evidenceId) continue;
-      if (!isPairwiseMatched(receiptByEvidenceId.get(otherId))) continue;
+      if (!constraintReceiptMatched(receiptByEvidenceId.get(otherId))) continue;
       const fraction = fractionByEvidenceId.get(otherId);
       if (fraction !== undefined) inherited.push(fraction);
     }

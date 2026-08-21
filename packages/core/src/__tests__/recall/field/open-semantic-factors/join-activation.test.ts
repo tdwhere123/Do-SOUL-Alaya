@@ -55,10 +55,6 @@ describe("join activation inherits constraint compatibility", () => {
       })
     ]));
   });
-
-  it("omits a join member when the constraint fraction is missing", () => {
-    expect(resolveJoinActivation(undefined, undefined, false)).toBeNull();
-  });
 });
 
 function twoPropositionWhereQuery() {

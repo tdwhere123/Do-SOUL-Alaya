@@ -177,7 +177,7 @@ function completeSelectedSolution(params: Readonly<{
   }
   if (params.reconstructionFormations === undefined || params.selected.length === 0) return;
   for (const selected of params.selected) {
-    if (!isPairwiseConstraintMatch(selected.match)) continue;
+    if (!nonJoinConstraintMatch(selected.match)) continue;
     for (const partner of enumerateCrossTurnJoinPartners({
       query: params.query,
       queryPropositionId: selected.match.query_proposition_id,
@@ -257,7 +257,7 @@ function collectAttributedMatches(
     compareText(left.match.evidence_proposition_id, right.match.evidence_proposition_id)));
 }
 
-function isPairwiseConstraintMatch(
+function nonJoinConstraintMatch(
   match: Readonly<OpenSemanticPropositionMatch | OpenSemanticJoinPropositionMatch>
 ): match is Readonly<OpenSemanticPropositionMatch> {
   return match.predicate_alignment.operator_id !== OPEN_SEMANTIC_SOURCE_BOUND_JOIN_OPERATOR_ID;
