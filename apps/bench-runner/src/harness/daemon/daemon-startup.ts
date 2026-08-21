@@ -14,6 +14,7 @@ import {
   applyBenchFastPragmaIfRequested,
   closeBenchDaemonResources,
   makeDispatchCli,
+  optimizeBenchDb,
   prepareBenchWorkspaceBinding,
   type BenchDaemonLaunchConfig
 } from "./daemon-support.js";
@@ -64,6 +65,7 @@ export async function initializeBenchDaemon(
     );
     await seedBenchDefaultWorkspace(input, resources.runtime);
     logBenchPragmaApplication(input.dataDir);
+    optimizeBenchDb(input.dataDir);
     return resources;
   } catch (error) {
     await closeBenchDaemonResources(resources);

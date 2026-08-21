@@ -53,7 +53,7 @@ describe("SqliteFileRepo", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_files_run_id' LIMIT 1")
       .get() as { readonly name: string } | undefined;
 
-    expect(migration?.version).toBe(8);
+    expect(migration?.version).toBe(9);
     expect(table?.name).toBe("files");
     expect(workspaceIndex?.name).toBe("idx_files_workspace_id");
     expect(runIndex?.name).toBe("idx_files_run_id");

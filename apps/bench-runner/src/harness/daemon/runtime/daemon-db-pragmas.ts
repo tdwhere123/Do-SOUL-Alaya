@@ -1,9 +1,18 @@
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { emitBenchHarnessWarning } from "./daemon-warnings.js";
 
 const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
 const BENCH_TEMP_STORE_ENV = "ALAYA_BENCH_TEMP_STORE";
+const BENCH_CACHE_SIZE_KIB_ENV = "ALAYA_BENCH_CACHE_SIZE_KIB";
+
+// Negative cache_size is KiB. Floor keeps small DBs at the historical 64 MiB
+// working set; cap stops a multi-GB snapshot from pinning the whole file.
+const CACHE_FLOOR_KIB = 65_536;
+const CACHE_CAP_KIB = 1_048_576;
+// SQLite's default SQLITE_MAX_MMAP_SIZE is 2 GiB minus 64 KiB (0x7fff0000).
+const MMAP_CAP_BYTES = 0x7fff0000;
 
 function isBenchFastPragmaEnabled(): boolean {
   const raw = process.env[BENCH_FAST_PRAGMA_ENV];
@@ -25,6 +34,54 @@ function resolveBenchTempStore(): "FILE" | "MEMORY" {
   return raw !== undefined && raw.trim().toLowerCase() === "memory"
     ? "MEMORY"
     : "FILE";
+}
+
+function readDbFileBytes(filename: string): number {
+  try {
+    const size = statSync(filename).size;
+    return Number.isFinite(size) && size > 0 ? size : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function readBenchCacheSizeOverrideKib(): number | undefined {
+  const raw = process.env[BENCH_CACHE_SIZE_KIB_ENV];
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const kib = Number(trimmed);
+  if (!Number.isSafeInteger(kib) || kib <= 0) return undefined;
+  return kib;
+}
+
+function resolveBenchCacheSizeKib(fileBytes: number): number {
+  const override = readBenchCacheSizeOverrideKib();
+  if (override !== undefined) return override;
+  const quarterKib = Math.floor(fileBytes / 4 / 1024);
+  return Math.min(CACHE_CAP_KIB, Math.max(CACHE_FLOOR_KIB, quarterKib));
+}
+
+// Skip mmap on tiny files so they keep SQLite's default (typically 0)
+// instead of a size-dependent mapping that does not help recall-eval.
+function resolveBenchMmapSize(fileBytes: number): number | undefined {
+  if (fileBytes < CACHE_FLOOR_KIB * 1024) return undefined;
+  return Math.min(fileBytes, MMAP_CAP_BYTES);
+}
+
+function benchPragmaList(
+  tempStore: "FILE" | "MEMORY",
+  cacheKib: number,
+  mmapSize: number | undefined
+): readonly string[] {
+  const pragmas = [
+    "journal_mode=WAL",
+    "synchronous=NORMAL",
+    `temp_store=${tempStore}`,
+    `cache_size=-${cacheKib}`
+  ];
+  if (mmapSize !== undefined) pragmas.push(`mmap_size=${mmapSize}`);
+  return Object.freeze(pragmas);
 }
 
 export interface BenchFastPragmaResult {
@@ -55,21 +112,19 @@ export function applyBenchFastPragmaIfRequested(
   // here is a no-op and documents the bench layering.
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const conn = db.connection;
-  // Production-set pragmas (re-asserted defensively; safe no-op when already on).
   conn.pragma("journal_mode = WAL");
   conn.pragma("synchronous = NORMAL");
-  // Bench-only adds.
   const tempStore = resolveBenchTempStore();
   conn.pragma(`temp_store = ${tempStore}`);
-  conn.pragma("cache_size = -65536");
+  const fileBytes = readDbFileBytes(db.filename);
+  const cacheKib = resolveBenchCacheSizeKib(fileBytes);
+  conn.pragma(`cache_size = -${cacheKib}`);
+  const mmapSize = resolveBenchMmapSize(fileBytes);
+  if (mmapSize !== undefined) {
+    conn.pragma(`mmap_size = ${mmapSize}`);
+  }
   return Object.freeze({
     applied: true,
-    pragmas: Object.freeze([
-      "journal_mode=WAL",
-      "synchronous=NORMAL",
-      `temp_store=${tempStore}`,
-      "cache_size=-65536"
-    ])
+    pragmas: benchPragmaList(tempStore, cacheKib, mmapSize)
   });
 }
-
