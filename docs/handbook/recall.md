@@ -15,6 +15,12 @@ this live HEAD — see `.do-it/plans/recall-any5-evidence-first.md`.
 This is not a KPI-promotion claim. The earlier `10da1318` B-arm dump remains
 historical benchmark evidence only.
 
+2026-08-22 amendment (algorithm evidence pin `3af4fd9`, live HEAD `334f937`,
+uncommitted): recorded the
+`Select_Gamma` query-conditioned marginal-gain contract ruling and its
+current implementation gap under Contract below. No live-path behavior
+changed by this amendment.
+
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
@@ -42,6 +48,29 @@ Before `Select_Gamma`, an operator may add a grounded candidate, attach
 evidence, transfer activation, enforce governance, or materialize a rebuildable
 view. It may not silently remove a previously eligible member. `Select_Gamma`
 is the one destructive budget cut and its admission order is delivery order.
+
+The `Select_Gamma` marginal-gain objective is defined against the query
+condition: gain measures incremental coverage of the query's own answer
+set and obligation facets (2026-08-22 contract ruling). The field has no
+intrinsic preference for source or dimension diversity; source
+multiplicity may only modulate a candidate's activation strength, never
+act as an admission objective. Implementation state: the live gain is
+`quality` plus a generic saturating `slice`/`f3` cover bonus
+(`select-gamma/objective.ts`, cover kinds in
+`select-gamma/bind-fine-assessment.ts`). Facility-demand and coverage modules
+exist, but `prepareSelectGammaProof` still constructs the generic objective and
+the current static production call graph has no caller for
+`materializeConfiguredCoverageSelection`; query-conditioned facility coverage
+therefore does not yet drive live admission or have a proven production proof
+consumer. Closing that design-to-consumer gap is tracked work, not a licence
+for a second walk or post-selection reorder.
+
+For a query q, the planned obligation set O_q includes entity, relation, time,
+logical-object, independent-evidence, and answer-shape atoms. Gamma gain is
+base relevance plus the incremental coverage of unmet atoms in O_q. Source
+multiplicity can strengthen activation, but cannot be an admission objective.
+Cardinality/enumerative obligations are required for full-gold completeness
+claims even if an initial any@5 experiment can proceed without them.
 
 Do not add another fusion stream, promoter, duplicate reranker, consensus
 reorder, or head-drop rule to repair benchmark coverage.
@@ -104,7 +133,7 @@ The principal owners are:
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. They can also activate already-admitted candidates. F3 remains rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. |
+| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Live gain covers only `slice`/`f3`; the query-conditioned facility objective has no proven production consumer yet (open gap, see Contract). |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
@@ -127,6 +156,10 @@ F3-only, and governance revoke. Post-`Select_Gamma` order is proved on the live
 selector. In-process query-only worker-read re-resolves already selected
 evidence ids and does not re-run pin/select. Selection-boundary replay remains
 the exact-order owner when an observer is attached.
+
+This closure covers field membership and selector ordering, not the
+query-conditioned facility objective. That objective remains open until the
+identical-pool comparison and a production-consumer receipt are both present.
 
 Do not add a second field, selector, query condition, or recall path.
 

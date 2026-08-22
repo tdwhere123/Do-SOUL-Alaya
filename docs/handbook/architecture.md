@@ -114,7 +114,10 @@ Do not implement recall from flood / SliceKey / fused-score prose.
 The algorithm is the UGAF read path. The live runtime now connects pinned
 field-generation candidate admission, graph/PathRelation expansion, Slice
 compatibility, attributed path/evidence flood, and one Select_Gamma admission
-walk. Owner and current closure boundary:
+walk. The core path is wired, but the query-conditioned facility objective is
+still a design-to-consumer verification gap: the live gain remains generic
+`slice`/`f3` coverage until a receipt-backed production consumer is proven.
+Owner and current closure boundary:
 
 [`recall.md`](recall.md)
 
