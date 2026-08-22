@@ -51,6 +51,16 @@ describe("recall-eval pager IPC isolation", () => {
     await expect(session.recall({ questionId: "__empty__" })).rejects.toThrow(/empty pack/u);
   });
 
+  it("delivers a backpressured recall payload instead of treating a full IPC queue as death", async () => {
+    const session = openSession();
+    await session.open({});
+    const pack = await session.recall({
+      questionId: "ok",
+      bulk: "x".repeat(4 * 1024 * 1024)
+    }) as { readonly questionId: string };
+    expect(pack.questionId).toBe("ok");
+  });
+
   function openSession(timeoutMs?: number) {
     const session = createRecallEvalPagerSession({
       host: createForkRecallEvalPagerHost(stubChildPath),

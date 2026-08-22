@@ -14,7 +14,10 @@ export const DEFAULT_RECALL_EVAL_PAGER_TIMEOUT_MS = 600_000;
 
 export interface RecallEvalPagerIpcProcess {
   readonly pid?: number;
-  send(message: unknown): boolean;
+  send(
+    message: unknown,
+    callback?: (error: Error | null) => void
+  ): boolean;
   on(event: "message", listener: (message: unknown) => void): unknown;
   on(
     event: "exit",
@@ -278,13 +281,10 @@ function waitForPagerIpcResponse(
       clearAbort: () => clearTimeout(timer)
     });
     try {
-      if (!child.send(message)) {
-        failPending(
-          pending,
-          message.id,
-          new Error("recall-eval pager child IPC send failed.")
-        );
-      }
+      // False means the IPC write queue is full, not that the child is gone.
+      child.send(message, (error) => {
+        if (error != null) failPending(pending, message.id, error);
+      });
     } catch (error) {
       failPending(pending, message.id, error);
     }
