@@ -42,6 +42,7 @@ import type { RecallEvalSnapshotBundle } from
 const SOURCE_MANIFEST_SHA = "b".repeat(64);
 const MODEL_ARTIFACT_SHA = "c".repeat(64);
 const MEMORY_ID = "11111111-1111-4111-8111-111111111111";
+const QUERY_MEMORY_ID = "33333333-3333-4333-8333-333333333333";
 const EVIDENCE_ID = "22222222-2222-4222-8222-222222222222";
 const VECTOR_SPACE = Object.freeze({
   provider_kind: "local_onnx" as const,
@@ -173,6 +174,32 @@ describe("source-bound embedding cache overlay", () => {
     expect(countMainRows(target, "memory_embeddings")).toBe(0);
     expect(countRows(target, "memory_embeddings")).toBe(0);
     expect(countRows(target, "evidence_recall_embeddings")).toBe(0);
+    target.close();
+  });
+
+  it("reuses a matching overlay bind after durable query rows land", async () => {
+    await writeFixtureOverlay();
+    await applyEmbeddingCacheOverlay({
+      receiptPath,
+      restoredDbPath: targetDbPath,
+      expected: expectedBinding()
+    });
+    seedQueryMemoryEmbedding(targetDbPath, new Float32Array([7, 8]));
+
+    await expect(applyEmbeddingCacheOverlay({
+      receiptPath,
+      restoredDbPath: targetDbPath,
+      expected: expectedBinding()
+    })).resolves.toMatchObject({
+      memory_embedding_count: 1,
+      evidence_embedding_count: 1
+    });
+
+    const target = openProjected(targetDbPath);
+    expect(countMainRows(target, "memory_embeddings")).toBe(1);
+    expect(countRows(target, "memory_embeddings")).toBe(2);
+    expect(countMainRows(target, "evidence_recall_embeddings")).toBe(0);
+    expect(countRows(target, "evidence_recall_embeddings")).toBe(1);
     target.close();
   });
 
@@ -377,10 +404,35 @@ function seedEmbeddings(path: string): void {
   database.close();
 }
 
+function seedQueryMemoryEmbedding(path: string, vector: Float32Array): void {
+  const database = initDatabase({ filename: path });
+  database.connection.prepare(`
+    INSERT INTO memory_entries (
+      object_id, object_kind, schema_version, lifecycle_state, created_at,
+      updated_at, created_by, dimension, source_kind, formation_kind, scope_class,
+      content, domain_tags, evidence_refs, workspace_id, run_id, storage_tier,
+      activation_score
+    ) VALUES (?, 'memory_entry', 1, 'active', ?, ?, 'overlay-test', 'fact',
+      'user', 'explicit', 'project', 'Query text.', '[]', '[]', 'workspace-1',
+      'run-1', 'hot', 0.1)
+  `).run(QUERY_MEMORY_ID, "2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z");
+  database.connection.prepare(`
+    INSERT INTO main.memory_embeddings (
+      object_id, workspace_id, content_hash, provider_kind, model_id,
+      schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(
+    QUERY_MEMORY_ID, "workspace-1", "sha256:query", VECTOR_SPACE.provider_kind,
+    VECTOR_SPACE.model_id, VECTOR_SPACE.schema_version, VECTOR_SPACE.dimensions,
+    encodeVector(vector), "2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z"
+  );
+  database.close();
+}
+
 function seedMemoryEmbedding(path: string, vector: Float32Array): void {
   const database = initDatabase({ filename: path });
   database.connection.prepare(`
-    INSERT INTO memory_embeddings (
+    INSERT INTO main.memory_embeddings (
       object_id, workspace_id, content_hash, provider_kind, model_id,
       schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)

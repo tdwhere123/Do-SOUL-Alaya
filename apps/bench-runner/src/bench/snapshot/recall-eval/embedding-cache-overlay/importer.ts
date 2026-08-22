@@ -1,9 +1,10 @@
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   bindEmbeddingOverlay,
   detachEmbeddingOverlay,
   embeddingOverlayBindPath,
+  hasEmbeddingOverlayBind,
   initDatabase,
   readSchemaMigrationLedger,
   writeEmbeddingOverlayBind,
@@ -35,6 +36,10 @@ export async function applyEmbeddingCacheOverlay(input: {
   if (resolve(loaded.overlayPath) === resolve(boundPath)) {
     throw new Error("embedding cache overlay input must differ from its bound working copy");
   }
+  if (reuseExistingOverlayBind(input.restoredDbPath, boundPath, loaded.binding.overlay_sha256)) {
+    // Pager recycle re-opens this working copy; Q1 may have written query rows into main.
+    return loaded.binding;
+  }
   copyRegularFileNoFollow({
     sourcePath: loaded.overlayPath,
     targetPath: boundPath,
@@ -49,6 +54,26 @@ export async function applyEmbeddingCacheOverlay(input: {
     rmSync(boundPath, { force: true });
     rmSync(embeddingOverlayBindPath(input.restoredDbPath), { force: true });
     throw error;
+  }
+}
+
+function reuseExistingOverlayBind(
+  restoredDbPath: string,
+  boundPath: string,
+  overlaySha256: string
+): boolean {
+  if (!hasEmbeddingOverlayBind(restoredDbPath) || !existsSync(boundPath)) return false;
+  const bindPath = embeddingOverlayBindPath(restoredDbPath);
+  try {
+    const document = JSON.parse(readFileSync(bindPath, "utf8")) as {
+      readonly overlay_sha256?: unknown;
+      readonly overlay_filename?: unknown;
+    };
+    return document.overlay_sha256 === overlaySha256 &&
+      typeof document.overlay_filename === "string" &&
+      existsSync(join(dirname(restoredDbPath), document.overlay_filename));
+  } catch {
+    return false;
   }
 }
 
