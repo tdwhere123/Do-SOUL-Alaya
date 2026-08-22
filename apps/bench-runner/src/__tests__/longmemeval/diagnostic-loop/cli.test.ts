@@ -41,6 +41,13 @@ describe("diagnostic-loop CLI", () => {
     expect(parsed.request.limit).toBe(1);
   });
 
+  it("parses an embedding cache overlay as an operational override", () => {
+    const parsed = parseDiagnosticLoopArgs(requiredFlags({
+      extra: ["--embedding-cache-overlay", "/tmp/overlay-receipt.json"]
+    }));
+    expect(parsed.request.embeddingCacheOverlayReceiptPath).toBe("/tmp/overlay-receipt.json");
+  });
+
   it("dispatches through injected adapters and prints avoided work", async () => {
     const workRoot = await tempRoot();
     const tracked = trackingAdapters();

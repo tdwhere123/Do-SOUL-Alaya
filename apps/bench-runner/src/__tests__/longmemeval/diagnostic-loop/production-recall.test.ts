@@ -5,6 +5,7 @@ const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted((
     current?: {
       readonly snapshotConsumeAuthority?: string;
       readonly snapshotDbPath?: string;
+      readonly embeddingCacheOverlayReceiptPath?: string;
     };
   } = {};
   return {
@@ -123,5 +124,32 @@ describe("diagnostic-loop production recall consume authority", () => {
     } as never, "control")).rejects.toThrow(/not contained in the snapshot/u);
 
     expect(runRecallEval).not.toHaveBeenCalled();
+  });
+
+  it("threads a source-bound embedding overlay into recall-eval", async () => {
+    const { runProductionRecallPhase } = await import(
+      "../../../bench/diagnostic-loop/production-recall.js"
+    );
+    runRecallEval.mockClear();
+
+    await runProductionRecallPhase({
+      request: {
+        variant: "longmemeval_s",
+        snapshotPath: "/tmp/request-snapshot.db",
+        historyRoot: "/tmp/history",
+        embeddingCacheOverlayReceiptPath: "/tmp/overlay-receipt.json"
+      },
+      checkpoints: new Map([
+        ["extraction", { artifact_paths: {}, content_identity: "cache" }],
+        ["snapshot", {
+          artifact_paths: { snapshot: "/tmp/checkpoint-snapshot.db" },
+          content_identity: "identity:/tmp/checkpoint-snapshot.db"
+        }]
+      ]),
+      workRoot: "/tmp/work"
+    } as never, "control");
+
+    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath)
+      .toBe("/tmp/overlay-receipt.json");
   });
 });

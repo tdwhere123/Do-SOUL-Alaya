@@ -4,6 +4,8 @@ import { parseFlags, type ParsedFlags } from "./cli-options.js";
 import { runAuthorizeExtractionCommand } from "./extraction-authority/command.js";
 import { runSelectExtractionTargetCommand } from "./target-selection/command.js";
 import { runDiagnosticLoopCommand } from "./diagnostic-loop/command.js";
+import { runEmitEmbeddingCacheOverlayCommand } from
+  "./emit-embedding-cache-overlay/command.js";
 import { runProviderPreflightCommand } from "./provider-preflight/command.js";
 import {
   runExtractionFillCommand,
@@ -32,7 +34,9 @@ Usage:
   alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--question-batch-limit N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--repair-invalid-shards]
   alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <target-root> (--cache-audit-receipt <audit-receipt.json> | --materialization-receipt <receipt.json> | --retired-source-rebuild-operator <operator> | --predecessor-target-selection <receipt.json> --extraction-predecessor-authority <receipt.json> [--adopt-existing-child-target-selection <receipt.json> --adopt-existing-child-authority <receipt.json>]) --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
   alaya-bench-runner recall-eval --snapshot <db> [--embedding-cache-overlay <receipt.json>] [--query-semantic-factor-cache <json>] [--experiment [--seed-extraction-system-prompt <txt>] [--rebuild-evidence-search-projections [--backfill-missing-fact-frame-formations|--fact-frame-retrofit-ledger <ndjson>]] [--warm-derived-snapshot-receipt <json>]] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
-  alaya-bench-runner diagnostic-loop --work-root <dir> --request-manifest <json> [--mode smoke|run|cache-only|report-only] [--from-phase <phase>] [--snapshot <db>] [--snapshot-out <db>] [--query-semantic-factor-cache <json>] [--gate7-unlock <3q-work-root>] [--history-root <path>]
+  alaya-bench-runner emit-embedding-cache-overlay --snapshot <db> --receipt <json>
+    Cache-only document embed into a source-bound overlay sidecar. Frozen snapshot stays read-only; recall-eval imports the overlay before scoring.
+  alaya-bench-runner diagnostic-loop --work-root <dir> --request-manifest <json> [--mode smoke|run|cache-only|report-only] [--from-phase <phase>] [--snapshot <db>] [--snapshot-out <db>] [--query-semantic-factor-cache <json>] [--embedding-cache-overlay <receipt.json>] [--gate7-unlock <3q-work-root>] [--history-root <path>]
     One resumable cache-only campaign: preflight → authority/cache → extraction proof → snapshot → control/treatment recall → miss ledger → report. Smoke uses the same path including host_worker. Report-only never reruns extraction or recall.
   alaya-bench-runner provider-preflight --mode replay --request-manifest <json>
   alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>]
@@ -70,6 +74,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "diagnostic-loop") {
     return runDiagnosticLoopCommand(rest);
+  }
+  if (command === "emit-embedding-cache-overlay") {
+    return runEmitEmbeddingCacheOverlayCommand(rest);
   }
   if (command === "provider-preflight") {
     return runProviderPreflightCommand(rest);

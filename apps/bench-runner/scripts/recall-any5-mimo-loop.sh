@@ -12,7 +12,7 @@ SMALL_WINDOW_CEILING=3
 
 usage() {
   cat <<'EOF'
-usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--gate7-unlock PATH] [--snapshot PATH]
+usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--gate7-unlock PATH] [--snapshot PATH] [--embedding-cache-overlay PATH]
 
   --limit is required. Windows larger than 3 also need --confirm-window equal
   to that limit and --gate7-unlock <3q-work-root> from a current Gate 7
@@ -23,6 +23,8 @@ usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-see
   diagnostic         cache-only credentialless diagnostic-loop
   inspect-seed       print projection artifact inflation from a seed sqlite
   --snapshot PATH    diagnostic reuse of a sealed DB; omits --snapshot-out
+  --embedding-cache-overlay PATH  diagnostic-only overlay receipt for read-mostly
+                     embedding-on recall (frozen snapshot stays 0-vector)
 EOF
 }
 
@@ -39,6 +41,7 @@ WORK_ROOT=""
 SEED_DB=""
 SNAPSHOT=""
 SNAPSHOT_FLAG=0
+EMBEDDING_CACHE_OVERLAY=""
 GATE7_UNLOCK=""
 TEMP_REQUEST_FILE=""
 TEMP_RECEIPT_FILE=""
@@ -78,6 +81,13 @@ while [[ $# -gt 0 ]]; do
       SNAPSHOT_FLAG=1
       shift 2
       ;;
+    --embedding-cache-overlay)
+      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+        die "--embedding-cache-overlay requires a non-empty path"
+      fi
+      EMBEDDING_CACHE_OVERLAY="$2"
+      shift 2
+      ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown flag $1" ;;
   esac
@@ -97,6 +107,9 @@ if [[ "$COMMAND" != "inspect-seed" ]]; then
 fi
 if [[ "$SNAPSHOT_FLAG" -eq 1 && "$COMMAND" != "diagnostic" ]]; then
   die "--snapshot is only valid for diagnostic"
+fi
+if [[ -n "$EMBEDDING_CACHE_OVERLAY" && "$COMMAND" != "diagnostic" ]]; then
+  die "--embedding-cache-overlay is only valid for diagnostic"
 fi
 
 ENV_FILE="${ALAYA_RECALL_ANY5_ENV:-$DEFAULT_ENV}"
@@ -228,6 +241,9 @@ invoke_cache_only_diagnostic() {
   fi
   if [[ -n "$GATE7_UNLOCK" ]]; then
     extra+=(--gate7-unlock "$GATE7_UNLOCK")
+  fi
+  if [[ -n "$EMBEDDING_CACHE_OVERLAY" ]]; then
+    extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
   rtk node "$BIN" diagnostic-loop \

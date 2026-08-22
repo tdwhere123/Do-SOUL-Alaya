@@ -17,13 +17,15 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyEmbeddingCacheOverlay
 } from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/importer.js";
 import {
   writeEmbeddingCacheOverlay
 } from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/writer.js";
+import { emitEmbeddingCacheOverlay } from
+  "../../../bench/snapshot/recall-eval/embedding-cache-overlay/emit.js";
 import { sha256File } from
   "../../../bench/snapshot/integrity.js";
 import { prepareRecallEvalDataRoot } from
@@ -167,6 +169,65 @@ describe("source-bound embedding cache overlay", () => {
       code: "ENOENT"
     });
     await expect(readFile(receiptPath, "utf8")).resolves.toBe("occupied\n");
+  });
+});
+
+describe("readonly snapshot overlay emit", () => {
+  it("writes vectors to the overlay without mutating the frozen snapshot", async () => {
+    const beforeSha = await sha256File(sourceDbPath);
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([1, 2]))
+    );
+
+    const binding = await emitEmbeddingCacheOverlay({
+      snapshotDbPath: sourceDbPath,
+      receiptPath,
+      provider: {
+        providerKind: VECTOR_SPACE.provider_kind,
+        modelId: VECTOR_SPACE.model_id,
+        schemaVersion: VECTOR_SPACE.schema_version,
+        isAvailable: true,
+        embedTexts
+      },
+      source: expectedBinding()
+    });
+
+    expect(embedTexts).toHaveBeenCalled();
+    expect(binding.memory_embedding_count).toBe(1);
+    expect(await sha256File(sourceDbPath)).toBe(beforeSha);
+    const source = initDatabase({ filename: sourceDbPath });
+    expect(countRows(source, "memory_embeddings")).toBe(0);
+    source.close();
+
+    await applyEmbeddingCacheOverlay({
+      receiptPath,
+      restoredDbPath: targetDbPath,
+      expected: expectedBinding()
+    });
+    const target = initDatabase({ filename: targetDbPath });
+    expect(countRows(target, "memory_embeddings")).toBe(1);
+    target.close();
+  });
+
+  it("refuses content_plus_hq overlays so mint-time HQ cannot leak into the sidecar", async () => {
+    await expect(emitEmbeddingCacheOverlay({
+      snapshotDbPath: sourceDbPath,
+      receiptPath,
+      provider: {
+        providerKind: VECTOR_SPACE.provider_kind,
+        modelId: VECTOR_SPACE.model_id,
+        schemaVersion: VECTOR_SPACE.schema_version,
+        isAvailable: true,
+        embedTexts: async () => [new Float32Array([1, 2])]
+      },
+      source: {
+        ...expectedBinding(),
+        vector_space: { ...VECTOR_SPACE, d2q_input: "content_plus_hq" }
+      }
+    })).rejects.toThrow(/raw_content d2q input/u);
+    const source = initDatabase({ filename: sourceDbPath });
+    expect(countRows(source, "memory_embeddings")).toBe(0);
+    source.close();
   });
 });
 

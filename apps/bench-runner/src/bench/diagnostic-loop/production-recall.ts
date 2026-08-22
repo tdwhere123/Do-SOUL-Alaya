@@ -75,6 +75,11 @@ async function executeRecallEvaluation(
     ...(context.request.limit === undefined ? {} : { limit: context.request.limit }),
     ...(context.request.offset === undefined ? {} : { offset: context.request.offset }),
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
+    ...(context.request.embeddingCacheOverlayReceiptPath === undefined
+      ? {}
+      : {
+          embeddingCacheOverlayReceiptPath: context.request.embeddingCacheOverlayReceiptPath
+        }),
     ...treatmentRecallCacheOptions(context, arm)
   });
 }

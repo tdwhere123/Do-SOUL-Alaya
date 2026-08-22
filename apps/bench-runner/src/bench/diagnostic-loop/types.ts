@@ -34,6 +34,7 @@ export interface DiagnosticLoopRequest extends DiagnosticLoopIdentity {
   readonly snapshotPath?: string;
   readonly snapshotOutPath?: string;
   readonly treatmentFactorCachePath?: string;
+  readonly embeddingCacheOverlayReceiptPath?: string;
   readonly historyRoot?: string;
   readonly dataDir?: string;
 }

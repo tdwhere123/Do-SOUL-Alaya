@@ -1,13 +1,5 @@
-import { randomUUID } from "node:crypto";
-import {
-  closeSync,
-  constants,
-  linkSync,
-  openSync,
-  rmSync,
-  unlinkSync
-} from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { rmSync } from "node:fs";
+import { basename } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import {
   readSchemaMigrationLedger
@@ -21,6 +13,12 @@ import {
   type EmbeddingCacheOverlayBinding,
   type EmbeddingCacheOverlaySourceBinding
 } from "./contract.js";
+import {
+  createOverlaySchema,
+  publishOverlayDatabase,
+  reserveStagingFile,
+  resolveOverlayOutputPaths
+} from "./overlay-schema.js";
 
 type SqliteDatabase = InstanceType<typeof BetterSqlite3>;
 
@@ -30,35 +28,59 @@ export async function writeEmbeddingCacheOverlay(input: {
   readonly source: EmbeddingCacheOverlaySourceBinding;
 }): Promise<EmbeddingCacheOverlayBinding> {
   assertSourceSchema(input);
-  const paths = resolveOutputPaths(input.receiptPath);
+  const paths = resolveOverlayOutputPaths(input.receiptPath);
   reserveStagingFile(paths.stagingPath);
-  let overlayPublished = false;
-  let receiptPublished = false;
   try {
     const counts = buildOverlayDatabase(input.warmedDbPath, paths.stagingPath, input.source);
-    const overlaySha256 = await sha256File(paths.stagingPath);
-    publishOverlayDatabase(paths.stagingPath, paths.overlayPath);
-    overlayPublished = true;
-    const receipt = buildEmbeddingCacheOverlayReceipt({
+    return await sealEmbeddingCacheOverlay({
+      stagingPath: paths.stagingPath,
+      receiptPath: paths.receiptPath,
+      overlayPath: paths.overlayPath,
       source: input.source,
-      relativeOverlayPath: basename(paths.overlayPath),
-      overlaySha256,
       memoryEmbeddingCount: counts.memory,
       evidenceEmbeddingCount: counts.evidence
     });
+  } catch (error) {
+    rmSync(paths.stagingPath, { force: true });
+    rmSync(`${paths.stagingPath}-wal`, { force: true });
+    rmSync(`${paths.stagingPath}-shm`, { force: true });
+    throw error;
+  }
+}
+
+export async function sealEmbeddingCacheOverlay(input: {
+  readonly stagingPath: string;
+  readonly receiptPath: string;
+  readonly overlayPath: string;
+  readonly source: EmbeddingCacheOverlaySourceBinding;
+  readonly memoryEmbeddingCount: number;
+  readonly evidenceEmbeddingCount: number;
+}): Promise<EmbeddingCacheOverlayBinding> {
+  let overlayPublished = false;
+  let receiptPublished = false;
+  try {
+    const overlaySha256 = await sha256File(input.stagingPath);
+    publishOverlayDatabase(input.stagingPath, input.overlayPath);
+    overlayPublished = true;
+    const receipt = buildEmbeddingCacheOverlayReceipt({
+      source: input.source,
+      relativeOverlayPath: basename(input.overlayPath),
+      overlaySha256,
+      memoryEmbeddingCount: input.memoryEmbeddingCount,
+      evidenceEmbeddingCount: input.evidenceEmbeddingCount
+    });
     await publishExclusiveOutput(
-      paths.receiptPath,
+      input.receiptPath,
       `${JSON.stringify(receipt, null, 2)}\n`
     );
     receiptPublished = true;
     return readEmbeddingCacheOverlay({
-      receiptPath: paths.receiptPath,
+      receiptPath: input.receiptPath,
       expected: input.source
     }).binding;
   } catch (error) {
-    rmSync(paths.stagingPath, { force: true });
-    if (receiptPublished) rmSync(paths.receiptPath, { force: true });
-    if (overlayPublished) rmSync(paths.overlayPath, { force: true });
+    if (overlayPublished) rmSync(input.overlayPath, { force: true });
+    if (receiptPublished) rmSync(input.receiptPath, { force: true });
     throw error;
   }
 }
@@ -71,32 +93,6 @@ function assertSourceSchema(input: {
   if (actual !== input.source.source_schema_version) {
     throw new Error("embedding cache overlay warmed DB schema binding mismatch");
   }
-}
-
-function resolveOutputPaths(receiptPath: string): {
-  readonly receiptPath: string;
-  readonly overlayPath: string;
-  readonly stagingPath: string;
-} {
-  const resolvedReceipt = resolve(receiptPath);
-  const root = dirname(resolvedReceipt);
-  const extension = extname(resolvedReceipt);
-  const stem = basename(resolvedReceipt, extension);
-  const overlayPath = join(root, `${stem}.sqlite`);
-  return {
-    receiptPath: resolvedReceipt,
-    overlayPath,
-    stagingPath: join(root, `.${stem}.overlay-${process.pid}-${randomUUID()}.tmp`)
-  };
-}
-
-function reserveStagingFile(path: string): void {
-  const descriptor = openSync(
-    path,
-    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-    0o600
-  );
-  closeSync(descriptor);
 }
 
 function buildOverlayDatabase(
@@ -118,27 +114,6 @@ function buildOverlayDatabase(
     warmed.close();
     database.close();
   }
-}
-
-function createOverlaySchema(database: SqliteDatabase): void {
-  database.exec(`
-    CREATE TABLE memory_embeddings (
-      object_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
-      content_hash TEXT NOT NULL, provider_kind TEXT NOT NULL,
-      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
-      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
-      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    );
-    CREATE TABLE evidence_recall_embeddings (
-      workspace_id TEXT NOT NULL, owner_object_id TEXT NOT NULL,
-      document_identity TEXT NOT NULL, content_hash TEXT NOT NULL,
-      document_role TEXT NOT NULL, provider_kind TEXT NOT NULL,
-      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
-      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
-      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-      PRIMARY KEY (workspace_id, owner_object_id, document_identity, document_role)
-    );
-  `);
 }
 
 function copyMatchingRows(
@@ -190,18 +165,6 @@ function copyRows(input: {
     count += 1;
   }
   return count;
-}
-
-function publishOverlayDatabase(stagingPath: string, overlayPath: string): void {
-  try {
-    linkSync(stagingPath, overlayPath);
-    unlinkSync(stagingPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`output already exists: ${overlayPath}`);
-    }
-    throw error;
-  }
 }
 
 const MEMORY_COLUMNS = `

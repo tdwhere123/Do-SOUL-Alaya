@@ -61,6 +61,8 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
     expect(stdoutBuf).toContain("--experiment");
     expect(stdoutBuf).toContain("--embedding-cache-overlay <receipt.json>");
+    expect(stdoutBuf).toContain("emit-embedding-cache-overlay --snapshot");
+    expect(stdoutBuf).not.toContain("embedding-cache-overlay-build");
     expect(stdoutBuf).toContain("--query-semantic-factor-cache <json>");
     expect(stdoutBuf).toContain("--concurrency N");
     expect(stdoutBuf).not.toContain("--direct-deepseek-500-operator");
@@ -114,6 +116,13 @@ describe("bench-runner CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/--snapshot <db> required/);
+  });
+
+  it("emit-embedding-cache-overlay without paths exits 2", async () => {
+    const exitCode = await runCli(["emit-embedding-cache-overlay"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--snapshot <db> and --receipt <json> are required/);
   });
 
   it("rejects invalid embedding modes instead of silently disabling embeddings", async () => {

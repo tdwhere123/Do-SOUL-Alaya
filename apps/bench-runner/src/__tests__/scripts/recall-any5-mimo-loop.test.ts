@@ -65,6 +65,24 @@ describe("recall-any5-mimo-loop", () => {
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
+    it("forwards --embedding-cache-overlay to diagnostic-loop", async () => {
+      const harness = await writeOperatorLoopHarness(tmpDir);
+      const overlay = path.join(tmpDir, "overlay-receipt.json");
+      await writeFile(overlay, "{}\n");
+      const argv = await invokeDiagnosticLoop(harness, [
+        "--limit",
+        "1",
+        "--snapshot",
+        harness.snapshot,
+        "--embedding-cache-overlay",
+        overlay,
+        "--work-root",
+        harness.workRoot
+      ]);
+      expect(flagValue(argv, "--embedding-cache-overlay")).toBe(overlay);
+      await expectCacheOnlyLoopEnv(harness, argv);
+    });
+
     it("forwards --gate7-unlock on a confirmed 100Q window", async () => {
       const harness = await writeOperatorLoopHarness(tmpDir);
       const unlock = path.join(tmpDir, "gate7-3q");

@@ -106,6 +106,9 @@ function parseScalarArgs(
       ...(parsed.treatmentFactorCache === undefined
         ? {}
         : { treatmentFactorCachePath: parsed.treatmentFactorCache }),
+      ...(parsed.embeddingCacheOverlay === undefined
+        ? {}
+        : { embeddingCacheOverlayReceiptPath: parsed.embeddingCacheOverlay }),
       historyRoot: parsed.historyRoot ?? DEFAULT_HISTORY_ROOT,
       ...(parsed.dataDir === undefined ? {} : { dataDir: parsed.dataDir })
     }
@@ -132,6 +135,7 @@ interface RawArgs {
   snapshot?: string;
   snapshotOut?: string;
   treatmentFactorCache?: string;
+  embeddingCacheOverlay?: string;
   historyRoot?: string;
   dataDir?: string;
   requestManifest?: string;
@@ -186,6 +190,7 @@ function consumeToken(
       assignString(parsed, args, index, token, "--snapshot", "snapshot") ||
       assignString(parsed, args, index, token, "--snapshot-out", "snapshotOut") ||
       assignString(parsed, args, index, token, "--query-semantic-factor-cache", "treatmentFactorCache") ||
+      assignString(parsed, args, index, token, "--embedding-cache-overlay", "embeddingCacheOverlay") ||
       assignString(parsed, args, index, token, "--history-root", "historyRoot") ||
       assignString(parsed, args, index, token, "--data-dir", "dataDir") ||
       assignString(parsed, args, index, token, "--gate7-unlock", "gate7Unlock")) {
@@ -291,6 +296,9 @@ function operationalOverrides(
     ...(parsed.treatmentFactorCache === undefined
       ? {}
       : { treatmentFactorCachePath: parsed.treatmentFactorCache }),
+    ...(parsed.embeddingCacheOverlay === undefined
+      ? {}
+      : { embeddingCacheOverlayReceiptPath: parsed.embeddingCacheOverlay }),
     historyRoot: parsed.historyRoot ?? request.historyRoot ?? DEFAULT_HISTORY_ROOT,
     ...(parsed.dataDir === undefined ? {} : { dataDir: parsed.dataDir })
   };
