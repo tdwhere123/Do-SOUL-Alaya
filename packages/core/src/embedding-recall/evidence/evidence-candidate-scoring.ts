@@ -173,12 +173,10 @@ function buildObservationCompletenessLookup(
     : "bounded_candidate_prefix";
 }
 
-export function selectLexicalEvidenceEmbeddingPrefix(
+export function sortLexicalEvidenceEmbeddingCandidates(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
-  queryText: string,
-  limit: number = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N
+  queryText: string
 ): ScoreEvidenceCandidatesParams["candidates"] {
-  if (candidates.length <= limit) return candidates;
   const queryProbes = compileRecallQueryProbes(queryText);
   return Object.freeze([...candidates].sort((left, right) => {
     const scoreDelta =
@@ -188,7 +186,18 @@ export function selectLexicalEvidenceEmbeddingPrefix(
     return compareText(left.candidateKey, right.candidateKey) ||
       compareText(left.evidenceObjectId, right.evidenceObjectId) ||
       compareText(left.documentIdentity, right.documentIdentity);
-  }).slice(0, limit));
+  }));
+}
+
+export function selectLexicalEvidenceEmbeddingPrefix(
+  candidates: ScoreEvidenceCandidatesParams["candidates"],
+  queryText: string,
+  limit: number = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N
+): ScoreEvidenceCandidatesParams["candidates"] {
+  if (candidates.length <= limit) return candidates;
+  return Object.freeze(
+    sortLexicalEvidenceEmbeddingCandidates(candidates, queryText).slice(0, limit)
+  );
 }
 
 function observationIdentity(
