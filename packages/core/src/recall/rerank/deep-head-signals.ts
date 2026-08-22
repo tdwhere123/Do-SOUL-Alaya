@@ -60,11 +60,28 @@ function hasFieldBaseline(
     );
 }
 
+const INDEPENDENT_EMBEDDING_CHANNELS = new Set([
+  "effective_factor",
+  "object_embedding"
+]);
+
 export function embeddingSignal(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number | null {
   return resolveEmbeddingActivation(candidate, supplementaryData).score;
+}
+
+export function independentEmbeddingScore(
+  activation: CandidateActivationReceipt
+): number | null {
+  let best: number | null = null;
+  for (const observation of activation.observations) {
+    if (!INDEPENDENT_EMBEDDING_CHANNELS.has(observation.channel)) continue;
+    if (observation.state !== "observed" || observation.score === null) continue;
+    if (best === null || observation.score > best) best = observation.score;
+  }
+  return best;
 }
 
 export function embeddingActivation(

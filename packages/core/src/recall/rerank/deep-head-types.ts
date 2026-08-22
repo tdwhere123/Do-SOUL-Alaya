@@ -57,6 +57,7 @@ export type RecallDeepHeadTrace = Readonly<{
 
 export type RecallDeepHeadAssessment = Readonly<{
   readonly scores: ReadonlyMap<string, number>;
+  readonly independentEmbeddingScores: ReadonlyMap<string, number>;
   readonly traceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly embeddingObserved: boolean;
   readonly relevanceUpperBoundReceipt:

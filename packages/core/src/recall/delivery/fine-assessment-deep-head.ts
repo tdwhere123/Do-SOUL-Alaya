@@ -2,9 +2,13 @@ import {
   resolveDeepHeadAssessment,
   type RecallDeepHeadAssessment
 } from "../rerank/deep-head.js";
+import { createRecallRelevanceUpperBoundReceipt } from
+  "../rerank/relevance-upper-bound-receipt.js";
 import type { DeliverySelectionCandidate } from "./delivery-selection.js";
 
 const EMPTY_DEEP_HEAD_SCORES: ReadonlyMap<string, number> = new Map();
+const INDEPENDENT_EMBEDDING_DELIVERY_OPERATOR_ID =
+  "independent_embedding_delivery_v1";
 
 export type FineAssessmentDeepHeadDelivery = Readonly<{
   readonly orderScores: ReadonlyMap<string, number>;
@@ -12,11 +16,12 @@ export type FineAssessmentDeepHeadDelivery = Readonly<{
   readonly coverageRelevanceUpperBound: RecallDeepHeadAssessment["relevanceUpperBoundReceipt"];
 }>;
 
-/** Embedding may rescore the pool; lexical/evidence deep-head must not replace fused order. */
+/** Independent embedding may rescore; lexical/evidence residual must not replace R_obj. */
 export function composeFineAssessmentDeepHeadDelivery(
   deepHead: RecallDeepHeadAssessment
 ): FineAssessmentDeepHeadDelivery {
-  if (!deepHead.embeddingObserved) {
+  const embeddingScores = deepHead.independentEmbeddingScores;
+  if (embeddingScores.size === 0) {
     return Object.freeze({
       orderScores: EMPTY_DEEP_HEAD_SCORES,
       coverageRelevance: EMPTY_DEEP_HEAD_SCORES,
@@ -24,9 +29,12 @@ export function composeFineAssessmentDeepHeadDelivery(
     });
   }
   return Object.freeze({
-    orderScores: deepHead.scores,
-    coverageRelevance: deepHead.scores,
-    coverageRelevanceUpperBound: deepHead.relevanceUpperBoundReceipt
+    orderScores: embeddingScores,
+    coverageRelevance: embeddingScores,
+    coverageRelevanceUpperBound: createRecallRelevanceUpperBoundReceipt(
+      INDEPENDENT_EMBEDDING_DELIVERY_OPERATOR_ID,
+      embeddingScores
+    )
   });
 }
 

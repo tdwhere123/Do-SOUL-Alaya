@@ -2,6 +2,7 @@ import type { DeliverySelectionCandidate } from "../delivery/delivery-selection.
 import {
   buildLightweightComponents,
   embeddingSignal,
+  independentEmbeddingScore,
   probabilisticOr
 } from "./deep-head-signals.js";
 import type {
@@ -39,6 +40,10 @@ export function buildComponentsDeepHeadAssessment(
   const components = candidates.map((candidate) =>
     buildLightweightComponents(candidate, supplementaryData)
   );
+  const independentEmbeddingScores = collectIndependentEmbeddingScores(
+    candidates,
+    components
+  );
   const embeddingObserved = components.some((item) => item.embedding !== null);
   const active = components.some((item) => formula.isActive(item));
   if (!includeTraces) {
@@ -50,6 +55,7 @@ export function buildComponentsDeepHeadAssessment(
       : new Map<string, number>();
     return Object.freeze({
       scores,
+      independentEmbeddingScores,
       traceByCandidateKey: new Map(),
       embeddingObserved,
       relevanceUpperBoundReceipt: active
@@ -69,12 +75,26 @@ export function buildComponentsDeepHeadAssessment(
     : new Map<string, number>();
   return Object.freeze({
     scores,
+    independentEmbeddingScores,
     traceByCandidateKey: new Map(traces),
     embeddingObserved,
     relevanceUpperBoundReceipt: active
       ? createRecallRelevanceUpperBoundReceipt(formula.operatorId, scores)
       : null
   });
+}
+
+function collectIndependentEmbeddingScores(
+  candidates: readonly DeliverySelectionCandidate[],
+  components: readonly LightweightComponents[]
+): ReadonlyMap<string, number> {
+  const scores = new Map<string, number>();
+  for (let index = 0; index < candidates.length; index += 1) {
+    const score = independentEmbeddingScore(components[index]!.activation);
+    if (score === null) continue;
+    scores.set(candidates[index]!.fusion.candidate_key, score);
+  }
+  return scores;
 }
 
 export const lightweightDeepHeadFormula: DeepHeadAssessmentFormula = Object.freeze({
