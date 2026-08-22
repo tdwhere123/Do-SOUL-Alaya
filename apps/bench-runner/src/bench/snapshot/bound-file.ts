@@ -9,9 +9,10 @@ import {
   readFileSync,
   readSync,
   rmSync,
+  statSync,
   writeSync
 } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const NO_FOLLOW = constants.O_NOFOLLOW;
 
@@ -47,6 +48,68 @@ export function sha256Buffer(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+type CachedFileSha256 = Readonly<{
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly sha256: string;
+}>;
+
+const fileSha256Cache = new Map<string, CachedFileSha256>();
+
+function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
+  try {
+    const metadata = statSync(filePath);
+    const cached = fileSha256Cache.get(resolve(filePath));
+    if (cached === undefined) return undefined;
+    if (cached.size !== metadata.size || cached.mtimeMs !== metadata.mtimeMs) return undefined;
+    return cached;
+  } catch {
+    return undefined;
+  }
+}
+
+export function peekCachedFileSha256(filePath: string): string | undefined {
+  return cachedFileSha256(filePath)?.sha256;
+}
+
+export function rememberFileSha256(filePath: string, sha256: string): void {
+  const metadata = statSync(filePath);
+  fileSha256Cache.set(resolve(filePath), Object.freeze({
+    size: metadata.size,
+    mtimeMs: metadata.mtimeMs,
+    sha256
+  }));
+}
+
+export function assertRegularFileNoFollow(filePath: string): void {
+  const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
+  try {
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error(`${filePath} is not a regular file`);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function hashRegularFileNoFollow(filePath: string): string {
+  const cached = peekCachedFileSha256(filePath);
+  if (cached !== undefined) {
+    assertRegularFileNoFollow(filePath);
+    return cached;
+  }
+  const source = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
+  let sha256: string;
+  try {
+    if (!fstatSync(source).isFile()) throw new Error(`${filePath} is not a regular file`);
+    sha256 = hashOpenFile(source);
+  } finally {
+    closeSync(source);
+  }
+  rememberFileSha256(filePath, sha256);
+  return sha256;
+}
+
 export function copyRegularFileNoFollow(input: {
   readonly sourcePath: string;
   readonly targetPath: string;
@@ -57,6 +120,7 @@ export function copyRegularFileNoFollow(input: {
   const source = openSync(input.sourcePath, constants.O_RDONLY | NO_FOLLOW);
   let target: number | undefined;
   let failed = false;
+  let actualSha: string | undefined;
   try {
     if (!fstatSync(source).isFile()) throw new Error("legacy snapshot DB is not a regular file");
     target = openSync(
@@ -64,7 +128,7 @@ export function copyRegularFileNoFollow(input: {
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW,
       0o600
     );
-    const actualSha = copyAndHash(source, target);
+    actualSha = copyAndHash(source, target);
     if (actualSha !== input.expectedSha256) {
       throw new Error("legacy snapshot DB SHA-256 mismatch");
     }
@@ -77,6 +141,24 @@ export function copyRegularFileNoFollow(input: {
     closeSync(source);
     if (failed) rmSync(input.targetPath, { force: true });
   }
+  if (actualSha === undefined) {
+    throw new Error("sealed snapshot copy produced no digest");
+  }
+  rememberFileSha256(input.sourcePath, actualSha);
+  rememberFileSha256(input.targetPath, actualSha);
+}
+
+function hashOpenFile(source: number): string {
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let position = 0;
+  while (true) {
+    const bytesRead = readSync(source, buffer, 0, buffer.length, position);
+    if (bytesRead === 0) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  return hash.digest("hex");
 }
 
 function copyAndHash(source: number, target: number): string {

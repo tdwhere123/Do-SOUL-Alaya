@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initDatabase } from "@do-soul/alaya-storage";
+import { initDatabase, closeCachedDatabase } from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../../../harness/daemon.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
@@ -109,6 +109,16 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(result.pragmas).toContain("mmap_size=2147418112");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-1048576);
     expect(readPragmaNumber(dataDir, "mmap_size")).toBe(2147418112);
+  });
+
+  it("sizes cache and mmap from the restored working path after a larger replace", async () => {
+    const dataDir = await newDataDir();
+    closeCachedDatabase(join(dataDir, "alaya.db"));
+    truncateSync(join(dataDir, "alaya.db"), 512 * 1024 * 1024);
+    const result = applyBenchFastPragmaIfRequested(dataDir);
+    expect(result.pragmas).toContain("cache_size=-131072");
+    expect(result.pragmas).toContain("mmap_size=536870912");
+    expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
   });
 
   it("applies when env is explicitly truthy", async () => {

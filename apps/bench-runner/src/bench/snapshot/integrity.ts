@@ -5,7 +5,12 @@ import {
   snapshotExtractionAuthorityPath,
   snapshotSidecarPath
 } from "./materialize.js";
-import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
+import {
+  peekCachedFileSha256,
+  rememberFileSha256,
+  sha256Buffer,
+  readRegularFileNoFollow
+} from "./bound-file.js";
 import { MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES } from
   "./extraction-authority.js";
 
@@ -18,9 +23,13 @@ export interface SnapshotArtifactIntegrity {
 }
 
 export async function sha256File(filePath: string): Promise<string> {
+  const cached = peekCachedFileSha256(filePath);
+  if (cached !== undefined) return cached;
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
-  return hash.digest("hex");
+  const digest = hash.digest("hex");
+  rememberFileSha256(filePath, digest);
+  return digest;
 }
 
 export async function buildSnapshotArtifactIntegrity(

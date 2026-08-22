@@ -1,5 +1,4 @@
-import { writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   snapshotExtractionAuthorityPath,
@@ -11,7 +10,7 @@ import {
 import { validateSnapshotManifest } from "../manifest-validation.js";
 import { parseSnapshotSidecar } from "../sidecar-validation.js";
 import {
-  copyRegularFileNoFollow,
+  hashRegularFileNoFollow,
   readRegularFileNoFollow,
   sha256Buffer
 } from "../bound-file.js";
@@ -54,21 +53,16 @@ export function bindCurrentSnapshotArtifacts(input: {
     consume
   );
   const sidecar = readCurrentSidecar(input.sourceDbPath, current.integrity);
-  const snapshotDbPath = join(input.targetRoot, basename(input.sourceDbPath));
-  copyRegularFileNoFollow({
-    sourcePath: input.sourceDbPath,
-    targetPath: snapshotDbPath,
-    expectedSha256: current.integrity.db_sha256
-  });
-  assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(snapshotDbPath);
-  writeBoundMetadata(
-    snapshotDbPath,
-    current.bytes,
-    sidecar.bytes,
-    authority.bytes
-  );
+  // Seal in place: working alaya.db is the one copy per arm. Hash mismatch
+  // on restore is the TOCTOU guard; a third 9GB duplicate cannot invert it.
+  void input.targetRoot;
+  const actualSha = hashRegularFileNoFollow(input.sourceDbPath);
+  if (actualSha !== current.integrity.db_sha256) {
+    throw new Error("legacy snapshot DB SHA-256 mismatch");
+  }
+  assertCurrentSnapshotVerifiedAssertionReceiptIntegrity(input.sourceDbPath);
   return {
-    snapshotDbPath,
+    snapshotDbPath: input.sourceDbPath,
     manifest: current.manifest,
     sidecar: sidecar.value,
     extractionAuthority: authority.value,
@@ -158,20 +152,6 @@ function readCurrentSidecar(
     RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION
   );
   return { bytes: sidecarBytes, value: sidecar };
-}
-
-function writeBoundMetadata(
-  snapshotDbPath: string,
-  manifestBytes: Buffer,
-  sidecarBytes: Buffer,
-  authorityBytes: Buffer
-): void {
-  writeFileSync(snapshotManifestPath(snapshotDbPath), manifestBytes, { flag: "wx", mode: 0o400 });
-  writeFileSync(snapshotSidecarPath(snapshotDbPath), sidecarBytes, { flag: "wx", mode: 0o400 });
-  writeFileSync(snapshotExtractionAuthorityPath(snapshotDbPath), authorityBytes, {
-    flag: "wx",
-    mode: 0o400
-  });
 }
 
 function requireIntegrity(manifest: LongMemEvalSnapshotManifest) {

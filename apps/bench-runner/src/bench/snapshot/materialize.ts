@@ -13,6 +13,7 @@ import {
   type SeedExtractionPath
 } from "@do-soul/alaya-eval";
 import {
+  closeCachedDatabase,
   getCurrentSchemaSummary,
   initDatabase
 } from "@do-soul/alaya-storage";
@@ -298,6 +299,7 @@ export function restoreSnapshotToDataDir(input: {
   }
   mkdirSync(input.dataDirRoot, { recursive: true });
   const workingDbPath = join(input.dataDirRoot, BENCH_DAEMON_DB_FILENAME);
+  closeCachedDatabase(workingDbPath);
   // Clear any stale WAL/SHM from a previous restore so the daemon opens a clean
   // copy (a leftover -wal could re-introduce another run's appended frames).
   for (const suffix of ["", "-wal", "-shm"]) {

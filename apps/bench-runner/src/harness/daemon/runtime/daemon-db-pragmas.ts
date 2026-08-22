@@ -110,13 +110,14 @@ export function applyBenchFastPragmaIfRequested(
   // daemon runtime is already using. The pragmas are session-scoped except
   // journal_mode (file-scoped + persisted) — re-issuing the production set
   // here is a no-op and documents the bench layering.
-  const db = initDatabase({ filename: join(dataDir, "alaya.db") });
+  const workingDbPath = join(dataDir, "alaya.db");
+  const db = initDatabase({ filename: workingDbPath });
   const conn = db.connection;
   conn.pragma("journal_mode = WAL");
   conn.pragma("synchronous = NORMAL");
   const tempStore = resolveBenchTempStore();
   conn.pragma(`temp_store = ${tempStore}`);
-  const fileBytes = readDbFileBytes(db.filename);
+  const fileBytes = readDbFileBytes(workingDbPath);
   const cacheKib = resolveBenchCacheSizeKib(fileBytes);
   conn.pragma(`cache_size = -${cacheKib}`);
   const mmapSize = resolveBenchMmapSize(fileBytes);

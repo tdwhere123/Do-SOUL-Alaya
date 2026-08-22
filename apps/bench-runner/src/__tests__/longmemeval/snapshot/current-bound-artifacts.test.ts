@@ -35,32 +35,33 @@ afterEach(async () => {
 });
 
 describe("current snapshot immutable artifact binding", () => {
-  it("keeps consuming the owned copies after every source path is replaced", async () => {
+  it("seals the source DB in place instead of duplicating it", async () => {
     const fixture = await snapshotFixture();
-    const original = await Promise.all([
-      readFile(fixture.snapshotDbPath),
-      readFile(`${fixture.snapshotDbPath}.manifest.json`),
-      readFile(`${fixture.snapshotDbPath}.sidecar.json`),
-      readFile(`${fixture.snapshotDbPath}.extraction-authority.json`)
-    ]);
+    const original = await readFile(fixture.snapshotDbPath);
 
     const bound = bindCurrentSnapshotArtifacts({
       sourceDbPath: fixture.snapshotDbPath,
       targetRoot: fixture.targetRoot
     });
-    await Promise.all([
-      writeFile(fixture.snapshotDbPath, "replacement DB", "utf8"),
-      writeFile(`${fixture.snapshotDbPath}.manifest.json`, "{}", "utf8"),
-      writeFile(`${fixture.snapshotDbPath}.sidecar.json`, "{}", "utf8"),
-      writeFile(`${fixture.snapshotDbPath}.extraction-authority.json`, "{}", "utf8")
-    ]);
 
-    expect(await readFile(bound.snapshotDbPath)).toEqual(original[0]);
-    expect(await readFile(`${bound.snapshotDbPath}.manifest.json`)).toEqual(original[1]);
-    expect(await readFile(`${bound.snapshotDbPath}.sidecar.json`)).toEqual(original[2]);
-    expect(await readFile(`${bound.snapshotDbPath}.extraction-authority.json`))
-      .toEqual(original[3]);
-    expect(bound.manifestSha256).toBe(sha256(original[1]!));
+    expect(bound.snapshotDbPath).toBe(fixture.snapshotDbPath);
+    expect(await readFile(bound.snapshotDbPath)).toEqual(original);
+    expect(bound.manifestSha256).toBe(
+      sha256(await readFile(`${fixture.snapshotDbPath}.manifest.json`))
+    );
+  }, 20_000);
+
+  it("rejects an in-place DB mutation against the sealed digest", async () => {
+    const fixture = await snapshotFixture();
+    bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    });
+    await writeFile(fixture.snapshotDbPath, "replacement DB", "utf8");
+    expect(() => bindCurrentSnapshotArtifacts({
+      sourceDbPath: fixture.snapshotDbPath,
+      targetRoot: fixture.targetRoot
+    })).toThrow(/SHA-256 mismatch/u);
   }, 20_000);
 
   it("rejects a symlinked current snapshot DB instead of following it", async () => {

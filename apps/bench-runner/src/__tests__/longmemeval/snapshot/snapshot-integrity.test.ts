@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildSnapshotArtifactIntegrity,
+  sha256File,
   verifySnapshotArtifactIntegrity
 } from "../../../bench/snapshot/integrity.js";
+import { peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
 
 const roots: string[] = [];
 
@@ -31,5 +33,20 @@ describe("snapshot artifact integrity", () => {
     await expect(verifySnapshotArtifactIntegrity(dbPath, integrity)).rejects.toThrow(
       /sidecar SHA-256 mismatch/u
     );
+  });
+
+  it("remembers a sealed digest until size or mtime changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "snapshot-integrity-cache-"));
+    roots.push(root);
+    const dbPath = join(root, "snapshot.db");
+    await writeFile(dbPath, "db-v1", "utf8");
+
+    const first = await sha256File(dbPath);
+    expect(peekCachedFileSha256(dbPath)).toBe(first);
+    expect(await sha256File(dbPath)).toBe(first);
+
+    await writeFile(dbPath, "db-v2-longer", "utf8");
+    expect(peekCachedFileSha256(dbPath)).toBeUndefined();
+    expect(await sha256File(dbPath)).not.toBe(first);
   });
 });

@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildStageAttributionTables } from "./build-tables.js";
 import { loadRecallEvalQuestionDiagnostics } from "./load-recall-eval-diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../schema/diagnostics-types.js";
 import type { StageAttributionTables } from "./types.js";
 
 export async function buildStageAttributionFromRecallEvalGzip(input: {
@@ -21,6 +22,7 @@ export async function writeStageAttributionTables(input: {
   readonly cells: readonly {
     readonly cell: "A" | "B";
     readonly diagnosticsPath: string;
+    readonly questions?: readonly LongMemEvalQuestionDiagnostic[];
   }[];
 }): Promise<Readonly<Record<"A" | "B", StageAttributionTables>>> {
   await mkdir(input.outDir, { recursive: true });
@@ -28,10 +30,16 @@ export async function writeStageAttributionTables(input: {
   const summaryByCell: Record<string, StageAttributionTables["summary"]> = {};
 
   for (const cell of input.cells) {
-    const tables = await buildStageAttributionFromRecallEvalGzip({
-      cell: cell.cell,
-      diagnosticsPath: cell.diagnosticsPath
-    });
+    const tables = cell.questions === undefined
+      ? await buildStageAttributionFromRecallEvalGzip({
+        cell: cell.cell,
+        diagnosticsPath: cell.diagnosticsPath
+      })
+      : buildStageAttributionTables({
+        cell: cell.cell,
+        sourceDiagnostics: cell.diagnosticsPath,
+        questions: cell.questions
+      });
     result[cell.cell] = tables;
     summaryByCell[cell.cell] = tables.summary;
     const outPath = path.join(

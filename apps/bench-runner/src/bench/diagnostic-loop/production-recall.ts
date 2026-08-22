@@ -206,19 +206,23 @@ async function buildProductionMissLedger(
   controlDiag: string,
   treatmentDiag: string
 ) {
+  const [controlQuestions, treatmentQuestions] = await Promise.all([
+    loadRecallEvalQuestionDiagnostics(controlDiag),
+    loadRecallEvalQuestionDiagnostics(treatmentDiag)
+  ]);
   const tables = await writeStageAttributionTables({
     outDir,
     cells: [
-      { cell: "A", diagnosticsPath: controlDiag },
-      { cell: "B", diagnosticsPath: treatmentDiag }
+      { cell: "A", diagnosticsPath: controlDiag, questions: controlQuestions },
+      { cell: "B", diagnosticsPath: treatmentDiag, questions: treatmentQuestions }
     ]
   });
   const comparison = compareF0F2VsCachedF3({
     control: tables.A.questions,
     treatment: tables.B.questions,
     treatmentExposure: buildTreatmentExposureReceipts({
-      control: await loadRecallEvalQuestionDiagnostics(controlDiag),
-      treatment: await loadRecallEvalQuestionDiagnostics(treatmentDiag),
+      control: controlQuestions,
+      treatment: treatmentQuestions,
       controlStages: tables.A.questions,
       treatmentStages: tables.B.questions
     })
