@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   RecallEvalPagerChildExitedError,
   createForkRecallEvalPagerHost,
-  createRecallEvalPagerSession
+  createRecallEvalPagerSession,
+  type RecallEvalPagerIpcHost
 } from "../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js";
 
 const stubChildPath = fileURLToPath(
@@ -27,16 +28,45 @@ describe("recall-eval pager IPC isolation", () => {
     expect(parentMapsAlayaDb()).toBe(false);
   });
 
+  it("spawns a fresh child for each question instead of reusing one address space", async () => {
+    const counted = countingHost();
+    const session = openSession(undefined, counted.host);
+    await session.open({});
+    expect(counted.pids).toHaveLength(1);
+    await session.recall({ questionId: "q1" });
+    await session.recall({ questionId: "q2" });
+    expect(counted.pids).toHaveLength(2);
+    expect(counted.pids[1]).not.toBe(counted.pids[0]);
+  });
+
   it("fail-closes when the child exits mid-request", async () => {
-    const session = openSession();
+    const counted = countingHost();
+    const session = openSession(undefined, counted.host);
     await session.open({});
     await expect(session.recall({ questionId: "__crash__" })).rejects.toMatchObject({
       name: "RecallEvalPagerChildExitedError",
       code: 7
     });
+    const spawnsAfterCrash = counted.pids.length;
     await expect(session.recall({ questionId: "ok" })).rejects.toBeInstanceOf(
       RecallEvalPagerChildExitedError
     );
+    expect(counted.pids).toHaveLength(spawnsAfterCrash);
+  });
+
+  it("fail-closes when spawn throws and does not retry", async () => {
+    let spawns = 0;
+    const session = openSession(undefined, {
+      spawn() {
+        spawns += 1;
+        throw new Error("synthetic spawn failure");
+      }
+    });
+    await expect(session.open({})).rejects.toBeInstanceOf(RecallEvalPagerChildExitedError);
+    await expect(session.recall({ questionId: "ok" })).rejects.toBeInstanceOf(
+      RecallEvalPagerChildExitedError
+    );
+    expect(spawns).toBe(1);
   });
 
   it("fail-closes when the child never replies", async () => {
@@ -61,13 +91,31 @@ describe("recall-eval pager IPC isolation", () => {
     expect(pack.questionId).toBe("ok");
   });
 
-  function openSession(timeoutMs?: number) {
+  function openSession(timeoutMs?: number, host?: RecallEvalPagerIpcHost) {
     const session = createRecallEvalPagerSession({
-      host: createForkRecallEvalPagerHost(stubChildPath),
+      host: host ?? createForkRecallEvalPagerHost(stubChildPath),
       ...(timeoutMs === undefined ? {} : { timeoutMs })
     });
     sessions.push(session);
     return session;
+  }
+
+  function countingHost(): {
+    readonly pids: number[];
+    readonly host: RecallEvalPagerIpcHost;
+  } {
+    const inner = createForkRecallEvalPagerHost(stubChildPath);
+    const pids: number[] = [];
+    return {
+      pids,
+      host: {
+        spawn() {
+          const child = inner.spawn();
+          pids.push(child.pid ?? -1);
+          return child;
+        }
+      }
+    };
   }
 });
 

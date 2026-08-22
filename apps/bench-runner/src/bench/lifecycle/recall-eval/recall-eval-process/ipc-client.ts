@@ -89,6 +89,10 @@ export class RecallEvalPagerIpcSession {
   private host: RecallEvalPagerIpcHost | undefined;
   private child: RecallEvalPagerIpcProcess | null = null;
   private nextId = 0;
+  private childEpoch = 0;
+  private recycling = false;
+  private openPayload: unknown | undefined;
+  private selectionArtifact: unknown = null;
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: RecallEvalPagerChildExitedError | null = null;
   private mapsHint: RecallEvalPagerMapsHint | null = null;
@@ -115,9 +119,9 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<RecallEvalPagerIpcSuccess> {
+    this.openPayload = payload;
     const response = await this.request("open", { open: payload }, timeoutMs);
-    this.childPid = response.pid ?? this.child?.pid ?? this.childPid;
-    this.mapsHint = response.mapsHint ?? this.mapsHint;
+    this.recordIdentity(response);
     return response;
   }
 
@@ -125,12 +129,13 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
+    await this.ensureOpened(timeoutMs);
     const response = await this.request("recall", { recall: payload }, timeoutMs);
-    this.childPid = response.pid ?? this.child?.pid ?? this.childPid;
-    this.mapsHint = response.mapsHint ?? this.mapsHint;
+    this.recordIdentity(response);
     if (response.pack === undefined || !hasRecallPack(response.pack)) {
       throw new Error("recall-eval pager child returned an empty pack.");
     }
+    await this.recycleChild(timeoutMs);
     return response.pack;
   }
 
@@ -138,15 +143,54 @@ export class RecallEvalPagerIpcSession {
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
     const child = this.child;
-    if (child === null) return null;
+    if (child === null) return this.selectionArtifact;
     try {
-      const response = await this.request("close", {}, timeoutMs);
-      return response.selectionArtifact ?? null;
+      await this.closeAttachedChild(timeoutMs);
+      return this.selectionArtifact;
     } catch (error) {
       this.exitError ??= toPagerExitError(error, this.childPid, this.mapsHint);
       throw this.exitError;
     } finally {
-      this.killChild(child);
+      this.reapChild(child, true);
+    }
+  }
+
+  private async ensureOpened(timeoutMs: number): Promise<void> {
+    if (this.exitError !== null) throw this.exitError;
+    if (this.child !== null) return;
+    if (this.openPayload === undefined) {
+      throw new Error("recall-eval pager session is not open");
+    }
+    const response = await this.request("open", { open: this.openPayload }, timeoutMs);
+    this.recordIdentity(response);
+  }
+
+  private async recycleChild(timeoutMs: number): Promise<void> {
+    const child = this.child;
+    if (child === null) return;
+    // Long-lived pager SIGBUS'd after Q1; Q2 must not inherit that address space.
+    this.recycling = true;
+    try {
+      await this.closeAttachedChild(timeoutMs);
+    } finally {
+      this.recycling = false;
+      this.reapChild(child, this.exitError !== null);
+    }
+  }
+
+  private async closeAttachedChild(timeoutMs: number): Promise<void> {
+    try {
+      const response = await this.request("close", {}, timeoutMs);
+      this.selectionArtifact = response.selectionArtifact ?? this.selectionArtifact;
+    } catch (error) {
+      if (this.exitError !== null) throw this.exitError;
+      if (
+        error instanceof RecallEvalPagerChildExitedError &&
+        isCleanPagerExit(error.code, error.exitSignal)
+      ) {
+        return;
+      }
+      throw error;
     }
   }
 
@@ -168,7 +212,7 @@ export class RecallEvalPagerIpcSession {
         this.pending, child, message, timeoutMs
       );
     } catch (error) {
-      if (isPagerTimeoutError(error)) this.killChild(child);
+      if (isPagerTimeoutError(error)) this.reapChild(child, true);
       throw error;
     }
   }
@@ -178,14 +222,33 @@ export class RecallEvalPagerIpcSession {
     if (this.child !== null) return this.child;
     const host = this.host ?? createForkRecallEvalPagerHost();
     this.host = host;
-    const child = host.spawn();
+    const child = this.spawnHost(host);
+    const epoch = this.childEpoch;
     this.child = child;
     this.childPid = child.pid ?? this.childPid;
     child.on("message", (message) => this.onMessage(message));
-    child.on("exit", (code, exitSignal) => this.onExit(code, exitSignal));
+    child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
     child.on("error", (error) => this.onSpawnError(error));
     child.unref?.();
     return child;
+  }
+
+  private spawnHost(host: RecallEvalPagerIpcHost): RecallEvalPagerIpcProcess {
+    try {
+      const child = host.spawn();
+      process.stdout.write(
+        `[recall-eval pager] spawn pid=${child.pid ?? "unknown"}\n`
+      );
+      return child;
+    } catch (error) {
+      this.onSpawnError(error instanceof Error ? error : new Error(String(error)));
+      throw this.exitError ?? error;
+    }
+  }
+
+  private recordIdentity(response: RecallEvalPagerIpcSuccess): void {
+    this.childPid = response.pid ?? this.child?.pid ?? this.childPid;
+    this.mapsHint = response.mapsHint ?? this.mapsHint;
   }
 
   private onMessage(message: unknown): void {
@@ -201,8 +264,17 @@ export class RecallEvalPagerIpcSession {
     pending.resolve(message);
   }
 
-  private onExit(code: number | null, exitSignal: NodeJS.Signals | null): void {
+  private onExit(
+    epoch: number,
+    code: number | null,
+    exitSignal: NodeJS.Signals | null
+  ): void {
+    if (epoch !== this.childEpoch) return;
     this.child = null;
+    if (this.recycling && isCleanPagerExit(code, exitSignal)) {
+      resolvePendingAsSuccess(this.pending);
+      return;
+    }
     this.exitError = new RecallEvalPagerChildExitedError({
       code,
       exitSignal,
@@ -224,14 +296,17 @@ export class RecallEvalPagerIpcSession {
     rejectPendingIpc(this.pending, this.exitError);
   }
 
-  private killChild(child: RecallEvalPagerIpcProcess): void {
-    this.exitError ??= new RecallEvalPagerChildExitedError({
-      code: 0,
-      exitSignal: "SIGTERM",
-      childPid: this.childPid,
-      mapsHint: this.mapsHint
-    });
-    this.child = null;
+  private reapChild(child: RecallEvalPagerIpcProcess, failClosed: boolean): void {
+    if (failClosed) {
+      this.exitError ??= new RecallEvalPagerChildExitedError({
+        code: 0,
+        exitSignal: "SIGTERM",
+        childPid: this.childPid,
+        mapsHint: this.mapsHint
+      });
+    }
+    this.childEpoch += 1;
+    if (this.child === child) this.child = null;
     try {
       child.kill("SIGTERM");
     } catch {
@@ -313,6 +388,24 @@ function rejectPendingIpc(
     current.clearAbort();
     current.reject(error);
   }
+}
+
+function resolvePendingAsSuccess(
+  pending: Map<number, PendingIpcRequest>
+): void {
+  const waiting = [...pending.entries()];
+  pending.clear();
+  for (const [id, current] of waiting) {
+    current.clearAbort();
+    current.resolve({ id, ok: true });
+  }
+}
+
+function isCleanPagerExit(
+  code: number | null,
+  signal: NodeJS.Signals | null
+): boolean {
+  return code === 0 || signal === "SIGTERM";
 }
 
 function isPagerTimeoutError(error: unknown): boolean {
