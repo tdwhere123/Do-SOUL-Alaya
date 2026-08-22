@@ -202,11 +202,15 @@ function spawnLocalOnnxEmbeddingChild(scriptPath: string): ChildProcess {
   const env = { ...process.env };
   // Inherited inspect/loader flags would pull the pager's tooling into ORT.
   delete env.NODE_OPTIONS;
-  return fork(scriptPath, [], {
+  const child = fork(scriptPath, [], {
     execArgv: [],
     stdio: ["ignore", "inherit", "inherit", "ipc"],
     env
   });
+  // Process-handle unref is not enough: the IPC pipe still refs the event loop.
+  child.unref();
+  child.channel?.unref();
+  return child;
 }
 
 function waitForLocalOnnxIpcResponse(
