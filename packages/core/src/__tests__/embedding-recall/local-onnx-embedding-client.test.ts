@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -404,17 +404,24 @@ const modelPresent = existsSync(
 describe.runIf(modelPresent)("LocalOnnxEmbeddingClient (real model smoke)", () => {
   it("loads the ONNX model offline and emits normalized 384-dim vectors", async () => {
     const client = new LocalOnnxEmbeddingClient({ cacheDir: modelCacheDir });
-    const vectors = await client.embedTexts(["The cat sat on the mat", "你好世界"], {
-      timeoutMs: 120_000
-    });
-    expect(vectors).toHaveLength(2);
-    for (const vector of vectors) {
-      expect(vector.length).toBe(LOCAL_ONNX_EMBEDDING_DIMENSIONS);
-      let sumSquares = 0;
-      for (const value of vector) {
-        sumSquares += value * value;
+    try {
+      const vectors = await client.embedTexts(["The cat sat on the mat", "你好世界"], {
+        timeoutMs: 120_000
+      });
+      expect(vectors).toHaveLength(2);
+      for (const vector of vectors) {
+        expect(vector.length).toBe(LOCAL_ONNX_EMBEDDING_DIMENSIONS);
+        let sumSquares = 0;
+        for (const value of vector) {
+          sumSquares += value * value;
+        }
+        expect(Math.sqrt(sumSquares)).toBeCloseTo(1, 1);
       }
-      expect(Math.sqrt(sumSquares)).toBeCloseTo(1, 1);
+      if (process.platform === "linux") {
+        expect(readFileSync("/proc/self/maps", "utf8")).not.toMatch(/onnxruntime/i);
+      }
+    } finally {
+      await client.close();
     }
   }, 180_000);
 });

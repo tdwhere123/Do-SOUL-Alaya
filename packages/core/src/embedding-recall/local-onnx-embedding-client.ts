@@ -1,7 +1,16 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
 import { withLocalOnnxHostSingleFlight } from "./local-onnx-host-single-flight.js";
+import {
+  LocalOnnxEmbeddingIpcSession,
+  isLocalOnnxEmbeddingChildExitedError,
+  type LocalOnnxEmbeddingIpcHost
+} from "./local-onnx-process/ipc-client.js";
+import { LOCAL_ONNX_EMBEDDING_DIMENSIONS } from "./local-onnx-process/protocol.js";
 import os from "node:os";
 import path from "node:path";
+
+export type { LocalOnnxEmbeddingIpcHost };
+export { LOCAL_ONNX_EMBEDDING_DIMENSIONS };
 
 /**
  * Feature-extraction pipeline contract satisfied by the
@@ -61,10 +70,16 @@ export interface LocalOnnxEmbeddingClientOptions {
   readonly now?: () => number;
   // Cosine-space schema version (default 1); daemon sets D2Q_SCHEMA_VERSION when doc2query is on.
   readonly schemaVersion?: number;
+  /**
+   * `child_process` (default) keeps onnxruntime-node out of the SQLite pager
+   * process. `in_process` is only for the ORT child and pipelineLoader tests.
+   */
+  readonly execution?: "in_process" | "child_process";
+  /** Test seam: replace the forked ORT worker. */
+  readonly ipcHost?: LocalOnnxEmbeddingIpcHost;
 }
 
 export const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
-export const LOCAL_ONNX_EMBEDDING_DIMENSIONS = 384;
 // Consecutive load failures before the provider declares itself unavailable.
 // A small window so a single transient cold-cache fault does not flip the
 // dynamic gate; a sustained failure run takes the provider offline.
@@ -106,6 +121,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   private readonly cacheDir: string | null;
   private readonly pipelineLoader: LocalOnnxPipelineLoader;
   private readonly now: () => number;
+  private readonly isolated: LocalOnnxEmbeddingIpcSession | null;
   private extractorPromise: Promise<LocalOnnxFeatureExtractor> | null = null;
   // Starts `true` (configured) and only flips `false` after sustained load
   // failures, so the daemon's startup-time embedding-policy decorator is not
@@ -124,10 +140,28 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     this.pipelineLoader = options.pipelineLoader ?? ((modelId, cacheDir, loaderOptions) =>
       defaultLocalOnnxPipelineLoader(modelId, cacheDir, loaderOptions, importer));
     this.now = options.now ?? (() => Date.now());
+    this.isolated = shouldIsolateLocalOnnx(options)
+      ? new LocalOnnxEmbeddingIpcSession({
+          modelId: this.modelId,
+          cacheDir: this.cacheDir,
+          schemaVersion: this.schemaVersion,
+          ...(options.ipcHost === undefined ? {} : { host: options.ipcHost })
+        })
+      : null;
   }
 
   public warmup(): Promise<void> {
+    if (this.isolated !== null) {
+      return this.isolated.warmup(new AbortController().signal).catch((error: unknown) => {
+        this.noteIsolatedFailure(error);
+        throw error;
+      });
+    }
     return this.loadExtractor().then(() => undefined);
+  }
+
+  public async close(): Promise<void> {
+    await this.isolated?.close();
   }
 
   public get isAvailable(): boolean {
@@ -152,7 +186,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     }
     const deadline = createEmbeddingDeadline(options.timeoutMs, options.signal);
     const occupancy = withLocalOnnxHostSingleFlight(
-      () => this.embedUnderLease(texts, deadline.signal),
+      () => this.embedUnderLease(texts, deadline.signal, options.timeoutMs),
       {
         signal: deadline.signal,
         timeoutMs: options.timeoutMs > 0 ? options.timeoutMs : undefined
@@ -167,14 +201,33 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
 
   private async embedUnderLease(
     texts: readonly string[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    timeoutMs: number
   ): Promise<readonly Float32Array[]> {
+    if (this.isolated !== null) {
+      try {
+        const vectors = await this.isolated.embedTexts(texts, signal, timeoutMs);
+        this.currentlyAvailable = true;
+        this.consecutiveLoadFailures = 0;
+        return vectors;
+      } catch (error) {
+        this.noteIsolatedFailure(error);
+        throw error;
+      }
+    }
     const extractor = await this.loadExtractor();
     throwIfEmbeddingCancelled(signal);
     const output = await Promise.resolve().then(() =>
       extractor([...texts], { pooling: "mean", normalize: true })
     );
     return this.readVectors(output, texts.length);
+  }
+
+  private noteIsolatedFailure(error: unknown): void {
+    if (!isLocalOnnxEmbeddingChildExitedError(error)) return;
+    this.currentlyAvailable = false;
+    this.consecutiveLoadFailures = LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD;
+    this.nextLoadAttemptAt = this.now() + LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS;
   }
 
   private readVectors(
@@ -428,4 +481,12 @@ function readPositiveThreadCount(raw: string | undefined): number | null {
     return null;
   }
   return Math.min(parsed, 64);
+}
+
+function shouldIsolateLocalOnnx(options: LocalOnnxEmbeddingClientOptions): boolean {
+  return (
+    options.pipelineLoader === undefined &&
+    options.transformersImporter === undefined &&
+    options.execution !== "in_process"
+  );
 }
