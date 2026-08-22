@@ -13,6 +13,7 @@ export {
   EMBEDDING_OVERLAY_BIND_FILENAME,
   bindEmbeddingOverlay,
   bindEmbeddingOverlayIfPresent,
+  detachEmbeddingOverlay,
   embeddingOverlayBindPath,
   hasEmbeddingOverlayBind,
   writeEmbeddingOverlayBind,

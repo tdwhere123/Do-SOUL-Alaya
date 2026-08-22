@@ -1,7 +1,8 @@
-import { chmodSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   bindEmbeddingOverlay,
+  detachEmbeddingOverlay,
   embeddingOverlayBindPath,
   initDatabase,
   readSchemaMigrationLedger,
@@ -39,7 +40,8 @@ export async function applyEmbeddingCacheOverlay(input: {
     targetPath: boundPath,
     expectedSha256: loaded.binding.overlay_sha256
   });
-  chmodSync(boundPath, 0o444);
+  // Do not chmod the overlay 444: attaching a read-only file makes SQLite
+  // reject writes on the live working copy (EventLog / WAL).
   try {
     bindCopiedOverlay(input.restoredDbPath, boundPath, loaded.binding);
     return loaded.binding;
@@ -72,6 +74,7 @@ function bindCopiedOverlay(
       overlayFilename: basename(overlayPath),
       overlaySha256: binding.overlay_sha256
     });
+    detachEmbeddingOverlay(database.connection);
   } finally {
     database.close();
   }

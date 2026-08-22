@@ -78,6 +78,19 @@ export function bindEmbeddingOverlay(
   ensureOverlayViews(connection);
 }
 
+export function detachEmbeddingOverlay(connection: SqliteConnection): void {
+  if (!isOverlayAttached(connection)) return;
+  connection.exec(`
+    DROP VIEW IF EXISTS memory_embeddings;
+    DROP VIEW IF EXISTS evidence_recall_embeddings;
+  `);
+  try {
+    connection.exec(`DETACH DATABASE ${EMBEDDING_OVERLAY_ALIAS}`);
+  } catch {
+    // Preserve the caller failure; detach is best-effort on the way out.
+  }
+}
+
 export function bindEmbeddingOverlayIfPresent(
   connection: SqliteConnection,
   databaseFilename: string

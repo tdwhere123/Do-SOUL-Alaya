@@ -93,6 +93,7 @@ describe("source-bound embedding cache overlay", () => {
     expect(countRows(target, "evidence_recall_embeddings")).toBe(1);
     const loaded = await new SqliteMemoryEmbeddingRepo(target).findByObjectId(MEMORY_ID);
     expect(loaded?.embedding).toEqual(new Float32Array([1, 2]));
+    expect(() => target.connection.exec("CREATE TEMP TABLE overlay_write_probe(x INTEGER)")).not.toThrow();
     expect(binding).toMatchObject({
       receipt_sha256: written.receipt_sha256,
       overlay_sha256: written.overlay_sha256,
