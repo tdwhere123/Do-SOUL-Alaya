@@ -7,6 +7,9 @@ vi.mock("@do-soul/alaya-core", async (importOriginal) => ({
   LocalOnnxEmbeddingClient: class {
     readonly modelId = "test-local-onnx";
     readonly embedTexts = embedTexts;
+    async close() {
+      return undefined;
+    }
   }
 }));
 

@@ -19,6 +19,7 @@ export interface LocalOnnxEmbeddingIpcProcess {
   ): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
   kill(signal?: NodeJS.Signals): boolean;
+  unref?(): void;
 }
 
 export interface LocalOnnxEmbeddingIpcHost {
@@ -148,6 +149,8 @@ export class LocalOnnxEmbeddingIpcSession {
     child.on("message", (message) => this.onMessage(message));
     child.on("exit", (code, exitSignal) => this.onExit(code, exitSignal));
     child.on("error", (error) => this.onSpawnError(error));
+    // IPC must not pin the pager/daemon event loop after recall finishes.
+    child.unref?.();
     return child;
   }
 

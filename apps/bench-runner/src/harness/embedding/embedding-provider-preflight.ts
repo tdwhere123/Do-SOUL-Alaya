@@ -67,6 +67,8 @@ async function preflightLocalOnnxProvider(
         `embedding provider preflight failed: provider=local_onnx ${detail}; ` +
         "run 'node scripts/fetch-local-embedding-model.mjs' to pre-fetch model weights"
     };
+  } finally {
+    await client.close();
   }
 }
 
