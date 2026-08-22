@@ -59,6 +59,23 @@ describe("diagnostic-loop run-state exposure policy", () => {
     expect(() => readRunRecord(path)).toThrow(/invalid diagnostic-loop run record/iu);
   });
 
+  it("keeps embedding cache overlay off the sealed run identity", async () => {
+    const workRoot = await mkdtemp(join(tmpdir(), "run-state-overlay-"));
+    roots.push(workRoot);
+    const identity = await resolveDiagnosticLoopIdentity(loopRequest({
+      embeddingCacheOverlayReceiptPath: "/tmp/overlay-receipt.json"
+    }));
+    expect(identity.request).not.toHaveProperty("embeddingCacheOverlayReceiptPath");
+    persistRunRecord({
+      workRoot,
+      identity,
+      mode: "cache-only",
+      argv: ["--embedding-cache-overlay", "/tmp/overlay-receipt.json"]
+    });
+    expect(readRunRecord(runRecordPath(workRoot)).identity.request)
+      .not.toHaveProperty("embeddingCacheOverlayReceiptPath");
+  });
+
   it("rejects archived query-cache schema 1/2 as current run-state authority", async () => {
     const workRoot = await mkdtemp(join(tmpdir(), "run-state-query-cache-"));
     roots.push(workRoot);

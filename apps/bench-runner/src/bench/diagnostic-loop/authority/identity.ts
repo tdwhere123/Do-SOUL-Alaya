@@ -114,16 +114,24 @@ export async function resolveDiagnosticLoopIdentity(
   const query = request.treatmentFactorCachePath === undefined
     ? undefined
     : await resolveQueryFactorCacheIdentity(request);
+  const sealedRequest = sealedDiagnosticLoopRequest(request);
   return {
     schema_version: 3,
     canonical_mode: "cache_only",
     request_identity_digest: diagnosticLoopIdentityDigest(request),
-    request,
+    request: sealedRequest,
     treatment_exposure_policy: CACHED_F3_EXPOSURE_POLICY,
     ...(extraction === undefined ? {} : { extraction_cache: extraction }),
     ...(snapshot === undefined ? {} : { snapshot }),
     ...(query === undefined ? {} : { query_factor_cache: query })
   };
+}
+
+function sealedDiagnosticLoopRequest(
+  request: DiagnosticLoopRequest
+): DiagnosticLoopRequest {
+  const { embeddingCacheOverlayReceiptPath: _overlay, ...sealed } = request;
+  return sealed;
 }
 
 export function resolvedDiagnosticLoopIdentityDigest(
