@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   selectionDispose: vi.fn(),
   shutdown: vi.fn(),
   writeEntry: vi.fn(),
-  createSpool: vi.fn()
+  createSpool: vi.fn(),
+  createPager: vi.fn()
 }));
 
 const spool = { append: mocks.append, dispose: mocks.dispose, rootPath: "/tmp/spool" };
@@ -38,6 +39,18 @@ vi.mock("@do-soul/alaya-eval", () => ({
 vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: vi.fn(async () => ({ shutdown: mocks.shutdown }))
 }));
+vi.mock(
+  "../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js")
+    >();
+    return {
+      ...actual,
+      createRecallEvalPagerSession: mocks.createPager
+    };
+  }
+);
 vi.mock("../../../harness/recall/recall-weight-overrides.js", () => ({
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV: "ALAYA_RECALL_WEIGHT_OVERRIDES",
   formatBenchRecallWeightOverrides: vi.fn(),
@@ -306,6 +319,25 @@ function configureRuntimeHarness(): void {
     return compact(result);
   });
   mocks.question.mockResolvedValue(fullQuestion());
+  mocks.createPager.mockImplementation(() => ({
+    open: async () => ({
+      ok: true,
+      pid: 1,
+      mapsHint: {
+        pid: 1,
+        comm: "stub",
+        alaya_db_mappings: 0,
+        onnxruntime_mappings: 0
+      }
+    }),
+    recall: async () => {
+      mocks.captureCommitted = true;
+      return mocks.question();
+    },
+    close: async () => null,
+    pid: 1,
+    lastMapsHint: null
+  }));
 }
 
 function configureArchiveHarness(): void {
@@ -368,7 +400,9 @@ function runContext() {
     warmDerivedSnapshot: null,
     selectionBoundarySpool: { dispose: mocks.selectionDispose },
     querySemanticFactorCache: null,
-    memoryProfile: null
+    memoryProfile: null,
+    runtimeAttribution: {},
+    sourceExtractionSystemPromptSha256: undefined
   };
 }
 

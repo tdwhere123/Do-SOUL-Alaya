@@ -7,10 +7,6 @@ import {
   type HistoryLayout
 } from "@do-soul/alaya-eval";
 import {
-  startBenchDaemon,
-  type BenchDaemonHandle
-} from "../../../harness/daemon.js";
-import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
   resolveBenchRecallWeightOverrides
@@ -26,7 +22,6 @@ import {
   renderLifecycleFailure,
   throwLifecycleErrors
 } from "../errors.js";
-import { writeRecallEvalProgress } from "./recall-eval-progress.js";
 import { buildRecallEvalArchiveBundle } from "../../provenance/recall-eval/recall-eval-archive-bundle.js";
 import {
   RecallEvalDiagnosticsSpool
@@ -48,19 +43,11 @@ import {
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
 import { recordedWorktreeIdentityForSlug } from "../../provenance/identity/history-code-slug.js";
 import {
-  captureRecallEvalQuestion,
-  finalizeRecallEvalSelectionBoundarySpool,
   RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
   type RecallEvalSelectionBoundaryArtifact
 } from "./recall-eval-selection-replay.js";
-import { recallEvalOneQuestion } from
-  "./question/recall-eval-question.js";
-import { recallOptionsForQuestion } from "./recall-eval-question-options.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
-import {
-  combineSelectionBoundaryObservers,
-  createCandidateActivationCapture
-} from "./recall-eval-candidate-activation.js";
+import { executeRecallEvalRun } from "./recall-eval-execute.js";
 export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 
 /** Run recall-only scoring against an integrity-checked working snapshot copy. */
@@ -126,11 +113,10 @@ async function executeManagedRecallEval(
   let primaryError: unknown;
   try {
     await context.memoryProfile?.sample({ phase: "snapshot_restored" });
-    const collected = await executeRecallEvalRun(context, diagnosticsSpool);
-    const selectionArtifact =
-      await finalizeRecallEvalSelectionBoundarySpool(context.selectionBoundarySpool);
+    const ran = await executeRecallEvalRun(context, diagnosticsSpool);
     result = await writeRecallEvalArtifacts(
-      context, diagnosticsSpool, collected, selectionArtifact
+      withPagerRebuildReport(context, ran.evidenceProjectionRebuild),
+      diagnosticsSpool, ran.collected, ran.selectionArtifact
     );
   } catch (error) {
     primaryError = error;
@@ -155,93 +141,6 @@ async function executeManagedRecallEval(
     result = appendCompletionFailure(result, "selection_spool_cleanup", selectionError);
   }
   return result;
-}
-
-async function executeRecallEvalRun(
-  context: RecallEvalRunContext,
-  diagnosticsSpool: RecallEvalDiagnosticsSpool
-): Promise<readonly RecallEvalQuestionResult[]> {
-  const daemon = await startBenchDaemon({
-    dataDirRoot: context.dataDirRoot,
-    embeddingMode: context.daemonLaunch.embeddingMode,
-    embeddingProviderKind: context.daemonLaunch.embeddingProviderKind,
-    recallWeightOverrides: context.recallWeightOverrides
-  }, context.daemonLaunch);
-  let collected: readonly RecallEvalQuestionResult[] = [];
-  let primaryError: unknown;
-  try {
-    await context.memoryProfile?.sample({ phase: "daemon_started" });
-    collected = await executeRecallEvalQuestions(context, daemon, diagnosticsSpool);
-  } catch (error) {
-    primaryError = error;
-  }
-  let shutdownError: unknown;
-  try {
-    await daemon.shutdown();
-    await context.memoryProfile?.sample({ phase: "daemon_stopped" });
-  } catch (error) {
-    shutdownError = error;
-  }
-  throwLifecycleErrors("recall-eval daemon lifecycle failed", [primaryError, shutdownError]);
-  return collected;
-}
-
-async function executeRecallEvalQuestions(
-  context: RecallEvalRunContext,
-  daemon: BenchDaemonHandle,
-  diagnosticsSpool: RecallEvalDiagnosticsSpool
-): Promise<readonly RecallEvalQuestionResult[]> {
-  const collected: RecallEvalQuestionResult[] = [];
-  const warmupProfiled = { value: false };
-  for (let i = 0; i < context.window.length; i += 1) {
-    const question = context.window[i];
-    if (question === undefined) continue;
-    const candidateActivation = createCandidateActivationCapture(
-      context.options.captureOpenSemanticFactorCandidateActivations === true
-    );
-    const fullResult = await captureRecallEvalQuestion(
-      context.selectionBoundarySpool, question.questionId,
-      (selectionBoundaryObserver) => recallEvalOneQuestion({
-        daemon, question, turnIndex: i + 1,
-        embeddingMode: context.daemonLaunch.embeddingMode,
-        recallOptions: recallOptionsForQuestion(
-          context,
-          question.question,
-          combineSelectionBoundaryObservers(
-            selectionBoundaryObserver,
-            candidateActivation.observer
-          )
-        ),
-        simulateReport: context.simulateReport,
-        measurement: context.measurementForQuestion?.(question.questionId),
-        ...buildFirstWarmupProfiler(context, warmupProfiled)
-      })
-    );
-    const result = await diagnosticsSpool.append(candidateActivation.attach(fullResult));
-    collected.push(result);
-    await context.memoryProfile?.sample({
-      phase: "question_complete",
-      questionId: question.questionId,
-      questionIndex: i
-    });
-    writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-  }
-  return collected;
-}
-
-function buildFirstWarmupProfiler(
-  context: RecallEvalRunContext,
-  profiled: { value: boolean }
-) {
-  if (profiled.value || context.memoryProfile === null) return {};
-  return {
-    onActualEmbeddingWarmupComplete: async () => {
-      await context.memoryProfile?.sample({
-        phase: "first_embedding_warmup_complete"
-      });
-      profiled.value = true;
-    }
-  };
 }
 
 async function writeRecallEvalArtifacts(
@@ -449,4 +348,18 @@ function buildRecallEvalFileSidecars(
       bytes: selectionArtifact.binding.bytes
     }
   }])];
+}
+
+function withPagerRebuildReport(
+  context: RecallEvalRunContext,
+  evidenceProjectionRebuild: unknown
+): RecallEvalRunContext {
+  if (evidenceProjectionRebuild === null || evidenceProjectionRebuild === undefined) {
+    return context;
+  }
+  return {
+    ...context,
+    derivedEvidenceProjectionRebuild:
+      evidenceProjectionRebuild as RecallEvalRunContext["derivedEvidenceProjectionRebuild"]
+  };
 }

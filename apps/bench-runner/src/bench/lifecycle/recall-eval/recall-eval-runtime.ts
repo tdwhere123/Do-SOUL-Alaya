@@ -33,7 +33,6 @@ import {
   deriveSnapshotAttribution,
   type LongMemEvalSnapshotManifest
 } from "../../snapshot/materialize.js";
-import { prepareRecallEvalRestoredDb } from "../../snapshot/recall-eval/recall-eval-db.js";
 import type { RecallEvalSnapshotBundle } from "../../snapshot/recall-eval/recall-eval-loader.js";
 import type { RecallEvalOptions } from "./recall-eval-contract.js";
 import { readOptionalOnnxThreadCount } from "../../../harness/strict-treatment-config.js";
@@ -46,18 +45,16 @@ import {
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import type { QuerySemanticFactorCacheBinding } from
   "../../query-factors/query-semantic-factor-cache-identity.js";
-import {
-  rebuildEvidenceSearchProjectionsOnWorkingCopy,
-  type EvidenceSearchProjectionRebuildReport
-} from "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import {
   buildWarmDerivedSnapshotBinding,
   readWarmDerivedSnapshotReceipt,
   type WarmDerivedSnapshotBinding,
   type WarmDerivedSnapshotReceipt
 } from "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
-import { applyEmbeddingCacheOverlay } from
-  "../../snapshot/recall-eval/embedding-cache-overlay/importer.js";
+import { readEmbeddingCacheOverlay } from
+  "../../snapshot/recall-eval/embedding-cache-overlay/contract.js";
 import type {
   EmbeddingCacheOverlayBinding,
   EmbeddingCacheOverlayExpectedSourceBinding
@@ -346,19 +343,18 @@ export async function prepareRecallEvalDataRoot(
     ...buildRecallEvalRestoreInput(options, bundle, warmDerivedSnapshot),
     requestedRoot: options.dataDirRoot,
     plannedRoot,
-    validateRestoredDb: async (dbPath) => {
-      evidenceProjectionRebuild = await prepareRecallEvalWorkingDb(
-        dbPath, options, bundle, warmDerivedSnapshot
-      );
+    validateRestoredDb: async () => {
+      // File restore only. SQLite open, overlay ATTACH, and projection rehydrate
+      // belong in the pager child so the orchestrator never maps the working copy.
+      evidenceProjectionRebuild = warmDerivedSnapshot?.rebuildReport ?? null;
       if (options.embeddingCacheOverlayReceiptPath !== undefined) {
         if (embeddingCacheOverlayExpected === undefined) {
           throw new Error("embedding cache overlay runtime binding is missing");
         }
-        embeddingCacheOverlay = await applyEmbeddingCacheOverlay({
+        embeddingCacheOverlay = readEmbeddingCacheOverlay({
           receiptPath: options.embeddingCacheOverlayReceiptPath,
-          restoredDbPath: dbPath,
           expected: embeddingCacheOverlayExpected
-        });
+        }).binding;
       }
     }
   });
@@ -409,36 +405,6 @@ function buildRecallEvalRestoreInput(
     snapshotDbPath: bundle.snapshotDbPath,
     artifactIntegrity: bundle.manifest.artifact_integrity
   };
-}
-
-async function prepareRecallEvalWorkingDb(
-  dbPath: string,
-  options: RecallEvalOptions,
-  bundle: RecallEvalSnapshotBundle,
-  warm: WarmDerivedSnapshotReceipt | null
-): Promise<EvidenceSearchProjectionRebuildReport | null> {
-  prepareRecallEvalRestoredDb({
-    manifest: bundle.manifest,
-    restoredDbPath: dbPath,
-    legacySnapshot: options.legacySnapshot === true,
-    derivedEvidenceProjectionRebuild: options.derivedEvidenceProjectionRebuild === true,
-    ...(warm === null ? {} : { warmDerivedSnapshot: warm })
-  });
-  if (options.derivedEvidenceProjectionRebuild !== true) {
-    return warm?.rebuildReport ?? null;
-  }
-  return rebuildEvidenceSearchProjectionsOnWorkingCopy({
-    workingDbPath: dbPath,
-    ...(options.backfillMissingFactFrameFormations === true
-      ? { backfillMissingFactFrameFormations: true }
-      : {}),
-    ...(options.factFrameRetrofitLedgerPath === undefined
-      ? {}
-      : { factFrameRetrofitLedgerPath: options.factFrameRetrofitLedgerPath }),
-    ...(bundle.sourceExtractionSystemPromptSha256 === undefined
-      ? {}
-      : { sourceExtractionSystemPromptSha256: bundle.sourceExtractionSystemPromptSha256 })
-  });
 }
 
 export function planRecallEvalDataRoot(options: RecallEvalOptions): OwnedTempRoot {

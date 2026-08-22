@@ -46,9 +46,6 @@ import { assertProductDefaultRecallEnvironment } from
   "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
-import {
-  createRecallEvalSelectionBoundarySpool
-} from "./recall-eval-selection-replay.js";
 import type { LongMemEvalSelectionBoundarySpool } from
   "../../selection-replay/selection-boundary-spool.js";
 import type { WarmDerivedSnapshotBinding } from
@@ -67,8 +64,6 @@ import { buildExpectedEmbeddingCacheOverlayBinding } from
   "../../snapshot/recall-eval/embedding-cache-overlay/runtime-binding.js";
 import type { RecallEvalMemoryProfile } from
   "../../measurement/recall-eval-memory-profile.js";
-import { finalizeOwnedTempRoot } from "../owned-temp-root.js";
-import { throwLifecycleErrors } from "../errors.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -95,6 +90,7 @@ export interface RecallEvalRunContext {
   readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
   readonly querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
   readonly memoryProfile: RecallEvalMemoryProfile | null;
+  readonly sourceExtractionSystemPromptSha256: string | undefined;
 }
 
 export async function prepareRecallEvalRunContext(
@@ -228,37 +224,11 @@ async function prepareBoundRecallEvalRunContext(
         ...baseRuntimeAttribution,
         embedding_cache_overlay: dataDir.embeddingCacheOverlay
       });
-  const selectionBoundarySpool = await createSelectionSpoolOrFinalizeDataRoot(
-    ambientEnv, dataDir
-  );
   return buildBoundRecallEvalRunContext({
     options, bundle, window, policyShape, recallOptions, recallWeightOverrides,
-    daemonLaunch, dataDir, runtimeAttribution, selectionBoundarySpool,
+    daemonLaunch, dataDir, runtimeAttribution, selectionBoundarySpool: null,
     querySemanticFactorCache, memoryProfile
   });
-}
-
-async function createSelectionSpoolOrFinalizeDataRoot(
-  ambientEnv: Readonly<Record<string, string | undefined>>,
-  dataDir: Awaited<ReturnType<typeof prepareRecallEvalDataRoot>>
-): Promise<LongMemEvalSelectionBoundarySpool | null> {
-  try {
-    return await createRecallEvalSelectionBoundarySpool(ambientEnv);
-  } catch (primaryError) {
-    let cleanupError: unknown;
-    try {
-      await finalizeOwnedTempRoot(
-        { path: dataDir.path, owned: dataDir.owned }, false
-      );
-    } catch (error) {
-      cleanupError = error;
-    }
-    throwLifecycleErrors(
-      "recall-eval context acquisition failed",
-      [primaryError, cleanupError]
-    );
-    throw new Error("recall-eval context acquisition lost its failure");
-  }
 }
 
 async function prepareRecallEvalAttribution(
@@ -363,7 +333,8 @@ function buildBoundRecallEvalRunContext(input: Readonly<{
     warmDerivedSnapshot: input.dataDir.warmDerivedSnapshot,
     selectionBoundarySpool: input.selectionBoundarySpool,
     querySemanticFactorCache: input.querySemanticFactorCache,
-    memoryProfile: input.memoryProfile
+    memoryProfile: input.memoryProfile,
+    sourceExtractionSystemPromptSha256: input.bundle.sourceExtractionSystemPromptSha256
   };
 }
 

@@ -34,6 +34,8 @@ import { sha256File } from
   "../../../bench/snapshot/integrity.js";
 import { prepareRecallEvalDataRoot } from
   "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
+  "../../../bench/snapshot/recall-eval/recall-eval-working-sqlite.js";
 import type { RecallEvalSnapshotBundle } from
   "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
 
@@ -127,6 +129,26 @@ describe("source-bound embedding cache overlay", () => {
     expect(prepared.embeddingCacheOverlay).toMatchObject({
       receipt_sha256: written.receipt_sha256,
       overlay_sha256: written.overlay_sha256
+    });
+    const unbound = openProjected(join(dataDirRoot, "alaya.db"));
+    expect(countMainRows(unbound, "memory_embeddings")).toBe(0);
+    expect(countRows(unbound, "memory_embeddings")).toBe(0);
+    unbound.close();
+    await openRecallEvalWorkingSqlite({
+      restoredDbPath: recallEvalWorkingDbPath(dataDirRoot),
+      options: {
+        snapshotDbPath: sourceDbPath,
+        variant: "longmemeval_s",
+        historyRoot: join(root, "history"),
+        dataDirRoot,
+        embeddingCacheOverlayReceiptPath: receiptPath
+      },
+      manifest: {
+        schema_migration_version: sourceSchemaVersion,
+        recall_pipeline_version: "fusion-evidence-first-v3"
+      } as RecallEvalSnapshotBundle["manifest"],
+      warm: null,
+      overlayExpected: expectedBinding()
     });
     const restored = openProjected(join(dataDirRoot, "alaya.db"));
     expect(countMainRows(restored, "memory_embeddings")).toBe(0);

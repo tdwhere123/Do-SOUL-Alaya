@@ -5,6 +5,10 @@ import { initDatabase, readSchemaMigrationLedger } from "@do-soul/alaya-storage"
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareRecallEvalDataRoot } from
   "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
+  "../../../bench/snapshot/recall-eval/recall-eval-working-sqlite.js";
+import { readWarmDerivedSnapshotReceipt } from
+  "../../../bench/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import type { RecallEvalSnapshotBundle } from
   "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
 import { sha256File } from "../../../bench/snapshot/integrity.js";
@@ -70,10 +74,21 @@ describe("warm derived snapshot restore", () => {
     const receiptPath = await writeReceipt({
       databaseSchemaVersion: databaseSchemaVersion + 1
     });
+    const dataDirRoot = join(root, "schema-mismatch");
+    await prepareRecallEvalDataRoot(
+      options(receiptPath, dataDirRoot), bundle()
+    );
 
-    await expect(prepareRecallEvalDataRoot(
-      options(receiptPath, join(root, "schema-mismatch")), bundle()
-    )).rejects.toThrow(/schema binding mismatch/u);
+    await expect(openRecallEvalWorkingSqlite({
+      restoredDbPath: recallEvalWorkingDbPath(dataDirRoot),
+      options: options(receiptPath, dataDirRoot),
+      manifest: bundle().manifest,
+      warm: readWarmDerivedSnapshotReceipt({
+        receiptPath,
+        sourceSnapshotDbSha256: SOURCE_SHA,
+        sourceSchemaVersion: 113
+      })
+    })).rejects.toThrow(/schema binding mismatch/u);
   });
 });
 
