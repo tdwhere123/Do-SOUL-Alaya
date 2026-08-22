@@ -1,11 +1,4 @@
-import { createHash } from "node:crypto";
-import {
-  closeSync,
-  openSync,
-  readFileSync,
-  readSync,
-  writeFileSync
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { StorageError } from "../shared/errors.js";
 import type { SqliteConnection } from "./db.js";
@@ -15,7 +8,6 @@ export const EMBEDDING_OVERLAY_ALIAS = "embedding_overlay";
 
 const BIND_KIND = "alaya_sqlite_embedding_overlay";
 const BIND_SCHEMA_VERSION = 1 as const;
-const SHA256_CHUNK_BYTES = 1024 * 1024;
 
 export interface EmbeddingOverlayBindDocument {
   readonly schema_version: typeof BIND_SCHEMA_VERSION;
@@ -103,12 +95,11 @@ export function bindEmbeddingOverlayIfPresent(
   const bind = readBindDocument(databaseFilename);
   if (bind === null) return;
   const overlayPath = path.join(path.dirname(databaseFilename), bind.overlay_filename);
-  if (sha256FileSync(overlayPath) !== bind.overlay_sha256) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      "embedding overlay file SHA-256 binding mismatch"
-    );
+  if (!existsSync(overlayPath)) {
+    throw new StorageError("VALIDATION_FAILED", "embedding overlay file is missing");
   }
+  // The sealed digest is checked when the sidecar is copied. Later ATTACH can
+  // create WAL next to that file, so re-hashing here is not a stable identity.
   bindEmbeddingOverlay(connection, overlayPath);
 }
 
@@ -183,19 +174,4 @@ function isBindDocument(value: unknown): value is EmbeddingOverlayBindDocument {
     path.basename(document.overlay_filename) === document.overlay_filename &&
     typeof document.overlay_sha256 === "string" &&
     /^[a-f0-9]{64}$/u.test(document.overlay_sha256);
-}
-
-function sha256FileSync(filePath: string): string {
-  const hash = createHash("sha256");
-  const fd = openSync(filePath, "r");
-  try {
-    const buffer = Buffer.alloc(SHA256_CHUNK_BYTES);
-    let bytes = 0;
-    while ((bytes = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
-      hash.update(buffer.subarray(0, bytes));
-    }
-  } finally {
-    closeSync(fd);
-  }
-  return hash.digest("hex");
 }
