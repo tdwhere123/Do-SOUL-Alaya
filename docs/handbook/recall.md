@@ -15,11 +15,11 @@ this live HEAD — see `.do-it/plans/recall-any5-evidence-first.md`.
 This is not a KPI-promotion claim. The earlier `10da1318` B-arm dump remains
 historical benchmark evidence only.
 
-2026-08-22 amendment (algorithm evidence pin `3af4fd9`, live HEAD `334f937`,
-uncommitted): recorded the
+2026-08-23 amendment (algorithm evidence pin `3af4fd9`, source baseline
+`a03dc5d`): recorded the
 `Select_Gamma` query-conditioned marginal-gain contract ruling and its
-current implementation gap under Contract below. No live-path behavior
-changed by this amendment.
+current implementation gaps under Contract below. This is a documentation-only
+boundary correction; no live-path behavior changed.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -72,6 +72,44 @@ multiplicity can strengthen activation, but cannot be an admission objective.
 Cardinality/enumerative obligations are required for full-gold completeness
 claims even if an initial any@5 experiment can proceed without them.
 
+Two additional boundaries are currently open. First, the live selector applies
+a hard `evidenceSourceIdentity` duplicate rejection before objective
+competition; `lineage` is receipt metadata, not the admission key. This is an
+implementation contradiction to the source-multiplicity ruling and is owned by
+G17a until the fixed-pool on/off counterfactual and selector-parity receipt
+close it. Second, the live facility state is demand-atom based and does not yet
+consume distinct OSF answer values. The target consumer must carry answer
+variables and binding-value coverage into the same Gamma walk.
+
+### Binding and kind-projection boundary
+
+OSF composition already produces result bindings, variable collections,
+distinct-value counts, and evidence IDs. The current candidate attribution and
+Gamma path compress that structure to activation/solution-count scalars and a
+boolean `f3` cover. The planned producer-to-consumer chain is therefore:
+
+```text
+OSF result binding
+  -> candidate binding-coverage receipt
+  -> query answer variables and obligation facets
+  -> one binding-aware Select_Gamma walk
+  -> selected binding-set receipt
+```
+
+For answer variable v, the marginal term is the increase in distinct
+`Values_v`, alongside relevance and ordinary obligation coverage. Redundancy
+is bounded by content and lineage; source multiplicity is not a diversity
+quota.
+
+Kind/category evidence is a separate, rebuildable projection. Before any
+large cache rebuild, a fixture must prove
+`answer_kind_constraint -> kind_projection -> spotify binding`, preserve
+`spotify` as the referent, and reject an invalid projection without rejecting
+the base grounded graph. The projection is tied to the base graph digest and
+factor id and has its own producer, digest, and rejection receipt. It is not a
+plain optional field whose schema failure can invalidate the strict base OSF
+graph, and it never becomes durable truth.
+
 Do not add another fusion stream, promoter, duplicate reranker, consensus
 reorder, or head-drop rule to repair benchmark coverage.
 
@@ -99,7 +137,8 @@ assessment
   -> integrated Slice/path/evidence flood (diagnostics and Gamma cover;
      does not enter the ranking scalar)
   -> deep-head relevance (rescores the pool only when embedding is observed)
-  -> Select_Gamma under eligibility, source, lineage, dimension,
+  -> Select_Gamma under eligibility, current source hard-dedupe,
+     lineage receipt, dimension,
      max-entry, and token constraints
   -> ordered ContextPack and selection-boundary receipt
 ```
@@ -130,10 +169,10 @@ The principal owners are:
 | Slice/fiber compatibility | Live | Query and source routing keys are matched by `selectSliceCompatibilityV2`; rejected slices withhold fuel. Missing slice material is explicit pass-through, not a fabricated match. |
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
-| Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. They can also activate already-admitted candidates. F3 remains rebuildable routing, not durable truth. |
+| Open-semantic candidate attribution | Live, consumer depth open | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are not yet carried into candidate/Gamma coverage, and kind projection has no live category consumer. F3 remains rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Live gain covers only `slice`/`f3`; the query-conditioned facility objective has no proven production consumer yet (open gap, see Contract). |
+| `Select_Gamma` | Live and sole final admission owner; objective consumer open | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Live gain covers only `slice`/`f3`; current source hard-dedupe and missing binding-value coverage are open G17a/G17b gaps. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |

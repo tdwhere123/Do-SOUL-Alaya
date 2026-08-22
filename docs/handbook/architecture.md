@@ -117,6 +117,12 @@ compatibility, attributed path/evidence flood, and one Select_Gamma admission
 walk. The core path is wired, but the query-conditioned facility objective is
 still a design-to-consumer verification gap: the live gain remains generic
 `slice`/`f3` coverage until a receipt-backed production consumer is proven.
+The current selector also hard-rejects repeated evidence sources before that
+objective runs, while OSF result bindings are not yet carried into distinct
+answer-value coverage. Those are implementation gaps under the recall
+authority, not additional architecture axes. Kind/category projections remain
+independent rebuildable routing projections and must not be schema-coupled to
+strict base graph acceptance.
 Owner and current closure boundary:
 
 [`recall.md`](recall.md)
