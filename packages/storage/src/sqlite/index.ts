@@ -9,6 +9,16 @@ export {
   type InitDatabaseOptions
 } from "./db.js";
 export {
+  EMBEDDING_OVERLAY_ALIAS,
+  EMBEDDING_OVERLAY_BIND_FILENAME,
+  bindEmbeddingOverlay,
+  bindEmbeddingOverlayIfPresent,
+  embeddingOverlayBindPath,
+  hasEmbeddingOverlayBind,
+  writeEmbeddingOverlayBind,
+  type EmbeddingOverlayBindDocument
+} from "./embedding-overlay-bind.js";
+export {
   createInMemorySqliteWriteQueuePort,
   createSerialSqliteWriteQueuePort,
   type SqliteWriteJob,

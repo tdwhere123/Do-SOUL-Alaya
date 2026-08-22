@@ -60,7 +60,7 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
 }
 
 const UPSERT_MEMORY_EMBEDDING_SQL = `
-      INSERT INTO memory_embeddings (
+      INSERT INTO main.memory_embeddings (
         object_id,
         workspace_id,
         content_hash,

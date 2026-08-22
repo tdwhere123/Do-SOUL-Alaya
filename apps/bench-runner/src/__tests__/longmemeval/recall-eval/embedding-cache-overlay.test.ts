@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,8 +10,10 @@ import {
   WorkspaceState
 } from "@do-soul/alaya-protocol";
 import {
+  closeCachedDatabase,
   initDatabase,
   readSchemaMigrationLedger,
+  SqliteMemoryEmbeddingRepo,
   SqliteMemoryEntryRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
@@ -75,7 +77,7 @@ afterEach(async () => {
 });
 
 describe("source-bound embedding cache overlay", () => {
-  it("imports exact memory and evidence vectors into a clean snapshot copy", async () => {
+  it("binds overlay vectors without inserting blobs into the restored copy", async () => {
     const written = await writeFixtureOverlay();
 
     const binding = await applyEmbeddingCacheOverlay({
@@ -84,9 +86,13 @@ describe("source-bound embedding cache overlay", () => {
       expected: expectedBinding()
     });
 
-    const target = initDatabase({ filename: targetDbPath });
+    const target = openProjected(targetDbPath);
+    expect(countMainRows(target, "memory_embeddings")).toBe(0);
+    expect(countMainRows(target, "evidence_recall_embeddings")).toBe(0);
     expect(countRows(target, "memory_embeddings")).toBe(1);
     expect(countRows(target, "evidence_recall_embeddings")).toBe(1);
+    const loaded = await new SqliteMemoryEmbeddingRepo(target).findByObjectId(MEMORY_ID);
+    expect(loaded?.embedding).toEqual(new Float32Array([1, 2]));
     expect(binding).toMatchObject({
       receipt_sha256: written.receipt_sha256,
       overlay_sha256: written.overlay_sha256,
@@ -94,6 +100,8 @@ describe("source-bound embedding cache overlay", () => {
       evidence_embedding_count: 1,
       vector_space: VECTOR_SPACE
     });
+    await expect(access(join(root, `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`)))
+      .resolves.toBeUndefined();
     target.close();
   });
 
@@ -119,13 +127,14 @@ describe("source-bound embedding cache overlay", () => {
       receipt_sha256: written.receipt_sha256,
       overlay_sha256: written.overlay_sha256
     });
-    const restored = initDatabase({ filename: join(dataDirRoot, "alaya.db") });
+    const restored = openProjected(join(dataDirRoot, "alaya.db"));
+    expect(countMainRows(restored, "memory_embeddings")).toBe(0);
     expect(countRows(restored, "memory_embeddings")).toBe(1);
     expect(countRows(restored, "evidence_recall_embeddings")).toBe(1);
     restored.close();
   });
 
-  it("rejects source drift before importing any rows", async () => {
+  it("rejects source drift before binding any overlay", async () => {
     await writeFixtureOverlay();
 
     await expect(applyEmbeddingCacheOverlay({
@@ -138,6 +147,7 @@ describe("source-bound embedding cache overlay", () => {
     })).rejects.toThrow(/source snapshot DB SHA-256 binding mismatch/u);
 
     const target = initDatabase({ filename: targetDbPath });
+    expect(countMainRows(target, "memory_embeddings")).toBe(0);
     expect(countRows(target, "memory_embeddings")).toBe(0);
     expect(countRows(target, "evidence_recall_embeddings")).toBe(0);
     target.close();
@@ -155,10 +165,10 @@ describe("source-bound embedding cache overlay", () => {
 
     const target = initDatabase({ filename: targetDbPath });
     const blob = target.connection.prepare(
-      "SELECT embedding_blob FROM memory_embeddings WHERE object_id = ?"
+      "SELECT embedding_blob FROM main.memory_embeddings WHERE object_id = ?"
     ).pluck().get(MEMORY_ID) as Buffer;
     expect(blob.readFloatLE(0)).toBe(9);
-    expect(countRows(target, "evidence_recall_embeddings")).toBe(0);
+    expect(countMainRows(target, "evidence_recall_embeddings")).toBe(0);
     target.close();
   });
 
@@ -206,7 +216,8 @@ describe("readonly snapshot overlay emit", () => {
       restoredDbPath: targetDbPath,
       expected: expectedBinding()
     });
-    const target = initDatabase({ filename: targetDbPath });
+    const target = openProjected(targetDbPath);
+    expect(countMainRows(target, "memory_embeddings")).toBe(0);
     expect(countRows(target, "memory_embeddings")).toBe(1);
     target.close();
   });
@@ -366,6 +377,15 @@ function encodeVector(vector: Float32Array): Buffer {
   return bytes;
 }
 
+function openProjected(filename: string): StorageDatabase {
+  closeCachedDatabase(filename);
+  return initDatabase({ filename });
+}
+
 function countRows(database: StorageDatabase, table: string): number {
   return database.connection.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get() as number;
+}
+
+function countMainRows(database: StorageDatabase, table: string): number {
+  return database.connection.prepare(`SELECT COUNT(*) FROM main.${table}`).pluck().get() as number;
 }

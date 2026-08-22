@@ -1,11 +1,19 @@
-import { truncateSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, truncateSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initDatabase, closeCachedDatabase } from "@do-soul/alaya-storage";
+import {
+  closeCachedDatabase,
+  initDatabase,
+  writeEmbeddingOverlayBind
+} from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../../../harness/daemon.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
+import { createOverlaySchema } from
+  "../../../bench/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
 
 // Bench-only SQLite tuning is layered on top of the production storage
 // hardening (see packages/storage/src/sqlite/db.ts). The production pragmas are
@@ -42,6 +50,18 @@ async function newDataDir(): Promise<string> {
 function readPragmaNumber(dataDir: string, pragma: string): number {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   return Number(db.connection.pragma(pragma, { simple: true }));
+}
+
+function bindEmptyOverlay(dataDir: string): void {
+  const overlayPath = join(dataDir, "overlay.sqlite");
+  const overlay = new BetterSqlite3(overlayPath);
+  createOverlaySchema(overlay);
+  overlay.close();
+  writeEmbeddingOverlayBind({
+    databaseFilename: join(dataDir, "alaya.db"),
+    overlayFilename: "overlay.sqlite",
+    overlaySha256: createHash("sha256").update(readFileSync(overlayPath)).digest("hex")
+  });
 }
 
 describe("applyBenchFastPragmaIfRequested", () => {
@@ -109,6 +129,15 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(result.pragmas).toContain("mmap_size=2147418112");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-1048576);
     expect(readPragmaNumber(dataDir, "mmap_size")).toBe(2147418112);
+  });
+
+  it("disables mmap when an embedding overlay is bound to the working copy", async () => {
+    const dataDir = await newDataDir();
+    bindEmptyOverlay(dataDir);
+    truncateSync(join(dataDir, "alaya.db"), 8 * 1024 * 1024 * 1024);
+    const result = applyBenchFastPragmaIfRequested(dataDir);
+    expect(result.pragmas).toContain("mmap_size=0");
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
   });
 
   it("sizes cache and mmap from the restored working path after a larger replace", async () => {

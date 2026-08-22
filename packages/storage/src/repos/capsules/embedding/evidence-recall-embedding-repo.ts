@@ -341,7 +341,7 @@ const FIND_BY_DOCUMENTS_SQL = `
 `;
 
 const UPSERT_SQL = `
-  INSERT INTO evidence_recall_embeddings (
+  INSERT INTO main.evidence_recall_embeddings (
     workspace_id,
     owner_object_id,
     document_identity,

@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { initDatabase } from "@do-soul/alaya-storage";
+import { hasEmbeddingOverlayBind, initDatabase } from "@do-soul/alaya-storage";
 import { emitBenchHarnessWarning } from "./daemon-warnings.js";
 
 const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
@@ -64,7 +64,10 @@ function resolveBenchCacheSizeKib(fileBytes: number): number {
 
 // Skip mmap on tiny files so they keep SQLite's default (typically 0)
 // instead of a size-dependent mapping that does not help recall-eval.
-function resolveBenchMmapSize(fileBytes: number): number | undefined {
+// Overlay-bound eval keeps mmap off so ORT and a multi-GB pager do not share
+// a 2 GiB mapping on the working copy.
+function resolveBenchMmapSize(fileBytes: number, workingDbPath: string): number | undefined {
+  if (hasEmbeddingOverlayBind(workingDbPath)) return 0;
   if (fileBytes < CACHE_FLOOR_KIB * 1024) return undefined;
   return Math.min(fileBytes, MMAP_CAP_BYTES);
 }
@@ -120,7 +123,7 @@ export function applyBenchFastPragmaIfRequested(
   const fileBytes = readDbFileBytes(workingDbPath);
   const cacheKib = resolveBenchCacheSizeKib(fileBytes);
   conn.pragma(`cache_size = -${cacheKib}`);
-  const mmapSize = resolveBenchMmapSize(fileBytes);
+  const mmapSize = resolveBenchMmapSize(fileBytes, workingDbPath);
   if (mmapSize !== undefined) {
     conn.pragma(`mmap_size = ${mmapSize}`);
   }

@@ -20,6 +20,7 @@ import {
   TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION,
   migrateVerifiedProjectionBindKey
 } from "./temporal-verified-bind-key.js";
+import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
@@ -107,6 +108,7 @@ export class StorageDatabase {
       busyTimeoutMs: this.reopenBusyTimeoutMs,
       analysisLimit: 400
     });
+    bindEmbeddingOverlayIfPresent(database, this.filename);
     this.connection = database;
     this.connectionVersion += 1;
     this.closed = false;
@@ -196,6 +198,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
       if (temporalMode === "runtime") {
         assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
       }
+      bindEmbeddingOverlayIfPresent(cached.connection, filename);
       return cached;
     }
     if (temporalMode === "runtime") {
@@ -210,6 +213,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
   try {
     configureDatabaseConnection(database, busyTimeoutMs);
     runMigrations(database, temporalMode);
+    bindEmbeddingOverlayIfPresent(database, filename);
   } catch (error) {
     database.close();
     throw error;

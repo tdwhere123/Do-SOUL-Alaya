@@ -78,7 +78,7 @@ function scrubMemoryEntries(
 ): void {
   const connection = database.connection;
   const deletes = [
-    "DELETE FROM memory_embeddings WHERE workspace_id = ? AND object_id = ?",
+    "DELETE FROM main.memory_embeddings WHERE workspace_id = ? AND object_id = ?",
     "DELETE FROM memory_object_keys WHERE workspace_id = ? AND owner_id = ?",
     "DELETE FROM recall_routing_key_owners WHERE workspace_id = ? AND owner_id = ?"
   ].map((sql) => connection.prepare(sql));

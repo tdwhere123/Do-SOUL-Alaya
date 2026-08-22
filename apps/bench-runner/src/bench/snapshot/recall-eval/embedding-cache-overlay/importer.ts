@@ -1,8 +1,11 @@
-import { rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { chmodSync, rmSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import {
+  bindEmbeddingOverlay,
+  embeddingOverlayBindPath,
   initDatabase,
   readSchemaMigrationLedger,
+  writeEmbeddingOverlayBind,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { copyRegularFileNoFollow } from "../../bound-file.js";
@@ -36,11 +39,14 @@ export async function applyEmbeddingCacheOverlay(input: {
     targetPath: boundPath,
     expectedSha256: loaded.binding.overlay_sha256
   });
+  chmodSync(boundPath, 0o444);
   try {
-    importBoundOverlay(input.restoredDbPath, boundPath, loaded.binding);
+    bindCopiedOverlay(input.restoredDbPath, boundPath, loaded.binding);
     return loaded.binding;
-  } finally {
+  } catch (error) {
     rmSync(boundPath, { force: true });
+    rmSync(embeddingOverlayBindPath(input.restoredDbPath), { force: true });
+    throw error;
   }
 }
 
@@ -50,22 +56,23 @@ function assertRestoredSchema(restoredDbPath: string, expected: number): void {
   }
 }
 
-function importBoundOverlay(
+function bindCopiedOverlay(
   restoredDbPath: string,
   overlayPath: string,
   binding: EmbeddingCacheOverlayBinding
 ): void {
   const database = initDatabase({ filename: restoredDbPath });
-  let attached = false;
   try {
-    database.connection.prepare(`ATTACH DATABASE ? AS ${OVERLAY_ALIAS}`).run(overlayPath);
-    attached = true;
+    bindEmbeddingOverlay(database.connection, overlayPath);
     assertOverlayRows(database, binding);
-    applyRowsAtomically(database, binding);
-    database.connection.exec(`DETACH DATABASE ${OVERLAY_ALIAS}`);
-    attached = false;
+    assertNoConflicts(database);
+    assertReadProjection(database, binding);
+    writeEmbeddingOverlayBind({
+      databaseFilename: restoredDbPath,
+      overlayFilename: basename(overlayPath),
+      overlaySha256: binding.overlay_sha256
+    });
   } finally {
-    if (attached) detachBestEffort(database);
     database.close();
   }
 }
@@ -97,25 +104,35 @@ function assertOverlayRows(
   }
 }
 
-function applyRowsAtomically(
+function assertNoConflicts(database: StorageDatabase): void {
+  const conflicts = readScalar(database, MEMORY_CONFLICT_COUNT_SQL) +
+    readScalar(database, EVIDENCE_CONFLICT_COUNT_SQL);
+  if (conflicts > 0) {
+    throw new Error("embedding cache overlay conflicts with restored embedding rows");
+  }
+}
+
+function assertReadProjection(
   database: StorageDatabase,
   binding: EmbeddingCacheOverlayBinding
 ): void {
-  database.connection.transaction(() => {
-    const conflicts = readScalar(database, MEMORY_CONFLICT_COUNT_SQL) +
-      readScalar(database, EVIDENCE_CONFLICT_COUNT_SQL);
-    if (conflicts > 0) {
-      throw new Error("embedding cache overlay conflicts with restored embedding rows");
-    }
-    database.connection.exec(MEMORY_IMPORT_SQL);
-    database.connection.exec(EVIDENCE_IMPORT_SQL);
-    const memoryMatches = readScalar(database, MEMORY_MATCH_COUNT_SQL);
-    const evidenceMatches = readScalar(database, EVIDENCE_MATCH_COUNT_SQL);
-    if (memoryMatches !== binding.memory_embedding_count ||
-        evidenceMatches !== binding.evidence_embedding_count) {
-      throw new Error("embedding cache overlay import closure mismatch");
-    }
-  }).immediate();
+  const durableMemory = readScalar(database, `
+    SELECT COUNT(*) FROM main.memory_embeddings
+  `);
+  const durableEvidence = readScalar(database, `
+    SELECT COUNT(*) FROM main.evidence_recall_embeddings
+  `);
+  const projectedMemory = readScalar(database, `SELECT COUNT(*) FROM memory_embeddings`);
+  const projectedEvidence = readScalar(database, `
+    SELECT COUNT(*) FROM evidence_recall_embeddings
+  `);
+  if (durableMemory !== 0 || durableEvidence !== 0) {
+    throw new Error("embedding cache overlay requires empty durable embedding tables");
+  }
+  if (projectedMemory !== binding.memory_embedding_count ||
+      projectedEvidence !== binding.evidence_embedding_count) {
+    throw new Error("embedding cache overlay read projection mismatch");
+  }
 }
 
 function readCount(
@@ -134,37 +151,6 @@ function readCount(
 function readScalar(database: StorageDatabase, sql: string): number {
   return database.connection.prepare(sql).pluck().get() as number;
 }
-
-function detachBestEffort(database: StorageDatabase): void {
-  try {
-    database.connection.exec(`DETACH DATABASE ${OVERLAY_ALIAS}`);
-  } catch {
-    // Preserve the validation/import failure that caused cleanup.
-  }
-}
-
-const MEMORY_COLUMNS = `
-  object_id, workspace_id, content_hash, provider_kind, model_id,
-  schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
-`;
-
-const MEMORY_IMPORT_SQL = `
-  INSERT OR IGNORE INTO main.memory_embeddings (${MEMORY_COLUMNS})
-  SELECT ${MEMORY_COLUMNS} FROM ${OVERLAY_ALIAS}.memory_embeddings
-  ORDER BY object_id
-`;
-
-const EVIDENCE_COLUMNS = `
-  workspace_id, owner_object_id, document_identity, content_hash, document_role,
-  provider_kind, model_id, schema_version, dimensions, embedding_blob,
-  vector_valid, created_at, updated_at
-`;
-
-const EVIDENCE_IMPORT_SQL = `
-  INSERT OR IGNORE INTO main.evidence_recall_embeddings (${EVIDENCE_COLUMNS})
-  SELECT ${EVIDENCE_COLUMNS} FROM ${OVERLAY_ALIAS}.evidence_recall_embeddings
-  ORDER BY workspace_id, owner_object_id, document_identity, document_role
-`;
 
 const MEMORY_CONFLICT_COUNT_SQL = `
   SELECT COUNT(*)
@@ -200,33 +186,4 @@ const EVIDENCE_CONFLICT_COUNT_SQL = `
     restored.created_at IS overlay.created_at AND
     restored.updated_at IS overlay.updated_at
   )
-`;
-
-const MEMORY_MATCH_COUNT_SQL = `
-  SELECT COUNT(*) FROM ${OVERLAY_ALIAS}.memory_embeddings overlay
-  INNER JOIN main.memory_embeddings restored
-    ON restored.object_id = overlay.object_id
-   AND restored.embedding_blob IS overlay.embedding_blob
-   AND restored.content_hash = overlay.content_hash
-   AND restored.provider_kind = overlay.provider_kind
-   AND restored.model_id = overlay.model_id
-   AND restored.schema_version = overlay.schema_version
-   AND restored.dimensions = overlay.dimensions
-   AND restored.vector_valid = overlay.vector_valid
-`;
-
-const EVIDENCE_MATCH_COUNT_SQL = `
-  SELECT COUNT(*) FROM ${OVERLAY_ALIAS}.evidence_recall_embeddings overlay
-  INNER JOIN main.evidence_recall_embeddings restored
-    ON restored.workspace_id = overlay.workspace_id
-   AND restored.owner_object_id = overlay.owner_object_id
-   AND restored.document_identity = overlay.document_identity
-   AND restored.document_role = overlay.document_role
-   AND restored.embedding_blob IS overlay.embedding_blob
-   AND restored.content_hash = overlay.content_hash
-   AND restored.provider_kind = overlay.provider_kind
-   AND restored.model_id = overlay.model_id
-   AND restored.schema_version = overlay.schema_version
-   AND restored.dimensions = overlay.dimensions
-   AND restored.vector_valid = overlay.vector_valid
 `;

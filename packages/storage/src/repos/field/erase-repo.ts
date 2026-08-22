@@ -197,7 +197,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     scrubDerivedPrivacyClosure(this.database, root, evidenceIds);
     const deletes = [
       "DELETE FROM evidence_search_projections WHERE workspace_id = ? AND evidence_object_id = ?",
-      "DELETE FROM evidence_recall_embeddings WHERE workspace_id = ? AND owner_object_id = ?",
+      "DELETE FROM main.evidence_recall_embeddings WHERE workspace_id = ? AND owner_object_id = ?",
       "DELETE FROM evidence_fact_frame_formations WHERE workspace_id = ? AND evidence_object_id = ?",
       "DELETE FROM evidence_semantic_factor_formations WHERE workspace_id = ? AND evidence_object_id = ?"
     ].map((sql) => connection.prepare(sql));
