@@ -71,7 +71,57 @@ describe("sqlite embedding overlay bind", () => {
     expect(count(database.connection, "SELECT COUNT(*) FROM memory_embeddings")).toBe(1);
     database.close();
   });
+
+  it("rejects a cached connection whose bind document points at another overlay", async () => {
+    const root = await mkdtemp(join(tmpdir(), "alaya-overlay-bind-mismatch-"));
+    roots.push(root);
+    const databasePath = join(root, "alaya.db");
+    const firstOverlay = join(root, "first.sqlite");
+    const secondOverlay = join(root, "second.sqlite");
+    createOverlayTables(firstOverlay);
+    createOverlayTables(secondOverlay);
+
+    writeEmbeddingOverlayBind({
+      databaseFilename: databasePath,
+      overlayFilename: "first.sqlite",
+      overlaySha256: sha256File(firstOverlay)
+    });
+    const database = initDatabase({ filename: databasePath });
+    writeEmbeddingOverlayBind({
+      databaseFilename: databasePath,
+      overlayFilename: "second.sqlite",
+      overlaySha256: sha256File(secondOverlay)
+    });
+
+    expect(() => initDatabase({ filename: databasePath })).toThrow(
+      /does not match the attached sidecar/u
+    );
+    database.close();
+  });
 });
+
+function createOverlayTables(filename: string): void {
+  const overlay = new BetterSqlite3(filename);
+  overlay.exec(`
+    CREATE TABLE memory_embeddings (
+      object_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+      content_hash TEXT NOT NULL, provider_kind TEXT NOT NULL,
+      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
+      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
+      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE evidence_recall_embeddings (
+      workspace_id TEXT NOT NULL, owner_object_id TEXT NOT NULL,
+      document_identity TEXT NOT NULL, content_hash TEXT NOT NULL,
+      document_role TEXT NOT NULL, provider_kind TEXT NOT NULL,
+      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
+      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
+      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, owner_object_id, document_identity, document_role)
+    );
+  `);
+  overlay.close();
+}
 
 function encodeVector(vector: Float32Array): Buffer {
   const bytes = Buffer.alloc(vector.length * Float32Array.BYTES_PER_ELEMENT);

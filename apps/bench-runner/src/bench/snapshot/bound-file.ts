@@ -49,6 +49,9 @@ export function sha256Buffer(value: Uint8Array): string {
 }
 
 type CachedFileSha256 = Readonly<{
+  readonly dev: number;
+  readonly ino: number;
+  readonly ctimeMs: number;
   readonly size: number;
   readonly mtimeMs: number;
   readonly sha256: string;
@@ -61,7 +64,9 @@ function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
     const metadata = statSync(filePath);
     const cached = fileSha256Cache.get(resolve(filePath));
     if (cached === undefined) return undefined;
-    if (cached.size !== metadata.size || cached.mtimeMs !== metadata.mtimeMs) return undefined;
+    if (cached.dev !== metadata.dev || cached.ino !== metadata.ino ||
+        cached.ctimeMs !== metadata.ctimeMs ||
+        cached.size !== metadata.size || cached.mtimeMs !== metadata.mtimeMs) return undefined;
     return cached;
   } catch {
     return undefined;
@@ -75,6 +80,9 @@ export function peekCachedFileSha256(filePath: string): string | undefined {
 export function rememberFileSha256(filePath: string, sha256: string): void {
   const metadata = statSync(filePath);
   fileSha256Cache.set(resolve(filePath), Object.freeze({
+    dev: metadata.dev,
+    ino: metadata.ino,
+    ctimeMs: metadata.ctimeMs,
     size: metadata.size,
     mtimeMs: metadata.mtimeMs,
     sha256

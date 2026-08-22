@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -48,5 +48,20 @@ describe("snapshot artifact integrity", () => {
     await writeFile(dbPath, "db-v2-longer", "utf8");
     expect(peekCachedFileSha256(dbPath)).toBeUndefined();
     expect(await sha256File(dbPath)).not.toBe(first);
+  });
+
+  it("rejects symlinked artifacts and detects inode replacement with preserved metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "snapshot-integrity-no-follow-"));
+    roots.push(root);
+    const dbPath = join(root, "snapshot.db");
+    const replacement = join(root, "replacement.db");
+    const symlinkPath = join(root, "snapshot-link.db");
+    await writeFile(dbPath, "db-v1", "utf8");
+    const first = await sha256File(dbPath);
+    await writeFile(replacement, "db-v2", "utf8");
+    await rename(replacement, dbPath);
+    expect(await sha256File(dbPath)).not.toBe(first);
+    await symlink(dbPath, symlinkPath);
+    await expect(sha256File(symlinkPath)).rejects.toThrow();
   });
 });

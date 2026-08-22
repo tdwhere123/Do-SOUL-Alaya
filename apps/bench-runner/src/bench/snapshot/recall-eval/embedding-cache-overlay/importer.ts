@@ -70,8 +70,8 @@ function reuseExistingOverlayBind(
       readonly overlay_filename?: unknown;
     };
     return document.overlay_sha256 === overlaySha256 &&
-      typeof document.overlay_filename === "string" &&
-      existsSync(join(dirname(restoredDbPath), document.overlay_filename));
+      document.overlay_filename === basename(boundPath) &&
+      existsSync(boundPath);
   } catch {
     return false;
   }

@@ -1,13 +1,11 @@
-import { createHash } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import {
   snapshotExtractionAuthorityPath,
   snapshotSidecarPath
 } from "./materialize.js";
 import {
-  peekCachedFileSha256,
-  rememberFileSha256,
+  hashRegularFileNoFollow,
   sha256Buffer,
   readRegularFileNoFollow
 } from "./bound-file.js";
@@ -23,13 +21,7 @@ export interface SnapshotArtifactIntegrity {
 }
 
 export async function sha256File(filePath: string): Promise<string> {
-  const cached = peekCachedFileSha256(filePath);
-  if (cached !== undefined) return cached;
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
-  const digest = hash.digest("hex");
-  rememberFileSha256(filePath, digest);
-  return digest;
+  return hashRegularFileNoFollow(filePath);
 }
 
 export async function buildSnapshotArtifactIntegrity(

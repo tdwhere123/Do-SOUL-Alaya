@@ -34,6 +34,7 @@ export interface RecallEvalPagerIpcHost {
 }
 
 interface PendingIpcRequest {
+  readonly op: RecallEvalPagerIpcOp;
   readonly resolve: (value: RecallEvalPagerIpcSuccess) => void;
   readonly reject: (error: unknown) => void;
   readonly clearAbort: () => void;
@@ -209,7 +210,7 @@ export class RecallEvalPagerIpcSession {
     };
     try {
       return await waitForPagerIpcResponse(
-        this.pending, child, message, timeoutMs
+        this.pending, child, message, op, timeoutMs
       );
     } catch (error) {
       if (isPagerTimeoutError(error)) this.reapChild(child, true);
@@ -222,18 +223,18 @@ export class RecallEvalPagerIpcSession {
     if (this.child !== null) return this.child;
     const host = this.host ?? createForkRecallEvalPagerHost();
     this.host = host;
-    const child = this.spawnHost(host);
+    const child = this.spawnHost(host, this.childEpoch);
     const epoch = this.childEpoch;
     this.child = child;
     this.childPid = child.pid ?? this.childPid;
     child.on("message", (message) => this.onMessage(message));
     child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
-    child.on("error", (error) => this.onSpawnError(error));
+    child.on("error", (error) => this.onSpawnError(epoch, error));
     child.unref?.();
     return child;
   }
 
-  private spawnHost(host: RecallEvalPagerIpcHost): RecallEvalPagerIpcProcess {
+  private spawnHost(host: RecallEvalPagerIpcHost, epoch: number): RecallEvalPagerIpcProcess {
     try {
       const child = host.spawn();
       process.stdout.write(
@@ -241,7 +242,7 @@ export class RecallEvalPagerIpcSession {
       );
       return child;
     } catch (error) {
-      this.onSpawnError(error instanceof Error ? error : new Error(String(error)));
+      this.onSpawnError(epoch, error instanceof Error ? error : new Error(String(error)));
       throw this.exitError ?? error;
     }
   }
@@ -284,7 +285,8 @@ export class RecallEvalPagerIpcSession {
     rejectPendingIpc(this.pending, this.exitError);
   }
 
-  private onSpawnError(error: Error): void {
+  private onSpawnError(epoch: number, error: Error): void {
+    if (epoch !== this.childEpoch) return;
     this.child = null;
     this.exitError = new RecallEvalPagerChildExitedError({
       code: null,
@@ -340,6 +342,7 @@ function waitForPagerIpcResponse(
   pending: Map<number, PendingIpcRequest>,
   child: RecallEvalPagerIpcProcess,
   message: RecallEvalPagerIpcRequest,
+  op: RecallEvalPagerIpcOp,
   timeoutMs: number
 ): Promise<RecallEvalPagerIpcSuccess> {
   return new Promise((resolve, reject) => {
@@ -351,6 +354,7 @@ function waitForPagerIpcResponse(
       );
     }, timeoutMs);
     pending.set(message.id, {
+      op,
       resolve,
       reject,
       clearAbort: () => clearTimeout(timer)
@@ -397,7 +401,11 @@ function resolvePendingAsSuccess(
   pending.clear();
   for (const [id, current] of waiting) {
     current.clearAbort();
-    current.resolve({ id, ok: true });
+    if (current.op === "close") {
+      current.reject(new Error("recall-eval pager close response was lost before child exit."));
+    } else {
+      current.resolve({ id, ok: true });
+    }
   }
 }
 

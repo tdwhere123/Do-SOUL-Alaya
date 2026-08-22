@@ -14,7 +14,7 @@ async function handle(message) {
   if (typeof id !== "number" || typeof process.send !== "function") return;
   const op = message?.op;
   if (op === "close") {
-    process.send({ id, ok: true, selectionArtifact: null });
+    process.send({ id, ok: true, selectionArtifact: { sourcePath: "selection.json" } });
     process.exit(0);
     return;
   }

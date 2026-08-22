@@ -150,6 +150,26 @@ describe("projection generation artifact intern", () => {
     )).toThrow(/digest mismatch/u);
   });
 
+  it("rejects a legacy expanded artifact with malformed source_state", () => {
+    const artifacts = createProjectionGenerationArtifacts(graphOf([
+      sourceKey("evidence-a", "ada", sourceState())
+    ]));
+    const expanded = {
+      generation_id: artifacts.generation_id,
+      postings: artifacts.postings,
+      bundles: artifacts.bundles,
+      slice_keys: artifacts.slice_keys.map((key) => ({ ...key, source_state: null })),
+      policy: artifacts.policy
+    };
+    const oldDigest = digestRecallFieldIdentity(expanded);
+
+    expect(() => parseProjectionGenerationArtifacts(
+      expanded,
+      artifacts.generation_id,
+      oldDigest
+    )).toThrow(/persisted projection generation artifacts are invalid/u);
+  });
+
   it("rejects an interned key whose source_state_id is missing", () => {
     const interned = internProjectionGenerationArtifacts(graphOf([
       sourceKey("evidence-a", "ada", sourceState())

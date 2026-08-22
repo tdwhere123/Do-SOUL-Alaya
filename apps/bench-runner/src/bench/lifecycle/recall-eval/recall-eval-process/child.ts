@@ -39,7 +39,7 @@ async function handleChildMessage(message: unknown): Promise<void> {
   if (!isRecallEvalPagerIpcRequest(message)) {
     const id = readMessageId(message);
     if (id !== null) {
-      sendChildResponse({
+      await sendChildResponse({
         id,
         ok: false,
         error: { name: "Error", message: "invalid recall-eval pager child request" }
@@ -48,10 +48,10 @@ async function handleChildMessage(message: unknown): Promise<void> {
     return;
   }
   try {
-    sendChildResponse(await runChildRequest(message));
+    await sendChildResponse(await runChildRequest(message));
     if (message.op === "close") process.exit(0);
   } catch (error) {
-    sendChildResponse({
+    await sendChildResponse({
       id: message.id,
       ok: false,
       error: serializeRecallEvalPagerIpcError(error)
@@ -91,11 +91,16 @@ async function runChildRequest(
   };
 }
 
-function sendChildResponse(response: RecallEvalPagerIpcResponse): void {
+function sendChildResponse(response: RecallEvalPagerIpcResponse): Promise<void> {
   if (typeof process.send !== "function") {
     throw new Error("recall-eval pager child lost its IPC channel");
   }
-  process.send(response);
+  return new Promise((resolve, reject) => {
+    process.send?.(response, (error) => {
+      if (error !== null) reject(error);
+      else resolve();
+    });
+  });
 }
 
 function readMessageId(message: unknown): number | null {

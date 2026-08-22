@@ -91,6 +91,13 @@ describe("recall-eval pager IPC isolation", () => {
     expect(pack.questionId).toBe("ok");
   });
 
+  it("retains the close selection artifact across child recycle", async () => {
+    const session = openSession();
+    await session.open({});
+    await session.recall({ questionId: "artifact" });
+    await expect(session.close()).resolves.toEqual({ sourcePath: "selection.json" });
+  });
+
   function openSession(timeoutMs?: number, host?: RecallEvalPagerIpcHost) {
     const session = createRecallEvalPagerSession({
       host: host ?? createForkRecallEvalPagerHost(stubChildPath),

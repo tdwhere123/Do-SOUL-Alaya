@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { StorageError } from "../shared/errors.js";
 
@@ -72,8 +72,14 @@ export function bindEmbeddingOverlay(
   connection: EmbeddingOverlayBindConnection,
   overlayPath: string
 ): void {
-  if (!isOverlayAttached(connection)) {
+  const attachedPath = attachedOverlayPath(connection);
+  if (attachedPath === null) {
     connection.prepare(`ATTACH DATABASE ? AS ${EMBEDDING_OVERLAY_ALIAS}`).run(overlayPath);
+  } else if (canonicalPath(attachedPath) !== canonicalPath(overlayPath)) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "embedding overlay binding does not match the attached sidecar"
+    );
   }
   ensureOverlayViews(connection);
 }
@@ -96,15 +102,25 @@ export function bindEmbeddingOverlayIfPresent(
   databaseFilename: string
 ): void {
   if (databaseFilename === ":memory:") return;
-  if (isOverlayAttached(connection)) {
-    ensureOverlayViews(connection);
+  const bind = readBindDocument(databaseFilename);
+  const attachedPath = attachedOverlayPath(connection);
+  if (bind === null) {
+    if (attachedPath !== null) detachEmbeddingOverlay(connection);
     return;
   }
-  const bind = readBindDocument(databaseFilename);
-  if (bind === null) return;
   const overlayPath = path.join(path.dirname(databaseFilename), bind.overlay_filename);
   if (!existsSync(overlayPath)) {
     throw new StorageError("VALIDATION_FAILED", "embedding overlay file is missing");
+  }
+  if (attachedPath !== null) {
+    if (canonicalPath(attachedPath) !== canonicalPath(overlayPath)) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "embedding overlay binding does not match the attached sidecar"
+      );
+    }
+    ensureOverlayViews(connection);
+    return;
   }
   // The sealed digest is checked when the sidecar is copied. Later ATTACH can
   // create WAL next to that file, so re-hashing here is not a stable identity.
@@ -112,9 +128,21 @@ export function bindEmbeddingOverlayIfPresent(
 }
 
 function isOverlayAttached(connection: EmbeddingOverlayBindConnection): boolean {
-  const rows = connection.prepare("SELECT name FROM pragma_database_list").all() as
-    ReadonlyArray<Readonly<{ name: string }>>;
-  return rows.some((row) => row.name === EMBEDDING_OVERLAY_ALIAS);
+  return attachedOverlayPath(connection) !== null;
+}
+
+function attachedOverlayPath(connection: EmbeddingOverlayBindConnection): string | null {
+  const rows = connection.prepare("SELECT name, file FROM pragma_database_list").all() as
+    ReadonlyArray<Readonly<{ name: string; file?: string }>>;
+  return rows.find((row) => row.name === EMBEDDING_OVERLAY_ALIAS)?.file ?? null;
+}
+
+function canonicalPath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
 }
 
 function ensureOverlayViews(connection: EmbeddingOverlayBindConnection): void {

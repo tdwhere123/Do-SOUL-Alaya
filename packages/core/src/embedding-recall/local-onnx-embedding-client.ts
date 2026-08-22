@@ -188,6 +188,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     const occupancy = withLocalOnnxHostSingleFlight(
       () => this.embedUnderLease(texts, deadline.signal, options.timeoutMs),
       {
+        // The isolated child owns the cross-process lock; holding it in the
+        // parent while awaiting IPC would deadlock the child on the same DB.
+        enabled: this.isolated === null ? undefined : false,
         signal: deadline.signal,
         timeoutMs: options.timeoutMs > 0 ? options.timeoutMs : undefined
       }

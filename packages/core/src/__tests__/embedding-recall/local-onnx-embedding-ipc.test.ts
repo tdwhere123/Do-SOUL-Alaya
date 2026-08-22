@@ -7,7 +7,8 @@ import {
 } from "../../embedding-recall/local-onnx-embedding-client.js";
 import {
   LocalOnnxEmbeddingChildExitedError,
-  createForkLocalOnnxEmbeddingHost
+  createForkLocalOnnxEmbeddingHost,
+  type LocalOnnxEmbeddingIpcHost
 } from "../../embedding-recall/local-onnx-process/ipc-client.js";
 
 const stubChildPath = fileURLToPath(
@@ -45,6 +46,18 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     await expect(client.embedTexts(["__hang__"], { timeoutMs: 40 })).rejects.toThrow(/timed out/);
   });
 
+  it("recycles a timed-out child before serving the next request", async () => {
+    const client = openClient();
+    await expect(client.embedTexts(["__hang__"], { timeoutMs: 40 })).rejects.toThrow(/timed out/);
+    const vectors = await client.embedTexts(["ok"], { timeoutMs: 5_000 });
+    expect(vectors).toHaveLength(1);
+  });
+
+  it("waits for the send callback when IPC reports backpressure", async () => {
+    const client = openClient(backpressuredHost());
+    await expect(client.embedTexts(["ok"], { timeoutMs: 5_000 })).resolves.toHaveLength(1);
+  });
+
   it("fail-closes when the child returns no vectors", async () => {
     const client = openClient();
     await expect(client.embedTexts(["__empty__"], { timeoutMs: 5_000 })).rejects.toThrow(
@@ -59,12 +72,32 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     );
   });
 
-  function openClient(): LocalOnnxEmbeddingClient {
+  function openClient(host?: LocalOnnxEmbeddingIpcHost): LocalOnnxEmbeddingClient {
     const client = new LocalOnnxEmbeddingClient({
-      ipcHost: createForkLocalOnnxEmbeddingHost(stubChildPath)
+      ipcHost: host ?? createForkLocalOnnxEmbeddingHost(stubChildPath)
     });
     clients.push(client);
     return client;
+  }
+
+  function backpressuredHost(): LocalOnnxEmbeddingIpcHost {
+    const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    return {
+      spawn() {
+        const child = inner.spawn();
+        return new Proxy(child, {
+          get(target, property, receiver) {
+            if (property === "send") {
+              return (message: unknown, callback?: (error: Error | null) => void) => {
+                target.send(message, callback);
+                return false;
+              };
+            }
+            return Reflect.get(target, property, receiver);
+          }
+        });
+      }
+    };
   }
 });
 

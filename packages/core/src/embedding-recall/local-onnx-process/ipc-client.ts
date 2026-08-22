@@ -11,7 +11,7 @@ import { decodeLocalOnnxIpcVectors } from "./vectors.js";
 
 export interface LocalOnnxEmbeddingIpcProcess {
   readonly pid?: number;
-  send(message: unknown): boolean;
+  send(message: unknown, callback?: (error: Error | null) => void): boolean;
   on(event: "message", listener: (message: unknown) => void): unknown;
   on(
     event: "exit",
@@ -90,6 +90,7 @@ export class LocalOnnxEmbeddingIpcSession {
   private host: LocalOnnxEmbeddingIpcHost | undefined;
   private child: LocalOnnxEmbeddingIpcProcess | null = null;
   private nextId = 0;
+  private childEpoch = 0;
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: LocalOnnxEmbeddingChildExitedError | null = null;
 
@@ -115,6 +116,7 @@ export class LocalOnnxEmbeddingIpcSession {
 
   public async close(): Promise<void> {
     const child = this.child;
+    this.childEpoch += 1;
     this.exitError ??= new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
     this.child = null;
     rejectPendingIpc(this.pending, this.exitError);
@@ -136,7 +138,13 @@ export class LocalOnnxEmbeddingIpcSession {
     const child = this.ensureChild();
     const id = ++this.nextId;
     const message = this.buildRequest(id, op, texts, timeoutMs);
-    return await waitForLocalOnnxIpcResponse(this.pending, child, message, signal);
+    return await waitForLocalOnnxIpcResponse(
+      this.pending,
+      child,
+      message,
+      signal,
+      (error) => this.recycleAfterAbort(child, message.id, error)
+    );
   }
 
   private ensureChild(): LocalOnnxEmbeddingIpcProcess {
@@ -146,9 +154,10 @@ export class LocalOnnxEmbeddingIpcSession {
     this.host = host;
     const child = host.spawn();
     this.child = child;
+    const epoch = this.childEpoch;
     child.on("message", (message) => this.onMessage(message));
-    child.on("exit", (code, exitSignal) => this.onExit(code, exitSignal));
-    child.on("error", (error) => this.onSpawnError(error));
+    child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
+    child.on("error", (error) => this.onSpawnError(epoch, error));
     // IPC must not pin the pager/daemon event loop after recall finishes.
     child.unref?.();
     return child;
@@ -167,17 +176,43 @@ export class LocalOnnxEmbeddingIpcSession {
     pending.resolve(message);
   }
 
-  private onExit(code: number | null, exitSignal: NodeJS.Signals | null): void {
+  private onExit(
+    epoch: number,
+    code: number | null,
+    exitSignal: NodeJS.Signals | null
+  ): void {
+    if (epoch !== this.childEpoch) return;
     this.child = null;
     this.exitError = new LocalOnnxEmbeddingChildExitedError(code, exitSignal);
     rejectPendingIpc(this.pending, this.exitError);
   }
 
-  private onSpawnError(error: Error): void {
+  private onSpawnError(epoch: number, error: Error): void {
+    if (epoch !== this.childEpoch) return;
     this.child = null;
     this.exitError = new LocalOnnxEmbeddingChildExitedError(null, null);
     this.exitError.cause = error;
     rejectPendingIpc(this.pending, this.exitError);
+  }
+
+  private recycleAfterAbort(
+    child: LocalOnnxEmbeddingIpcProcess,
+    id: number,
+    error: unknown
+  ): void {
+    failPending(this.pending, id, error);
+    if (this.child !== child) return;
+    this.childEpoch += 1;
+    this.child = null;
+    rejectPendingIpc(
+      this.pending,
+      new LocalOnnxEmbeddingChildExitedError(null, "SIGTERM")
+    );
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Child may already be gone; the epoch invalidates late events.
+    }
   }
 
   private buildRequest(
@@ -217,11 +252,12 @@ function waitForLocalOnnxIpcResponse(
   pending: Map<number, PendingIpcRequest>,
   child: LocalOnnxEmbeddingIpcProcess,
   message: LocalOnnxEmbeddingIpcRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onAbortRequest: (error: unknown) => void
 ): Promise<LocalOnnxEmbeddingIpcSuccess> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
-      failPending(pending, message.id, ipcAbortError(signal));
+      onAbortRequest(ipcAbortError(signal));
     };
     if (signal.aborted) {
       onAbort();
@@ -234,13 +270,9 @@ function waitForLocalOnnxIpcResponse(
       clearAbort: () => signal.removeEventListener("abort", onAbort)
     });
     try {
-      if (!child.send(message)) {
-        failPending(
-          pending,
-          message.id,
-          new Error("Local ONNX embedding child IPC send failed.")
-        );
-      }
+      child.send(message, (error) => {
+        if (error != null) failPending(pending, message.id, error);
+      });
     } catch (error) {
       failPending(pending, message.id, error);
     }

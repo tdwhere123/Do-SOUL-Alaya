@@ -104,8 +104,8 @@ function internInternedSliceKey(
   const id = record.source_state_id;
   if (typeof id !== "string") return freezeInternedSliceKey(rest);
   const state = sourceStates[id];
-  if (!isRecord(state)) invalidArtifacts();
-  if (!collected.has(id)) collected.set(id, Object.freeze(state) as SourceProjectionState);
+  const validState = requireSourceProjectionState(state);
+  if (!collected.has(id)) collected.set(id, Object.freeze(validState));
   return freezeInternedSliceKey({ ...rest, source_state_id: id });
 }
 
@@ -177,9 +177,43 @@ function omitStateFields(key: Record<string, unknown>): Record<string, unknown> 
 }
 
 function readSourceState(key: Record<string, unknown>): SourceProjectionState | undefined {
+  if (!Object.prototype.hasOwnProperty.call(key, "source_state")) return undefined;
   const value = key.source_state;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  return requireSourceProjectionState(value);
+}
+
+function requireSourceProjectionState(value: unknown): SourceProjectionState {
+  if (!isRecord(value) || typeof value.scope !== "string" ||
+      !isNullableString(value.event_time) || !isNullableString(value.valid_from) ||
+      !isNullableString(value.valid_to) ||
+      (value.lifecycle_state !== "active" && value.lifecycle_state !== "inactive") ||
+      (value.governance_state !== "ordinary_evidence" && value.governance_state !== "restricted") ||
+      typeof value.sealed !== "boolean" || typeof value.erased !== "boolean" ||
+      typeof value.revoked !== "boolean" || !Array.isArray(value.governance_effects) ||
+      (value.evidence_transitions !== undefined && !Array.isArray(value.evidence_transitions)) ||
+      !value.governance_effects.every(isGovernanceEffect) ||
+      (value.evidence_transitions !== undefined && !value.evidence_transitions.every(isEvidenceTransition))) {
+    invalidArtifacts();
+  }
   return value as SourceProjectionState;
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isEvidenceTransition(value: unknown): boolean {
+  return isRecord(value) &&
+    (value.kind === "health" || value.kind === "lifecycle") &&
+    typeof value.from_state === "string" && typeof value.to_state === "string" &&
+    typeof value.effective_as_of === "string";
+}
+
+function isGovernanceEffect(value: unknown): boolean {
+  return isRecord(value) &&
+    (value.action === "activate" || value.action === "revoke" ||
+      value.action === "seal" || value.action === "erase") &&
+    typeof value.effective_as_of === "string";
 }
 
 function requireRecord(value: unknown): Record<string, unknown> {
