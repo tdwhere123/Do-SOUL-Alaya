@@ -1,3 +1,4 @@
+import { resolveEffectiveEmbeddingPosture } from "@do-soul/alaya";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
@@ -66,9 +67,15 @@ export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): BenchEmbeddingMode {
   const value = env.ALAYA_RECALL_EVAL_EMBEDDING?.trim().toLowerCase();
-  if (value === undefined || value.length === 0 || value === "disabled") return "disabled";
+  if (value === "disabled") return "disabled";
   if (value === "env") return "env";
-  throw new Error("ALAYA_RECALL_EVAL_EMBEDDING must be env or disabled");
+  if (value !== undefined && value.length > 0) {
+    throw new Error("ALAYA_RECALL_EVAL_EMBEDDING must be env or disabled");
+  }
+  // Unset follows daemon admission; a disabled default would force product local_onnx off.
+  return resolveEffectiveEmbeddingPosture((key) => env[key]).embeddingSupplementEnabled
+    ? "env"
+    : "disabled";
 }
 
 export function recallEvalEmbeddingProviderKind(

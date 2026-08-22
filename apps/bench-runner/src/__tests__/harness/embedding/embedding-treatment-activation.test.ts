@@ -13,7 +13,10 @@ import {
   createBenchDaemonLaunchConfig,
   resolveBenchDaemonManagedEnvKeys
 } from "../../../harness/daemon/daemon-environment.js";
-import { recallEvalEmbeddingMode } from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+import {
+  recallEvalEmbeddingMode,
+  recallEvalEmbeddingProviderKind
+} from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {
@@ -194,13 +197,39 @@ describe("embedding treatment activation", () => {
       .toThrow(/ALAYA_RECALL_D2Q/u);
   });
 
-  it("accepts only explicit recall-eval embedding modes", () => {
-    expect(recallEvalEmbeddingMode({})).toBe("disabled");
+  it("follows product local_onnx admission when recall-eval mode is unset", () => {
+    expect(recallEvalEmbeddingMode({})).toBe("env");
+    expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" }))
+      .toBe("disabled");
+    expect(recallEvalEmbeddingMode({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
+      .toBe("env");
+  });
+
+  it("honors explicit recall-eval embedding modes", () => {
     expect(recallEvalEmbeddingMode({ ALAYA_RECALL_EVAL_EMBEDDING: "disabled" }))
       .toBe("disabled");
+    expect(recallEvalEmbeddingMode({
+      ALAYA_RECALL_EVAL_EMBEDDING: "disabled",
+      ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true"
+    })).toBe("disabled");
     expect(recallEvalEmbeddingMode({ ALAYA_RECALL_EVAL_EMBEDDING: "env" })).toBe("env");
     expect(() => recallEvalEmbeddingMode({ ALAYA_RECALL_EVAL_EMBEDDING: "local" }))
       .toThrow(/ALAYA_RECALL_EVAL_EMBEDDING/u);
+  });
+
+  it("opens the product local_onnx supplement when recall-eval follows admission", () => {
+    const embeddingMode = recallEvalEmbeddingMode({});
+    expect(embeddingMode).toBe("env");
+    const launch = createBenchDaemonLaunchConfig({
+      dataDir: "/tmp/bench-product-embed-admission",
+      embeddingMode,
+      embeddingProviderKind: recallEvalEmbeddingProviderKind({}),
+      reviewerIdentity: "user:test",
+      reviewerToken: "test-token",
+      ambientEnv: {}
+    });
+    expect(launch.environment.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT).toBe("true");
+    expect(launch.environment.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
   });
 
   it("pins OpenAI explicitly and rejects invalid threads before mutation", () => {
