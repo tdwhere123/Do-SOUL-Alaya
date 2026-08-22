@@ -24,8 +24,10 @@ import {
 import {
   writeEmbeddingCacheOverlay
 } from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/writer.js";
-import { emitEmbeddingCacheOverlay } from
-  "../../../bench/snapshot/recall-eval/embedding-cache-overlay/emit.js";
+import {
+  emitEmbeddingCacheOverlay,
+  productOverlayEmbeddingClientOptions
+} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/emit.js";
 import { sha256File } from
   "../../../bench/snapshot/integrity.js";
 import { prepareRecallEvalDataRoot } from
@@ -228,6 +230,13 @@ describe("readonly snapshot overlay emit", () => {
     const source = initDatabase({ filename: sourceDbPath });
     expect(countRows(source, "memory_embeddings")).toBe(0);
     source.close();
+  });
+
+  it("uses the product ONNX cache tree when ALAYA_LOCAL_EMBEDDING_CACHE_DIR is unset", () => {
+    expect(productOverlayEmbeddingClientOptions({})).not.toHaveProperty("cacheDir");
+    expect(productOverlayEmbeddingClientOptions({
+      ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/alaya-onnx-cache"
+    }).cacheDir).toBe("/tmp/alaya-onnx-cache");
   });
 });
 

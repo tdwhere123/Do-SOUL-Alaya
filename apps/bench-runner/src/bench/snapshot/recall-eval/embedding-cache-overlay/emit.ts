@@ -112,12 +112,19 @@ export async function bindOverlaySourceFromSnapshot(input: {
 export function createProductOverlayEmbeddingProvider(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): LocalOnnxEmbeddingClient {
-  const cacheDir = env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim() || null;
+  return new LocalOnnxEmbeddingClient(productOverlayEmbeddingClientOptions(env));
+}
+
+export function productOverlayEmbeddingClientOptions(
+  env: Readonly<Record<string, string | undefined>>
+): ConstructorParameters<typeof LocalOnnxEmbeddingClient>[0] {
+  const cacheDir = env.ALAYA_LOCAL_EMBEDDING_CACHE_DIR?.trim();
   const modelId = env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim();
-  return new LocalOnnxEmbeddingClient({
-    cacheDir,
+  return {
+    // Omit cacheDir so LocalOnnxEmbeddingClient uses the product default tree.
+    ...(cacheDir === undefined || cacheDir.length === 0 ? {} : { cacheDir }),
     ...(modelId === undefined || modelId.length === 0 ? {} : { modelId })
-  });
+  };
 }
 
 function assertEmitSource(input: {
@@ -136,5 +143,6 @@ function openReadonlySnapshot(path: string): StorageDatabase {
     fileMustExist: true
   });
   connection.pragma("query_only = ON");
+  connection.pragma("mmap_size = 0");
   return new StorageDatabase(path, connection);
 }
