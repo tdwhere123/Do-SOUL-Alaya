@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertValidEmbeddingBatch } from "@do-soul/alaya-core";
+import { bindEmbeddingOverlayIfPresent } from "@do-soul/alaya-storage";
 import type { BenchEmbeddingWarmupSummary } from "../daemon-types.js";
 import { embeddingInputIdentityForSchemaVersion } from "../../strict-treatment-config.js";
 
@@ -45,8 +46,10 @@ export async function readEmbeddingWarmupSummary(input: {
     });
   }
 
-  const db = new DatabaseSync(join(input.dataDir, "alaya.db"), { readOnly: true });
+  const dbPath = join(input.dataDir, "alaya.db");
+  const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
+    bindEmbeddingOverlayIfPresent(db, dbPath);
     const readyIds = readReadyEmbeddingIds(db, input, expectedIds);
     const missingObjectIds = expectedIds.filter((objectId) => !readyIds.has(objectId));
     return Object.freeze({

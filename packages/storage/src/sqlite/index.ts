@@ -17,6 +17,7 @@ export {
   embeddingOverlayBindPath,
   hasEmbeddingOverlayBind,
   writeEmbeddingOverlayBind,
+  type EmbeddingOverlayBindConnection,
   type EmbeddingOverlayBindDocument
 } from "./embedding-overlay-bind.js";
 export {

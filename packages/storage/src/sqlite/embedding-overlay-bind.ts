@@ -1,10 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { StorageError } from "../shared/errors.js";
-import type { SqliteConnection } from "./db.js";
 
 export const EMBEDDING_OVERLAY_BIND_FILENAME = ".alaya-embedding-overlay.json";
 export const EMBEDDING_OVERLAY_ALIAS = "embedding_overlay";
+
+/** Duck-typed because overlay TEMP views are per-connection, not engine-specific. */
+export interface EmbeddingOverlayBindConnection {
+  exec(sql: string): unknown;
+  prepare(sql: string): {
+    run(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+  };
+}
 
 const BIND_KIND = "alaya_sqlite_embedding_overlay";
 const BIND_SCHEMA_VERSION = 1 as const;
@@ -61,7 +69,7 @@ export function writeEmbeddingOverlayBind(input: {
 }
 
 export function bindEmbeddingOverlay(
-  connection: SqliteConnection,
+  connection: EmbeddingOverlayBindConnection,
   overlayPath: string
 ): void {
   if (!isOverlayAttached(connection)) {
@@ -70,7 +78,7 @@ export function bindEmbeddingOverlay(
   ensureOverlayViews(connection);
 }
 
-export function detachEmbeddingOverlay(connection: SqliteConnection): void {
+export function detachEmbeddingOverlay(connection: EmbeddingOverlayBindConnection): void {
   if (!isOverlayAttached(connection)) return;
   connection.exec(`
     DROP VIEW IF EXISTS memory_embeddings;
@@ -84,7 +92,7 @@ export function detachEmbeddingOverlay(connection: SqliteConnection): void {
 }
 
 export function bindEmbeddingOverlayIfPresent(
-  connection: SqliteConnection,
+  connection: EmbeddingOverlayBindConnection,
   databaseFilename: string
 ): void {
   if (databaseFilename === ":memory:") return;
@@ -103,12 +111,13 @@ export function bindEmbeddingOverlayIfPresent(
   bindEmbeddingOverlay(connection, overlayPath);
 }
 
-function isOverlayAttached(connection: SqliteConnection): boolean {
-  const rows = connection.pragma("database_list") as ReadonlyArray<Readonly<{ name: string }>>;
+function isOverlayAttached(connection: EmbeddingOverlayBindConnection): boolean {
+  const rows = connection.prepare("SELECT name FROM pragma_database_list").all() as
+    ReadonlyArray<Readonly<{ name: string }>>;
   return rows.some((row) => row.name === EMBEDDING_OVERLAY_ALIAS);
 }
 
-function ensureOverlayViews(connection: SqliteConnection): void {
+function ensureOverlayViews(connection: EmbeddingOverlayBindConnection): void {
   connection.exec(`
     CREATE TEMP VIEW IF NOT EXISTS memory_embeddings AS
     SELECT

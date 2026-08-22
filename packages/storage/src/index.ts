@@ -15,6 +15,7 @@ export {
   embeddingOverlayBindPath,
   hasEmbeddingOverlayBind,
   writeEmbeddingOverlayBind,
+  type EmbeddingOverlayBindConnection,
   createInMemorySqliteWriteQueuePort,
   createSerialSqliteWriteQueuePort,
   createWorkerThreadSqliteWriteQueuePort,
