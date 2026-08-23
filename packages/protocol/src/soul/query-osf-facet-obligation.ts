@@ -1,11 +1,30 @@
 import { z } from "zod";
-import { RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID } from
-  "./query-osf-semantic-completeness.js";
+import {
+  QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+  QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID
+} from "./query-osf-semantic-completeness.js";
 
 export const QUERY_FACT_FRAME_OSF_FACET_RECEIPT_OPERATOR_ID =
   "query_fact_frame_osf_facet_receipt_v1" as const;
 export const MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID =
   "model_query_obligation_facet_fallback_v1" as const;
+
+export const CERTIFIED_QUERY_OSF_PRODUCER_IDS = [
+  RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
+  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+  QUERY_FACT_FRAME_OSF_OBLIGATION_OPERATOR_ID,
+  QUERY_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+  QUERY_FACT_FRAME_OSF_FACET_RECEIPT_OPERATOR_ID
+] as const;
+
+const CERTIFIED_QUERY_OSF_PRODUCER_ID_SET: ReadonlySet<string> =
+  new Set(CERTIFIED_QUERY_OSF_PRODUCER_IDS);
+
+export function isCertifiedQueryOsfProducer(operatorId: string): boolean {
+  return CERTIFIED_QUERY_OSF_PRODUCER_ID_SET.has(operatorId);
+}
 
 export const QUERY_OBLIGATION_FACET_IDS = [
   "predicate",
@@ -39,9 +58,12 @@ export const QUERY_OBLIGATION_FACET_REASONS = [
   "capture_unavailable",
   "query_ineligible",
   "ambiguous_wh",
+  "ambiguous_role",
   "capture_mismatch",
   "multiple_frames",
-  "model_fallback_rule_based_impersonation"
+  "ungrounded_fill",
+  "model_fallback_rule_based_impersonation",
+  "model_fallback_certified_producer"
 ] as const;
 
 export const QUERY_OBLIGATION_FACET_CONSTRAINT_CLASS = {
@@ -97,7 +119,6 @@ export const QueryFactFrameOsfFacetReceiptSchema = z.object({
   query_digest: DigestSchema,
   fact_frame_producer_operator_id: z.string().min(1).nullable(),
   fact_frame_capture_digest: DigestSchema,
-  certified_obligation_digest: DigestSchema.nullable(),
   facets: z.array(QueryObligationFacetSchema).length(6).readonly(),
   receipt_digest: DigestSchema
 }).strict().superRefine(validateFacetReceipt).readonly();
@@ -115,7 +136,6 @@ export function queryFactFrameOsfFacetReceiptPreimage(value: Omit<
     query_digest: value.query_digest,
     fact_frame_producer_operator_id: value.fact_frame_producer_operator_id,
     fact_frame_capture_digest: value.fact_frame_capture_digest,
-    certified_obligation_digest: value.certified_obligation_digest,
     facets: value.facets
   });
 }
@@ -124,13 +144,13 @@ function validateFacetProducerIdentity(
   facet: FacetFields,
   context: z.RefinementCtx
 ): void {
-  const formed = facet.status === "formed";
-  const impersonating = facet.producer_kind === "model_fallback" &&
-    facet.producer_operator_id === RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID;
-  if (impersonating) {
+  if (facet.producer_kind === "model_fallback" &&
+      isCertifiedQueryOsfProducer(facet.producer_operator_id ?? "")) {
     context.addIssue({
       code: "custom",
-      message: "model fallback cannot impersonate the rule-based producer"
+      message: facet.producer_operator_id === RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID
+        ? "model fallback cannot impersonate the rule-based producer"
+        : "model fallback cannot impersonate a certified query OSF producer"
     });
     return;
   }
@@ -141,7 +161,7 @@ function validateFacetProducerIdentity(
       message: "query obligation facet constraint class does not match facet id"
     });
   }
-  if (formed) {
+  if (facet.status === "formed") {
     validateFormedFacet(facet, context);
     return;
   }
@@ -176,6 +196,14 @@ function validateFormedFacet(
       message: "rule-based facet producer identity mismatch"
     });
   }
+  if (facet.producer_kind === "model_fallback" &&
+      facet.producer_operator_id !==
+        MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID) {
+    context.addIssue({
+      code: "custom",
+      message: "model fallback must use the facet fallback producer"
+    });
+  }
 }
 
 function validateAmbiguousFacet(
@@ -191,11 +219,7 @@ function validateAmbiguousFacet(
 }
 
 function validateFacetReceipt(
-  value: {
-    fact_frame_producer_operator_id: string | null;
-    certified_obligation_digest: string | null;
-    facets: readonly FacetFields[];
-  },
+  value: { facets: readonly FacetFields[] },
   context: z.RefinementCtx
 ): void {
   const ids = value.facets.map((facet) => facet.facet_id);
@@ -204,32 +228,6 @@ function validateFacetReceipt(
     context.addIssue({
       code: "custom",
       message: "query obligation facet receipt must list each facet once in order"
-    });
-  }
-  const modelFilled = value.facets.some((facet) =>
-    facet.producer_kind === "model_fallback");
-  if (modelFilled && value.certified_obligation_digest !== null) {
-    context.addIssue({
-      code: "custom",
-      message: "model fallback cannot certify a complete query obligation"
-    });
-  }
-  if (value.certified_obligation_digest === null) return;
-  if (value.fact_frame_producer_operator_id !==
-      RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID) {
-    context.addIssue({
-      code: "custom",
-      message: "certified facet receipt requires the rule-based producer"
-    });
-  }
-  const required = ["predicate", "subject", "answer_variable"] as const;
-  if (required.some((id) => {
-    const facet = value.facets.find((entry) => entry.facet_id === id);
-    return facet?.status !== "formed" || facet.producer_kind !== "rule_based";
-  })) {
-    context.addIssue({
-      code: "custom",
-      message: "certified facet receipt is missing rule-based hard slots"
     });
   }
 }

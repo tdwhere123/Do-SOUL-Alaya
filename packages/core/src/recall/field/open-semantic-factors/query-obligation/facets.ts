@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import {
+  MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID,
   QUERY_FACT_FRAME_OSF_FACET_RECEIPT_OPERATOR_ID,
   QUERY_OBLIGATION_FACET_CONSTRAINT_CLASS,
   QUERY_OBLIGATION_FACET_IDS,
@@ -13,21 +13,21 @@ import {
   type QueryObligationFacetStatus
 } from "@do-soul/alaya-protocol";
 import { traceRuleBasedQueryFactFrame } from
-  "../../../shared/query-fact-frame-extraction-rules.js";
+  "../../../../shared/query-fact-frame-extraction-rules.js";
 import {
   extractAnswerOperatorSlot,
   extractTypeConstraintSlot,
   isTimeAnswerOperator,
   scanInterrogativeCues,
   type InterrogativeCueScan
-} from "../../../shared/fact-frame-grammar/interrogative-cues.js";
+} from "../../../../shared/fact-frame-grammar/interrogative-cues.js";
 import {
   verifyRecallQueryFactFrameExtractionCapture,
   type RecallQueryFactFrameCaptureFrame,
   type RecallQueryFactFrameExtractionCapture,
   type RecallQueryFactFrameSlotCapture
-} from "../query-attribution/query-fact-frame-attribution-producer.js";
-import { deriveQueryFactFrameOsfObligation } from "./query-obligation.js";
+} from "../../query-attribution/query-fact-frame-attribution-producer.js";
+import { captureMatchesTrace, digestQueryFactFrame } from "./identity.js";
 
 // Certified OSF stays fail-closed; this sibling records partial facet status.
 
@@ -38,47 +38,54 @@ type FallbackFill = Readonly<{
   readonly surface: string;
   readonly source_span: readonly [number, number];
 }>;
+type PendingStatus = Exclude<QueryObligationFacetStatus, "formed">;
+type FacetProducerKind = "rule_based" | "model_fallback";
 
 export function deriveQueryFactFrameOsfFacetReceipt(input: Readonly<{
   query_text: string;
   fact_frame_capture: Readonly<RecallQueryFactFrameExtractionCapture>;
 }>): QueryFactFrameOsfFacetReceipt {
   verifyRecallQueryFactFrameExtractionCapture(input.fact_frame_capture);
-  const certified = deriveQueryFactFrameOsfObligation(input);
   return sealFacetReceipt({
-    query_digest: digest(input.query_text),
+    query_digest: digestQueryFactFrame(input.query_text),
     fact_frame_producer_operator_id: input.fact_frame_capture.producer_operator_id,
     fact_frame_capture_digest: input.fact_frame_capture.capture_digest,
-    certified_obligation_digest: certified?.obligation_digest ?? null,
     facets: deriveFacets(input.query_text, input.fact_frame_capture)
   });
 }
 
+export function verifyQueryFactFrameOsfFacetReceipt(
+  receipt: Readonly<QueryFactFrameOsfFacetReceipt>
+): QueryFactFrameOsfFacetReceipt {
+  const parsed = QueryFactFrameOsfFacetReceiptSchema.parse(receipt);
+  const { receipt_digest, ...body } = parsed;
+  if (receipt_digest !== digestQueryFactFrame(
+    queryFactFrameOsfFacetReceiptPreimage(body)
+  )) {
+    throw new Error("query fact-frame OSF facet receipt digest mismatch");
+  }
+  return parsed;
+}
+
 export function applyQueryObligationFacetFallback(input: Readonly<{
   receipt: Readonly<QueryFactFrameOsfFacetReceipt>;
+  query_text: string;
   producer_operator_id: string;
   fills: readonly FallbackFill[];
 }>): QueryFactFrameOsfFacetReceipt {
-  const receipt = QueryFactFrameOsfFacetReceiptSchema.parse(input.receipt);
-  const impersonating =
-    input.producer_operator_id === RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID;
-  const filledIds = new Set(input.fills.map((fill) => fill.facet_id));
+  const receipt = verifyQueryFactFrameOsfFacetReceipt(input.receipt);
+  const rejection = fallbackRejection(input.producer_operator_id);
   const fills = new Map(input.fills.map((fill) => [fill.facet_id, fill]));
-  const facets = QUERY_OBLIGATION_FACET_IDS.map((id) => {
-    const current = receipt.facets.find((facet) => facet.facet_id === id)!;
-    return applyFallbackFacet(
-      current, fills.get(id), input.producer_operator_id, impersonating
-    );
-  });
-  const filled = !impersonating &&
-    receipt.facets.some((facet) =>
-      facet.status === "unavailable" && filledIds.has(facet.facet_id));
   return sealFacetReceipt({
     query_digest: receipt.query_digest,
     fact_frame_producer_operator_id: receipt.fact_frame_producer_operator_id,
     fact_frame_capture_digest: receipt.fact_frame_capture_digest,
-    certified_obligation_digest: filled ? null : receipt.certified_obligation_digest,
-    facets
+    facets: QUERY_OBLIGATION_FACET_IDS.map((id) => applyFallbackFacet(
+      receipt.facets.find((facet) => facet.facet_id === id)!,
+      fills.get(id),
+      input.query_text,
+      rejection
+    ))
   });
 }
 
@@ -94,10 +101,12 @@ function deriveFacets(
     return allFacets("unavailable", "capture_unavailable");
   }
   if (capture.frames.length > 1) {
-    return facetsFromMultipleFrames(cues);
+    return pendingHardCensus(
+      { status: "ambiguous", reason: "multiple_frames" }, cues, "multiple_frames"
+    );
   }
   if (capture.producer_operator_id !== RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID) {
-    return facetsFromForeignCapture(query, capture, cues);
+    return facetsFromNoParse(cues);
   }
   return facetsFromRuleBasedCapture(query, capture, cues);
 }
@@ -111,23 +120,21 @@ function facetsFromRuleBasedCapture(
   const frame = capture.frames[0];
   if (frame === undefined || trace === null) return facetsFromNoParse(cues);
   if (!captureMatchesTrace(frame, trace.frame)) {
-    return facetsFromMismatch(cues);
+    return pendingHardCensus(
+      { status: "rejected", reason: "capture_mismatch" }, cues, "capture_mismatch"
+    );
   }
-  if (trace.osfLayout !== null) {
-    return facetsFromLayout(query, trace.osfLayout, cues);
-  }
+  if (trace.osfLayout !== null) return facetsFromLayout(query, trace.osfLayout, cues);
   return facetsFromParsedFrame(query, frame, cues, "missing_osf_layout");
 }
 
-function facetsFromForeignCapture(
-  query: string,
-  capture: Readonly<RecallQueryFactFrameExtractionCapture>,
-  cues: InterrogativeCueScan
-): readonly QueryObligationFacet[] {
-  const frame = capture.frames[0];
-  if (frame === undefined) return facetsFromNoParse(cues);
-  return facetsFromParsedFrame(
-    query, frame, cues, "no_parse", capture.producer_operator_id!
+function facetsFromNoParse(cues: InterrogativeCueScan): readonly QueryObligationFacet[] {
+  if (!cues.interrogative) return allFacets("ineligible", "query_ineligible");
+  return pendingHardCensus(
+    { status: "unavailable", reason: "no_parse" },
+    cues,
+    "no_parse",
+    cues.ambiguous_wh ? { status: "ambiguous", reason: "ambiguous_wh" } : undefined
   );
 }
 
@@ -138,111 +145,89 @@ function facetsFromLayout(
 ): readonly QueryObligationFacet[] {
   const producer = RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID;
   const answer = operatorAndType(query, layout.value.source_span);
-  return [
-    formedFacet("predicate", layout.predicate, producer, "rule_based"),
-    formedFacet("subject", layout.subject, producer, "rule_based"),
-    answer.operator === "ambiguous"
+  return facetCensus({
+    predicate: formedFacet("predicate", layout.predicate, producer, "rule_based"),
+    subject: formedFacet("subject", layout.subject, producer, "rule_based"),
+    answer_variable: answer.operator === "ambiguous"
       ? pendingFacet("answer_variable", "ambiguous", "ambiguous_wh")
       : formedFacet("answer_variable", layout.value, producer, "rule_based"),
-    answer.type === null
-      ? pendingFacet("type_constraint", "ineligible", "not_requested")
+    type_constraint: answer.type === null
+      ? pendingForRequest("type_constraint", false, "not_requested")
       : formedFacet("type_constraint", answer.type, producer, "rule_based"),
-    timeFromAnswer(answer.operator, layout.value, cues, producer, "rule_based"),
-    answerOperatorFacet(answer.operator, producer, "rule_based")
-  ];
+    time: timeFromAnswer(
+      answer.operator, layout.value, cues, producer, "rule_based", "not_requested"
+    ),
+    answer_operator: answerOperatorFacet(
+      answer.operator, producer, "rule_based", false, "not_requested"
+    )
+  });
 }
 
 function facetsFromParsedFrame(
   query: string,
   frame: Readonly<RecallQueryFactFrameCaptureFrame>,
   cues: InterrogativeCueScan,
-  missingReason: QueryObligationFacetReason,
-  producer: string = RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID
+  missingReason: QueryObligationFacetReason
 ): readonly QueryObligationFacet[] {
-  const kind = producer === RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID
-    ? "rule_based" as const
-    : "model_fallback" as const;
+  const producer = RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID;
+  const kind = "rule_based" as const;
   const predicate = uniqueRoleSlot(frame, "relation");
   const subject = uniqueRoleSlot(frame, "subject");
   const value = uniqueRoleSlot(frame, "value");
   const time = uniqueRoleSlot(frame, "time");
   const answer = value === null || value === "ambiguous"
-    ? { operator: value, type: null }
+    ? { operator: value, type: null as FacetSlot | null }
     : operatorAndType(query, value.source_span);
-  return [
-    parsedSlotFacet("predicate", predicate, producer, kind, cues, missingReason),
-    parsedSlotFacet("subject", subject, producer, kind, cues, missingReason),
-    parsedAnswerVariable(value, answer.operator, producer, kind, cues, missingReason),
-    answer.type === null
-      ? cueFacet("type_constraint", cues.type_requested, missingReason)
-      : formedFacet("type_constraint", answer.type, producer, kind),
-    time === null
-      ? timeFromAnswer(answer.operator, value === "ambiguous" ? null : value,
-        cues, producer, kind, missingReason)
-      : timeFacet(time, cues, producer, kind, missingReason),
-    answerOperatorFacet(answer.operator, producer, kind, missingReason, cues)
-  ];
-}
-
-function facetsFromNoParse(cues: InterrogativeCueScan): readonly QueryObligationFacet[] {
-  if (!cues.interrogative) return allFacets("ineligible", "query_ineligible");
-  return [
-    pendingFacet("predicate", "unavailable", "no_parse"),
-    pendingFacet("subject", "unavailable", "no_parse"),
-    pendingFacet(
-      "answer_variable",
-      cues.ambiguous_wh ? "ambiguous" : "unavailable",
-      cues.ambiguous_wh ? "ambiguous_wh" : "no_parse"
+  return facetCensus({
+    predicate: parsedSlotFacet("predicate", predicate, producer, kind, cues, missingReason),
+    subject: parsedSlotFacet("subject", subject, producer, kind, cues, missingReason),
+    answer_variable: parsedAnswerVariable(
+      value, answer.operator, producer, kind, cues, missingReason
     ),
-    cueFacet("type_constraint", cues.type_requested, "no_parse"),
-    cueFacet("time", cues.time_requested, "no_parse"),
-    pendingFacet(
-      "answer_operator",
-      cues.ambiguous_wh ? "ambiguous" : "unavailable",
-      cues.ambiguous_wh ? "ambiguous_wh" : "no_parse"
+    type_constraint: answer.type === null
+      ? pendingForRequest("type_constraint", cues.type_requested, missingReason)
+      : formedFacet("type_constraint", answer.type, producer, kind),
+    time: parsedTimeFacet(
+      time, answer.operator, value === "ambiguous" ? null : value,
+      cues, producer, kind, missingReason
+    ),
+    answer_operator: answerOperatorFacet(
+      answer.operator, producer, kind, cues.interrogative, missingReason
     )
-  ];
-}
-
-function facetsFromMultipleFrames(
-  cues: InterrogativeCueScan
-): readonly QueryObligationFacet[] {
-  return [
-    pendingFacet("predicate", "ambiguous", "multiple_frames"),
-    pendingFacet("subject", "ambiguous", "multiple_frames"),
-    pendingFacet("answer_variable", "ambiguous", "multiple_frames"),
-    cueFacet("type_constraint", cues.type_requested, "multiple_frames"),
-    cueFacet("time", cues.time_requested, "multiple_frames"),
-    pendingFacet("answer_operator", "ambiguous", "multiple_frames")
-  ];
-}
-
-function facetsFromMismatch(
-  cues: InterrogativeCueScan
-): readonly QueryObligationFacet[] {
-  return [
-    pendingFacet("predicate", "rejected", "capture_mismatch"),
-    pendingFacet("subject", "rejected", "capture_mismatch"),
-    pendingFacet("answer_variable", "rejected", "capture_mismatch"),
-    cueFacet("type_constraint", cues.type_requested, "capture_mismatch"),
-    cueFacet("time", cues.time_requested, "capture_mismatch"),
-    pendingFacet("answer_operator", "rejected", "capture_mismatch")
-  ];
+  });
 }
 
 function applyFallbackFacet(
   current: QueryObligationFacet,
   fill: FallbackFill | undefined,
-  producer: string,
-  impersonating: boolean
+  query: string,
+  rejection: QueryObligationFacetReason | null
 ): QueryObligationFacet {
   if (fill === undefined || current.status !== "unavailable") return current;
-  if (impersonating) {
-    return pendingFacet(
-      current.facet_id, "rejected", "model_fallback_rule_based_impersonation"
-    );
+  if (rejection !== null) {
+    return pendingFacet(current.facet_id, "rejected", rejection);
   }
-  return formedFacet(current.facet_id, fill, producer, "model_fallback");
+  if (!fillIsSourceExact(query, fill)) {
+    return pendingFacet(current.facet_id, "rejected", "ungrounded_fill");
+  }
+  return formedFacet(
+    current.facet_id, fill,
+    MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID, "model_fallback"
+  );
+}
+
+function fallbackRejection(producer: string): QueryObligationFacetReason | null {
+  if (producer === MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID) return null;
+  return producer === RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID
+    ? "model_fallback_rule_based_impersonation"
+    : "model_fallback_certified_producer";
+}
+
+function fillIsSourceExact(query: string, fill: FallbackFill): boolean {
+  const [start, end] = fill.source_span;
+  return Number.isSafeInteger(start) && Number.isSafeInteger(end) &&
+    start >= 0 && end <= query.length && end > start &&
+    query.slice(start, end) === fill.surface;
 }
 
 function operatorAndType(query: string, valueSpan: readonly [number, number]) {
@@ -256,31 +241,44 @@ function parsedSlotFacet(
   id: QueryObligationFacetId,
   slot: FacetSlot | "ambiguous" | null,
   producer: string,
-  kind: "rule_based" | "model_fallback",
+  kind: FacetProducerKind,
   cues: InterrogativeCueScan,
   missingReason: QueryObligationFacetReason
 ): QueryObligationFacet {
-  if (slot === "ambiguous") return pendingFacet(id, "ambiguous", "ambiguous_wh");
+  if (slot === "ambiguous") return pendingFacet(id, "ambiguous", "ambiguous_role");
   if (slot !== null) return formedFacet(id, slot, producer, kind);
-  return pendingFacet(
-    id,
-    cues.interrogative ? "unavailable" : "ineligible",
-    cues.interrogative ? missingReason : "query_ineligible"
-  );
+  return pendingForRequest(id, cues.interrogative, missingReason, "query_ineligible");
 }
 
 function parsedAnswerVariable(
   value: FacetSlot | "ambiguous" | null,
   operator: FacetSlot | "ambiguous" | null,
   producer: string,
-  kind: "rule_based" | "model_fallback",
+  kind: FacetProducerKind,
   cues: InterrogativeCueScan,
   missingReason: QueryObligationFacetReason
 ): QueryObligationFacet {
-  if (value === "ambiguous" || operator === "ambiguous") {
+  if (value === "ambiguous") {
+    return pendingFacet("answer_variable", "ambiguous", "ambiguous_role");
+  }
+  if (operator === "ambiguous") {
     return pendingFacet("answer_variable", "ambiguous", "ambiguous_wh");
   }
   return parsedSlotFacet("answer_variable", value, producer, kind, cues, missingReason);
+}
+
+function parsedTimeFacet(
+  slot: FacetSlot | "ambiguous" | null,
+  operator: FacetSlot | "ambiguous" | null,
+  value: FacetSlot | null,
+  cues: InterrogativeCueScan,
+  producer: string,
+  kind: FacetProducerKind,
+  missingReason: QueryObligationFacetReason
+): QueryObligationFacet {
+  if (slot === "ambiguous") return pendingFacet("time", "ambiguous", "ambiguous_role");
+  if (slot !== null) return formedFacet("time", slot, producer, kind);
+  return timeFromAnswer(operator, value, cues, producer, kind, missingReason);
 }
 
 function timeFromAnswer(
@@ -288,64 +286,77 @@ function timeFromAnswer(
   value: FacetSlot | null,
   cues: InterrogativeCueScan,
   producer: string,
-  kind: "rule_based" | "model_fallback",
-  missingReason: QueryObligationFacetReason = "not_requested"
+  kind: FacetProducerKind,
+  missingReason: QueryObligationFacetReason
 ): QueryObligationFacet {
   if (operator !== "ambiguous" && operator !== null &&
       isTimeAnswerOperator(operator.surface)) {
     return formedFacet("time", value ?? operator, producer, kind);
   }
-  return timeFacet(null, cues, producer, kind, missingReason);
-}
-
-function timeFacet(
-  slot: FacetSlot | "ambiguous" | null,
-  cues: InterrogativeCueScan,
-  producer: string,
-  kind: "rule_based" | "model_fallback" = "rule_based",
-  missingReason: QueryObligationFacetReason = "no_parse"
-): QueryObligationFacet {
-  if (slot === "ambiguous") return pendingFacet("time", "ambiguous", "ambiguous_wh");
-  if (slot !== null) return formedFacet("time", slot, producer, kind);
-  return cueFacet("time", cues.time_requested, missingReason);
+  return pendingForRequest("time", cues.time_requested, missingReason);
 }
 
 function answerOperatorFacet(
   operator: FacetSlot | "ambiguous" | null,
   producer: string,
-  kind: "rule_based" | "model_fallback",
-  missingReason: QueryObligationFacetReason = "not_requested",
-  cues?: InterrogativeCueScan
+  kind: FacetProducerKind,
+  requested: boolean,
+  missingReason: QueryObligationFacetReason
 ): QueryObligationFacet {
   if (operator === "ambiguous") {
     return pendingFacet("answer_operator", "ambiguous", "ambiguous_wh");
   }
   if (operator !== null) return formedFacet("answer_operator", operator, producer, kind);
-  if (cues === undefined) return pendingFacet("answer_operator", "ineligible", "not_requested");
-  return pendingFacet(
-    "answer_operator",
-    cues.interrogative ? "unavailable" : "ineligible",
-    cues.interrogative ? missingReason : "query_ineligible"
+  return pendingForRequest(
+    "answer_operator", requested, missingReason, "query_ineligible"
   );
 }
 
-function cueFacet(
+function pendingHardCensus(
+  hard: Readonly<{ status: PendingStatus; reason: QueryObligationFacetReason }>,
+  cues: InterrogativeCueScan,
+  cueReason: QueryObligationFacetReason,
+  answer?: Readonly<{ status: PendingStatus; reason: QueryObligationFacetReason }>
+): readonly QueryObligationFacet[] {
+  const answerState = answer ?? hard;
+  return facetCensus({
+    predicate: pendingFacet("predicate", hard.status, hard.reason),
+    subject: pendingFacet("subject", hard.status, hard.reason),
+    answer_variable: pendingFacet(
+      "answer_variable", answerState.status, answerState.reason
+    ),
+    type_constraint: pendingForRequest(
+      "type_constraint", cues.type_requested, cueReason
+    ),
+    time: pendingForRequest("time", cues.time_requested, cueReason),
+    answer_operator: pendingFacet(
+      "answer_operator", answerState.status, answerState.reason
+    )
+  });
+}
+
+function facetCensus(slots: Readonly<Record<
+  QueryObligationFacetId, QueryObligationFacet
+>>): readonly QueryObligationFacet[] {
+  return QUERY_OBLIGATION_FACET_IDS.map((id) => slots[id]);
+}
+
+function pendingForRequest(
   id: QueryObligationFacetId,
   requested: boolean,
-  requestedReason: QueryObligationFacetReason
+  requestedReason: QueryObligationFacetReason,
+  unrequestedReason: QueryObligationFacetReason = "not_requested"
 ): QueryObligationFacet {
-  return pendingFacet(
-    id,
-    requested ? "unavailable" : "ineligible",
-    requested ? requestedReason : "not_requested"
-  );
+  return requested
+    ? pendingFacet(id, "unavailable", requestedReason)
+    : pendingFacet(id, "ineligible", unrequestedReason);
 }
 
 function formedFacet(
   id: QueryObligationFacetId,
   slot: FacetSlot,
   producer: string,
-  kind: "rule_based" | "model_fallback"
+  kind: FacetProducerKind
 ): QueryObligationFacet {
   return Object.freeze({
     facet_id: id,
@@ -361,7 +372,7 @@ function formedFacet(
 
 function pendingFacet(
   id: QueryObligationFacetId,
-  status: Exclude<QueryObligationFacetStatus, "formed">,
+  status: PendingStatus,
   reason: QueryObligationFacetReason
 ): QueryObligationFacet {
   return Object.freeze({
@@ -377,7 +388,7 @@ function pendingFacet(
 }
 
 function allFacets(
-  status: Exclude<QueryObligationFacetStatus, "formed" | "ambiguous">,
+  status: Exclude<PendingStatus, "ambiguous">,
   reason: QueryObligationFacetReason
 ): readonly QueryObligationFacet[] {
   return QUERY_OBLIGATION_FACET_IDS.map((id) => pendingFacet(id, status, reason));
@@ -397,17 +408,6 @@ function uniqueRoleSlot(
   });
 }
 
-function captureMatchesTrace(
-  captured: RecallQueryFactFrameCaptureFrame,
-  parsed: RuleBasedTrace["frame"]
-): boolean {
-  return captured.slots.length === parsed.slots.length &&
-    captured.slots.every((slot, index) => {
-      const expected = parsed.slots[index];
-      return expected?.role === slot.role && expected.text === slot.text;
-    });
-}
-
 function sealFacetReceipt(body: Omit<QueryFactFrameOsfFacetReceipt, "schema_version" |
   "operator_id" | "receipt_digest">): QueryFactFrameOsfFacetReceipt {
   const unsigned = {
@@ -417,10 +417,6 @@ function sealFacetReceipt(body: Omit<QueryFactFrameOsfFacetReceipt, "schema_vers
   };
   return QueryFactFrameOsfFacetReceiptSchema.parse({
     ...unsigned,
-    receipt_digest: digest(queryFactFrameOsfFacetReceiptPreimage(unsigned))
+    receipt_digest: digestQueryFactFrame(queryFactFrameOsfFacetReceiptPreimage(unsigned))
   });
-}
-
-function digest(value: string): `sha256:${string}` {
-  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
