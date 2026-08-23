@@ -11,6 +11,7 @@ import { materializeKindConstraintAlignment } from
 import {
   T2_ANSWER_VARIABLE_ID,
   T2_DUPLICATE_FACTOR_OVERLAYS,
+  T2_LYING_BINDING_IDENTITY,
   T2_INVALID_GRAPH_DIGEST,
   T2_INVALID_KIND_VALUES_TOO_MANY,
   T2_INVALID_MALFORMED_PROJECTION,
@@ -188,6 +189,22 @@ describe("kind_constraint_alignment_v1", () => {
       projection.status === "rejected" &&
       projection.rejection_reason === "kind_projection_invalid_duplicate_factor"
     )).toBe(true);
+    expect(OpenSemanticFactorGraphSchema.safeParse(graph).success).toBe(true);
+  });
+
+  it(`${T2_LYING_BINDING_IDENTITY}: a lying binding cannot replace the referent with the kind`, () => {
+    const graph = t2SpotifyEvidenceGraph();
+    const result = align(graph, [{
+      variable_id: T2_ANSWER_VARIABLE_ID,
+      evidence_factor_id: "spotify",
+      semantic_identity: T2_MUSIC_STREAMING_SERVICE
+    }], [t2KindProposal(graph, "spotify", [T2_MUSIC_STREAMING_SERVICE])]);
+
+    expect(result.alignments).toEqual([]);
+    expect(result.alignments.some((binding) =>
+      binding.answer_identity === T2_MUSIC_STREAMING_SERVICE
+    )).toBe(false);
+    expect(result.status).toBe("ineligible");
     expect(OpenSemanticFactorGraphSchema.safeParse(graph).success).toBe(true);
   });
 

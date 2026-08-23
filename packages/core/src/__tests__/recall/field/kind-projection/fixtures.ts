@@ -26,6 +26,7 @@ export const T2_MISSING_KIND_PROJECTION = "t2-missing-kind-projection";
 export const T2_POLARITY_VIDEO_HOSTING = "t2-polarity-video-hosting";
 export const T2_REJECTED_SIBLING_POLARITY = "t2-rejected-sibling-polarity";
 export const T2_DUPLICATE_FACTOR_OVERLAYS = "t2-duplicate-factor-overlays";
+export const T2_LYING_BINDING_IDENTITY = "t2-lying-binding-identity";
 
 export function t2SpotifyEvidenceGraph(): OpenSemanticFactorGraph {
   return groundedGraph("evidence", T2_SPOTIFY_SOURCE, [
@@ -62,13 +63,13 @@ export function t2SpotifyQueryGraph(): OpenSemanticFactorGraph {
 }
 
 export function t2SpotifyResultBindings(): readonly KindConstraintResultBinding[] {
-  return [resultBinding("spotify", "spotify")];
+  return [resultBinding("spotify")];
 }
 
 export function t2TwoInstanceResultBindings(): readonly KindConstraintResultBinding[] {
   return [
-    resultBinding("spotify", "spotify"),
-    resultBinding("apple-music", "apple music")
+    resultBinding("spotify"),
+    resultBinding("apple-music")
   ];
 }
 
@@ -86,13 +87,9 @@ export function t2KindProposal(
   };
 }
 
-function resultBinding(
-  evidenceFactorId: string,
-  semanticIdentity: string
-): KindConstraintResultBinding {
+function resultBinding(evidenceFactorId: string): KindConstraintResultBinding {
   return {
     variable_id: T2_ANSWER_VARIABLE_ID,
-    semantic_identity: semanticIdentity,
     evidence_factor_id: evidenceFactorId
   };
 }

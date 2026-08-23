@@ -3,8 +3,11 @@ import {
   normalizeSemanticIdentity,
   type KindProjection,
   type KindProjectionStatus,
+  type OpenSemanticFactor,
   type OpenSemanticFactorGraph
 } from "@do-soul/alaya-protocol";
+import type { OpenSemanticFactorBindingObservation } from
+  "../open-semantic-factors/composition-search.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../field-identity.js";
@@ -16,11 +19,10 @@ import {
 export const KIND_CONSTRAINT_ALIGNMENT_OPERATOR_ID =
   "kind_constraint_alignment_v1" as const;
 
-export type KindConstraintResultBinding = Readonly<{
-  readonly variable_id: string;
-  readonly semantic_identity: string;
-  readonly evidence_factor_id: string;
-}>;
+export type KindConstraintResultBinding = Pick<
+  OpenSemanticFactorBindingObservation,
+  "variable_id" | "evidence_factor_id"
+> & Partial<Pick<OpenSemanticFactorBindingObservation, "semantic_identity">>;
 
 export type KindConstraintAlignmentBinding = Readonly<{
   readonly variable_id: string;
@@ -64,7 +66,8 @@ export function materializeKindConstraintAlignment(input: Readonly<{
       projections,
       input.result_bindings,
       constraint,
-      input.answer_variable_id
+      input.answer_variable_id,
+      input.evidence_graph
     )
     : [];
   const body = Object.freeze({
@@ -106,14 +109,23 @@ function collectAlignments(
   projections: readonly KindProjection[],
   resultBindings: readonly KindConstraintResultBinding[],
   constraint: string,
-  variableId: string
+  variableId: string,
+  graph: OpenSemanticFactorGraph
 ): KindConstraintAlignmentBinding[] {
   // Filter OSF result bindings; a kind payload cannot mint an answer.
   const formed = formedProjectionsByFactor(projections);
+  const factors = new Map(
+    graph.factors.map((factor) => [factor.factor_id, factor])
+  );
   const alignments: KindConstraintAlignmentBinding[] = [];
   for (const binding of resultBindings) {
     if (binding.variable_id !== variableId) continue;
-    const aligned = filterBinding(binding, formed.get(binding.evidence_factor_id), constraint);
+    const aligned = filterBinding(
+      binding,
+      formed.get(binding.evidence_factor_id),
+      factors.get(binding.evidence_factor_id),
+      constraint
+    );
     if (aligned !== null) alignments.push(aligned);
   }
   return alignments.sort((left, right) => compareText(left.factor_id, right.factor_id));
@@ -133,9 +145,11 @@ function formedProjectionsByFactor(
 function filterBinding(
   binding: KindConstraintResultBinding,
   projection: KindProjection | undefined,
+  factor: OpenSemanticFactor | undefined,
   constraint: string
 ): KindConstraintAlignmentBinding | null {
-  if (projection === undefined) return null;
+  if (projection === undefined || factor === undefined) return null;
+  if (claimedIdentityMismatchesFactor(binding, factor)) return null;
   const edge = projection.instance_of.find((item) =>
     item.subject_factor_id === binding.evidence_factor_id &&
     item.predicate === "instance_of" &&
@@ -144,10 +158,18 @@ function filterBinding(
   return Object.freeze({
     variable_id: binding.variable_id,
     factor_id: binding.evidence_factor_id,
-    answer_identity: binding.semantic_identity,
+    answer_identity: factor.semantic_identity,
     kind_identity: edge.kind_identity,
     projection_digest: projection.projection_digest
   });
+}
+
+function claimedIdentityMismatchesFactor(
+  binding: KindConstraintResultBinding,
+  factor: OpenSemanticFactor
+): boolean {
+  return binding.semantic_identity !== undefined &&
+    binding.semantic_identity !== factor.semantic_identity;
 }
 
 function classifyAlignmentStatus(input: Readonly<{
