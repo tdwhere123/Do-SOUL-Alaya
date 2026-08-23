@@ -60,6 +60,90 @@ describe("Select_Gamma admission walk", () => {
     });
   });
 
+  it("treats omitted source_hard_dedupe as on", () => {
+    const candidates = [
+      candidate("duplicate-a", 3, { source: "shared" }),
+      candidate("duplicate-b", 2, { source: "shared" }),
+      candidate("novel", 1, { source: "novel" })
+    ];
+    const omitted = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      candidates,
+      max_selected: 2
+    });
+    const explicit = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      candidates,
+      max_selected: 2,
+      source_hard_dedupe: true
+    });
+
+    expect(omitted.selected_candidate_keys).toEqual(explicit.selected_candidate_keys);
+    expect(omitted.decisions.map(({ candidate_key, receipt }) => ({
+      candidate_key,
+      receipt
+    }))).toEqual(explicit.decisions.map(({ candidate_key, receipt }) => ({
+      candidate_key,
+      receipt
+    })));
+  });
+
+  it("admits distinct objects from one source when source hard-dedupe is off", () => {
+    const result = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      source_hard_dedupe: false,
+      candidates: [
+        candidate("duplicate-a", 3, {
+          object_key: "memory:a",
+          source: "shared"
+        }),
+        candidate("duplicate-b", 2, {
+          object_key: "memory:b",
+          source: "shared"
+        }),
+        candidate("novel", 1, {
+          object_key: "memory:novel",
+          source: "novel"
+        })
+      ],
+      max_selected: 2
+    });
+
+    expect(result.selected_candidate_keys).toEqual(["duplicate-a", "duplicate-b"]);
+    expect(result.decisions.filter((decision) =>
+      decision.receipt.kind === "duplicate")).toEqual([]);
+  });
+
+  it("still rejects a duplicate object when source hard-dedupe is off", () => {
+    const result = selectGammaWalk(REQUEST, {
+      ...BINDING,
+      source_hard_dedupe: false,
+      candidates: [
+        candidate("duplicate-a", 3, {
+          object_key: "memory:shared",
+          source: "shared"
+        }),
+        candidate("duplicate-b", 2, {
+          object_key: "memory:shared",
+          source: "shared"
+        }),
+        candidate("novel", 1, {
+          object_key: "memory:novel",
+          source: "other"
+        })
+      ],
+      max_selected: 2
+    });
+
+    expect(result.selected_candidate_keys).toEqual(["duplicate-a", "novel"]);
+    expect(result.decisions.find(({ candidate_key }) =>
+      candidate_key === "duplicate-b")?.receipt).toMatchObject({
+      kind: "duplicate",
+      identity_channel: "object",
+      retained_candidate_key: "duplicate-a"
+    });
+  });
+
   it("admits a second distinct object that shares lineage", () => {
     const result = selectGammaWalk(REQUEST, {
       ...BINDING,

@@ -47,7 +47,8 @@ export function buildFineAssessmentSelectGammaBinding(
     candidates,
     feature_weights: featureWeights(eligibleCandidates),
     max_selected: context.config.budgets.max_entries,
-    per_dimension_limits: context.config.budgets.per_dimension_limits
+    per_dimension_limits: context.config.budgets.per_dimension_limits,
+    source_hard_dedupe: true
   });
 }
 

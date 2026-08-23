@@ -57,6 +57,23 @@ export type SelectGammaBinding = Readonly<{
   readonly feature_weights: SelectGammaFeatureWeights;
   readonly max_selected: number;
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
+  readonly source_hard_dedupe?: boolean;
+}>;
+
+export type SelectGammaWalkObjective<State = unknown> = Readonly<{
+  readonly operator_id: string;
+  readonly mathematical_class?: "monotone_submodular";
+  readonly configuration_digest?: string;
+  readonly createState: () => State;
+  readonly cloneState?: (state: State) => State;
+  readonly marginalGain: (
+    candidate: SelectGammaFormulaCandidate,
+    state: State
+  ) => number;
+  readonly accept: (
+    candidate: SelectGammaFormulaCandidate,
+    state: State
+  ) => void;
 }>;
 
 export type SelectGammaRequest = Readonly<{

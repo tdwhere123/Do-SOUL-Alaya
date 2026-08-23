@@ -2,18 +2,15 @@ import {
   compareCodeUnits,
   SELECT_GAMMA_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
-import {
-  acceptSelectGammaCoverage,
-  selectGammaMarginalGain
-} from "./objective.js";
+import { createSelectGammaGenericWalkObjective } from "./walk-objective.js";
 import type {
   SelectGammaBinding,
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
-  SelectGammaFeatureWeights,
   SelectGammaFormulaCandidate,
   SelectGammaRequest,
   SelectGammaSelectionReceipt,
+  SelectGammaWalkObjective,
   SelectGammaWalkResult
 } from "./types.js";
 
@@ -24,6 +21,7 @@ type AdmissionState = Readonly<{
   readonly retainedByObjectKey: ReadonlyMap<string, string>;
   readonly retainedBySourceKey: ReadonlyMap<string, string>;
   readonly perDimensionCounts: ReadonlyMap<string, number>;
+  readonly sourceHardDedupe: boolean;
   readonly limits: Readonly<{
     readonly maxSelected: number;
     readonly perDimensionLimits: Readonly<Record<string, number>> | null;
@@ -34,7 +32,8 @@ type SelectionLimits = AdmissionState["limits"];
 
 export function selectGammaWalk(
   request: SelectGammaRequest,
-  binding: SelectGammaBinding
+  binding: SelectGammaBinding,
+  objective: SelectGammaWalkObjective = createSelectGammaGenericWalkObjective(binding)
 ): SelectGammaWalkResult {
   assertBoundIdentity(request, binding);
   assertTokenBudget(request.token_budget);
@@ -54,22 +53,30 @@ export function selectGammaWalk(
     maxSelected,
     request.token_budget
   );
-  return greedySelect(remaining, request.token_budget, binding.feature_weights, {
-    maxSelected,
-    perDimensionLimits: binding.per_dimension_limits
-  }, selectionReceipt);
+  return greedySelect(
+    remaining,
+    request.token_budget,
+    objective,
+    {
+      maxSelected,
+      perDimensionLimits: binding.per_dimension_limits
+    },
+    selectionReceipt,
+    binding.source_hard_dedupe ?? true
+  );
 }
 
 function greedySelect(
   remaining: SelectGammaFormulaCandidate[],
   tokenBudget: number,
-  weights: SelectGammaFeatureWeights,
+  objective: SelectGammaWalkObjective,
   limits: SelectionLimits,
-  selectionReceipt: SelectGammaSelectionReceipt
+  selectionReceipt: SelectGammaSelectionReceipt,
+  sourceHardDedupe: boolean
 ): SelectGammaWalkResult {
   const selected: string[] = [];
   const decisions: SelectGammaDecision[] = [];
-  const covered = new Map<string, number>();
+  const covered = objective.createState();
   const retainedByObjectKey = new Map<string, string>();
   const retainedBySourceKey = new Map<string, string>();
   const perDimensionCounts = new Map<string, number>();
@@ -82,13 +89,14 @@ function greedySelect(
       retainedByObjectKey,
       retainedBySourceKey,
       perDimensionCounts,
+      sourceHardDedupe,
       limits
     }, decisions);
     if (rejected.size === remaining.length) break;
     remaining.splice(0, remaining.length, ...remaining.filter((_, index) =>
       !rejected.has(index)));
     const picked = pickNext(
-      remaining, covered, weights, selectionReceipt.ordering_basis
+      remaining, covered, objective, selectionReceipt.ordering_basis
     );
     if (picked === null) break;
     const candidate = remaining.splice(picked.index, 1)[0]!;
@@ -98,10 +106,11 @@ function greedySelect(
     ));
     selected.push(candidate.candidate_key);
     usedTokens += candidate.token_cost;
-    retainedByObjectKey.set(objectKey(candidate), candidate.candidate_key);
-    retainIdentity(candidate.source, candidate.candidate_key, retainedBySourceKey);
+    retainAdmittedIdentity(
+      candidate, retainedByObjectKey, retainedBySourceKey, sourceHardDedupe
+    );
     incrementDimensionCount(candidate.dimension ?? "unbound", perDimensionCounts);
-    acceptSelectGammaCoverage(candidate, covered);
+    objective.accept(candidate, covered);
   }
   return materializeWalkResult(selected, decisions, selectionReceipt);
 }
@@ -118,6 +127,18 @@ function materializeWalkResult(
   });
 }
 
+function retainAdmittedIdentity(
+  candidate: SelectGammaFormulaCandidate,
+  retainedByObjectKey: Map<string, string>,
+  retainedBySourceKey: Map<string, string>,
+  sourceHardDedupe: boolean
+): void {
+  retainedByObjectKey.set(objectKey(candidate), candidate.candidate_key);
+  if (sourceHardDedupe) {
+    retainIdentity(candidate.source, candidate.candidate_key, retainedBySourceKey);
+  }
+}
+
 function incrementDimensionCount(
   dimension: string,
   counts: Map<string, number>
@@ -127,8 +148,8 @@ function incrementDimensionCount(
 
 function pickNext(
   remaining: readonly SelectGammaFormulaCandidate[],
-  covered: ReadonlyMap<string, number>,
-  weights: SelectGammaFeatureWeights,
+  covered: unknown,
+  objective: SelectGammaWalkObjective,
   orderingBasis: SelectGammaSelectionReceipt["ordering_basis"]
 ): Readonly<{ readonly index: number; readonly gain: number }> | null {
   let bestIndex = -1;
@@ -139,7 +160,7 @@ function pickNext(
   for (let index = 0; index < remaining.length; index += 1) {
     const candidate = remaining[index]!;
     assertTokenCost(candidate.token_cost);
-    const gain = selectGammaMarginalGain(candidate, covered, weights);
+    const gain = objective.marginalGain(candidate, covered);
     const score = orderingBasis === "raw_marginal_gain"
       ? gain : gain / candidate.token_cost;
     const authority = authorityTieBreakRank(candidate);
@@ -210,9 +231,11 @@ function rejectedReceipt(
   if (retained !== undefined) {
     return duplicateReceipt("object", retained);
   }
-  const sourceRetained = retainedIdentity(candidate.source, state.retainedBySourceKey);
-  if (sourceRetained !== null) {
-    return duplicateReceipt("source", sourceRetained);
+  if (state.sourceHardDedupe) {
+    const sourceRetained = retainedIdentity(candidate.source, state.retainedBySourceKey);
+    if (sourceRetained !== null) {
+      return duplicateReceipt("source", sourceRetained);
+    }
   }
   const dimension = candidate.dimension;
   const dimensionCount = state.perDimensionCounts.get(dimension) ?? 0;

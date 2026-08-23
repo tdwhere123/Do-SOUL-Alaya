@@ -1,4 +1,3 @@
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import {
   materializeCoverageSelectionCandidateStates,
   materializeCoverageSelectionObjectiveReceipt,
@@ -10,10 +9,7 @@ import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
 } from "../fine-assessment-selection/types.js";
-import {
-  acceptSelectGammaCoverage,
-  selectGammaMarginalGain
-} from "./objective.js";
+import { createSelectGammaGenericWalkObjective } from "./walk-objective.js";
 import type {
   SelectGammaBinding,
   SelectGammaCoverState,
@@ -51,18 +47,17 @@ function createSelectGammaProofObjective(
     candidate.candidate_key,
     candidate
   ]));
-  const weights = binding.feature_weights;
+  const walkObjective = createSelectGammaGenericWalkObjective(binding);
   return Object.freeze({
-    operator_id: SELECT_GAMMA_OPERATOR_ID,
-    mathematical_class: "monotone_submodular" as const,
-    createState: () => new Map<string, number>(),
-    cloneState: (state) => new Map(state),
-    marginalGain: ({ candidate, state }) => selectGammaMarginalGain(
+    operator_id: walkObjective.operator_id,
+    mathematical_class: walkObjective.mathematical_class,
+    createState: walkObjective.createState,
+    cloneState: walkObjective.cloneState,
+    marginalGain: ({ candidate, state }) => walkObjective.marginalGain(
       boundCandidate(byKey, candidate.fusion.candidate_key),
-      state,
-      weights
+      state
     ),
-    accept: ({ candidate, state }) => acceptSelectGammaCoverage(
+    accept: ({ candidate, state }) => walkObjective.accept(
       boundCandidate(byKey, candidate.fusion.candidate_key),
       state
     )
