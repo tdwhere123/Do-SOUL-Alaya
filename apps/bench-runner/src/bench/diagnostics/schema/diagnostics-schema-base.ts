@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
   RecallCandidateAnswerFeaturesSchema,
-  RecallEvidenceProjectionMatchReceiptSchema
+  RecallEvidenceProjectionMatchReceiptSchema,
+  DiagnosticSelectGammaDecisionSchema
 } from "../../../harness/recall/recall-diagnostics-schema.js";
 import { DELIVERY_MISS_DROP_REASONS } from "../miss/delivery-miss-taxonomy.js";
 import {
@@ -34,6 +35,8 @@ const DiagnosticAdmissionAttemptSchema = z.object({
 export const DiagnosticAdmissionAttemptsSchema = z.array(
   DiagnosticAdmissionAttemptSchema
 ).readonly();
+
+export { DiagnosticSelectGammaDecisionSchema };
 
 export const DiagnosticEvidenceProjectionMatchesSchema = z.array(
   RecallEvidenceProjectionMatchReceiptSchema

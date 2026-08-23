@@ -119,6 +119,9 @@ function buildReplayRankingFields(candidate: CandidateDiagnostic) {
 
 function buildReplayDeliveryFields(candidate: CandidateDiagnostic) {
   return {
+    ...(candidate.selectGammaDecision === undefined ? {} : {
+      select_gamma_decision: candidate.selectGammaDecision
+    }),
     plane_first_admitted: candidate.planeFirstAdmitted,
     plane_winning_admission: candidate.planeWinningAdmission,
     source_planes: candidate.sourcePlanes,

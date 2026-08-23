@@ -162,6 +162,30 @@ describe("query fact-frame OSF facet obligation receipt", () => {
     expect(QueryFactFrameOsfObligationSchema.safeParse(filled).success).toBe(false);
   });
 
+  it("rejects duplicate and unknown fallback facet ids before resealing", async () => {
+    const { receipt } = await deriveBoth(WHEN);
+    const input = {
+      receipt,
+      query_text: WHEN,
+      producer_operator_id: MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID
+    };
+    expect(() => applyQueryObligationFacetFallback({
+      ...input,
+      fills: [
+        { facet_id: "time", surface: "When", source_span: [0, 4] },
+        { facet_id: "time", surface: "When", source_span: [0, 4] }
+      ]
+    })).toThrow(/duplicates facet/);
+    expect(() => applyQueryObligationFacetFallback({
+      ...input,
+      fills: [{
+        facet_id: "unknown" as never,
+        surface: "When",
+        source_span: [0, 4]
+      }]
+    })).toThrow(/unknown facet/);
+  });
+
   it("does not let fallback overwrite certified rule-based facets", async () => {
     const query = "What degree did I graduate with?";
     const { receipt, certified } = await deriveBoth(query);

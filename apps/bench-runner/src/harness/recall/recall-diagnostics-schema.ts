@@ -55,6 +55,19 @@ export { EvidenceCandidateScoringSelectionReceiptSchema } from
   "./evidence/evidence-scoring-schema.js";
 
 const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
+export const DiagnosticSelectGammaDecisionSchema = z.object({
+  kind: z.enum([
+    "ineligible",
+    "retained",
+    "duplicate",
+    "quality_displaced",
+    "coverage_displaced",
+    "dimension_limit",
+    "max_entries",
+    "max_total_tokens"
+  ]),
+  identity_channel: z.enum(["object", "source"]).optional()
+}).strict().readonly();
 const RecallFusionStreamRankSchema = z
   .object({
     lexical_fts: z.number().int().positive().nullable(),
@@ -240,6 +253,7 @@ const RecallCandidateDiagnosticSchema = z
     coverage_marginal_gain: z.number().finite().nonnegative().nullable().default(null),
     selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     semantic_activation: CandidateActivationReceiptSchema.optional(),
+    select_gamma_decision: DiagnosticSelectGammaDecisionSchema.optional(),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),

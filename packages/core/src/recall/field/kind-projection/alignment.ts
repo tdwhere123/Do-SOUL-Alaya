@@ -117,6 +117,7 @@ function collectAlignments(
   const factors = new Map(
     graph.factors.map((factor) => [factor.factor_id, factor])
   );
+  rejectDuplicateResultBindings(resultBindings, variableId);
   const alignments: KindConstraintAlignmentBinding[] = [];
   for (const binding of resultBindings) {
     if (binding.variable_id !== variableId) continue;
@@ -129,6 +130,25 @@ function collectAlignments(
     if (aligned !== null) alignments.push(aligned);
   }
   return alignments.sort((left, right) => compareText(left.factor_id, right.factor_id));
+}
+
+function rejectDuplicateResultBindings(
+  bindings: readonly KindConstraintResultBinding[],
+  variableId: string
+): void {
+  const seen = new Set<string>();
+  for (const binding of bindings) {
+    if (binding.variable_id !== variableId) continue;
+    const key = JSON.stringify([
+      binding.variable_id,
+      binding.evidence_factor_id,
+      binding.semantic_identity ?? null
+    ]);
+    if (seen.has(key)) {
+      throw new Error("kind constraint alignment received duplicate result binding");
+    }
+    seen.add(key);
+  }
 }
 
 function formedProjectionsByFactor(

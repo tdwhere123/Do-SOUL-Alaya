@@ -203,8 +203,32 @@ function recordLastSlotDisplacement<State>(
   winnerGain: number,
   losers: readonly SelectGammaFormulaCandidate[]
 ): void {
+  const duplicateLosers: Array<readonly [SelectGammaFormulaCandidate, SelectGammaDecisionReceipt]> = [];
+  const displacedLosers: SelectGammaFormulaCandidate[] = [];
+  for (const loser of losers) {
+    const duplicate = rejectDuplicateIdentity(loser, walk.identity);
+    if (duplicate === null) {
+      displacedLosers.push(loser);
+    } else {
+      duplicateLosers.push([loser, duplicate]);
+    }
+  }
+  walk.decisions.push(...duplicateLosers.map(([candidate, receipt], index) =>
+    Object.freeze({
+      candidate_key: candidate.candidate_key,
+      selection_order: walk.decisions.length + index + 1,
+      selected_rank: null,
+      marginal_gain: null,
+      receipt
+    })
+  ));
   walk.decisions.push(...lastSlotDisplacementDecisions(
-    losers, winner, winnerGain, walk.covered, walk.objective, walk.decisions.length + 1
+    displacedLosers,
+    winner,
+    winnerGain,
+    walk.covered,
+    walk.objective,
+    walk.decisions.length + 1
   ));
 }
 

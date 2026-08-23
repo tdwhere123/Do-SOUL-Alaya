@@ -181,7 +181,7 @@ describe("final recall relevance ownership", () => {
     });
 
     expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
+      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
     expect(assessed.diagnostics.map((candidate) => candidate.final_rank))
       .toEqual(assessed.diagnostics.map((candidate) =>
         candidate.rank_after_coverage_selector
@@ -230,8 +230,7 @@ describe("final recall relevance ownership", () => {
     )).toBe(true);
   });
 
-  it("does not let gist cover replace quality order", () => {
-    // Gist remains a receipt. Quality, not unique gist keys, owns packet order.
+  it("uses bounded gist redundancy in the final selector order", () => {
     const primary = createMemory(FUSION_WINNER_ID, 0.9, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.85, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.5, [{ facet: "location_place" }]);
@@ -261,11 +260,11 @@ describe("final recall relevance ownership", () => {
     });
 
     expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
+      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({ final_rank: 1, post_rank: 1 });
-    expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
-    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
+    expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
   });
 
   it("does not restore CE relevance order after coverage-stage displacement", () => {
@@ -274,7 +273,7 @@ describe("final recall relevance ownership", () => {
     expect(assessed.candidates.length).toBeGreaterThan(5);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     const highDup = diagnostics.get(CE_HIGH_DUP_ID);
-    expect(highDup?.rank_after_coverage_selector).toBe(2);
+    expect(highDup?.rank_after_coverage_selector).toBe(8);
     expect(highDup?.final_rank).toBe(highDup?.rank_after_coverage_selector);
     expect(highDup?.post_rank).toBe(highDup?.final_rank);
   });

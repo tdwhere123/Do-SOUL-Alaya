@@ -64,7 +64,7 @@ function appendDecision(
   if (receipt.kind !== "retained") {
     accumulator.diagnostics.push(createFineAssessmentDiagnostic(
       candidate, buildRecallCandidateDedupeKey(candidate), decision.selection_order,
-      null, receipt.kind, context, "final_selector"
+      null, receipt.kind, context, "final_selector", receipt
     ));
     return accumulator;
   }
@@ -99,7 +99,7 @@ function appendRetained(
   accumulator.selected.push(next);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(
     candidate, candidateKey, decision.selection_order,
-    decision.selected_rank, null, context, "final_selector"
+    decision.selected_rank, null, context, "final_selector", receipt
   ));
   recordAcceptedAdmission(
     accumulator.admission,

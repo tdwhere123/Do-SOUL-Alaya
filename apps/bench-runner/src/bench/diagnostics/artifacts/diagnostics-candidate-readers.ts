@@ -15,6 +15,7 @@ import {
   DiagnosticFloodPotentialSchema,
   DiagnosticEvidenceProjectionMatchesSchema,
   DiagnosticAdmissionAttemptsSchema,
+  DiagnosticSelectGammaDecisionSchema,
   DiagnosticQueryProbesSchema
 } from "../schema/diagnostics-schema.js";
 import { RecallDeepHeadTraceSchema } from
@@ -140,6 +141,10 @@ function readCandidateRow(
     record.admission_attempts ?? []
   );
   if (!admissionAttempts.success) return null;
+  const selectGammaDecision = record.select_gamma_decision == null
+    ? null
+    : DiagnosticSelectGammaDecisionSchema.safeParse(record.select_gamma_decision);
+  if (selectGammaDecision !== null && !selectGammaDecision.success) return null;
   const projectionMatches = DiagnosticEvidenceProjectionMatchesSchema.safeParse(
     record.evidence_projection_matches ?? []
   );
@@ -151,6 +156,7 @@ function readCandidateRow(
     ...readCandidateBasics(record),
     originPlane: identity.originPlane,
     admissionAttempts: admissionAttempts.data,
+    selectGammaDecision: selectGammaDecision?.data,
     evidenceProjectionMatches: projectionMatches.data,
     ...readCandidateScoring(record, fusion),
     ...readCandidateProvenance(record),

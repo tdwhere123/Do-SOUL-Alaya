@@ -56,7 +56,6 @@ describe("selectFineAssessmentCandidates delivery", () => {
         [next.fusion.candidate_key, 3]
       ])
     });
-
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
       "next",
       "shared"
@@ -71,7 +70,7 @@ describe("selectFineAssessmentCandidates delivery", () => {
     ]);
   });
 
-  it("does not let gist cover move quality order", () => {
+  it("uses bounded redundancy to prefer novel content when quality is close", () => {
     const primary = createRankedCandidate("primary", 1, 1);
     const redundant = createRankedCandidate("redundant", 2, 0.9);
     const diverse = createRankedCandidate("diverse", 3, 0.8);
@@ -96,8 +95,8 @@ describe("selectFineAssessmentCandidates delivery", () => {
     });
 
     expect(stageRanks(result, "primary")).toEqual([1, 1, "kept"]);
-    expect(stageRanks(result, "redundant")).toEqual([2, 2, "kept"]);
-    expect(stageRanks(result, "diverse")).toEqual([3, 3, "kept"]);
+    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced"]);
+    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted"]);
   });
 
   it("captures traces without changing the delivered packet", () => {
@@ -152,6 +151,6 @@ describe("selectFineAssessmentCandidates delivery", () => {
       selector_observation: { coverage: { marginal_gain: 1 } }
     });
     expect(withTrace.diagnostics.find((row) => row.object_id === "redundant"))
-      .toMatchObject({ coverage_marginal_gain: 0.9 });
+      .toMatchObject({ coverage_marginal_gain: 0.65 });
   });
 });

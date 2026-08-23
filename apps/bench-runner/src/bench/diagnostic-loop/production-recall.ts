@@ -5,6 +5,10 @@ import { RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME } from
   "../provenance/recall-eval/recall-eval-diagnostics.js";
 import { writeStageAttributionTables } from "../diagnostics/stage-attribution/write-tables.js";
 import { compareF0F2VsCachedF3 } from "../diagnostics/stage-attribution/diagnostic-100q.js";
+import { buildRecallMechanismSplit } from
+  "../diagnostics/stage-attribution/mechanism/receipt.js";
+import { pairMechanismQuestions } from
+  "../diagnostics/stage-attribution/mechanism/from-question-diagnostics.js";
 import { loadRecallEvalQuestionDiagnostics } from
   "../diagnostics/stage-attribution/load-recall-eval-diagnostics.js";
 import { buildTreatmentExposureReceipts } from
@@ -189,16 +193,17 @@ export async function runProductionMissLedgerPhase(
       "miss ledger requires control and treatment diagnostics artifacts"
     );
   }
-  const { comparison, missLedgerPath } = await buildProductionMissLedger(
+  const { comparison, missLedgerPath, mechanismSplitPath } = await buildProductionMissLedger(
     outDir, controlDiag, treatmentDiag
   );
   return {
     contentIdentity: missLedgerContentIdentity(control, treatment),
     physicalCalls: 0,
-    artifactPaths: { missLedger: missLedgerPath },
+    artifactPaths: { missLedger: missLedgerPath, mechanismSplit: mechanismSplitPath },
     details: {
       ...sharedSubstrateIdentities(context),
       artifact_sha256: await sha256File(missLedgerPath),
+      mechanism_split_sha256: await sha256File(mechanismSplitPath),
       exposure_sli: comparison.exposure_sli,
       gate7_polarity_matrix: comparison.gate7_polarity_matrix,
       diagnostic_100q_unlock: comparison.diagnostic_100q_unlock
@@ -232,13 +237,22 @@ async function buildProductionMissLedger(
       treatmentStages: tables.B.questions
     })
   });
+  const mechanismSplit = buildRecallMechanismSplit({
+    questions: pairMechanismQuestions(controlQuestions, treatmentQuestions)
+  });
+  const mechanismSplitPath = join(outDir, "recall-mechanism-split.json");
+  await writeFile(
+    mechanismSplitPath,
+    `${JSON.stringify(mechanismSplit, null, 2)}\n`,
+    "utf8"
+  );
   const missLedgerPath = join(outDir, "diagnostic-100q.json");
   await writeFile(
     missLedgerPath,
     `${JSON.stringify(comparison, null, 2)}\n`,
     "utf8"
   );
-  return { comparison, missLedgerPath };
+  return { comparison, missLedgerPath, mechanismSplitPath };
 }
 
 function fail(

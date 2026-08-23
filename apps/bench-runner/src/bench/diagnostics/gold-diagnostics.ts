@@ -116,6 +116,9 @@ function buildGoldPlaneFields(candidate: CandidateDiagnostic | undefined) {
 
 function buildGoldDeliveryFields(candidate: CandidateDiagnostic | undefined) {
   return {
+    ...(candidate?.selectGammaDecision === undefined ? {} : {
+      select_gamma_decision: candidate.selectGammaDecision
+    }),
     lexical_rank: candidate?.lexicalRank ?? null,
     structural_score: candidate?.structuralScore ?? null,
     score_factors: candidate?.scoreFactors ?? null,

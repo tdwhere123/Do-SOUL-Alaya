@@ -73,11 +73,15 @@ export function embeddingSignal(
 }
 
 export function independentEmbeddingScore(
-  activation: CandidateActivationReceipt
+  activation: CandidateActivationReceipt,
+  allowEvidenceSemantic = false
 ): number | null {
+  const channels = allowEvidenceSemantic
+    ? new Set([...INDEPENDENT_EMBEDDING_CHANNELS, "evidence_semantic"])
+    : INDEPENDENT_EMBEDDING_CHANNELS;
   let best: number | null = null;
   for (const observation of activation.observations) {
-    if (!INDEPENDENT_EMBEDDING_CHANNELS.has(observation.channel)) continue;
+    if (!channels.has(observation.channel)) continue;
     if (observation.state !== "observed" || observation.score === null) continue;
     if (best === null || observation.score > best) best = observation.score;
   }

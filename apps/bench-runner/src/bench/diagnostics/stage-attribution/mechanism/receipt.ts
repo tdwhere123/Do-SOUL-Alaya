@@ -87,37 +87,48 @@ function freezeGoldExclusions(
 function freezePrefixRows(
   questions: readonly MechanismQuestionObservation[]
 ): readonly PrefixEligibilityRow[] {
-  const rows: PrefixEligibilityRow[] = [];
-  const seen = new Set<string>();
+  const rowsByKey = new Map<string, PrefixEligibilityRow>();
   for (const question of questions) {
     for (const gold of question.golds ?? []) {
       if (gold.candidate_key === undefined) continue;
-      appendPrefixRow(rows, seen, question.question_id,
+      appendPrefixRow(rowsByKey, question.question_id,
         gold.candidate_key, gold.prefix_eligible);
     }
     for (const candidate of question.candidates ?? []) {
-      appendPrefixRow(rows, seen, question.question_id,
+      appendPrefixRow(rowsByKey, question.question_id,
         candidate.candidate_key, candidate.prefix_eligible);
     }
   }
+  const rows = [...rowsByKey.values()];
   rows.sort(comparePrefixRow);
   return rows;
 }
 
 function appendPrefixRow(
-  rows: PrefixEligibilityRow[],
-  seen: Set<string>,
+  rowsByKey: Map<string, PrefixEligibilityRow>,
   questionId: string,
   candidateKey: string,
   eligible: PrefixEligibility | undefined
 ): void {
   const key = requireToken(candidateKey, "candidate_key");
-  pushUnique(seen, pairKey(questionId, key), "prefix eligibility");
-  rows.push({
+  const rowKey = pairKey(questionId, key);
+  const next: PrefixEligibilityRow = {
     question_id: questionId,
     candidate_key: key,
     eligible: eligible ?? "unavailable"
-  });
+  };
+  const existing = rowsByKey.get(rowKey);
+  if (existing === undefined) {
+    rowsByKey.set(rowKey, next);
+    return;
+  }
+  if (existing.eligible === next.eligible) return;
+  if (existing.eligible === "unavailable") {
+    rowsByKey.set(rowKey, next);
+    return;
+  }
+  if (next.eligible === "unavailable") return;
+  throw new Error(`conflicting prefix eligibility: ${rowKey}`);
 }
 
 function indexedQuestions(

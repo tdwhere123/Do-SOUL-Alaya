@@ -59,6 +59,50 @@ describe("query OSF facet obligation receipt", () => {
     expect(byId(receipt, "time").producer_operator_id)
       .toBe(MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID);
   });
+
+  it("rejects non-forward source spans before a facet receipt is sealed", () => {
+    const body = unsigned(facets({
+      predicate: formed("predicate", "graduate", [18, 26]),
+      subject: formed("subject", "I", [16, 17]),
+      answer_variable: formed("answer_variable", "What degree", [0, 11]),
+      type_constraint: formed("type_constraint", "degree", [5, 11]),
+      time: pending("time", "ineligible", "not_requested"),
+      answer_operator: formed("answer_operator", "What", [0, 4])
+    }).map((facet) => facet.facet_id === "predicate"
+      ? { ...facet, source_span: [26, 18] as [number, number] }
+      : facet));
+    expect(QueryFactFrameOsfFacetReceiptSchema.safeParse({
+      ...body,
+      receipt_digest: digest(queryFactFrameOsfFacetReceiptPreimage(body))
+    }).success).toBe(false);
+  });
+
+  it("rejects contradictory facet status and reason/slot combinations", () => {
+    const base = facets({
+      predicate: formed("predicate", "graduate", [18, 26]),
+      subject: formed("subject", "I", [16, 17]),
+      answer_variable: formed("answer_variable", "What degree", [0, 11]),
+      type_constraint: formed("type_constraint", "degree", [5, 11]),
+      time: pending("time", "ineligible", "not_requested"),
+      answer_operator: formed("answer_operator", "What", [0, 4])
+    });
+    const cases = [
+      base.map((facet) => facet.facet_id === "predicate"
+        ? { ...facet, reason: "no_parse" as const } : facet),
+      base.map((facet) => facet.facet_id === "time"
+        ? { ...facet, reason: null } : facet),
+      base.map((facet) => facet.facet_id === "time"
+        ? { ...facet, status: "ambiguous" as const, reason: "ambiguous_wh" as const,
+          surface: "When" } : facet)
+    ];
+    for (const facetList of cases) {
+      const body = unsigned(facetList);
+      expect(QueryFactFrameOsfFacetReceiptSchema.safeParse({
+        ...body,
+        receipt_digest: digest(queryFactFrameOsfFacetReceiptPreimage(body))
+      }).success).toBe(false);
+    }
+  });
 });
 
 function parseForgedProducer(producer: string) {

@@ -181,6 +181,61 @@ describe("Select_Gamma binding-value coverage", () => {
     });
   });
 
+  it("reports duplicate identity before last-slot displacement", () => {
+    const novel = formulaCandidate("novel", {
+      quality: 4, cover: {}, source: "other"
+    });
+    const shared = formulaCandidate("dup-a", {
+      quality: 3, cover: {}, source: "shared"
+    });
+    const duplicate = {
+      ...formulaCandidate("dup-b", { quality: 2, cover: {}, source: "shared" }),
+      object_key: shared.object_key
+    };
+    const walk = selectGammaWalk(
+      requestOf(["novel", "dup-a", "dup-b"]),
+      bindingOf([novel, shared, duplicate], 2),
+      bindingObjective(new Map())
+    );
+
+    expect(walk.selected_candidate_keys).toEqual(["novel", "dup-a"]);
+    expect(walk.decisions.find((decision) => decision.candidate_key === "dup-b"))
+      .toMatchObject({
+        selection_order: 3,
+        selected_rank: null,
+        receipt: { kind: "duplicate", identity_channel: "object", retained_candidate_key: "dup-a" }
+      });
+  });
+
+  it("decomposes facility gain as quality for displacement receipts", () => {
+    const facilityWinner = formulaCandidate("facility-hit", {
+      quality: 0.1, cover: {}, source: "facility"
+    });
+    const qualityLoser = formulaCandidate("quality-loser", {
+      quality: 0.9, cover: {}, source: "quality"
+    });
+    const facility = {
+      operator_id: "test_facility",
+      createState: () => null,
+      marginalGain: (candidate: ReturnType<typeof formulaCandidate>) =>
+        candidate.candidate_key === "facility-hit" ? 2 : 0,
+      accept: () => undefined
+    };
+    const walk = selectGammaWalk(
+      requestOf(["facility-hit", "quality-loser"]),
+      bindingOf([facilityWinner, qualityLoser], 1),
+      createBindingAwareWalkObjective({
+        receiptsByCandidateKey: new Map(),
+        configurationDigest: `sha256:${"c".repeat(64)}`,
+        facility
+      })
+    );
+
+    expect(walk.selected_candidate_keys).toEqual(["facility-hit"]);
+    expect(walk.decisions.find((decision) => decision.candidate_key === "quality-loser")
+      ?.receipt.kind).toBe("quality_displaced");
+  });
+
   it("attributes OSF result bindings onto candidate coverage receipts", () => {
     const apple = withEvidence(createCandidate("gold-a"), "ev-apple");
     const banana = withEvidence(createCandidate("gold-b"), "ev-banana");

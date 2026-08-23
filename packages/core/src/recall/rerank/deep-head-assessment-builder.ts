@@ -90,7 +90,10 @@ function collectIndependentEmbeddingScores(
 ): ReadonlyMap<string, number> {
   const scores = new Map<string, number>();
   for (let index = 0; index < candidates.length; index += 1) {
-    const score = independentEmbeddingScore(components[index]!.activation);
+    const score = independentEmbeddingScore(
+      components[index]!.activation,
+      candidates[index]!.objectKind === "evidence_capsule"
+    );
     if (score === null) continue;
     scores.set(candidates[index]!.fusion.candidate_key, score);
   }

@@ -54,6 +54,7 @@ export type {
   RecallAdmissionDiagnosticPass,
   RecallCandidateAnswerFeatures,
   RecallCandidateDiagnostic,
+  RecallSelectGammaDecisionDiagnostic,
   RecallConformantAxis,
   RecallFusionBreakdown,
   RecallFusionStream,

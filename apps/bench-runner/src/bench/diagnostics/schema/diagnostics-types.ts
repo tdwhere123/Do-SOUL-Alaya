@@ -6,6 +6,7 @@ import {
   DiagnosticFloodPotentialSchema,
   DiagnosticEvidenceProjectionMatchesSchema,
   DiagnosticRecallResultSchema,
+  DiagnosticSelectGammaDecisionSchema,
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalMissTaxonomySchema,
   LongMemEvalQuestionDiagnosticSchema,
@@ -46,6 +47,9 @@ export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
 export type DiagnosticAxisRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticAxisContributions = Readonly<Record<string, number>>;
 export type DiagnosticQueryProbes = z.infer<typeof DiagnosticQueryProbesSchema>;
+export type DiagnosticSelectGammaDecision = z.infer<
+  typeof DiagnosticSelectGammaDecisionSchema
+>;
 export type DiagnosticAnswerShapePlan = z.infer<typeof RecallAnswerShapePlanSchema>;
 export type DiagnosticDeepHeadTrace = z.infer<typeof RecallDeepHeadTraceSchema>;
 export type DiagnosticCandidateAnswerFeatures = z.infer<
@@ -87,6 +91,7 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly pre_budget_rank: number | null;
   readonly selection_order: number | null;
   readonly admission_attempts: readonly DiagnosticAdmissionAttempt[];
+  readonly select_gamma_decision?: DiagnosticSelectGammaDecision;
   readonly evidence_projection_matches: readonly DiagnosticEvidenceProjectionMatch[];
   readonly fused_rank: number | null;
   readonly fused_score: number | null;
@@ -436,6 +441,7 @@ export interface CandidateDiagnostic {
   readonly preBudgetRank: number | null;
   readonly selectionOrder: number | null;
   readonly admissionAttempts: readonly DiagnosticAdmissionAttempt[];
+  readonly selectGammaDecision?: DiagnosticSelectGammaDecision;
   readonly evidenceProjectionMatches: readonly DiagnosticEvidenceProjectionMatch[];
   readonly finalRank: number | null;
   readonly fusedRank: number | null;

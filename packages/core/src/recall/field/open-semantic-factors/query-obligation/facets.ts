@@ -76,7 +76,7 @@ export function applyQueryObligationFacetFallback(input: Readonly<{
   const receipt = verifyQueryFactFrameOsfFacetReceipt(input.receipt);
   requireQueryDigest(input.query_text, receipt.query_digest);
   const rejection = fallbackRejection(input.producer_operator_id);
-  const fills = new Map(input.fills.map((fill) => [fill.facet_id, fill]));
+  const fills = indexFallbackFills(input.fills);
   return sealFacetReceipt({
     query_digest: receipt.query_digest,
     fact_frame_producer_operator_id: receipt.fact_frame_producer_operator_id,
@@ -88,6 +88,23 @@ export function applyQueryObligationFacetFallback(input: Readonly<{
       rejection
     ))
   });
+}
+
+function indexFallbackFills(
+  input: readonly FallbackFill[]
+): ReadonlyMap<QueryObligationFacetId, FallbackFill> {
+  const knownIds = new Set<string>(QUERY_OBLIGATION_FACET_IDS);
+  const fills = new Map<QueryObligationFacetId, FallbackFill>();
+  for (const fill of input) {
+    if (!knownIds.has(fill.facet_id)) {
+      throw new Error(`fallback fill references unknown facet: ${fill.facet_id}`);
+    }
+    if (fills.has(fill.facet_id)) {
+      throw new Error(`fallback fill duplicates facet: ${fill.facet_id}`);
+    }
+    fills.set(fill.facet_id, fill);
+  }
+  return fills;
 }
 
 function deriveFacets(

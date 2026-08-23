@@ -232,7 +232,7 @@ describe("recall mechanism split v1", () => {
     }
   );
 
-  it("maps first-cut Gamma kinds and leaves terminal max_entries unavailable", () => {
+  it("maps every Gamma exclusion kind to the gate reason", () => {
     const built = receipt([
       question("q-dup-source", {
         golds: [{
@@ -279,13 +279,39 @@ describe("recall mechanism split v1", () => {
             treatment: { kind: "max_entries" }
           }
         }]
+      }),
+      question("q-quality", {
+        golds: [{
+          gold_key: "g6",
+          gamma_decision: {
+            control: { kind: "retained" },
+            treatment: {
+              kind: "quality_displaced",
+              reason: "last_slot"
+            }
+          }
+        }]
+      }),
+      question("q-coverage", {
+        golds: [{
+          gold_key: "g7",
+          gamma_decision: {
+            control: { kind: "retained" },
+            treatment: {
+              kind: "coverage_displaced",
+              reason: "last_slot"
+            }
+          }
+        }]
       })
     ]);
     expect(built.gold_exclusions.map((row) => [row.first_reason, row.outcome])).toEqual([
+      ["coverage_displaced", "excluded"],
       ["dimension_limit", "excluded"],
       ["duplicate_object", "excluded"],
       ["duplicate_source", "excluded"],
-      ["unavailable", "unavailable"],
+      ["entry_budget", "excluded"],
+      ["quality_displaced", "excluded"],
       ["token_budget", "excluded"]
     ]);
   });

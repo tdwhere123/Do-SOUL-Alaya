@@ -10,6 +10,7 @@ export {
   DiagnosticFloodFuelCoverageSchema,
   DiagnosticFloodPotentialSchema,
   DiagnosticQueryProbesSchema,
+  DiagnosticSelectGammaDecisionSchema,
   DiagnosticScoreFactorsSchema,
   DiagnosticStreamContributionsSchema,
   DiagnosticStreamRanksSchema,

@@ -9,6 +9,13 @@ import type {
   IntegratedFloodCandidateDiagnostics
 } from "./flood-diagnostics.js";
 import type { RecallAdmissionPlane, RecallCandidateDropReason } from "./vocabulary.js";
+import type { SelectGammaDecisionReceipt } from
+  "../../delivery/select-gamma/types.js";
+
+export type RecallSelectGammaDecisionDiagnostic = Readonly<{
+  readonly kind: SelectGammaDecisionReceipt["kind"];
+  readonly identity_channel?: "object" | "source";
+}>;
 
 export type RecallFusionStream =
   | "lexical_fts"
@@ -71,6 +78,8 @@ export interface RecallCandidateDiagnostic {
   readonly pre_budget_rank: number;
   readonly selection_order: number;
   readonly admission_attempts: readonly Readonly<RecallAdmissionAttemptDiagnostic>[];
+  /** Compact Select_Gamma receipt retained for evidence-first admission attribution. */
+  readonly select_gamma_decision?: RecallSelectGammaDecisionDiagnostic;
   readonly evidence_projection_matches: readonly Readonly<
     import("../recall-service-results.js").RecallEvidenceProjectionMatchReceipt
   >[];

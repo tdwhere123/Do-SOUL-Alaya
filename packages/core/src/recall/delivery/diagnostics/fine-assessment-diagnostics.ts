@@ -22,6 +22,8 @@ import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
 } from "../fine-assessment-selection.js";
+import type { SelectGammaDecisionReceipt } from
+  "../select-gamma/types.js";
 
 interface CandidateRankContext {
   readonly deliveryRank: number | undefined;
@@ -36,7 +38,8 @@ export function createFineAssessmentDiagnostic(
   finalRank: number | null,
   droppedReason: RecallCandidateDropReason | null,
   context: FineAssessmentSelectionContext,
-  admissionPass: RecallAdmissionDiagnosticPass
+  admissionPass: RecallAdmissionDiagnosticPass,
+  admissionReceipt?: SelectGammaDecisionReceipt
 ): Readonly<RecallCandidateDiagnostic> {
   const admissionPlanes: readonly RecallAdmissionPlane[] = Object.freeze([
     ...(candidate.admissionPlanes ?? ["activation"])
@@ -53,6 +56,9 @@ export function createFineAssessmentDiagnostic(
       admitted: droppedReason === null,
       dropped_reason: droppedReason
     })]),
+    ...(admissionReceipt === undefined ? {} : {
+      select_gamma_decision: compactSelectGammaDecision(admissionReceipt)
+    }),
     evidence_projection_matches: collectEvidenceProjectionMatches(
       candidate,
       context.supplementaryData
@@ -76,6 +82,17 @@ export function createFineAssessmentDiagnostic(
       : {}),
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
+  });
+}
+
+function compactSelectGammaDecision(
+  receipt: SelectGammaDecisionReceipt
+) {
+  return Object.freeze({
+    kind: receipt.kind,
+    ...(receipt.kind === "duplicate"
+      ? { identity_channel: receipt.identity_channel }
+      : {})
   });
 }
 

@@ -89,7 +89,9 @@ const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const SourceSpanSchema = z.tuple([
   z.number().int().nonnegative(),
   z.number().int().positive()
-]);
+]).refine(([start, end]) => end > start, {
+  message: "source span end must be greater than start"
+});
 
 type FacetFields = {
   facet_id: QueryObligationFacetId;
@@ -169,13 +171,7 @@ function validateFacetProducerIdentity(
     validateAmbiguousFacet(facet, context);
     return;
   }
-  if (facet.producer_kind !== "absent" || facet.producer_operator_id !== null ||
-      facet.surface !== null || facet.source_span !== null) {
-    context.addIssue({
-      code: "custom",
-      message: "non-formed query obligation facet cannot carry a slot"
-    });
-  }
+  validatePendingFacet(facet, context);
 }
 
 function validateFormedFacet(
@@ -204,16 +200,48 @@ function validateFormedFacet(
       message: "model fallback must use the facet fallback producer"
     });
   }
+  if (facet.reason !== null) {
+    context.addIssue({
+      code: "custom",
+      message: "formed query obligation facet cannot carry a pending reason"
+    });
+  }
 }
 
 function validateAmbiguousFacet(
   facet: FacetFields,
   context: z.RefinementCtx
 ): void {
-  if (facet.producer_kind === "model_fallback") {
+  if (facet.reason === null) {
     context.addIssue({
       code: "custom",
-      message: "model fallback cannot mark a facet ambiguous"
+      message: "ambiguous query obligation facet requires a reason"
+    });
+  }
+  if (facet.producer_kind !== "absent" || facet.producer_operator_id !== null ||
+      facet.surface !== null || facet.source_span !== null) {
+    context.addIssue({
+      code: "custom",
+      message: "ambiguous query obligation facet cannot carry a slot"
+    });
+  }
+}
+
+function validatePendingFacet(
+  facet: FacetFields,
+  context: z.RefinementCtx
+): void {
+  if (facet.reason === null) {
+    context.addIssue({
+      code: "custom",
+      message: "pending query obligation facet requires a reason"
+    });
+  }
+  if (facet.producer_kind !== "absent" || facet.producer_operator_id !== null ||
+      facet.surface !== null || facet.source_span !== null) {
+    context.addIssue({
+      code: "custom",
+      message: "non-formed query obligation facet cannot carry a slot"
     });
   }
 }

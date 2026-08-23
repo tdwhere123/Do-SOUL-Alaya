@@ -78,6 +78,14 @@ describe("kind_constraint_alignment_v1", () => {
     expect(OpenSemanticFactorGraphSchema.safeParse(graph).success).toBe(true);
   });
 
+  it("rejects duplicate result bindings instead of duplicating alignments", () => {
+    const graph = t2SpotifyEvidenceGraph();
+    const bindings = t2SpotifyResultBindings();
+    expect(() => align(graph, [...bindings, ...bindings], [
+      t2KindProposal(graph, "spotify", [T2_MUSIC_STREAMING_SERVICE])
+    ])).toThrow(/duplicate result binding/);
+  });
+
   it(`${T2_INVALID_MALFORMED_PROJECTION}: malformed projection is rejected beside an accepted graph`, () => {
     const graph = t2SpotifyEvidenceGraph();
     const result = align(graph, t2SpotifyResultBindings(), [

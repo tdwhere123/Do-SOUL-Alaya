@@ -29,12 +29,15 @@ export function createBindingAwareWalkObjective(params: Readonly<{
       bindingAwareGain(candidate, state, receipts, contentKeys, facility),
     accept: (candidate, state) =>
       acceptBindingAware(candidate, state, receipts, contentKeys, facility),
-    decomposeGain: (candidate, state) => Object.freeze({
-      quality: candidate.quality,
-      coverage: bindingAwareGain(
-        candidate, state, receipts, contentKeys, facility
-      ) - candidate.quality
-    })
+    decomposeGain: (candidate, state) => {
+      const quality = qualityTerm(candidate, state, facility);
+      return Object.freeze({
+        quality,
+        coverage: bindingAwareGain(
+          candidate, state, receipts, contentKeys, facility
+        ) - quality
+      });
+    }
   });
 }
 
