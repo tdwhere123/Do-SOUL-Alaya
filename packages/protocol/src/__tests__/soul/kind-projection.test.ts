@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  KIND_PROJECTION_AUTHORITY,
   KIND_PROJECTION_OPERATOR_ID,
+  KIND_PROJECTION_SCHEMA_VERSION,
   KindProjectionProposalSchema,
   KindProjectionSchema,
   kindProjectionPreimage,
@@ -23,13 +25,15 @@ describe("kind projection schema", () => {
     expect(exportedOperatorId).toBe("kind_projection_v1");
   });
 
-  it("accepts a formed projection and verifies its digest", () => {
+  it("accepts a formed routing-only projection and verifies its digest", () => {
     const capture = formedCapture(["music streaming service"]);
     expect(KindProjectionSchema.parse(capture)).toEqual(capture);
+    expect(capture.authority).toBe("proposed_routing_only");
+    expect(capture).not.toHaveProperty("kind_values");
     expect(verifyKindProjection(capture, sha256)).toEqual(capture);
     expect(() => verifyKindProjection({
       ...capture,
-      factor_id: "other"
+      producer_operator_id: "other-producer"
     }, sha256)).toThrow(/digest mismatch/u);
   });
 
@@ -54,13 +58,12 @@ describe("kind projection schema", () => {
     expect(OpenSemanticFactorGraphSchema.safeParse(graph).success).toBe(true);
   });
 
-  it("parses a rejection receipt and refuses formed captures that smuggle kinds into a reject", () => {
+  it("parses a rejection receipt and refuses formed captures that smuggle edges into a reject", () => {
     const rejected = capture({
       status: "rejected",
       producer_operator_id: null,
       evidence_graph_digest: DIGEST,
       factor_id: null,
-      kind_values: [],
       instance_of: [],
       rejection_reason: "kind_projection_invalid_shape"
     });
@@ -70,19 +73,26 @@ describe("kind projection schema", () => {
       kind_values: ["music streaming service"]
     }).success).toBe(false);
     expect(KindProjectionSchema.safeParse({
+      ...rejected,
+      instance_of: [{
+        subject_factor_id: "service",
+        predicate: "instance_of",
+        kind_identity: "music streaming service"
+      }]
+    }).success).toBe(false);
+    expect(KindProjectionSchema.safeParse({
       ...formedCapture(["music streaming service"]),
       rejection_reason: "kind_projection_invalid_shape"
     }).success).toBe(false);
   });
 
-  it("accepts unavailable and ineligible captures without kind values", () => {
+  it("accepts unavailable and ineligible captures without instance_of edges", () => {
     for (const status of ["unavailable", "ineligible"] as const) {
       expect(KindProjectionSchema.parse(capture({
         status,
         producer_operator_id: null,
         evidence_graph_digest: DIGEST,
         factor_id: "service",
-        kind_values: [],
         instance_of: [],
         rejection_reason: null
       })).status).toBe(status);
@@ -92,7 +102,7 @@ describe("kind projection schema", () => {
 
 function proposal(kindValues: readonly string[]) {
   return {
-    schema_version: 1 as const,
+    schema_version: KIND_PROJECTION_SCHEMA_VERSION,
     producer_operator_id: "kind_projection_fixture_v1",
     evidence_graph_digest: DIGEST,
     factor_id: "service",
@@ -106,8 +116,8 @@ function formedCapture(kindValues: readonly string[]) {
     producer_operator_id: "kind_projection_fixture_v1",
     evidence_graph_digest: DIGEST,
     factor_id: "service",
-    kind_values: kindValues,
     instance_of: kindValues.map((kind_identity) => ({
+      subject_factor_id: "service",
       predicate: "instance_of" as const,
       kind_identity
     })),
@@ -115,10 +125,11 @@ function formedCapture(kindValues: readonly string[]) {
   });
 }
 
-function capture(body: Omit<KindProjectionBody, "schema_version" | "operator_id">) {
+function capture(body: Omit<KindProjectionBody, "schema_version" | "operator_id" | "authority">) {
   const fullBody: KindProjectionBody = {
-    schema_version: 1,
+    schema_version: KIND_PROJECTION_SCHEMA_VERSION,
     operator_id: KIND_PROJECTION_OPERATOR_ID,
+    authority: KIND_PROJECTION_AUTHORITY,
     ...body
   };
   return {

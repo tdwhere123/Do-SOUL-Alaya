@@ -8,7 +8,7 @@ export const OPEN_SEMANTIC_VARIABLE_LIMIT = 8;
 export const OPEN_SEMANTIC_PROPOSITION_LIMIT = 8;
 export const OPEN_SEMANTIC_ARGUMENT_LIMIT = 8;
 
-const CanonicalIdSchema = z.string()
+export const CanonicalIdSchema = z.string()
   .min(1)
   .max(128)
   .regex(/^[a-z][a-z0-9._:-]*$/u);
@@ -28,7 +28,7 @@ const ProposedSurfaceSchema = z.object({
   surface: z.string().min(1).max(512),
   source_occurrence: z.number().int().nonnegative().lt(128).default(0)
 }).strict();
-const SemanticIdentitySchema = z.string().min(1).max(512).superRefine(
+export const SemanticIdentitySchema = z.string().min(1).max(512).superRefine(
   (value, context) => {
     if (value !== normalizeSemanticIdentity(value)) {
       context.addIssue({
@@ -450,6 +450,6 @@ function compareText(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
 }
 
-function normalizeSemanticIdentity(value: string): string {
+export function normalizeSemanticIdentity(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }

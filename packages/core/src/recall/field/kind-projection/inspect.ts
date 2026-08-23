@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import {
-  KIND_PROJECTION_KIND_VALUE_LIMIT,
+  KIND_PROJECTION_AUTHORITY,
   KIND_PROJECTION_OPERATOR_ID,
+  KIND_PROJECTION_SCHEMA_VERSION,
   KindProjectionProposalSchema,
   KindProjectionSchema,
   kindProjectionPreimage,
@@ -29,7 +30,7 @@ export function inspectKindProjection(input: Readonly<{
       evidence_graph_digest: input.evidence_graph_digest,
       factor_id: null,
       producer_operator_id: null,
-      reason: classifyProposalRejection(input.value, parsed.error.issues)
+      reason: classifyProposalRejection(parsed.error.issues)
     });
   }
   return bindKindProposal(
@@ -39,15 +40,71 @@ export function inspectKindProjection(input: Readonly<{
   );
 }
 
+export function rejectDuplicateFactorProjections(
+  projections: readonly KindProjection[]
+): readonly KindProjection[] {
+  const duplicateKeys = duplicateFormedFactorKeys(projections);
+  return Object.freeze(projections.map((projection) => {
+    const digest = projection.evidence_graph_digest;
+    if (digest === null || !shouldRejectDuplicate(projection, duplicateKeys)) {
+      return projection;
+    }
+    return rejectedCapture({
+      evidence_graph_digest: digest,
+      factor_id: projection.factor_id,
+      producer_operator_id: projection.producer_operator_id,
+      reason: "kind_projection_invalid_duplicate_factor"
+    });
+  }));
+}
+
+function duplicateFormedFactorKeys(
+  projections: readonly KindProjection[]
+): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  for (const projection of projections) {
+    const key = formedFactorKey(projection);
+    if (key === null) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return new Set([...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key));
+}
+
+function shouldRejectDuplicate(
+  projection: KindProjection,
+  duplicateKeys: ReadonlySet<string>
+): boolean {
+  const key = formedFactorKey(projection);
+  return key !== null &&
+    projection.evidence_graph_digest !== null &&
+    duplicateKeys.has(key);
+}
+
+function formedFactorKey(projection: KindProjection): string | null {
+  if (projection.status !== "formed" ||
+      projection.factor_id === null ||
+      projection.evidence_graph_digest === null) {
+    return null;
+  }
+  return `${projection.evidence_graph_digest}\0${projection.factor_id}`;
+}
+
 function bindKindProposal(
   proposal: KindProjectionProposal,
   graph: OpenSemanticFactorGraph,
   evidenceGraphDigest: RecallFieldDigest
 ): KindProjection {
-  const bound = graph.factors.some(
-    (factor) => factor.factor_id === proposal.factor_id
-  );
-  if (!bound || proposal.evidence_graph_digest !== evidenceGraphDigest) {
+  if (proposal.evidence_graph_digest !== evidenceGraphDigest) {
+    return rejectedCapture({
+      evidence_graph_digest: proposal.evidence_graph_digest,
+      factor_id: proposal.factor_id,
+      producer_operator_id: proposal.producer_operator_id,
+      reason: "kind_projection_invalid_graph_digest"
+    });
+  }
+  if (!graph.factors.some((factor) => factor.factor_id === proposal.factor_id)) {
     return rejectedCapture({
       evidence_graph_digest: proposal.evidence_graph_digest,
       factor_id: proposal.factor_id,
@@ -61,31 +118,28 @@ function bindKindProposal(
     producer_operator_id: proposal.producer_operator_id,
     evidence_graph_digest: proposal.evidence_graph_digest,
     factor_id: proposal.factor_id,
-    kind_values: kindValues,
-    instance_of: instanceOfEdges(kindValues),
+    instance_of: instanceOfEdges(proposal.factor_id, kindValues),
     rejection_reason: null
   });
 }
 
 function classifyProposalRejection(
-  value: unknown,
   issues: readonly Readonly<{
-    readonly message: string;
+    readonly code: string;
+    readonly path: readonly PropertyKey[];
   }>[]
 ): KindProjectionRejectionReason {
-  if (tooManyKindValues(value)) {
+  if (issues.some((issue) =>
+    issue.path[0] === "kind_values" && issue.code === "too_big")) {
     return "kind_projection_invalid_kind_values_too_many";
   }
-  if (issues.some((issue) => /semantic identity/iu.test(issue.message))) {
+  if (issues.some((issue) =>
+    issue.path[0] === "kind_values" &&
+    issue.path.length > 1 &&
+    issue.code === "custom")) {
     return "kind_projection_invalid_identity";
   }
   return "kind_projection_invalid_shape";
-}
-
-function tooManyKindValues(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  const kinds = (value as { readonly kind_values?: unknown }).kind_values;
-  return Array.isArray(kinds) && kinds.length > KIND_PROJECTION_KIND_VALUE_LIMIT;
 }
 
 function unavailableCapture(evidenceGraphDigest: RecallFieldDigest): KindProjection {
@@ -94,7 +148,6 @@ function unavailableCapture(evidenceGraphDigest: RecallFieldDigest): KindProject
     producer_operator_id: null,
     evidence_graph_digest: evidenceGraphDigest,
     factor_id: null,
-    kind_values: [],
     instance_of: [],
     rejection_reason: null
   });
@@ -111,25 +164,26 @@ function rejectedCapture(input: Readonly<{
     producer_operator_id: input.producer_operator_id,
     evidence_graph_digest: input.evidence_graph_digest,
     factor_id: input.factor_id,
-    kind_values: [],
     instance_of: [],
     rejection_reason: input.reason
   });
 }
 
-function instanceOfEdges(kindValues: readonly string[]) {
+function instanceOfEdges(factorId: string, kindValues: readonly string[]) {
   return Object.freeze(kindValues.map((kind_identity) => Object.freeze({
+    subject_factor_id: factorId,
     predicate: "instance_of" as const,
     kind_identity
   })));
 }
 
 function createCapture(
-  fields: Omit<KindProjectionBody, "schema_version" | "operator_id">
+  fields: Omit<KindProjectionBody, "schema_version" | "operator_id" | "authority">
 ): KindProjection {
   const body: KindProjectionBody = {
-    schema_version: 1,
+    schema_version: KIND_PROJECTION_SCHEMA_VERSION,
     operator_id: KIND_PROJECTION_OPERATOR_ID,
+    authority: KIND_PROJECTION_AUTHORITY,
     ...fields
   };
   return KindProjectionSchema.parse(Object.freeze({
