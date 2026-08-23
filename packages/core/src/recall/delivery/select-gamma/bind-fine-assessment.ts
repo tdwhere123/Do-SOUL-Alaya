@@ -154,6 +154,7 @@ function attributedCoverFeatures(
   context: FineAssessmentSelectionContext
 ): readonly string[] {
   // Lineage/gist/dimension remain identity receipts; unique keys must not buy a slot.
+  // slice/f3 stay on the inspection map; featureWeights omits them from admission.
   const flood = candidate.fusion.flood_potential;
   return Object.freeze([
     ...obligationCoverFeatures(candidate, context),
@@ -168,11 +169,9 @@ function obligationCoverFeatures(
 ): readonly string[] {
   const facets = context.supplementaryData.querySoughtFacets ?? [];
   if (facets.length === 0) return [];
-  const gist = context.supplementaryData.evidenceGistsByMemoryId[
-    candidate.entry.object_id
-  ] ?? "";
-  const haystack = `${candidate.entry.content}\0${candidate.entry.domain_tags.join("\0")}\0${gist}`;
-  return facets.filter((facet) => haystack.includes(facet)).map(
+  // Exact attributed domain_tag identity only — not content/gist id substrings.
+  const tags = new Set(candidate.entry.domain_tags);
+  return facets.filter((facet) => tags.has(facet)).map(
     (facet) => `${OBLIGATION_COVER_PREFIX}${facet}`
   );
 }
@@ -211,7 +210,8 @@ function featureWeights(
     }
   }
   return Object.freeze(Object.fromEntries([...coverageCounts]
-    .filter(([, count]) => count < candidates.length)
+    .filter(([feature, count]) =>
+      feature.startsWith(OBLIGATION_COVER_PREFIX) && count < candidates.length)
     .map(([feature]) => [feature, 1])));
 }
 

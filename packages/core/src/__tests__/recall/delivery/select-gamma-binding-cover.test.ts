@@ -233,6 +233,67 @@ describe("Select_Gamma binding-value coverage", () => {
     expect(result.binding_set_receipt.values_status).toBe("truncated");
   });
 
+  it("does not let an active-slice distractor beat higher relevance", () => {
+    const relevant = createRankedCandidate("relevant", 1, 1);
+    const weakSlice = withFlood(createRankedCandidate("weak-slice", 2, 0.4), {
+      slice: true
+    });
+    const params = {
+      ...FIELD_PINS,
+      orderedCandidates: [relevant, weakSlice],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([relevant, weakSlice])
+    };
+    const binding = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    );
+    expect(binding.feature_weights).not.toHaveProperty("slice");
+    expect(binding.feature_weights).not.toHaveProperty("f3");
+    const result = selectFineAssessmentCandidates(params);
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["relevant"]);
+  });
+
+  it("does not grant obligation cover from facet-id content substrings", () => {
+    const mentioned = {
+      ...createRankedCandidate("mentioned", 1, 0.4),
+      entry: {
+        ...createRankedCandidate("mentioned", 1, 0.4).entry,
+        content: "I talked about location_place in passing."
+      }
+    };
+    const tagged = {
+      ...createRankedCandidate("tagged", 2, 0.3),
+      entry: {
+        ...createRankedCandidate("tagged", 2, 0.3).entry,
+        domain_tags: ["location_place"]
+      }
+    };
+    const params = {
+      ...FIELD_PINS,
+      orderedCandidates: [mentioned, tagged],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        querySoughtFacets: ["location_place"]
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([mentioned, tagged])
+    };
+    const coverById = new Map(buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    ).candidates.map((candidate) => [candidate.object_key, candidate.cover]));
+    expect(coverById.get("memory_entry:mentioned")).not.toHaveProperty(
+      "obligation:location_place"
+    );
+    expect(coverById.get("memory_entry:tagged")).toMatchObject({
+      "obligation:location_place": 1
+    });
+  });
+
   it("records obligation facet standing instead of always-unmet", () => {
     const covered = {
       ...createRankedCandidate("place-gold", 1, 0.4),
@@ -274,6 +335,35 @@ function tightBudget(maxEntries: number) {
     budgets: {
       ...createConfig().budgets,
       max_entries: maxEntries
+    }
+  };
+}
+
+function withFlood(
+  candidate: ReturnType<typeof createCandidate>,
+  axes: Readonly<{ readonly slice?: boolean }>
+) {
+  return {
+    ...candidate,
+    fusion: {
+      ...candidate.fusion,
+      flood_potential: {
+        R_obj: 0,
+        Slice: axes.slice === true ? 1 : 0,
+        A_path: 0,
+        B_evidence: 0,
+        E_direct: 0,
+        omega: 1,
+        Flood: 0,
+        lambda: 0.6,
+        beta: 1,
+        final_score: 0,
+        slice_status: axes.slice === true ? "active" as const : "inactive:no_slice_match" as const,
+        path_status: "inactive:pass_through" as const,
+        evidence_status: "inactive:no_evidence" as const,
+        e_direct_status: "inactive:not_applicable" as const,
+        fuel_verified: axes.slice === true
+      }
     }
   };
 }
