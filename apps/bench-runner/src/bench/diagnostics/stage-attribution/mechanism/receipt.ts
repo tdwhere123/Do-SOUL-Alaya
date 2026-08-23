@@ -37,8 +37,8 @@ export type {
 export function buildRecallMechanismSplit(
   input: RecallMechanismSplitInput
 ): RecallMechanismSplitReceipt {
-  const questions = freezeQuestions(indexedQuestions(input.questions));
-  return freezeDeep(Object.freeze({
+  const questions = cloneQuestions(indexedQuestions(input.questions));
+  return freezeDeep({
     schema_version: RECALL_MECHANISM_SPLIT_SCHEMA_VERSION,
     kind: RECALL_MECHANISM_SPLIT_KIND,
     prefix_operator_id: MECHANISM_PREFIX_OPERATOR_ID,
@@ -46,7 +46,7 @@ export function buildRecallMechanismSplit(
     ...classifyMechanismFields(questions),
     gold_exclusions: freezeGoldExclusions(questions),
     bounded_candidate_prefix: freezePrefixRows(questions)
-  }));
+  });
 }
 
 export function compareGoldRow(left: GoldExclusionRow, right: GoldExclusionRow): number {
@@ -72,16 +72,16 @@ function freezeGoldExclusions(
       const goldKey = requireToken(gold.gold_key, "gold_key");
       pushUnique(seen, pairKey(question.question_id, goldKey), "gold exclusion");
       const firstReason = resolveFirstReason(gold);
-      rows.push(Object.freeze({
+      rows.push({
         question_id: question.question_id,
         gold_key: goldKey,
         first_reason: firstReason,
         outcome: goldOutcome(gold, firstReason)
-      }));
+      });
     }
   }
   rows.sort(compareGoldRow);
-  return Object.freeze(rows);
+  return rows;
 }
 
 function freezePrefixRows(
@@ -101,7 +101,7 @@ function freezePrefixRows(
     }
   }
   rows.sort(comparePrefixRow);
-  return Object.freeze(rows);
+  return rows;
 }
 
 function appendPrefixRow(
@@ -113,11 +113,11 @@ function appendPrefixRow(
 ): void {
   const key = requireToken(candidateKey, "candidate_key");
   pushUnique(seen, pairKey(questionId, key), "prefix eligibility");
-  rows.push(Object.freeze({
+  rows.push({
     question_id: questionId,
     candidate_key: key,
     eligible: eligible ?? "unavailable"
-  }));
+  });
 }
 
 function indexedQuestions(
@@ -131,12 +131,11 @@ function indexedQuestions(
   return questions;
 }
 
-function freezeQuestions(
+function cloneQuestions(
   questions: readonly MechanismQuestionObservation[]
 ): readonly MechanismQuestionObservation[] {
-  return Object.freeze(
-    JSON.parse(JSON.stringify(questions)) as MechanismQuestionObservation[]
-  );
+  // Drop undefined optionals so artifact isDeepStrictEqual matches disk JSON.
+  return JSON.parse(JSON.stringify(questions)) as MechanismQuestionObservation[];
 }
 
 function freezeDeep<T>(value: T): T {

@@ -182,7 +182,7 @@ function collect(
     if (verdict === "unavailable") return "unavailable";
     if (verdict) changed.push(question.question_id);
   }
-  return freezeSortedUnique(changed);
+  return sortedUnique(changed);
 }
 
 function reduceBool(
@@ -249,6 +249,6 @@ function rankInTop5(rank: number | null): boolean {
   return rank !== null && rank <= 5;
 }
 
-function freezeSortedUnique(values: readonly string[]): readonly string[] {
-  return Object.freeze([...new Set(values)].sort());
+function sortedUnique(values: readonly string[]): readonly string[] {
+  return [...new Set(values)].sort();
 }
