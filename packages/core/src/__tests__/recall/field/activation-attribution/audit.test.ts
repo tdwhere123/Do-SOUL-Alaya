@@ -28,8 +28,6 @@ import {
 } from "../../../../recall/field/activation-attribution/audit.js";
 import { compileRecallQueryDemand } from "../../../../recall/query/recall-query-demand.js";
 import { compileRecallQueryProbes } from "../../../../recall/query/recall-query-probes.js";
-import { computeIntegratedFloodScore } from
-  "../../../../recall/scoring/integrated-flood-scoring.js";
 import {
   createMemoryEntry,
   entityQueryKey,
@@ -170,30 +168,28 @@ describe("activation flood attribution audit", () => {
     }), "path_inflow").reason).toBe("path_not_eligible");
   });
 
-  it("live flood fuel ignores date terms and neighbor scores", () => {
-    const entry = createMemoryEntry({ object_id: TARGET_ID });
-    const axisInputs = { R_obj: 0.42, A_path: 0, B_evidence: 0 };
-    const base = computeIntegratedFloodScore({
-      entry, axisInputs, supplementaryData: supplementary()
-    });
-    const dated = computeIntegratedFloodScore({
-      entry,
-      axisInputs,
-      supplementaryData: supplementary({
-        queryProbes: compileRecallQueryProbes("what changed in 2024")
+  it("keeps date and neighbors non-fuel on a live verified flood row", () => {
+    const receipt = auditActivationAttribution({
+      ...compatibleFloodRow(),
+      query_id: "t1-live-non-fuel",
+      source_proximity: Object.freeze({
+        tier: StorageTier.HOT,
+        seed_count: 3,
+        neighbor_count: 2
       })
     });
-    const neighbors = computeIntegratedFloodScore({
-      entry,
-      axisInputs,
-      supplementaryData: supplementary({
-        sourceProximityScores: { [TARGET_ID]: 1 }
-      })
+    expect(receipt.fuel_verified).toBe(true);
+    expect(channel(receipt, "slice_compatibility")?.counts_as_fuel).toBe(true);
+    expect(channel(receipt, "date")).toMatchObject({
+      status: "not_applicable",
+      reason: "date_not_flood_fuel",
+      counts_as_fuel: false
     });
-    expect(dated.diagnostics.fuel_verified).toBe(base.diagnostics.fuel_verified);
-    expect(dated.diagnostics.Flood).toBe(base.diagnostics.Flood);
-    expect(neighbors.diagnostics.fuel_verified).toBe(base.diagnostics.fuel_verified);
-    expect(neighbors.diagnostics.Flood).toBe(base.diagnostics.Flood);
+    expect(channel(receipt, "source_proximity")).toMatchObject({
+      status: "not_applicable",
+      reason: "neighbor_not_flood_fuel",
+      counts_as_fuel: false
+    });
   });
 
   it("classifies empty query, unobserved gold, and HOT-only proximity", () => {
