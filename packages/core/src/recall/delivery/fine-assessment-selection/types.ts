@@ -13,6 +13,8 @@ import type { RecallFieldRefinementStopCertificate } from
 import type { RecallRelevanceUpperBoundReceipt } from
   "../../rerank/relevance-upper-bound-receipt.js";
 import type { FineAssessmentOrderSequence } from "./order-sequence.js";
+import type { SelectedBindingSetReceipt } from
+  "../select-gamma/binding-cover/types.js";
 import type { SelectGammaDecisionReceipt } from "../select-gamma/types.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
@@ -102,4 +104,5 @@ export type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPa
     Readonly<RecallFieldRefinementStopCertificate>;
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
   readonly orderSequence: FineAssessmentOrderSequence;
+  readonly binding_set_receipt: SelectedBindingSetReceipt;
 }>;

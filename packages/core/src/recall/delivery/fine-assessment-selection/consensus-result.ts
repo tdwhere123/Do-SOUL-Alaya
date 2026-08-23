@@ -15,6 +15,8 @@ import type { FineAssessmentOrderSequence } from "./order-sequence.js";
 import type { FineAssessmentPreProjectionCapture } from
   "../selection-boundary/selection-boundary-types.js";
 import type { CoverageSelectionObjectiveReceipt } from "../coverage-selection.js";
+import type { SelectedBindingSetReceipt } from
+  "../select-gamma/binding-cover/types.js";
 import type { RecallFieldRefinementStopCertificate } from
   "../../field/refinement/field-refinement-stop-certificate.js";
 
@@ -24,6 +26,7 @@ export function buildSelectionResult(
   packet: ReturnType<typeof materializeFinalPacket>,
   coverageSelectionObjective: CoverageSelectionObjectiveReceipt,
   orderSequence: FineAssessmentOrderSequence,
+  bindingSetReceipt: SelectedBindingSetReceipt,
   fieldRefinementStopCertificate?: Readonly<RecallFieldRefinementStopCertificate>,
   tokenEstimatesByContent?: ReadonlyMap<string, number>,
   preProjection?: FineAssessmentPreProjectionCapture
@@ -33,6 +36,7 @@ export function buildSelectionResult(
     candidates: packet.candidates,
     diagnostics: packet.diagnostics,
     coverageSelectionObjective,
+    binding_set_receipt: bindingSetReceipt,
     orderSequence,
     ...(fieldRefinementStopCertificate === undefined ? {} : {
       fieldRefinementStopCertificate

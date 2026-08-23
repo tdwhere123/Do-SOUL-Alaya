@@ -1,8 +1,7 @@
 import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
-import {
-  MemoryDimension,
-  SELECT_GAMMA_OPERATOR_ID
-} from "@do-soul/alaya-protocol";
+import { MemoryDimension } from "@do-soul/alaya-protocol";
+import { SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID } from
+  "../../recall/delivery/select-gamma/binding-cover/types.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -118,9 +117,9 @@ describe("selection boundary pre-projection decision receipts", () => {
 
     expect(boundary.expected.pre_projection.selection_receipt).toEqual({
       schema_version: 4,
-      objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
-      configuration_digest: null,
-      source_hard_dedupe: true,
+      objective_semantic_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
+      configuration_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      source_hard_dedupe: false,
       ordering_basis: "raw_marginal_gain",
       witness: {
         kind: "static_top_k_token_bound",

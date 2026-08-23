@@ -22,6 +22,7 @@ export function createSelectGammaGenericWalkObjective(
   return Object.freeze({
     operator_id: SELECT_GAMMA_OPERATOR_ID,
     createState: () => new Map<string, number>(),
+    cloneState: (state) => new Map(state),
     marginalGain: (candidate, state) =>
       selectGammaMarginalGain(candidate, state, weights),
     accept: (candidate, state) => acceptSelectGammaCoverage(candidate, state),
@@ -67,6 +68,7 @@ export function bindCoverageSelectionWalkObjective<
     operator_id: objective.operator_id,
     configuration_digest: objective.configuration_digest,
     createState: objective.createState,
+    cloneState: objective.cloneState,
     marginalGain: (candidate, state) =>
       objective.marginalGain(observation(candidate.candidate_key, state)),
     accept: (candidate, state) =>

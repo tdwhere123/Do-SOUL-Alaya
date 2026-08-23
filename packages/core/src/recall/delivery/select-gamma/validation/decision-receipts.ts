@@ -183,6 +183,7 @@ function validExclusion(
     return receipt.accepted_before === selectedCount &&
       nonNegativeInteger(receipt.limit) && selectedCount >= receipt.limit;
   }
+  if (receipt.kind !== "max_total_tokens") return false;
   return receipt.token_total_before === tokenTotal &&
     positiveFinite(receipt.token_estimate) &&
     nonNegativeFinite(receipt.limit) &&

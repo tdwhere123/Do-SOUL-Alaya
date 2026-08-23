@@ -215,6 +215,7 @@ describe("fine-assessment selection boundary fidelity", () => {
     const {
       coverageSelectionObjective: _coverageSelectionObjective,
       orderSequence: _orderSequence,
+      binding_set_receipt: _bindingSetReceipt,
       ...visiblePayload
     } = visibleResult;
     const candidateDrift = {

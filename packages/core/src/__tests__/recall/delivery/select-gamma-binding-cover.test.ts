@@ -1,0 +1,375 @@
+import { describe, expect, it } from "vitest";
+import { OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID } from
+  "../../../recall/field/open-semantic-factors/composition.js";
+import { selectFineAssessmentCandidates } from
+  "../../../recall/delivery/fine-assessment-selection.js";
+import { createSelectionContext } from
+  "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
+import {
+  buildFineAssessmentSelectGammaBinding,
+  buildSelectGammaRequest
+} from "../../../recall/delivery/select-gamma/bind-fine-assessment.js";
+import { attributeCandidateBindingCoverage } from
+  "../../../recall/delivery/select-gamma/binding-cover/candidate-receipt.js";
+import { createBindingAwareWalkObjective } from
+  "../../../recall/delivery/select-gamma/binding-cover/objective.js";
+import {
+  bindFineAssessmentBindingCover,
+  PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE
+} from "../../../recall/delivery/select-gamma/binding-cover/production.js";
+import {
+  SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
+  SELECT_GAMMA_CANDIDATE_BINDING_COVERAGE_OPERATOR_ID,
+  type CandidateBindingCoverageReceipt
+} from "../../../recall/delivery/select-gamma/binding-cover/types.js";
+import { prepareSelectGammaProof } from
+  "../../../recall/delivery/select-gamma/proof-objective.js";
+import { selectGammaWalk } from
+  "../../../recall/delivery/select-gamma/select-gamma.js";
+import type { SelectGammaBinding, SelectGammaRequest } from
+  "../../../recall/delivery/select-gamma/types.js";
+import {
+  createCandidate,
+  createConfig,
+  createRankedCandidate,
+  createSupplementaryData,
+  FIELD_PINS,
+  rankMap
+} from "../fine-assessment-selection-fixtures.js";
+import { formulaCandidate } from "./select-gamma-parity-pool.js";
+
+describe("Select_Gamma binding-value coverage", () => {
+  it("admits two same-source golds with distinct values under budget 5", () => {
+    const walk = bindingWalk({
+      selected: 5,
+      receipts: [
+        valueReceipt("gold-apple", "count", "three"),
+        valueReceipt("gold-banana", "count", "five")
+      ],
+      extras: distractors(4, 0.72)
+    });
+
+    expect(walk.selected_candidate_keys).toEqual(expect.arrayContaining([
+      "gold-apple",
+      "gold-banana"
+    ]));
+    expect(walk.selected_candidate_keys).toHaveLength(5);
+    expect(walk.selection_receipt.source_hard_dedupe).toBe(false);
+    expect(walk.selection_receipt.objective_semantic_id)
+      .toBe(SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID);
+  });
+
+  it("lets a new value beat a same-value same-lineage repeat", () => {
+    const apple = formulaCandidate("gold-apple", {
+      quality: 0.8, cover: {}, source: "receipt"
+    });
+    const repeat = {
+      ...formulaCandidate("gold-repeat", {
+        quality: 0.79, cover: {}, source: "receipt"
+      }),
+      lineage: { status: "available" as const, key: "session-1" }
+    };
+    const appleWithLineage = {
+      ...apple,
+      lineage: { status: "available" as const, key: "session-1" }
+    };
+    const novel = formulaCandidate("gold-orange", {
+      quality: 0.5, cover: {}, source: "note"
+    });
+    const walk = selectGammaWalk(requestOf([
+      appleWithLineage.candidate_key, repeat.candidate_key, novel.candidate_key
+    ]), bindingOf([appleWithLineage, repeat, novel], 2), createBindingAwareWalkObjective({
+      weights: {},
+      receiptsByCandidateKey: new Map([
+        ["gold-apple", valueReceipt("gold-apple", "count", "three")],
+        ["gold-repeat", valueReceipt("gold-repeat", "count", "three")],
+        ["gold-orange", valueReceipt("gold-orange", "count", "five")]
+      ])
+    }));
+
+    expect(walk.selected_candidate_keys).toEqual(["gold-apple", "gold-orange"]);
+    const repeatGain = walk.decisions.find((decision) =>
+      decision.candidate_key === "gold-repeat"
+    )?.marginal_gain;
+    const novelGain = walk.decisions.find((decision) =>
+      decision.candidate_key === "gold-orange"
+    )?.marginal_gain;
+    expect(novelGain).toBeGreaterThan(repeatGain ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("keeps live walk keys on the proof path with the same objective", () => {
+    const golds = enumerativeGolds();
+    const params = productionParams(golds);
+    const context = createSelectionContext(params);
+    const binding = buildFineAssessmentSelectGammaBinding(params, context);
+    const cover = bindFineAssessmentBindingCover(params, context, binding);
+    const live = selectGammaWalk(
+      buildSelectGammaRequest(params, context, params.orderedCandidates),
+      binding,
+      cover.objective
+    );
+    const proofWalk = selectGammaWalk(
+      buildSelectGammaRequest(params, context, params.orderedCandidates),
+      binding,
+      cover.objective
+    );
+    const proof = prepareSelectGammaProof(
+      params.orderedCandidates, context, binding, cover.objective
+    );
+    const result = selectFineAssessmentCandidates(params);
+
+    expect(proofWalk.selected_candidate_keys).toEqual(live.selected_candidate_keys);
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
+      live.selected_candidate_keys.map((key) =>
+        params.orderedCandidates.find((candidate) =>
+          candidate.fusion.candidate_key === key
+        )?.entry.object_id
+      )
+    );
+    expect(proof.objective.operator_id)
+      .toBe(live.selection_receipt.objective_semantic_id);
+    expect(result.coverageSelectionObjective.operator_id)
+      .toBe(SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID);
+    expect(result.binding_set_receipt.variables[0]?.gained_values.map(
+      (value) => value.semantic_identity
+    ).sort()).toEqual(["five", "three"]);
+  });
+
+  it("pins production source hard-dedupe off", () => {
+    expect(PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE).toBe(false);
+    const candidate = createCandidate("bound");
+    const params = {
+      ...FIELD_PINS,
+      orderedCandidates: [candidate],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: new Map([[candidate.fusion.candidate_key, 1]])
+    };
+    const binding = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    );
+    expect(binding.source_hard_dedupe).toBe(false);
+  });
+
+  it("still hard-rejects a duplicate object when source hard-dedupe is on", () => {
+    const shared = formulaCandidate("dup-a", {
+      quality: 3, cover: {}, source: "shared"
+    });
+    const duplicate = {
+      ...formulaCandidate("dup-b", { quality: 2, cover: {}, source: "shared" }),
+      object_key: shared.object_key
+    };
+    const novel = formulaCandidate("novel", {
+      quality: 1, cover: {}, source: "other"
+    });
+    const walk = selectGammaWalk(
+      requestOf(["dup-a", "dup-b", "novel"]),
+      {
+        ...bindingOf([shared, duplicate, novel], 2),
+        source_hard_dedupe: true
+      },
+      createBindingAwareWalkObjective({
+        weights: {},
+        receiptsByCandidateKey: new Map()
+      })
+    );
+    expect(walk.selected_candidate_keys).toEqual(["dup-a", "novel"]);
+    expect(walk.decisions.find((decision) =>
+      decision.candidate_key === "dup-b")?.receipt).toMatchObject({
+      kind: "duplicate",
+      identity_channel: "object"
+    });
+  });
+
+  it("attributes OSF result bindings onto candidate coverage receipts", () => {
+    const apple = withEvidence(createCandidate("gold-a"), "ev-apple");
+    const banana = withEvidence(createCandidate("gold-b"), "ev-banana");
+    const receipts = attributeCandidateBindingCoverage({
+      candidates: [apple, banana],
+      composition: compositionOf([
+        ["count", "three", ["ev-apple"]],
+        ["count", "five", ["ev-banana"]]
+      ]),
+      answerVariableIds: ["count"]
+    });
+    expect(receipts.get(apple.fusion.candidate_key)?.values).toEqual([
+      expect.objectContaining({
+        variable_id: "count",
+        semantic_identity: "three"
+      })
+    ]);
+    expect(receipts.get(banana.fusion.candidate_key)?.values).toEqual([
+      expect.objectContaining({
+        variable_id: "count",
+        semantic_identity: "five"
+      })
+    ]);
+  });
+});
+
+function enumerativeGolds() {
+  return [
+    withSource(withEvidence(createRankedCandidate("gold-a", 1, 0.8), "ev-apple"), "turn-1"),
+    withSource(withEvidence(createRankedCandidate("gold-b", 2, 0.55), "ev-banana"), "turn-1"),
+    ...[0, 1, 2, 3].map((index) =>
+      createRankedCandidate(`noise-${index}`, index + 3, 0.72)
+    )
+  ];
+}
+
+function productionParams(candidates: ReturnType<typeof enumerativeGolds>) {
+  return {
+    ...FIELD_PINS,
+    orderedCandidates: candidates,
+    config: {
+      ...createConfig(),
+      budgets: { ...createConfig().budgets, max_entries: 5 }
+    },
+    supplementaryData: createSupplementaryData({
+      openSemanticFactorComposition: compositionOf([
+        ["count", "three", ["ev-apple"]],
+        ["count", "five", ["ev-banana"]]
+      ])
+    }),
+    tokenEstimator: { estimate: () => 6 },
+    rankByCandidateKey: rankMap(candidates)
+  };
+}
+
+function bindingWalk(params: Readonly<{
+  readonly selected: number;
+  readonly receipts: readonly CandidateBindingCoverageReceipt[];
+  readonly extras: ReturnType<typeof formulaCandidate>[];
+}>) {
+  const golds = [
+    formulaCandidate("gold-apple", { quality: 0.8, cover: {}, source: "receipt" }),
+    formulaCandidate("gold-banana", { quality: 0.7, cover: {}, source: "receipt" })
+  ];
+  const candidates = [...golds, ...params.extras];
+  return selectGammaWalk(
+    requestOf(candidates.map((candidate) => candidate.candidate_key)),
+    bindingOf(candidates, params.selected),
+    createBindingAwareWalkObjective({
+      weights: {},
+      receiptsByCandidateKey: new Map(params.receipts.map((receipt) => [
+        receipt.candidate_key,
+        receipt
+      ]))
+    })
+  );
+}
+
+function distractors(count: number, quality: number) {
+  return Array.from({ length: count }, (_, index) => formulaCandidate(
+    `noise-${index}`,
+    { quality, cover: {}, source: `blog-${index}` }
+  ));
+}
+
+function valueReceipt(
+  candidateKey: string,
+  variableId: string,
+  semanticIdentity: string
+): CandidateBindingCoverageReceipt {
+  return Object.freeze({
+    schema_version: 1 as const,
+    operator_id: SELECT_GAMMA_CANDIDATE_BINDING_COVERAGE_OPERATOR_ID,
+    candidate_key: candidateKey,
+    values: Object.freeze([{
+      variable_id: variableId,
+      semantic_identity: semanticIdentity,
+      surfaces: Object.freeze([semanticIdentity]),
+      evidence_ids: Object.freeze([`ev-${semanticIdentity}`])
+    }])
+  });
+}
+
+function compositionOf(
+  values: readonly (readonly [string, string, readonly string[]])[]
+) {
+  const digest = `sha256:${"a".repeat(64)}` as const;
+  const boundValues = values.map(([variableId, semanticIdentity, evidenceIds]) =>
+    Object.freeze({
+      variable_id: variableId,
+      semantic_identity: semanticIdentity,
+      surfaces: Object.freeze([semanticIdentity]),
+      evidence_ids: Object.freeze([...evidenceIds])
+    })
+  );
+  return Object.freeze({
+    schema_version: 2 as const,
+    operator_id: OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
+    status: "composed" as const,
+    compatibility_trace_digest: digest,
+    query_capture_digest: digest,
+    result_variable_ids: Object.freeze(["count"]),
+    search_step_count: 1,
+    solution_count: values.length,
+    observed_binding_count: values.length,
+    binding_observation_count: values.length,
+    truncated: false,
+    bindings: Object.freeze([]),
+    solutions: Object.freeze(boundValues.map((binding) => Object.freeze({
+      result_bindings: Object.freeze([binding]),
+      evidence_ids: binding.evidence_ids,
+      proposition_matches: Object.freeze([])
+    }))),
+    variable_collections: Object.freeze([{
+      variable_id: "count",
+      observation_count: boundValues.length,
+      distinct_value_count: boundValues.length,
+      values: Object.freeze(boundValues.map((binding) => Object.freeze({
+        semantic_identity: binding.semantic_identity,
+        surfaces: binding.surfaces,
+        evidence_ids: binding.evidence_ids
+      })))
+    }]),
+    receipt_digest: digest
+  });
+}
+
+function withEvidence(
+  candidate: ReturnType<typeof createCandidate>,
+  evidenceId: string
+) {
+  return {
+    ...candidate,
+    entry: { ...candidate.entry, evidence_refs: [evidenceId] }
+  };
+}
+
+function withSource(
+  candidate: ReturnType<typeof createCandidate>,
+  source: string
+) {
+  return { ...candidate, evidenceSourceIdentity: source };
+}
+
+function requestOf(keys: readonly string[]): SelectGammaRequest {
+  return Object.freeze({
+    workspace_id: "workspace-1",
+    generation_id: `sha256:${"a".repeat(64)}`,
+    condition_digest: `sha256:${"b".repeat(64)}`,
+    eligible_candidate_keys: Object.freeze([...keys]),
+    token_budget: 100
+  });
+}
+
+function bindingOf(
+  candidates: readonly ReturnType<typeof formulaCandidate>[],
+  maxSelected: number
+): SelectGammaBinding {
+  const request = requestOf(candidates.map((candidate) => candidate.candidate_key));
+  return Object.freeze({
+    workspace_id: request.workspace_id,
+    generation_id: request.generation_id,
+    condition_digest: request.condition_digest,
+    candidates,
+    feature_weights: Object.freeze({}),
+    max_selected: maxSelected,
+    per_dimension_limits: null,
+    source_hard_dedupe: false
+  });
+}

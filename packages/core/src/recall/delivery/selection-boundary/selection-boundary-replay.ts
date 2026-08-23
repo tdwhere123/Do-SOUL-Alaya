@@ -62,6 +62,7 @@ export function replayFineAssessmentSelectionBoundary(
     candidates: replayed.candidates,
     diagnostics: replayed.diagnostics,
     coverageSelectionObjective: replayed.coverageSelectionObjective,
+    binding_set_receipt: replayed.binding_set_receipt,
     orderSequence: replayed.orderSequence,
     ...(replayed.fieldRefinementStopCertificate === undefined ? {} : {
       fieldRefinementStopCertificate: replayed.fieldRefinementStopCertificate

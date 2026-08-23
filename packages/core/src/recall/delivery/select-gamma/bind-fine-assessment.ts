@@ -12,6 +12,8 @@ import type {
   FineAssessmentSelectionContext,
   FineAssessmentSelectionParams
 } from "../fine-assessment-selection/types.js";
+import { PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE } from
+  "./binding-cover/production.js";
 import { selectGammaQuality } from "./quality.js";
 import type {
   SelectGammaBinding,
@@ -48,7 +50,7 @@ export function buildFineAssessmentSelectGammaBinding(
     feature_weights: featureWeights(eligibleCandidates),
     max_selected: context.config.budgets.max_entries,
     per_dimension_limits: context.config.budgets.per_dimension_limits,
-    source_hard_dedupe: true
+    source_hard_dedupe: PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE
   });
 }
 

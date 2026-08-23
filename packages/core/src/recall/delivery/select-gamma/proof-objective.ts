@@ -10,19 +10,19 @@ import type {
   FineAssessmentSelectionContext
 } from "../fine-assessment-selection/types.js";
 import { requireByKey } from "./admission/require-by-key.js";
-import { createSelectGammaGenericWalkObjective } from "./walk-objective.js";
 import type {
   SelectGammaBinding,
-  SelectGammaCoverState,
-  SelectGammaFormulaCandidate
+  SelectGammaFormulaCandidate,
+  SelectGammaWalkObjective
 } from "./types.js";
 
 export function prepareSelectGammaProof(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  binding: SelectGammaBinding
+  binding: SelectGammaBinding,
+  walkObjective: SelectGammaWalkObjective<any>
 ) {
-  const objective = createSelectGammaProofObjective(binding);
+  const objective = createSelectGammaProofObjective(binding, walkObjective);
   const preparedSelection: MaterializedConfiguredCoverageSelection<
     FineAssessmentCandidate
   > = Object.freeze({
@@ -41,19 +41,19 @@ export function prepareSelectGammaProof(
   });
 }
 
-function createSelectGammaProofObjective(
-  binding: SelectGammaBinding
-): CoverageSelectionObjective<FineAssessmentCandidate, SelectGammaCoverState> {
+function createSelectGammaProofObjective<State>(
+  binding: SelectGammaBinding,
+  walkObjective: SelectGammaWalkObjective<State>
+): CoverageSelectionObjective<FineAssessmentCandidate, State> {
   const byKey = new Map(binding.candidates.map((candidate) => [
     candidate.candidate_key,
     candidate
   ]));
-  const walkObjective = createSelectGammaGenericWalkObjective(binding.feature_weights);
   return Object.freeze({
     operator_id: walkObjective.operator_id,
-    mathematical_class: "monotone_submodular" as const,
+    configuration_digest: walkObjective.configuration_digest,
     createState: walkObjective.createState,
-    cloneState: (state: SelectGammaCoverState) => new Map(state),
+    cloneState: proofCloneState(walkObjective),
     marginalGain: ({ candidate, state }) => walkObjective.marginalGain(
       boundFormulaCandidate(byKey, candidate.fusion.candidate_key),
       state
@@ -63,6 +63,17 @@ function createSelectGammaProofObjective(
       state
     )
   });
+}
+
+function proofCloneState<State>(
+  walkObjective: SelectGammaWalkObjective<State>
+): (state: State) => State {
+  const clone = walkObjective.cloneState;
+  if (clone !== undefined) return (state) => clone(state);
+  return (state) => {
+    if (state instanceof Map) return new Map(state) as State;
+    throw new Error("Select_Gamma proof requires cloneState");
+  };
 }
 
 function boundFormulaCandidate(

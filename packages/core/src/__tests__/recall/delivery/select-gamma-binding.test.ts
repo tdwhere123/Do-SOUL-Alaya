@@ -77,7 +77,7 @@ describe("live Select_Gamma binding", () => {
     expect(Object.keys(bound.cover)).toEqual([]);
     expect(bound.source).toEqual({ status: "available", key: "source-1" });
     expect(bound.lineage).toEqual({ status: "available", key: "lineage-1" });
-    expect(binding.source_hard_dedupe).toBe(true);
+    expect(binding.source_hard_dedupe).toBe(false);
   });
 
   it("covers only independently evidenced query-bound axes", () => {

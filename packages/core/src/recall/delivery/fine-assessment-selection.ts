@@ -6,6 +6,8 @@ import {
   buildFineAssessmentSelectGammaBinding,
   buildSelectGammaRequest
 } from "./select-gamma/bind-fine-assessment.js";
+import { bindFineAssessmentBindingCover } from
+  "./select-gamma/binding-cover/production.js";
 import { buildSelectGammaPacketObservation } from
   "./select-gamma/packet-observation.js";
 import { prepareSelectGammaProof } from
@@ -51,17 +53,23 @@ export function selectFineAssessmentCandidates(
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
   const binding = buildFineAssessmentSelectGammaBinding(selectionParams, context);
+  const bindingCover = bindFineAssessmentBindingCover(
+    selectionParams, context, binding
+  );
   const walk = selectGammaWalk(
     buildSelectGammaRequest(
       selectionParams,
       context,
       selectionParams.orderedCandidates
     ),
-    binding
+    binding,
+    bindingCover.objective
   );
   const gammaOrder = orderByDecisionKeys(selectionParams.orderedCandidates, walk);
   const selected = orderByKeys(gammaOrder, walk.selected_candidate_keys);
-  const proof = prepareSelectGammaProof(gammaOrder, context, binding);
+  const proof = prepareSelectGammaProof(
+    gammaOrder, context, binding, bindingCover.objective
+  );
   const accumulator = materializeSelectGammaAccumulator(
     gammaOrder,
     walk,
@@ -85,6 +93,7 @@ export function selectFineAssessmentCandidates(
     delivered,
     proof.objective,
     stampFineAssessmentFinalRanks(order, delivered.candidates),
+    bindingCover.selectedBindingSet(walk.selected_candidate_keys),
     buildRefinementStopCertificate(delivered.candidates, proof, context),
     boundaryCapture?.tokenEstimatesByContent,
     preProjection

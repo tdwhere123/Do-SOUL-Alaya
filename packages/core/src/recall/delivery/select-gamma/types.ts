@@ -69,6 +69,7 @@ export type SelectGammaWalkObjective<State = unknown> = Readonly<{
   readonly operator_id: string;
   readonly configuration_digest?: string;
   readonly createState: () => State;
+  readonly cloneState?: (state: State) => State;
   readonly marginalGain: (
     candidate: SelectGammaFormulaCandidate,
     state: State

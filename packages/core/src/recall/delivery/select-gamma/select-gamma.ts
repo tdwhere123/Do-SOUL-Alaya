@@ -56,7 +56,7 @@ type PickedCandidate = Readonly<{
 export function selectGammaWalk(
   request: SelectGammaRequest,
   binding: SelectGammaBinding,
-  objective?: SelectGammaWalkObjective
+  objective?: SelectGammaWalkObjective<any>
 ): SelectGammaWalkResult {
   assertBoundIdentity(request, binding);
   assertTokenBudget(request.token_budget);
@@ -339,7 +339,10 @@ function buildSelectionReceipt(
   candidates: readonly SelectGammaFormulaCandidate[],
   maxSelected: number,
   tokenBudget: number,
-  objective: SelectGammaWalkObjective,
+  objective: Readonly<{
+    readonly operator_id: string;
+    readonly configuration_digest?: string;
+  }>,
   identityPolicy: SelectGammaIdentityPolicy
 ): SelectGammaSelectionReceipt {
   const cardinalityBound = Math.min(maxSelected, candidates.length);

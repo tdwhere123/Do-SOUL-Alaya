@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
+import { SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID } from
+  "../../../recall/delivery/select-gamma/binding-cover/types.js";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { selectFineAssessmentCandidates } from
   "../../../recall/delivery/fine-assessment-selection.js";
@@ -27,9 +28,9 @@ describe("Select_Gamma boundary objective", () => {
     expect(boundary.expected.pre_projection.schema_version).toBe(2);
     expect(boundary.expected.coverage_objective).toEqual({
       schema_version: 1,
-      operator_id: SELECT_GAMMA_OPERATOR_ID,
-      mathematical_class: "monotone_submodular",
-      configuration_digest: null
+      operator_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
+      mathematical_class: null,
+      configuration_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u)
     });
     expect(boundary.expected.visible_result_sha256)
       .toMatch(/^sha256:[0-9a-f]{64}$/u);
