@@ -1,0 +1,4 @@
+{
+  "name": "Do-SOUL Alaya",
+  "install": "bash .cursor/scripts/cloud-agent-install.sh"
+}
