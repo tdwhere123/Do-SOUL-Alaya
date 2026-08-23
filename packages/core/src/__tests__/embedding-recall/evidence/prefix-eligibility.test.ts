@@ -129,6 +129,29 @@ describe("evidence prefix eligibility audit", () => {
     expect(rank33AtFull).not.toHaveProperty("degenerate_embedded_text");
     expect(rank33At32).not.toHaveProperty("degenerate_embedded_text");
   });
+
+  it("does not copy live completeness onto the wrong document of a shared key", () => {
+    const documentA = freezeCandidate("memory:shared", "evidence-a", "owner");
+    const documentB = freezeCandidate("memory:shared", "evidence-b", "gist");
+    const receipts = auditEvidencePrefixEligibility(
+      Object.freeze([documentA, documentB]),
+      QUERY_TEXT,
+      new Map([[32, new Map([[documentA.candidateKey, scoredReceipt(documentA, "complete")]])]])
+    ).receipts;
+    const at32 = receipts.filter((receipt) =>
+      receipt.prefix === 32 && receipt.candidateKey === documentA.candidateKey
+    );
+
+    expect(at32).toHaveLength(2);
+    expect(receiptForDocument(at32, documentA)).toMatchObject({
+      eligible: true,
+      live_observation_completeness: "complete"
+    });
+    expect(receiptForDocument(at32, documentB)).toMatchObject({
+      eligible: true,
+      live_observation_completeness: "not_observed"
+    });
+  });
 });
 
 function buildSameContentPool(): readonly EvidenceEmbeddingCandidate[] {
@@ -217,6 +240,18 @@ function receiptAt(
 ): Readonly<EvidencePrefixEligibilityReceipt> {
   const receipt = receipts.find((row) =>
     row.candidateKey === candidateKey && row.prefix === prefix
+  );
+  expect(receipt).toBeDefined();
+  return receipt!;
+}
+
+function receiptForDocument(
+  receipts: readonly Readonly<EvidencePrefixEligibilityReceipt>[],
+  candidate: Readonly<EvidenceEmbeddingCandidate>
+): Readonly<EvidencePrefixEligibilityReceipt> {
+  const receipt = receipts.find((row) =>
+    row.evidenceObjectId === candidate.evidenceObjectId &&
+    row.documentIdentity === candidate.documentIdentity
   );
   expect(receipt).toBeDefined();
   return receipt!;
