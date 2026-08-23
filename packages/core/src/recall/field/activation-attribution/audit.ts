@@ -1,6 +1,6 @@
 import { digestRecallFieldIdentity } from "../field-identity.js";
 import { compileRecallQueryProbes } from "../../query/recall-query-probes.js";
-import { classifyActivationAttributionChannels } from "./classify.js";
+import { classifyActivationAttribution } from "./classify.js";
 import {
   inspectCharNgramConsumer,
   inspectSourceProximityConsumer
@@ -13,6 +13,7 @@ import {
 
 export {
   ACTIVATION_ATTRIBUTION_CHANNELS,
+  ACTIVATION_ATTRIBUTION_FUEL_CHANNELS,
   ACTIVATION_ATTRIBUTION_OPERATOR_ID,
   ACTIVATION_ATTRIBUTION_STATUSES
 } from "./types.js";
@@ -21,6 +22,7 @@ export type {
   ActivationAttributionAuditRow,
   ActivationAttributionChannel,
   ActivationAttributionChannelReceipt,
+  ActivationAttributionFloodObservation,
   ActivationAttributionQueryShape,
   ActivationAttributionReason,
   ActivationAttributionStatus,
@@ -29,20 +31,24 @@ export type {
 } from "./types.js";
 export {
   inspectCharNgramConsumer,
-  inspectSourceProximityConsumer
+  inspectSourceProximityConsumer,
+  QUERY_PROBE_RETRIEVAL_FIELDS
 } from "./consumers.js";
 
 export function auditActivationAttribution(
   row: ActivationAttributionAuditRow
 ): ActivationAttributionAuditReceipt {
   const probes = compileRecallQueryProbes(row.query_text);
+  const classified = classifyActivationAttribution(row, probes);
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: ACTIVATION_ATTRIBUTION_OPERATOR_ID,
     query_id: row.query_id,
     query_shape: row.query_shape,
     query_text: row.query_text,
-    channels: classifyActivationAttributionChannels(row, probes),
+    intent: classified.intent,
+    fuel_verified: classified.fuel_verified,
+    channels: classified.channels,
     char_ngram_consumer: inspectCharNgramConsumer(probes),
     source_proximity_consumer: inspectSourceProximityConsumer()
   });
@@ -50,4 +56,14 @@ export function auditActivationAttribution(
     ...body,
     receipt_digest: digestRecallFieldIdentity(body)
   });
+}
+
+export function verifyActivationAttributionAudit(
+  receipt: Readonly<ActivationAttributionAuditReceipt>,
+  row: ActivationAttributionAuditRow
+): void {
+  const derived = auditActivationAttribution(row);
+  if (derived.receipt_digest !== receipt.receipt_digest) {
+    throw new Error("activation attribution audit digest mismatch");
+  }
 }
