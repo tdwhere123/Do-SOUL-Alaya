@@ -74,6 +74,7 @@ export function applyQueryObligationFacetFallback(input: Readonly<{
   fills: readonly FallbackFill[];
 }>): QueryFactFrameOsfFacetReceipt {
   const receipt = verifyQueryFactFrameOsfFacetReceipt(input.receipt);
+  requireQueryDigest(input.query_text, receipt.query_digest);
   const rejection = fallbackRejection(input.producer_operator_id);
   const fills = new Map(input.fills.map((fill) => [fill.facet_id, fill]));
   return sealFacetReceipt({
@@ -214,6 +215,12 @@ function applyFallbackFacet(
     current.facet_id, fill,
     MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID, "model_fallback"
   );
+}
+
+function requireQueryDigest(queryText: string, queryDigest: string): void {
+  if (digestQueryFactFrame(queryText) !== queryDigest) {
+    throw new Error("query fact-frame OSF facet receipt query digest mismatch");
+  }
 }
 
 function fallbackRejection(producer: string): QueryObligationFacetReason | null {

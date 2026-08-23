@@ -190,6 +190,19 @@ describe("query fact-frame OSF facet obligation receipt", () => {
     expect(byId(filled, "type_constraint")).toMatchObject({ status: "ineligible" });
   });
 
+  it("fails closed when apply query_text does not match receipt.query_digest", async () => {
+    const { receipt } = await deriveBoth(WHEN);
+    const standIn = "When did I graduate?";
+    expect(standIn.slice(0, 4)).toBe("When");
+    expect(() => applyQueryObligationFacetFallback({
+      receipt,
+      query_text: standIn,
+      producer_operator_id: MODEL_QUERY_OBLIGATION_FACET_FALLBACK_OPERATOR_ID,
+      fills: [{ facet_id: "time", surface: "When", source_span: [0, 4] }]
+    })).toThrow(/query digest mismatch/);
+    expect(byId(receipt, "time").status).toBe("unavailable");
+  });
+
   it("rejects ungrounded fills and tampered receipt digests", async () => {
     const { receipt } = await deriveBoth(WHEN);
     const ungrounded = applyQueryObligationFacetFallback({
