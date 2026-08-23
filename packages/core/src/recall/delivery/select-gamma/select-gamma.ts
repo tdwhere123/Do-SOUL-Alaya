@@ -55,16 +55,38 @@ type PickedCandidate = Readonly<{
 
 export function selectGammaWalk(
   request: SelectGammaRequest,
+  binding: SelectGammaBinding
+): SelectGammaWalkResult;
+export function selectGammaWalk<State>(
+  request: SelectGammaRequest,
   binding: SelectGammaBinding,
-  objective?: SelectGammaWalkObjective<any>
+  objective: SelectGammaWalkObjective<State>
+): SelectGammaWalkResult;
+export function selectGammaWalk<State>(
+  request: SelectGammaRequest,
+  binding: SelectGammaBinding,
+  objective?: SelectGammaWalkObjective<State>
+): SelectGammaWalkResult {
+  if (objective === undefined) {
+    return runSelectGammaWalk(
+      request,
+      binding,
+      createSelectGammaGenericWalkObjective(binding.feature_weights)
+    );
+  }
+  return runSelectGammaWalk(request, binding, objective);
+}
+
+function runSelectGammaWalk<State>(
+  request: SelectGammaRequest,
+  binding: SelectGammaBinding,
+  walkObjective: SelectGammaWalkObjective<State>
 ): SelectGammaWalkResult {
   assertBoundIdentity(request, binding);
   assertTokenBudget(request.token_budget);
   const maxSelected = validateMaxSelected(binding.max_selected);
   validateDimensionLimits(binding.per_dimension_limits);
   assertUniqueEligibleKeys(request.eligible_candidate_keys);
-  const walkObjective = objective ??
-    createSelectGammaGenericWalkObjective(binding.feature_weights);
   const identityPolicy = resolveIdentityPolicy(binding);
   const indexed = indexCandidates(binding.candidates, binding.workspace_id);
   const remaining = request.eligible_candidate_keys.map((key) => {

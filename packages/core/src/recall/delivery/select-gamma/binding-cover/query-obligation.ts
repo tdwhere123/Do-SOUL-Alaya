@@ -1,6 +1,10 @@
 import type { RecallAnswerShape } from "../../../query/recall-answer-shape-plan.js";
 import type { OpenSemanticFactorCompositionReceipt } from
   "../../../field/open-semantic-factors/composition.js";
+import {
+  bindingValuesStatus,
+  usableOpenSemanticFactorComposition
+} from "./composition.js";
 import type { BindingQueryObligation } from "./types.js";
 
 export function resolveBindingQueryObligation(params: Readonly<{
@@ -11,16 +15,15 @@ export function resolveBindingQueryObligation(params: Readonly<{
   return Object.freeze({
     answer_variable_ids: Object.freeze(answerVariableIds(params.composition)),
     obligation_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
-    answer_shape: params.answerShape ?? null
+    answer_shape: params.answerShape ?? null,
+    values_status: bindingValuesStatus(params.composition)
   });
 }
 
 function answerVariableIds(
   composition: Readonly<OpenSemanticFactorCompositionReceipt> | undefined
 ): readonly string[] {
-  if (composition === undefined || composition.status !== "composed") {
-    return [];
-  }
+  if (!usableOpenSemanticFactorComposition(composition)) return [];
   if (composition.result_variable_ids.length > 0) {
     return composition.result_variable_ids;
   }

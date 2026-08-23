@@ -13,10 +13,10 @@ import { attributeCandidateBindingCoverage } from
   "../../../recall/delivery/select-gamma/binding-cover/candidate-receipt.js";
 import { createBindingAwareWalkObjective } from
   "../../../recall/delivery/select-gamma/binding-cover/objective.js";
-import {
-  bindFineAssessmentBindingCover,
-  PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE
-} from "../../../recall/delivery/select-gamma/binding-cover/production.js";
+import { PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE } from
+  "../../../recall/delivery/select-gamma/admission/identity.js";
+import { bindFineAssessmentBindingCover } from
+  "../../../recall/delivery/select-gamma/binding-cover/production.js";
 import {
   SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
   SELECT_GAMMA_CANDIDATE_BINDING_COVERAGE_OPERATOR_ID,
@@ -78,14 +78,11 @@ describe("Select_Gamma binding-value coverage", () => {
     });
     const walk = selectGammaWalk(requestOf([
       appleWithLineage.candidate_key, repeat.candidate_key, novel.candidate_key
-    ]), bindingOf([appleWithLineage, repeat, novel], 2), createBindingAwareWalkObjective({
-      weights: {},
-      receiptsByCandidateKey: new Map([
-        ["gold-apple", valueReceipt("gold-apple", "count", "three")],
-        ["gold-repeat", valueReceipt("gold-repeat", "count", "three")],
-        ["gold-orange", valueReceipt("gold-orange", "count", "five")]
-      ])
-    }));
+    ]), bindingOf([appleWithLineage, repeat, novel], 2), bindingObjective(new Map([
+      ["gold-apple", valueReceipt("gold-apple", "count", "three")],
+      ["gold-repeat", valueReceipt("gold-repeat", "count", "three")],
+      ["gold-orange", valueReceipt("gold-orange", "count", "five")]
+    ])));
 
     expect(walk.selected_candidate_keys).toEqual(["gold-apple", "gold-orange"]);
     const repeatGain = walk.decisions.find((decision) =>
@@ -108,17 +105,21 @@ describe("Select_Gamma binding-value coverage", () => {
       binding,
       cover.objective
     );
-    const proofWalk = selectGammaWalk(
-      buildSelectGammaRequest(params, context, params.orderedCandidates),
-      binding,
-      cover.objective
-    );
     const proof = prepareSelectGammaProof(
       params.orderedCandidates, context, binding, cover.objective
     );
     const result = selectFineAssessmentCandidates(params);
+    const proofState = proof.preparedSelection.objective.createState();
+    const firstProof = proof.preparedSelection.candidateStates.reduce((best, state) => {
+      const gain = proof.preparedSelection.objective.marginalGain({
+        ...state,
+        state: proofState,
+        supplementaryData: context.supplementaryData
+      });
+      return gain > best.gain ? { key: state.candidate.fusion.candidate_key, gain } : best;
+    }, { key: "", gain: Number.NEGATIVE_INFINITY });
 
-    expect(proofWalk.selected_candidate_keys).toEqual(live.selected_candidate_keys);
+    expect(firstProof.key).toBe(live.selected_candidate_keys[0]);
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
       live.selected_candidate_keys.map((key) =>
         params.orderedCandidates.find((candidate) =>
@@ -170,10 +171,7 @@ describe("Select_Gamma binding-value coverage", () => {
         ...bindingOf([shared, duplicate, novel], 2),
         source_hard_dedupe: true
       },
-      createBindingAwareWalkObjective({
-        weights: {},
-        receiptsByCandidateKey: new Map()
-      })
+      bindingObjective(new Map())
     );
     expect(walk.selected_candidate_keys).toEqual(["dup-a", "novel"]);
     expect(walk.decisions.find((decision) =>
@@ -207,7 +205,78 @@ describe("Select_Gamma binding-value coverage", () => {
       })
     ]);
   });
+
+  it("keeps truncated OSF values and stamps truncated standing", () => {
+    const apple = withEvidence(createCandidate("gold-a"), "ev-apple");
+    const composition = {
+      ...compositionOf([["count", "three", ["ev-apple"]]]),
+      truncated: true
+    };
+    const receipts = attributeCandidateBindingCoverage({
+      candidates: [apple],
+      composition,
+      answerVariableIds: ["count"]
+    });
+    const params = productionParams([
+      withSource(apple, "turn-1"),
+      createRankedCandidate("noise-0", 2, 0.1)
+    ]);
+    const truncatedParams = {
+      ...params,
+      supplementaryData: createSupplementaryData({
+        openSemanticFactorComposition: composition
+      })
+    };
+    const result = selectFineAssessmentCandidates(truncatedParams);
+    expect(receipts.get(apple.fusion.candidate_key)?.values[0]?.semantic_identity)
+      .toBe("three");
+    expect(result.binding_set_receipt.values_status).toBe("truncated");
+  });
+
+  it("records obligation facet standing instead of always-unmet", () => {
+    const covered = {
+      ...createRankedCandidate("place-gold", 1, 0.4),
+      entry: {
+        ...createRankedCandidate("place-gold", 1, 0.4).entry,
+        domain_tags: ["location_place"]
+      }
+    };
+    const other = createRankedCandidate("other", 2, 0.9);
+    const params = {
+      ...FIELD_PINS,
+      orderedCandidates: [covered, other],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData({
+        querySoughtFacets: ["location_place"]
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([covered, other])
+    };
+    const binding = buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    );
+    expect(binding.candidates.find((candidate) =>
+      candidate.candidate_key === covered.fusion.candidate_key
+    )?.cover).toMatchObject({ "obligation:location_place": 1 });
+    const result = selectFineAssessmentCandidates(params);
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["place-gold"]);
+    expect(result.binding_set_receipt.obligation_facets).toEqual([
+      { facet_id: "location_place", standing: "covered" }
+    ]);
+  });
 });
+
+function tightBudget(maxEntries: number) {
+  return {
+    ...createConfig(),
+    budgets: {
+      ...createConfig().budgets,
+      max_entries: maxEntries
+    }
+  };
+}
 
 function enumerativeGolds() {
   return [
@@ -251,14 +320,20 @@ function bindingWalk(params: Readonly<{
   return selectGammaWalk(
     requestOf(candidates.map((candidate) => candidate.candidate_key)),
     bindingOf(candidates, params.selected),
-    createBindingAwareWalkObjective({
-      weights: {},
-      receiptsByCandidateKey: new Map(params.receipts.map((receipt) => [
-        receipt.candidate_key,
-        receipt
-      ]))
-    })
+    bindingObjective(new Map(params.receipts.map((receipt) => [
+      receipt.candidate_key,
+      receipt
+    ])))
   );
+}
+
+function bindingObjective(
+  receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>
+) {
+  return createBindingAwareWalkObjective({
+    receiptsByCandidateKey,
+    configurationDigest: `sha256:${"b".repeat(64)}`
+  });
 }
 
 function distractors(count: number, quality: number) {

@@ -2,12 +2,14 @@ import type {
   OpenSemanticFactorCompositionReceipt,
   OpenSemanticFactorVariableCollection
 } from "../../../field/open-semantic-factors/composition.js";
-import {
-  isWorkspaceMemoryCandidate
-} from "../../../runtime/recall-service-helpers.js";
+import { uniqueSortedStrings } from
+  "../../../field/open-semantic-factors/composition-search.js";
+import { isWorkspaceMemoryCandidate } from
+  "../../../runtime/recall-service-helpers.js";
 import { compareText } from "../../../../shared/compare-text.js";
 import type { FineAssessmentCandidate } from
   "../../fine-assessment-selection/types.js";
+import { usableOpenSemanticFactorComposition } from "./composition.js";
 import {
   SELECT_GAMMA_CANDIDATE_BINDING_COVERAGE_OPERATOR_ID,
   type BindingCoverValue,
@@ -33,17 +35,15 @@ function usableCollections(
   composition: Readonly<OpenSemanticFactorCompositionReceipt> | undefined,
   answerVariableIds: readonly string[] | undefined
 ): readonly Readonly<OpenSemanticFactorVariableCollection>[] {
-  if (composition === undefined || composition.status !== "composed" ||
-      composition.truncated) {
-    return [];
+  if (!usableOpenSemanticFactorComposition(composition)) return [];
+  const declared = answerVariableIds ?? composition.result_variable_ids;
+  const allowed = new Set(declared.filter((variableId) => variableId.length > 0));
+  if (allowed.size === 0) {
+    // Declared-empty means no answer variables; undeclared means exists-query, all collections.
+    return declared.length > 0 ? [] : composition.variable_collections;
   }
-  const allowed = new Set(
-    (answerVariableIds ?? composition.result_variable_ids).filter(
-      (variableId) => variableId.length > 0
-    )
-  );
   return composition.variable_collections.filter((collection) =>
-    allowed.size === 0 || allowed.has(collection.variable_id)
+    allowed.has(collection.variable_id)
   );
 }
 
@@ -100,16 +100,9 @@ function mergeValue(
   return Object.freeze({
     variable_id: left.variable_id,
     semantic_identity: left.semantic_identity,
-    surfaces: uniqueSorted(left.surfaces, right.surfaces),
-    evidence_ids: uniqueSorted(left.evidence_ids, right.evidence_ids)
+    surfaces: uniqueSortedStrings([...left.surfaces, ...right.surfaces]),
+    evidence_ids: uniqueSortedStrings([...left.evidence_ids, ...right.evidence_ids])
   });
-}
-
-function uniqueSorted(
-  left: readonly string[],
-  right: readonly string[]
-): readonly string[] {
-  return Object.freeze([...new Set([...left, ...right])].sort(compareText));
 }
 
 function compareBindingValues(
@@ -123,9 +116,11 @@ function compareBindingValues(
 function candidateEvidenceIds(
   candidate: FineAssessmentCandidate
 ): readonly string[] {
+  const refs = [...candidate.entry.evidence_refs];
   if (candidate.objectKind === "evidence_capsule") {
-    return [candidate.entry.object_id];
+    refs.push(candidate.entry.object_id);
+  } else if (!isWorkspaceMemoryCandidate(candidate)) {
+    return [];
   }
-  if (!isWorkspaceMemoryCandidate(candidate)) return [];
-  return [...new Set(candidate.entry.evidence_refs)];
+  return uniqueSortedStrings(refs);
 }

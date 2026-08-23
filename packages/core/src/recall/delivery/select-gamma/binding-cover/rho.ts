@@ -27,6 +27,7 @@ export function acceptBindingCoverRho(
 }
 
 export function boundRedundancy(rho: number, positiveGain: number): number {
+  // Cap so proof evaluation cannot observe negative gain.
   if (!Number.isFinite(rho) || rho <= 0) return 0;
   return Math.min(rho, Math.max(0, positiveGain));
 }

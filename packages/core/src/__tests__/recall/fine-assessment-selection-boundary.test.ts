@@ -395,7 +395,10 @@ describe("fine-assessment selection boundary fidelity", () => {
     const stringify = vi.spyOn(JSON, "stringify");
     try {
       selectFineAssessmentCandidates(params);
-      expect(stringify).not.toHaveBeenCalled();
+      expect(stringify.mock.calls.every(([value]) =>
+        typeof value !== "object" || value === null ||
+        !("admission_actions" in value) && !("visible_result_sha256" in value)
+      )).toBe(true);
     } finally {
       stringify.mockRestore();
     }

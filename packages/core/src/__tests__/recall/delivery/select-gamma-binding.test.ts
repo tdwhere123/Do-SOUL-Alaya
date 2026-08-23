@@ -221,7 +221,7 @@ describe("live Select_Gamma binding", () => {
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["gold"]);
   });
 
-  it("lets a unique active slice cover promote a weaker candidate", () => {
+  it("does not let generic slice cover promote a weaker candidate", () => {
     const strong = withFlood(createRankedCandidate("strong", 1, 0.8), {});
     const weakSlice = withFlood(createRankedCandidate("weak-slice", 2, 0.3), {
       slice: true
@@ -236,7 +236,7 @@ describe("live Select_Gamma binding", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id))
-      .toEqual(["weak-slice"]);
+      .toEqual(["strong"]);
   });
 
   it("marks missing temporal quality unavailable", () => {

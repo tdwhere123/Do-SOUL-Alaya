@@ -52,54 +52,57 @@ export function selectFineAssessmentCandidates(
   const boundaryCapture = createSelectionBoundary(params);
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
-  const binding = buildFineAssessmentSelectGammaBinding(selectionParams, context);
-  const bindingCover = bindFineAssessmentBindingCover(
-    selectionParams, context, binding
-  );
-  const walk = selectGammaWalk(
-    buildSelectGammaRequest(
-      selectionParams,
-      context,
-      selectionParams.orderedCandidates
-    ),
-    binding,
-    bindingCover.objective
-  );
-  const gammaOrder = orderByDecisionKeys(selectionParams.orderedCandidates, walk);
-  const selected = orderByKeys(gammaOrder, walk.selected_candidate_keys);
-  const proof = prepareSelectGammaProof(
-    gammaOrder, context, binding, bindingCover.objective
-  );
+  const session = runSelectGammaSession(selectionParams, context);
   const accumulator = materializeSelectGammaAccumulator(
-    gammaOrder,
-    walk,
+    session.gammaOrder,
+    session.walk,
     context,
     boundaryCapture !== undefined
   );
-  const preProjection = boundaryCapture === undefined
-    ? undefined : captureFineAssessmentPreProjection(
-      accumulator,
-      walk.selection_receipt
-    );
   const delivered = materializeFineAssessmentDelivery(accumulator, context);
-  const packetObservation = buildSelectGammaPacketObservation(
-    selected,
-    delivered.candidates
-  );
-  const order = buildGammaOrderState(selectionParams, gammaOrder, walk);
   const result = buildSelectionResult(
     selectionParams,
-    packetObservation,
+    buildSelectGammaPacketObservation(
+      orderByKeys(session.gammaOrder, session.walk.selected_candidate_keys),
+      delivered.candidates
+    ),
     delivered,
-    proof.objective,
-    stampFineAssessmentFinalRanks(order, delivered.candidates),
-    bindingCover.selectedBindingSet(walk.selected_candidate_keys),
-    buildRefinementStopCertificate(delivered.candidates, proof, context),
+    session.proof.objective,
+    stampFineAssessmentFinalRanks(
+      buildGammaOrderState(selectionParams, session.gammaOrder, session.walk),
+      delivered.candidates
+    ),
+    session.bindingCover.selectedBindingSet(session.walk.selected_candidate_keys),
+    buildRefinementStopCertificate(delivered.candidates, session.proof, context),
     boundaryCapture?.tokenEstimatesByContent,
-    preProjection
+    boundaryCapture === undefined
+      ? undefined
+      : captureFineAssessmentPreProjection(accumulator, session.walk.selection_receipt)
   );
-  assertSelectGammaDeliveryOrder(result.candidates, walk, selectionParams.orderedCandidates);
+  assertSelectGammaDeliveryOrder(
+    result.candidates, session.walk, selectionParams.orderedCandidates
+  );
   return result;
+}
+
+function runSelectGammaSession(
+  params: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext
+) {
+  const binding = buildFineAssessmentSelectGammaBinding(params, context);
+  const bindingCover = bindFineAssessmentBindingCover(params, context, binding);
+  const walk = selectGammaWalk(
+    buildSelectGammaRequest(params, context, params.orderedCandidates),
+    binding,
+    bindingCover.objective
+  );
+  const gammaOrder = orderByDecisionKeys(params.orderedCandidates, walk);
+  return Object.freeze({
+    bindingCover,
+    walk,
+    gammaOrder,
+    proof: prepareSelectGammaProof(gammaOrder, context, binding, bindingCover.objective)
+  });
 }
 
 function buildGammaOrderState(

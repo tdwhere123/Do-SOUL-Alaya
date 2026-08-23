@@ -11,6 +11,9 @@ export type IdentityAdmission = Readonly<{
   readonly retainedBySourceKey: Map<string, string>;
 }>;
 
+/** Source is not a diversity quota; lineage/content redundancy is rho. */
+export const PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE = false;
+
 export function resolveIdentityPolicy(
   binding: SelectGammaBinding
 ): SelectGammaIdentityPolicy {

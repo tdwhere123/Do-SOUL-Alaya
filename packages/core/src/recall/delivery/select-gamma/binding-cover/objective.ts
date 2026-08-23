@@ -1,57 +1,64 @@
-import {
-  acceptSelectGammaCoverage,
-  selectGammaMarginalGain
-} from "../objective.js";
 import type {
-  SelectGammaFeatureWeights,
   SelectGammaFormulaCandidate,
   SelectGammaWalkObjective
 } from "../types.js";
 import { acceptBindingCoverRho, bindingCoverRho, boundRedundancy } from "./rho.js";
 import {
-  BINDING_COVER_CONFIGURATION_DIGEST,
   BINDING_COVER_VALUE_WEIGHT,
+  OBLIGATION_COVER_PREFIX,
   SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
   type BindingCoverState,
   type CandidateBindingCoverageReceipt
 } from "./types.js";
 
 export function createBindingAwareWalkObjective(params: Readonly<{
-  readonly weights: SelectGammaFeatureWeights;
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
   readonly contentKeyByCandidateKey?: ReadonlyMap<string, string>;
+  readonly configurationDigest: string;
+  readonly facility?: SelectGammaWalkObjective<unknown> | null;
 }>): SelectGammaWalkObjective<BindingCoverState> {
   const receipts = params.receiptsByCandidateKey;
   const contentKeys = params.contentKeyByCandidateKey ?? new Map<string, string>();
-  const weights = params.weights;
+  const facility = params.facility ?? null;
   return Object.freeze({
     operator_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
-    configuration_digest: BINDING_COVER_CONFIGURATION_DIGEST,
-    createState: createBindingCoverState,
-    cloneState: cloneBindingCoverState,
+    configuration_digest: params.configurationDigest,
+    createState: () => createBindingCoverState(facility),
+    cloneState: (state) => cloneBindingCoverState(state, facility),
     marginalGain: (candidate, state) =>
-      bindingAwareGain(candidate, state, weights, receipts, contentKeys),
+      bindingAwareGain(candidate, state, receipts, contentKeys, facility),
     accept: (candidate, state) =>
-      acceptBindingAware(candidate, state, receipts, contentKeys),
+      acceptBindingAware(candidate, state, receipts, contentKeys, facility),
     decomposeGain: (candidate, state) => Object.freeze({
       quality: candidate.quality,
-      coverage: coverageGain(candidate, state, weights, receipts, contentKeys)
+      coverage: bindingAwareGain(
+        candidate, state, receipts, contentKeys, facility
+      ) - candidate.quality
     })
   });
 }
 
-export function createBindingCoverState(): BindingCoverState {
+function createBindingCoverState(
+  facility: SelectGammaWalkObjective<unknown> | null
+): BindingCoverState {
   return {
-    covered: new Map<string, number>(),
+    facility: facility?.createState() ?? null,
+    obligationCovered: new Map<string, number>(),
     valuesByVariable: new Map<string, Set<string>>(),
     lineageKeys: new Set<string>(),
     contentKeys: new Set<string>()
   };
 }
 
-export function cloneBindingCoverState(state: BindingCoverState): BindingCoverState {
+function cloneBindingCoverState(
+  state: BindingCoverState,
+  facility: SelectGammaWalkObjective<unknown> | null
+): BindingCoverState {
   return {
-    covered: new Map(state.covered),
+    facility: facility?.cloneState === undefined
+      ? state.facility
+      : facility.cloneState(state.facility),
+    obligationCovered: new Map(state.obligationCovered),
     valuesByVariable: new Map([...state.valuesByVariable].map(([variable, values]) =>
       [variable, new Set(values)]
     )),
@@ -63,11 +70,12 @@ export function cloneBindingCoverState(state: BindingCoverState): BindingCoverSt
 function bindingAwareGain(
   candidate: SelectGammaFormulaCandidate,
   state: BindingCoverState,
-  weights: SelectGammaFeatureWeights,
   receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
-  contentKeys: ReadonlyMap<string, string>
+  contentKeys: ReadonlyMap<string, string>,
+  facility: SelectGammaWalkObjective<unknown> | null
 ): number {
-  const positive = selectGammaMarginalGain(candidate, state.covered, weights) +
+  const positive = qualityTerm(candidate, state, facility) +
+    obligationFacetGain(candidate, state) +
     BINDING_COVER_VALUE_WEIGHT * newValueCount(candidate.candidate_key, receipts, state);
   const rho = boundRedundancy(
     bindingCoverRho(candidate, state, contentKeys.get(candidate.candidate_key)),
@@ -76,26 +84,58 @@ function bindingAwareGain(
   return positive - rho;
 }
 
-function coverageGain(
+function qualityTerm(
   candidate: SelectGammaFormulaCandidate,
   state: BindingCoverState,
-  weights: SelectGammaFeatureWeights,
-  receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
-  contentKeys: ReadonlyMap<string, string>
+  facility: SelectGammaWalkObjective<unknown> | null
 ): number {
-  return bindingAwareGain(candidate, state, weights, receipts, contentKeys) -
-    candidate.quality;
+  if (facility === null) return candidate.quality;
+  return facility.marginalGain(candidate, state.facility) + temporalFit(candidate);
+}
+
+function temporalFit(candidate: SelectGammaFormulaCandidate): number {
+  return candidate.quality_channels.temporal.status === "available"
+    ? candidate.quality_channels.temporal.value
+    : 0;
+}
+
+function obligationFacetGain(
+  candidate: SelectGammaFormulaCandidate,
+  state: BindingCoverState
+): number {
+  let gain = 0;
+  for (const [feature, amount] of Object.entries(candidate.cover)) {
+    if (!feature.startsWith(OBLIGATION_COVER_PREFIX)) continue;
+    const previous = state.obligationCovered.get(feature) ?? 0;
+    gain += Math.min(1, previous + amount) - Math.min(1, previous);
+  }
+  return gain;
 }
 
 function acceptBindingAware(
   candidate: SelectGammaFormulaCandidate,
   state: BindingCoverState,
   receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
-  contentKeys: ReadonlyMap<string, string>
+  contentKeys: ReadonlyMap<string, string>,
+  facility: SelectGammaWalkObjective<unknown> | null
 ): void {
-  acceptSelectGammaCoverage(candidate, state.covered);
+  facility?.accept(candidate, state.facility);
+  acceptObligationCover(candidate, state);
   acceptValues(candidate.candidate_key, receipts, state);
   acceptBindingCoverRho(candidate, state, contentKeys.get(candidate.candidate_key));
+}
+
+function acceptObligationCover(
+  candidate: SelectGammaFormulaCandidate,
+  state: BindingCoverState
+): void {
+  for (const [feature, amount] of Object.entries(candidate.cover)) {
+    if (!feature.startsWith(OBLIGATION_COVER_PREFIX)) continue;
+    state.obligationCovered.set(
+      feature,
+      (state.obligationCovered.get(feature) ?? 0) + amount
+    );
+  }
 }
 
 function newValueCount(

@@ -1,10 +1,9 @@
 import {
   materializeCoverageSelectionCandidateStates,
   materializeCoverageSelectionObjectiveReceipt,
+  type CoverageSelectionCandidateState,
   type CoverageSelectionObjective
 } from "../coverage-selection.js";
-import type { MaterializedConfiguredCoverageSelection } from
-  "../../field/facility/selection-objective.js";
 import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
@@ -16,27 +15,29 @@ import type {
   SelectGammaWalkObjective
 } from "./types.js";
 
-export function prepareSelectGammaProof(
+export type SelectGammaPreparedSelection = Readonly<{
+  readonly candidateStates: readonly CoverageSelectionCandidateState<
+    FineAssessmentCandidate
+  >[];
+  readonly objective: CoverageSelectionObjective<FineAssessmentCandidate, unknown>;
+}>;
+
+export function prepareSelectGammaProof<State>(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
   binding: SelectGammaBinding,
-  walkObjective: SelectGammaWalkObjective<any>
+  walkObjective: SelectGammaWalkObjective<State>
 ) {
   const objective = createSelectGammaProofObjective(binding, walkObjective);
-  const preparedSelection: MaterializedConfiguredCoverageSelection<
-    FineAssessmentCandidate
-  > = Object.freeze({
-    candidateStates: materializeCoverageSelectionCandidateStates({
-      candidates,
-      relevanceByCandidateKey: context.coverageRelevanceByCandidateKey,
-      supplementaryData: context.supplementaryData
-    }),
-    objective: objective as unknown as MaterializedConfiguredCoverageSelection<
-      FineAssessmentCandidate
-    >["objective"]
-  });
   return Object.freeze({
-    preparedSelection,
+    preparedSelection: Object.freeze({
+      candidateStates: materializeCoverageSelectionCandidateStates({
+        candidates,
+        relevanceByCandidateKey: context.coverageRelevanceByCandidateKey,
+        supplementaryData: context.supplementaryData
+      }),
+      objective
+    }),
     objective: materializeCoverageSelectionObjectiveReceipt(objective)
   });
 }
@@ -44,7 +45,11 @@ export function prepareSelectGammaProof(
 function createSelectGammaProofObjective<State>(
   binding: SelectGammaBinding,
   walkObjective: SelectGammaWalkObjective<State>
-): CoverageSelectionObjective<FineAssessmentCandidate, State> {
+): CoverageSelectionObjective<FineAssessmentCandidate, unknown> {
+  const clone = walkObjective.cloneState;
+  if (clone === undefined) {
+    throw new Error("Select_Gamma proof requires cloneState");
+  }
   const byKey = new Map(binding.candidates.map((candidate) => [
     candidate.candidate_key,
     candidate
@@ -53,27 +58,16 @@ function createSelectGammaProofObjective<State>(
     operator_id: walkObjective.operator_id,
     configuration_digest: walkObjective.configuration_digest,
     createState: walkObjective.createState,
-    cloneState: proofCloneState(walkObjective),
+    cloneState: (state: unknown) => clone(state as State),
     marginalGain: ({ candidate, state }) => walkObjective.marginalGain(
       boundFormulaCandidate(byKey, candidate.fusion.candidate_key),
-      state
+      state as State
     ),
     accept: ({ candidate, state }) => walkObjective.accept(
       boundFormulaCandidate(byKey, candidate.fusion.candidate_key),
-      state
+      state as State
     )
   });
-}
-
-function proofCloneState<State>(
-  walkObjective: SelectGammaWalkObjective<State>
-): (state: State) => State {
-  const clone = walkObjective.cloneState;
-  if (clone !== undefined) return (state) => clone(state);
-  return (state) => {
-    if (state instanceof Map) return new Map(state) as State;
-    throw new Error("Select_Gamma proof requires cloneState");
-  };
 }
 
 function boundFormulaCandidate(

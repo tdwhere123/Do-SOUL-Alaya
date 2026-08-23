@@ -13,7 +13,8 @@ import type {
   FineAssessmentSelectionParams
 } from "../fine-assessment-selection/types.js";
 import { PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE } from
-  "./binding-cover/production.js";
+  "./admission/identity.js";
+import { OBLIGATION_COVER_PREFIX } from "./binding-cover/types.js";
 import { selectGammaQuality } from "./quality.js";
 import type {
   SelectGammaBinding,
@@ -155,9 +156,25 @@ function attributedCoverFeatures(
   // Lineage/gist/dimension remain identity receipts; unique keys must not buy a slot.
   const flood = candidate.fusion.flood_potential;
   return Object.freeze([
+    ...obligationCoverFeatures(candidate, context),
     ...(flood?.slice_status === "active" ? ["slice"] : []),
     ...(openSemanticCover(candidate, context) ? ["f3"] : [])
   ]);
+}
+
+function obligationCoverFeatures(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): readonly string[] {
+  const facets = context.supplementaryData.querySoughtFacets ?? [];
+  if (facets.length === 0) return [];
+  const gist = context.supplementaryData.evidenceGistsByMemoryId[
+    candidate.entry.object_id
+  ] ?? "";
+  const haystack = `${candidate.entry.content}\0${candidate.entry.domain_tags.join("\0")}\0${gist}`;
+  return facets.filter((facet) => haystack.includes(facet)).map(
+    (facet) => `${OBLIGATION_COVER_PREFIX}${facet}`
+  );
 }
 
 function openSemanticCover(

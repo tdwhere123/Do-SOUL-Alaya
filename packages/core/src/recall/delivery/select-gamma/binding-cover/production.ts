@@ -1,12 +1,17 @@
+import { resolveCoverageIdentity } from "../../coverage-selection.js";
 import type {
   FineAssessmentSelectionContext,
   FineAssessmentSelectionParams
 } from "../../fine-assessment-selection/types.js";
+import { isWorkspaceMemoryCandidate } from
+  "../../../runtime/recall-service-helpers.js";
 import type {
   SelectGammaBinding,
   SelectGammaWalkObjective
 } from "../types.js";
 import { attributeCandidateBindingCoverage } from "./candidate-receipt.js";
+import { digestBindingCoverConfiguration } from "./digest.js";
+import { bindProductionFacilityWalkObjective } from "./facility.js";
 import { createBindingAwareWalkObjective } from "./objective.js";
 import { resolveBindingQueryObligation } from "./query-obligation.js";
 import { materializeSelectedBindingSetReceipt } from "./selected-receipt.js";
@@ -16,8 +21,6 @@ import type {
   CandidateBindingCoverageReceipt,
   SelectedBindingSetReceipt
 } from "./types.js";
-
-export const PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE = false;
 
 export type FineAssessmentBindingCover = Readonly<{
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
@@ -44,10 +47,18 @@ export function bindFineAssessmentBindingCover(
     composition,
     answerVariableIds: obligation.answer_variable_ids
   });
+  const facility = bindProductionFacilityWalkObjective(params, context);
   const objective = createBindingAwareWalkObjective({
-    weights: binding.feature_weights,
     receiptsByCandidateKey,
-    contentKeyByCandidateKey: contentKeys(params, context)
+    contentKeyByCandidateKey: contentKeys(params, context),
+    facility,
+    configurationDigest: digestBindingCoverConfiguration({
+      receiptsByCandidateKey,
+      answerVariableIds: obligation.answer_variable_ids,
+      obligationFacets: obligation.obligation_facets,
+      valuesStatus: obligation.values_status,
+      facilityDigest: facility?.configuration_digest ?? null
+    })
   });
   return Object.freeze({
     receiptsByCandidateKey,
@@ -57,7 +68,8 @@ export function bindFineAssessmentBindingCover(
       materializeSelectedBindingSetReceipt({
         selectedCandidateKeys,
         receiptsByCandidateKey,
-        obligation
+        obligation,
+        formulaCandidates: binding.candidates
       })
   });
 }
@@ -66,13 +78,14 @@ function contentKeys(
   params: FineAssessmentSelectionParams,
   context: FineAssessmentSelectionContext
 ): ReadonlyMap<string, string> {
-  const gists = context.supplementaryData.evidenceGistsByMemoryId;
   const keys = new Map<string, string>();
   for (const candidate of params.orderedCandidates) {
-    const gist = gists[candidate.entry.object_id]?.trim();
-    if (gist !== undefined && gist.length > 0) {
-      keys.set(candidate.fusion.candidate_key, gist);
-    }
+    if (!isWorkspaceMemoryCandidate(candidate)) continue;
+    const gistKey = resolveCoverageIdentity(
+      candidate,
+      context.supplementaryData
+    ).gistKey;
+    if (gistKey.length > 0) keys.set(candidate.fusion.candidate_key, gistKey);
   }
   return keys;
 }

@@ -1,17 +1,22 @@
 import { compareText } from "../../../../shared/compare-text.js";
 import {
+  OBLIGATION_COVER_PREFIX,
   SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID,
   type BindingCoverValue,
+  type BindingObligationFacetCoverage,
+  type BindingObligationFacetStanding,
   type BindingQueryObligation,
   type CandidateBindingCoverageReceipt,
   type SelectedBindingSetReceipt,
   type SelectedBindingValue
 } from "./types.js";
+import type { SelectGammaFormulaCandidate } from "../types.js";
 
 export function materializeSelectedBindingSetReceipt(params: Readonly<{
   readonly selectedCandidateKeys: readonly string[];
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
   readonly obligation: BindingQueryObligation;
+  readonly formulaCandidates?: readonly SelectGammaFormulaCandidate[];
 }>): SelectedBindingSetReceipt {
   const gained = collectGainedValues(
     params.selectedCandidateKeys,
@@ -27,12 +32,12 @@ export function materializeSelectedBindingSetReceipt(params: Readonly<{
     schema_version: 1 as const,
     operator_id: SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID,
     answer_shape: params.obligation.answer_shape,
-    obligation_facets: Object.freeze(params.obligation.obligation_facets.map(
-      (facetId) => Object.freeze({
-        facet_id: facetId,
-        covered: false
-      })
-    )),
+    values_status: params.obligation.values_status,
+    obligation_facets: obligationFacetStandings(
+      params.obligation.obligation_facets,
+      params.selectedCandidateKeys,
+      params.formulaCandidates ?? []
+    ),
     variables
   });
 }
@@ -63,10 +68,9 @@ function variableIds(
   obligation: BindingQueryObligation,
   gained: ReadonlyMap<string, BindingCoverValue[]>
 ): readonly string[] {
-  const ids = obligation.answer_variable_ids.length > 0
+  return obligation.answer_variable_ids.length > 0
     ? obligation.answer_variable_ids
     : [...gained.keys()].sort(compareText);
-  return ids;
 }
 
 function valuesFor(
@@ -81,4 +85,37 @@ function valuesFor(
       answer_shape: obligation.answer_shape
     })
   }));
+}
+
+function obligationFacetStandings(
+  facets: readonly string[],
+  selectedCandidateKeys: readonly string[],
+  formulaCandidates: readonly SelectGammaFormulaCandidate[]
+): readonly BindingObligationFacetCoverage[] {
+  if (facets.length === 0) return Object.freeze([]);
+  const byKey = new Map(formulaCandidates.map((candidate) => [
+    candidate.candidate_key,
+    candidate
+  ]));
+  const selected = new Set(selectedCandidateKeys);
+  return Object.freeze(facets.map((facetId) => Object.freeze({
+    facet_id: facetId,
+    standing: facetStanding(facetId, byKey, selected)
+  })));
+}
+
+function facetStanding(
+  facetId: string,
+  byKey: ReadonlyMap<string, SelectGammaFormulaCandidate>,
+  selected: ReadonlySet<string>
+): BindingObligationFacetStanding {
+  const feature = `${OBLIGATION_COVER_PREFIX}${facetId}`;
+  let scored = false;
+  for (const [key, candidate] of byKey) {
+    if ((candidate.cover[feature] ?? 0) <= 0) continue;
+    scored = true;
+    if (selected.has(key)) return "covered";
+  }
+  // Unscored facets stay not_evaluated; do not emit a computed-unmet claim.
+  return scored ? "unmet" : "not_evaluated";
 }
