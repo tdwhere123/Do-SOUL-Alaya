@@ -34,6 +34,25 @@ type AdmissionState = Readonly<{
 
 type SelectionLimits = AdmissionState["limits"];
 
+type GreedyWalk<State> = {
+  remaining: SelectGammaFormulaCandidate[];
+  selected: string[];
+  decisions: SelectGammaDecision[];
+  covered: State;
+  identity: IdentityAdmission;
+  perDimensionCounts: Map<string, number>;
+  usedTokens: number;
+  readonly tokenBudget: number;
+  readonly limits: SelectionLimits;
+  readonly objective: SelectGammaWalkObjective<State>;
+  readonly orderingBasis: SelectGammaSelectionReceipt["ordering_basis"];
+};
+
+type PickedCandidate = Readonly<{
+  readonly index: number;
+  readonly gain: number;
+}>;
+
 export function selectGammaWalk(
   request: SelectGammaRequest,
   binding: SelectGammaBinding,
@@ -83,65 +102,88 @@ function greedySelect<State>(
   selectionReceipt: SelectGammaSelectionReceipt,
   identityPolicy: SelectGammaIdentityPolicy
 ): SelectGammaWalkResult {
-  const selected: string[] = [];
-  const decisions: SelectGammaDecision[] = [];
-  const covered = objective.createState();
-  const identity = createIdentityAdmission(identityPolicy);
-  const perDimensionCounts = new Map<string, number>();
-  let usedTokens = 0;
-  while (remaining.length > 0) {
-    const rejected = rejectConstrainedCandidates(remaining, {
-      selectedCount: selected.length,
-      usedTokens,
-      tokenBudget,
-      identity,
-      perDimensionCounts,
-      limits
-    }, decisions);
-    if (rejected.size === remaining.length) break;
-    remaining.splice(0, remaining.length, ...remaining.filter((_, index) =>
-      !rejected.has(index)));
-    const picked = pickNext(
-      remaining, covered, objective, selectionReceipt.ordering_basis
-    );
-    if (picked === null) break;
-    usedTokens = admitPicked(
-      remaining, picked, selected, decisions, covered, objective,
-      identity, perDimensionCounts, usedTokens, limits
-    );
+  const walk: GreedyWalk<State> = {
+    remaining,
+    selected: [],
+    decisions: [],
+    covered: objective.createState(),
+    identity: createIdentityAdmission(identityPolicy),
+    perDimensionCounts: new Map<string, number>(),
+    usedTokens: 0,
+    tokenBudget,
+    limits,
+    objective,
+    orderingBasis: selectionReceipt.ordering_basis
+  };
+  while (walk.remaining.length > 0) {
+    if (!advanceGreedyStep(walk)) break;
   }
-  return materializeWalkResult(selected, decisions, selectionReceipt);
+  return materializeWalkResult(walk.selected, walk.decisions, selectionReceipt);
 }
 
-function admitPicked<State>(
-  remaining: SelectGammaFormulaCandidate[],
-  picked: Readonly<{ readonly index: number; readonly gain: number }>,
-  selected: string[],
-  decisions: SelectGammaDecision[],
-  covered: State,
-  objective: SelectGammaWalkObjective<State>,
-  identity: IdentityAdmission,
-  perDimensionCounts: Map<string, number>,
-  usedTokens: number,
-  limits: SelectionLimits
-): number {
-  const candidate = remaining.splice(picked.index, 1)[0]!;
-  const lastSlot = selected.length + 1 >= limits.maxSelected;
-  const losers = lastSlot ? remaining.splice(0) : [];
-  decisions.push(retainedDecision(
-    candidate, decisions.length + 1, selected.length, usedTokens, picked.gain
-  ));
-  selected.push(candidate.candidate_key);
-  const nextUsedTokens = usedTokens + candidate.token_cost;
-  retainAdmittedIdentity(candidate, identity);
-  incrementDimensionCount(candidate.dimension ?? "unbound", perDimensionCounts);
+function advanceGreedyStep<State>(walk: GreedyWalk<State>): boolean {
+  const rejected = rejectConstrainedCandidates(
+    walk.remaining, admissionFrom(walk), walk.decisions
+  );
+  if (rejected.size === walk.remaining.length) return false;
+  walk.remaining.splice(0, walk.remaining.length, ...walk.remaining.filter((_, index) =>
+    !rejected.has(index)));
+  const picked = pickNext(
+    walk.remaining, walk.covered, walk.objective, walk.orderingBasis
+  );
+  if (picked === null) return false;
+  retainWinnerThenDisplace(walk, picked);
+  return true;
+}
+
+function admissionFrom<State>(walk: GreedyWalk<State>): AdmissionState {
+  return {
+    selectedCount: walk.selected.length,
+    usedTokens: walk.usedTokens,
+    tokenBudget: walk.tokenBudget,
+    identity: walk.identity,
+    perDimensionCounts: walk.perDimensionCounts,
+    limits: walk.limits
+  };
+}
+
+function retainWinnerThenDisplace<State>(
+  walk: GreedyWalk<State>,
+  picked: PickedCandidate
+): void {
+  const winner = walk.remaining.splice(picked.index, 1)[0]!;
+  const lastSlot = walk.selected.length + 1 >= walk.limits.maxSelected;
+  const losers = lastSlot ? walk.remaining.splice(0) : [];
+  retainWinner(walk, winner, picked.gain);
   if (losers.length > 0) {
-    decisions.push(...lastSlotDisplacementDecisions(
-      losers, candidate, picked.gain, covered, objective, decisions.length + 1
-    ));
+    recordLastSlotDisplacement(walk, winner, picked.gain, losers);
   }
-  objective.accept(candidate, covered);
-  return nextUsedTokens;
+  walk.objective.accept(winner, walk.covered);
+}
+
+function retainWinner<State>(
+  walk: GreedyWalk<State>,
+  candidate: SelectGammaFormulaCandidate,
+  gain: number
+): void {
+  walk.decisions.push(retainedDecision(
+    candidate, walk.decisions.length + 1, walk.selected.length, walk.usedTokens, gain
+  ));
+  walk.selected.push(candidate.candidate_key);
+  walk.usedTokens += candidate.token_cost;
+  retainAdmittedIdentity(candidate, walk.identity);
+  incrementDimensionCount(candidate.dimension ?? "unbound", walk.perDimensionCounts);
+}
+
+function recordLastSlotDisplacement<State>(
+  walk: GreedyWalk<State>,
+  winner: SelectGammaFormulaCandidate,
+  winnerGain: number,
+  losers: readonly SelectGammaFormulaCandidate[]
+): void {
+  walk.decisions.push(...lastSlotDisplacementDecisions(
+    losers, winner, winnerGain, walk.covered, walk.objective, walk.decisions.length + 1
+  ));
 }
 
 function materializeWalkResult(
