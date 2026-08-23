@@ -181,8 +181,7 @@ function witnessMatchesExclusion(witness: unknown, reason: string): boolean {
   }
   if (reason === "duplicate") {
     return (witness.identity_channel === "object" ||
-      witness.identity_channel === "source" ||
-      witness.identity_channel === "lineage") &&
+      witness.identity_channel === "source") &&
       isNonEmptyString(witness.retained_candidate_key);
   }
   if (reason === "dimension_limit") {
@@ -198,6 +197,11 @@ function witnessMatchesExclusion(witness: unknown, reason: string): boolean {
     return isNonNegativeFinite(witness.token_total_before) &&
       isNonNegativeFinite(witness.token_estimate) &&
       isNonNegativeFinite(witness.limit);
+  }
+  if (reason === "coverage_displaced" || reason === "quality_displaced") {
+    return isNonEmptyString(witness.competing_candidate_key) &&
+      isNonNegativeFinite(witness.competing_marginal_gain) &&
+      isNonNegativeFinite(witness.candidate_marginal_gain);
   }
   return false;
 }

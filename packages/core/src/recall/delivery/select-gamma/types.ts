@@ -1,5 +1,3 @@
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
-
 export type SelectGammaRisk = "clear" | "blocked";
 export type SelectGammaAuthority = "clear" | "blocked";
 
@@ -49,6 +47,8 @@ export type SelectGammaFormulaCandidate = Readonly<{
 
 export type SelectGammaFeatureWeights = Readonly<Record<string, number>>;
 
+export type SelectGammaIdentityPolicy = "source_hard_dedupe" | "object_only";
+
 export type SelectGammaBinding = Readonly<{
   readonly workspace_id: string;
   readonly generation_id: string;
@@ -60,12 +60,15 @@ export type SelectGammaBinding = Readonly<{
   readonly source_hard_dedupe?: boolean;
 }>;
 
+export type SelectGammaGainParts = Readonly<{
+  readonly quality: number;
+  readonly coverage: number;
+}>;
+
 export type SelectGammaWalkObjective<State = unknown> = Readonly<{
   readonly operator_id: string;
-  readonly mathematical_class?: "monotone_submodular";
   readonly configuration_digest?: string;
   readonly createState: () => State;
-  readonly cloneState?: (state: State) => State;
   readonly marginalGain: (
     candidate: SelectGammaFormulaCandidate,
     state: State
@@ -74,6 +77,10 @@ export type SelectGammaWalkObjective<State = unknown> = Readonly<{
     candidate: SelectGammaFormulaCandidate,
     state: State
   ) => void;
+  readonly decomposeGain?: (
+    candidate: SelectGammaFormulaCandidate,
+    state: State
+  ) => SelectGammaGainParts;
 }>;
 
 export type SelectGammaRequest = Readonly<{
@@ -87,8 +94,10 @@ export type SelectGammaRequest = Readonly<{
 export type SelectGammaCoverState = Map<string, number>;
 
 export type SelectGammaSelectionReceipt = Readonly<{
-  readonly schema_version: 3;
-  readonly objective_semantic_id: typeof SELECT_GAMMA_OPERATOR_ID;
+  readonly schema_version: 4;
+  readonly objective_semantic_id: string;
+  readonly configuration_digest: string | null;
+  readonly source_hard_dedupe: boolean;
   readonly ordering_basis: "raw_marginal_gain" | "marginal_gain_per_token";
   readonly witness: Readonly<{
     readonly kind: "static_top_k_token_bound";
@@ -115,8 +124,14 @@ export type SelectGammaDecisionReceipt =
     }>
   | Readonly<{
       readonly kind: "duplicate";
-      readonly identity_channel: "object" | "source" | "lineage";
+      readonly identity_channel: "object" | "source";
       readonly retained_candidate_key: string;
+    }>
+  | Readonly<{
+      readonly kind: "coverage_displaced" | "quality_displaced";
+      readonly competing_candidate_key: string;
+      readonly competing_marginal_gain: number;
+      readonly candidate_marginal_gain: number;
     }>
   | Readonly<{
       readonly kind: "dimension_limit";

@@ -222,7 +222,7 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
     const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "high-activation");
     expect(goldDiagnostic?.fused_rank).toBe(1);
     expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
-    expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
+    expect(droppedDiagnostic?.dropped_reason).toBe("quality_displaced");
     expect(droppedDiagnostic?.fused_rank).toBeGreaterThan(1);
     expect(droppedDiagnostic?.per_stream_rank.existing_score).toBe(1);
     expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(0);
@@ -352,7 +352,7 @@ it("lets embedding-on supplements participate in the fused-rank budget cut", asy
     expect(goldDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
     expect(goldDiagnostic?.fused_rank).toBe(1);
     expect(goldDiagnostic?.source_channels).toContain("semantic_supplement");
-    expect(droppedDiagnostic?.dropped_reason).toBe("max_entries");
+    expect(droppedDiagnostic?.dropped_reason).toBe("quality_displaced");
   });
 
 it("uses path expansion in a cold workspace without usage proof lookup", async () => {

@@ -1,4 +1,3 @@
-import { SELECT_GAMMA_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import type {
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
@@ -56,7 +55,12 @@ export function isValidSelectGammaSelectionReceipt(
   if (!record(value) || !record(value.witness)) return false;
   const witness = value.witness;
   if (!hasExactKeys(value, [
-    "schema_version", "objective_semantic_id", "ordering_basis", "witness"
+    "schema_version",
+    "objective_semantic_id",
+    "configuration_digest",
+    "source_hard_dedupe",
+    "ordering_basis",
+    "witness"
   ]) ||
       !hasExactKeys(witness, [
         "kind",
@@ -72,8 +76,13 @@ export function isValidSelectGammaSelectionReceipt(
       !nonNegativeFinite(witness.token_budget)) return false;
   const expectedBasis = witness.top_k_token_cost_upper_bound <= witness.token_budget
     ? "raw_marginal_gain" : "marginal_gain_per_token";
-  return value.schema_version === 3 &&
-    value.objective_semantic_id === SELECT_GAMMA_OPERATOR_ID &&
+  return value.schema_version === 4 &&
+    typeof value.objective_semantic_id === "string" &&
+    value.objective_semantic_id.trim().length > 0 &&
+    (value.configuration_digest === null ||
+      (typeof value.configuration_digest === "string" &&
+        value.configuration_digest.length > 0)) &&
+    typeof value.source_hard_dedupe === "boolean" &&
     witness.kind === "static_top_k_token_bound" &&
     value.ordering_basis === expectedBasis;
 }
@@ -126,10 +135,21 @@ function assertExcludedDecision(
 ): void {
   const receipt = decision.receipt;
   if (receipt.kind === "retained" || decision.selected_rank !== null ||
-      decision.marginal_gain !== null ||
-      !validExclusion(receipt, retainedKeys, selectedCount, tokenTotal)) {
+      !validExclusion(receipt, retainedKeys, selectedCount, tokenTotal) ||
+      !validExclusionGain(decision, receipt)) {
     throw new Error("Select_Gamma exclusion receipt is invalid");
   }
+}
+
+function validExclusionGain(
+  decision: SelectGammaDecision,
+  receipt: SelectGammaDecisionReceipt
+): boolean {
+  if (receipt.kind === "coverage_displaced" || receipt.kind === "quality_displaced") {
+    return decision.marginal_gain === receipt.candidate_marginal_gain &&
+      nonNegativeFinite(decision.marginal_gain);
+  }
+  return decision.marginal_gain === null;
 }
 
 function validExclusion(
@@ -144,10 +164,15 @@ function validExclusion(
   }
   if (receipt.kind === "duplicate") {
     return (receipt.identity_channel === "object" ||
-      receipt.identity_channel === "source" ||
-      receipt.identity_channel === "lineage") &&
+      receipt.identity_channel === "source") &&
       nonEmpty(receipt.retained_candidate_key) &&
       retainedKeys.includes(receipt.retained_candidate_key);
+  }
+  if (receipt.kind === "coverage_displaced" || receipt.kind === "quality_displaced") {
+    return nonEmpty(receipt.competing_candidate_key) &&
+      retainedKeys.includes(receipt.competing_candidate_key) &&
+      nonNegativeFinite(receipt.competing_marginal_gain) &&
+      nonNegativeFinite(receipt.candidate_marginal_gain);
   }
   if (receipt.kind === "dimension_limit") {
     return nonEmpty(receipt.dimension) && nonNegativeInteger(receipt.limit) &&

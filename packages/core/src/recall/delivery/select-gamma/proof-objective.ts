@@ -9,6 +9,7 @@ import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
 } from "../fine-assessment-selection/types.js";
+import { requireByKey } from "./admission/require-by-key.js";
 import { createSelectGammaGenericWalkObjective } from "./walk-objective.js";
 import type {
   SelectGammaBinding,
@@ -47,30 +48,30 @@ function createSelectGammaProofObjective(
     candidate.candidate_key,
     candidate
   ]));
-  const walkObjective = createSelectGammaGenericWalkObjective(binding);
+  const walkObjective = createSelectGammaGenericWalkObjective(binding.feature_weights);
   return Object.freeze({
     operator_id: walkObjective.operator_id,
-    mathematical_class: walkObjective.mathematical_class,
+    mathematical_class: "monotone_submodular" as const,
     createState: walkObjective.createState,
-    cloneState: walkObjective.cloneState,
+    cloneState: (state: SelectGammaCoverState) => new Map(state),
     marginalGain: ({ candidate, state }) => walkObjective.marginalGain(
-      boundCandidate(byKey, candidate.fusion.candidate_key),
+      boundFormulaCandidate(byKey, candidate.fusion.candidate_key),
       state
     ),
     accept: ({ candidate, state }) => walkObjective.accept(
-      boundCandidate(byKey, candidate.fusion.candidate_key),
+      boundFormulaCandidate(byKey, candidate.fusion.candidate_key),
       state
     )
   });
 }
 
-function boundCandidate(
+function boundFormulaCandidate(
   byKey: ReadonlyMap<string, SelectGammaFormulaCandidate>,
   candidateKey: string
 ): SelectGammaFormulaCandidate {
-  const candidate = byKey.get(candidateKey);
-  if (candidate === undefined) {
-    throw new Error("Select_Gamma proof candidate is absent from the live binding");
-  }
-  return candidate;
+  return requireByKey(
+    byKey,
+    candidateKey,
+    "Select_Gamma proof candidate is absent from the live binding"
+  );
 }

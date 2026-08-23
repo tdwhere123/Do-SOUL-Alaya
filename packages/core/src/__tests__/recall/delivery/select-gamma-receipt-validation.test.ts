@@ -20,8 +20,7 @@ describe("Select_Gamma receipt validation", () => {
   it.each([
     ["version", { schema_version: 0 }],
     ["semantic", {
-      objective_semantic_id:
-        "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2"
+      objective_semantic_id: "   "
     }],
     ["basis", { ordering_basis: "marginal_gain_per_token" }],
     ["K", { witness: selectionWitness({ k: 2 }) }],
@@ -105,8 +104,10 @@ function fixture() {
   const walk: SelectGammaWalkResult = {
     selected_candidate_keys: [candidate.fusion.candidate_key],
     selection_receipt: {
-      schema_version: 3,
+      schema_version: 4,
       objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
+      configuration_digest: null,
+      source_hard_dedupe: true,
       ordering_basis: "raw_marginal_gain",
       witness: selectionWitness()
     },

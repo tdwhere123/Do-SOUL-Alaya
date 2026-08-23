@@ -63,7 +63,7 @@ describe("RecallService", () => {
     expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "memory-2")).toMatchObject({
       pre_budget_rank: 2,
       final_rank: null,
-      dropped_reason: "max_entries",
+      dropped_reason: "quality_displaced",
       within_budget: false
     });
   });

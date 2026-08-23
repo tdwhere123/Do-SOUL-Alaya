@@ -312,7 +312,7 @@ describe("coverage-aware delivery budget", () => {
     )?.dropped_reason).toBeNull();
     expect(result.diagnostics.find(
       (candidate) => candidate.object_id === "embedding-head"
-    )?.dropped_reason).toBe("max_entries");
+    )?.dropped_reason).toBe("quality_displaced");
   });
 
   it("uses diminishing returns without discarding repeated-gist items", () => {

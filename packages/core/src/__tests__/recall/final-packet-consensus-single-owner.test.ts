@@ -18,7 +18,7 @@ describe("Select_Gamma final selection ownership", () => {
     )).toBe(true);
     expect(result.diagnostics.find((candidate) =>
       candidate.object_id === "challenger"
-    )).toMatchObject({ final_rank: null, dropped_reason: "max_entries" });
+    )).toMatchObject({ final_rank: null, dropped_reason: "quality_displaced" });
   });
 
   it("publishes Gamma order as an identity packet observation", () => {

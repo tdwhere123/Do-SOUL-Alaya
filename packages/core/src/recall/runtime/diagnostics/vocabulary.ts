@@ -24,7 +24,9 @@ export type RecallCandidateDropReason =
   | "duplicate"
   | "dimension_limit"
   | "max_entries"
-  | "max_total_tokens";
+  | "max_total_tokens"
+  | "coverage_displaced"
+  | "quality_displaced";
 
 export type RecallEmbeddingProviderStatus =
   | "provider_returned"

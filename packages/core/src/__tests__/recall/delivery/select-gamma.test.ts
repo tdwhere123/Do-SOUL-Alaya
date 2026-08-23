@@ -158,8 +158,10 @@ describe("Select_Gamma", () => {
 
     expect(result.selected_candidate_keys).toEqual(["long-high-gain"]);
     expect(result.selection_receipt).toEqual({
-      schema_version: 3,
+      schema_version: 4,
       objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
+      configuration_digest: null,
+      source_hard_dedupe: true,
       ordering_basis: "raw_marginal_gain",
       witness: {
         kind: "static_top_k_token_bound",

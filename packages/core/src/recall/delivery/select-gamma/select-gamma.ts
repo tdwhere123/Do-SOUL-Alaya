@@ -1,13 +1,19 @@
+import { compareCodeUnits } from "@do-soul/alaya-protocol";
+import { lastSlotDisplacementDecisions } from "./admission/displacement.js";
 import {
-  compareCodeUnits,
-  SELECT_GAMMA_OPERATOR_ID
-} from "@do-soul/alaya-protocol";
+  createIdentityAdmission,
+  rejectDuplicateIdentity,
+  resolveIdentityPolicy,
+  retainAdmittedIdentity,
+  type IdentityAdmission
+} from "./admission/identity.js";
 import { createSelectGammaGenericWalkObjective } from "./walk-objective.js";
 import type {
   SelectGammaBinding,
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
   SelectGammaFormulaCandidate,
+  SelectGammaIdentityPolicy,
   SelectGammaRequest,
   SelectGammaSelectionReceipt,
   SelectGammaWalkObjective,
@@ -18,10 +24,8 @@ type AdmissionState = Readonly<{
   readonly selectedCount: number;
   readonly usedTokens: number;
   readonly tokenBudget: number;
-  readonly retainedByObjectKey: ReadonlyMap<string, string>;
-  readonly retainedBySourceKey: ReadonlyMap<string, string>;
+  readonly identity: IdentityAdmission;
   readonly perDimensionCounts: ReadonlyMap<string, number>;
-  readonly sourceHardDedupe: boolean;
   readonly limits: Readonly<{
     readonly maxSelected: number;
     readonly perDimensionLimits: Readonly<Record<string, number>> | null;
@@ -33,13 +37,16 @@ type SelectionLimits = AdmissionState["limits"];
 export function selectGammaWalk(
   request: SelectGammaRequest,
   binding: SelectGammaBinding,
-  objective: SelectGammaWalkObjective = createSelectGammaGenericWalkObjective(binding)
+  objective?: SelectGammaWalkObjective
 ): SelectGammaWalkResult {
   assertBoundIdentity(request, binding);
   assertTokenBudget(request.token_budget);
   const maxSelected = validateMaxSelected(binding.max_selected);
   validateDimensionLimits(binding.per_dimension_limits);
   assertUniqueEligibleKeys(request.eligible_candidate_keys);
+  const walkObjective = objective ??
+    createSelectGammaGenericWalkObjective(binding.feature_weights);
+  const identityPolicy = resolveIdentityPolicy(binding);
   const indexed = indexCandidates(binding.candidates, binding.workspace_id);
   const remaining = request.eligible_candidate_keys.map((key) => {
     const candidate = indexed.get(key);
@@ -51,34 +58,35 @@ export function selectGammaWalk(
   const selectionReceipt = buildSelectionReceipt(
     remaining,
     maxSelected,
-    request.token_budget
+    request.token_budget,
+    walkObjective,
+    identityPolicy
   );
   return greedySelect(
     remaining,
     request.token_budget,
-    objective,
+    walkObjective,
     {
       maxSelected,
       perDimensionLimits: binding.per_dimension_limits
     },
     selectionReceipt,
-    binding.source_hard_dedupe ?? true
+    identityPolicy
   );
 }
 
-function greedySelect(
+function greedySelect<State>(
   remaining: SelectGammaFormulaCandidate[],
   tokenBudget: number,
-  objective: SelectGammaWalkObjective,
+  objective: SelectGammaWalkObjective<State>,
   limits: SelectionLimits,
   selectionReceipt: SelectGammaSelectionReceipt,
-  sourceHardDedupe: boolean
+  identityPolicy: SelectGammaIdentityPolicy
 ): SelectGammaWalkResult {
   const selected: string[] = [];
   const decisions: SelectGammaDecision[] = [];
   const covered = objective.createState();
-  const retainedByObjectKey = new Map<string, string>();
-  const retainedBySourceKey = new Map<string, string>();
+  const identity = createIdentityAdmission(identityPolicy);
   const perDimensionCounts = new Map<string, number>();
   let usedTokens = 0;
   while (remaining.length > 0) {
@@ -86,10 +94,8 @@ function greedySelect(
       selectedCount: selected.length,
       usedTokens,
       tokenBudget,
-      retainedByObjectKey,
-      retainedBySourceKey,
+      identity,
       perDimensionCounts,
-      sourceHardDedupe,
       limits
     }, decisions);
     if (rejected.size === remaining.length) break;
@@ -99,20 +105,43 @@ function greedySelect(
       remaining, covered, objective, selectionReceipt.ordering_basis
     );
     if (picked === null) break;
-    const candidate = remaining.splice(picked.index, 1)[0]!;
-    decisions.push(retainedDecision(
-      candidate, decisions.length + 1, selected.length, usedTokens,
-      picked.gain
-    ));
-    selected.push(candidate.candidate_key);
-    usedTokens += candidate.token_cost;
-    retainAdmittedIdentity(
-      candidate, retainedByObjectKey, retainedBySourceKey, sourceHardDedupe
+    usedTokens = admitPicked(
+      remaining, picked, selected, decisions, covered, objective,
+      identity, perDimensionCounts, usedTokens, limits
     );
-    incrementDimensionCount(candidate.dimension ?? "unbound", perDimensionCounts);
-    objective.accept(candidate, covered);
   }
   return materializeWalkResult(selected, decisions, selectionReceipt);
+}
+
+function admitPicked<State>(
+  remaining: SelectGammaFormulaCandidate[],
+  picked: Readonly<{ readonly index: number; readonly gain: number }>,
+  selected: string[],
+  decisions: SelectGammaDecision[],
+  covered: State,
+  objective: SelectGammaWalkObjective<State>,
+  identity: IdentityAdmission,
+  perDimensionCounts: Map<string, number>,
+  usedTokens: number,
+  limits: SelectionLimits
+): number {
+  const candidate = remaining.splice(picked.index, 1)[0]!;
+  const lastSlot = selected.length + 1 >= limits.maxSelected;
+  const losers = lastSlot ? remaining.splice(0) : [];
+  decisions.push(retainedDecision(
+    candidate, decisions.length + 1, selected.length, usedTokens, picked.gain
+  ));
+  selected.push(candidate.candidate_key);
+  const nextUsedTokens = usedTokens + candidate.token_cost;
+  retainAdmittedIdentity(candidate, identity);
+  incrementDimensionCount(candidate.dimension ?? "unbound", perDimensionCounts);
+  if (losers.length > 0) {
+    decisions.push(...lastSlotDisplacementDecisions(
+      losers, candidate, picked.gain, covered, objective, decisions.length + 1
+    ));
+  }
+  objective.accept(candidate, covered);
+  return nextUsedTokens;
 }
 
 function materializeWalkResult(
@@ -127,18 +156,6 @@ function materializeWalkResult(
   });
 }
 
-function retainAdmittedIdentity(
-  candidate: SelectGammaFormulaCandidate,
-  retainedByObjectKey: Map<string, string>,
-  retainedBySourceKey: Map<string, string>,
-  sourceHardDedupe: boolean
-): void {
-  retainedByObjectKey.set(objectKey(candidate), candidate.candidate_key);
-  if (sourceHardDedupe) {
-    retainIdentity(candidate.source, candidate.candidate_key, retainedBySourceKey);
-  }
-}
-
 function incrementDimensionCount(
   dimension: string,
   counts: Map<string, number>
@@ -146,10 +163,10 @@ function incrementDimensionCount(
   counts.set(dimension, (counts.get(dimension) ?? 0) + 1);
 }
 
-function pickNext(
+function pickNext<State>(
   remaining: readonly SelectGammaFormulaCandidate[],
-  covered: unknown,
-  objective: SelectGammaWalkObjective,
+  covered: State,
+  objective: SelectGammaWalkObjective<State>,
   orderingBasis: SelectGammaSelectionReceipt["ordering_basis"]
 ): Readonly<{ readonly index: number; readonly gain: number }> | null {
   let bestIndex = -1;
@@ -227,16 +244,8 @@ function rejectedReceipt(
   if (eligibility.risk === "blocked" || eligibility.authority === "blocked") {
     return Object.freeze({ kind: "ineligible", ...eligibility });
   }
-  const retained = state.retainedByObjectKey.get(objectKey(candidate));
-  if (retained !== undefined) {
-    return duplicateReceipt("object", retained);
-  }
-  if (state.sourceHardDedupe) {
-    const sourceRetained = retainedIdentity(candidate.source, state.retainedBySourceKey);
-    if (sourceRetained !== null) {
-      return duplicateReceipt("source", sourceRetained);
-    }
-  }
+  const duplicate = rejectDuplicateIdentity(candidate, state.identity);
+  if (duplicate !== null) return duplicate;
   const dimension = candidate.dimension;
   const dimensionCount = state.perDimensionCounts.get(dimension) ?? 0;
   const dimensionLimit = state.limits.perDimensionLimits?.[dimension] ?? null;
@@ -287,7 +296,9 @@ function retainedDecision(
 function buildSelectionReceipt(
   candidates: readonly SelectGammaFormulaCandidate[],
   maxSelected: number,
-  tokenBudget: number
+  tokenBudget: number,
+  objective: SelectGammaWalkObjective,
+  identityPolicy: SelectGammaIdentityPolicy
 ): SelectGammaSelectionReceipt {
   const cardinalityBound = Math.min(maxSelected, candidates.length);
   const tokenCosts = candidates.map(({ token_cost }) => {
@@ -298,6 +309,10 @@ function buildSelectionReceipt(
     tokenCosts,
     cardinalityBound
   );
+  const operatorId = objective.operator_id.trim();
+  if (operatorId.length === 0) {
+    throw new Error("Select_Gamma objective operator id must be non-empty");
+  }
   const witness = Object.freeze({
     kind: "static_top_k_token_bound" as const,
     eligible_candidate_count: candidates.length,
@@ -306,8 +321,10 @@ function buildSelectionReceipt(
     token_budget: tokenBudget
   });
   return Object.freeze({
-    schema_version: 3 as const,
-    objective_semantic_id: SELECT_GAMMA_OPERATOR_ID,
+    schema_version: 4 as const,
+    objective_semantic_id: operatorId,
+    configuration_digest: objective.configuration_digest ?? null,
+    source_hard_dedupe: identityPolicy === "source_hard_dedupe",
     ordering_basis: maxTokenCostSum <= tokenBudget
       ? "raw_marginal_gain" as const
       : "marginal_gain_per_token" as const,
@@ -327,36 +344,6 @@ function sumFiniteTopKTokenCosts(
     }
   }
   return sum;
-}
-
-function objectKey(candidate: SelectGammaFormulaCandidate): string {
-  return candidate.object_key;
-}
-
-function duplicateReceipt(
-  identityChannel: "object" | "source",
-  retainedCandidateKey: string
-): SelectGammaDecisionReceipt {
-  return Object.freeze({
-    kind: "duplicate",
-    identity_channel: identityChannel,
-    retained_candidate_key: retainedCandidateKey
-  });
-}
-
-function retainedIdentity(
-  channel: SelectGammaFormulaCandidate["source"] | SelectGammaFormulaCandidate["lineage"],
-  retained: ReadonlyMap<string, string>
-): string | null {
-  return channel.status === "available" ? retained.get(channel.key) ?? null : null;
-}
-
-function retainIdentity(
-  channel: SelectGammaFormulaCandidate["source"] | SelectGammaFormulaCandidate["lineage"],
-  candidateKey: string,
-  retained: Map<string, string>
-): void {
-  if (channel.status === "available") retained.set(channel.key, candidateKey);
 }
 
 function validateMaxSelected(value: number): number {
