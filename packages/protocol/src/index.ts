@@ -35,6 +35,7 @@ export * from "./soul/open-semantic-factor-activation-state.js";
 export * from "./soul/open-semantic-structural-role.js";
 export * from "./soul/query-osf-semantic-completeness.js";
 export * from "./soul/kind-projection.js";
+export * from "./soul/query-osf-facet-obligation.js";
 export * from "./soul/field-contract/index.js";
 export * from "./soul/verified-user-assertion-receipt.js";
 export * from "./soul/garden-source-turn-fallback-receipt.js";
