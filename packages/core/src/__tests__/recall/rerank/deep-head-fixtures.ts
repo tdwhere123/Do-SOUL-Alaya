@@ -54,6 +54,7 @@ export function fusedCandidate(input: {
   readonly fusedRank?: number;
   readonly embedding?: number;
   readonly evidenceFts?: number;
+  readonly objectKind?: "memory_entry" | "evidence_capsule";
   readonly contributions?: Partial<Record<string, number>>;
 }): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
@@ -73,8 +74,10 @@ export function fusedCandidate(input: {
   const factors = {
     ...(input.embedding === undefined ? {} : { embedding_similarity: input.embedding })
   } as RecallScoreFactors;
+  const objectKind = input.objectKind ?? "memory_entry";
   return Object.freeze({
     entry: memory({ object_id: input.objectId }),
+    objectKind,
     effectiveScore: input.fusedScore,
     effectiveFactors: factors,
     fusion

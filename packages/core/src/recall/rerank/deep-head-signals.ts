@@ -73,15 +73,12 @@ export function embeddingSignal(
 }
 
 export function independentEmbeddingScore(
-  activation: CandidateActivationReceipt,
-  allowEvidenceSemantic = false
+  activation: CandidateActivationReceipt
 ): number | null {
-  const channels = allowEvidenceSemantic
-    ? new Set([...INDEPENDENT_EMBEDDING_CHANNELS, "evidence_semantic"])
-    : INDEPENDENT_EMBEDDING_CHANNELS;
+  // Capsule evidence_semantic is a foreign channel; it must not buy Gamma quality.
   let best: number | null = null;
   for (const observation of activation.observations) {
-    if (!channels.has(observation.channel)) continue;
+    if (!INDEPENDENT_EMBEDDING_CHANNELS.has(observation.channel)) continue;
     if (observation.state !== "observed" || observation.score === null) continue;
     if (best === null || observation.score > best) best = observation.score;
   }
