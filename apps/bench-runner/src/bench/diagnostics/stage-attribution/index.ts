@@ -17,15 +17,16 @@ export {
 } from "./diagnostic-100q.js";
 export {
   GOLD_EXCLUSION_FIRST_REASONS,
+  MECHANISM_PREFIX_OPERATOR_ID,
   RECALL_MECHANISM_SPLIT_KIND,
   RECALL_MECHANISM_SPLIT_SCHEMA_VERSION,
   buildRecallMechanismSplit
-} from "./mechanism-receipt.js";
+} from "./mechanism/receipt.js";
 export {
   assertRecallMechanismSplitReceipt,
   readRecallMechanismSplitArtifact
-} from "./mechanism-receipt-artifact.js";
+} from "./mechanism/artifact.js";
 export type {
   GoldExclusionFirstReason,
   RecallMechanismSplitReceipt
-} from "./mechanism-receipt.js";
+} from "./mechanism/receipt.js";

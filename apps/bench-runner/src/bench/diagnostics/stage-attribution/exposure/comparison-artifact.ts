@@ -24,6 +24,11 @@ export async function readDiagnostic100QComparisonArtifact(
 }
 
 function assertComparison(value: unknown): asserts value is Diagnostic100QComparison {
+  if (isRecord(value) && value.kind === "recall_mechanism_split_v1") {
+    throw new Error(
+      "recall mechanism split cannot be reinterpreted as a diagnostic 100Q comparison"
+    );
+  }
   if (isRecord(value) && value.schema_version === 5) {
     throw new Error(
       "historical diagnostic 100Q comparison cannot be reinterpreted as current gate authority"

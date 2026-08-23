@@ -10,6 +10,8 @@ import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
   "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { readDiagnostic100QComparisonArtifact } from
   "../../../bench/diagnostics/stage-attribution/exposure/comparison-artifact.js";
+import { buildRecallMechanismSplit } from
+  "../../../bench/diagnostics/stage-attribution/mechanism/receipt.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -216,5 +218,36 @@ describe("diagnostic 100Q stage map", () => {
       treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
       treatmentExposure: []
     })).toThrow(/exposure receipts do not match/u);
+  });
+
+  it("rejects a recall mechanism split and extra keys on schema 6", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diagnostic-100q-split-"));
+    const path = join(root, "comparison.json");
+    const split = buildRecallMechanismSplit({
+      questions: [{
+        question_id: "q1",
+        delivered_hit: { control: false, treatment: true }
+      }]
+    });
+    await writeFile(path, JSON.stringify(split));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /recall mechanism split cannot be reinterpreted as a diagnostic 100Q comparison/u
+    );
+
+    const comparison = compareF0F2VsCachedF3({
+      control: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      treatmentExposure: [exposure("q1", "exposed", false)]
+    });
+    await writeFile(path, JSON.stringify(comparison));
+    await expect(readDiagnostic100QComparisonArtifact(path)).resolves.toEqual(comparison);
+
+    await writeFile(path, JSON.stringify({
+      ...comparison,
+      delivered_hit_changed: ["q1"]
+    }));
+    await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
+      /lacks the cached F3 exposure contract/u
+    );
   });
 });
