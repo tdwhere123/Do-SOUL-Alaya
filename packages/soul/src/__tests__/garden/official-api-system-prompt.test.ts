@@ -114,6 +114,11 @@ describe("official API system prompt", () => {
       "When it is a location or place participant, binding_identity must be \"location\""
     );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Other open role names remain allowed");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"kind_projection"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Never put kind into semantic_factor_graph");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "do not invent entity, event, attribute, or answer-family categories"
+    );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       "Names other than the structural tokens duration and location stay open text"
     );

@@ -13,6 +13,7 @@ import { OpenSemanticFactorActivationReceiptSchema,
   OpenSemanticFactorCompatibilityTraceSchema, OpenSemanticFactorCompositionReceiptSchema,
   OpenSemanticFactorFormationCaptureSchema } from
   "../../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import { KindConstraintAlignmentReceiptSchema } from "../field-diagnostics-schema.js";
 import { readDiagnosticQueryProbes, readStringArray } from
   "../../artifacts/diagnostics-candidate-readers.js";
 import type { NarrowRecallDiagnostics } from "../diagnostics-types.js";
@@ -29,7 +30,8 @@ type DiagnosticFields = Pick<NarrowRecallDiagnostics,
   | "queryFactFrameExtraction" | "queryOpenSemanticFactorFormation"
   | "queryOpenSemanticFactorCompletenessReceipt"
   | "openSemanticFactorCompatibilityTrace" | "openSemanticFactorComposition"
-  | "openSemanticFactorActivation" | "openSemanticFactorArchive"
+  | "openSemanticFactorActivation" | "kindConstraintAlignment"
+  | "openSemanticFactorArchive"
   | "answerShapePlan" | "querySoughtFacets">;
 
 export function readDiagnosticFields(
@@ -114,6 +116,8 @@ function diagnosticFieldReaders() {
       OpenSemanticFactorCompositionReceiptSchema),
     openSemanticFactorActivation: schemaReader("open_semantic_factor_activation",
       OpenSemanticFactorActivationReceiptSchema),
+    kindConstraintAlignment: schemaReader("kind_constraint_alignment",
+      KindConstraintAlignmentReceiptSchema),
     answerShapePlan: schemaReader("answer_shape_plan", RecallAnswerShapePlanSchema),
     querySoughtFacets: (record: Readonly<Record<string, unknown>>) =>
       readStringArray(record.query_sought_facets)

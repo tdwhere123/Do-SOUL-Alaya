@@ -30,6 +30,8 @@ describe("OSF freeze to selection-boundary attribution", () => {
     const evidence = listenEvidence();
     const frozen = freezeChain(DURATION_QUERY, query, { commute: evidence });
     expect(frozen.openSemanticFactorComposition.status).toBe("composed");
+    expect(frozen.kindConstraintAlignment?.operator_id)
+      .toBe("kind_constraint_alignment_v1");
     const key = "workspace_local:memory_entry:duration-memory";
     const activations = attributeOpenSemanticFactorActivations({
       candidates: [memoryCandidate("duration-memory", ["commute"])],

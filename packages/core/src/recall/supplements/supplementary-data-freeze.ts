@@ -19,6 +19,10 @@ import { materializeOpenSemanticFactorComposition } from
   "../field/open-semantic-factors/composition.js";
 import { materializeOpenSemanticFactorActivation } from
   "../field/open-semantic-factors/activation.js";
+import {
+  bindProductionKindConstraintAlignment,
+  wrapProductionKindProjectionDrafts
+} from "../field/kind-projection/production.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { normalizeGraphSupport } from "../runtime/recall-service-helpers.js";
 import type { EvidenceSupportVector } from "../runtime/recall-service-types.js";
@@ -55,6 +59,7 @@ export interface CollectSupplementaryDataParams {
   readonly querySemanticFactorCompletenessReceipt?: Readonly<
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   > | null;
+  readonly kindProjections?: readonly unknown[];
   readonly policy: Readonly<RecallPolicy>;
   readonly coarseFtsRanks: Readonly<Record<string, number>>;
   readonly coarseTrigramFtsRanks: Readonly<Record<string, number>>;
@@ -97,6 +102,8 @@ export function freezeSupplementaryData(
 ): RecallSupplementaryData {
   const queryTimeWindow = resolveQueryTimeWindow(params);
   const semanticSupplements = buildOpenSemanticFactorSupplements(
+    params,
+    queryFieldAttribution,
     querySemanticFactorFormation,
     evidenceAndGovernance
   );
@@ -141,6 +148,8 @@ export function freezeSupplementaryData(
 }
 
 function buildOpenSemanticFactorSupplements(
+  params: CollectSupplementaryDataParams,
+  queryFieldAttribution: Awaited<ReturnType<typeof collectQueryFieldAttribution>>,
   querySemanticFactorFormation: Awaited<
     ReturnType<typeof captureCertifiedRecallQueryOpenSemanticFactors>
   >,
@@ -166,8 +175,31 @@ function buildOpenSemanticFactorSupplements(
       trace: openSemanticFactorCompatibilityTrace,
       query_capture: querySemanticFactorFormation.formation,
       evidence_formations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId
+    }),
+    kindConstraintAlignment: bindProductionKindConstraintAlignment({
+      queryText: params.queryText,
+      factFrameCapture: queryFieldAttribution.factFrameCapture,
+      queryFormation: querySemanticFactorFormation.formation,
+      resultVariableIds: openSemanticFactorComposition.result_variable_ids,
+      resultBindings: openSemanticFactorComposition.bindings,
+      evidenceFormations: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+      ...resolveKindProjections(params, evidenceAndGovernance)
     })
   };
+}
+
+function resolveKindProjections(
+  params: CollectSupplementaryDataParams,
+  evidenceAndGovernance: Readonly<EvidenceAndGovernanceSupplement>
+): Readonly<{ readonly kindProjections?: readonly unknown[] }> {
+  if (params.kindProjections !== undefined) {
+    return { kindProjections: params.kindProjections };
+  }
+  const wrapped = wrapProductionKindProjectionDrafts({
+    formationsByEvidenceId: evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+    draftsByEvidenceId: evidenceAndGovernance.kindProjectionDraftsByEvidenceId
+  });
+  return wrapped.length === 0 ? {} : { kindProjections: wrapped };
 }
 
 function extractCoarseRankings(params: CollectSupplementaryDataParams) {

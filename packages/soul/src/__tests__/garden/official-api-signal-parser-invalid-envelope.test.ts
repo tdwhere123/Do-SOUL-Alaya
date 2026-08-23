@@ -74,4 +74,26 @@ describe("parseOfficialApiSignals invalid envelope rejection", () => {
       }
     }]);
   });
+
+  it("keeps the base graph when kind_projection is missing or invalid", () => {
+    const otherwiseValid = withOpenSemanticFactorGraph({
+      confidence: 0.8,
+      matched_text: "I use Spotify"
+    });
+    expect(parseOfficialApiSignals(JSON.stringify({
+      signals: [{ ...otherwiseValid, kind_projection: { factor_id: "spotify" } }]
+    }))[0]).not.toHaveProperty("kind_projection");
+    expect(parseOfficialApiSignals(JSON.stringify({
+      signals: [{
+        ...otherwiseValid,
+        kind_projection: { factor_id: "spotify", kind_values: ["Music Streaming Service"] }
+      }]
+    }))).toMatchObject([{
+      matched_text: "I use Spotify",
+      kind_projection: {
+        factor_id: "spotify",
+        kind_values: ["music streaming service"]
+      }
+    }]);
+  });
 });

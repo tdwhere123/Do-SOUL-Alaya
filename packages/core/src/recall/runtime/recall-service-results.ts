@@ -142,6 +142,9 @@ export interface RecallSupplementaryData {
     import("../field/open-semantic-factors/activation.js")
       .OpenSemanticFactorActivationReceipt
   >;
+  readonly kindConstraintAlignment?: Readonly<
+    import("../field/kind-projection/alignment.js").KindConstraintAlignmentReceipt
+  >;
   readonly openSemanticFactorCandidateActivationsByCandidateKey?: ReadonlyMap<
     string,
     Readonly<import("../field/open-semantic-factors/candidate-attribution.js")

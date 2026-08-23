@@ -14,7 +14,8 @@ import {
   type AssociativeFactKeyProjectionForm,
   type CandidateMemorySignal,
   type GardenSourceTurnFallbackVerifiedReceipt,
-  type OpenSemanticFactorFormationCapture
+  type OpenSemanticFactorFormationCapture,
+  KIND_PROJECTION_KIND_VALUE_LIMIT
 } from "@do-soul/alaya-protocol";
 import type {
   EvidenceSearchMatch,
@@ -140,7 +141,8 @@ export function qualifyEvidenceMatch(
       matched_projection: projection,
       ...(semanticFactorFormation === undefined
         ? {}
-        : { semantic_factor_formation: semanticFactorFormation })
+        : { semantic_factor_formation: semanticFactorFormation }),
+      ...kindProjectionDraftsFromSignal(signal)
     });
   }
   if (match.matched_projection?.projection_kind === "fact_key") {
@@ -164,7 +166,8 @@ export function qualifyEvidenceMatch(
       matched_fact_frame: attributed.frame,
       ...(semanticFactorFormation === undefined
         ? {}
-        : { semantic_factor_formation: semanticFactorFormation })
+        : { semantic_factor_formation: semanticFactorFormation }),
+      ...kindProjectionDraftsFromSignal(signal)
     });
   }
   if (!matchesOwnerProjection(capsule, receipt)) return null;
@@ -173,7 +176,8 @@ export function qualifyEvidenceMatch(
     verified_user_projection: verifiedUserProjection,
     ...(semanticFactorFormation === undefined
       ? {}
-      : { semantic_factor_formation: semanticFactorFormation })
+      : { semantic_factor_formation: semanticFactorFormation }),
+    ...kindProjectionDraftsFromSignal(signal)
   });
 }
 
@@ -311,6 +315,43 @@ function matchesFactKeySignalEnvelope(
   return typeof grounding === "object" && grounding !== null && !Array.isArray(grounding) &&
     (grounding as Record<string, unknown>).status === "grounded" &&
     (grounding as Record<string, unknown>).content_basis === "source_assertion";
+}
+
+function kindProjectionDraftsFromSignal(
+  signal: Readonly<CandidateMemorySignal> | undefined
+): Readonly<{ readonly kind_projection_drafts?: RecallQualifiedEvidence["kind_projection_drafts"] }> {
+  const draft = readKindProjectionDraft(signal?.raw_payload.kind_projection);
+  return draft === undefined ? {} : { kind_projection_drafts: Object.freeze([draft]) };
+}
+
+function readKindProjectionDraft(
+  value: unknown
+): NonNullable<RecallQualifiedEvidence["kind_projection_drafts"]>[number] | undefined {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const factorId = typeof record.factor_id === "string" ? record.factor_id.trim() : "";
+  const kindValues = Array.isArray(record.kind_values)
+    ? uniqueLowerKindValues(record.kind_values)
+    : [];
+  return factorId.length === 0 || kindValues.length === 0
+    ? undefined
+    : Object.freeze({ factor_id: factorId, kind_values: Object.freeze(kindValues) });
+}
+
+function uniqueLowerKindValues(values: readonly unknown[]): readonly string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const item of values) {
+    if (typeof item !== "string") continue;
+    const normalized = item.trim().toLowerCase();
+    if (normalized.length === 0 || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+    if (unique.length >= KIND_PROJECTION_KIND_VALUE_LIMIT) break;
+  }
+  return unique;
 }
 
 function readPayloadText(value: unknown): string | null {

@@ -40,9 +40,11 @@ import {
 import { RecallFieldRefinementStopCertificateSchema, RecallFiniteFieldChannelCaptureSchema,
   RecallQueryEntityExtractionCaptureSchema, RecallQueryFactFrameExtractionCaptureSchema,
   RecallRetrievalFieldRefinementReceiptSchema } from "./field-capture-schema.js";
-import { OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompatibilityTraceSchema,
-  OpenSemanticFactorCompositionReceiptSchema, OpenSemanticFactorFormationCaptureSchema } from
-  "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import {     OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompatibilityTraceSchema,
+    OpenSemanticFactorCompositionReceiptSchema, OpenSemanticFactorFormationCaptureSchema } from
+    "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import { KindConstraintAlignmentReceiptSchema } from
+    "./semantic-factors/kind-constraint-alignment-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -370,6 +372,8 @@ export const BenchRecallDiagnosticsSchema = z
       OpenSemanticFactorCompositionReceiptSchema.optional(),
     open_semantic_factor_activation:
       OpenSemanticFactorActivationReceiptSchema.optional(),
+    kind_constraint_alignment:
+      KindConstraintAlignmentReceiptSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),

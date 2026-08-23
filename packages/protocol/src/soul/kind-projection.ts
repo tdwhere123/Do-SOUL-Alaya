@@ -11,6 +11,8 @@ export const KIND_PROJECTION_SCHEMA_VERSION = 1 as const;
 export const KIND_PROJECTION_OPERATOR_ID = "kind_projection_v1" as const;
 export const KIND_PROJECTION_KIND_VALUE_LIMIT = 2 as const;
 export const KIND_PROJECTION_AUTHORITY = "proposed_routing_only" as const;
+export const KIND_PROJECTION_DRAFT_PRODUCER_ID =
+  "official_api_kind_projection_v1" as const;
 
 export const KindProjectionStatusSchema = z.enum([
   "formed",

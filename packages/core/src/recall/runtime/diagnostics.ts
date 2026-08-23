@@ -43,6 +43,8 @@ import type { OpenSemanticFactorCompositionReceipt } from
   "../field/open-semantic-factors/composition.js";
 import type { OpenSemanticFactorActivationReceipt } from
   "../field/open-semantic-factors/activation.js";
+import type { KindConstraintAlignmentReceipt } from
+  "../field/kind-projection/alignment.js";
 import type { PinnedProjectionCandidateSelection } from
   "../field/retrieval/projection/pinned-projection-selection.js";
 
@@ -63,6 +65,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly openSemanticFactorActivation?: Readonly<
     OpenSemanticFactorActivationReceipt
   >;
+  readonly kindConstraintAlignment?: Readonly<KindConstraintAlignmentReceipt>;
   readonly retrievalFieldCaptures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly retrievalFieldRefinementReceipts?:
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
@@ -175,6 +178,9 @@ function buildOptionalQueryDiagnosticFields(
         open_semantic_factor_activation:
           params.openSemanticFactorActivation
       }),
+    ...(params.kindConstraintAlignment === undefined
+      ? {}
+      : { kind_constraint_alignment: params.kindConstraintAlignment }),
     ...(params.retrievalFieldCaptures === undefined
       ? {}
       : { retrieval_field_captures: Object.freeze([...params.retrievalFieldCaptures]) }),

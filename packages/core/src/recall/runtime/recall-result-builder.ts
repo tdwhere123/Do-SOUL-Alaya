@@ -52,6 +52,8 @@ export function buildRecallResult(
         assessment.supplementaryData.openSemanticFactorComposition,
       openSemanticFactorActivation:
         assessment.supplementaryData.openSemanticFactorActivation,
+      kindConstraintAlignment:
+        assessment.supplementaryData.kindConstraintAlignment,
       retrievalFieldCaptures: assessment.retrievalFieldCaptures,
       retrievalFieldRefinementReceipts:
         assessment.supplementaryData.retrievalFieldRefinementReceipts,

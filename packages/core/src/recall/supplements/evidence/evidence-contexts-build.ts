@@ -91,8 +91,27 @@ export function buildMemoryEvidenceContexts(
     ...buildUnavailableSemanticFactorEvidenceIds(
       qualifiedSemanticFormations,
       semanticUnavailableEvidenceIds
-    )
+    ),
+    ...buildKindProjectionDraftsByEvidenceId(qualifiedSemanticFormations)
   });
+}
+
+function buildKindProjectionDraftsByEvidenceId(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): Readonly<{
+  readonly kindProjectionDraftsByEvidenceId?: RecallEvidenceContexts["kindProjectionDraftsByEvidenceId"];
+}> {
+  const drafts: Record<string, NonNullable<
+    RecallEvidenceContexts["kindProjectionDraftsByEvidenceId"]
+  >[string]> = {};
+  for (const item of qualified) {
+    if (item.kind_projection_drafts === undefined ||
+        item.kind_projection_drafts.length === 0) continue;
+    drafts[item.capsule.object_id] = item.kind_projection_drafts;
+  }
+  return Object.keys(drafts).length === 0
+    ? {}
+    : { kindProjectionDraftsByEvidenceId: Object.freeze(drafts) };
 }
 
 function buildSemanticFactorFormationsByEvidenceId(

@@ -386,6 +386,8 @@ export interface NarrowRecallDiagnostics {
     NonNullable<BenchRecallDiagnostics["open_semantic_factor_composition"]> | null;
   readonly openSemanticFactorActivation:
     NonNullable<BenchRecallDiagnostics["open_semantic_factor_activation"]> | null;
+  readonly kindConstraintAlignment:
+    NonNullable<BenchRecallDiagnostics["kind_constraint_alignment"]> | null;
   readonly openSemanticFactorArchive: OpenSemanticFactorArchive | null;
   readonly answerShapePlan: DiagnosticAnswerShapePlan | null;
   readonly querySoughtFacets: readonly string[] | null;

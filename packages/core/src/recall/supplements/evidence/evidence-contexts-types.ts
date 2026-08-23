@@ -28,6 +28,13 @@ export interface RecallEvidenceContexts {
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
   readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[];
+  readonly kindProjectionDraftsByEvidenceId?: Readonly<Record<
+    string,
+    readonly Readonly<{
+      readonly factor_id: string;
+      readonly kind_values: readonly string[];
+    }>[]
+  >>;
 }
 
 export interface EvidenceRecord {

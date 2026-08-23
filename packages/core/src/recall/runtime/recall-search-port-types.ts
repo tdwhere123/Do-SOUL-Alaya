@@ -40,6 +40,10 @@ export type RecallQualifiedEvidence = Readonly<{
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
   readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
   readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly kind_projection_drafts?: readonly Readonly<{
+    readonly factor_id: string;
+    readonly kind_values: readonly string[];
+  }>[];
 }>;
 
 export type KeywordSearchLaneId = FtsLaneId;

@@ -30,6 +30,13 @@ export interface EvidenceAndGovernanceSupplement {
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
   readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[];
+  readonly kindProjectionDraftsByEvidenceId?: Readonly<Record<
+    string,
+    readonly Readonly<{
+      readonly factor_id: string;
+      readonly kind_values: readonly string[];
+    }>[]
+  >>;
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
   readonly pathInflowAvailability: NonNullable<

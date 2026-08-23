@@ -26,6 +26,10 @@ import {
   projectOfficialApiObjectKind,
   type OfficialApiObjectKindProjection
 } from "./official-api/object-kind-contract.js";
+import {
+  readOfficialApiKindProjectionDraft,
+  type OfficialApiKindProjectionDraft
+} from "./official-api/kind-projection-draft.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
 export {
@@ -214,6 +218,7 @@ export interface OfficialApiSignalDraft {
   readonly semantic_factor_graph?: OpenSemanticFactorGraphProposal;
   readonly semantic_factor_graph_projection?:
     OfficialApiSemanticFactorGraphProjectionAudit;
+  readonly kind_projection?: OfficialApiKindProjectionDraft;
 }
 
 export interface OfficialApiSignalParseOptions {
@@ -362,7 +367,10 @@ function inspectOfficialApiSignalEntry(
       ...parsed.data,
       signal_kind: objectKindProjection.signalKind,
       object_kind: objectKindProjection.objectKind
-    }), semanticProjection.audit, temporalProjection.audit, objectKindProjection.audit),
+    }), semanticProjection.audit, temporalProjection.audit, objectKindProjection.audit,
+    readOfficialApiKindProjectionDraft(
+      (candidate as Record<string, unknown>).kind_projection
+    )),
     rejection: null
   };
 }
@@ -374,7 +382,8 @@ function buildOfficialApiSignalDraft(
   },
   semanticFactorGraphProjection: OfficialApiSemanticFactorGraphProjectionAudit | undefined,
   temporalProjectionAudit: OfficialApiTemporalProjectionAudit,
-  objectKindProjection: OfficialApiObjectKindProjection | undefined
+  objectKindProjection: OfficialApiObjectKindProjection | undefined,
+  kindProjection: OfficialApiKindProjectionDraft | undefined
 ): OfficialApiSignalDraft {
   const clampedMatchedText = record.matched_text.slice(0, MAX_OFFICIAL_API_MATCHED_TEXT_CHARS);
   // Absence delegates to the materialization rule distiller; matched_text is not a substitute.
@@ -404,7 +413,8 @@ function buildOfficialApiSignalDraft(
       : { semantic_factor_graph: record.semantic_factor_graph }),
     ...(semanticFactorGraphProjection === undefined
       ? {}
-      : { semantic_factor_graph_projection: semanticFactorGraphProjection })
+      : { semantic_factor_graph_projection: semanticFactorGraphProjection }),
+    ...(kindProjection === undefined ? {} : { kind_projection: kindProjection })
   });
 }
 

@@ -168,6 +168,9 @@ export interface RecallDiagnostics {
     import("../field/open-semantic-factors/activation.js")
       .OpenSemanticFactorActivationReceipt
   >;
+  readonly kind_constraint_alignment?: Readonly<
+    import("../field/kind-projection/alignment.js").KindConstraintAlignmentReceipt
+  >;
   readonly total_scanned: number;
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;

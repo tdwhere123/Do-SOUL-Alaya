@@ -1,5 +1,6 @@
 import {
   KIND_PROJECTION_AUTHORITY,
+  KindProjectionProposalSchema,
   normalizeSemanticIdentity,
   type KindProjection,
   type KindProjectionStatus,
@@ -51,14 +52,16 @@ export function materializeKindConstraintAlignment(input: Readonly<{
   readonly result_variable_ids: readonly string[];
   readonly result_bindings: readonly KindConstraintResultBinding[];
   readonly evidence_graph: OpenSemanticFactorGraph;
+  readonly evidence_graphs?: ReadonlyMap<string, OpenSemanticFactorGraph>;
   readonly kind_projections?: readonly unknown[];
 }>): KindConstraintAlignmentReceipt {
   const evidenceGraphDigest = digestRecallFieldIdentity(input.evidence_graph);
   const constraint = normalizeSemanticIdentity(input.answer_kind_constraint);
   const payloads = input.kind_projections;
   const provided = payloads !== undefined && payloads.length > 0;
+  const catalog = input.evidence_graphs;
   const projections = inspectPayloads(
-    payloads, input.evidence_graph, evidenceGraphDigest
+    payloads, input.evidence_graph, evidenceGraphDigest, catalog
   );
   const listed = input.result_variable_ids.includes(input.answer_variable_id);
   const alignments = listed
@@ -67,7 +70,8 @@ export function materializeKindConstraintAlignment(input: Readonly<{
       input.result_bindings,
       constraint,
       input.answer_variable_id,
-      input.evidence_graph
+      input.evidence_graph,
+      catalog
     )
     : [];
   const body = Object.freeze({
@@ -95,14 +99,40 @@ export function materializeKindConstraintAlignment(input: Readonly<{
 function inspectPayloads(
   payloads: readonly unknown[] | undefined,
   evidenceGraph: OpenSemanticFactorGraph,
-  evidenceGraphDigest: RecallFieldDigest
+  evidenceGraphDigest: RecallFieldDigest,
+  catalog?: ReadonlyMap<string, OpenSemanticFactorGraph>
 ): readonly KindProjection[] {
   if (payloads === undefined || payloads.length === 0) return [];
-  return rejectDuplicateFactorProjections(payloads.map((value) => inspectKindProjection({
-    value,
-    evidence_graph: evidenceGraph,
-    evidence_graph_digest: evidenceGraphDigest
-  })));
+  return rejectDuplicateFactorProjections(payloads.map((value) => {
+    const target = resolveInspectTarget(value, evidenceGraph, evidenceGraphDigest, catalog);
+    return inspectKindProjection({
+      value,
+      evidence_graph: target.graph,
+      evidence_graph_digest: target.digest
+    });
+  }));
+}
+
+// A draft names one graph; first-graph-only inspect treats other candidate graphs as forged.
+function resolveInspectTarget(
+  value: unknown,
+  fallback: OpenSemanticFactorGraph,
+  fallbackDigest: RecallFieldDigest,
+  catalog?: ReadonlyMap<string, OpenSemanticFactorGraph>
+): Readonly<{ graph: OpenSemanticFactorGraph; digest: RecallFieldDigest }> {
+  if (catalog === undefined) {
+    return { graph: fallback, digest: fallbackDigest };
+  }
+  const parsed = KindProjectionProposalSchema.safeParse(value);
+  if (!parsed.success) {
+    return { graph: fallback, digest: fallbackDigest };
+  }
+  const digest = parsed.data.evidence_graph_digest;
+  const stamped = catalog.get(digest);
+  if (stamped === undefined) {
+    return { graph: fallback, digest: fallbackDigest };
+  }
+  return { graph: stamped, digest: digest as RecallFieldDigest };
 }
 
 function collectAlignments(
@@ -110,26 +140,38 @@ function collectAlignments(
   resultBindings: readonly KindConstraintResultBinding[],
   constraint: string,
   variableId: string,
-  graph: OpenSemanticFactorGraph
+  graph: OpenSemanticFactorGraph,
+  catalog?: ReadonlyMap<string, OpenSemanticFactorGraph>
 ): KindConstraintAlignmentBinding[] {
   // Filter OSF result bindings; a kind payload cannot mint an answer.
   const formed = formedProjectionsByFactor(projections);
-  const factors = new Map(
-    graph.factors.map((factor) => [factor.factor_id, factor])
-  );
   rejectDuplicateResultBindings(resultBindings, variableId);
   const alignments: KindConstraintAlignmentBinding[] = [];
   for (const binding of resultBindings) {
     if (binding.variable_id !== variableId) continue;
+    const projection = formed.get(binding.evidence_factor_id);
+    const factorGraph = resolveProjectionGraph(projection, graph, catalog);
     const aligned = filterBinding(
       binding,
-      formed.get(binding.evidence_factor_id),
-      factors.get(binding.evidence_factor_id),
+      projection,
+      factorGraph.factors.find((item) => item.factor_id === binding.evidence_factor_id),
       constraint
     );
     if (aligned !== null) alignments.push(aligned);
   }
   return alignments.sort((left, right) => compareText(left.factor_id, right.factor_id));
+}
+
+function resolveProjectionGraph(
+  projection: KindProjection | undefined,
+  fallback: OpenSemanticFactorGraph,
+  catalog?: ReadonlyMap<string, OpenSemanticFactorGraph>
+): OpenSemanticFactorGraph {
+  const digest = projection?.evidence_graph_digest;
+  if (digest === undefined || digest === null || catalog === undefined) {
+    return fallback;
+  }
+  return catalog.get(digest) ?? fallback;
 }
 
 function rejectDuplicateResultBindings(

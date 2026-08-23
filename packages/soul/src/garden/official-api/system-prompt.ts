@@ -93,6 +93,13 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   "Do not force facts into subject/relation/value/qualifier/time slots and do not invent entity, event, attribute, or answer-family categories."
 ]);
 
+const KIND_PROJECTION_PROMPT_PARTS = Object.freeze([
+  'Optional independent sibling only: when a source-named instance has a conventional category that is not already a factor surface, you may include "kind_projection":{"factor_id":FACTOR_ID,"kind_values":[KIND]}.',
+  "At most two unique kind values. Omit the field when no kind is justified.",
+  "Never put kind into semantic_factor_graph. kind_projection is rebuildable routing, not durable truth.",
+  "A missing or invalid kind_projection must not change the base graph."
+]);
+
 const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
   'Use "semantic_factor_graph":{"schema_version":2,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
   'For a single atomic assertion, a valid graph has one predicate factor, every explicit relation participant as an argument, and at least one proposition; never omit the graph or replace it with fact_frame.',
@@ -134,6 +141,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...GROUNDED_SIGNAL_PROMPT_PARTS,
   ...DURABLE_PROJECTION_PROMPT_PARTS,
   ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
+  ...KIND_PROJECTION_PROMPT_PARTS,
   ...FINAL_PROMPT_PARTS
 ]);
 

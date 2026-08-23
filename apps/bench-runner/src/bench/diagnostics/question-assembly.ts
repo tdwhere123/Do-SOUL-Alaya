@@ -103,6 +103,8 @@ export function assembleQuestionDiagnostic(
       parts.diagnostics?.openSemanticFactorComposition ?? null,
     open_semantic_factor_activation:
       parts.diagnostics?.openSemanticFactorActivation ?? null,
+    kind_constraint_alignment:
+      parts.diagnostics?.kindConstraintAlignment ?? null,
     open_semantic_factor_archive:
       parts.diagnostics?.openSemanticFactorArchive ?? null,
     answer_shape_plan: parts.diagnostics?.answerShapePlan ?? null,

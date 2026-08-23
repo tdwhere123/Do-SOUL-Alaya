@@ -17,6 +17,10 @@ import {
   OpenSemanticFactorCompositionReceiptSchema,
   OpenSemanticFactorFormationCaptureSchema
 } from "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import { KindConstraintAlignmentReceiptSchema } from
+  "../../../harness/recall/semantic-factors/kind-constraint-alignment-schema.js";
+
+export { KindConstraintAlignmentReceiptSchema };
 
 export const LongMemEvalFieldDiagnosticSchemaShape = {
   evidence_embedding_selection_receipt:
@@ -41,5 +45,7 @@ export const LongMemEvalFieldDiagnosticSchemaShape = {
   open_semantic_factor_composition:
     OpenSemanticFactorCompositionReceiptSchema.nullable().optional(),
   open_semantic_factor_activation:
-    OpenSemanticFactorActivationReceiptSchema.nullable().optional()
+    OpenSemanticFactorActivationReceiptSchema.nullable().optional(),
+  kind_constraint_alignment:
+    KindConstraintAlignmentReceiptSchema.nullable().optional()
 } as const;
