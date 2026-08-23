@@ -85,7 +85,9 @@ describe("same-root continuation issuance", () => {
       "--extraction-target-selection", "/target-selection.json"
     ], {
       inspect: vi.fn(async () => scenario.inspection),
-      readLedger: () => scenario.predecessorLedger,
+      readLedger: (input) => input.lineageDigest === scenario.predecessorReceipt.lineage_digest
+        ? scenario.predecessorLedger
+        : undefined,
       readPredecessorAuthority: () => scenario.predecessorReceipt,
       readSettledLedger: () => scenario.predecessorLedger,
       readTargetSelection: () => scenario.predecessorSelection,
@@ -103,6 +105,64 @@ describe("same-root continuation issuance", () => {
         continuation: expect.objectContaining({ mode: "output_token_cap_renewal" })
       })
     );
+  });
+
+  it("chains a second output-token-cap renewal while the ancestor ledger remains", async () => {
+    const first = createAuthorityRenewalScenario();
+    persistScenario(first);
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const outputPath = join(first.cacheRoot, "..", "renewed-2048.json");
+    const exitCode = await runAuthorizeExtractionCommand([
+      "--variant", "s", "--offset", "0", "--limit", "100",
+      "--extraction-cache-root", first.cacheRoot,
+      "--extraction-action", "fill",
+      "--extraction-receipt-out", outputPath,
+      "--extraction-output-token-cap", "2048",
+      "--extraction-output-token-field", "max_tokens",
+      "--extraction-input-price-usd-per-million", "1",
+      "--extraction-output-price-usd-per-million", "2",
+      "--extraction-max-input-tokens", "300",
+      "--extraction-disk-floor-bytes", "0",
+      "--extraction-predecessor-authority", first.outputPath,
+      "--extraction-target-selection", "/target-selection.json"
+    ], {
+      inspect: vi.fn(async () => first.inspection),
+      readTargetSelection: () => first.successorSelection,
+      assertTargetSelection: () => undefined,
+      assertTargetSelectionWindow: () => undefined
+    });
+    expect(exitCode).toBe(0);
+    const receipt = readExtractionAuthorityReceipt(outputPath);
+    expect(receipt.limits.max_output_tokens).toBe(2_048);
+    expect(receipt.continuation).toMatchObject({ mode: "output_token_cap_renewal" });
+  });
+
+  it("rejects re-issuing an already-forked renewal lineage", async () => {
+    const scenario = createAuthorityRenewalScenario();
+    persistScenario(scenario);
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const exitCode = await runAuthorizeExtractionCommand([
+      "--variant", "s", "--offset", "0", "--limit", "100",
+      "--extraction-cache-root", scenario.cacheRoot,
+      "--extraction-action", "fill",
+      "--extraction-receipt-out", join(scenario.cacheRoot, "..", "renewed-again.json"),
+      "--extraction-output-token-cap", "1024",
+      "--extraction-output-token-field", "max_tokens",
+      "--extraction-input-price-usd-per-million", "1",
+      "--extraction-output-price-usd-per-million", "2",
+      "--extraction-max-input-tokens", "300",
+      "--extraction-disk-floor-bytes", "0",
+      "--extraction-predecessor-authority", "/predecessor.json",
+      "--extraction-target-selection", "/target-selection.json"
+    ], {
+      inspect: vi.fn(async () => scenario.inspection),
+      readPredecessorAuthority: () => scenario.predecessorReceipt,
+      readSettledLedger: () => scenario.predecessorLedger,
+      readTargetSelection: () => scenario.predecessorSelection,
+      assertTargetSelection: () => undefined,
+      assertTargetSelectionWindow: () => undefined
+    });
+    expect(exitCode).toBe(2);
   });
 
   it("rejects live ledger or manifest drift before creating durable child state", () => {

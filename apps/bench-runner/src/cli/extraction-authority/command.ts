@@ -36,8 +36,6 @@ import {
   prepareAuthorityContinuation,
   type PreparedAuthorityContinuation
 } from "./continuation.js";
-import { sameRootContinuationMode } from
-  "../../bench/extraction/authority/continuation/contract.js";
 import { continuationPredecessorNewSuccessfulKeys } from
   "../../bench/extraction/authority/continuation/predecessor-state.js";
 import {
@@ -114,11 +112,9 @@ function finishAuthorizedReceipt(input: {
     targetSelection,
     dependencies: input.deps
   });
-  if (continuation !== undefined && input.ledger !== undefined &&
-      (sameRootContinuationMode(continuation.evidence) !== "output_token_cap_renewal" ||
-       input.ledger.lineageDigest !== continuation.predecessor.lineage_digest)) {
-    throw new Error("same-root continuation successor lineage already exists");
-  }
+  assertSuccessorLineageAvailable(
+    input.cacheRoot, input.inspection.observation, continuation, input.deps
+  );
   return Object.freeze({
     cacheRoot: input.cacheRoot,
     outputPath: input.authority.outputPath,
@@ -131,6 +127,29 @@ function finishAuthorizedReceipt(input: {
     ),
     ...(continuation === undefined ? {} : { continuation })
   });
+}
+
+function assertSuccessorLineageAvailable(
+  cacheRoot: string,
+  observation: ExtractionAuthorityInspection["observation"],
+  continuation: PreparedAuthorityContinuation | undefined,
+  deps: AuthorizeExtractionDependencies
+): void {
+  if (continuation === undefined) return;
+  // Successor lineage includes the continuation; the observation-only ledger is the ancestor.
+  const successorLedger = (deps.readLedger ?? readExtractionAttemptLedger)({
+    cacheRoot,
+    lineageDigest: computeExtractionAuthorityLineageDigest(
+      observation, continuation.evidence
+    ),
+    cacheIdentity: {
+      model: observation.extraction.model,
+      requestProfile: observation.extraction.requestProfile
+    }
+  });
+  if (successorLedger !== undefined) {
+    throw new Error("same-root continuation successor lineage already exists");
+  }
 }
 
 function readTargetSelection(
