@@ -173,6 +173,7 @@ function buildObservationCompletenessLookup(
     : "bounded_candidate_prefix";
 }
 
+// Shared by the live prefix slice and G18 audit ranks; not an admission or fusion order.
 export function sortLexicalEvidenceEmbeddingCandidates(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
   queryText: string

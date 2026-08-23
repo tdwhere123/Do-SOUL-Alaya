@@ -1,20 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { selectLexicalEvidenceEmbeddingPrefix } from
+  "../../../embedding-recall/evidence/evidence-candidate-scoring.js";
 import {
-  EVIDENCE_CANDIDATE_EMBEDDING_TOP_N,
-  selectLexicalEvidenceEmbeddingPrefix,
-  scoreTransientEvidenceCandidates
-} from "../../../embedding-recall/evidence/evidence-candidate-scoring.js";
-import {
+  EVIDENCE_LEXICAL_PREFIX_ELIGIBILITY_OPERATOR_ID,
   auditEvidencePrefixEligibility,
   type EvidencePrefixEligibilityLimit,
   type EvidencePrefixEligibilityReceipt
 } from "../../../embedding-recall/evidence/prefix-eligibility.js";
-import type { EvidenceEmbeddingCandidate } from "../../../embedding-recall/types.js";
+import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../../../embedding-recall/constants.js";
+import type {
+  EvidenceCandidateScoringReceipt,
+  EvidenceEmbeddingCandidate
+} from "../../../embedding-recall/types.js";
 import { compareText } from "../../../shared/compare-text.js";
-import { createProvider } from "../embedding-recall-test-helpers.js";
-import { EvidenceDocumentEmbeddingEngine } from
-  "../../../embedding-recall/evidence/evidence-document-embedding-engine.js";
-import { QueryEmbeddingEngine } from "../../../embedding-recall/query-embedding-engine.js";
 
 const QUERY_TEXT = "kubernetes staging pipeline checklist";
 const POOL_SIZE = 40;
@@ -22,40 +20,32 @@ const POOL_SIZE = 40;
 describe("evidence prefix eligibility audit", () => {
   it("marks ranks 17-32 eligible at 32 only and rank 33+ only at full", () => {
     const candidates = buildSameContentPool();
-    const receipts = auditEvidencePrefixEligibility(candidates, QUERY_TEXT);
+    const audit = auditEvidencePrefixEligibility(candidates, QUERY_TEXT);
+    const receipts = audit.receipts;
 
-    for (const receipt of receipts) {
-      expect(receipt.observation_completeness).toBe(
-        receipt.eligible ? "complete" : "bounded_candidate_prefix"
-      );
-    }
+    expect(audit).toMatchObject({
+      schema_version: 1,
+      operator_id: EVIDENCE_LEXICAL_PREFIX_ELIGIBILITY_OPERATOR_ID,
+      status: "returned",
+      pool_size: POOL_SIZE
+    });
     expect(eligibleKeySet(receipts, 16)).toEqual(new Set(prefixKeys(candidates, 16)));
     expect(eligibleKeySet(receipts, 32)).toEqual(new Set(prefixKeys(candidates, 32)));
     expect(eligibleKeySet(receipts, "full")).toEqual(
       new Set(candidates.map((candidate) => candidate.candidateKey))
     );
-
-    expect(eligibility(receipts, "memory:15", 16)).toEqual({
-      eligible: true, observation_completeness: "complete", lexical_rank: 16
-    });
-    expect(eligibility(receipts, "memory:16", 16)).toEqual({
-      eligible: false, observation_completeness: "bounded_candidate_prefix", lexical_rank: 17
-    });
-    expect(eligibility(receipts, "memory:16", 32)).toEqual({
-      eligible: true, observation_completeness: "complete", lexical_rank: 17
-    });
-    expect(eligibility(receipts, "memory:31", 32)).toEqual({
-      eligible: true, observation_completeness: "complete", lexical_rank: 32
-    });
-    expect(eligibility(receipts, "memory:32", 16)).toEqual({
-      eligible: false, observation_completeness: "bounded_candidate_prefix", lexical_rank: 33
-    });
-    expect(eligibility(receipts, "memory:32", 32)).toEqual({
-      eligible: false, observation_completeness: "bounded_candidate_prefix", lexical_rank: 33
-    });
-    expect(eligibility(receipts, "memory:32", "full")).toEqual({
-      eligible: true, observation_completeness: "complete", lexical_rank: 33
-    });
+    expect(eligibility(receipts, "memory:15", 16)).toEqual({ eligible: true, lexical_rank: 16 });
+    expect(eligibility(receipts, "memory:16", 16)).toEqual({ eligible: false, lexical_rank: 17 });
+    expect(eligibility(receipts, "memory:16", 32)).toEqual({ eligible: true, lexical_rank: 17 });
+    expect(eligibility(receipts, "memory:31", 32)).toEqual({ eligible: true, lexical_rank: 32 });
+    expect(eligibility(receipts, "memory:32", 16)).toEqual({ eligible: false, lexical_rank: 33 });
+    expect(eligibility(receipts, "memory:32", 32)).toEqual({ eligible: false, lexical_rank: 33 });
+    expect(eligibility(receipts, "memory:32", "full")).toEqual({ eligible: true, lexical_rank: 33 });
+    expect(receiptAt(receipts, "memory:16", 16).live_observation_completeness)
+      .toBe("bounded_candidate_prefix");
+    expect(receiptAt(receipts, "memory:16", 32).live_observation_completeness).toBe("not_observed");
+    expect(receiptAt(receipts, "memory:32", "full").live_observation_completeness)
+      .toBe("not_observed");
   });
 
   it("assigns lexical_rank with the selectLexicalEvidenceEmbeddingPrefix compareText chain", () => {
@@ -69,7 +59,7 @@ describe("evidence prefix eligibility audit", () => {
       compareText(left.evidenceObjectId, right.evidenceObjectId) ||
       compareText(left.documentIdentity, right.documentIdentity)
     );
-    const receipts = auditEvidencePrefixEligibility(candidates, QUERY_TEXT);
+    const receipts = auditEvidencePrefixEligibility(candidates, QUERY_TEXT).receipts;
     const rankedKeys = uniqueByRank(receipts).map((receipt) => [
       receipt.candidateKey, receipt.evidenceObjectId, receipt.documentIdentity, receipt.lexical_rank
     ]);
@@ -84,71 +74,60 @@ describe("evidence prefix eligibility audit", () => {
     ));
   });
 
-  it("keeps the live scoring path prefixed at 32", async () => {
-    expect(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N).toBe(32);
-    const candidates = buildSameContentPool();
-    expect(selectLexicalEvidenceEmbeddingPrefix(candidates, QUERY_TEXT)).toHaveLength(32);
-
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
-      texts.map(() => new Float32Array([1, 0]))
-    );
-    const provider = createProvider({ embedTexts });
-    const result = await scoreTransientEvidenceCandidates({
-      workspaceId: "workspace-1",
-      runId: null,
-      queryText: QUERY_TEXT,
-      preparedQuery: null,
-      candidates
-    }, {
-      provider,
-      documentEngine: new EvidenceDocumentEmbeddingEngine(
-        provider,
-        16,
-        undefined,
-        () => "2026-04-23T00:00:00.000Z",
-        () => undefined
-      ),
-      queryEngine: new QueryEmbeddingEngine({
-        provider,
-        generateQueryId: () => "query-prefix-eligibility-1",
-        queryTimeoutMs: 1000,
-        queryEmbeddingCacheSize: 8
-      }),
-      queryTimeoutMs: 1000,
-      warn: () => undefined
+  it("returns not_applicable for an empty pool", () => {
+    expect(auditEvidencePrefixEligibility(Object.freeze([]), QUERY_TEXT)).toEqual({
+      schema_version: 1,
+      operator_id: EVIDENCE_LEXICAL_PREFIX_ELIGIBILITY_OPERATOR_ID,
+      status: "not_applicable",
+      pool_size: 0,
+      receipts: []
     });
-
-    expect(result.scoredCount).toBe(32);
-    expect(result.activationsByCandidateKey.size).toBe(32);
   });
 
-  it("does not treat a prefix-ineligible cosine-0 gold as a semantic gap", () => {
+  it("copies live completeness only from a prefix-scoped scored witness", () => {
     const candidates = buildSameContentPool();
-    const receipts = auditEvidencePrefixEligibility(
+    const gistBounded = candidates.find((candidate) => candidate.candidateKey === "memory:00")!;
+    const scoredComplete = candidates.find((candidate) => candidate.candidateKey === "memory:15")!;
+    const ineligibleGold = candidates.find((candidate) => candidate.candidateKey === "memory:32")!;
+    const audit = auditEvidencePrefixEligibility(
       candidates,
       QUERY_TEXT,
-      new Map([["memory:00", 0], ["memory:32", 0]])
+      new Map([[32, new Map([
+        [gistBounded.candidateKey, scoredReceipt(gistBounded, "bounded_candidate_prefix")],
+        [scoredComplete.candidateKey, scoredReceipt(scoredComplete, "complete")]
+      ])]])
     );
-    const ineligibleGold = receiptAt(receipts, "memory:32", 32);
-    const eligibleGold = receiptAt(receipts, "memory:00", 32);
-    const fullIneligibleGold = receiptAt(receipts, "memory:32", "full");
+    const receipts = audit.receipts;
+    const boundedAt32 = receiptAt(receipts, gistBounded.candidateKey, 32);
+    const completeAt32 = receiptAt(receipts, scoredComplete.candidateKey, 32);
+    const eligibleUnscoredAt16 = receiptAt(receipts, gistBounded.candidateKey, 16);
+    const rank33AtFull = receiptAt(receipts, ineligibleGold.candidateKey, "full");
+    const rank33At32 = receiptAt(receipts, ineligibleGold.candidateKey, 32);
 
-    expect(ineligibleGold).toMatchObject({
+    expect(boundedAt32).toMatchObject({
+      schema_version: 1,
+      operator_id: EVIDENCE_LEXICAL_PREFIX_ELIGIBILITY_OPERATOR_ID,
+      eligible: true,
+      lexical_rank: 1,
+      live_observation_completeness: "bounded_candidate_prefix"
+    });
+    expect(completeAt32.live_observation_completeness).toBe("complete");
+    expect(eligibleUnscoredAt16).toMatchObject({
+      eligible: true,
+      live_observation_completeness: "not_observed"
+    });
+    expect(rank33AtFull).toMatchObject({
+      eligible: true,
+      lexical_rank: 33,
+      live_observation_completeness: "not_observed"
+    });
+    expect(rank33At32).toMatchObject({
       eligible: false,
-      observation_completeness: "bounded_candidate_prefix",
-      lexical_rank: 33
+      live_observation_completeness: "bounded_candidate_prefix"
     });
-    expect(ineligibleGold).not.toHaveProperty("degenerate_embedded_text");
-    expect(eligibleGold).toMatchObject({
-      eligible: true,
-      observation_completeness: "complete",
-      degenerate_embedded_text: true
-    });
-    expect(fullIneligibleGold).toMatchObject({
-      eligible: true,
-      observation_completeness: "complete",
-      degenerate_embedded_text: true
-    });
+    expect(boundedAt32).not.toHaveProperty("observation_completeness");
+    expect(rank33AtFull).not.toHaveProperty("degenerate_embedded_text");
+    expect(rank33At32).not.toHaveProperty("degenerate_embedded_text");
   });
 });
 
@@ -175,6 +154,27 @@ function freezeCandidate(
   });
 }
 
+function scoredReceipt(
+  candidate: Readonly<EvidenceEmbeddingCandidate>,
+  observationCompleteness: EvidenceCandidateScoringReceipt["observation_completeness"]
+): Readonly<EvidenceCandidateScoringReceipt> {
+  const winner = Object.freeze({
+    score: 0.4,
+    evidenceObjectId: candidate.evidenceObjectId,
+    documentIdentity: candidate.documentIdentity
+  });
+  return Object.freeze({
+    schema_version: 1,
+    operator_id: EVIDENCE_DOCUMENT_MAX_OPERATOR_ID,
+    state: "observed",
+    score: winner.score,
+    winner,
+    observations: Object.freeze([winner]),
+    observation_completeness: observationCompleteness,
+    missing_channel_policy: "no_op"
+  });
+}
+
 function prefixKeys(
   candidates: readonly EvidenceEmbeddingCandidate[],
   limit: number
@@ -197,16 +197,9 @@ function eligibility(
   receipts: readonly Readonly<EvidencePrefixEligibilityReceipt>[],
   candidateKey: string,
   prefix: EvidencePrefixEligibilityLimit
-): Pick<
-  EvidencePrefixEligibilityReceipt,
-  "eligible" | "observation_completeness" | "lexical_rank"
-> {
+): Pick<EvidencePrefixEligibilityReceipt, "eligible" | "lexical_rank"> {
   const receipt = receiptAt(receipts, candidateKey, prefix);
-  return {
-    eligible: receipt.eligible,
-    observation_completeness: receipt.observation_completeness,
-    lexical_rank: receipt.lexical_rank
-  };
+  return { eligible: receipt.eligible, lexical_rank: receipt.lexical_rank };
 }
 
 function uniqueByRank(

@@ -14,6 +14,7 @@ const QUERY_TEXT = "kubernetes staging pipeline checklist";
 
 describe("lexical prefix before evidence candidate embedding", () => {
   it("keeps embedding rank of the retained N identical to scoring those N first", async () => {
+    expect(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N).toBe(32);
     const allCandidates = buildCandidates();
     const lexicalStart = EVIDENCE_CANDIDATE_EMBEDDING_TOP_N + 1;
     expect(allCandidates.slice(0, lexicalStart).every((candidate) =>
