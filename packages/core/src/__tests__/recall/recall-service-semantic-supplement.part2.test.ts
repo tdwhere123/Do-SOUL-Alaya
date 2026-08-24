@@ -181,8 +181,9 @@ it("handles overlapped embedding preparation rejection when vector precheck fail
           taskSurface: createTaskSurface(),
           workspaceId: "workspace-1",
           strategy: "analyze",
-          policyOverride: policy
-        })
+          policyOverride: policy,
+      diagnosticCapture: "answer_features"
+})
       ).rejects.toThrow("unexpected vector precheck failure");
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(hasStoredVectors).toHaveBeenCalled();
@@ -252,7 +253,8 @@ it("uses prepared embedding supplements without the legacy query-embedding port"
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(prepareQuerySupplement).toHaveBeenCalledWith({
@@ -304,7 +306,8 @@ it("merges keyword supplement candidates without duplicating deterministic match
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "build",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(searchByKeyword).toHaveBeenCalledWith("workspace-1", "Implement recall", 5);
@@ -347,7 +350,8 @@ it("uses direct lexical FTS rank as lexical structural evidence", async () => {
     const result = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
-      strategy: "chat"
+      strategy: "chat",
+      diagnosticCapture: "answer_features"
     });
 
     const alphaDiagnostic = result.diagnostics?.candidates.find(
@@ -397,7 +401,8 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "chat"
+      strategy: "chat",
+      diagnosticCapture: "answer_features"
     });
 
     const strong = result.diagnostics?.candidates.find(
@@ -451,7 +456,8 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "chat"
+      strategy: "chat",
+      diagnosticCapture: "answer_features"
     });
 
     expect(searchByKeywordField).toHaveBeenCalledWith(

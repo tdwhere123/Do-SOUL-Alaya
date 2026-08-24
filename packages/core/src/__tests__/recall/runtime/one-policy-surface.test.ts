@@ -90,14 +90,16 @@ describe("one policy surface", () => {
     const ordinary = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const selectionBoundaryObserver = vi.fn(() => undefined);
     const captured = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
       strategy: "analyze",
-      selectionBoundaryObserver
+      selectionBoundaryObserver,
+      diagnosticCapture: "answer_features"
     });
 
     expect(ordinary.diagnostics?.answer_shape_plan).toEqual(

@@ -15,7 +15,8 @@ describe("recall tier window pagination", () => {
   it("keeps the cursor window aligned to the 102400-memory hard cap", () => {
     expect(MAX_RECALL_TIER_MEMORIES).toBe(102_400);
     expect(MAX_CURSOR_RECALL_TIER_PAGES).toBe(205);
-    expect(resolveRecallTierWindowPageLimit(100_000)).toBe(500);
+    expect(resolveRecallTierWindowPageLimit(0)).toBe(102_400);
+    expect(resolveRecallTierWindowPageLimit(100_000)).toBe(2_400);
     expect(resolveRecallTierWindowPageLimit(102_000)).toBe(400);
     expect(resolveRecallTierWindowPageLimit(102_400)).toBeNull();
   });

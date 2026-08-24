@@ -238,14 +238,16 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
       workspaceId: WS,
       runId: RUN,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
     const emptyTable = await withoutVectors.recallService.recall({
       taskSurface: createTaskSurface(QUERY_TEXT),
       workspaceId: WS,
       runId: RUN,
       strategy: "analyze",
-      policyOverride: embeddingEnabledPolicy(withoutVectors.recallService)
+      policyOverride: embeddingEnabledPolicy(withoutVectors.recallService),
+      diagnosticCapture: "answer_features"
     });
 
     expect(live.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
@@ -278,7 +280,8 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
       workspaceId: WS,
       runId: RUN,
       strategy: "analyze",
-      policyOverride: embeddingEnabledPolicy(fixture.recallService)
+      policyOverride: embeddingEnabledPolicy(fixture.recallService),
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.diagnostics?.provider_degradation_reason).toBe(

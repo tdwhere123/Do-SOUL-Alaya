@@ -79,7 +79,8 @@ it("adds FTS supplement candidates and treats direct FTS rank as lexical structu
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(searchByKeyword).toHaveBeenCalledWith(
@@ -118,7 +119,8 @@ it("uses token-estimator hints per recall call without leaking global state", as
     const noHint = await service.recall(baseParams);
     const cl100k = await service.recall({
       ...baseParams,
-      hostContext: { tokenizer_hint: "cl100k" }
+      hostContext: { tokenizer_hint: "cl100k" },
+      diagnosticCapture: "answer_features"
     });
     const noHintAgain = await service.recall(baseParams);
 
@@ -156,7 +158,8 @@ it("records valid per-domain activation weight overrides in score factors", asyn
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates[0]?.score_factors?.resolved_activation_weights).toMatchObject({
@@ -192,14 +195,16 @@ it("keeps additive weight overrides diagnostic while fusion owns public relevanc
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: basePolicy
+      policyOverride: basePolicy,
+      diagnosticCapture: "answer_features"
     });
     const overrideResult = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: override
+      policyOverride: override,
+      diagnosticCapture: "answer_features"
     });
 
     expect(overrideResult.candidates[0]?.score_factors?.weighted_confidence ?? 0)
@@ -249,14 +254,16 @@ it("dynamically transfers base prior weight to strong query evidence", async () 
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: noTransferPolicy
+      policyOverride: noTransferPolicy,
+      diagnosticCapture: "answer_features"
     });
     const withTransfer = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build",
-      policyOverride: basePolicy
+      policyOverride: basePolicy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(withoutTransfer.candidates[0]?.object_id).toBe("query-match");
@@ -293,7 +300,8 @@ it("dynamically transfers base prior weight to strong query evidence", async () 
       taskSurface,
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     const warm = result.candidates.find((candidate) => candidate.object_id === "warm-twin");
     const cold = result.candidates.find((candidate) => candidate.object_id === "cold-twin");
@@ -320,7 +328,8 @@ it("keeps weak or absent evidence below false-confident recall confidence", asyn
       taskSurface: createTaskSurface("missing answer query"),
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     const noEvidence = noEvidenceResult.candidates.find((candidate) => candidate.object_id === "no-evidence");
 
@@ -349,7 +358,8 @@ it("keeps weak or absent evidence below false-confident recall confidence", asyn
       taskSurface: createTaskSurface("missing answer query"),
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     const weakLexical = result.candidates.find((candidate) => candidate.object_id === "weak-lexical");
@@ -401,7 +411,8 @@ it("keeps off-topic path-plasticity candidates below false-confident recall conf
       taskSurface: createTaskSurface("missing answer query"),
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "chat"
+      strategy: "chat",
+      diagnosticCapture: "answer_features"
     });
 
     const offTopic = result.candidates.find((candidate) => candidate.object_id === "off-topic-path");
@@ -450,7 +461,8 @@ it("keeps weak conflicted contradiction losers below false-confident recall conf
       taskSurface: createTaskSurface("weak contradicted procedure"),
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const loser = result.candidates.find((candidate) => candidate.object_id === "losing-claim");
@@ -477,7 +489,8 @@ it("keeps strong lexical evidence diagnostic while fusion owns public relevance"
       taskSurface: createTaskSurface("Direct answer evidence"),
       workspaceId: "workspace-1",
       runId: "run-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     const strong = result.candidates.find((candidate) => candidate.object_id === "strong-evidence");

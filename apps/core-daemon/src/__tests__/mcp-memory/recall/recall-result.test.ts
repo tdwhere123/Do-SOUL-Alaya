@@ -11,7 +11,8 @@ import {
 import {
   buildMemorySearchResult,
   buildRecallStrategyMix,
-  resolveMcpDegradationReason
+  resolveMcpDegradationReason,
+  selectRecallMcpHonestyDiagnostics
 } from "../../../mcp-memory/recall/recall-result.js";
 
 const GOLDEN_MCP_RECALL_RESULT = Object.freeze({
@@ -326,6 +327,34 @@ describe("resolveMcpDegradationReason", () => {
     }
   });
 });
+
+describe("selectRecallMcpHonestyDiagnostics", () => {
+  it("keeps embedding honesty fields and drops candidate dumps", () => {
+    const honesty = selectRecallMcpHonestyDiagnostics({
+      embedding_supplement_status: "requested",
+      embedding_provider_status: "provider_ready",
+      provider_degradation_reason: null,
+      candidates: [{ candidate_key: "should-not-leak" }],
+      fusion_breakdown: [{ candidate_key: "should-not-leak" }]
+    } as Parameters<typeof selectRecallMcpHonestyDiagnostics>[0] & {
+      readonly candidates: readonly unknown[];
+      readonly fusion_breakdown: readonly unknown[];
+    });
+    expect(honesty).toEqual({
+      embedding_supplement_status: "requested",
+      embedding_provider_status: "provider_ready",
+      provider_degradation_reason: null
+    });
+    expect(honesty).not.toHaveProperty("candidates");
+    expect(honesty).not.toHaveProperty("fusion_breakdown");
+  });
+
+  it("returns null when recall diagnostics are absent", () => {
+    expect(selectRecallMcpHonestyDiagnostics(undefined)).toBeNull();
+    expect(selectRecallMcpHonestyDiagnostics(null)).toBeNull();
+  });
+});
+
 
 function createPolicy(): RecallPolicy {
   return {

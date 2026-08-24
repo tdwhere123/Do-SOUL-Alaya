@@ -82,8 +82,9 @@ it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion"
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const victim = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
       expect(victim).toBeDefined();
       return {
@@ -165,8 +166,9 @@ it("demotes a low-base victim to a floor residual without erasing it from the ca
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure overview" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const victim = result.diagnostics?.candidates.find((c) => c.object_id === "low-base-victim");
       return {
         fusedScore: victim?.fused_score ?? -1,
@@ -247,8 +249,9 @@ it("does not let a weak attention_only negative path move rankings", async () =>
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const target = result.diagnostics?.candidates.find((c) => c.object_id === "weak-target");
       expect(target).toBeDefined();
       return target?.fused_score ?? -1;

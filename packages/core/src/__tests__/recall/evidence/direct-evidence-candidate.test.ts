@@ -209,7 +209,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates.filter((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
@@ -246,7 +247,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates).toEqual([]);
   });
@@ -279,7 +281,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates).toEqual([]);
   });
@@ -310,7 +313,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.find((item) =>
@@ -344,7 +348,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.find((item) =>
@@ -375,7 +380,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.some((item) =>
@@ -418,7 +424,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toEqual([]);
@@ -450,7 +457,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.some((item) =>
@@ -488,7 +496,8 @@ describe("direct evidence recall candidates", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toEqual([]);

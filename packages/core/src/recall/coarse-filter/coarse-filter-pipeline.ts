@@ -11,17 +11,20 @@ import { addContentDerivedExpansionCandidates } from "../expansion/content-expan
 import { addSourceProximityCandidates } from "../expansion/source-proximity-expansion.js";
 import {
   addGraphExpansionCandidates,
-  collectEntityDerivedSeeds
+  admitLoadedEntityDerivedSeeds,
+  loadEntityDerivedSeedHits
 } from "../expansion/structural-expansion.js";
 import {
   addPathExpansionCandidates,
   collectNegativePathSuppressions
 } from "../expansion/path-expansion.js";
+import { memoizePathFindByAnchors } from "../expansion/path-find-by-anchors-cache.js";
 import {
   addSemanticSupplementCandidates
 } from "./coarse-filter-semantic.js";
 import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
+  queryHasObjectProbeSignal,
   resolveSourceProximityAdmissionLimit,
   scoreObjectProbeMatch,
   selectExpansionSeedDrafts,
@@ -35,7 +38,8 @@ import type { RecallGraphExpansionDiagnostics } from "../runtime/recall-service-
 import type { RecallEvidenceProjectionMatchReceipt } from
   "../runtime/recall-service-results.js";
 import {
-  addTemporalWindowCandidates,
+  admitTemporalWindowEntries,
+  loadTemporalWindowEntries,
   type TemporalWindowCandidateBudget
 } from
   "./temporal/temporal-window-candidates.js";
@@ -160,25 +164,46 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
-  await admitSemanticAndContentCandidates(params);
-  const sourceCohortKeys = await admitSourceProximityCandidates(params);
-  const graphExpansionSeedIds = await collectGraphExpansionSeedIds(params);
-  const graphResult = await admitPathAndGraphExpansionCandidates(params, graphExpansionSeedIds);
-  await addTemporalWindowCandidates({
+  const pathExpansionPort = memoizePathFindByAnchors(params.context.dependencies.pathExpansionPort);
+  const entityHitsPromise = loadEntityDerivedSeedHits({
+    workspaceId: params.workspaceId,
+    queryEntityExtraction: params.queryEntityExtraction,
+    byId: params.byId,
+    memoryRepo: params.context.dependencies.memoryRepo,
+    warn: params.context.warn,
+    entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
+    entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
+    entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
+    entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
+    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
+    degradationReasons: params.context.degradationReasons
+  });
+  const temporalEntriesPromise = loadTemporalWindowEntries({
     workspaceId: params.workspaceId,
     tier: params.tier,
     queryProbes: params.queryProbes,
     referenceTime: params.referenceTime,
     budget: params.temporalCandidateBudget,
-    memoryRepo: params.context.dependencies.memoryRepo,
-    addCandidate: params.state.addCandidate
+    memoryRepo: params.context.dependencies.memoryRepo
   });
+  await admitSemanticAndContentCandidates(params);
+  const sourceCohortKeys = await admitSourceProximityCandidates(params);
+  const graphExpansionSeedIds = admitPrefetchedEntityGraphSeeds(params, await entityHitsPromise);
+  const graphResult = await admitPathAndGraphExpansionCandidates(
+    params,
+    graphExpansionSeedIds,
+    pathExpansionPort
+  );
+  admitTemporalWindowEntries({
+    budget: params.temporalCandidateBudget,
+    addCandidate: params.state.addCandidate
+  }, await temporalEntriesPromise);
   await collectNegativePathSuppressions({
     workspaceId: params.workspaceId,
     byId: params.byId,
     drafts: params.state.drafts,
     suppressionScores: params.state.pathSuppressionScores,
-    pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
@@ -235,6 +260,9 @@ function addObjectProbeCandidates(
   addCandidate: AddCoarseCandidate,
   onTruncated: () => void
 ): void {
+  if (!queryHasObjectProbeSignal(queryProbes)) {
+    return;
+  }
   const scoredCandidates = tierMemories
     .map((entry) => Object.freeze({ entry, score: scoreObjectProbeMatch(entry, queryProbes) }))
     .filter((candidate) => candidate.score > 0);
@@ -300,10 +328,14 @@ async function admitSourceProximityCandidates(
   });
 }
 
-async function collectGraphExpansionSeedIds(
-  params: Parameters<typeof admitDynamicCoarseCandidates>[0]
-): Promise<readonly string[]> {
-  const entityDerivedSeeds = await collectEntityDerivedSeeds({
+function admitPrefetchedEntityGraphSeeds(
+  params: Parameters<typeof admitDynamicCoarseCandidates>[0],
+  loaded: Awaited<ReturnType<typeof loadEntityDerivedSeedHits>>
+): readonly string[] {
+  if (loaded === null) {
+    return [];
+  }
+  const entityDerivedSeeds = admitLoadedEntityDerivedSeeds({
     workspaceId: params.workspaceId,
     queryEntityExtraction: params.queryEntityExtraction,
     byId: params.byId,
@@ -317,7 +349,7 @@ async function collectGraphExpansionSeedIds(
     entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
     entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
     degradationReasons: params.context.degradationReasons
-  });
+  }, loaded);
   return entityDerivedSeeds
     .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)
     .map((seed) => seed.memoryId);
@@ -325,7 +357,8 @@ async function collectGraphExpansionSeedIds(
 
 async function admitPathAndGraphExpansionCandidates(
   params: Parameters<typeof admitDynamicCoarseCandidates>[0],
-  graphExpansionSeedIds: readonly string[]
+  graphExpansionSeedIds: readonly string[],
+  pathExpansionPort: ReturnType<typeof memoizePathFindByAnchors>
 ): Promise<Readonly<{
   readonly diagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
@@ -339,12 +372,12 @@ async function admitPathAndGraphExpansionCandidates(
     queryProbes: params.queryProbes,
     addCandidate: params.state.addCandidate,
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
-    pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
   });
-  if (params.context.dependencies.pathExpansionPort === undefined) {
+  if (pathExpansionPort === undefined) {
     return Object.freeze({
       diagnostics: createEmptyGraphExpansionDiagnostics(),
       candidateSources: new Map()
@@ -355,7 +388,7 @@ async function admitPathAndGraphExpansionCandidates(
     byId: params.byId,
     drafts: params.state.drafts,
     addCandidate: params.state.addCandidate,
-    pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
     extraSeedMemoryIds: graphExpansionSeedIds,
     draftSeedIds: prePathGraphSeedIds,

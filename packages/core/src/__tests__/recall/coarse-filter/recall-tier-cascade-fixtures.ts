@@ -227,7 +227,8 @@ function buildPolicy(service: RecallService, maxEntries: number): RecallPolicy {
 
 export async function recallWith(
   params: TierCascadeFixtureParams,
-  maxEntries = 10
+  maxEntries = 10,
+  diagnosticCapture?: "answer_features" | "packet_trace"
 ): Promise<TierCascadeRecallFixtureResult> {
   const { dependencies, findByWorkspaceIdSpy, warnSpy } = createDependencies(params);
   const service = new RecallService(dependencies);
@@ -235,7 +236,8 @@ export async function recallWith(
     taskSurface: createTaskSurface(),
     workspaceId: "workspace-1",
     strategy: "chat",
-    policyOverride: buildPolicy(service, maxEntries)
+    policyOverride: buildPolicy(service, maxEntries),
+    ...(diagnosticCapture === undefined ? {} : { diagnosticCapture })
   });
   return { result, findByWorkspaceIdSpy, warnSpy };
 }

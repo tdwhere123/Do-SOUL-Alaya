@@ -41,7 +41,7 @@ type EntitySeedLookup = Readonly<{
   readonly limit: number;
 }>;
 
-export async function collectEntityDerivedSeeds(params: Readonly<{
+type CollectEntityDerivedSeedsParams = Readonly<{
   readonly workspaceId: string;
   readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
@@ -55,28 +55,43 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly entitySeedTotalAdmitCap: number;
   readonly entitySeedMinSurfaceLength: number;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
-}>): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
+}>;
+
+export type LoadedEntityDerivedSeeds = Readonly<{
+  readonly lookups: readonly EntitySeedLookup[];
+  readonly hitBatches: readonly (readonly { readonly object_id: string; readonly normalized_rank: number }[])[];
+}>;
+
+export async function loadEntityDerivedSeedHits(
+  params: Omit<CollectEntityDerivedSeedsParams, "addCandidate" | "lexicalFtsRanks">
+): Promise<LoadedEntityDerivedSeeds | null> {
   if (shouldSkipEntitySeedCollection(params)) {
-    return [];
+    return null;
   }
   const entities = params.queryEntityExtraction.candidates.slice(
     0,
     params.entityExtractionMaxEntities
   );
   if (entities.length === 0) {
-    return [];
+    return null;
   }
-  const seedConfidenceById = new Map<string, number>();
-  const candidateIds = [...params.byId.keys()];
   const lookups = buildEntitySeedLookups(params, entities);
-  const hitBatches = await loadEntitySeedBatchesForCollection(params, lookups, candidateIds);
+  const hitBatches = await loadEntitySeedBatchesForCollection(params, lookups, [...params.byId.keys()]);
+  return Object.freeze({ lookups, hitBatches });
+}
+
+export function admitLoadedEntityDerivedSeeds(
+  params: CollectEntityDerivedSeedsParams,
+  loaded: LoadedEntityDerivedSeeds
+): readonly Readonly<{ memoryId: string; entityConfidence: number }>[] {
+  const seedConfidenceById = new Map<string, number>();
   let admittedTotal = 0;
-  for (let index = 0; index < lookups.length; index += 1) {
+  for (let index = 0; index < loaded.lookups.length; index += 1) {
     if (admittedTotal >= params.entitySeedTotalAdmitCap) {
       break;
     }
-    const lookup = lookups[index];
-    const hits = hitBatches[index] ?? [];
+    const lookup = loaded.lookups[index];
+    const hits = loaded.hitBatches[index] ?? [];
     if (lookup === undefined) break;
     admittedTotal = admitEntitySeedHits(
       params,
@@ -87,6 +102,16 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
     );
   }
   return buildEntitySeedResults(seedConfidenceById);
+}
+
+export async function collectEntityDerivedSeeds(
+  params: CollectEntityDerivedSeedsParams
+): Promise<readonly Readonly<{ memoryId: string; entityConfidence: number }>[]> {
+  const loaded = await loadEntityDerivedSeedHits(params);
+  if (loaded === null) {
+    return [];
+  }
+  return admitLoadedEntityDerivedSeeds(params, loaded);
 }
 
 export async function addGraphExpansionCandidates(params: Readonly<{

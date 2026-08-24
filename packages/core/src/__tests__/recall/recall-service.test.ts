@@ -95,7 +95,8 @@ it("merges adopted global-source candidates through optional recall ports and ex
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(globalRecall).toHaveBeenCalledWith({
@@ -230,7 +231,8 @@ it("delivers one object for matching local and global ids while preserving prove
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const collidingCandidates = result.candidates.filter(
@@ -357,7 +359,8 @@ it("applies embedding hits to the local candidate when a global candidate shares
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(querySupplementIfReady).toHaveBeenCalled();
@@ -412,8 +415,9 @@ it("does not record global recall classifications when recall completion fails",
       service.recall({
         taskSurface: createTaskSurface(),
         workspaceId: "workspace-1",
-        strategy: "analyze"
-      })
+        strategy: "analyze",
+      diagnosticCapture: "answer_features"
+})
     ).rejects.toThrow("completion append failed");
     expect(recordClassifications).not.toHaveBeenCalled();
   });
@@ -460,7 +464,8 @@ it("does not fail recall when optional global recall cache recording throws and 
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("global-accepted");

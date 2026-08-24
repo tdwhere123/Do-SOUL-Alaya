@@ -22,27 +22,46 @@ type ResolvedSliceFloodAxis = Readonly<{
 
 const EMPTY_KEYS: readonly SelectedSliceKeyV2[] = Object.freeze([]);
 
+export const PASS_THROUGH_SLICE_COMPATIBILITY: Readonly<SliceCompatibilityV2> = Object.freeze({
+  decision: "pass_through",
+  reason: "no_query_key",
+  matches: Object.freeze([])
+});
+
 export function resolveSliceAxis(
   entry: Readonly<MemoryEntry>,
   supplementaryData: RecallSupplementaryData
 ): ResolvedSliceFloodAxis {
-  const memoryKeys = memorySliceKeys(entry, supplementaryData);
+  return resolveSliceAxisFromKeys(
+    supplementaryData.queryRoutingKeys ?? EMPTY_KEYS,
+    memorySliceKeys(entry, supplementaryData)
+  );
+}
+
+function resolveSliceAxisFromKeys(
+  queryKeys: readonly SelectedSliceKeyV2[],
+  memoryKeys: readonly SelectedSliceKeyV2[]
+): ResolvedSliceFloodAxis {
+  if (queryKeys.length === 0) {
+    return axisFromCompatibility(PASS_THROUGH_SLICE_COMPATIBILITY);
+  }
   return axisFromCompatibility(selectSliceCompatibilityV2({
-    queryKeys: supplementaryData.queryRoutingKeys ?? EMPTY_KEYS,
+    queryKeys,
     sourceKeys: memoryKeys,
     targetKeys: memoryKeys
   }));
 }
 
-function memorySliceKeys(
+export function memorySliceKeys(
   entry: Readonly<MemoryEntry>,
-  supplementaryData: RecallSupplementaryData
+  supplementaryData: RecallSupplementaryData,
+  asOfMs = supplementaryData.queryTimeWindow?.startMs ?? 0
 ): readonly SelectedSliceKeyV2[] {
   return mergeSelectedSliceKeysV2(
     deriveMemorySliceKeysV2({
       workspaceId: entry.workspace_id,
       entry,
-      asOfMs: supplementaryData.queryTimeWindow?.startMs ?? 0
+      asOfMs
     }),
     supplementaryData.routingKeysByOwnerIdentity?.get(
       projectedRoutingKeyOwnerIdentity("memory_entry", entry.object_id)

@@ -17,7 +17,7 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 type EmbeddingPath = "legacy" | "snapshot";
-type DiagnosticCapture = "answer_features" | "packet_trace";
+type DiagnosticCapture = "answer_features" | "packet_trace" | undefined;
 type InvocationSpy = ReturnType<typeof vi.fn>;
 
 type EmbeddingCalls = Readonly<{
@@ -85,6 +85,23 @@ describe("RecallService packet trace integration", () => {
       );
       expectEmbeddingCalls(control.calls, 0);
       expectEmbeddingCalls(traced.calls, 0);
+    }
+  );
+
+  it.each(["legacy", "snapshot"] as const)(
+    "omits per-candidate dumps on the %s path when diagnosticCapture is unset",
+    async (path) => {
+      const production = await runRecall(path, true, undefined);
+      const captured = await runRecall(path, true, "answer_features");
+      expect(production.result.candidates).toEqual(captured.result.candidates);
+      expect(production.result.diagnostics?.candidates).toEqual([]);
+      expect(production.result.diagnostics?.fusion_breakdown).toEqual([]);
+      expect(production.result.diagnostics?.fine_assessment_pruned_candidates).toEqual([]);
+      expect(production.result.diagnostics?.packet_plan_trace).toBeUndefined();
+      expect(captured.result.diagnostics?.candidates.length).toBeGreaterThan(0);
+      expect(captured.result.diagnostics?.fusion_breakdown.length).toBeGreaterThan(0);
+      expect(production.result.diagnostics?.embedding_provider_status)
+        .toBe(captured.result.diagnostics?.embedding_provider_status);
     }
   );
 });

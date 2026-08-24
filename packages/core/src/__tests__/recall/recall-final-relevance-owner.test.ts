@@ -118,8 +118,15 @@ describe("final recall relevance ownership", () => {
       warn: vi.fn()
     });
 
-    expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([COVERAGE_NOVEL_ID, FUSION_WINNER_ID]);
+    expect(
+      assessed.candidates.map((candidate) => candidate.object_id),
+      JSON.stringify(assessed.candidates.map((candidate) => ({
+        id: candidate.object_id,
+        relevance: candidate.relevance_score,
+        fused: assessed.diagnostics.find((row) => row.object_id === candidate.object_id)?.fused_score,
+        embedding: candidate.score_factors?.embedding_similarity
+      })))
+    ).toEqual([COVERAGE_NOVEL_ID, FUSION_WINNER_ID]);
     expect(assessed.candidates.map((candidate) => candidate.relevance_score))
       .toEqual([
         assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score,

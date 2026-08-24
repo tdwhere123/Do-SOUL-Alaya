@@ -15,6 +15,8 @@ import {
   createMemoryEntry,
   recallWith
 } from "./coarse-filter/recall-tier-cascade-fixtures.js";
+import { MAX_RECALL_TIER_MEMORIES } from
+  "../../recall/coarse-filter/pagination/recall-tier-window-pagination.js";
 
 describe("RecallService tier cascade", () => {
   it("keeps the HOT-only fast path output identical when HOT reaches threshold", async () => {
@@ -118,20 +120,11 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(result.candidates.length).toBeGreaterThan(0);
-    expect(findRecallTierWindow).toHaveBeenCalledTimes(2);
-    expect(findRecallTierWindow).toHaveBeenNthCalledWith(1, {
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(1);
+    expect(findRecallTierWindow).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       tier: StorageTier.HOT,
-      limit: 500
-    });
-    expect(findRecallTierWindow).toHaveBeenNthCalledWith(2, {
-      workspaceId: "workspace-1",
-      tier: StorageTier.HOT,
-      limit: 500,
-      cursor: {
-        created_at: hot[499]!.created_at,
-        object_id: hot[499]!.object_id
-      }
+      limit: MAX_RECALL_TIER_MEMORIES
     });
     expect(findByWorkspaceIdSpy).not.toHaveBeenCalled();
   }, 30_000);
@@ -173,7 +166,7 @@ describe("RecallService tier cascade", () => {
   it("uses WARM once and keeps cascade decay in the fusion input diagnostic", async () => {
     const baseline = await recallWith({
       hot: [createMemoryEntry({ object_id: "candidate-0", activation_score: 0.8 })]
-    });
+    }, 10, "answer_features");
     // Assert collectSupplementaryData runs exactly once on the cascade path.
     // The obsolete HOT-only assess used to call the spy MIN_RECALL_RESULTS
     // times, then the cascade-merged assess called it again. The HOT-only
@@ -192,7 +185,7 @@ describe("RecallService tier cascade", () => {
         countInboundSupports: cascadeGraphSpy,
         countInboundEdgesWeighted: cascadeGraphSpy
       }
-    }, 3);
+    }, 3, "answer_features");
 
     expect(warm.findByWorkspaceIdSpy).toHaveBeenCalledTimes(2);
     expect(warm.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(
@@ -225,7 +218,7 @@ describe("RecallService tier cascade", () => {
   it("uses COLD and keeps cascade decay in the fusion input diagnostic", async () => {
     const baseline = await recallWith({
       hot: [createMemoryEntry({ object_id: "candidate", activation_score: 0.8 })]
-    });
+    }, 10, "answer_features");
     const cold = await recallWith({
       cold: [
         createMemoryEntry({
@@ -234,7 +227,7 @@ describe("RecallService tier cascade", () => {
           activation_score: 0.8
         })
       ]
-    });
+    }, 10, "answer_features");
 
     expect(cold.findByWorkspaceIdSpy).toHaveBeenCalledTimes(3);
     expect(cold.findByWorkspaceIdSpy).toHaveBeenNthCalledWith(

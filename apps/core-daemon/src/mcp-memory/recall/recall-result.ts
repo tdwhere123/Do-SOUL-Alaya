@@ -47,6 +47,25 @@ export function buildMemorySearchResult(
   return base;
 }
 
+export function selectRecallMcpHonestyDiagnostics(
+  diagnostics: RecallMcpHonestyDiagnostics | null | undefined
+): RecallMcpHonestyDiagnostics | null {
+  if (diagnostics === undefined || diagnostics === null) {
+    return null;
+  }
+  return {
+    ...(diagnostics.embedding_supplement_status === undefined
+      ? {}
+      : { embedding_supplement_status: diagnostics.embedding_supplement_status }),
+    ...(diagnostics.embedding_provider_status === undefined
+      ? {}
+      : { embedding_provider_status: diagnostics.embedding_provider_status }),
+    ...(diagnostics.provider_degradation_reason === undefined
+      ? {}
+      : { provider_degradation_reason: diagnostics.provider_degradation_reason })
+  };
+}
+
 export function buildRecallStrategyMix(
   policy: RecallPolicy,
   results: readonly Readonly<MemorySearchResult>[],

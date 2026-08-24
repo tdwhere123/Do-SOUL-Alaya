@@ -24,7 +24,10 @@ import { resolveFineAssessmentDeliveryBranch } from
   "./fine-assessment-delivery-branch.js";
 import { resolveFineAssessmentDeepHead, composeFineAssessmentDeepHeadDelivery } from
   "./fine-assessment-deep-head.js";
-import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
+import {
+  computeEffectiveScoreDetails,
+  createEffectiveScorePolicyCache
+} from "../scoring/scoring.js";
 import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
@@ -89,12 +92,14 @@ export function prepareFineAssessment(
   params: FineAssessParams
 ): FineAssessmentPreparation {
   assertUniqueCandidateField(params.candidates);
-  const scoredCandidates = scoreFineAssessmentCandidates(params);
+  const nowIso = params.now();
+  const scoredCandidates = scoreFineAssessmentCandidates(params, nowIso);
   const fusedCandidates = fuseFineAssessmentCandidates(
     scoredCandidates,
     params.policy,
     params.supplementaryData,
-    params.now()
+    nowIso,
+    params.captureAnswerFeatures === true
   );
   return preparationFromCompleteField(params.candidates, fusedCandidates);
 }
@@ -167,7 +172,16 @@ type AdditiveScoredCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveFactors: RecallScoreFactors;
 }>;
 
-function scoreFineAssessmentCandidates(params: FineAssessParams): readonly AdditiveScoredCandidate[] {
+function scoreFineAssessmentCandidates(
+  params: FineAssessParams,
+  nowIso: string
+): readonly AdditiveScoredCandidate[] {
+  const policyCache = createEffectiveScorePolicyCache({
+    policy: params.policy,
+    supplementaryData: params.supplementaryData,
+    nowIso
+  });
+  const now = () => nowIso;
   return params.candidates.map((candidate) => {
     const scored = computeEffectiveScoreDetails({
       entry: candidate.entry,
@@ -179,8 +193,9 @@ function scoreFineAssessmentCandidates(params: FineAssessParams): readonly Addit
       scoreMultiplier: candidate.scoreMultiplier ?? 1,
       objectKind: candidate.objectKind ?? "memory_entry",
       synthesisChild: isSynthesisChildCandidate(candidate),
-      now: params.now,
-      warn: params.warn
+      now,
+      warn: params.warn,
+      policyCache
     });
     return Object.freeze({ ...candidate, effectiveScore: scored.score, effectiveFactors: scored.factors });
   });
@@ -190,10 +205,17 @@ function fuseFineAssessmentCandidates(
   additiveScoredCandidates: readonly AdditiveScoredCandidate[],
   policy: Readonly<RecallPolicy>,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string
+  nowIso: string,
+  includeFloodEdgeTraces: boolean
 ): readonly FineAssessmentCandidate[] {
   const fusionByCandidateKey = applyPathSuppressionToFusionScores(
-    buildRecallFusionDetails({ candidates: additiveScoredCandidates, policy, supplementaryData, nowIso }),
+    buildRecallFusionDetails({
+      candidates: additiveScoredCandidates,
+      policy,
+      supplementaryData,
+      nowIso,
+      includeFloodEdgeTraces
+    }),
     supplementaryData.pathSuppressionScores
   );
   const fusedCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({

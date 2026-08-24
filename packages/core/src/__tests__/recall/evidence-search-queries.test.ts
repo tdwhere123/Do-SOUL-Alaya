@@ -98,7 +98,8 @@ describe("evidence scalar reference", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(rawQuery),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(evidenceSearch).toHaveBeenCalled();
@@ -335,8 +336,9 @@ async function runEvidenceBatchFixture(state: EvidenceBatchState, options: Evide
   const recall = await service.recall({
     taskSurface: createTaskSurface(state.rawQuery),
     workspaceId: "workspace-1",
-    strategy: "build"
-  });
+    strategy: "build",
+      diagnosticCapture: "answer_features"
+    });
   return { recall, candidateRanks: readEvidenceCandidateRanks(recall), scalarSearch, batchSearch, warn };
 }
 

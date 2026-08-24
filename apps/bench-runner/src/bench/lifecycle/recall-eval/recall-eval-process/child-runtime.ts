@@ -14,6 +14,8 @@ import {
   finalizeRecallEvalSelectionBoundarySpool
 } from "../recall-eval-selection-replay.js";
 import { recallEvalOneQuestion } from "../question/recall-eval-question.js";
+import { RecallEvalWorkspaceSession } from
+  "../question/recall-eval-workspace-session.js";
 import {
   combineSelectionBoundaryObservers,
   createCandidateActivationCapture
@@ -33,6 +35,7 @@ interface PagerRuntime {
   readonly daemon: BenchDaemonHandle;
   readonly spool: LongMemEvalSelectionBoundarySpool | null;
   readonly open: RecallEvalPagerOpenPayload;
+  readonly workspace: RecallEvalWorkspaceSession;
 }
 
 let runtime: PagerRuntime | null = null;
@@ -62,7 +65,8 @@ export async function openRecallEvalPagerChild(
   runtime = {
     daemon,
     spool: await createRecallEvalSelectionBoundarySpool(process.env),
-    open: payload
+    open: payload,
+    workspace: new RecallEvalWorkspaceSession()
   };
   return sqlite;
 }
@@ -71,6 +75,10 @@ export async function recallRecallEvalPagerChild(
   payload: RecallEvalPagerRecallPayload
 ): Promise<RecallEvalQuestionResult> {
   const current = requireRuntime();
+  const workspace = await current.workspace.acquire(current.daemon, {
+    workspaceId: payload.question.workspaceId,
+    runId: payload.question.runId
+  });
   const activation = createCandidateActivationCapture(
     current.open.captureOpenSemanticFactorCandidateActivations
   );
@@ -87,7 +95,8 @@ export async function recallRecallEvalPagerChild(
         ...observerFields(observer, activation.observer)
       },
       simulateReport: current.open.simulateReport,
-      measurement: payload.measurement
+      measurement: payload.measurement,
+      workspace
     })
   );
   return activation.attach(result);
@@ -100,9 +109,14 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
   let selectionArtifact = null;
   let primaryError: unknown;
   try {
-    selectionArtifact = await finalizeRecallEvalSelectionBoundarySpool(current.spool);
+    await current.workspace.release();
   } catch (error) {
     primaryError = error;
+  }
+  try {
+    selectionArtifact = await finalizeRecallEvalSelectionBoundarySpool(current.spool);
+  } catch (error) {
+    primaryError ??= error;
   }
   try {
     await current.daemon.shutdown();

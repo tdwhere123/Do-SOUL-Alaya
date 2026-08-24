@@ -43,7 +43,7 @@ import type {
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { validateSnapshotManifest } from "./manifest-validation.js";
 import { parseSnapshotSidecar } from "./sidecar-validation.js";
-import { copyRegularFileNoFollow } from "./bound-file.js";
+import { hashRegularFileNoFollow, rememberFileSha256 } from "./bound-file.js";
 import { atomicCopy } from "./freeze/db-copy.js";
 export { checkpointAndCopyBenchDb } from "./freeze/db-copy.js";
 export { deriveSnapshotAttribution } from "./attribution.js";
@@ -305,14 +305,16 @@ export function restoreSnapshotToDataDir(input: {
   for (const suffix of ["", "-wal", "-shm"]) {
     rmSync(`${workingDbPath}${suffix}`, { force: true });
   }
-  if (input.expectedSha256 === undefined) {
-    atomicCopy(input.snapshotDbPath, workingDbPath);
-  } else {
-    copyRegularFileNoFollow({
-      sourcePath: input.snapshotDbPath,
-      targetPath: workingDbPath,
-      expectedSha256: input.expectedSha256
-    });
+  // Sealed digest already hashed the frozen DB; a copy-time hash would read it again.
+  if (input.expectedSha256 !== undefined) {
+    const actualSha256 = hashRegularFileNoFollow(input.snapshotDbPath);
+    if (actualSha256 !== input.expectedSha256) {
+      throw new Error("recall-eval snapshot DB SHA-256 mismatch");
+    }
+  }
+  atomicCopy(input.snapshotDbPath, workingDbPath);
+  if (input.expectedSha256 !== undefined) {
+    rememberFileSha256(workingDbPath, input.expectedSha256);
   }
   return input.dataDirRoot;
 }

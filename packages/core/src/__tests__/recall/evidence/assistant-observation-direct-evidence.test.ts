@@ -191,7 +191,8 @@ describe("Assistant observation direct evidence", () => {
         'What did you say about the "moss-green TrailShell" backpack on 2026-07-25?'
       ),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(searchManyByKeywordField.mock.calls[0]?.[1].length).toBeGreaterThan(1);
@@ -256,7 +257,8 @@ describe("Assistant observation direct evidence", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface("Which TrailShell backpack did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(findRecallQualifiedByIds.mock.calls[0]?.[1]).toEqual([
@@ -297,8 +299,9 @@ describe("Assistant observation direct evidence", () => {
     await expect(service.recall({
       taskSurface: createTaskSurface("Which TrailShell backpack did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
-    })).rejects.toBe(integrityError);
+      strategy: "build",
+      diagnosticCapture: "answer_features"
+})).rejects.toBe(integrityError);
     expect(fallback).not.toHaveBeenCalled();
   });
 });

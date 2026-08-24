@@ -20,9 +20,8 @@ export type RecallTierWindowStep = Readonly<
 
 export function resolveRecallTierWindowPageLimit(memoryCount: number): number | null {
   const remaining = MAX_RECALL_TIER_MEMORIES - memoryCount;
-  return remaining <= 0
-    ? null
-    : Math.min(STORAGE_RECALL_TIER_PAGE_SIZE, remaining);
+  // Cursor limit is I/O batching up to the hard cap, not a ranking window.
+  return remaining <= 0 ? null : remaining;
 }
 
 export function resolveRecallTierWindowStep(

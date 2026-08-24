@@ -55,8 +55,9 @@ describe("governance manifestation HARD CEILING — truth boundary", () => {
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail one" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       return result.candidates.find((candidate) => candidate.object_id === "victim-target");
     };
 
@@ -234,8 +235,9 @@ describe("governance manifestation HARD CEILING — truth boundary", () => {
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail one" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const victim = result.candidates.find((candidate) => candidate.object_id === "victim-target");
       expect(victim).toBeDefined();
       expect(victim?.manifestation).toBe("full_eligible");
@@ -369,7 +371,8 @@ it("expands path-graph candidates across two hops with cycle-safe edge-type deca
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(

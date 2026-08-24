@@ -94,7 +94,8 @@ it("uses the unified path plane for direct (path_expansion) and multi-hop (graph
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
@@ -209,7 +210,8 @@ it("excludes negative-bias paths from path_expansion positive candidates", async
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     // path-target must NOT be admitted through path_expansion off the
@@ -316,7 +318,8 @@ it("excludes recall-neutral exception_to paths (recall_bias == 0) from path_expa
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const pathTarget = result.diagnostics?.candidates.find(
@@ -383,7 +386,8 @@ it("actively suppresses a target via a reinforced (high-strength) negative path"
       taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const suppressed = result.diagnostics?.candidates.find((c) => c.object_id === "suppressed-target");
@@ -461,8 +465,9 @@ it("does not let an attention_only negative path suppress even at high strength"
         taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const target = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
       expect(target).toBeDefined();
       return target?.fused_score ?? -1;

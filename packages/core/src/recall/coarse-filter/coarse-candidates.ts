@@ -87,6 +87,24 @@ export function buildExpandedKeywordQuery(queryProbes: Readonly<RecallQueryProbe
   return expanded.length === 0 ? null : expanded.join(" ");
 }
 
+export function queryHasObjectProbeSignal(
+  queryProbes: Readonly<RecallQueryProbes>
+): boolean {
+  return (
+    queryProbes.object_ids.length > 0 ||
+    queryProbes.evidence_refs.length > 0 ||
+    queryProbes.run_ids.length > 0 ||
+    queryProbes.surface_ids.length > 0 ||
+    queryProbes.dimensions.length > 0 ||
+    queryProbes.scope_classes.length > 0 ||
+    queryProbes.domain_tags.length > 0 ||
+    queryProbes.file_paths.length > 0 ||
+    queryProbes.package_names.length > 0 ||
+    queryProbes.command_names.length > 0 ||
+    queryProbes.task_refs.length > 0
+  );
+}
+
 export function scoreObjectProbeMatch(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>

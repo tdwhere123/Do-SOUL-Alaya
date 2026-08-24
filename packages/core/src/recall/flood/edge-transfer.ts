@@ -4,7 +4,10 @@ import type {
   RecallFloodEdgeTraceV1
 } from "../runtime/recall-service-types.js";
 import type { SliceCompatibilityV2 } from "./slice-key-selector.js";
-import { evaluateSingleHopRemoteness } from "./remoteness.js";
+import {
+  evaluateSingleHopRemoteness,
+  type SingleHopRemotenessResult
+} from "./remoteness.js";
 import { clamp01 } from "../../shared/clamp.js";
 import { compareText } from "../../shared/compare-text.js";
 
@@ -27,20 +30,27 @@ export type FloodEdgeTransferInput = Readonly<{
   readonly sliceCompatibilityByPathId?: ReadonlyMap<string, Readonly<SliceCompatibilityV2>>;
 }>;
 
+function hopForEdge(
+  input: FloodEdgeTransferInput,
+  edge: PathInflowEdge
+): Readonly<SingleHopRemotenessResult> {
+  return evaluateSingleHopRemoteness({
+    inputPotential: input.rObjectById.get(edge.seedObjectId) ?? 0,
+    edgeConductance: edge.weight,
+    capPerSource: input.capPerSource,
+    selfLoop: edge.seedObjectId === input.targetObjectId,
+    sliceCompatibility: edge.pathId === undefined
+      ? undefined
+      : input.sliceCompatibilityByPathId?.get(edge.pathId)
+  });
+}
+
 function traceForEdge(
   edge: PathInflowEdge,
+  hop: Readonly<SingleHopRemotenessResult>,
   targetObjectId: string,
-  inputPotential: number,
-  capPerSource: number,
-  sliceCompatibility: Readonly<SliceCompatibilityV2> | undefined
+  inputPotential: number
 ): Readonly<RecallFloodEdgeTraceV1> {
-  const remoteness = evaluateSingleHopRemoteness({
-    inputPotential,
-    edgeConductance: edge.weight,
-    capPerSource,
-    selfLoop: edge.seedObjectId === targetObjectId,
-    sliceCompatibility
-  });
   return Object.freeze({
     schema_version: 1,
     path_id: edge.pathId ?? `unknown:${edge.seedObjectId}->${targetObjectId}`,
@@ -49,11 +59,11 @@ function traceForEdge(
     target_object_id: edge.targetObjectId ?? targetObjectId,
     input_potential: inputPotential,
     edge_conductance: edge.weight,
-    slice_compatibility: remoteness.sliceCompatibility,
-    raw_transfer: remoteness.rawTransfer,
-    capped_transfer: remoteness.cappedTransfer,
-    decision: remoteness.decision,
-    reason: remoteness.reason
+    slice_compatibility: hop.sliceCompatibility,
+    raw_transfer: hop.rawTransfer,
+    capped_transfer: hop.cappedTransfer,
+    decision: hop.decision,
+    reason: hop.reason
   });
 }
 
@@ -129,21 +139,28 @@ export function computeDissipativeEdgeStep(input: Readonly<{
 export function computeFloodEdgeTransfer(
   input: FloodEdgeTransferInput
 ): Readonly<FloodEdgeTransferResult> {
+  const limit = Math.max(0, Math.trunc(input.traceLimit ?? RECALL_FLOOD_EDGE_TRACE_LIMIT));
+  const inflow = input.inflow ?? [];
+  if (limit === 0) {
+    const supports: number[] = [];
+    for (const edge of inflow) {
+      const hop = hopForEdge(input, edge);
+      if (hop.decision === "transferred") supports.push(hop.cappedTransfer);
+    }
+    return freezeTransfer(supports, input.rhoPath, input.capTotal, Object.freeze([]), inflow.length);
+  }
   const traces = evaluateFloodEdgeTraces(input);
   const supports = traces
     .filter((trace) => trace.decision === "transferred")
     .map((trace) => trace.capped_transfer);
-  const limit = Math.max(0, Math.trunc(input.traceLimit ?? RECALL_FLOOD_EDGE_TRACE_LIMIT));
   const ordered = [...traces].sort(compareTrace);
-  const value = Math.min(
-    noisyOrDecorrelate(supports, supports.map(() => 1), input.rhoPath),
-    clamp01(input.capTotal)
+  return freezeTransfer(
+    supports,
+    input.rhoPath,
+    input.capTotal,
+    Object.freeze(ordered.slice(0, limit)),
+    Math.max(0, ordered.length - limit)
   );
-  return Object.freeze({
-    value,
-    traces: Object.freeze(ordered.slice(0, limit)),
-    truncatedCount: Math.max(0, ordered.length - limit)
-  });
 }
 
 export function evaluateFloodEdgeTraces(
@@ -151,18 +168,29 @@ export function evaluateFloodEdgeTraces(
 ): readonly Readonly<RecallFloodEdgeTraceV1>[] {
   const traces: Readonly<RecallFloodEdgeTraceV1>[] = [];
   for (const edge of input.inflow ?? []) {
-    const inputPotential = input.rObjectById.get(edge.seedObjectId) ?? 0;
-    const sliceCompatibility = edge.pathId === undefined
-      ? undefined
-      : input.sliceCompatibilityByPathId?.get(edge.pathId);
-    const trace = traceForEdge(
+    traces.push(traceForEdge(
       edge,
+      hopForEdge(input, edge),
       input.targetObjectId,
-      inputPotential,
-      input.capPerSource,
-      sliceCompatibility
-    );
-    traces.push(trace);
+      input.rObjectById.get(edge.seedObjectId) ?? 0
+    ));
   }
   return Object.freeze(traces);
+}
+
+function freezeTransfer(
+  supports: readonly number[],
+  rhoPath: number,
+  capTotal: number,
+  traces: readonly Readonly<RecallFloodEdgeTraceV1>[],
+  truncatedCount: number
+): Readonly<FloodEdgeTransferResult> {
+  return Object.freeze({
+    value: Math.min(
+      noisyOrDecorrelate(supports, supports.map(() => 1), rhoPath),
+      clamp01(capTotal)
+    ),
+    traces,
+    truncatedCount
+  });
 }

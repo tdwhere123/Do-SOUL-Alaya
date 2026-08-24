@@ -73,7 +73,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert last Saturday?"
       },
-      referenceTime: "2026-08-22T08:01:00.000Z"
+      referenceTime: "2026-08-22T08:01:00.000Z",
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow).toHaveBeenCalledWith({
@@ -113,7 +114,8 @@ describe("RecallService reference time", () => {
       taskSurface: {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert on 2026-08-15?"
-      }
+      },
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow).toHaveBeenCalledWith({
@@ -147,7 +149,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Which neighborhood concert memory is relevant?"
       },
-      referenceTime: "2026-08-22T08:01:00.000Z"
+      referenceTime: "2026-08-22T08:01:00.000Z",
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow).not.toHaveBeenCalled();
@@ -164,7 +167,8 @@ describe("RecallService reference time", () => {
     const control = await new RecallService(controlDependencies).recall({
       workspaceId: "workspace-1",
       strategy: "analyze",
-      taskSurface: createTaskSurface()
+      taskSurface: createTaskSurface(),
+      diagnosticCapture: "answer_features"
     });
     const treatment = await new RecallService({
     testOnlyAllowInMemoryFieldQuerySession: true,
@@ -173,7 +177,8 @@ describe("RecallService reference time", () => {
     }).recall({
       workspaceId: "workspace-1",
       strategy: "analyze",
-      taskSurface: createTaskSurface()
+      taskSurface: createTaskSurface(),
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow).not.toHaveBeenCalled();
@@ -204,7 +209,8 @@ describe("RecallService reference time", () => {
         service,
         false,
         MAX_TEMPORAL_RECALL_CANDIDATES + 25
-      )
+      ),
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow).toHaveBeenCalledWith(
@@ -243,7 +249,8 @@ describe("RecallService reference time", () => {
       taskSurface: {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert on 2026-08-15?"
-      }
+      },
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow.mock.calls.map(([query]) => query.tier))
@@ -301,7 +308,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert on 2026-08-15?"
       },
-      policyOverride: policyWithEmbedding(service, false, 5)
+      policyOverride: policyWithEmbedding(service, false, 5),
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByEventTimeWindow.mock.calls.map(([query]) => ({
@@ -358,8 +366,9 @@ describe("RecallService reference time", () => {
           ...createTaskSurface(),
           display_name: "Who attended the neighborhood concert on 2026-08-15?"
         },
-        policyOverride: policyWithEmbedding(service, embeddingEnabled)
-      });
+        policyOverride: policyWithEmbedding(service, embeddingEnabled),
+      diagnosticCapture: "answer_features"
+    });
       return result.diagnostics?.candidates
         .filter((candidate) => candidate.admission_planes.includes("temporal_window"))
         .map((candidate) => candidate.object_id);
@@ -382,7 +391,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert last Saturday?"
       },
-      referenceTime: "2026-08-22T08:01:00.000Z"
+      referenceTime: "2026-08-22T08:01:00.000Z",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates[0]?.object_id).toBe(requested.object_id);
@@ -399,14 +409,16 @@ describe("RecallService reference time", () => {
       workspaceId: "workspace-1",
       strategy: "analyze",
       taskSurface: createTaskSurface(),
-      referenceTime: "not-a-date"
-    })).rejects.toThrow(/reference time/iu);
+      referenceTime: "not-a-date",
+      diagnosticCapture: "answer_features"
+})).rejects.toThrow(/reference time/iu);
     await expect(service.recall({
       workspaceId: "workspace-1",
       strategy: "analyze",
       taskSurface: createTaskSurface(),
-      referenceTime: "2026-08-23T00:30:00"
-    })).rejects.toThrow(/timezone offset/iu);
+      referenceTime: "2026-08-23T00:30:00",
+      diagnosticCapture: "answer_features"
+})).rejects.toThrow(/timezone offset/iu);
   });
 
   it("uses the explicit fixed offset for relative calendar days", async () => {
@@ -422,7 +434,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Who attended the neighborhood concert last Saturday?"
       },
-      referenceTime: "2026-08-23T00:30:00+08:00"
+      referenceTime: "2026-08-23T00:30:00+08:00",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates[0]?.object_id).toBe(localPrevious.object_id);
@@ -458,7 +471,8 @@ describe("RecallService reference time", () => {
         ...createTaskSurface(),
         display_name: "Which concert memory is relevant?"
       },
-      referenceTime
+      referenceTime,
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByAnchors).toHaveBeenCalledWith(

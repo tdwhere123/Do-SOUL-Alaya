@@ -148,8 +148,9 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
         },
         workspaceId: "workspace-1",
         strategy: "chat",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
     };
 
 const buildCompositionSynthesis = (id: string): SynthesisCapsule => ({
@@ -321,8 +322,9 @@ it("does not deliver source-less synthesis rows when no structural candidate is 
         },
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
 
       const delivered = result.candidates;
       expect(delivered.length).toBe(5);

@@ -43,7 +43,8 @@ describe("RecallService historical as-of generation miss", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      referenceTime: QUESTION_AS_OF
+      referenceTime: QUESTION_AS_OF,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("memory-historical");

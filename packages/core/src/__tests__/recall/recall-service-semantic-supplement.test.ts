@@ -39,7 +39,8 @@ it("does not invoke embedding supplement work under the default policy", async (
     await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(hasStoredVectors).not.toHaveBeenCalled();
@@ -176,7 +177,8 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(querySupplement).toHaveBeenCalledWith(
@@ -369,7 +371,8 @@ it("allows an embedding-boosted supplement to replace a weaker lexical candidate
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(querySupplementIfReady).toHaveBeenCalledWith(
@@ -431,7 +434,8 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(hasStoredVectors).toHaveBeenCalledWith({
@@ -518,7 +522,8 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(hasStoredVectors).toHaveBeenCalledWith({

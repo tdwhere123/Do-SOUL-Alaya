@@ -35,6 +35,43 @@ export function createTemporalWindowCandidateBudget(
     : new TemporalWindowCandidateBudget(limit);
 }
 
+export async function loadTemporalWindowEntries(params: Readonly<{
+  readonly workspaceId: string;
+  readonly tier: MemoryEntry["storage_tier"];
+  readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly referenceTime?: string;
+  readonly budget?: TemporalWindowCandidateBudget;
+  readonly memoryRepo: RecallServiceMemoryRepoPort;
+}>): Promise<readonly Readonly<MemoryEntry>[]> {
+  const readWindow = params.memoryRepo.findByEventTimeWindow;
+  if (readWindow === undefined || params.budget === undefined || params.budget.remaining <= 0) {
+    return [];
+  }
+  const window = parseQueryTimeWindow(params.queryProbes, params.referenceTime);
+  if (window === null) {
+    return [];
+  }
+  return readWindow.call(params.memoryRepo, {
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    startTime: new Date(window.startMs).toISOString(),
+    endTime: new Date(window.endMs).toISOString(),
+    limit: params.budget.remaining
+  });
+}
+
+export function admitTemporalWindowEntries(params: Readonly<{
+  readonly budget?: TemporalWindowCandidateBudget;
+  readonly addCandidate: AddCoarseCandidate;
+}>, entries: readonly Readonly<MemoryEntry>[]): void {
+  if (params.budget === undefined || params.budget.remaining <= 0) {
+    return;
+  }
+  for (const entry of params.budget.admit(entries)) {
+    params.addCandidate(entry, "temporal_window", 0, "temporal_window");
+  }
+}
+
 export async function addTemporalWindowCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly tier: MemoryEntry["storage_tier"];
@@ -44,22 +81,6 @@ export async function addTemporalWindowCandidates(params: Readonly<{
   readonly memoryRepo: RecallServiceMemoryRepoPort;
   readonly addCandidate: AddCoarseCandidate;
 }>): Promise<void> {
-  const readWindow = params.memoryRepo.findByEventTimeWindow;
-  if (readWindow === undefined || params.budget === undefined || params.budget.remaining <= 0) {
-    return;
-  }
-  const window = parseQueryTimeWindow(params.queryProbes, params.referenceTime);
-  if (window === null) {
-    return;
-  }
-  const entries = await readWindow.call(params.memoryRepo, {
-    workspaceId: params.workspaceId,
-    tier: params.tier,
-    startTime: new Date(window.startMs).toISOString(),
-    endTime: new Date(window.endMs).toISOString(),
-    limit: params.budget.remaining
-  });
-  for (const entry of params.budget.admit(entries)) {
-    params.addCandidate(entry, "temporal_window", 0, "temporal_window");
-  }
+  const entries = await loadTemporalWindowEntries(params);
+  admitTemporalWindowEntries(params, entries);
 }

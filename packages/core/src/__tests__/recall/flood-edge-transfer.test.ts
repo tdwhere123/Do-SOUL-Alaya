@@ -325,6 +325,31 @@ describe("flood edge transfer trace", () => {
     expect(forward.truncatedCount).toBe(1);
     expect(reversed.truncatedCount).toBe(1);
   });
+
+  it("keeps transfer value when traces are omitted", () => {
+    const inflow = [
+      edge("path-a", "seed", "target", 0.5),
+      edge("path-b", "seed", "target", 0.25)
+    ];
+    const shared = {
+      inflow,
+      targetObjectId: "target",
+      rObjectById: new Map([["seed", 0.8]]),
+      capPerSource: 1,
+      capTotal: 1,
+      rhoPath: 0.5,
+      sliceCompatibilityByPathId: new Map<string, SliceCompatibilityV2>([
+        ["path-a", { decision: "compatible", reason: "slice_match", matches: [] }],
+        ["path-b", { decision: "compatible", reason: "slice_match", matches: [] }]
+      ])
+    } as const;
+    const traced = computeFloodEdgeTransfer(shared);
+    const omitted = computeFloodEdgeTransfer({ ...shared, traceLimit: 0 });
+
+    expect(Object.is(omitted.value, traced.value)).toBe(true);
+    expect(omitted.traces).toEqual([]);
+    expect(omitted.truncatedCount).toBe(inflow.length);
+  });
 });
 
 function legacyCollapse(

@@ -30,6 +30,7 @@ import {
   buildMemorySearchResult,
   buildRecallStrategyMix,
   resolveMcpDegradationReason,
+  selectRecallMcpHonestyDiagnostics,
   type RecallMcpHonestyDiagnostics
 } from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
@@ -254,6 +255,7 @@ function buildRecallResponse(
   policyOverride: RecallPolicy,
   explainabilityPartial: boolean
 ): SoulMemorySearchResponse {
+  const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
   return SoulMemorySearchResponseSchema.parse({
     delivery_id: deliveryId,
     protocol_version: 1,
@@ -261,8 +263,14 @@ function buildRecallResponse(
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
     total_count: totalCount,
-    strategy_mix: buildRecallStrategyMix(policyOverride, results, recallResult.diagnostics),
-    degradation_reason: resolveMcpDegradationReason(recallResult, explainabilityPartial)
+    strategy_mix: buildRecallStrategyMix(policyOverride, results, honestyDiagnostics),
+    degradation_reason: resolveMcpDegradationReason(
+      {
+        degradation_reason: recallResult.degradation_reason,
+        diagnostics: honestyDiagnostics
+      },
+      explainabilityPartial
+    )
   });
 }
 

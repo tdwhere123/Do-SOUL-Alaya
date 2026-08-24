@@ -49,6 +49,12 @@ export interface SemanticSupplementParams {
   readonly retrievalFieldBundle: Readonly<RecallRetrievalFieldBundle>;
 }
 
+type KeywordHit = Readonly<{
+  readonly object_id: string;
+  readonly normalized_rank: number;
+  readonly trigram_rank?: number;
+}>;
+
 export async function addSemanticSupplementCandidates(params: SemanticSupplementParams): Promise<void> {
   if (
     !params.config.semantic_supplement.enabled ||
@@ -60,30 +66,34 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
 
   const objectIds = [...params.byId.keys()];
   const searchScoped = createScopedKeywordSearch(params, objectIds);
-  const supplement = await searchScoped(
+  const expandedQuery = buildExpandedKeywordQuery(params.queryProbes);
+  const relaxedPromise = searchScoped(
     "lexical_relaxed",
     params.queryText,
     params.config.semantic_supplement.max_supplement
   );
-  for (const match of supplement) {
-    const entry = params.byId.get(match.object_id);
-    if (entry === undefined) continue;
-    params.ftsRanks.set(match.object_id, clamp01(match.normalized_rank));
-    if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
-      params.trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank));
-    }
-    params.addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
-  }
+  const expandedPromise = expandedQuery === null
+    ? Promise.resolve([])
+    : searchScoped(
+      "lexical_expanded",
+      expandedQuery,
+      params.config.semantic_supplement.max_supplement
+    );
+  const evidencePromise = loadEvidenceFtsHitBatches(params);
 
-  await addExpandedKeywordCandidates(params, searchScoped);
-  await addEvidenceFtsCandidates(params);
+  admitRelaxedKeywordMatches(params, await relaxedPromise);
+  admitExpandedKeywordMatches(params, await expandedPromise);
+  const evidenceHitBatches = await evidencePromise;
+  if (evidenceHitBatches !== null) {
+    await admitEvidenceFtsHitBatches(params, evidenceHitBatches);
+  }
 }
 
 type ScopedKeywordSearch = (
   variant: RecallMemoryFieldVariant,
   queryText: string,
   limit: number
-) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
+) => Promise<readonly KeywordHit[]>;
 
 function createScopedKeywordSearch(
   params: SemanticSupplementParams,
@@ -101,19 +111,25 @@ function createScopedKeywordSearch(
     });
 }
 
-async function addExpandedKeywordCandidates(
+function admitRelaxedKeywordMatches(
   params: SemanticSupplementParams,
-  searchScoped: ScopedKeywordSearch
-): Promise<void> {
-  const expandedQuery = buildExpandedKeywordQuery(params.queryProbes);
-  if (expandedQuery === null) {
-    return;
+  supplement: readonly KeywordHit[]
+): void {
+  for (const match of supplement) {
+    const entry = params.byId.get(match.object_id);
+    if (entry === undefined) continue;
+    params.ftsRanks.set(match.object_id, clamp01(match.normalized_rank));
+    if (match.trigram_rank !== undefined && match.trigram_rank > 0) {
+      params.trigramFtsRanks.set(match.object_id, clamp01(match.trigram_rank));
+    }
+    params.addCandidate(entry, "lexical", clamp01(match.normalized_rank), "lexical");
   }
-  const expandedSupplement = await searchScoped(
-    "lexical_expanded",
-    expandedQuery,
-    params.config.semantic_supplement.max_supplement
-  );
+}
+
+function admitExpandedKeywordMatches(
+  params: SemanticSupplementParams,
+  expandedSupplement: readonly KeywordHit[]
+): void {
   for (const match of expandedSupplement) {
     const entry = params.byId.get(match.object_id);
     if (entry === undefined) continue;
@@ -131,23 +147,28 @@ async function addExpandedKeywordCandidates(
   }
 }
 
-async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promise<void> {
-  if (
-    params.queryText === null
-  ) {
-    return;
+async function loadEvidenceFtsHitBatches(
+  params: SemanticSupplementParams
+): Promise<readonly (readonly KeywordSearchResult[])[] | null> {
+  if (params.queryText === null) {
+    return [];
   }
   const evidenceQueries = selectEvidenceSearchQueries(params.queryText, params.queryProbes);
   const limit = params.config.semantic_supplement.max_supplement;
-  let evidenceHitBatches: readonly (readonly KeywordSearchResult[])[];
   try {
-    evidenceHitBatches = await params.retrievalFieldBundle.searchEvidenceKeywords({
+    return await params.retrievalFieldBundle.searchEvidenceKeywords({
       queries: evidenceQueries.map((queryText) => ({ queryText, limit }))
     });
   } catch (error) {
     recordEvidenceFtsFailure(params, error);
-    return;
+    return null;
   }
+}
+
+async function admitEvidenceFtsHitBatches(
+  params: SemanticSupplementParams,
+  evidenceHitBatches: readonly (readonly KeywordSearchResult[])[]
+): Promise<void> {
   const evidenceMatchByKey = new Map<string, Readonly<KeywordSearchResult>>();
   for (const evidenceMatches of evidenceHitBatches) {
     for (const match of evidenceMatches) {

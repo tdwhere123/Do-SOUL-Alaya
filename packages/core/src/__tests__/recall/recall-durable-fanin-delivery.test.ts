@@ -96,8 +96,9 @@ function runSynthesisRecall(service: RecallService, maxEntries: number) {
     taskSurface: { ...createTaskSurface(), display_name: "recall synthesis router" },
     workspaceId: WS,
     strategy: "analyze",
-    policyOverride: policy
-  });
+    policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
 }
 
 describe("synthesis router disables direct capsule delivery", () => {

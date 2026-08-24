@@ -71,7 +71,8 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => `${candidate.object_kind}:${candidate.object_id}`))
@@ -101,7 +102,8 @@ it("degrades cleanly to memory_entry-only when no synthesis port is wired", asyn
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(
@@ -176,7 +178,8 @@ it("does not reserve tail delivery slots for source-less synthesis capsules", as
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const delivered = result.candidates;
