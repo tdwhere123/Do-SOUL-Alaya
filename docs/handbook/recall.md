@@ -27,10 +27,11 @@ complete-form extraction, and the `06af8c83` exclusion of capsule
 
 2026-08-24 docs closeout (against code HEAD `5782391d`): aligned
 `architecture.md` with those G17a/G17b closures. S11 remains closed.
-The remaining E0 misses after S11 — 32 waist/composition questions plus
-one `answer_set_coverage_drop` (`d23cf73b`) — are dump-only S12, not a
-G21, retune, or promotion licence. This is a documentation pass against
-live code, not a KPI claim.
+2026-08-24 S12 dump-only closeout: the remaining E0 misses are
+classified — `d23cf73b` is coverage displacement of a legal fused top-5
+gold; all 32 waist questions are honest fused-order family-max walls.
+S12 is not a G21, retune, or promotion licence. This is a
+documentation pass against live code, not a KPI claim.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -228,9 +229,19 @@ competitor genuinely carried the higher `R_obj` ranking scalar. No
 residual inversion was observed, so S11 authorizes no ranking change.
 Related hardening: `06af8c83` excludes capsule `evidence_semantic` from
 the independent-embedding quality channel, so a foreign capsule
-similarity cannot buy `Select_Gamma` quality. S11 does not classify the
-remaining E0 waist (stage 4) or the one coverage-admission miss; that is
-S12, dump-only, on the same E0-control dump.
+similarity cannot buy `Select_Gamma` quality.
+
+## S12 waist and coverage audit (closed)
+
+S12 asked, on the same E0-control dump as S11, whether the remaining 33
+misses were a forbidden residual inside composition or a coverage
+displacement of a legal fused top-5 gold. The one coverage case
+(`d23cf73b`) is `coverage_displaced_fused_top5`: gold fused rank 5 was
+pushed to delivered rank 7. All 32 waist questions are
+`honest_waist_r_obj`: every fused-order top-5 occupier carries a
+strictly higher legal family-max `R_obj` than the best gold. No fused
+residual inversion was observed. S12 authorizes no ranking change, no
+weight retune, and no G21 launch. HEAD `5782391d` remains unmeasured.
 
 ## Semantic formation boundary
 
@@ -278,9 +289,9 @@ The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
 last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
 diagnostic evidence, not a promotion. Later code — including HEAD
 `5782391d` — is unmeasured, and the ancestor `85faef95` missed its
-diagnostic gates. Active dump-only work is S12 (remaining E0
-composition/coverage). G21, retuning, and benchmark promotion are not
-authorized by this document.
+diagnostic gates. S12 dump-only classification of the remaining E0 composition/coverage
+is closed. G21, retuning, and benchmark promotion are not authorized
+by this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate
