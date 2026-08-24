@@ -53,6 +53,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
+  readonly includeFloodEdgeTraces?: boolean;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
   const resolved = resolveRrfFusionWeights({
     policy: params.policy,
@@ -68,12 +69,14 @@ export function buildRecallFusionDetails(params: Readonly<{
     resolved,
     supplementaryData: params.supplementaryData
   });
+  const includeFloodEdgeTraces = params.includeFloodEdgeTraces !== false;
   const axisContext = buildConformantAxisContext({
     candidates: streamSnapshots,
     ranksByStream,
     resolved,
     supplementaryData: params.supplementaryData,
-    nowIso: params.nowIso
+    nowIso: params.nowIso,
+    includeFloodEdgeTraces
   });
   const prelim = buildPreliminaryFusionCandidates(streamSnapshots, params.supplementaryData, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
@@ -85,7 +88,12 @@ export function applyPathSuppressionToFusionScores(
   fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,
   suppressionScores: Readonly<Record<string, number>>
 ): ReadonlyMap<string, RecallFusionBreakdown> {
-  const hasAnySuppression = Object.values(suppressionScores).some((delta) => delta > 0);
+  const hasAnySuppression = [...fusionByCandidateKey.values()].some((breakdown) => {
+    if (breakdown.origin_plane !== "workspace_local" || breakdown.object_kind !== "memory_entry") {
+      return false;
+    }
+    return (suppressionScores[breakdown.object_id] ?? 0) > 0;
+  });
   if (!hasAnySuppression) {
     return fusionByCandidateKey;
   }
@@ -159,13 +167,13 @@ function buildFusionRanksForStream(
         nowIso,
         candidateKey
       );
-      return Object.freeze({
+      return {
         candidateKey,
         candidate,
         score: stream === "workspace_activation" || stream === "existing_score"
           ? normalizeDriftSensitiveRankingScore(rawScore)
           : normalizeRecallRankingScore(rawScore)
-      });
+      };
     })
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) =>
@@ -254,7 +262,8 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
       A_path: ra?.path ?? 0,
       B_evidence: ra?.evidence ?? 0
     },
-    supplementaryData: params.supplementaryData
+    supplementaryData: params.supplementaryData,
+    pathWeight: params.axisContext.pathWeight
   });
   const trace = params.axisContext.edgeTraceByKey.get(params.candidateKey);
   if (trace === undefined) {

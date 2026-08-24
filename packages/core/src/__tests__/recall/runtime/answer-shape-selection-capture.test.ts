@@ -31,15 +31,10 @@ describe("recall answer-shape selection capture", () => {
     expect(captured.candidates.map((candidate) => candidate.object_id)).toEqual(
       ordinary.candidates.map((candidate) => candidate.object_id)
     );
-    expect(captured.diagnostics?.candidates.map((row) => row.candidate_key)).toEqual(
-      ordinary.diagnostics?.candidates.map((row) => row.candidate_key)
-    );
+    expect(ordinary.diagnostics?.candidates).toEqual([]);
+    expect(captured.diagnostics?.candidates).toEqual([]);
     expect(pendingCaptures).toHaveLength(1);
     expect(pendingCaptures[0]?.params.captureAnswerFeatures).toBe(false);
-    for (const row of captured.diagnostics?.candidates ?? []) {
-      expect(row).not.toHaveProperty("answer_features");
-      expect(row).not.toHaveProperty("selector_observation");
-    }
     const boundary = materializeFineAssessmentSelectionBoundary(pendingCaptures[0]!);
     expect(boundary.schema_version).toBe(5);
     expect(boundary.expected.pre_projection?.admission_actions.length)

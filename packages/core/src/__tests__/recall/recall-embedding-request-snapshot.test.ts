@@ -108,7 +108,8 @@ describe("RecallService embedding request score snapshot", () => {
       taskSurface,
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride
+      policyOverride,
+      diagnosticCapture: "answer_features"
     });
 
     expect(listByObjectIds).toHaveBeenCalledOnce();
@@ -375,8 +376,9 @@ async function runSnapshotRecall(
   });
   const startedAt = performance.now();
   const result = await service.recall({
-    taskSurface, workspaceId: "workspace-1", strategy: "analyze", policyOverride
-  });
+    taskSurface, workspaceId: "workspace-1", strategy: "analyze", policyOverride,
+      diagnosticCapture: "answer_features"
+    });
   return { result, elapsedMs: performance.now() - startedAt };
 }
 

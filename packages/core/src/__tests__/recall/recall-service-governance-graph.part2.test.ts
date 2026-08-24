@@ -124,7 +124,8 @@ it("gates same-relation hop-2 chain extension while keeping heterogeneous associ
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     // hop-1 neighbors land on path_expansion; hop-1 is never gated.
@@ -225,7 +226,8 @@ it("does not count graph diagnostics for neighbors rejected by deterministic fil
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("seed-memory");
@@ -254,7 +256,8 @@ it("applies conflict awareness to non-winner claim-like entries", async () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const winner = result.candidates.find((candidate) => candidate.object_id === "winner-claim-1");
@@ -278,7 +281,8 @@ it("exempts all source_object_refs from conflict penalty when a claim has multip
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const winnerA = result.candidates.find((c) => c.object_id === "winner-mem-a");

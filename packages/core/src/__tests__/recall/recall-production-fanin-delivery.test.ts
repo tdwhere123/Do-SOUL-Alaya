@@ -126,8 +126,9 @@ async function inspectSiblingViaPath(relationKind: string): Promise<{
     workspaceId: WS,
     runId: RUN,
     strategy: "build",
-    policyOverride: buildWideOpenPolicy(recallService)
-  });
+    policyOverride: buildWideOpenPolicy(recallService),
+      diagnosticCapture: "answer_features"
+    });
 
   const candidate = result.candidates.find((row) => row.object_id === SIBLING_ID);
   const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);

@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
@@ -22,6 +22,8 @@ import {
   type LongMemEvalSnapshotManifest,
   type SnapshotExtractionProvenanceV3
 } from "../../../bench/snapshot/materialize.js";
+import { sha256File } from "../../../bench/snapshot/integrity.js";
+import { peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
@@ -103,7 +105,8 @@ afterEach(async () => {
   for (const path of [
     join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME),
     join(tmpDir, "snapshot.db"),
-    join(tmpDir, "restore", BENCH_DAEMON_DB_FILENAME)
+    join(tmpDir, "restore", BENCH_DAEMON_DB_FILENAME),
+    join(tmpDir, "restore-sealed", BENCH_DAEMON_DB_FILENAME)
   ]) {
     try {
       initDatabase({ filename: path }).close();
@@ -190,6 +193,36 @@ describe("snapshot plumbing", () => {
       .get("v") as { k: string } | undefined;
     expect(row?.k).toBe("v");
     working.close();
+  });
+
+  it("restores from a sealed digest without rewriting the frozen snapshot", async () => {
+    const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);
+    freshMigratedDb(liveDbPath);
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    checkpointAndCopyBenchDb(liveDbPath, snapshotDbPath);
+    const frozenSha = await sha256File(snapshotDbPath);
+    const frozenBytes = readFileSync(snapshotDbPath);
+
+    const restoreRoot = join(tmpDir, "restore-sealed");
+    restoreSnapshotToDataDir({
+      snapshotDbPath,
+      dataDirRoot: restoreRoot,
+      expectedSha256: frozenSha
+    });
+    const workingDbPath = join(restoreRoot, BENCH_DAEMON_DB_FILENAME);
+    expect(peekCachedFileSha256(snapshotDbPath)).toBe(frozenSha);
+    expect(peekCachedFileSha256(workingDbPath)).toBe(frozenSha);
+
+    writeFileSync(workingDbPath, "working mutation");
+    expect(readFileSync(snapshotDbPath)).toEqual(frozenBytes);
+
+    const mismatchRoot = join(tmpDir, "restore-mismatch");
+    expect(() => restoreSnapshotToDataDir({
+      snapshotDbPath,
+      dataDirRoot: mismatchRoot,
+      expectedSha256: "0".repeat(64)
+    })).toThrow(/SHA-256 mismatch/u);
+    expect(existsSync(join(mismatchRoot, BENCH_DAEMON_DB_FILENAME))).toBe(false);
   });
 
   it("round-trips the snapshot manifest + sidecar JSON", () => {

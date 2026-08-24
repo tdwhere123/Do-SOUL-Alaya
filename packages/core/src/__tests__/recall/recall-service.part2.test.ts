@@ -61,7 +61,8 @@ it("applies coarse scope filters to all global-source candidates", async () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(globalRecall).toHaveBeenCalled();
@@ -151,7 +152,8 @@ it("applies min_activation_score and preserves full content for full-eligible gl
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["global-warm"]);
@@ -187,12 +189,14 @@ it("returns more candidates for analyze than build", async () => {
     const analyze = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const build = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(analyze.candidates.length).toBeGreaterThan(build.candidates.length);
@@ -210,7 +214,8 @@ it("build strategy applies scope filters while active constraints stay separate"
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
@@ -230,7 +235,8 @@ it("build strategy applies dimension filters while active constraints stay separ
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.dimension)).toEqual([
@@ -261,7 +267,8 @@ it("min_activation_score filters low-activation optional entries", async () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-2"]);
@@ -290,7 +297,8 @@ it("respects token budget", async () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toHaveLength(1);
@@ -321,7 +329,8 @@ it("respects max_entries budget", async () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toHaveLength(2);
@@ -350,7 +359,8 @@ it("cohort dominance guard skips the plane when union ratio exceeds 50% on a sin
       taskSurface: { ...taskSurface, display_name: "request inside surface-shared during run-shared" },
       workspaceId: "workspace-1",
       runId: "run-shared",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const cohortWins = result.candidates.filter(
       (c) => c.source_channels?.some((channel) => channel.includes("session_surface_cohort"))
@@ -396,7 +406,8 @@ it("cohort dominance guard admits the cohort plane when matching cohort stays un
       taskSurface: { ...taskSurface, display_name: "request inside surface-target during run-target" },
       workspaceId: "workspace-1",
       runId: "run-target",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     // invariant: when the would-be cohort union stays under 50% of the
     // tier pool (here 1/4 = 25%), the cohort plane admits the matching
@@ -437,7 +448,8 @@ it("keeps active constraints independent from the score-ranked result budget", a
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toHaveLength(3);

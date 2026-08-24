@@ -131,6 +131,7 @@ type IntegratedFloodScoreParams = Readonly<{
   readonly memorySupplementEligible?: boolean;
   readonly axisInputs: IntegratedFloodAxisInputs;
   readonly supplementaryData: RecallSupplementaryData;
+  readonly pathWeight?: number;
 }>;
 
 interface ResolvedIntegratedFloodScore {
@@ -154,7 +155,7 @@ const EVIDENCE_RESIDUAL_SCALE = 1;
 function resolveIntegratedFloodScore(
   params: IntegratedFloodScoreParams
 ): ResolvedIntegratedFloodScore {
-  const lambda = resolveConformantPathWeight();
+  const lambda = params.pathWeight ?? resolveConformantPathWeight();
   const beta = EVIDENCE_RESIDUAL_SCALE;
   const memorySupplementEligible = params.memorySupplementEligible ?? true;
   const slice = resolveSliceAxis(params.entry, params.supplementaryData);

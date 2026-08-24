@@ -86,8 +86,9 @@ it("admits FTS hits for extracted entities on the entity_seed plane and fans int
           display_name: "How does MaterializationRouter coordinate writes?"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const ids = new Set(result.candidates.map((c) => c.object_id));
       expect(ids.has("memory-anchor")).toBe(true);
@@ -136,8 +137,9 @@ it("is a no-op when entityExtractionPort is not wired", async () => {
           display_name: "MaterializationRouter behavior"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const diag = result.diagnostics?.candidates.find((c) => c.object_id === "memory-x");
       expect(diag?.admission_planes ?? []).not.toContain("entity_seed");
@@ -189,8 +191,9 @@ it("never writes propose/accept paths from entity-seed admissions", async () => 
           display_name: "MaterializationRouter behavior"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const writtenEventTypes = appendSpy.mock.calls.map(
         (args: readonly unknown[]) => (args[0] as { event_type: string }).event_type
@@ -296,8 +299,9 @@ it("entity_seed admissions still pass the deterministic scope/dimension filter",
         },
         workspaceId: "workspace-1",
         strategy: "chat",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
 
       const ids = new Set(result.candidates.map((c) => c.object_id));
       // The off-scope PREFERENCE memory must never appear — entity_seed
@@ -355,8 +359,9 @@ it("does not double-count fusion when the same memory hits lexical_fts and entit
           display_name: "MaterializationRouter behavior"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const diag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-overlap"

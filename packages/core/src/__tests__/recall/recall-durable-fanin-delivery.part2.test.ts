@@ -128,8 +128,9 @@ async function inspectSibling(params: {
     workspaceId: WS,
     runId: RUN,
     strategy: "build",
-    policyOverride: buildWideOpenPolicy(recallService)
-  });
+    policyOverride: buildWideOpenPolicy(recallService),
+      diagnosticCapture: "answer_features"
+    });
   const delivered = result.candidates.some((row) => row.object_id === SIBLING_ID);
   const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);
   if (diagnostic === undefined) {

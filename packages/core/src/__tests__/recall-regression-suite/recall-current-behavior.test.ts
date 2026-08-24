@@ -17,7 +17,8 @@ it("keeps winning admission diagnostics aligned to the first specific attributio
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("release checklist lexical-gold"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const diag = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-gold");
     expect(diag?.plane_first_admitted).toBe("activation");
@@ -33,7 +34,8 @@ it("emits per-phase latency telemetry on the in-memory handler fixture", async (
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("phase latency probe"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const latency = result.diagnostics?.phase_latency_ms;
     expect(latency).toBeDefined();
@@ -57,7 +59,8 @@ it("records path_expansion as the winning admission plane for path-only linked c
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("needle seed"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const diag = result.diagnostics?.candidates.find((item) => item.object_id === "linked");
     expect(diag?.admission_planes).toContain("path_expansion");
@@ -98,7 +101,8 @@ it("uses source proximity as an independent fusion stream for neighboring eviden
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("needle source chunk"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
@@ -126,7 +130,8 @@ it("promotes answerable source-window neighbors without lifting source-only neig
       taskSurface: task("Where did I buy my new bookshelf?"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
@@ -178,7 +183,8 @@ it("uses subject alignment only for self-referential personal-memory queries", a
       taskSurface: task("Where did I buy my new bookshelf?"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(personalResult.candidates.map((item) => item.object_id)).toEqual(["personal-fact"]);
@@ -191,7 +197,8 @@ it("uses subject alignment only for self-referential personal-memory queries", a
       taskSurface: task("Where did Alex buy the new bookshelf?"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
     const thirdPersonPersonalDiagnostic = thirdPersonResult.diagnostics?.candidates.find(
       (item) => item.object_id === "personal-fact"
@@ -232,7 +239,8 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("needle source chunk"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByIds).toHaveBeenCalled();
@@ -270,7 +278,8 @@ it("keeps final delivery budget filled after source proximity admission", async 
       taskSurface: task("needle answer primary"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates).toHaveLength(10);
@@ -327,7 +336,8 @@ it("bounds source-proximity admission by the delivery budget", async () => {
       taskSurface: task("source proximity seed"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const sourceOnlyDiagnostics = (result.diagnostics?.candidates ?? [])

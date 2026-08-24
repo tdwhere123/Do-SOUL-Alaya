@@ -211,7 +211,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       workspaceId: WS,
       runId: RUN,
       strategy: "build",
-      policyOverride: withMaxEntries(recallService, 5)
+      policyOverride: withMaxEntries(recallService, 5),
+      diagnosticCapture: "answer_features"
     });
 
     const deliveredIds = result.candidates.map((row) => row.object_id);
@@ -250,7 +251,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       taskSurface: createTaskSurface("database migrations staging release"),
       workspaceId: WS,
       runId: RUN,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     const topFive = result.candidates.slice(0, 5).map((row) => row.object_id);
@@ -293,7 +295,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       taskSurface: createTaskSurface("kubernetes deploy pipeline"),
       workspaceId: WS,
       runId: RUN,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     const recalledIds = new Set(result.candidates.map((row) => row.object_id));
@@ -328,7 +331,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       taskSurface: createTaskSurface("deployment credentials"),
       workspaceId: WS,
       runId: RUN,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     const backed = result.candidates.find((row) => row.object_id === backedMemoryId);
@@ -357,7 +361,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       workspaceId: WS,
       runId: RUN,
       strategy: "build",
-      policyOverride: withMaxEntries(recallService, cap)
+      policyOverride: withMaxEntries(recallService, cap),
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.length).toBeLessThanOrEqual(cap);
@@ -374,7 +379,8 @@ describe("RecallService integration (real SQLite + FTS5)", () => {
       taskSurface: createTaskSurface("zylphqorbex quantum flux capacitor"),
       workspaceId: WS,
       runId: RUN,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
 
     expect(Array.isArray(result.candidates)).toBe(true);

@@ -13,7 +13,8 @@ it("emits soul.recall.completed after recall", async () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "chat",
-      runId: "run-1"
+      runId: "run-1",
+      diagnosticCapture: "answer_features"
     });
 
     expect(appendSpy).toHaveBeenCalledWith(
@@ -62,7 +63,8 @@ it("ranks a high-plasticity candidate above an equivalent low-plasticity candida
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(plasticityPort.getStrengthByMemoryId).toHaveBeenCalled();
@@ -111,7 +113,8 @@ it("fades ONLY the freshness band of a long-idle memory at recall read; a recent
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const recent = result.candidates.find((candidate) => candidate.object_id === "memory-recent");
@@ -151,7 +154,8 @@ it("does NOT double-penalize a freshly-used high-scope memory's activation at re
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const fresh = result.candidates.find((candidate) => candidate.object_id === "memory-fresh");
@@ -195,7 +199,8 @@ it("does not let plasticity alone override a base lexical/activation rank invers
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates[0]?.object_id).toBe("memory-strong-lexical");
@@ -240,7 +245,8 @@ it("preserves base lexical ordering on a moderate gap under PATH_PLASTICITY_WEIG
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const strong = result.candidates.find((candidate) =>
@@ -275,7 +281,8 @@ it("falls back to no plasticity boost when the path plasticity port throws — r
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.length).toBe(1);
@@ -350,7 +357,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(synthesisSearchByKeyword).toHaveBeenCalled();
@@ -442,7 +450,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByIds).toHaveBeenCalledWith("workspace-1", ["memory-child"]);
@@ -540,7 +549,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByIds).toHaveBeenCalledTimes(1);
@@ -624,7 +634,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
@@ -706,7 +717,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
@@ -780,7 +792,8 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);

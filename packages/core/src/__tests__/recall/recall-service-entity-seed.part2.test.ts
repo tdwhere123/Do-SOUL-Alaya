@@ -100,8 +100,9 @@ it("excludes a weak entity-only draft from graph_expansion fan-in (Fix-5b path 1
           display_name: "describe the binding"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const anchorDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-anchor"
@@ -208,8 +209,9 @@ it("admits a weak entity into graph_expansion when a co-admitting plane carries 
           display_name: "How does MaterializationRouter coordinate writes?"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const anchorDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-anchor"
@@ -325,8 +327,9 @@ it("does not let a weak entity-only draft leak into content_expansion (evidence_
           display_name: "describe the binding"
         },
         workspaceId: "workspace-1",
-        strategy: "chat"
-      });
+        strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
       const anchorDiag = result.diagnostics?.candidates.find(
         (c) => c.object_id === "memory-weak-anchor"

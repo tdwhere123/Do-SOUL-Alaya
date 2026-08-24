@@ -48,11 +48,15 @@ export interface RecallEvalOneQuestionInput {
   readonly simulateReport: BenchSimulateReportMode;
   readonly measurement: SnapshotQuestionMeasurementOracle | undefined;
   readonly onActualEmbeddingWarmupComplete?: () => Promise<void>;
+  readonly workspace?: BenchWorkspaceHandle;
 }
 
 export async function recallEvalOneQuestion(
   input: RecallEvalOneQuestionInput
 ): Promise<RecallEvalQuestionResult> {
+  if (input.workspace !== undefined) {
+    return recallEvalAttachedQuestion(input, input.workspace);
+  }
   const workspace = await input.daemon.attachWorkspace({
     workspaceId: input.question.workspaceId,
     runId: input.question.runId

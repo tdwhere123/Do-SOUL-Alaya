@@ -30,8 +30,9 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
         },
         workspaceId: "workspace-1",
         strategy: "chat",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
     };
 
 // Flexible builder mirroring buildStructuralFixture: lexical multi-stream
@@ -330,8 +331,9 @@ it("distinguishes path-plus-lexical evidence from lexical-only evidence", async 
         },
         workspaceId: "workspace-1",
         strategy: "chat",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
       const delivered = result.candidates.map((candidate) => candidate.object_id);
 
       const goldDiagnostic = goldDiag(result, "gold-weak-lexical");

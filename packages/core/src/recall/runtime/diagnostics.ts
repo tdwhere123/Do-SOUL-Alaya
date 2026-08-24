@@ -95,10 +95,18 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly fineAssessmentPrunedCandidates:
     readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[];
+  // Production MCP never reads per-candidate dumps; clone only for diagnosticCapture.
+  readonly includeCandidateEvidence?: boolean;
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
   readonly embeddingWorkspaceScan?: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
   readonly phaseLatencyMs?: Readonly<Record<string, number>>;
 }>;
+
+export const EMPTY_RECALL_CANDIDATE_DIAGNOSTICS: readonly Readonly<RecallCandidateDiagnostic>[] =
+  Object.freeze([]);
+export const EMPTY_FINE_ASSESSMENT_PRUNED_DIAGNOSTICS:
+  readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[] = Object.freeze([]);
+const EMPTY_FUSION_BREAKDOWN: RecallDiagnostics["fusion_breakdown"] = Object.freeze([]);
 
 export function buildRecallDiagnostics(
   params: BuildRecallDiagnosticsParams
@@ -131,7 +139,8 @@ export function buildRecallDiagnostics(
       : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
     ...buildCandidateEvidenceDiagnostics(
       params.candidates,
-      params.fineAssessmentPrunedCandidates
+      params.fineAssessmentPrunedCandidates,
+      params.includeCandidateEvidence !== false
     ),
     token_economy: params.tokenEconomy,
     ...(params.phaseLatencyMs === undefined
@@ -243,11 +252,19 @@ function buildDegradationDiagnostics(
 
 function buildCandidateEvidenceDiagnostics(
   candidates: readonly Readonly<RecallCandidateDiagnostic>[],
-  prunedCandidates: readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[]
+  prunedCandidates: readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[],
+  includeCandidateEvidence: boolean
 ): Pick<
   RecallDiagnostics,
   "fusion_breakdown" | "candidates" | "fine_assessment_pruned_candidates"
 > {
+  if (!includeCandidateEvidence) {
+    return {
+      fusion_breakdown: EMPTY_FUSION_BREAKDOWN,
+      candidates: EMPTY_RECALL_CANDIDATE_DIAGNOSTICS,
+      fine_assessment_pruned_candidates: EMPTY_FINE_ASSESSMENT_PRUNED_DIAGNOSTICS
+    };
+  }
   return {
     fusion_breakdown: freezeFusionBreakdown(candidates),
     candidates: Object.freeze([...candidates]),

@@ -1,4 +1,9 @@
-import { buildRecallDiagnostics, computeRecallTokenEconomy } from "./diagnostics.js";
+import {
+  buildRecallDiagnostics,
+  computeRecallTokenEconomy,
+  EMPTY_FINE_ASSESSMENT_PRUNED_DIAGNOSTICS,
+  EMPTY_RECALL_CANDIDATE_DIAGNOSTICS
+} from "./diagnostics.js";
 import { queryConditionParityView } from "./query-condition-parity.js";
 import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
 import type { CoarseStageResult } from "./recall-service-runner-coarse.js";
@@ -23,10 +28,16 @@ export function buildRecallResult(
   assessment: RecallAssessmentStageResult,
   manifested: RecallManifestedResult,
   degradationReasons: ReadonlySet<RecallDegradationReason>,
-  synthesis: SelectGammaSynthesisStatus
+  synthesis: SelectGammaSynthesisStatus,
+  includeCandidateEvidence: boolean
 ): RecallResult {
   const phaseLatencyMs = buildPhaseLatencyMs(coarse, assessment, manifested);
-  const tokenEconomy = buildTokenEconomy(assessment, coarse.combinedCoarseCandidates.length, manifested);
+  const tokenEconomy = buildTokenEconomy(
+    assessment,
+    coarse.combinedCoarseCandidates.length,
+    manifested,
+    includeCandidateEvidence
+  );
   return Object.freeze({
     candidates: manifested.candidates,
     synthesis,
@@ -69,7 +80,9 @@ export function buildRecallResult(
       answerShapePlan: prepared.answerShapePlan,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
-      preBudgetCount: manifested.candidateDiagnostics.length,
+      preBudgetCount: includeCandidateEvidence
+        ? manifested.candidateDiagnostics.length
+        : assessment.finalAssessment.diagnostics.length,
       deliveredCount: manifested.candidates.length,
       ...(assessment.packetPlanTrace === undefined
         ? {}
@@ -81,11 +94,16 @@ export function buildRecallResult(
       answerRerankDiagnostics: assessment.answerRerankDiagnostics,
       degradationReasons: [...degradationReasons],
       graphExpansionDiagnostics: coarse.coarseFilter.graphExpansionDiagnostics,
-      candidates: manifested.candidateDiagnostics,
-      fineAssessmentPrunedCandidates: buildFineAssessmentPrunedDiagnostics(
-        coarse.combinedCoarseCandidates,
-        assessment.finalAssessment.prunedCandidates
-      ),
+      candidates: includeCandidateEvidence
+        ? manifested.candidateDiagnostics
+        : EMPTY_RECALL_CANDIDATE_DIAGNOSTICS,
+      fineAssessmentPrunedCandidates: includeCandidateEvidence
+        ? buildFineAssessmentPrunedDiagnostics(
+          coarse.combinedCoarseCandidates,
+          assessment.finalAssessment.prunedCandidates
+        )
+        : EMPTY_FINE_ASSESSMENT_PRUNED_DIAGNOSTICS,
+      includeCandidateEvidence,
       tokenEconomy,
       embeddingWorkspaceScan: assessment.embeddingCoarseInjection.workspaceScan,
       phaseLatencyMs
@@ -138,7 +156,8 @@ function buildPhaseLatencyMs(
 function buildTokenEconomy(
   assessment: RecallAssessmentStageResult,
   coarsePoolSize: number,
-  manifested: RecallManifestedResult
+  manifested: RecallManifestedResult,
+  includeCandidateEvidence: boolean
 ): Readonly<RecallTokenEconomy> {
   const preparedEmbeddingInferenceCalls =
     assessment.embeddingProviderStatus === "provider_returned" &&
@@ -152,7 +171,9 @@ function buildTokenEconomy(
     fineEvaluated: assessment.finalAssessment.fineEvaluated,
     finePrunedCount: assessment.finalAssessment.finePrunedCount,
     finePriorityOverflowCount: assessment.finalAssessment.finePriorityOverflowCount,
-    preBudgetCandidates: manifested.candidateDiagnostics,
+    preBudgetCandidates: includeCandidateEvidence
+      ? manifested.candidateDiagnostics
+      : assessment.finalAssessment.diagnostics,
     embeddingInferenceCalls:
       assessment.embeddingCoarseInjection.embeddingInferenceCalls +
       preparedEmbeddingInferenceCalls +

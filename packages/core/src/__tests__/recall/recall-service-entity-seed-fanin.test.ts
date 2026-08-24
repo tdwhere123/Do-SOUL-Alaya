@@ -68,8 +68,9 @@ describe("RecallService", () => {
             display_name: "neutral query"
           },
           workspaceId: "workspace-1",
-          strategy: "chat"
-        });
+          strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
         expect(result.diagnostics?.multi_seed_graph_fan_in).toBeUndefined();
       });
@@ -156,8 +157,9 @@ describe("RecallService", () => {
             display_name: "AlphaRouter and BetaPlanner coordination"
           },
           workspaceId: "workspace-1",
-          strategy: "chat"
-        });
+          strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
         const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
         expect(fanIn).toBeDefined();
@@ -245,8 +247,9 @@ describe("RecallService", () => {
             display_name: "AlphaRouter BetaPlanner shared consumer"
           },
           workspaceId: "workspace-1",
-          strategy: "chat"
-        });
+          strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
         // The per-seed BFS still runs independently for each entity seed, so
         // the shared neighbor is reached twice and the merge records the
@@ -339,8 +342,9 @@ describe("RecallService", () => {
             display_name: "FanRouter binding span"
           },
           workspaceId: "workspace-1",
-          strategy: "chat"
-        });
+          strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
         // The 260 neighbors are direct hop-1 associations off the entity-seed
         // anchor, so the unified plane admits them on path_expansion under the
@@ -418,8 +422,9 @@ describe("RecallService", () => {
             display_name: "SoloRouter binding scope"
           },
           workspaceId: "workspace-1",
-          strategy: "chat"
-        });
+          strategy: "chat",
+      diagnosticCapture: "answer_features"
+    });
 
         const fanIn = result.diagnostics?.multi_seed_graph_fan_in;
         expect(fanIn).toBeDefined();

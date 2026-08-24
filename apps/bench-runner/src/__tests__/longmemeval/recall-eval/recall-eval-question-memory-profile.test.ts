@@ -87,6 +87,26 @@ describe("recall-eval question memory profile wiring", () => {
     expect(mocks.onWarmup).toHaveBeenCalledTimes(1);
     expect(mocks.detach).toHaveBeenCalledTimes(3);
   });
+
+  it("does not attach or detach a caller-owned workspace", async () => {
+    mocks.warm.mockResolvedValue({
+      embeddingWarmup: null,
+      queryEmbeddingWarmup: null,
+      documentWarmupLatencyMs: null
+    });
+    const input = buildInput("disabled");
+    const owned = await input.daemon.attachWorkspace({
+      workspaceId: input.question.workspaceId,
+      runId: input.question.runId
+    });
+    mocks.detach.mockClear();
+    (input.daemon.attachWorkspace as ReturnType<typeof vi.fn>).mockClear();
+
+    await recallEvalOneQuestion({ ...input, workspace: owned });
+
+    expect(input.daemon.attachWorkspace).not.toHaveBeenCalled();
+    expect(mocks.detach).not.toHaveBeenCalled();
+  });
 });
 
 function warmupSummary(passCount: number) {

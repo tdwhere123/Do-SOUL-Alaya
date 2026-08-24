@@ -74,10 +74,31 @@ export function parseTemporalQueryTermWindow(
 }
 
 const QUERY_WINDOW_DECAY_DAYS = 90;
+const queryTimeWindowCache = new WeakMap<
+  Readonly<RecallQueryProbes>,
+  Map<string, QueryTimeWindow | null>
+>();
 
 // Object-time facet: distance to the question's asked-about window, independent of distance-to-now.
 // Absolute terms resolve anchor-free; relative terms resolve only when nowIso supplies the now-anchor.
 export function parseQueryTimeWindow(
+  queryProbes: Readonly<RecallQueryProbes>,
+  nowIso?: string
+): QueryTimeWindow | null {
+  const cacheKey = nowIso ?? "";
+  const cachedByAnchor = queryTimeWindowCache.get(queryProbes);
+  const cached = cachedByAnchor?.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const window = resolveQueryTimeWindow(queryProbes, nowIso);
+  const next = cachedByAnchor ?? new Map<string, QueryTimeWindow | null>();
+  next.set(cacheKey, window);
+  queryTimeWindowCache.set(queryProbes, next);
+  return window;
+}
+
+function resolveQueryTimeWindow(
   queryProbes: Readonly<RecallQueryProbes>,
   nowIso?: string
 ): QueryTimeWindow | null {

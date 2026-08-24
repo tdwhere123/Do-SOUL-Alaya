@@ -100,7 +100,8 @@ describe("RecallService embedding-on coarse injection", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, false)
+      policyOverride: buildPolicy(service, false),
+      diagnosticCapture: "answer_features"
     });
 
     expect(collectWorkspaceNeighbors).not.toHaveBeenCalled();
@@ -121,7 +122,8 @@ describe("RecallService embedding-on coarse injection", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, true)
+      policyOverride: buildPolicy(service, true),
+      diagnosticCapture: "answer_features"
     });
 
     expect(collectWorkspaceNeighbors).toHaveBeenCalledTimes(1);
@@ -159,7 +161,8 @@ describe("RecallService embedding-on coarse injection", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, true)
+      policyOverride: buildPolicy(service, true),
+      diagnosticCapture: "answer_features"
     });
 
     expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledTimes(1);
@@ -179,7 +182,8 @@ describe("RecallService embedding-on coarse injection", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, true)
+      policyOverride: buildPolicy(service, true),
+      diagnosticCapture: "answer_features"
     });
     expect(
       result.candidates.some((candidate) => candidate.object_id === lexicallyAbsentMemory.object_id)
@@ -269,7 +273,8 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildInjectionPolicy(service, { cap: 2 })
+      policyOverride: buildInjectionPolicy(service, { cap: 2 }),
+      diagnosticCapture: "answer_features"
     });
     const injectedIds = new Set(
       absentMemories
@@ -290,7 +295,8 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildInjectionPolicy(defaultService, {})
+      policyOverride: buildInjectionPolicy(defaultService, {}),
+      diagnosticCapture: "answer_features"
     });
     expect(
       defaultResult.candidates.some(
@@ -303,7 +309,8 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildInjectionPolicy(loweredService, { floor: 0.3 })
+      policyOverride: buildInjectionPolicy(loweredService, { floor: 0.3 }),
+      diagnosticCapture: "answer_features"
     });
     expect(
       loweredResult.candidates.some(
@@ -394,7 +401,8 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 })
+      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
+      diagnosticCapture: "answer_features"
     });
 
     expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledTimes(1);
@@ -419,7 +427,8 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 0 })
+      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 0 }),
+      diagnosticCapture: "answer_features"
     });
 
     expect(
@@ -451,7 +460,8 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 })
+      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
+      diagnosticCapture: "answer_features"
     });
 
     expect(
@@ -484,7 +494,8 @@ describe("RecallService embedding coarse-injection fetch budget and stale-vector
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 })
+      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
+      diagnosticCapture: "answer_features"
     });
 
     expect(

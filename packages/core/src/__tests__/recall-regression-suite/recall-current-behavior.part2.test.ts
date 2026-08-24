@@ -48,7 +48,8 @@ it("keeps lexical evidence in fusion without overriding fused order", async () =
       taskSurface: task("rare lexical protected answer"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const diagnostic = result.diagnostics?.candidates.find(
@@ -110,7 +111,8 @@ it("preserves fused order across legacy delivery stages", async () => {
       taskSurface: task("ordering strong lexical answer"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     const diagnosticsById = new Map(
@@ -156,7 +158,8 @@ it("returns active constraints outside the ranked result budget", async () => {
       taskSurface: task(),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates.map((item) => item.object_id)).toEqual(["ranked"]);
     expect(result.active_constraints.map((item) => item.object_id)).toEqual(["constraint"]);
@@ -168,7 +171,8 @@ it("reports active constraints count from the active constraints port", async ()
     const result = await new RecallService(dependencies).recall({
       taskSurface: task(),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     expect(result.active_constraints_count).toBe(1);
   });
@@ -182,7 +186,8 @@ it("passes active constraints cap through to the port", async () => {
       taskSurface: task(),
       workspaceId: WS,
       strategy: "analyze",
-      activeConstraintsCap: 3
+      activeConstraintsCap: 3,
+      diagnosticCapture: "answer_features"
     });
     expect(findActiveConstraints).toHaveBeenCalledWith({
       workspaceId: WS,
@@ -214,7 +219,8 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
       taskSurface: task("rare fused-rank needle"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((item) => item.object_id)).toEqual(["lexical-gold"]);
@@ -240,7 +246,8 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
       taskSurface: task("rare fused-rank needle"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: legacyWeightedPolicy
+      policyOverride: legacyWeightedPolicy,
+      diagnosticCapture: "answer_features"
     });
     const legacyWeightedDiagnostic = legacyWeightedResult.diagnostics?.candidates.find(
       (item) => item.object_id === "high-activation"
@@ -283,7 +290,8 @@ it("promotes memories when evidence FTS and structural evidence agree", async ()
       taskSurface: task("Where did I complete my Bachelor's degree in Computer Science?"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((item) => item.object_id)).toEqual(["ucla-gold"]);
@@ -341,7 +349,8 @@ it("lets embedding-on supplements participate in the fused-rank budget cut", asy
       taskSurface: task("semantic query"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(querySupplementIfReady).toHaveBeenCalled();
@@ -369,7 +378,8 @@ it("uses path expansion in a cold workspace without usage proof lookup", async (
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("cold seed"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates.some((item) => item.object_id === "linked")).toBe(true);
     expect(queryByEntity).not.toHaveBeenCalled();
@@ -387,7 +397,8 @@ it("marks path expansion source channels on cold linked candidates", async () =>
     const result = await new RecallService(dependencies).recall({
       taskSurface: task("cold seed"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const linkedCandidate = result.candidates.find((item) => item.object_id === "linked");
     expect(linkedCandidate?.source_channels).toContain("path_expansion");
@@ -422,7 +433,8 @@ it("falls back to lexical results when embedding precheck fails", async () => {
       taskSurface: task("embedding fallback lexical"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: withEmbedding(service.buildDefaultPolicy("analyze", task().runtime_id))
+      policyOverride: withEmbedding(service.buildDefaultPolicy("analyze", task().runtime_id)),
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates.map((item) => item.object_id)).toContain("lexical");
     expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
@@ -455,7 +467,8 @@ it("falls back to lexical results while embedding query is pending", async () =>
       taskSurface: task("embedding pending lexical"),
       workspaceId: WS,
       strategy: "analyze",
-      policyOverride: withEmbedding(service.buildDefaultPolicy("analyze", task().runtime_id))
+      policyOverride: withEmbedding(service.buildDefaultPolicy("analyze", task().runtime_id)),
+      diagnosticCapture: "answer_features"
     });
     expect(result.candidates.map((item) => item.object_id)).toContain("lexical");
     expect(result.diagnostics?.embedding_provider_status).toBe("provider_pending");

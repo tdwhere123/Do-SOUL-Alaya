@@ -28,15 +28,15 @@ describe("recall-eval pager IPC isolation", () => {
     expect(parentMapsAlayaDb()).toBe(false);
   });
 
-  it("spawns a fresh child for each question instead of reusing one address space", async () => {
+  it("reuses one child across questions in an arm", async () => {
     const counted = countingHost();
     const session = openSession(undefined, counted.host);
     await session.open({});
     expect(counted.pids).toHaveLength(1);
     await session.recall({ questionId: "q1" });
     await session.recall({ questionId: "q2" });
-    expect(counted.pids).toHaveLength(2);
-    expect(counted.pids[1]).not.toBe(counted.pids[0]);
+    expect(counted.pids).toHaveLength(1);
+    expect(counted.pids[0]).toBeGreaterThan(0);
   });
 
   it("fail-closes when the child exits mid-request", async () => {
@@ -91,10 +91,11 @@ describe("recall-eval pager IPC isolation", () => {
     expect(pack.questionId).toBe("ok");
   });
 
-  it("retains the close selection artifact across child recycle", async () => {
+  it("retains the close selection artifact after sequential recalls", async () => {
     const session = openSession();
     await session.open({});
     await session.recall({ questionId: "artifact" });
+    await session.recall({ questionId: "artifact-2" });
     await expect(session.close()).resolves.toEqual({ sourcePath: "selection.json" });
   });
 

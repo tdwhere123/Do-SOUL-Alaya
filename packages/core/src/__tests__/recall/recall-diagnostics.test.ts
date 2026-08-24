@@ -121,7 +121,7 @@ describe("recall diagnostics", () => {
       evidence_projection_matches: Object.freeze([])
     });
 
-    const diagnostics = buildRecallDiagnostics({
+    const params = {
       queryProbes: emptyQueryProbes,
       queryEntityExtraction: await captureRecallQueryEntities({ query_text: null }),
       retrievalFieldCaptures: materializeRecallRetrievalFieldCaptures([]),
@@ -183,7 +183,8 @@ describe("recall diagnostics", () => {
         fusion_families_with_hits: 1,
         embedding_inference_calls: 0
       }
-    });
+    };
+    const diagnostics = buildRecallDiagnostics(params);
 
     expect(diagnostics.fusion_breakdown[0]).toMatchObject({
       per_axis_rank: { object: 1, path: 2, evidence: null, temporal: null, control: null },
@@ -211,5 +212,16 @@ describe("recall diagnostics", () => {
       owner_gist_selected_count: 1,
       full_evidence_selected_count: 1
     });
+
+    const omitted = buildRecallDiagnostics({
+      ...params,
+      includeCandidateEvidence: false
+    });
+    expect(omitted.candidates).toEqual([]);
+    expect(omitted.fusion_breakdown).toEqual([]);
+    expect(omitted.fine_assessment_pruned_candidates).toEqual([]);
+    expect(omitted.embedding_provider_status).toBe(diagnostics.embedding_provider_status);
+    expect(omitted.pre_budget_count).toBe(1);
+    expect(omitted.token_economy).toEqual(diagnostics.token_economy);
   });
 });

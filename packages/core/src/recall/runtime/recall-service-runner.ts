@@ -12,6 +12,7 @@ import {
   recordGlobalRecallClassificationsSafely
 } from "./orchestration.js";
 import {
+  EMPTY_RECALL_CANDIDATE_DIAGNOSTICS,
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
   resolveEmbeddingProviderStatus
@@ -50,6 +51,7 @@ import { captureRecallRequestTime } from "./query/recall-request-time.js";
 import { applySelectGammaSynthesis } from
   "../delivery/select-gamma/synthesis-adapter.js";
 import {
+  capturesRecallAnswerFeatures,
   type FineAssessmentResult,
   type FineAssessmentPreparation,
   type PreparedEmbeddingQuery,
@@ -101,7 +103,8 @@ export async function executeRecall(
     outcome.assessment,
     outcome.manifested,
     degradationReasons,
-    outcome.synthesis.synthesis
+    outcome.synthesis.synthesis,
+    capturesRecallAnswerFeatures(params.diagnosticCapture)
   );
   await recordRecallSideEffects(
     executionContext,
@@ -390,9 +393,9 @@ async function manifestCandidateStage(
     });
     return Object.freeze({
       candidates,
-      candidateDiagnostics: finalizeRecallCandidateDiagnostics(
-        selectedDiagnostics, candidates
-      )
+      candidateDiagnostics: capturesRecallAnswerFeatures(params.diagnosticCapture)
+        ? finalizeRecallCandidateDiagnostics(selectedDiagnostics, candidates)
+        : EMPTY_RECALL_CANDIDATE_DIAGNOSTICS
     });
   });
   return Object.freeze({

@@ -204,6 +204,7 @@ export interface RecallDiagnostics {
   readonly graph_expansion_plane_count_per_edge_type: RecallGraphExpansionPlaneCountPerEdgeType;
   // Present only when entity_seed drove 1+ seeds into graph fan-in; absence means content/structural-seed driven only.
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
+  // Empty unless diagnosticCapture requested per-candidate flood/fusion dumps.
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly fine_assessment_pruned_candidates:

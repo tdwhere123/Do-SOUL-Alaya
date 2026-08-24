@@ -119,15 +119,15 @@ function observeChannel(
   eligible: boolean
 ): CandidateActivationObservation {
   if (!eligible) {
-    return Object.freeze({ channel, state: "ineligible", score: null });
+    return { channel, state: "ineligible", score: null };
   }
   if (value === undefined) {
-    return Object.freeze({ channel, state: "absent", score: null });
+    return { channel, state: "absent", score: null };
   }
   if (!Number.isFinite(value) || value < 0) {
-    return Object.freeze({ channel, state: "invalid", score: null });
+    return { channel, state: "invalid", score: null };
   }
-  return Object.freeze({ channel, state: "observed", score: clamp01(value) });
+  return { channel, state: "observed", score: clamp01(value) };
 }
 
 function freezeReceipt(
@@ -141,7 +141,7 @@ function freezeReceipt(
     state,
     score: winner?.score ?? null,
     winner: winner === null ? null : Object.freeze(winner),
-    observations: Object.freeze([...observations]),
+    observations: Object.freeze(observations),
     missing_channel_policy: MISSING_CHANNEL_POLICY
   });
 }

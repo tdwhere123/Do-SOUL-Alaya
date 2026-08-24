@@ -50,8 +50,9 @@ describe("RecallService complete fine-assessment field", () => {
         taskSurface: createTaskSurface(),
         workspaceId: "workspace-1",
         strategy: "analyze",
-        policyOverride: policy
-      });
+        policyOverride: policy,
+      diagnosticCapture: "answer_features"
+    });
 
       expect(spies.readGraphMetrics).toHaveBeenCalledOnce();
       const graphIds = spies.readGraphMetrics.mock.calls[0]![0];
@@ -86,7 +87,8 @@ describe("RecallService complete fine-assessment field", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: buildFieldPolicy(fixture.service, 1, true)
+      policyOverride: buildFieldPolicy(fixture.service, 1, true),
+      diagnosticCapture: "answer_features"
     });
 
     expect(fixture.prepareQuerySupplement).toHaveBeenCalledWith(expect.objectContaining({

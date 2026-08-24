@@ -13,7 +13,8 @@ describe("RecallService", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      activeConstraintsCap: 5
+      activeConstraintsCap: 5,
+      diagnosticCapture: "answer_features"
     });
 
     expect(dependencies.activeConstraintsPort?.findActiveConstraints).toHaveBeenCalledWith({
@@ -55,7 +56,8 @@ describe("RecallService", () => {
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
-      policyOverride: policy
+      policyOverride: policy,
+      diagnosticCapture: "answer_features"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
@@ -86,7 +88,8 @@ describe("RecallService", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     const tokenEconomy = result.diagnostics?.token_economy;
@@ -133,12 +136,14 @@ describe("RecallService", () => {
     const first = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const second = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     // Both recalls land on the non-degraded path so token_economy is
     // present and stable across identical inputs.
@@ -316,7 +321,8 @@ describe("RecallService", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     expect(result.degradation_reason).not.toBeNull();
     expect(result.diagnostics?.token_economy).toEqual(
@@ -355,7 +361,8 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
@@ -376,7 +383,8 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
