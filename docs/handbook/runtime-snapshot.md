@@ -1,12 +1,12 @@
 # Runtime Snapshot
 
 Package version is `0.3.11`; the current documentation anchor is committed HEAD
-`ae95e313` on 2026-08-24. This file is readiness vocabulary and dated
+`5782391d` on 2026-08-24. This file is readiness vocabulary and dated
 snapshots. It is **not** a KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture delta (2026-08-24, `ae95e313`)
+## Recall posture delta (2026-08-24, `5782391d`)
 
 | Fact | Status |
 |---|---|
@@ -15,8 +15,8 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | S11 near-top audit | Closed: ten of ten E0 near-top cases were honest higher `R_obj`, not residual inversion |
 | Independent-embedding quality | Capsule `evidence_semantic` excluded (`06af8c83`) |
 | Last comparable KPI pin | `3af4fd9`: E1 any@5 81/94, full-gold@5 43/94 — diagnostic only |
-| Recall any@5 promotion | **NOT PROMOTED**; HEAD `ae95e313` unmeasured, ancestor `85faef95` missed diagnostic gates |
-| Active recall slice | None; G21, retuning, and benchmark promotion not authorized |
+| Recall any@5 promotion | **NOT PROMOTED**; HEAD `5782391d` unmeasured, ancestor `85faef95` missed diagnostic gates |
+| Active recall slice | S12 dump-only: remaining E0 waist/composition (32) plus coverage-admission `d23cf73b`. G21, retuning, and promotion not authorized |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
 ## Recall posture (2026-08-19 live-source pass)
