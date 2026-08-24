@@ -4,22 +4,27 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation identity: package `0.3.11`. Architecture
-implementation pin is `baa6e35b` (`Close recall architecture authority
-gaps`). That commit encodes gates 1–6. Live documentation identity is
-this commit (`Pin recall documentation identity after architecture
-integration`). Integration base is `b329325`. Historical review evidence
-at `263c6600` (2026-08-19) remains prior documentation context. Live
-owners are the modules named under Current live path. Canary identity is
-this live HEAD — see `.do-it/plans/recall-any5-evidence-first.md`.
-This is not a KPI-promotion claim. The earlier `10da1318` B-arm dump remains
-historical benchmark evidence only.
+Current documentation identity: package `0.3.11`, code HEAD `ae95e313`
+(2026-08-24). Earlier pins — architecture `baa6e35b` (gates 1–6),
+integration base `b329325`, review evidence `263c6600` (2026-08-19) —
+remain historical context. Live owners are the modules named under
+Current live path. Recall any@5 is **NOT PROMOTED**: the last comparable
+KPI evidence pin is `3af4fd9` (E1 arm: any@5 81/94, full-gold@5 43/94);
+HEAD `ae95e313` is unmeasured and the ancestor `85faef95` missed its
+diagnostic gates. The earlier `10da1318` B-arm dump remains historical
+benchmark evidence only.
 
 2026-08-23 amendment (algorithm evidence pin `3af4fd9`, source baseline
 `a03dc5d`): recorded the
 `Select_Gamma` query-conditioned marginal-gain contract ruling and its
-current implementation gaps under Contract below. This is a documentation-only
-boundary correction; no live-path behavior changed.
+then-current implementation gaps under Contract below. This was a
+documentation-only boundary correction; no live-path behavior changed.
+
+2026-08-24 amendment (documentation identity `ae95e313`): recorded the
+G17a/G17b closures, the S11 near-top audit closure, the withdrawal of
+complete-form extraction, and the `06af8c83` exclusion of capsule
+`evidence_semantic` from independent-embedding Gamma quality. This is a
+documentation pass against live code, not a KPI or promotion claim.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -54,16 +59,16 @@ condition: gain measures incremental coverage of the query's own answer
 set and obligation facets (2026-08-22 contract ruling). The field has no
 intrinsic preference for source or dimension diversity; source
 multiplicity may only modulate a candidate's activation strength, never
-act as an admission objective. Implementation state: the live gain is
-`quality` plus a generic saturating `slice`/`f3` cover bonus
-(`select-gamma/objective.ts`, cover kinds in
-`select-gamma/bind-fine-assessment.ts`). Facility-demand and coverage modules
-exist, but `prepareSelectGammaProof` still constructs the generic objective and
-the current static production call graph has no caller for
-`materializeConfiguredCoverageSelection`; query-conditioned facility coverage
-therefore does not yet drive live admission or have a proven production proof
-consumer. Closing that design-to-consumer gap is tracked work, not a licence
-for a second walk or post-selection reorder.
+act as an admission objective. Implementation state (2026-08-24): the
+production walk objective is binding-aware. `runSelectGammaSession` in
+`delivery/fine-assessment-selection.ts` calls
+`bindFineAssessmentBindingCover` (`select-gamma/binding-cover/production.ts`),
+which binds `bindProductionFacilityWalkObjective` over
+`materializeConfiguredCoverageSelection`; the same binding-cover objective
+drives `selectGammaWalk` admission and is what `prepareSelectGammaProof`
+consumes. Query-conditioned facility coverage therefore drives live admission
+and has a production proof consumer. This closure is not a licence for a
+second walk or post-selection reorder, and it is not a KPI claim.
 
 For a query q, the planned obligation set O_q includes entity, relation, time,
 logical-object, independent-evidence, and answer-shape atoms. Gamma gain is
@@ -72,21 +77,22 @@ multiplicity can strengthen activation, but cannot be an admission objective.
 Cardinality/enumerative obligations are required for full-gold completeness
 claims even if an initial any@5 experiment can proceed without them.
 
-Two additional boundaries are currently open. First, the live selector applies
-a hard `evidenceSourceIdentity` duplicate rejection before objective
-competition; `lineage` is receipt metadata, not the admission key. This is an
-implementation contradiction to the source-multiplicity ruling and is owned by
-G17a until the fixed-pool on/off counterfactual and selector-parity receipt
-close it. Second, the live facility state is demand-atom based and does not yet
-consume distinct OSF answer values. The target consumer must carry answer
-variables and binding-value coverage into the same Gamma walk.
+Two previously open boundaries are closed (2026-08-24). G17a: production
+admission runs with source hard-dedupe off
+(`PRODUCTION_SELECT_GAMMA_SOURCE_HARD_DEDUPE = false` in
+`select-gamma/admission/identity.ts`), so duplicate rejection is
+object-key only and source multiplicity is never an admission key; the
+selection receipt records the active policy. G17b: distinct OSF answer
+values are consumed — answer variables and binding-value coverage enter
+the one Gamma walk through `bindFineAssessmentBindingCover` and
+`bindProductionFacilityWalkObjective`, with per-candidate
+binding-coverage receipts and a selected binding-set receipt.
 
 ### Binding and kind-projection boundary
 
 OSF composition already produces result bindings, variable collections,
-distinct-value counts, and evidence IDs. The current candidate attribution and
-Gamma path compress that structure to activation/solution-count scalars and a
-boolean `f3` cover. The planned producer-to-consumer chain is therefore:
+distinct-value counts, and evidence IDs. The producer-to-consumer chain
+is live on the current HEAD:
 
 ```text
 OSF result binding
@@ -137,9 +143,9 @@ assessment
   -> integrated Slice/path/evidence flood (diagnostics and Gamma cover;
      does not enter the ranking scalar)
   -> deep-head relevance (rescores the pool only when embedding is observed)
-  -> Select_Gamma under eligibility, current source hard-dedupe,
-     lineage receipt, dimension,
-     max-entry, and token constraints
+  -> Select_Gamma with the binding-aware coverage objective under
+     eligibility, object-identity dedupe (source hard-dedupe off),
+     lineage receipt, dimension, max-entry, and token constraints
   -> ordered ContextPack and selection-boundary receipt
 ```
 
@@ -157,6 +163,9 @@ The principal owners are:
   `integrated-flood-scoring.ts`;
 - final admission and order: `selectFineAssessmentCandidates` and
   `selectGammaWalk`;
+- binding-value and facility coverage objective:
+  `bindFineAssessmentBindingCover` in
+  `select-gamma/binding-cover/production.ts`;
 - exact capture/replay: `delivery/selection-boundary/`.
 
 ## Connectedness matrix
@@ -169,10 +178,10 @@ The principal owners are:
 | Slice/fiber compatibility | Live | Query and source routing keys are matched by `selectSliceCompatibilityV2`; rejected slices withhold fuel. Missing slice material is explicit pass-through, not a fabricated match. |
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
-| Open-semantic candidate attribution | Live, consumer depth open | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are not yet carried into candidate/Gamma coverage, and kind projection has no live category consumer. F3 remains rebuildable routing, not durable truth. |
+| Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner; objective consumer open | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Live gain covers only `slice`/`f3`; current source hard-dedupe and missing binding-value coverage are open G17a/G17b gaps. |
+| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Gain is quality plus obligation, binding-value, and facility coverage via the binding-aware objective; production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
@@ -196,11 +205,24 @@ selector. In-process query-only worker-read re-resolves already selected
 evidence ids and does not re-run pin/select. Selection-boundary replay remains
 the exact-order owner when an observer is attached.
 
-This closure covers field membership and selector ordering, not the
-query-conditioned facility objective. That objective remains open until the
-identical-pool comparison and a production-consumer receipt are both present.
+This closure covers field membership, selector ordering, and — since the
+G17a/G17b closures — the query-conditioned coverage objective with its
+production consumer and selection receipts. It is an implementation
+claim, not a KPI promotion.
 
 Do not add a second field, selector, query condition, or recall path.
+
+## S11 near-top audit (closed)
+
+S11 asked whether near-top E0 misses (E0/E1 are the fixed diagnostic
+arms of the `3af4fd9` evidence pin) were caused by the diagnostic
+evidence residual inverting a higher object score. The audit of the ten
+near-top E0 cases found ten of ten `honest_higher_r_obj`: the admitted
+competitor genuinely carried the higher `R_obj` ranking scalar. No
+residual inversion was observed, so S11 authorizes no ranking change.
+Related hardening: `06af8c83` excludes capsule `evidence_semantic` from
+the independent-embedding quality channel, so a foreign capsule
+similarity cannot buy `Select_Gamma` quality.
 
 ## Semantic formation boundary
 
@@ -214,6 +236,9 @@ immutable source/span
   -> runtime grounding and versioned soft projection
   -> governed recall field
 ```
+
+Complete-form extraction is withdrawn (2026-08-24). This boundary is
+immutable; no complete-form extraction stage may be added around it.
 
 Provider failure, empty output, or invalid F3 cannot delete root evidence or
 deterministic F0-F2 material. A model cannot directly write
@@ -240,6 +265,13 @@ and KPI digest
 `ed061c008db5603c5f53ef3d3d84c7d20a598774751aee6c5a0a75795827642a`.
 It correctly described that old commit's inactive path/Slice behavior. It must
 not be used to describe current connectedness or to claim a current score gate.
+
+The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
+last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
+diagnostic evidence, not a promotion. Later code — including HEAD
+`ae95e313` — is unmeasured, and the ancestor `85faef95` missed its
+diagnostic gates. There is no active recall slice; G21, retuning, and
+benchmark promotion are not authorized by this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate
