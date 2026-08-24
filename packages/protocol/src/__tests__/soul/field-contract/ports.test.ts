@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { QUERY_CONDITION_OPERATOR_ID } from "../../../soul/field-contract/index.js";
 import type {
   AttributedActivationPort,
   CausalUsagePort,
@@ -49,7 +50,7 @@ describe("field-contract ports", () => {
     const condition: QueryConditionPort = {
       captureCondition: (input) => ({
         schema_version: 1,
-        producer: "query_condition_v1",
+        producer: QUERY_CONDITION_OPERATOR_ID,
         consumer: "attributed_activation",
         identity: "sha256:" + "a".repeat(64),
         replay_rule: "idempotent_same_identity",
@@ -58,7 +59,7 @@ describe("field-contract ports", () => {
         deletion_behavior: "rebuildable",
         condition: input,
         generation_id: "sha256:" + "b".repeat(64),
-        query_operator_id: "query_condition_v1",
+        query_operator_id: QUERY_CONDITION_OPERATOR_ID,
         query_cache_key: "sha256:" + "c".repeat(64),
         recorded_at: input.effective_as_of
       })
@@ -76,7 +77,7 @@ describe("field-contract ports", () => {
     };
     const proof: ProofEffectPort = {
       decide: (input) => ({
-        schema_version: 1,
+        schema_version: 2,
         producer: "proof_effect_v1",
         consumer: "governance",
         identity: "sha256:" + "a".repeat(64),
@@ -85,6 +86,9 @@ describe("field-contract ports", () => {
         governance_effect: "policy_decision",
         deletion_behavior: "retain_identity",
         workspace_id: input.workspace_id,
+        actor_id: input.actor_id,
+        run_id: input.run_id,
+        delivery_id: input.delivery_id,
         request_digest: "sha256:" + "a".repeat(64),
         action: input.action,
         target: input.target,
@@ -92,6 +96,10 @@ describe("field-contract ports", () => {
         effective_as_of: input.effective_as_of,
         decision: "deny",
         supporting_receipt_ids: input.supporting_receipt_ids,
+        supporting_proof_witnesses: input.supporting_proof_witnesses,
+        governance_frontier: input.governance_frontier,
+        policy_operator_id: input.policy_operator_id,
+        policy_operator_version: input.policy_operator_version,
         recorded_at: input.effective_as_of
       })
     };

@@ -154,7 +154,7 @@ describe("field-contract receipts", () => {
     };
     const receipt = QueryConditionReceiptSchema.parse({
       schema_version: 1,
-      producer: "query_condition_v1",
+      producer: QUERY_CONDITION_OPERATOR_ID,
       consumer: "attributed_activation",
       identity: hashConditionDigest(condition, sha256),
       replay_rule: "idempotent_same_identity",
@@ -189,8 +189,8 @@ describe("field-contract receipts", () => {
 
   it("rejects a self-certified noncanonical generation manifest", () => {
     const canonical = generationReceipt();
-    const operators = canonical.operator_versions.map(([id, version], index) =>
-      [id, index === 0 ? "99" : version] as const
+    const operators = canonical.operator_versions.map(([id, version], index):
+      [string, string] => [id, index === 0 ? "99" : version]
     );
     const entries = operators.map(([id, version]) => ({ id, version }));
     const digest = hashOperatorManifestDigest(entries, sha256);
@@ -212,13 +212,15 @@ describe("field-contract receipts", () => {
 
   it("rejects a self-certified v2 Select_Gamma manifest", () => {
     const canonical = generationReceipt();
-    const operators = canonical.operator_versions.map(([id, version]) =>
-      id.startsWith("select_gamma")
-        ? [
-            "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2",
-            "2"
-          ] as const
-        : [id, version] as const
+    const operators = canonical.operator_versions.map(([id, version]):
+      [string, string] => (
+        id.startsWith("select_gamma")
+          ? [
+              "select_gamma_relevance_temporal_query_coverage_authority_tiebreak_v2",
+              "2"
+            ]
+          : [id, version]
+      )
     );
     const entries = operators.map(([id, version]) => ({ id, version }));
     const digest = hashOperatorManifestDigest(entries, sha256);

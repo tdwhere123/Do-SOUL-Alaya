@@ -298,7 +298,8 @@ function factor(
   return {
     factor_id: factorId,
     surface,
-    semantic_identity: semanticIdentity
+    semantic_identity: semanticIdentity,
+    source_occurrence: 0
   };
 }
 
