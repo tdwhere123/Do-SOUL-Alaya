@@ -31,7 +31,7 @@ describe("provider execution authority", () => {
     const execution = await executeProviderChatCompletion(
       { ...REQUEST, fetchImpl },
       { maxRetries: 1, retryDelaysMs: [0] },
-      { onAttemptFailure: (failure) => failures.push(failure) }
+      { onAttemptFailure: (failure) => { failures.push(failure); } }
     );
 
     expect(execution).toMatchObject({
