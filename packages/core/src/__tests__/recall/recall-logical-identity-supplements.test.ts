@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import {
-  applyPathSuppressionToFusionScores,
-  buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -75,24 +73,6 @@ describe("recall supplementary logical identity", () => {
     expect(findByAnchors).toHaveBeenCalledWith(WORKSPACE_ID, [
       { kind: "object", object_id: shared.object_id }
     ]);
-  });
-
-  it("applies path suppression only to the local memory projection", () => {
-    const objectId = "same-id";
-    const memoryKey = `workspace_local:memory_entry:${objectId}`;
-    const synthesisKey = `workspace_local:synthesis_capsule:${objectId}`;
-    const globalKey = `global:memory_entry:${objectId}`;
-    const fusion = new Map<string, RecallFusionBreakdown>([
-      [memoryKey, breakdown(objectId, memoryKey, "memory_entry", "workspace_local")],
-      [synthesisKey, breakdown(objectId, synthesisKey, "synthesis_capsule", "workspace_local")],
-      [globalKey, breakdown(objectId, globalKey, "memory_entry", "global")]
-    ]);
-
-    const suppressed = applyPathSuppressionToFusionScores(fusion, { [objectId]: 0.2 });
-
-    expect(suppressed.get(memoryKey)?.fused_score).toBeCloseTo(0.3, 12);
-    expect(suppressed.get(synthesisKey)?.fused_score).toBe(0.5);
-    expect(suppressed.get(globalKey)?.fused_score).toBe(0.5);
   });
 
   it("keeps memory evidence and path fuel off same-id synthesis and global candidates", () => {
@@ -224,22 +204,6 @@ function policy() {
     filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
     conflictAwareness: false,
     maxTotalTokens: 1_000
-  });
-}
-
-function breakdown(
-  objectId: string,
-  candidateKey: string,
-  objectKind: RecallFusionBreakdown["object_kind"],
-  originPlane: RecallFusionBreakdown["origin_plane"]
-): RecallFusionBreakdown {
-  return Object.freeze({
-    ...buildEmptyRecallFusionBreakdown(objectId),
-    candidate_key: candidateKey,
-    object_kind: objectKind,
-    origin_plane: originPlane,
-    fused_rank: 1,
-    fused_score: 0.5
   });
 }
 

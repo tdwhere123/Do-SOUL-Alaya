@@ -44,7 +44,7 @@ describe("coverage-aware delivery packet", () => {
     ]);
   });
 
-  it("keeps the final packet in the coverage-selected order", () => {
+  it("does not let facility-only novelty invert R_obj without a binding increment", () => {
     const highFusedDupA = createCandidate("dup-a", 0.99);
     const highFusedDupB = createCandidate("dup-b", 0.98);
     const lowFusedNovel = createCandidate("novel", 0.4);
@@ -81,29 +81,29 @@ describe("coverage-aware delivery packet", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "novel",
-      "dup-a"
+      "dup-a",
+      "dup-b"
     ]);
     expect(result.candidates.map((candidate) => candidate.relevance_score)).toEqual([
-      0.4,
-      0.99
+      0.99,
+      0.98
     ]);
-    // Coverage chooses both the admitted set and the final selector order.
     expect(result.candidates[0]).toMatchObject({
-      score_factors: { relevance: 0.4 },
+      score_factors: { relevance: 0.99 },
       budget_state: { remaining_entries: 1, remaining_tokens: 94 }
     });
     const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
-    expect(diagnostics.get("novel")).toMatchObject({
+    expect(diagnostics.get("dup-a")).toMatchObject({
       rank_after_coverage_selector: 1,
       final_rank: 1,
       post_rank: 1
     });
-    expect(diagnostics.get("dup-a")).toMatchObject({
+    expect(diagnostics.get("dup-b")).toMatchObject({
       rank_after_coverage_selector: 2,
       final_rank: 2,
       post_rank: 2
     });
+    expect(diagnostics.get("novel")?.final_rank).toBeNull();
   });
 
   it("does not perform a second public-order displacement", () => {

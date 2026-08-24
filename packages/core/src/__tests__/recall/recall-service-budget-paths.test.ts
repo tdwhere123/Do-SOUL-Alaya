@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { aggregateFamilyContributions } from
+  "../../recall/delivery/fusion-delivery-families.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
@@ -328,11 +330,7 @@ it("excludes recall-neutral exception_to paths (recall_bias == 0) from path_expa
     expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
   });
 
-it("actively suppresses a target via a reinforced (high-strength) negative path", async () => {
-    // A plasticity-reinforced contradiction (recall_bias < 0, strength near 1)
-    // demotes its target's fused score below an otherwise-equivalent peer that
-    // carries no negative path. Both targets are lexical hits, so the only
-    // ranking difference is the active suppression delta.
+it("records governed negative-path suppression without forking R_obj authority", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -382,7 +380,7 @@ it("actively suppresses a target via a reinforced (high-strength) negative path"
       }
     });
 
-    const result = await service.recall({
+    const recall = () => service.recall({
       taskSurface: { ...createTaskSurface(), display_name: "deployment rollback procedure detail" },
       workspaceId: "workspace-1",
       strategy: "analyze",
@@ -390,16 +388,30 @@ it("actively suppresses a target via a reinforced (high-strength) negative path"
       diagnosticCapture: "answer_features"
     });
 
+    const result = await recall();
+    const replay = await recall();
+
     const suppressed = result.diagnostics?.candidates.find((c) => c.object_id === "suppressed-target");
     const control = result.diagnostics?.candidates.find((c) => c.object_id === "control-target");
-    // The suppressed target must still be present (suppression demotes, it does
-    // not remove), but it must rank strictly below the equivalent control.
     expect(suppressed).toBeDefined();
     expect(control).toBeDefined();
     expect(suppressed?.path_suppression_score ?? 0).toBeGreaterThan(0);
     expect(control?.path_suppression_score).toBe(0);
-    expect(suppressed?.fused_score ?? 1).toBeLessThan(control?.fused_score ?? 0);
-    expect(suppressed?.fused_rank ?? 0).toBeGreaterThan(control?.fused_rank ?? Number.MAX_SAFE_INTEGER);
+    expect(suppressed?.fused_score).toBeCloseTo(control?.fused_score ?? -1, 12);
+    expect(suppressed?.fused_score).toBeCloseTo(
+      aggregateFamilyContributions(suppressed?.fused_rank_contribution_per_stream ?? {}),
+      12
+    );
+    expect(suppressed?.flood_potential?.R_obj).toBeCloseTo(
+      suppressed?.fused_score ?? -1,
+      12
+    );
+    expect(replay.candidates.map((candidate) => candidate.object_id)).toEqual(
+      result.candidates.map((candidate) => candidate.object_id)
+    );
+    expect(replay.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === "suppressed-target"
+    )?.path_suppression_score).toBe(suppressed?.path_suppression_score);
   });
 
 it("does not let an attention_only negative path suppress even at high strength", async () => {

@@ -141,6 +141,64 @@ describe("RecallService tier cascade", () => {
     expect(findByWorkspaceIdSpy).not.toHaveBeenCalled();
   }, 30_000);
 
+  it.each([
+    ["oversized", (cursor: unknown) => ({
+      memories: Array.from({ length: STORAGE_RECALL_TIER_PAGE_SIZE + 1 }, (_, index) =>
+        createMemoryEntry({ object_id: `invalid-${index}` })
+      ),
+      next_cursor: cursor,
+      truncated: true
+    })],
+    ["missing cursor", () => ({ memories: [createMemoryEntry({ object_id: "invalid" })], next_cursor: null, truncated: true })],
+    ["stalled cursor", (cursor: unknown) => ({ memories: [createMemoryEntry({ object_id: "invalid" })], next_cursor: cursor, truncated: true })],
+    ["backward cursor", () => ({
+      memories: [createMemoryEntry({ object_id: "invalid" })],
+      next_cursor: { created_at: "0000-01-01T00:00:00.000Z", object_id: "older" },
+      truncated: true
+    })]
+  ] as const)("discards a cursor page with %s and stops incomplete", async (_label, invalidPage) => {
+    const first = createMemoryEntry({ object_id: "validated" });
+    const cursor = { created_at: first.created_at, object_id: first.object_id };
+    const findRecallTierWindow = vi.fn(async (query: {
+      readonly tier: StorageTier;
+      readonly cursor?: typeof cursor;
+    }) => {
+      if (query.tier !== StorageTier.HOT) {
+        return { memories: [], next_cursor: null, truncated: false };
+      }
+      return query.cursor === undefined
+        ? { memories: [first], next_cursor: cursor, truncated: true }
+        : invalidPage(cursor);
+    });
+
+    const { result, warnSpy } = await recallWith({ findRecallTierWindow }, 10, "answer_features");
+
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(4);
+    expect(result.total_scanned).toBeLessThanOrEqual(1);
+    expect(result.diagnostics?.candidates.map((candidate) => candidate.object_id))
+      .not.toContain("invalid");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards an oversized offset page before admission", async () => {
+    const findByWorkspaceId = vi.fn(async (
+      _workspaceId: string,
+      tier?: StorageTier,
+      page?: { readonly limit: number; readonly offset: number }
+    ) => (tier ?? StorageTier.HOT) === StorageTier.HOT && page !== undefined
+      ? Array.from({ length: page.limit + 1 }, (_, index) =>
+        createMemoryEntry({ object_id: `invalid-${index}` })
+      )
+      : []);
+
+    const { result, findByWorkspaceIdSpy, warnSpy } = await recallWith({ findByWorkspaceId }, 10, "answer_features");
+
+    expect(findByWorkspaceIdSpy).toHaveBeenCalledTimes(3);
+    expect(result.total_scanned).toBe(0);
+    expect(result.diagnostics?.candidates).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("stops a HOT tier scan when the page source keeps returning full unique pages", async () => {
     const findByWorkspaceId = vi.fn(async (
       _workspaceId: string,

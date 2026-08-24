@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   published: vi.fn(),
   question: vi.fn(),
   selectionDispose: vi.fn(),
+  selectionArtifactDispose: vi.fn(),
   shutdown: vi.fn(),
   writeEntry: vi.fn(),
   createSpool: vi.fn(),
@@ -145,7 +146,8 @@ vi.mock(
       mocks.captureCommitted = true;
       return result;
     }),
-    finalizeRecallEvalSelectionBoundarySpool: vi.fn(async () => null)
+    finalizeRecallEvalSelectionBoundarySpool: vi.fn(async () => null),
+    disposeRecallEvalSelectionBoundaryArtifact: mocks.selectionArtifactDispose
   })
 );
 vi.mock(
@@ -198,6 +200,46 @@ describe("recall-eval diagnostics spool lifecycle", () => {
     expect(mocks.dispose).toHaveBeenCalledTimes(1);
     expect(mocks.archive).not.toHaveBeenCalled();
   });
+
+  it("disposes the assembled selection artifact when a later question fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "alaya-selection-replay-failure-"));
+    roots.push(root);
+    await writeFile(join(root, "selection-boundaries.ndjson.gz"), "assembled");
+    mocks.prepareContext.mockResolvedValueOnce({
+      ...runContext(),
+      window: [
+        { questionId: "q-1", question: "first" },
+        { questionId: "q-2", question: "second" }
+      ]
+    });
+    let recalls = 0;
+    mocks.createPager.mockReturnValueOnce({
+      open: async () => ({ ok: true, pid: 1, mapsHint: null }),
+      recall: async () => {
+        recalls += 1;
+        if (recalls === 2) throw new Error("synthetic q2 failure");
+        mocks.captureCommitted = true;
+        return fullQuestion();
+      },
+      close: async () => ({
+        rootPath: root,
+        sourcePath: join(root, "selection-boundaries.ndjson.gz"),
+        binding: { filename: "selection-boundaries.ndjson.gz", sha256: "a".repeat(64), bytes: 9, record_count: 1 }
+      }),
+      pid: 1,
+      lastMapsHint: null
+    });
+    mocks.selectionArtifactDispose.mockImplementationOnce(async (artifact) => {
+      await rm(artifact.rootPath, { recursive: true, force: true });
+      throw new Error("synthetic cleanup failure");
+    });
+
+    await expect(runRecallEval(options())).rejects.toThrow("synthetic q2 failure");
+    await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(mocks.selectionArtifactDispose).toHaveBeenCalledWith(
+      expect.objectContaining({ rootPath: root })
+    );
+  });
 });
 
 describe("recall-eval diagnostics artifact profile lifecycle", () => {
@@ -242,17 +284,17 @@ describe("recall-eval diagnostics artifact profile lifecycle", () => {
 
 describe("recall-eval committed cleanup status", () => {
   it.each([
-    ["data_root_cleanup", () => mocks.finalizeOwnedRoot.mockRejectedValueOnce(eio())],
-    ["selection_spool_cleanup", () => mocks.selectionDispose.mockRejectedValueOnce(eio())],
-    ["diagnostics_spool_cleanup", () => mocks.dispose.mockRejectedValueOnce(eio())]
-  ])("reports %s without losing the committed result", async (phase, fail) => {
+    ["data_root_cleanup", () => mocks.finalizeOwnedRoot.mockRejectedValueOnce(eio()), "Error", "EIO"],
+    ["selection_spool_cleanup", () => mocks.selectionDispose.mockRejectedValueOnce(eio()), "AggregateError", null],
+    ["diagnostics_spool_cleanup", () => mocks.dispose.mockRejectedValueOnce(eio()), "Error", "EIO"]
+  ] as const)("reports %s without losing the committed result", async (phase, fail, name, code) => {
     fail();
 
     await expect(runRecallEval(options())).resolves.toMatchObject({
       slug: "fixture-slug",
       completion: {
         status: "incomplete",
-        failures: [{ phase, name: "Error", code: "EIO" }]
+        failures: [{ phase, name, code }]
       }
     });
     expect(mocks.writeEntry).toHaveBeenCalledTimes(1);
@@ -291,6 +333,7 @@ function resetHarnessState(): void {
   mocks.shutdown.mockResolvedValue(undefined);
   mocks.dispose.mockResolvedValue(undefined);
   mocks.selectionDispose.mockResolvedValue(undefined);
+  mocks.selectionArtifactDispose.mockResolvedValue(undefined);
   mocks.finalizeOwnedRoot.mockResolvedValue(undefined);
 }
 

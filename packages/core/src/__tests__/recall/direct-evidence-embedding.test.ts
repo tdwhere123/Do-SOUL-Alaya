@@ -134,7 +134,7 @@ describe("direct evidence transient embedding assessment", () => {
     });
   });
 
-  it("uses a transient evidence score to change the bounded delivered survivor", async () => {
+  it("does not let transient evidence quality bypass R_obj without binding gain", async () => {
     const evidence = [createEvidenceCapsule(
       0,
       "opaque zxq-8842 neutral archival payload with extra tokens"
@@ -148,8 +148,17 @@ describe("direct evidence transient embedding assessment", () => {
       }))
     ]);
 
-    expect(findCandidate(scoredResult, evidence[0]!)).toBeDefined();
+    expect(findCandidate(scoredResult, evidence[0]!)).toBeUndefined();
     expect(findCandidate(controlResult, evidence[0]!)).toBeUndefined();
+    expect(findDiagnostic(scoredResult, evidenceCandidateKey(evidence[0]!.object_id)))
+      .toMatchObject({
+        deep_head_trace: expect.objectContaining({ embedding_signal: 0.99 })
+      });
+    expect(scoredResult.diagnostics).toMatchObject({
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 1,
+      evidence_embedding_scored_count: 1
+    });
   });
 
   it("keeps evidence embedding off while retaining lexical evidence when embedding is disabled", async () => {

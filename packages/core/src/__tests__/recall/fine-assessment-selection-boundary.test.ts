@@ -99,6 +99,28 @@ describe("fine-assessment selection boundary fidelity", () => {
     expect(withCapture.diagnostics).toEqual(withoutCapture.diagnostics);
   });
 
+  it("replays negative-path receipts without changing the captured order", () => {
+    const supplementaryData = Object.freeze({
+      ...createSupplementaryData(),
+      pathSuppressionScores: Object.freeze({ "candidate-1": 0.25 })
+    });
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, supplementaryData);
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    const replayed = replayFineAssessmentSelectionBoundary(boundary);
+
+    expect(boundary.input.supplementary_data.pathSuppressionScores)
+      .toEqual({ "candidate-1": 0.25 });
+    expect(replayed.candidates.map((candidate) => candidate.object_id))
+      .toEqual(boundary.expected.candidate_keys.map((key) => key.split(":").at(-1)));
+    expect(replayed.diagnostics.find((candidate) => candidate.object_id === "candidate-1")
+      ?.path_suppression_score).toBe(0.25);
+  });
+
   it("captures excluded admission actions outside the settled sequence", () => {
     const candidates = fixtureCandidates();
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;

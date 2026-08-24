@@ -101,7 +101,7 @@ describe("mcp memory tool handler wiring", () => {
     });
   });
 
-  it("returns active constraints outside results and dedupes overlapping ids from results", async () => {
+  it("preserves Core delivery order when an active constraint overlaps a result", async () => {
     const deps = createDeps();
     deps.recallService.recall = vi.fn(async () => ({
       candidates: [
@@ -126,7 +126,7 @@ describe("mcp memory tool handler wiring", () => {
         scope_class: null,
         dimension: null,
         domain_tags: null,
-        max_results: 10,
+        max_results: 2,
         active_constraints_cap: 5
       },
       context
@@ -144,20 +144,48 @@ describe("mcp memory tool handler wiring", () => {
       readonly active_constraints: ReadonlyArray<{ readonly object_id: string }>;
       readonly active_constraints_count: number;
     };
-    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem2"]);
+    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem1", "mem2"]);
     expect(output.active_constraints.map((entry) => entry.object_id)).toEqual([
       "mem1",
       "constraint-2"
     ]);
     expect(output.active_constraints_count).toBe(2);
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalledWith(expect.objectContaining({
-      delivered_object_ids: ["mem2", "mem1", "constraint-2"],
+      delivered_object_ids: ["mem1", "mem2", "constraint-2"],
       delivered_objects: [
-        { object_id: "mem2", object_kind: "memory_entry" },
         { object_id: "mem1", object_kind: "memory_entry" },
+        { object_id: "mem2", object_kind: "memory_entry" },
         { object_id: "constraint-2", object_kind: "memory_entry" }
       ]
     }));
+  });
+
+  it("fails closed when Core exceeds the requested result budget", async () => {
+    const deps = createDeps();
+    deps.recallService.recall = vi.fn(async () => ({
+      candidates: [createRecallCandidate(), createRecallCandidate({ object_id: "mem2" })],
+      active_constraints: [],
+      active_constraints_count: 0,
+      total_scanned: 2,
+      coarse_filter_count: 2,
+      fine_assessment_count: 2
+    })) as typeof deps.recallService.recall;
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const result = await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 1
+      },
+      context
+    });
+
+    expect(result.ok).toBe(false);
+    expect(deps.trustStateRecorder.recordDelivery).not.toHaveBeenCalled();
   });
 
   it("omits timeFilter when the request has no time bounds", async () => {

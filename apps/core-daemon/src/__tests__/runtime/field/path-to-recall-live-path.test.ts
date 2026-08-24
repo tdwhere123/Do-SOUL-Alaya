@@ -23,7 +23,9 @@ describe("path to recall live path", () => {
   it("introduces the linked memory only through path_expansion", async () => {
     const runtime = await openPathRecall();
     const lexical = await runtime.memoryRepo.searchByKeyword(WORKSPACE_ID, QUERY, 10);
-    const result = await runtime.recall.recall(recallRequest(QUERY));
+    const result = await runtime.recall.recall(recallRequest(QUERY, {
+      diagnosticCapture: "answer_features"
+    }));
     const linked = result.candidates.find((candidate) => candidate.object_id === LINKED_ID);
     const diagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === LINKED_ID

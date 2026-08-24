@@ -186,12 +186,8 @@ export interface RecallSupplementaryData {
   readonly pathInflowByTarget?: Readonly<Record<string, readonly PathInflowEdge[]>>;
   /** Capture provenance for distinguishing an empty path set from a failed path read. */
   readonly pathInflowAvailability?: RecallPathInflowAvailability;
-  // Active sign-aware suppression deltas keyed by target memory id. A positive
-  // value is subtracted from that memory's fused recall score before final
-  // ranking, demoting targets that a reinforced negative path (recall_bias < 0)
-  // suppresses. Empty when no negative path anchored on an expansion seed.
-  // see also: recall-service.ts collectNegativePathSuppressions /
-  // applyPathSuppressionToFusionScores.
+  // Active sign-aware suppression receipts keyed by target memory id. They
+  // remain diagnostic because family-max RRF is the sole R_obj authority.
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
   // Key presence means query embedding was observed; finite zero is distinct from cold absence.
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;

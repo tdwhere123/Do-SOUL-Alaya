@@ -84,7 +84,7 @@ describe("final recall relevance ownership", () => {
     assertFusionOwnedCandidates(fixture.assessed);
   });
 
-  it("keeps a unique semantic memory leader first while public relevance owns its scalar", () => {
+  it("keeps higher R_obj first when semantic quality has no binding increment", () => {
     const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
@@ -126,21 +126,21 @@ describe("final recall relevance ownership", () => {
         fused: assessed.diagnostics.find((row) => row.object_id === candidate.object_id)?.fused_score,
         embedding: candidate.score_factors?.embedding_similarity
       })))
-    ).toEqual([COVERAGE_NOVEL_ID, FUSION_WINNER_ID]);
+    ).toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID]);
     expect(assessed.candidates.map((candidate) => candidate.relevance_score))
       .toEqual([
-        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score,
-        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score
+        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
+        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
       ]);
     expect(assessed.candidates.map((candidate) => candidate.budget_state?.remaining_entries))
       .toEqual([1, 0]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
-    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({
+    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
       rank_after_coverage_selector: 1,
       final_rank: 1,
       post_rank: 1
     });
-    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({
       rank_after_coverage_selector: 2,
       final_rank: 2,
       post_rank: 2

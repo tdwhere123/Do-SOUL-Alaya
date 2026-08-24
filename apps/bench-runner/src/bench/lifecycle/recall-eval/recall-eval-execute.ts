@@ -5,8 +5,10 @@ import {
 } from "../../provenance/recall-eval/recall-eval-diagnostics-spool.js";
 import type { RecallEvalRunContext } from "./recall-eval-run-context.js";
 import type { RecallEvalQuestionResult } from "./recall-eval-contract.js";
-import type { RecallEvalSelectionBoundaryArtifact } from
-  "./recall-eval-selection-replay.js";
+import {
+  disposeRecallEvalSelectionBoundaryArtifact,
+  type RecallEvalSelectionBoundaryArtifact
+} from "./recall-eval-selection-replay.js";
 import { recallOptionsForQuestion } from "./recall-eval-question-options.js";
 import {
   RecallEvalPagerChildExitedError,
@@ -82,7 +84,8 @@ async function closePager(
 
 async function closePagerQuietly(session: RecallEvalPagerIpcSession): Promise<void> {
   try {
-    await session.close();
+    const artifact = await closePager(session);
+    await disposeRecallEvalSelectionBoundaryArtifact(artifact);
   } catch {
     // Primary failure already owns the arm; close is best-effort reap.
   }

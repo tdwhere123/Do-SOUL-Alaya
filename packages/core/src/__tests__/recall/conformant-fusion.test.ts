@@ -14,10 +14,10 @@ import {
   WorkspaceState
 } from "@do-soul/alaya-protocol";
 import {
-  applyPathSuppressionToFusionScores,
-  buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { aggregateFamilyContributions } from
+  "../../recall/delivery/fusion-delivery-families.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { classifyRecallIntent } from "../../recall/query/recall-query-plan.js";
 import { buildEvidenceSupportVectors } from "../../recall/supplements/supplementary-data.js";
@@ -129,7 +129,8 @@ function buildSupplementaryData(
   query: string,
   specs: readonly CandidateSpec[],
   entries: readonly MemoryEntry[],
-  inflow?: InflowMap
+  inflow?: InflowMap,
+  suppression: Readonly<Record<string, number>> = {}
 ): RecallSupplementaryData {
   const record = (pick: (spec: CandidateSpec) => number | undefined): Record<string, number> => {
     const out: Record<string, number> = {};
@@ -155,7 +156,7 @@ function buildSupplementaryData(
     graphExpansionScores: record((s) => s.graph),
     entitySeedScores: record((s) => s.entity),
     pathExpansionScores: record((s) => s.path),
-    pathSuppressionScores: {},
+    pathSuppressionScores: suppression,
     embeddingSimilarityScores: record((s) => s.embedding),
     evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: record((s) => s.graphSupport),
@@ -174,7 +175,11 @@ function buildSupplementaryData(
 async function runFusion(
   query: string,
   specs: readonly CandidateSpec[],
-  options: { readonly nowIso?: string; readonly inflow?: InflowMap } = {}
+  options: {
+    readonly nowIso?: string;
+    readonly inflow?: InflowMap;
+    readonly suppression?: Readonly<Record<string, number>>;
+  } = {}
 ): Promise<ReadonlyMap<string, RecallFusionBreakdown>> {
   const repo = createRealStorage();
   const byId = await seedEntries(repo, specs);
@@ -189,7 +194,9 @@ async function runFusion(
       structuralScore: spec.structural ?? 0
     })),
     policy: {} as RecallPolicy,
-    supplementaryData: buildSupplementaryData(query, specs, entries, options.inflow),
+    supplementaryData: buildSupplementaryData(
+      query, specs, entries, options.inflow, options.suppression
+    ),
     nowIso: options.nowIso ?? NOW
   });
 }
@@ -411,39 +418,25 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(withEmbedding).toBeGreaterThan(surfaceOnly);
   });
 
-  it("path-suppression stays a clean demote, not an annihilation, on the delivered score", async () => {
-    const spec: CandidateSpec = { id: objectId(1), lexical: 1, sourceProximity: 1 };
-    const fusion = await runFusion(GENERIC_QUERY, [spec]);
-    const before = fusion.get(keyOf(spec.id))!.fused_score;
-    expect(before).toBeGreaterThan(0);
-    // partial suppression demotes proportionally (scale-agnostic: additive RRF base, not the old composite scale).
-    const partial = applyPathSuppressionToFusionScores(fusion, { [spec.id]: before / 2 });
-    const afterPartial = partial.get(keyOf(spec.id))!.fused_score;
-    expect(afterPartial).toBeCloseTo(before / 2, 9);
-    expect(afterPartial).toBeLessThan(before);
-    // an over-large suppression floors, never annihilates.
-    const heavy = applyPathSuppressionToFusionScores(fusion, { [spec.id]: before * 10 });
-    const afterHeavy = heavy.get(keyOf(spec.id))!.fused_score;
-    expect(afterHeavy).toBeGreaterThan(0);
-    expect(afterHeavy).toBeLessThan(before);
-  });
+  it("keeps tied family-max R_obj authoritative when suppression is observed", async () => {
+    const specs: readonly CandidateSpec[] = [
+      { id: objectId(1), lexical: 1, sourceProximity: 1 },
+      { id: objectId(2), lexical: 1, sourceProximity: 1 }
+    ];
+    const fusion = await runFusion(GENERIC_QUERY, specs, {
+      suppression: { [specs[0]!.id]: 1 }
+    });
+    const first = fusion.get(keyOf(specs[0]!.id))!;
+    const second = fusion.get(keyOf(specs[1]!.id))!;
 
-  it("path-suppression floor never boosts a tiny positive score", () => {
-    const tiny = 0.00001;
-    const breakdown = buildEmptyRecallFusionBreakdown("tiny");
-    const fusion = new Map<string, RecallFusionBreakdown>([
-      [
-        "workspace_local:memory_entry:tiny",
-        Object.freeze({
-          ...breakdown,
-          fused_rank: 1,
-          fused_score: tiny
-        })
-      ]
-    ]);
-
-    const suppressed = applyPathSuppressionToFusionScores(fusion, { tiny: 1 });
-    expect(suppressed.get("workspace_local:memory_entry:tiny")?.fused_score).toBe(tiny);
+    expect(first.fused_score).toBeCloseTo(second.fused_score, 12);
+    expect(first.fused_score).toBeCloseTo(
+      aggregateFamilyContributions(first.fused_rank_contribution_per_stream),
+      12
+    );
+    expect(first.flood_potential?.R_obj).toBeCloseTo(first.fused_score, 12);
+    expect(first.fused_rank).toBe(1);
+    expect(second.fused_rank).toBe(2);
   });
 
   it("unified assembly is the production algorithm", async () => {

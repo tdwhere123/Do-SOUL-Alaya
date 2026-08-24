@@ -49,6 +49,7 @@ describe("F3-only field membership", () => {
     const certified = await formedQueryCapture(QUERY);
     const result = await runtime.recall.recall({
       ...recallRequest(QUERY),
+      diagnosticCapture: "answer_features",
       querySemanticFactorFormationCapture: certified.capture,
       querySemanticFactorCompletenessReceipt: certified.receipt
     });

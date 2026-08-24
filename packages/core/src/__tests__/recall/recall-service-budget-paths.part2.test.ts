@@ -4,16 +4,11 @@ import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
-it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion", async () => {
+it("caps stacked recall_allowed negative-path receipts", async () => {
     // invariant: multiple converging governed negatives compound only up to one
     // reinforced-supersession delta (0.27). see also:
     // packages/core/src/recall/path-relations.ts:PATH_SUPPRESSION_MAX_PER_TARGET.
-    // ganging extra negatives onto the same victim cannot push its fused score
-    // any lower than a single negative already does. Isolate the cap by running
-    // the same corpus with three converging negatives vs one negative: the
-    // victim's fused score must be identical (the cap clamps the stack), and the
-    // victim must remain delivered (suppression demotes, never removes from the
-    // ranked set).
+    // The cap applies to the diagnostic receipt; R_obj remains unchanged.
     const buildMemories = () => [
       createMemoryEntry({
         object_id: "seed-one",
@@ -51,6 +46,7 @@ it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion"
     const runRecall = async (negatives: readonly PathRelation[]): Promise<{
       readonly delivered: boolean;
       readonly fusedScore: number;
+      readonly suppressionScore: number;
     }> => {
       const { dependencies } = createDependencies(buildMemories());
       const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
@@ -89,28 +85,21 @@ it("caps stacked recall_allowed negatives so ganging cannot deepen the demotion"
       expect(victim).toBeDefined();
       return {
         delivered: result.candidates.some((candidate) => candidate.object_id === "victim-target"),
-        fusedScore: victim?.fused_score ?? -1
+        fusedScore: victim?.fused_score ?? -1,
+        suppressionScore: victim?.path_suppression_score ?? -1
       };
     };
 
     const single = await runRecall([allNegatives[0]!]);
     const ganged = await runRecall(allNegatives);
-    // The cap clamps the stack to one delta: three converging negatives demote
-    // the victim no more than one does.
+    expect(single.suppressionScore).toBeGreaterThan(0);
+    expect(ganged.suppressionScore).toBeCloseTo(single.suppressionScore, 10);
     expect(ganged.fusedScore).toBeCloseTo(single.fusedScore, 10);
-    // Suppression demotes, never removes: the victim is still delivered.
     expect(single.delivered).toBe(true);
     expect(ganged.delivered).toBe(true);
   });
 
-it("demotes a low-base victim to a floor residual without erasing it from the candidate set", async () => {
-    // invariant: PATH_SUPPRESSION_RESIDUAL_FLOOR. A single full-strength
-    // recall_allowed negative produces a delta (~0.27) that exceeds a low-base
-    // victim's fused_score. Without the residual floor the subtraction would
-    // drive the victim to 0 and drop it out of the candidate set (erasure).
-    // The floor keeps a positive pre-suppression candidate present as a tail
-    // candidate: still ranked, fused_score > 0, but strictly demoted below its
-    // no-path baseline. see also: packages/core/src/recall/fusion-delivery.ts:applyPathSuppressionToFusionScores.
+it("keeps a low-base candidate on R_obj while exposing suppression", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "seed-memory",
@@ -138,6 +127,7 @@ it("demotes a low-base victim to a floor residual without erasing it from the ca
     const runRecall = async (wirePath: boolean): Promise<{
       readonly fusedScore: number;
       readonly present: boolean;
+      readonly suppressionScore: number;
     }> => {
       const { dependencies } = createDependencies(memories);
       const findByAnchors = vi.fn(async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
@@ -172,19 +162,18 @@ it("demotes a low-base victim to a floor residual without erasing it from the ca
       const victim = result.diagnostics?.candidates.find((c) => c.object_id === "low-base-victim");
       return {
         fusedScore: victim?.fused_score ?? -1,
-        present: victim !== undefined
+        present: victim !== undefined,
+        suppressionScore: victim?.path_suppression_score ?? -1
       };
     };
 
     const baseline = await runRecall(false);
     const suppressed = await runRecall(true);
-    // Baseline below the cap delta: the subtraction alone would reach 0.
     expect(baseline.fusedScore).toBeGreaterThan(0);
     expect(baseline.fusedScore).toBeLessThan(0.27);
-    // Suppressed: still a candidate, demoted below baseline, but floored above 0.
     expect(suppressed.present).toBe(true);
-    expect(suppressed.fusedScore).toBeGreaterThan(0);
-    expect(suppressed.fusedScore).toBeLessThan(baseline.fusedScore);
+    expect(suppressed.suppressionScore).toBeGreaterThan(0);
+    expect(suppressed.fusedScore).toBeCloseTo(baseline.fusedScore, 10);
   });
 
 it("does not let a weak attention_only negative path move rankings", async () => {

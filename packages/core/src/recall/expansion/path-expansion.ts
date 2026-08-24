@@ -117,8 +117,8 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   return admitTimeConcernPathExpansionCandidates(params, paths, windowDigests);
 }
 
-// Collects negative (recall_bias<0) paths the positive lanes exclude; each demotes its direction-eligible
-// target by a strength-gated delta, accumulated per target. Fail-soft on missing port / lookup failure.
+// Collects negative paths the positive lanes exclude so governed suppression
+// remains observable without becoming a second ranking authority.
 export async function collectNegativePathSuppressions(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;

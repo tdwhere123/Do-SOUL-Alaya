@@ -163,7 +163,7 @@ describe("RecallService semantic supplement", () => {
     );
   });
 
-  it("uses exact loaded ids when the tier window is truncated", async () => {
+  it("uses exact validated ids when a later cursor page is invalid", async () => {
     const valid = createMemoryEntry({ object_id: "memory-loaded-window" });
     const { dependencies } = createDependencies([valid]);
     const searchByKeywordWithinTier = vi.fn(async () => [
@@ -180,11 +180,18 @@ describe("RecallService semantic supplement", () => {
         ...dependencies,
         memoryRepo: {
           ...dependencies.memoryRepo,
-          findRecallTierWindow: vi.fn(async () => ({
-            memories: [valid],
-            next_cursor: null,
-            truncated: true
-          })),
+          findRecallTierWindow: vi.fn(async (query: Readonly<{
+            cursor?: Readonly<{ created_at: string; object_id: string }>;
+          }>) => {
+            const cursor = { created_at: valid.created_at, object_id: valid.object_id };
+            return query.cursor === undefined
+              ? { memories: [valid], next_cursor: cursor, truncated: true }
+              : {
+                  memories: [createMemoryEntry({ object_id: "invalid-page-row" })],
+                  next_cursor: cursor,
+                  truncated: true
+                };
+          }),
           searchByKeywordWithinTier,
           searchByKeywordWithinObjectIds
         }

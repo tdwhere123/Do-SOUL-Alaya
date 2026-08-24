@@ -228,7 +228,7 @@ function embeddingEnabledPolicy(recallService: RecallService): RecallPolicy {
   });
 }
 describe("RecallService embedding integration (real SQLite + stored vectors)", () => {
-  it("changes delivered ranking when stored vectors are present versus an empty vector table", async () => {
+  it("activates embedding RRF without bypassing a higher family-max R_obj", async () => {
     const withVectors = await createRecallEmbeddingFixture({ seedVectors: true });
     const withoutVectors = await createRecallEmbeddingFixture({ seedVectors: false });
     const policy = embeddingEnabledPolicy(withVectors.recallService);
@@ -251,13 +251,23 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
     });
 
     expect(live.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
-      SEMANTIC_ID,
-      LEXICAL_ID
+      LEXICAL_ID,
+      SEMANTIC_ID
     ]);
     expect(live.diagnostics?.provider_degradation_reason).toBeNull();
+    const semanticDiagnostic = live.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === SEMANTIC_ID
+    );
+    expect(semanticDiagnostic?.score_factors.embedding_similarity).toBeGreaterThan(0);
+    expect(semanticDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
+    expect(semanticDiagnostic?.fused_rank_contribution_per_stream.embedding_similarity)
+      .toBeGreaterThan(0);
+    expect(semanticDiagnostic?.fused_score).toBeCloseTo(
+      semanticDiagnostic?.flood_potential?.R_obj ?? -1,
+      12
+    );
 
-    // Empty vector table still fills the delivery budget from non-embedding
-    // paths; the regression signal is ranking flip plus no_stored_vectors.
+    // Empty vector table still fills the delivery budget from non-embedding paths.
     expect(emptyTable.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
       LEXICAL_ID,
       SEMANTIC_ID

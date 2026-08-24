@@ -244,6 +244,21 @@ describe("fine-assessment component ledger", () => {
     expect(row.duplicate_evidence.evidence_fts_in_evidence_agreement).toBe(true);
   });
 
+  it("keeps the persisted ledger on the same family-max R_obj scalar", () => {
+    const boundary = captureLiveBoundary();
+    const ledger = buildFineAssessmentComponentLedger(boundary);
+    const fusionByKey = new Map(boundary.input.ordered_candidates.map((candidate) => [
+      candidate.fusion.candidate_key,
+      candidate.fusion
+    ] as const));
+
+    for (const row of ledger.candidates) {
+      const fusion = fusionByKey.get(row.candidate_key)!;
+      expect(row.fusion.rrf_family_total).toBeCloseTo(fusion.fused_score, 12);
+      expect(fusion.flood_potential?.R_obj).toBeCloseTo(fusion.fused_score, 12);
+    }
+  });
+
   it("does not alter composition packet digests when derived first", () => {
     const boundary = captureLiveBoundary();
     const before = selectionBoundaryJsonSha256(boundary);

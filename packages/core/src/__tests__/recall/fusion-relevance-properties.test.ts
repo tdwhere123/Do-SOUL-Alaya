@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
-  applyPathSuppressionToFusionScores,
   buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails,
   compareFusedRecallCandidates
@@ -36,22 +35,6 @@ describe("fusion relevance properties", () => {
     }
   });
 
-  it("recomputes suppression ties from candidate identity instead of old rank", () => {
-    const left = candidate(1, 0.8).fusion;
-    const right = candidate(2, 0.7).fusion;
-    const fusion = new Map([
-      [left.candidate_key, { ...left, fused_rank: 2 }],
-      [right.candidate_key, { ...right, fused_rank: 1 }]
-    ]);
-    const suppressed = applyPathSuppressionToFusionScores(fusion, {
-      [left.object_id]: 0.2,
-      [right.object_id]: 0.1
-    });
-    expect(suppressed.get(left.candidate_key)?.fused_score).toBeCloseTo(0.6, 12);
-    expect(suppressed.get(right.candidate_key)?.fused_score).toBeCloseTo(0.6, 12);
-    expect(suppressed.get(left.candidate_key)?.fused_rank).toBe(1);
-    expect(suppressed.get(right.candidate_key)?.fused_rank).toBe(2);
-  });
 });
 
 function candidate(seed: number, fusedScore: number): FusedRecallCandidateInput {

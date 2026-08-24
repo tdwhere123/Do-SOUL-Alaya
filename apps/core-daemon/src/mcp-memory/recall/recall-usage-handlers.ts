@@ -196,12 +196,10 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
 }
 
 function selectRecallCandidates(recallResult: RecallServiceResult, maxResults: number) {
-  const activeConstraintIds = new Set(
-    recallResult.active_constraints.map((constraint) => constraint.object_id)
-  );
-  return recallResult.candidates
-    .filter((candidate) => !activeConstraintIds.has(candidate.object_id))
-    .slice(0, maxResults);
+  if (recallResult.candidates.length > maxResults) {
+    throw new Error("Core recall returned more candidates than the requested result budget");
+  }
+  return recallResult.candidates;
 }
 
 function buildRecallDelivery(

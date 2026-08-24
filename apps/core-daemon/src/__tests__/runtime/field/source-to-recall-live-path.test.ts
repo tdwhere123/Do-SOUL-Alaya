@@ -77,7 +77,9 @@ describe("source to recall live path", () => {
   it("introduces the winner only through field_projection on a real memory repo", async () => {
     const runtime = await openPersistedAdaRecall();
     const lexical = await runtime.memoryRepo.searchByKeyword("workspace-1", "Ada", 10);
-    const result = await runtime.recall.recall(recallRequest("Ada"));
+    const result = await runtime.recall.recall(recallRequest("Ada", {
+      diagnosticCapture: "answer_features"
+    }));
     const winner = result.candidates.find((candidate) => candidate.object_id === MEMORY_ID);
     const diagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === MEMORY_ID

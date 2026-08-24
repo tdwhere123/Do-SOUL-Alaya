@@ -46,8 +46,6 @@ export {
   RECALL_FUSION_STREAMS
 } from "./fusion-delivery-streams.js";
 
-const PATH_SUPPRESSION_RESIDUAL_FLOOR = 1e-4;
-
 export function buildRecallFusionDetails(params: Readonly<{
   readonly candidates: readonly RecallFusionCandidateInput[];
   readonly policy: Readonly<RecallPolicy>;
@@ -82,60 +80,6 @@ export function buildRecallFusionDetails(params: Readonly<{
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
   return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey);
 }
-
-// invariant: path suppression changes the fused scalar before rank is derived.
-export function applyPathSuppressionToFusionScores(
-  fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,
-  suppressionScores: Readonly<Record<string, number>>
-): ReadonlyMap<string, RecallFusionBreakdown> {
-  const hasAnySuppression = [...fusionByCandidateKey.values()].some((breakdown) => {
-    if (breakdown.origin_plane !== "workspace_local" || breakdown.object_kind !== "memory_entry") {
-      return false;
-    }
-    return (suppressionScores[breakdown.object_id] ?? 0) > 0;
-  });
-  if (!hasAnySuppression) {
-    return fusionByCandidateKey;
-  }
-  const adjusted = [...fusionByCandidateKey.values()].map((breakdown) => {
-    const delta = breakdown.origin_plane === "workspace_local" &&
-      breakdown.object_kind === "memory_entry"
-      ? suppressionScores[breakdown.object_id] ?? 0
-      : 0;
-    const fusedScore =
-      delta > 0 && breakdown.fused_score > 0
-        ? Math.min(
-          breakdown.fused_score,
-          Math.max(PATH_SUPPRESSION_RESIDUAL_FLOOR, breakdown.fused_score - delta)
-        )
-        : breakdown.fused_score;
-    return { breakdown, fusedScore };
-  });
-  const ranked = [...adjusted].sort((left, right) => {
-    const delta = right.fusedScore - left.fusedScore;
-    if (delta !== 0) {
-      return delta;
-    }
-    return left.breakdown.fused_rank - right.breakdown.fused_rank ||
-      left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
-  });
-  const suppressedRankByKey = new Map(
-    ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
-  );
-  return Object.freeze(
-    new Map(
-      adjusted.map((entry) => [
-        entry.breakdown.candidate_key,
-        Object.freeze({
-          ...entry.breakdown,
-          fused_rank: suppressedRankByKey.get(entry.breakdown.candidate_key) ?? entry.breakdown.fused_rank,
-          fused_score: entry.fusedScore
-        })
-      ] as const)
-    )
-  );
-}
-
 
 function buildFusionRanksByStream(
   candidates: readonly KeyedRecallFusionCandidate[],

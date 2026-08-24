@@ -15,7 +15,6 @@ import type {
   TokenEstimator
 } from "../runtime/recall-service-types.js";
 import {
-  applyPathSuppressionToFusionScores,
   buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "./fusion-delivery.js";
@@ -208,16 +207,13 @@ function fuseFineAssessmentCandidates(
   nowIso: string,
   includeFloodEdgeTraces: boolean
 ): readonly FineAssessmentCandidate[] {
-  const fusionByCandidateKey = applyPathSuppressionToFusionScores(
-    buildRecallFusionDetails({
-      candidates: additiveScoredCandidates,
-      policy,
-      supplementaryData,
-      nowIso,
-      includeFloodEdgeTraces
-    }),
-    supplementaryData.pathSuppressionScores
-  );
+  const fusionByCandidateKey = buildRecallFusionDetails({
+    candidates: additiveScoredCandidates,
+    policy,
+    supplementaryData,
+    nowIso,
+    includeFloodEdgeTraces
+  });
   const fusedCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({
     ...candidate,
     fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
