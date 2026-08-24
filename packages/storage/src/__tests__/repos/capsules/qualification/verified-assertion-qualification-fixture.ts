@@ -133,6 +133,7 @@ function assertionSignal(sourceHash: string): CandidateMemorySignal {
     exception_to_refs: [],
     contradicts_refs: [],
     incompatible_with_refs: [],
+    source_observation: null,
     raw_payload: {
       source_assertion: ASSERTION,
       full_turn_content: SOURCE_CORPUS,

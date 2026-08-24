@@ -10,7 +10,7 @@ export function seedDerivedPrivacyClosure(
 ): void {
   seedMemory(database, evidenceId);
   seedMemoryArtifacts(database, evidenceId);
-  seedSynthesis(database, evidenceId);
+  seedSynthesis(database);
 }
 
 function seedMemory(database: StorageDatabase, evidenceId: string): void {
@@ -74,7 +74,7 @@ function seedMemoryArtifacts(database: StorageDatabase, evidenceId: string): voi
   );
 }
 
-function seedSynthesis(database: StorageDatabase, evidenceId: string): void {
+function seedSynthesis(database: StorageDatabase): void {
   database.connection.prepare(`
     INSERT INTO synthesis_capsules (
       object_id, object_kind, schema_version, lifecycle_state, created_at, updated_at,

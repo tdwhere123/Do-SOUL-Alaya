@@ -74,7 +74,7 @@ export function hashedRecord(
     source_id: sourceId,
     source_version: "v1",
     content_digest,
-    evidence_object_id: null,
+    evidence_object_id: null as string | null,
     recorded_at: CLOCK,
     event_time: null as string | null,
     valid_from: null as string | null,

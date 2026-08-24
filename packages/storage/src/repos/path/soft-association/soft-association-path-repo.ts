@@ -19,7 +19,7 @@ export class SqliteSoftAssociationPathRepo {
   private readonly selectCurrent;
   private readonly selectHistorical;
 
-  public constructor(private readonly database: StorageDatabase) {
+  public constructor(database: StorageDatabase) {
     this.insert = database.connection.prepare(`
       INSERT INTO soft_association_path_relations (
         path_id, workspace_id, anchors_json, constitution_json,
