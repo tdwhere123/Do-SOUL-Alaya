@@ -12,6 +12,8 @@ import {
 } from "../../../recall/field/open-semantic-factors/candidate-attribution.js";
 import type { IntegratedFloodCandidateDiagnostics } from
   "../../../recall/runtime/recall-service-types.js";
+import { evidenceSemanticActivationsFromScores } from
+  "../fixtures/evidence-semantic-activation.js";
 import {
   createCandidate,
   createConfig,
@@ -302,6 +304,70 @@ describe("live Select_Gamma binding", () => {
     expect(qualityByKey.get(queryMatch.fusion.candidate_key)).toBeGreaterThan(
       qualityByKey.get(stalePrior.fusion.candidate_key) ?? Number.POSITIVE_INFINITY
     );
+  });
+
+  it("does not let evidence_semantic activation buy Select_Gamma quality", () => {
+    const plain = createRankedCandidate("plain", 1, 0.5);
+    const semantic = createRankedCandidate("semantic", 2, 0.5);
+    const supplementaryData = createSupplementaryData({
+      evidenceSemanticActivationsByCandidateKey:
+        evidenceSemanticActivationsFromScores(
+          new Map([[semantic.fusion.candidate_key, 0.95]])
+        )
+    });
+    const params = {
+      ...fixture(plain, supplementaryData),
+      orderedCandidates: [plain, semantic]
+    };
+    const qualityByKey = (binding: ReturnType<
+      typeof buildFineAssessmentSelectGammaBinding
+    >) => new Map(binding.candidates.map((candidate) => [
+      candidate.candidate_key,
+      candidate.quality
+    ]));
+
+    const unmapped = qualityByKey(buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    ));
+    expect(unmapped.get(semantic.fusion.candidate_key))
+      .toBe(unmapped.get(plain.fusion.candidate_key));
+
+    const mappedParams = {
+      ...params,
+      coverageRelevanceByCandidateKey: new Map([
+        [plain.fusion.candidate_key, 0.4]
+      ])
+    };
+    const mapped = qualityByKey(buildFineAssessmentSelectGammaBinding(
+      mappedParams,
+      createSelectionContext(mappedParams)
+    ));
+    expect(mapped.get(semantic.fusion.candidate_key)).toBe(0);
+  });
+
+  it("does not let evidence_semantic activation displace independent relevance in the walk", () => {
+    const relevant = createRankedCandidate("relevant", 1, 0.08);
+    const semantic = createRankedCandidate("semantic", 2, 0.04);
+    const result = selectCandidates({
+      workspace_id: relevant.entry.workspace_id,
+      orderedCandidates: [relevant, semantic],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData({
+        evidenceSemanticActivationsByCandidateKey:
+          evidenceSemanticActivationsFromScores(
+            new Map([[semantic.fusion.candidate_key, 0.95]])
+          )
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([relevant, semantic]),
+      coverageRelevanceByCandidateKey: new Map([
+        [relevant.fusion.candidate_key, 0.4]
+      ])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["relevant"]);
   });
 
   it("does not reward coverage features shared by the whole field", () => {
