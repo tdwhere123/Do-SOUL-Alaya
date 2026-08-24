@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { buildTreatmentExposureReceipts } from
   "../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";

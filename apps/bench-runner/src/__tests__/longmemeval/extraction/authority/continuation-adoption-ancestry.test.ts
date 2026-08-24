@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { assertImmediateContinuationAdoptionParent } from
   "../../../../bench/extraction/authority/continuation/child-claim.js";

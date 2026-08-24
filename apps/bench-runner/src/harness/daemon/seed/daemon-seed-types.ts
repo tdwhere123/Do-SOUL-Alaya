@@ -16,6 +16,9 @@ export interface SeededEvidenceResult {
   readonly signalId: string;
   readonly truncated: boolean;
   readonly charsClipped: number;
+  /** Memory-only fields; absent on evidence capsules so union access typechecks. */
+  readonly memoryId?: undefined;
+  readonly proposalId?: undefined;
 }
 
 export type SeededObjectResult = SeededMemoryResult | SeededEvidenceResult;

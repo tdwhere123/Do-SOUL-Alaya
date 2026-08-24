@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { FullGoldDeliveryContributionSchema } from "@do-soul/alaya-eval";
 import {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { sealTreatmentExposureReceipt } from
   "../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
 import {

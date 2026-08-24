@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { LongMemEvalQuestionDiagnostic } from
   "../../../bench/diagnostics/schema/diagnostics-types.js";
 

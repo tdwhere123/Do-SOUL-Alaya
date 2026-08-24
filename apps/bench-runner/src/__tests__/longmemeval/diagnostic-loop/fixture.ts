@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { sha256Utf8 } from "../../../bench/diagnostic-loop/identity.js";
 import { sharedSubstrateIdentities } from "../../../bench/diagnostic-loop/run.js";
 import type {

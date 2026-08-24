@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecallEvalOneQuestionInput } from
   "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js";

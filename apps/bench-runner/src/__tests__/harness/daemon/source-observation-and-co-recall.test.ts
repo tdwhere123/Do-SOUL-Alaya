@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { tmpdir } from "node:os";

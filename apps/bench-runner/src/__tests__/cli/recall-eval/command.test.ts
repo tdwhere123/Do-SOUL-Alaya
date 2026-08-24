@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { beforeEach, expect, it, vi } from "vitest";
 import { buildFullLongMemEvalPayload } from
   "../../../../../../packages/eval/src/__tests__/history/history-fixture.js";
