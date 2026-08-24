@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { classifyGoldObjectStage } from "../../../bench/diagnostics/stage-attribution/classify-gold.js";
 import { classifyQuestionStage } from

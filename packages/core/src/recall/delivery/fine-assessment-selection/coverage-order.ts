@@ -5,7 +5,6 @@ import {
   resolvePreparedAnswerShapePlan
 } from "../../query/recall-answer-shape-plan.js";
 import type {
-  FineAssessmentCandidate,
   FineAssessmentSelectionContext,
   FineAssessmentSelectionParams
 } from "./types.js";

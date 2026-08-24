@@ -39,7 +39,7 @@ describe("duration subject word-piece coverage", () => {
       ["非通勤", "negated commute prefix"],
       ["没上班", "negated work"],
       ["无通勤", "negated commute absence"]
-    ] as const)("fails closed on CJK %s", (evidenceSubject) => {
+    ] as const)("fails closed on CJK %s", (evidenceSubject, _label) => {
       expect(receipt("每日通勤上班", evidenceSubject)).toMatchObject({
         status: "incompatible",
         matched_query_proposition_count: 0

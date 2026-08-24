@@ -146,7 +146,7 @@ describe("final recall relevance ownership", () => {
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
     const memories = [primary, redundant, novel];
     const basePolicy = buildPolicy();
-    const evidenceScores = {
+    const evidenceScores: Readonly<Record<string, number>> = {
       [FUSION_WINNER_ID]: 1,
       [ACTIVATION_WINNER_ID]: 0.9,
       [COVERAGE_NOVEL_ID]: 0.8
@@ -437,6 +437,7 @@ function createSupplementaryData(
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: {},

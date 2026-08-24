@@ -285,7 +285,11 @@ function createStore(
       record.providerKind === input.providerKind &&
       record.modelId === input.modelId &&
       record.schemaVersion === input.schemaVersion &&
-      input.documents.some((document) =>
+      input.documents.some((document: {
+        readonly ownerObjectId: string;
+        readonly documentIdentity: string;
+        readonly contentHash: string;
+      }) =>
         document.ownerObjectId === record.ownerObjectId &&
         document.documentIdentity === record.documentIdentity &&
         document.contentHash === record.contentHash

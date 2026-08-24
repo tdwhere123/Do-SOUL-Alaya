@@ -4,6 +4,10 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import type { CoarseCandidateDraft } from "../../recall/coarse-filter/coarse-candidates.js";
+import type { AddCoarseCandidate } from
+  "../../recall/coarse-filter/coarse-filter-admission.js";
+import type { RecallServiceWarnPort } from
+  "../../recall/runtime/recall-service-ports.js";
 import {
   addPathExpansionCandidates,
   addTimeConcernPathExpansionCandidates
@@ -159,9 +163,9 @@ function seededParams(
   seed: MemoryEntry,
   neighbor: MemoryEntry,
   findByAnchors: () => Promise<never>,
-  warn: ReturnType<typeof vi.fn>,
+  warn: RecallServiceWarnPort,
   degradationReasons: Set<"path_expansion_failed">,
-  addCandidate: ReturnType<typeof vi.fn>
+  addCandidate: AddCoarseCandidate
 ) {
   return {
     workspaceId: "workspace-1",
@@ -180,10 +184,10 @@ function seededParams(
 }
 
 function timeConcernParams(
-  findByTimeConcernWindowDigests: () => Promise<never>,
-  warn: ReturnType<typeof vi.fn>,
+  findByTimeConcernWindowDigests: () => Promise<never[]>,
+  warn: RecallServiceWarnPort,
   degradationReasons: Set<"path_expansion_failed">,
-  addCandidate: ReturnType<typeof vi.fn>
+  addCandidate: AddCoarseCandidate
 ) {
   return {
     workspaceId: "workspace-1",

@@ -41,7 +41,10 @@ function buildContentRanks(params: Readonly<{
   readonly zebraId: string;
   readonly alphaScore: number;
   readonly zebraScore: number;
-}>): Readonly<Record<string, number>> {
+}>): Readonly<Record<string, Readonly<{
+  readonly workspace_activation: number | null | undefined;
+  readonly existing_score: number | null | undefined;
+}>>> {
   const entries = [
     createMemoryEntry({
       object_id: params.alphaId,

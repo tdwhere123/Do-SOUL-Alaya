@@ -77,7 +77,7 @@ async function createHarness() {
     filesDirectory: "/tmp/alaya-daemon-knowledge-foundation-test",
     runtimeNotifier,
     configPaths: testConfigPaths(),
-    warnLogger: testWarnLogger(warn)
+    warnLogger: testWarnLogger(warn) as never
   }, eventPublisher);
   return { database, foundation, repositories };
 }

@@ -394,7 +394,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
     expect(listByObjectIds).toHaveBeenCalledWith("workspace-1", [memory.object_id]);
     expect(snapshot.poolScoresByObjectId[memory.object_id]).toBeCloseTo(1, 7);
     expect(snapshot.workspaceNeighbors.hits).toEqual([]);
-    expect(snapshot.workspaceNeighbors.workspace_scan_requested).toBeUndefined();
+    expect(snapshot.workspaceNeighbors.workspace_scan_truncated).toBeUndefined();
   });
 });
 

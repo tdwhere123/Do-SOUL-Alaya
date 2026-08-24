@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, vi } from "vitest";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";

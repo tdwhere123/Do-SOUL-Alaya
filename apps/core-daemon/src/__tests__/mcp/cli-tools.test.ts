@@ -148,7 +148,7 @@ describe("alaya tools", () => {
     const ensureLocalWorkspace = vi.fn(async () => undefined);
     const command = createToolsCommand({
       handler: {
-        call: async ({ context, toolName }) => {
+        call: async ({ context, toolName }: { context: { workspaceId: string }; toolName: string }) => {
           observedWorkspaceId = context.workspaceId;
           return {
             ok: true,
@@ -156,7 +156,7 @@ describe("alaya tools", () => {
             output: { workspace_id: context.workspaceId }
           };
         }
-      } as McpMemoryToolHandler,
+      } as unknown as McpMemoryToolHandler,
       ensureLocalWorkspace: { ensureLocalWorkspace }
     });
     const parsed = command.argsSchema.safeParse([
@@ -264,7 +264,7 @@ describe("alaya tools", () => {
       ok: true,
       tool_name: "soul.emit_candidate_signal",
       output: { signal_id: "sig-1" }
-    } as const)) };
+    } as const)) } as unknown as McpMemoryToolHandler;
     const command = createToolsCommand({
       handler,
       defaultWorkspaceId: "workspace-1",
@@ -298,7 +298,7 @@ describe("alaya tools", () => {
       ok: true,
       tool_name: "soul.apply_override",
       output: { override_id: "override-1" }
-    } as const)) };
+    } as const)) } as unknown as McpMemoryToolHandler;
     const command = createToolsCommand({
       handler,
       defaultWorkspaceId: "workspace-1",
@@ -359,7 +359,7 @@ describe("alaya tools", () => {
     let handlerCalled = false;
     const command = createToolsCommand({
       handler: {
-        call: async ({ toolName }) => {
+        call: async ({ toolName }: { toolName: string }) => {
           handlerCalled = true;
           return {
             ok: false,
@@ -395,7 +395,7 @@ describe("alaya tools", () => {
     let handlerCalled = false;
     const command = createToolsCommand({
       handler: {
-        call: async ({ toolName }) => {
+        call: async ({ toolName }: { toolName: string }) => {
           handlerCalled = true;
           return {
             ok: false,
@@ -440,7 +440,7 @@ describe("alaya tools", () => {
 
 function createHandler(): McpMemoryToolHandler {
   return {
-    call: async ({ toolName }) => {
+    call: async ({ toolName }: { toolName: string }) => {
       if (toolName !== "soul.open_pointer") {
         return {
           ok: false,
@@ -455,7 +455,7 @@ function createHandler(): McpMemoryToolHandler {
         output: { object_id: "mem1" }
       };
     }
-  };
+  } as unknown as McpMemoryToolHandler;
 }
 
 function createRunLookup(workspaceByRun: Record<string, string>) {

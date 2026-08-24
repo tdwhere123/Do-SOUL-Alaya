@@ -72,7 +72,7 @@ describe("recall usage evidence proof", () => {
       fine_assessment_count: 3
     })) as typeof deps.recallService.recall;
     const coherentPairKeys = vi.fn(async () => new Set(["mem1|mem2"]));
-    const enqueue = vi.fn((input: { readonly id: string }) => ({ task_id: input.id }));
+    const enqueue = vi.fn((input: { readonly id: string }) => ({ task_id: input.id })) as never;
     const handler = createMcpMemoryToolHandler({
       ...deps,
       coRecallCoherenceGate: { coherentPairKeys },
@@ -80,8 +80,8 @@ describe("recall usage evidence proof", () => {
         enqueue,
         findById: vi.fn(() => null),
         peekPending: vi.fn(() => [])
-      }
-    });
+      } as never
+    } as never);
 
     const result = await handler.call({
       toolName: "soul.recall",
@@ -386,7 +386,7 @@ describe("recall usage evidence proof", () => {
         usage_status: "used"
       }
     ]
-  ])("rejects unknown used object kinds without partial side effects", async (deliveredObjects) => {
+  ])("rejects unknown used object kinds without partial side effects", async (...deliveredObjects) => {
     const deps = createDeps();
     deps.trustStateRecorder.findDeliveryById = vi.fn(async () =>
       createEvidenceDelivery(

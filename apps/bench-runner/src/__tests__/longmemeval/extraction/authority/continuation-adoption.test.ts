@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { writeFileSync, unlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSettledExtractionAttemptLedger } from

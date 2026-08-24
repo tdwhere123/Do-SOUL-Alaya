@@ -248,14 +248,21 @@ function withEnsure(
   service: WorkspaceService,
   composition: ReturnType<typeof createDaemonFieldComposition>,
   security: {
-    readonly initializeWorkspace?: () => Promise<void>;
+    readonly initializeWorkspace?: (workspaceId: string) => Promise<unknown>;
     readonly recordInitializationFailure?: () => Promise<void>;
   } = {}
 ): WorkspaceService {
   return withSecurityStatusWorkspaceService(
     service,
     {
-      initializeWorkspace: security.initializeWorkspace ?? (async () => undefined),
+      initializeWorkspace: (security.initializeWorkspace ?? (async (workspaceId: string) => ({
+        workspace_id: workspaceId,
+        posture: "baseline" as const,
+        zero_day_active: false,
+        active_security_locks: 0,
+        last_assessment_at: NOW,
+        active_protections: []
+      }))) as never,
       recordInitializationFailure: security.recordInitializationFailure ?? (async () => undefined)
     },
     createFieldProjectionWorkspaceEnsureMutation(composition, () => NOW)

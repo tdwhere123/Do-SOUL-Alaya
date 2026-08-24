@@ -54,7 +54,7 @@ function createControls(
   const runEmbeddingBackfillPass =
     overrides.runEmbeddingBackfillPass ?? vi.fn(async () => undefined);
   const lifecycleState = {
-    drainState: { isDraining: false },
+    drainState: { isDraining: false, forced: false as boolean | undefined },
     inFlight: { count: 0 }
   };
   const backgroundManagerStop =

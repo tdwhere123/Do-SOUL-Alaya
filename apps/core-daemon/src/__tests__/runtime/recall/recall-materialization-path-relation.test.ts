@@ -42,6 +42,11 @@ describe("Garden temporal relation runtime", () => {
       const pathRelationRepo = new SqlitePathRelationRepo(database);
       const warn = vi.fn();
       const runtime = createPathRelationRuntime({
+        softAssociationPathRepo: {
+          create: (relation: unknown) => relation,
+          findByBackingObjectId: async () => null,
+          findActiveByWorkspace: async () => []
+        },
         coUsageCounterRepo: new SqliteCoUsageCounterRepo(database),
         eventLogRepo,
         eventPublisher,
@@ -52,7 +57,7 @@ describe("Garden temporal relation runtime", () => {
         relationAssertionRepo: new SqliteRelationAssertionRepo(database),
         runtimeNotifier,
         warn
-      });
+      } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
       pathRelationEvictionTimer = runtime.pathRelationEvictionTimer;
 
       expect(runtime.temporalRelationAssertionPort.admit).toEqual(expect.any(Function));
@@ -162,6 +167,11 @@ async function createAdmissionHarness(
   });
   const relationRepo = new SqliteRelationAssertionRepo(database);
   const runtimeInput = {
+    softAssociationPathRepo: {
+      create: (relation: unknown) => relation,
+      findByBackingObjectId: async () => null,
+      findActiveByWorkspace: async () => []
+    },
     coUsageCounterRepo: new SqliteCoUsageCounterRepo(database),
     eventLogRepo,
     eventPublisher,
@@ -173,7 +183,7 @@ async function createAdmissionHarness(
     runtimeNotifier,
     warn: vi.fn(),
     ...(relationProjectionAdmissionMode === undefined ? {} : { relationProjectionAdmissionMode })
-  } as Parameters<typeof createPathRelationRuntime>[0];
+  } as unknown as Parameters<typeof createPathRelationRuntime>[0];
   return {
     database,
     relationRepo,

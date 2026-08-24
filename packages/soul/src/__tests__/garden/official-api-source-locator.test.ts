@@ -227,7 +227,8 @@ describe("official API assertion catalog locator", () => {
   });
 
   it("builds a bounded deterministic User-only catalog and prefers v2 in the prompt", async () => {
-    const extract = vi.fn(async () => ({ rawJson: JSON.stringify({ signals: [] }) }));
+    const extract = vi.fn(async (_input: { readonly userPrompt: string }) =>
+      ({ rawJson: JSON.stringify({ signals: [] }) }));
     const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor: { extract } });
     await provider.compile("I moved to Berlin.", {
       ...EMPTY_CONTEXT,

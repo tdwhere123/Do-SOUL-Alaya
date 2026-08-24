@@ -334,13 +334,15 @@ Hopfield / Lyapunov / attractor language in the review tree is a
 design lens, not a proved runtime. Owner:
 [`docs/handbook/recall.md`](docs/handbook/recall.md).
 
-**What actually runs** on HEAD `10da1318`: family-max RRF
-(`fused_score`) plus stacked reorders, then `max_entries`. Typed path
-transfer \(G_L\) is not connected (`path_status = inactive:pass_through`,
-flood fuel unverified). Live deep-head operator is
-`lightweight_deep_head_prob_or_v1`. Embedding is a scorer and almost
-not a discoverer. Do not implement from the retired "four strategies
-in a fixed order" wording.
+**What actually runs** on the current integrated path: family-max RRF
+(`R_obj`) as the ranking scalar, typed path / Slice / evidence flood as
+diagnostics and Gamma cover, deep-head rescoring only when embedding is
+observed, and one binding-aware `Select_Gamma` walk as the sole final
+admission. Live deep-head operator is `lightweight_deep_head_prob_or_v1`.
+The historical `10da1318` (2026-08-14) B-arm state — path transfer
+disconnected, embedding almost not a discoverer — describes that commit
+only. Owner: [`docs/handbook/recall.md`](docs/handbook/recall.md). Do not
+implement from the retired "four strategies in a fixed order" wording.
 
 **Failure mode this prevents.** The most seductive failure of any
 agent-memory system is letting embedding decide truth. Cosine

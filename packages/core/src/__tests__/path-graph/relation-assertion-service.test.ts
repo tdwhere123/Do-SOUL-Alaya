@@ -405,7 +405,7 @@ function formationReceipt(sourceEvents: readonly Readonly<EventLogEntry>[]) {
     parameters,
     parameter_sha256: digest(parameters),
     source_observations: sourceEvents.map((event) => ({
-      source_kind: "event_log_entry",
+      source_kind: "event_log_entry" as const,
       source_id: event.event_id,
       source_sha256: digestRelationFormationEventSource(event)
     })),

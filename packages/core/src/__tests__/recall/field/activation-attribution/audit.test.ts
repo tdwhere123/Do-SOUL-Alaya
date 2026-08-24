@@ -403,7 +403,11 @@ function channel(
   receipt: ReturnType<typeof auditActivationAttribution>,
   name: ActivationAttributionChannel
 ) {
-  return receipt.channels.find((row) => row.channel === name);
+  const row = receipt.channels.find((entry) => entry.channel === name);
+  if (row === undefined) {
+    throw new Error(`missing activation attribution channel: ${name}`);
+  }
+  return row;
 }
 
 function uniqueStatuses(

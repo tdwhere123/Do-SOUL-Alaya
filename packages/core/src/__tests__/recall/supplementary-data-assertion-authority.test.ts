@@ -155,7 +155,7 @@ describe("collectSupplementaryData assertion authority", () => {
     });
 
     expect(rejected).toMatchObject({ status: "rejected", graph: null });
-    expect(result.semanticFactorFormationsByEvidenceId[evidence.object_id]).toEqual(rejected);
+    expect(result.semanticFactorFormationsByEvidenceId?.[evidence.object_id]).toEqual(rejected);
     expect(result.openSemanticFactorCompatibilityTrace).toMatchObject({
       incomparable_seal: "rejected",
       matchable_evidence_count: 0,

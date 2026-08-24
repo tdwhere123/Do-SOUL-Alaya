@@ -1,10 +1,23 @@
 # Runtime Snapshot
 
 Package version is `0.3.11`; the current documentation anchor is committed HEAD
-`263c6600` on 2026-08-19. This file is readiness vocabulary and dated
+`ae95e313` on 2026-08-24. This file is readiness vocabulary and dated
 snapshots. It is **not** a KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
+
+## Recall posture delta (2026-08-24, `ae95e313`)
+
+| Fact | Status |
+|---|---|
+| `Select_Gamma` objective | Binding-aware coverage objective is the production walk objective and proof consumer (G17b closed) — see [`recall.md`](recall.md) |
+| Source hard-dedupe | Off in production; object-identity dedupe only, policy recorded in the selection receipt (G17a closed) |
+| S11 near-top audit | Closed: ten of ten E0 near-top cases were honest higher `R_obj`, not residual inversion |
+| Independent-embedding quality | Capsule `evidence_semantic` excluded (`06af8c83`) |
+| Last comparable KPI pin | `3af4fd9`: E1 any@5 81/94, full-gold@5 43/94 — diagnostic only |
+| Recall any@5 promotion | **NOT PROMOTED**; HEAD `ae95e313` unmeasured, ancestor `85faef95` missed diagnostic gates |
+| Active recall slice | None; G21, retuning, and benchmark promotion not authorized |
+| Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
 ## Recall posture (2026-08-19 live-source pass)
 

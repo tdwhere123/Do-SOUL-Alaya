@@ -83,7 +83,8 @@ describe("Select_Gamma boundary objective", () => {
       dropped_reason: "ineligible",
       witness: { kind: "ineligible", risk: "clear", authority: "blocked" }
     });
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const observedBoundary = boundary;
+    expect(() => replayFineAssessmentSelectionBoundary(observedBoundary)).not.toThrow();
   });
 
   it("persists Gamma source and lineage identity receipts", () => {
@@ -116,7 +117,8 @@ describe("Select_Gamma boundary objective", () => {
         source: { status: "available", key: "source-1" },
         lineage: { status: "available", key: "lineage-1" }
       });
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    const observedBoundary = boundary;
+    expect(() => replayFineAssessmentSelectionBoundary(observedBoundary)).not.toThrow();
   });
 });
 

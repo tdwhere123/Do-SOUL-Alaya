@@ -74,7 +74,8 @@ describe("source-bound F3 tracer", () => {
         ...groundedProposal(),
         factors: [
           ...groundedProposal().factors,
-          { factor_id: "ghost", surface: "quantum foam", semantic_identity: "quantum foam" }
+          { factor_id: "ghost", surface: "quantum foam",
+            semantic_identity: "quantum foam", source_occurrence: 0 }
         ]
       }
     });
@@ -97,8 +98,8 @@ function groundedProposal(): OpenSemanticFactorGraphProposal {
     schema_version: 2,
     source_kind: "evidence",
     factors: [
-      { factor_id: "f0", surface: "learned", semantic_identity: "learn" },
-      { factor_id: "f1", surface: "cook", semantic_identity: "cook" }
+      { factor_id: "f0", surface: "learned", semantic_identity: "learn", source_occurrence: 0 },
+      { factor_id: "f1", surface: "cook", semantic_identity: "cook", source_occurrence: 0 }
     ],
     variables: [],
     result_variable_ids: [],

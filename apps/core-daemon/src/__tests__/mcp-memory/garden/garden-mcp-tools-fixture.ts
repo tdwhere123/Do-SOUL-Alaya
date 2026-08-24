@@ -206,14 +206,14 @@ export async function createGardenMcpHarness(
         await receiveSignal(signal, {
           gardenTaskRepo,
           signalService
-        })
+        }) as never
     },
     ...(options.omitPostTurnSignalReceiver === true
       ? {}
       : {
           postTurnSignalReceiver: {
             receiveSignal: async (signal) =>
-              await receiveSignal(signal, { gardenTaskRepo, signalService }),
+              await receiveSignal(signal, { gardenTaskRepo, signalService }) as never,
             hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
           }
         }),

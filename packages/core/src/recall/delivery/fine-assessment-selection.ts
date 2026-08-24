@@ -31,7 +31,6 @@ import {
 import { captureFineAssessmentPreProjection } from
   "./selection-boundary/pre-projection/observation.js";
 import type {
-  FineAssessmentAdmissionReceipt,
   FineAssessmentCandidate,
   FineAssessmentSelectionContext,
   FineAssessmentSelectionParams,

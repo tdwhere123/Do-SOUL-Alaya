@@ -187,7 +187,6 @@ async function createHarness(
       exploreOneHop: vi.fn(async () => [])
     },
     edgeProposalService,
-    graphEdgePort,
     ...(options.pathRelationProposalService === undefined
       ? {}
       : { pathRelationProposalService: options.pathRelationProposalService }),

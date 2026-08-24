@@ -6,13 +6,30 @@ import {
 } from
   "../../../repos/shared/monotone-field-refinement.js";
 
+type OwnerMatch = Readonly<{
+  object_id: string;
+  normalized_rank: number;
+}>;
+
+type ProjectionMatch = OwnerMatch & Readonly<{
+  matched_projection?: Readonly<{
+    projection_id: number;
+    projection_kind: string;
+  }>;
+}>;
+
+type LaneObservation = OwnerMatch & Readonly<{
+  rank: number;
+  source_id: string;
+}>;
+
 describe("monotone field refinement", () => {
   it("preserves observed identities when deeper ranking inserts new owners", () => {
-    const base = Object.freeze([
+    const base: readonly OwnerMatch[] = Object.freeze([
       Object.freeze({ object_id: "memory-a", normalized_rank: 1 }),
       Object.freeze({ object_id: "memory-b", normalized_rank: 0.5 })
     ]);
-    const levels = buildMonotoneFieldRefinementLevels(
+    const levels = buildMonotoneFieldRefinementLevels<OwnerMatch, readonly string[]>(
       base,
       [4],
       () => Object.freeze({
@@ -39,7 +56,7 @@ describe("monotone field refinement", () => {
   });
 
   it("keeps an observed projection representative for one owner", () => {
-    const base = Object.freeze([Object.freeze({
+    const base: readonly ProjectionMatch[] = Object.freeze([Object.freeze({
       object_id: "evidence-a",
       normalized_rank: 1,
       matched_projection: Object.freeze({
@@ -47,7 +64,7 @@ describe("monotone field refinement", () => {
         projection_kind: "assistant_observation"
       })
     })]);
-    const levels = buildMonotoneFieldRefinementLevels(
+    const levels = buildMonotoneFieldRefinementLevels<ProjectionMatch, readonly string[]>(
       base,
       [2],
       () => Object.freeze({
@@ -73,13 +90,13 @@ describe("monotone field refinement", () => {
   });
 
   it("preserves lane source identities and rebases appended ranks", () => {
-    const previous = Object.freeze([Object.freeze({
+    const previous: readonly LaneObservation[] = Object.freeze([Object.freeze({
       object_id: "evidence-a",
       normalized_rank: 1,
       rank: 1,
       source_id: "projection:evidence-a:assistant_observation:1"
     })]);
-    const next = Object.freeze([
+    const next: readonly LaneObservation[] = Object.freeze([
       Object.freeze({
         object_id: "evidence-b",
         normalized_rank: 1,

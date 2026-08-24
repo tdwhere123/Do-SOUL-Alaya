@@ -8,6 +8,10 @@ export {
   classifyQuestionStage
 } from "./classify-question.js";
 export {
+  classifyHonestHigherRObj,
+  type HonestHigherRObjVerdict
+} from "./honest-higher-r-obj.js";
+export {
   writeStageAttributionTables
 } from "./write-tables.js";
 export {

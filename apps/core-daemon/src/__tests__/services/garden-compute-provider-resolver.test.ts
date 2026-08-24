@@ -202,9 +202,14 @@ describe("GardenComputeProviderResolver", () => {
       ...createProvider(endpoint ?? "default"),
       extractOpenSemanticFactors: vi.fn(async () => ({
         ...queryGraph(),
-        factors: [{ factor_id: "predicate", surface: endpoint ?? "default", semantic_identity: "buy" }]
+        factors: [{
+          factor_id: "predicate",
+          surface: endpoint ?? "default",
+          source_occurrence: 0,
+          semantic_identity: "buy"
+        }]
       }))
-    }));
+    })) as never;
     const resolver = new GardenComputeProviderResolver({
       configReader: { getRuntimeGardenComputeConfig: async () => config },
       secretReader: vi.fn(() => "sk-one"),
@@ -222,14 +227,15 @@ describe("GardenComputeProviderResolver", () => {
 
 function queryGraph() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [{
       factor_id: "predicate",
       surface: "buy",
+      source_occurrence: 0,
       semantic_identity: "buy"
     }],
-    variables: [{ variable_id: "answer", surface: "What" }],
+    variables: [{ variable_id: "answer", surface: "What", source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{
       proposition_id: "purchase-query",

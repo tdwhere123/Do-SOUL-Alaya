@@ -1,33 +1,10 @@
-import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
-import { describe, expect, it, vi } from "vitest";
-import {
-  MemoryDimension,
-  type MemoryEntry,
-  type RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import {
-  orderByCoverageMarginalGain,
-  resolveCoverageIdentity,
-  type CoverageMarginalObservation,
-  type CoverageSelectionObjective
-} from "../../recall/delivery/coverage-selection.js";
-import type { CandidateCoverageReceipt } from
-  "../../recall/delivery/fine-assessment-selection/coverage-atoms.js";
-import {
-  selectFineAssessmentCandidates,
-  type FineAssessmentCandidate
-} from "../../recall/delivery/fine-assessment-selection.js";
-import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+import { describe, expect, it } from "vitest";
 import { evidenceSemanticActivation } from
   "./fixtures/evidence-semantic-activation.js";
 import {
   captureCoverageReceipt,
   createCandidate,
-  createRanks,
-  createSupplementaryData,
-  legacyCoveragePass,
-  relevanceMap,
-  withDimension
+  createSupplementaryData
 } from "./coverage-selection-test-support.js";
 
 describe("coverage-aware delivery atoms", () => {

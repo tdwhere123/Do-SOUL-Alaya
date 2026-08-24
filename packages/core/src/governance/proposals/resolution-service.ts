@@ -8,7 +8,6 @@ import {
   type ClaimForm,
   type EventLogEntry,
   type EffectDecisionReceipt,
-  type MemoryEntry,
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
@@ -16,9 +15,7 @@ import { GovernedEffectAction } from "../effects/proof-effect-policy.js";
 import {
   buildEffectAuditEventInput,
   decideClaimEffect,
-  requireDeliveryAuthority,
-  type ResolutionDeliveryAuthorityPort,
-  type ResolutionEffectAuthorityPort
+  requireDeliveryAuthority
 } from "./resolution-service-effects.js";
 export type {
   ResolutionDeliveryAuthorityPort,

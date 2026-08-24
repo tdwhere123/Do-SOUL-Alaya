@@ -52,7 +52,7 @@ describe("open semantic factor candidate attribution", () => {
     });
     const data = {
       openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-    } as SerializedRecallSupplementaryData;
+    } as unknown as SerializedRecallSupplementaryData;
 
     expect([...activations.values()][0]?.evidence_ids).toEqual([
       "evidence-a",
@@ -136,16 +136,16 @@ describe("open semantic factor candidate attribution", () => {
     });
     const data = {
       openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-    } as SerializedRecallSupplementaryData;
+    } as unknown as SerializedRecallSupplementaryData;
 
     expect(() => assertOpenSemanticCandidateActivations(data)).not.toThrow();
     expect(() => assertOpenSemanticCandidateActivations({
       ...data,
       openSemanticFactorCandidateActivationsByCandidateKey: [[
         "workspace_local:memory_entry:memory-1",
-        { ...activations.values().next().value, receipt_digest: "sha256:forged" }
+        { ...activations.values().next().value!, receipt_digest: "sha256:forged" as const }
       ]]
-    })).toThrow(/selection boundary fidelity mismatch/u);
+    } as unknown as SerializedRecallSupplementaryData)).toThrow(/selection boundary fidelity mismatch/u);
   });
 
   it("rejects an unknown activation state at the selection boundary", () => {
@@ -162,7 +162,7 @@ describe("open semantic factor candidate attribution", () => {
         "workspace_local:memory_entry:memory-1",
         { ...receipt, state: "inferred" }
       ]]
-    } as SerializedRecallSupplementaryData)).toThrow(
+    } as unknown as SerializedRecallSupplementaryData)).toThrow(
       /selection boundary fidelity mismatch/u
     );
   });

@@ -164,9 +164,10 @@ async function alignCell(
   if (evidence.status !== "formed" || evidence.graph === null) {
     throw new Error("evidence OSF fixture failed to form");
   }
-  const kindProjections = kindBuilders?.map((build) => build(evidence.graph));
+  const evidenceGraph = evidence.graph;
+  const kindProjections = kindBuilders?.map((build) => build(evidenceGraph));
   return {
-    evidenceGraph: evidence.graph,
+    evidenceGraph,
     receipt: bindProductionKindConstraintAlignment({
       queryText,
       factFrameCapture,

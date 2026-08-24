@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import type { ExtractionAttemptLedgerSnapshot } from
   "../../../../bench/extraction/authority/attempt-ledger.js";

@@ -29,13 +29,13 @@ describe("OSF freeze to selection-boundary attribution", () => {
     const query = durationQuery();
     const evidence = listenEvidence();
     const frozen = freezeChain(DURATION_QUERY, query, { commute: evidence });
-    expect(frozen.openSemanticFactorComposition.status).toBe("composed");
+    expect(frozen.openSemanticFactorComposition?.status).toBe("composed");
     expect(frozen.kindConstraintAlignment?.operator_id)
       .toBe("kind_constraint_alignment_v1");
     const key = "workspace_local:memory_entry:duration-memory";
     const activations = attributeOpenSemanticFactorActivations({
       candidates: [memoryCandidate("duration-memory", ["commute"])],
-      activation: frozen.openSemanticFactorActivation
+      activation: frozen.openSemanticFactorActivation!
     });
     expect(activations.get(key)).toMatchObject({
       state: "observed",
@@ -51,8 +51,8 @@ describe("OSF freeze to selection-boundary attribution", () => {
       redeem: redeemEvidence(),
       partner: partnerEvidence()
     });
-    expect(frozen.openSemanticFactorComposition.status).toBe("composed");
-    expect(frozen.openSemanticFactorActivation.entries).toEqual(
+    expect(frozen.openSemanticFactorComposition?.status).toBe("composed");
+    expect(frozen.openSemanticFactorActivation?.entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ evidence_id: "redeem", state: "observed" }),
         expect.objectContaining({ evidence_id: "partner", state: "reconstructed" })
@@ -64,7 +64,7 @@ describe("OSF freeze to selection-boundary attribution", () => {
         memoryCandidate("join-memory", ["redeem", "partner"]),
         capsuleCandidate("partner")
       ],
-      activation: frozen.openSemanticFactorActivation
+      activation: frozen.openSemanticFactorActivation!
     });
     expect(activations.get(partnerKey)).toMatchObject({
       state: "reconstructed",
@@ -140,7 +140,7 @@ function freezeParams(queryText: string): CollectSupplementaryDataParams {
     coarsePathExpansionScores: {},
     coarsePathSuppressionScores: {},
     captureAnswerFeatures: false
-  } as CollectSupplementaryDataParams;
+  } as unknown as CollectSupplementaryDataParams;
 }
 
 function durationQuery() {
@@ -279,7 +279,7 @@ function assertBoundary(
   expect(() => assertOpenSemanticCandidateActivations(
     cloneSelectionBoundaryJson({
       openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-    }) as SerializedRecallSupplementaryData
+    }) as unknown as SerializedRecallSupplementaryData
   )).not.toThrow();
 }
 

@@ -168,5 +168,5 @@ export function createSupplementaryData(
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
     ...overrides
-  };
+  } as RecallSupplementaryData;
 }

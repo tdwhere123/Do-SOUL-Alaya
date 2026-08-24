@@ -15,7 +15,7 @@ import { materializeSliceKeyL1Postings } from
   "../../../recall/flood/slice-key-l1-postings.js";
 
 const sha256: FieldContractSha256 = fieldContractSha256;
-const GENERATION = `sha256:${"a".repeat(64)}`;
+const GENERATION = `sha256:${"a".repeat(64)}` as `sha256:${string}`;
 
 describe("projection L1/L2 bundles", () => {
   it("always materializes L1 postings and only selectively materializes L2", () => {

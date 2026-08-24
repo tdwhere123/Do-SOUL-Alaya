@@ -4,10 +4,7 @@ import type {
   SelectionBoundaryNumberMap,
   SerializedRecallSupplementaryData
 } from "./selection-boundary-types.js";
-import {
-  assertSelectionBoundaryJsonValue,
-  selectionBoundaryJsonSha256
-} from "./selection-boundary-json.js";
+import { assertSelectionBoundaryJsonValue } from "./selection-boundary-json.js";
 import { assertPreProjection } from "./pre-projection/validation.js";
 import {
   assertEvidenceSemanticReceipts,

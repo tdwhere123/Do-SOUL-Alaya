@@ -17,7 +17,6 @@ import {
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 import {
-  cloneSelectionBoundaryJson,
   selectionBoundaryJsonSha256
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
@@ -31,14 +30,6 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 import type { FineAssessmentPreProjectionObservation } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
-import {
-  createRecallFiniteFieldChannelCapture,
-  materializeRecallRetrievalFieldSeal
-} from "../../recall/field/finite-field-capture.js";
-import { createRecallRetrievalFieldRefinementReceipt } from
-  "../../recall/field/refinement/field-refinement-receipt.js";
-import { captureRecallQueryFactFrames } from
-  "../../recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 
 describe("fine-assessment selection boundary fidelity", () => {
   it("captures the settled pre-projection sequence and admission actions", () => {
@@ -193,7 +184,7 @@ describe("fine-assessment selection boundary fidelity", () => {
       ...boundary,
       expected: {
         ...boundary.expected,
-        visible_result_sha256: `sha256:${"0".repeat(64)}`
+        visible_result_sha256: `sha256:${"0".repeat(64)}` as `sha256:${string}`
       }
     };
 

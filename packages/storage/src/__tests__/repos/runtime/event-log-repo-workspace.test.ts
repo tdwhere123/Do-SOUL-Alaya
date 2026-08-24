@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   WorkspaceRunEventType,
-  WorkspaceKind
+  WorkspaceKind,
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { createEventLogRepos, trackedDatabases } from "./event-log-repo-fixture.js";
 
@@ -178,24 +179,26 @@ describe("SqliteEventLogRepo workspace and transaction queries", () => {
       const { eventLogRepo } = await createEventLogRepos();
       // Three sequential appends inside one transaction — revisions must be 0,1,2.
       const entries = eventLogRepo.transactional(() => {
-        const out = [];
+        const out: EventLogEntry[] = [];
         for (let i = 0; i < 3; i++) {
-          out.push(
-            eventLogRepo.append({
-              event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
-              entity_type: "message",
-              entity_id: "msg-atomic",
-              workspace_id: "ws_events",
+          const appended = eventLogRepo.append({
+            event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
+            entity_type: "message",
+            entity_id: "msg-atomic",
+            workspace_id: "ws_events",
+            run_id: "run_order",
+            caused_by: "user_action",
+            payload_json: {
               run_id: "run_order",
-              caused_by: "user_action",
-              payload_json: {
-                run_id: "run_order",
-                role: "user",
-                content: `m${i}`,
-                message_id: `msg-atomic-${i}`
-              }
-            })
-          );
+              role: "user",
+              content: `m${i}`,
+              message_id: `msg-atomic-${i}`
+            }
+          });
+          if (appended instanceof Promise) {
+            throw new Error("append inside transactional() must stay synchronous");
+          }
+          out.push(appended);
         }
         return out;
       });

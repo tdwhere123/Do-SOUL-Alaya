@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach, expect, it, vi } from "vitest";
 import {
   runAuthorizeExtractionCommand

@@ -8,10 +8,13 @@ import type { RecallCandidateAnswerSupport } from
 import { createSelectionContext } from
   "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
 import {
-  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID
+  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
+  type OpenSemanticFactorCandidateActivation
 } from "../../../recall/field/open-semantic-factors/candidate-attribution.js";
 import type { IntegratedFloodCandidateDiagnostics } from
   "../../../recall/runtime/recall-service-types.js";
+import { evidenceSemanticActivationsFromScores } from
+  "../fixtures/evidence-semantic-activation.js";
 import {
   createCandidate,
   createConfig,
@@ -28,8 +31,11 @@ describe("live Select_Gamma binding", () => {
       evidenceSourceIdentity: "source-1",
       evidenceSourceRole: "user" as const,
       verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "atomic_assertion" as const,
         evidence_ref: "evidence-1",
-        projection_kind: "atomic_assertion" as const
+        support_identity: null
       },
       entry: {
         ...createCandidate("bound").entry,
@@ -133,8 +139,11 @@ describe("live Select_Gamma binding", () => {
       ...verifiedBase,
       evidenceSourceRole: "user" as const,
       verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "atomic_assertion" as const,
         evidence_ref: "evidence-verified",
-        projection_kind: "atomic_assertion" as const
+        support_identity: null
       },
       entry: {
         ...verifiedBase.entry,
@@ -304,6 +313,70 @@ describe("live Select_Gamma binding", () => {
     );
   });
 
+  it("does not let evidence_semantic activation buy Select_Gamma quality", () => {
+    const plain = createRankedCandidate("plain", 1, 0.5);
+    const semantic = createRankedCandidate("semantic", 2, 0.5);
+    const supplementaryData = createSupplementaryData({
+      evidenceSemanticActivationsByCandidateKey:
+        evidenceSemanticActivationsFromScores(
+          new Map([[semantic.fusion.candidate_key, 0.95]])
+        )
+    });
+    const params = {
+      ...fixture(plain, supplementaryData),
+      orderedCandidates: [plain, semantic]
+    };
+    const qualityByKey = (binding: ReturnType<
+      typeof buildFineAssessmentSelectGammaBinding
+    >) => new Map(binding.candidates.map((candidate) => [
+      candidate.candidate_key,
+      candidate.quality
+    ]));
+
+    const unmapped = qualityByKey(buildFineAssessmentSelectGammaBinding(
+      params,
+      createSelectionContext(params)
+    ));
+    expect(unmapped.get(semantic.fusion.candidate_key))
+      .toBe(unmapped.get(plain.fusion.candidate_key));
+
+    const mappedParams = {
+      ...params,
+      coverageRelevanceByCandidateKey: new Map([
+        [plain.fusion.candidate_key, 0.4]
+      ])
+    };
+    const mapped = qualityByKey(buildFineAssessmentSelectGammaBinding(
+      mappedParams,
+      createSelectionContext(mappedParams)
+    ));
+    expect(mapped.get(semantic.fusion.candidate_key)).toBe(0);
+  });
+
+  it("does not let evidence_semantic activation displace independent relevance in the walk", () => {
+    const relevant = createRankedCandidate("relevant", 1, 0.08);
+    const semantic = createRankedCandidate("semantic", 2, 0.04);
+    const result = selectCandidates({
+      workspace_id: relevant.entry.workspace_id,
+      orderedCandidates: [relevant, semantic],
+      config: tightBudget(1),
+      supplementaryData: createSupplementaryData({
+        evidenceSemanticActivationsByCandidateKey:
+          evidenceSemanticActivationsFromScores(
+            new Map([[semantic.fusion.candidate_key, 0.95]])
+          )
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap([relevant, semantic]),
+      coverageRelevanceByCandidateKey: new Map([
+        [relevant.fusion.candidate_key, 0.4]
+      ])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["relevant"]);
+  });
+
   it("does not reward coverage features shared by the whole field", () => {
     const first = createCandidate("shared-first");
     const second = createCandidate("shared-second");
@@ -328,7 +401,7 @@ describe("live Select_Gamma binding", () => {
     const blockedBase = createCandidate("blocked");
     const blocked = {
       ...blockedBase,
-      entry: { ...blockedBase.entry, scope_class: "global" as const }
+      entry: { ...blockedBase.entry, scope_class: "global_domain" as const }
     };
     const supplementaryData = createSupplementaryData({
       governanceCeilingByMemoryId: { blocked: "hidden" }
@@ -460,7 +533,7 @@ function floodAxes(axes: Readonly<{
   };
 }
 
-function observedOpenSemanticActivation() {
+function observedOpenSemanticActivation(): OpenSemanticFactorCandidateActivation {
   return {
     schema_version: 1 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,

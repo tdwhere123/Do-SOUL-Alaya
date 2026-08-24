@@ -145,6 +145,7 @@ export function createSupplementaryData(
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: {},
@@ -163,7 +164,7 @@ export function createSupplementaryData(
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
     ...overrides
-  };
+  } as RecallSupplementaryData;
 }
 
 export function captureCoverageReceipt(

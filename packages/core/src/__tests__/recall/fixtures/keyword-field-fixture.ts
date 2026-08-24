@@ -6,22 +6,25 @@ import type {
   RecallServiceMemoryRepoPort,
   RecallServiceSynthesisSearchPort
 } from "../../../recall/runtime/recall-service-types.js";
-import { RecallService } from "../../../recall/recall-service.js";
+import {
+  RecallService,
+  type RecallServiceFieldDeps
+} from "../../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 export function createFieldBackedRecallService(
-  dependencies: Readonly<RecallServiceDependencies>,
+  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
   pinWorkspaceId?: string
 ): RecallService {
   return new RecallService(withKeywordFieldFixturePorts(dependencies, pinWorkspaceId));
 }
 
 export function withKeywordFieldFixturePorts(
-  dependencies: Readonly<RecallServiceDependencies>,
+  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
   pinWorkspaceId?: string
-): RecallServiceDependencies {
+): RecallServiceDependencies & RecallServiceFieldDeps {
   return {
     ...dependencies,
     testOnlyAllowInMemoryFieldQuerySession: true,
@@ -37,7 +40,7 @@ export function withKeywordFieldFixturePorts(
 }
 
 function resolveFixtureFieldQuerySession(
-  dependencies: Readonly<RecallServiceDependencies>,
+  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
   pinWorkspaceId: string | undefined
 ) {
   if (dependencies.fieldQuerySession !== undefined) return dependencies.fieldQuerySession;

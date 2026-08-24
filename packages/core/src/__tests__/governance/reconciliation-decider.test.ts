@@ -20,22 +20,37 @@ function makeEntry(
   } as unknown as Readonly<MemoryEntry>;
 }
 
+function makeNeighbor(
+  neighbor: Omit<
+    PreWriteCandidateNeighbor,
+    "tagScore" | "entityScore" | "slotScore" | "temporalScore"
+  >
+): PreWriteCandidateNeighbor {
+  return {
+    tagScore: 0,
+    entityScore: 0,
+    slotScore: 0,
+    temporalScore: 0,
+    ...neighbor
+  };
+}
+
 describe("ReconciliationDecider candidate permutation invariance", () => {
   it("ambiguous candidate input permutations produce identical selected candidate content order", async () => {
-    const candidateA: PreWriteCandidateNeighbor = {
+    const candidateA: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("id-1", "Zebra lives in savanna"),
       lexicalScore: 0.8,
       structuralScore: 0.8,
       families: ["domain_tag"],
       relationPosteriors: []
-    };
-    const candidateB: PreWriteCandidateNeighbor = {
+    });
+    const candidateB: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("id-2", "Apple lives in orchard"),
       lexicalScore: 0.8,
       structuralScore: 0.8,
       families: ["domain_tag"],
       relationPosteriors: []
-    };
+    });
 
     const decideCalls: Array<readonly { readonly objectId: string; readonly content: string }[]> = [];
     const llmDecision = {
@@ -47,15 +62,13 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
 
     const inputBase = {
       workspaceId: "ws-1",
+      runId: "run-1",
       signalId: "sig-1",
       incomingContent: "Banana lives in garden",
       incomingDomainTags: ["tag-1"],
       incomingDimension: "fact" as const,
       incomingProjectionFields: {
-        domain_tags: ["tag-1"],
-        canonical_entities: [],
-        typed_slots: {},
-        temporal_anchors: []
+        canonical_entities: []
       }
     };
 
@@ -95,20 +108,20 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     expect(decideCalls[0]).toEqual(decideCalls[1]);
   });
   it("identical NOOP target selection is invariant to neighbor candidate input permutation with two whitespace-normalized-identical rows", async () => {
-    const candidateA: PreWriteCandidateNeighbor = {
+    const candidateA: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("id-2", "Zebra lives in savanna"),
       lexicalScore: 0.9,
       structuralScore: 0.9,
       families: ["domain_tag"],
       relationPosteriors: []
-    };
-    const candidateB: PreWriteCandidateNeighbor = {
+    });
+    const candidateB: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("id-1", "Zebra lives in savanna"),
       lexicalScore: 0.9,
       structuralScore: 0.9,
       families: ["domain_tag"],
       relationPosteriors: []
-    };
+    });
 
     const decider1 = new ReconciliationDecider({
       preWriteRecall: {
@@ -126,6 +139,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     });
     const decision1 = await decider1.decide({
       workspaceId: "ws-1",
+      runId: "run-1",
       signalId: "sig-1",
       incomingContent: "Zebra lives in savanna",
       incomingDomainTags: ["tag-1"],
@@ -148,6 +162,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
     });
     const decision2 = await decider2.decide({
       workspaceId: "ws-1",
+      runId: "run-1",
       signalId: "sig-1",
       incomingContent: "Zebra lives in savanna",
       incomingDomainTags: ["tag-1"],
@@ -163,20 +178,20 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
 
   it("keeps a normalized duplicate within the incoming memory dimension", async () => {
     const content = "The overhead lighting casts a shadow on the workspace.";
-    const fact: PreWriteCandidateNeighbor = {
+    const fact: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("memory-z-fact", content, "fact"),
       lexicalScore: 1,
       structuralScore: 1,
       families: ["lexical"],
       relationPosteriors: []
-    };
-    const preference: PreWriteCandidateNeighbor = {
+    });
+    const preference: PreWriteCandidateNeighbor = makeNeighbor({
       entry: makeEntry("memory-a-preference", content, "preference"),
       lexicalScore: 1,
       structuralScore: 1,
       families: ["lexical"],
       relationPosteriors: []
-    };
+    });
     const decide = async (candidates: readonly PreWriteCandidateNeighbor[]) => {
       const decider = new ReconciliationDecider({
         preWriteRecall: {
@@ -190,6 +205,7 @@ describe("ReconciliationDecider candidate permutation invariance", () => {
       });
       const input = {
         workspaceId: "ws-1",
+        runId: "run-1",
         signalId: "sig-1",
         incomingContent: content,
         incomingDomainTags: ["tag-1"],

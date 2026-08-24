@@ -12,6 +12,7 @@ import {
   classifyMechanism,
   questionHasEmptyGold
 } from "./classify-gold.js";
+import { classifyHonestHigherRObj } from "./honest-higher-r-obj.js";
 import type {
   AttributionMechanism,
   AttributionStage,
@@ -116,7 +117,9 @@ function mechanismFromBestGold(
       bestRank = rank;
     }
   }
-  return classifyMechanism(stage, best, bestRank);
+  const nearTop =
+    stage === 6 ? classifyHonestHigherRObj({ question, gold: best }) : null;
+  return classifyMechanism(stage, best, bestRank, nearTop);
 }
 
 export function isQualityCandidateAbsent(

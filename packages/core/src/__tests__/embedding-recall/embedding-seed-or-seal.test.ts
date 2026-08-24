@@ -41,7 +41,7 @@ describe("embedding seed-or-seal", () => {
           Object.freeze({ status: "ready", embedding: new Float32Array([0, 0]) }),
           { cacheHit: true }
         )
-      } as QueryEmbeddingEngine,
+      } as unknown as QueryEmbeddingEngine,
       queryTimeoutMs: 50,
       generateQueryId: () => "query-zero",
       nowEpochMs: () => 0,

@@ -174,7 +174,7 @@ describe("provider chat completion", () => {
       const caller = new AbortController();
       let fetchSignal: AbortSignal | undefined;
       const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
-        fetchSignal = init?.signal;
+        fetchSignal = init?.signal ?? undefined;
         return Promise.resolve(hangingBodyResponse(status));
       });
 

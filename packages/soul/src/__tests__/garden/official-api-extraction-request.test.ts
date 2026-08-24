@@ -16,8 +16,8 @@ describe("official API extraction request", () => {
     const request = buildOfficialApiExtractionRequest(
       "I moved to Berlin.",
       [
-        { message_id: "user-1", role: "user", content: "I moved to Berlin." },
-        { message_id: "assistant-1", role: "assistant", content: "That sounds exciting." }
+        { role: "user", content: "I moved to Berlin." },
+        { role: "assistant", content: "That sounds exciting." }
       ]
     );
 

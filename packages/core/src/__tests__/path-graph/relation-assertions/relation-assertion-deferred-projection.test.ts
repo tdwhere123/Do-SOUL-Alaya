@@ -29,11 +29,11 @@ import { stableStringify } from "../../../shared/stable-stringify.js";
 
 const databases = new Set<StorageDatabase>();
 const observedAt = "2026-07-17T01:02:03.000Z";
-const evidenceIds = Object.freeze({
+const evidenceIds: Readonly<Record<string, string>> = Object.freeze({
   first: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
   second: "95b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
   ordinary: "a5b3671a-d8d8-4848-9e5c-07d0a89f5ae9"
-} satisfies Readonly<Record<string, string>>);
+});
 
 afterEach(() => {
   for (const database of databases) database.close();

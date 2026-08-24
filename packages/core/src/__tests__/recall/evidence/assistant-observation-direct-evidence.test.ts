@@ -40,7 +40,10 @@ describe("Assistant observation direct evidence", () => {
         content: recommendation
       })
     });
-    const findRecallQualifiedByIds = vi.fn(async () => [qualifiedAssistantObservation]);
+    const findRecallQualifiedByIds = vi.fn(async (
+      _workspaceId: string,
+      _matches: readonly RecallEvidenceSearchMatch[]
+    ) => [qualifiedAssistantObservation]);
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
     testOnlyAllowInMemoryFieldQuerySession: true,
@@ -59,7 +62,7 @@ describe("Assistant observation direct evidence", () => {
             normalized_rank: 0.95,
             matched_projection: {
               projection_id: 1,
-              projection_kind: "assistant_observation"
+              projection_kind: "assistant_observation" as const
             }
           }
         ])),
@@ -85,7 +88,7 @@ describe("Assistant observation direct evidence", () => {
         object_id: EVIDENCE_ID,
         matched_projection: {
           projection_id: 1,
-          projection_kind: "assistant_observation"
+          projection_kind: "assistant_observation" as const
         }
       }
     ]);
@@ -158,7 +161,10 @@ describe("Assistant observation direct evidence", () => {
         content: recommendation
       }
     };
-    const findRecallQualifiedByIds = vi.fn(async () => [qualified]);
+    const findRecallQualifiedByIds = vi.fn(async (
+      _workspaceId: string,
+      _matches: readonly RecallEvidenceSearchMatch[]
+    ) => [qualified]);
     const searchManyByKeywordField = vi.fn(async (
       _workspaceId: string,
       queries: readonly unknown[]
@@ -195,7 +201,7 @@ describe("Assistant observation direct evidence", () => {
         object_id: EVIDENCE_ID,
         matched_projection: {
           projection_id: 1,
-          projection_kind: "assistant_observation"
+          projection_kind: "assistant_observation" as const
         }
       }
     ]);
@@ -259,7 +265,7 @@ describe("Assistant observation direct evidence", () => {
         object_id: EVIDENCE_ID,
         matched_projection: {
           projection_id: 1,
-          projection_kind: "assistant_observation"
+          projection_kind: "assistant_observation" as const
         }
       }
     ]);
@@ -280,7 +286,7 @@ describe("Assistant observation direct evidence", () => {
         normalized_rank: 1,
         matched_projection: {
           projection_id: 1,
-          projection_kind: "assistant_observation"
+          projection_kind: "assistant_observation" as const
         }
       }])),
       findRecallQualifiedByIds: vi.fn(async () => {

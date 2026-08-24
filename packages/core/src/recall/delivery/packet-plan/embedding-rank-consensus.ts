@@ -412,12 +412,6 @@ function protectionsAreSatisfied<T extends EmbeddingRankConsensusCandidate>(
   });
 }
 
-function candidateKeys<T extends EmbeddingRankConsensusCandidate>(
-  candidates: readonly T[]
-): ReadonlySet<string> {
-  return new Set(candidates.map((candidate) => candidate.candidateKey));
-}
-
 function hasSameKeyOrder<T extends EmbeddingRankConsensusCandidate>(
   left: readonly T[],
   right: readonly T[]

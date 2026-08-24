@@ -90,7 +90,10 @@ describe("selectBoundedTopK", () => {
         createTaskSurface().runtime_id
       );
       const result = await runCoarseFilter(
-        { dependencies, warn: warnSpy },
+        {
+          dependencies,
+          warn: warnSpy as unknown as (message: string, meta: Record<string, unknown>) => void
+        },
         "workspace-1",
         {
           ...basePolicy.coarse_filter,
@@ -109,7 +112,7 @@ describe("selectBoundedTopK", () => {
         null
       );
       return result.candidates
-        .filter((candidate) => candidate.admissionPlanes.includes("activation"))
+        .filter((candidate) => candidate.admissionPlanes?.includes("activation") === true)
         .map((candidate) => candidate.entry.content)
         .sort();
     };

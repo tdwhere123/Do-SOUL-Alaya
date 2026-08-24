@@ -84,7 +84,11 @@ it("reports no_stored_vectors from the legacy hasStoredVectors precheck", async 
       dependencies: {
         embeddingRecallService: {
           hasStoredVectors: vi.fn(async () => false),
-          prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused"))
+          prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused")),
+          querySupplement: vi.fn(async () => ({
+            supplementaryEntries: Object.freeze([]),
+            similarityHintsByObjectId: Object.freeze({})
+          }))
         }
       },
       config: overridePolicy(basePolicy, {

@@ -52,6 +52,7 @@ describe("immutable projection generations", () => {
     const second = catchUpProjectionGeneration({
       store,
       sha256,
+      sliceKeys: [],
       workspace_id: "workspace-1",
       source_generation_id: first.generation.generation_id,
       input_event_frontier: "event-2",
@@ -111,6 +112,7 @@ describe("immutable projection generations", () => {
     const next = catchUpProjectionGeneration({
       store,
       sha256,
+      sliceKeys: [],
       workspace_id: "workspace-1",
       source_generation_id: first.generation.generation_id,
       input_event_frontier: "event-2",
@@ -278,6 +280,7 @@ describe("immutable projection generations", () => {
     const next = catchUpProjectionGeneration({
       store,
       sha256,
+      sliceKeys: [],
       workspace_id: "workspace-1",
       source_generation_id: first.generation.generation_id,
       input_event_frontier: "event-2",

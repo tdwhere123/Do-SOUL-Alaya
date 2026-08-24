@@ -276,11 +276,11 @@ function g5QueryObligation(): QueryFactFrameOsfObligation {
 function obligation(
   query: string,
   predicate: string,
-  predicateSpan: readonly [number, number],
+  predicateSpan: [number, number],
   subject: string,
-  subjectSpan: readonly [number, number],
+  subjectSpan: [number, number],
   value: string,
-  valueSpan: readonly [number, number]
+  valueSpan: [number, number]
 ): QueryFactFrameOsfObligation {
   const body = {
     schema_version: 2 as const,
@@ -304,13 +304,13 @@ function constrainedObligation(query: string): QueryFactFrameOsfObligation {
     query_digest: digest(query),
     fact_frame_producer_operator_id: "rule_based_query_fact_frame_extractor_v2",
     fact_frame_capture_digest: digest(`capture:${query}`),
-    predicate: { surface: "redeem", source_span: [12, 18] as const, position: 0 },
-    subject: { surface: "I", source_span: [10, 11] as const, position: 0 },
+    predicate: { surface: "redeem", source_span: [12, 18] as [number, number], position: 0 },
+    subject: { surface: "I", source_span: [10, 11] as [number, number], position: 0 },
     constraints: [
       { surface: "a $5 coupon on coffee creamer",
-        source_span: [19, 48] as const, position: 1 }
+        source_span: [19, 48] as [number, number], position: 1 }
     ],
-    value: { surface: "Where", source_span: [0, 5] as const, position: 2 },
+    value: { surface: "Where", source_span: [0, 5] as [number, number], position: 2 },
     arity: 3
   };
   return { ...body, obligation_digest: digest(queryFactFrameOsfObligationPreimage(body)) };

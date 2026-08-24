@@ -263,6 +263,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
     const service = new EmbeddingRecallService({
       embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
       evidenceDocumentEmbeddingRepo: {
+        listSourcesByWorkspace: vi.fn(async () => []),
         findByDocuments: vi.fn(async () => []),
         upsertMany
       },

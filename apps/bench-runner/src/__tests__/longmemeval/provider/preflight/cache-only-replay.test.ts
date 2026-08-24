@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

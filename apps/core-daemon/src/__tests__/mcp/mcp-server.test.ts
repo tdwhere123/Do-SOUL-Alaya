@@ -19,13 +19,13 @@ describe("mcp server", () => {
   });
 
   it("converts successful handler output into an MCP call result", async () => {
-    const handler: McpMemoryToolHandler = {
+    const handler = {
       call: async () => ({
         ok: true,
         tool_name: "soul.open_pointer",
         output: { object_id: "mem1" }
       })
-    };
+    } as unknown as McpMemoryToolHandler;
 
     const result = await callAlayaMcpMemoryTool(
       {
@@ -45,13 +45,13 @@ describe("mcp server", () => {
   });
 
   it("converts handler failures into MCP error results", async () => {
-    const handler: McpMemoryToolHandler = {
+    const handler = {
       call: async () => ({
         ok: false,
         tool_name: "memory.recall",
         error: { code: "UNKNOWN_TOOL", message: "Unsupported" }
       })
-    };
+    } as unknown as McpMemoryToolHandler;
 
     const result = await callAlayaMcpMemoryTool(
       {
@@ -71,11 +71,11 @@ describe("mcp server", () => {
 
   it("converts a rejected handler promise into a structured MCP error result", async () => {
     const warn = vi.fn();
-    const handler: McpMemoryToolHandler = {
+    const handler = {
       call: async () => {
         throw new Error("private handler detail");
       }
-    };
+    } as unknown as McpMemoryToolHandler;
 
     const result = await callAlayaMcpMemoryTool(
       {
@@ -100,13 +100,13 @@ describe("mcp server", () => {
   });
 
   it("pins tools-only MCP server instructions for the full memory loop", () => {
-    const handler: McpMemoryToolHandler = {
+    const handler = {
       call: async () => ({
         ok: true,
         tool_name: "soul.recall",
         output: { delivery_id: "d1", results: [], total_count: 0 }
       })
-    };
+    } as unknown as McpMemoryToolHandler;
     createAlayaMcpServer({
       memoryToolHandler: handler,
       contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "session-1" })

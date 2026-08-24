@@ -151,7 +151,8 @@ export function assertionSignal(
       source_grounding: GROUNDED_SOURCE_AUDIT,
       ...payload
     },
-    created_at: CLOCK
+    created_at: CLOCK,
+    source_observation: null
   };
 }
 

@@ -75,7 +75,11 @@ describe("live query condition capture", () => {
   });
 
   it("passes captured as-of into path reads when the caller omits referenceTime", async () => {
-    const findByAnchors = vi.fn(async () => []);
+    const findByAnchors = vi.fn(async (
+      _workspaceId: string,
+      _anchors: readonly unknown[],
+      _options?: Readonly<{ asOf?: string }>
+    ) => []);
     const { dependencies } = createDependencies([
       createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
     ]);
@@ -99,7 +103,11 @@ describe("live query condition capture", () => {
   });
 
   it("canonicalizes receipts while preserving the path calendar offset", async () => {
-    const findByAnchors = vi.fn(async () => []);
+    const findByAnchors = vi.fn(async (
+      _workspaceId: string,
+      _anchors: readonly unknown[],
+      _options?: Readonly<{ asOf?: string }>
+    ) => []);
     const { dependencies } = createDependencies([
       createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
     ]);

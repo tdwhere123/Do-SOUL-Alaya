@@ -270,9 +270,8 @@ describe("EvidenceService source formation", () => {
       excerpt: "Root survives optional planning."
     }), [{
       projection_kind: "fact_key",
-      projection_version: 1,
-      normalized_text: "forbidden external fact key",
-      payload: {}
+      projection_id: 1,
+      content: "forbidden external fact key"
     }]);
 
     expect(await service.findById(created.object_id)).not.toBeNull();

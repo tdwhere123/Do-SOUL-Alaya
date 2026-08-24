@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

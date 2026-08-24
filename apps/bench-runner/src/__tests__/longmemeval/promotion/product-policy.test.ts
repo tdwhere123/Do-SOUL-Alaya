@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";

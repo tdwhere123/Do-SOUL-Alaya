@@ -137,6 +137,14 @@ describe("withSecurityStatusWorkspaceService", () => {
       {
         initializeWorkspace: vi.fn(async () => {
           order.push("security");
+          return {
+            workspace_id: "workspace-1",
+            posture: "baseline" as const,
+            zero_day_active: false,
+            active_security_locks: 0,
+            last_assessment_at: "2026-04-22T00:00:00.000Z",
+            active_protections: []
+          };
         }),
         recordInitializationFailure: vi.fn(async () => undefined)
       },
@@ -162,7 +170,14 @@ describe("withSecurityStatusWorkspaceService", () => {
       created_at: "2026-04-22T00:00:00.000Z",
       updated_at: "2026-04-22T00:00:00.000Z"
     };
-    const initializeWorkspace = vi.fn(async () => undefined);
+    const initializeWorkspace = vi.fn(async () => ({
+            workspace_id: "workspace-1",
+            posture: "baseline" as const,
+            zero_day_active: false,
+            active_security_locks: 0,
+            last_assessment_at: "2026-04-22T00:00:00.000Z",
+            active_protections: []
+          }));
     const service = withSecurityStatusWorkspaceService(
       {
         ensureLocalWorkspace: vi.fn(async () => workspace)
@@ -245,7 +260,14 @@ describe("withSecurityStatusWorkspaceService", () => {
         list: vi.fn(async () => [workspace])
       } as never,
       {
-        initializeWorkspace: vi.fn(async () => undefined),
+        initializeWorkspace: vi.fn(async () => ({
+            workspace_id: "workspace-1",
+            posture: "baseline" as const,
+            zero_day_active: false,
+            active_security_locks: 0,
+            last_assessment_at: "2026-04-22T00:00:00.000Z",
+            active_protections: []
+          })),
         recordInitializationFailure: vi.fn(async () => undefined)
       },
       workspaceEnsureMutation

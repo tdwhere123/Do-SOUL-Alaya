@@ -246,6 +246,33 @@ describe("attributed facility match materialization", () => {
 
     expect(matches).toEqual([]);
   });
+
+  it("gates independent_evidence demand on evidence identity, not semantic strength", () => {
+    const facilityDemand = materializeAttributedQueryFacilityDemand({
+      query_demand: queryDemand(),
+      weights: facilityWeights()
+    });
+    const matchesFor = (evidenceObjectId: string) =>
+      materializeAttributedFacilityMatches({
+        demand: facilityDemand,
+        candidates: [{
+          candidate_key: "candidate-a",
+          object_id: "other",
+          coverage: semanticEvidenceCoverage(evidenceObjectId, 0.95)
+        }]
+      }).get("candidate-a")!.filter((match) =>
+        match.demand_atom_id.includes(":independent_evidence:")
+      );
+
+    expect(matchesFor("evidence-b")).toEqual([]);
+    expect(matchesFor("evidence-a")).toEqual([
+      expect.objectContaining({
+        demand_atom_id: "facility:independent_evidence:evidence_ref:evidence-a",
+        alignment_operator_id: "identity_v1",
+        match_strength: 0.95
+      })
+    ]);
+  });
 });
 
 function queryDemand(extraTerms: readonly string[] = []): Readonly<RecallQueryDemand> {
@@ -374,6 +401,41 @@ function coverageReceipt(
         demand_roles: Object.freeze(["complete", "relation"] as const),
         observation_channels: Object.freeze(["evidence_fts" as const]),
         matched_fts_lanes: Object.freeze([...(options.matchedFtsLanes ?? [])])
+      })
+    ])
+  });
+}
+
+function semanticEvidenceCoverage(
+  evidenceObjectId: string,
+  strength: number
+): Readonly<CandidateCoverageReceipt> {
+  return Object.freeze({
+    schema_version: 1,
+    operator_id: "attributed_coverage_atoms_v1",
+    candidate_key: "candidate-a",
+    activation: Object.freeze({
+      schema_version: 1,
+      operator_id: "candidate_semantic_max_v1",
+      state: "absent",
+      score: null,
+      winner: null,
+      observations: Object.freeze([]),
+      missing_channel_policy: "no_op"
+    }),
+    evidence_semantic_completeness: "complete",
+    projection_match_count: 0,
+    atoms: Object.freeze([
+      Object.freeze({
+        atom_id: `evidence:${evidenceObjectId}`,
+        kind: "independent_evidence" as const,
+        strength,
+        independence_key: `evidence:${evidenceObjectId}`,
+        evidence_object_id: evidenceObjectId,
+        document_identity: null,
+        projection: null,
+        demand_roles: Object.freeze([]),
+        observation_channels: Object.freeze(["evidence_semantic" as const])
       })
     ])
   });

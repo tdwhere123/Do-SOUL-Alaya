@@ -29,7 +29,7 @@ export async function fetchProviderChatCompletion(
   const onAbort = (): void => {
     controller.abort(CALLER_ABORT);
   };
-  bindAbort(request.abortSignal, onAbort, controller);
+  bindAbort(request.abortSignal, onAbort);
   const timer = startTimeout(request.timeoutMs, controller);
   let knownStatus: number | null = null;
   try {
@@ -123,8 +123,7 @@ function inspectBody(
 
 function bindAbort(
   signal: AbortSignal | undefined,
-  onAbort: () => void,
-  controller: AbortController
+  onAbort: () => void
 ): void {
   if (signal === undefined) return;
   if (signal.aborted) onAbort();

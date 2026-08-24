@@ -101,11 +101,11 @@ function obligation() {
 }
 
 function obligationFor(query: string, slots: Readonly<{
-  predicate: { surface: string; source_span: readonly [number, number]; position: 0 };
-  subject: { surface: string; source_span: readonly [number, number]; position: 0 };
-  value: { surface: string; source_span: readonly [number, number]; position: number };
+  predicate: { surface: string; source_span: [number, number]; position: 0 };
+  subject: { surface: string; source_span: [number, number]; position: 0 };
+  value: { surface: string; source_span: [number, number]; position: number };
   constraints?: readonly {
-    surface: string; source_span: readonly [number, number]; position: number
+    surface: string; source_span: [number, number]; position: number
   }[];
 }>) {
   const constraints = slots.constraints ?? [];
@@ -143,7 +143,7 @@ function constrainedGraph() {
     schema_version: 2 as const, source_kind: "query" as const,
     factors: [factor("predicate", "redeem", "redeem"), factor("subject", "I", "i"),
       factor("constraint", "a $5 coupon on coffee creamer", "coupon on coffee creamer")],
-    variables: [{ variable_id: "answer", surface: "Where" }],
+    variables: [{ variable_id: "answer", surface: "Where", source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
       arguments: [argument(0, "factor", "subject"), argument(1, "factor", "constraint"),
@@ -166,7 +166,7 @@ function certifyRepeated(
       schema_version: 2, source_kind: "query",
       factors: [factor("predicate", "echo", "echo", predicateOccurrence),
         factor("subject", "echo", "echo", subjectOccurrence)],
-      variables: [{ variable_id: "answer", surface: "What" }],
+      variables: [{ variable_id: "answer", surface: "What", source_occurrence: 0 }],
       result_variable_ids: ["answer"],
       propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
         arguments: [argument(0, "factor", "subject"),
@@ -191,7 +191,7 @@ function binary(
     schema_version: 2 as const,
     source_kind: "query" as const,
     factors: [factor("predicate", "graduate", "graduate"), factor("subject", "I", "i")],
-    variables: [{ variable_id: "answer", surface: "What degree" }],
+    variables: [{ variable_id: "answer", surface: "What degree", source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{
       proposition_id: "query",
@@ -204,9 +204,9 @@ function binary(
   };
 }
 
-function factor(id: string, surface: string, semantic: string, occurrence?: number) {
+function factor(id: string, surface: string, semantic: string, occurrence = 0) {
   return { factor_id: id, surface, semantic_identity: semantic,
-    ...(occurrence === undefined ? {} : { source_occurrence: occurrence }) };
+    source_occurrence: occurrence };
 }
 
 function argument(

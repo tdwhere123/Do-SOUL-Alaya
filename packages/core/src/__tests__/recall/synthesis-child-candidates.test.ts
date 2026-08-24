@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallRetrievalFieldBundle } from
+  "../../recall/field/retrieval/retrieval-field-bundle.js";
+import type {
+  RecallServiceMemoryRepoPort,
+  RecallServiceSynthesisSearchPort
+} from "../../recall/runtime/recall-service-ports.js";
 import { collectSynthesisChildCandidates } from "../../recall/supplements/synthesis/child-candidates.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
@@ -68,22 +74,22 @@ describe("collectSynthesisChildCandidates", () => {
       return await collectSynthesisChildCandidates({
         dependencies: {
           memoryRepo: {
-            findByIds: async (_ws, ids) =>
+            findByIds: async (_ws: string, ids: readonly string[]) =>
               ids.map((id) => entryMap.get(id)).filter((e): e is MemoryEntry => e !== undefined)
-          }
+          } as unknown as RecallServiceMemoryRepoPort
         },
         workspaceId,
         queryText,
         queryProbes,
         synthesisSearchPort: {
-          findByIds: async (_ws, ids) =>
+          findByIds: async (_ws: string, ids: readonly string[]) =>
             capsules.filter((cap) => ids.includes(cap.object_id))
-        },
+        } as unknown as RecallServiceSynthesisSearchPort,
         retrievalFieldBundle: {
           searchSynthesisKeywords: async () => [
             capsules.map((cap) => ({ object_id: cap.object_id, normalized_rank: 0.8 }))
           ]
-        },
+        } as unknown as RecallRetrievalFieldBundle,
         limit: 50
       });
     };

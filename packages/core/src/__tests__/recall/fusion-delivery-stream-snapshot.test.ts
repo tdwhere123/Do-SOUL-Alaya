@@ -34,6 +34,7 @@ function supplementaryData(ids: readonly string[]): RecallSupplementaryData {
     trigramFtsRanks: { [ids[0]!]: 0.7 },
     synthesisFtsRanks: {},
     evidenceFtsRanks: { [ids[0]!]: 0.9, [ids[1]!]: 0.6 },
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: { [ids[0]!]: 0.9, [ids[1]!]: 0.5 },

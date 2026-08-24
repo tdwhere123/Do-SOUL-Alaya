@@ -13,6 +13,9 @@ import type {
 } from "../../../recall/runtime/recall-service-runner.js";
 import type { CoarseRecallCandidate } from "../../../recall/runtime/recall-service-types.js";
 import { buildRecallPolicy } from "../../../shared/recall-policy.js";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import { createSeededTestOnlyInMemoryFieldQuerySession } from
+  "../../../recall/runtime/query/field-query-session.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -254,7 +257,11 @@ function createEmbeddingWarmSetup(
           }),
           materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => {
             throw new Error("materialize must not run in coarse warm ordering test");
-          })
+          }),
+          querySupplement: vi.fn(async () => ({
+            supplementaryEntries: Object.freeze([]),
+            similarityHintsByObjectId: Object.freeze({})
+          }))
         }
       },
       buildDefaultPolicy: () => embeddingPolicy
@@ -264,7 +271,11 @@ function createEmbeddingWarmSetup(
       ...setup.prepared,
       policy: embeddingPolicy
     })
-  });
+  }) as unknown as Readonly<{
+    context: RecallExecutionContext;
+    params: RecallExecutionParams;
+    prepared: PreparedRecallRequest;
+  }>;
 }
 function createCandidateFixture() {
   const localEntry = createMemoryEntry({
@@ -366,7 +377,12 @@ function createStageSetup(memory: Readonly<MemoryEntry>): Readonly<{
       dependencies,
       warn: () => undefined,
       now: () => "2026-03-23T00:00:00.000Z",
-      buildDefaultPolicy: () => policy
+      buildDefaultPolicy: () => policy,
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
+        fieldContractSha256,
+        "workspace-1"
+      ),
+      sha256: fieldContractSha256
     }),
     params: Object.freeze({ taskSurface, workspaceId: "workspace-1", strategy: "analyze" }),
     prepared: Object.freeze({
@@ -379,18 +395,27 @@ function createStageSetup(memory: Readonly<MemoryEntry>): Readonly<{
       activeConstraints: Object.freeze({ constraints: Object.freeze([]), total_count: 0 }),
       winnerMemoryIds: new Set<string>()
     })
-  });
+  }) as unknown as Readonly<{
+    context: RecallExecutionContext;
+    params: RecallExecutionParams;
+    prepared: PreparedRecallRequest;
+  }>;
 }
 
 function coarseResult(candidate?: Readonly<CoarseRecallCandidate>): CoarseFilterResult {
   return Object.freeze({
     total_scanned: candidate === undefined ? 0 : 1,
     candidates: Object.freeze(candidate === undefined ? [] : [candidate]),
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: false,
+      explicit_pointer: false
+    }),
     ftsRanks: Object.freeze({}),
     trigramFtsRanks: Object.freeze({}),
     synthesisFtsRanks: Object.freeze({}),
     evidenceFtsRanks: Object.freeze({}),
     evidenceFtsRanksPerRef: Object.freeze({}),
+    evidenceProjectionMatchesByRef: Object.freeze({}),
     sourceProximityScores: Object.freeze({}),
     sourceCohortKeys: Object.freeze({}),
     structuralScores: Object.freeze({}),

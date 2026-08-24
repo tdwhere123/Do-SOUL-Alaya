@@ -224,7 +224,7 @@ describe("open semantic composition complete incompatible status", () => {
     });
 
     expect(() => verifyOpenSemanticFactorComposition({
-      receipt: legacy as typeof current,
+      receipt: legacy as unknown as typeof current,
       trace,
       query_capture: query
     })).toThrow(/composition receipt digest mismatch/u);

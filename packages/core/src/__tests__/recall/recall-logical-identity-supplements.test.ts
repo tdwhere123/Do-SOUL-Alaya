@@ -6,6 +6,8 @@ import {
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import { captureRecallQueryEntities } from
+  "../../recall/field/query-entity-attribution-producer.js";
 import {
   collectCoarseFilterSupplementaryData,
   type CoarseFilterResult
@@ -62,6 +64,7 @@ describe("recall supplementary logical identity", () => {
       runId: null,
       queryText: "recall shared object",
       queryProbes: compileRecallQueryProbes("recall shared object"),
+      queryEntityExtraction: await captureRecallQueryEntities({ query_text: null }),
       policy: policy(),
       winnerMemoryIds: new Set<string>(),
       tokenEstimator: { estimate: () => 1 }
@@ -183,11 +186,16 @@ function coarseFilter(
   return Object.freeze({
     total_scanned: candidates.length,
     candidates: Object.freeze([...candidates]),
+    retrievalFieldTruncation: Object.freeze({
+      session_event_index: false,
+      explicit_pointer: false
+    }),
     ftsRanks: Object.freeze({}),
     trigramFtsRanks: Object.freeze({}),
     synthesisFtsRanks: Object.freeze({}),
     evidenceFtsRanks: Object.freeze({}),
     evidenceFtsRanksPerRef: Object.freeze({}),
+    evidenceProjectionMatchesByRef: Object.freeze({}),
     sourceProximityScores: Object.freeze({}),
     sourceCohortKeys: Object.freeze({}),
     structuralScores: Object.freeze({}),
@@ -280,6 +288,7 @@ function supplementary(
     weightTransferAmount: 0,
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
+    evidenceProjectionMatchesByRef: {},
     ...overrides
-  };
+  } as RecallSupplementaryData;
 }

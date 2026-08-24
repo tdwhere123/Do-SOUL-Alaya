@@ -260,5 +260,5 @@ function stubFormedCapture(
         semantic_identity: identity
       }))
     }
-  } as OpenSemanticFactorFormationCapture;
+  } as unknown as OpenSemanticFactorFormationCapture;
 }

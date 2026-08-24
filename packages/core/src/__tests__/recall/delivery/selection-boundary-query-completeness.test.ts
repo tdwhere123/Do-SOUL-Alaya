@@ -108,7 +108,7 @@ function completeGraph() {
   return {
     schema_version: 2 as const, source_kind: "query" as const,
     factors: [factor("predicate", "graduate", "graduate"), factor("subject", "I", "i")],
-    variables: [{ variable_id: "answer", surface: "What degree" }],
+    variables: [{ variable_id: "answer", surface: "What degree", source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{ proposition_id: "query", predicate_factor_id: "predicate",
       arguments: [argument(0, "factor", "subject"),
@@ -117,7 +117,7 @@ function completeGraph() {
 }
 
 function factor(factorId: string, surface: string, semanticIdentity: string) {
-  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
+  return { factor_id: factorId, surface, source_occurrence: 0, semantic_identity: semanticIdentity };
 }
 
 function argument(position: number, referenceKind: "factor" | "variable", referenceId: string) {

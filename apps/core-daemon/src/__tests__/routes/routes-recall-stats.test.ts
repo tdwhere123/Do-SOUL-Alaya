@@ -145,7 +145,13 @@ describe("recall-stats route", () => {
 
     const response = await app.request("/workspaces/ws1/recall-stats");
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = await response.json() as {
+      success: boolean;
+      data: {
+        recall: { p50_latency_ms: number | null };
+        embedding: { p99_latency_ms: number | null };
+      };
+    };
     expect(body).toEqual({ success: true, data: emptyLatencyStats });
     expect(body.data.recall.p50_latency_ms).toBeNull();
     expect(body.data.embedding.p99_latency_ms).toBeNull();

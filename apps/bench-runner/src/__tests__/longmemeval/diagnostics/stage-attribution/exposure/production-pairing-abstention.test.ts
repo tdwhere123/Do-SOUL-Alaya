@@ -44,7 +44,7 @@ describe("production stage/receipt pairing with abstention twins", () => {
     expect(mixed.treatmentTable.questions.map((row) => row.question_id))
       .toEqual(CANARY_IDS);
     expect(mixed.receipts.map((receipt) => receipt.question_id)).toEqual(
-      [...CANARY_IDS].toSorted()
+      [...CANARY_IDS].sort()
     );
     expect(evaluateGate7PolarityMatrix(mixed.receipts))
       .toEqual(evaluateGate7PolarityMatrix(baseline.receipts));
@@ -99,9 +99,9 @@ describe("exposure abstention disjuncts", () => {
     );
 
     expect(flagPair.receipts.map((receipt) => receipt.question_id))
-      .toEqual([...CANARY_IDS].toSorted());
+      .toEqual([...CANARY_IDS].sort());
     expect(cohortPair.receipts.map((receipt) => receipt.question_id))
-      .toEqual([...CANARY_IDS].toSorted());
+      .toEqual([...CANARY_IDS].sort());
     expect(flagPair.comparison.gate7_polarity_matrix.passed).toBe(true);
     expect(cohortPair.comparison.gate7_polarity_matrix.passed).toBe(true);
   });

@@ -106,7 +106,6 @@ export async function executeRecall(
   await recordRecallSideEffects(
     executionContext,
     params,
-    prepared,
     outcome.coarse,
     outcome.assessment,
     outcome.manifested,
@@ -405,7 +404,6 @@ async function manifestCandidateStage(
 async function recordRecallSideEffects(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   assessment: AssessmentStageResult,
   manifested: ManifestedRecallResult,

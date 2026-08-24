@@ -83,8 +83,8 @@ describe("production backfill formation order", () => {
     const calls: RelationAssertionAdmissionRequest[] = [];
     const producer = new AnswersWithEdgeProducerService({
       pairSource: { answerCoRelevantPairs: async () => completePairWitnesses(objectIds) },
-      assertionPort: { admit: async (input) => admissionResult(calls, input) }
-    });
+      assertionPort: { admit: async (input: RelationAssertionAdmissionRequest) => admissionResult(calls, input) }
+    } as never);
 
     expect(new Set(objects.map((object) => object.formationKey)).size).toBe(1);
     await expect(producer.crystallize({
@@ -117,9 +117,9 @@ async function runTopology(
   const objects = await loadBackfillFormationObjects(memoryRepo, "workspace-1", objectIds);
   const calls: RelationAssertionAdmissionRequest[] = [];
   const producer = new AnswersWithEdgeProducerService({
-    pairSource: { answerCoRelevantPairs: async ({ objectIds: ids }) => completePairWitnesses(ids) },
-    assertionPort: { admit: async (input) => admissionResult(calls, input) }
-  });
+    pairSource: { answerCoRelevantPairs: async ({ objectIds: ids }: { objectIds: readonly string[] }) => completePairWitnesses(ids) as never },
+    assertionPort: { admit: async (input: RelationAssertionAdmissionRequest) => admissionResult(calls, input) }
+  } as never);
   await producer.crystallize({
     workspaceId: "workspace-1",
     runId: "run-1",
@@ -211,7 +211,7 @@ function completePairWitnesses(ids: readonly string[]) {
         evidenceReceipts: [{
           evidence_id: `evidence-${left}-${right}`,
           source_event_anchor: {
-            event_type: "soul.signal.emitted",
+            event_type: "soul.signal.emitted" as const,
             event_id: `event-${left}-${right}`,
             occurred_at: observedAt
           }
@@ -222,7 +222,7 @@ function completePairWitnesses(ids: readonly string[]) {
           parameters: { bar: 1 },
           parameter_sha256: "b".repeat(64),
           source_observations: [{
-            source_kind: "memory_hq_observation",
+            source_kind: "memory_hq_observation" as const,
             source_id: `hq-${left}-${right}`,
             source_sha256: "c".repeat(64)
           }],
@@ -233,7 +233,7 @@ function completePairWitnesses(ids: readonly string[]) {
       });
     }
   }
-  return witnesses;
+  return witnesses as never;
 }
 
 function admissionResult(

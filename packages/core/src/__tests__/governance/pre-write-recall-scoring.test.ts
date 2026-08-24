@@ -3,9 +3,10 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import {
   compareCandidateNeighbors,
   compareStructuralCandidate,
-  type PreWriteCandidateNeighbor,
   type StructuralCandidate
 } from "../../governance/reconciliation/pre-write-recall-scoring.js";
+import type { PreWriteCandidateNeighbor } from
+  "../../governance/reconciliation/pre-write-recall-service.js";
 
 function makeEntry(objectId: string, content: string): Readonly<MemoryEntry> {
   return {
@@ -42,6 +43,10 @@ describe("pre-write-recall-scoring candidate tie-breaking", () => {
       entry: makeEntry("id-1", "  Zebra lives in savanna  "),
       lexicalScore: 0.8,
       structuralScore: 0.8,
+      tagScore: 0,
+      entityScore: 0,
+      slotScore: 0,
+      temporalScore: 0,
       families: ["domain_tag"],
       relationPosteriors: []
     };
@@ -49,6 +54,10 @@ describe("pre-write-recall-scoring candidate tie-breaking", () => {
       entry: makeEntry("id-2", "Apple lives in orchard"),
       lexicalScore: 0.8,
       structuralScore: 0.8,
+      tagScore: 0,
+      entityScore: 0,
+      slotScore: 0,
+      temporalScore: 0,
       families: ["domain_tag"],
       relationPosteriors: []
     };

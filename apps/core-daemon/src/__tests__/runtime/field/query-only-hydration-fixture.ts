@@ -154,8 +154,8 @@ export async function dispatchQueryOnly(
 
 function createDispatchedMemoryPort(runtime: RecallReadWorkerRuntime) {
   return createWorkerMemoryRepo({
-    request: async <Result>(operation, payload): Promise<Result> =>
-      await dispatchQueryOnly(runtime, operation, payload) as Result,
+    request: async <Result>(operation: string, payload: unknown): Promise<Result> =>
+      await dispatchQueryOnly(runtime, operation as never, payload) as Result,
     readTierWindow: async (query) =>
       await dispatchQueryOnly(runtime, "memory.findRecallTierWindow", query) as WorkerTierWindowResult
   });

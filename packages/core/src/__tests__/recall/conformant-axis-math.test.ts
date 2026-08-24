@@ -33,6 +33,7 @@ function emptyRecords(): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes("what is the staging database password"),
     ftsRanks: {}, trigramFtsRanks: {}, synthesisFtsRanks: {}, evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {}, sourceCohortKeys: {}, structuralScores: {},
     graphExpansionScores: {}, entitySeedScores: {}, pathExpansionScores: {},
     pathSuppressionScores: {}, embeddingSimilarityScores: {},

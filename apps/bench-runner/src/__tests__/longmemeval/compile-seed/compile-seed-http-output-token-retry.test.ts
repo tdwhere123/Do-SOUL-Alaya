@@ -310,7 +310,7 @@ function requestUserPrompts(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): 
     const body = JSON.parse(String(call[1]?.body)) as {
       messages: readonly { readonly role: string; readonly content: string }[];
     };
-    return body.messages.findLast(({ role }) => role === "user")?.content ?? "";
+    return [...body.messages].reverse().find(({ role }) => role === "user")?.content ?? "";
   });
 }
 

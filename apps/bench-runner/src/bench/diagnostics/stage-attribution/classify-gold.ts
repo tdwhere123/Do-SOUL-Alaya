@@ -2,12 +2,13 @@ import type {
   LongMemEvalGoldDiagnostic,
   LongMemEvalQuestionDiagnostic
 } from "../schema/diagnostics-types.js";
-import {
-  isDeliveryAdmissionLoss,
-  isDeliveryBudgetLoss
-} from "../schema/diagnostics-private.js";
+import { isDeliveryAdmissionLoss } from "../schema/diagnostics-private.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
-import { goldPoolRank } from "./pool-rank.js";
+import { goldPoolRank, hasCoverageOrBudgetSignal } from "./pool-rank.js";
+import {
+  classifyHonestHigherRObj,
+  type HonestHigherRObjVerdict
+} from "./honest-higher-r-obj.js";
 import type {
   AttributionMechanism,
   AttributionStage,
@@ -82,25 +83,36 @@ export function classifyGoldObjectStage(input: {
     proof = "unevaluable_or_unranked_fallback";
   }
 
+  const nearTop =
+    stage === 6 ? classifyHonestHigherRObj({ question, gold }) : null;
+
   return {
     question_id: question.question_id,
     object_id: gold.object_id,
     object_kind: gold.object_kind,
     stage,
-    mechanism: classifyMechanism(stage, gold, poolRank),
+    mechanism: classifyMechanism(stage, gold, poolRank, nearTop),
     opportunity_pre_budget_6_10:
       input.opportunityQuestion && poolRank !== null && poolRank <= 10,
     miss_taxonomy: taxonomy,
     pool_rank: poolRank,
     final_rank: finalRank,
-    proof
+    proof,
+    ...(nearTop === null
+      ? {}
+      : {
+          near_top_class: nearTop.classification,
+          gold_family_max: nearTop.gold_family_max,
+          rank5_family_max: nearTop.rank5_family_max
+        })
   };
 }
 
 export function classifyMechanism(
   stage: AttributionStage,
   gold: LongMemEvalGoldDiagnostic,
-  poolRank: number | null
+  poolRank: number | null,
+  nearTop: HonestHigherRObjVerdict | null = null
 ): AttributionMechanism {
   if (stage === 7 || stage === 1 || stage === 2 || stage === 3) return null;
   if (
@@ -112,6 +124,11 @@ export function classifyMechanism(
     return "coverage_admission";
   }
   if (poolRank === null) return null;
+  // Every top-5 occupier legally outranks the gold on family-max R_obj:
+  // the fused order is honest, not a Gamma reorder or composition loss.
+  if (nearTop?.classification === "honest_higher_r_obj") {
+    return "honest_higher_r_obj";
+  }
   // Fused already outside top-5 means composition owned the loss before final order.
   if (gold.fused_rank !== null && gold.fused_rank > 5) return "composition";
   if (gold.miss_taxonomy === "delivery_order_drop" || stage === 6) {
@@ -119,21 +136,6 @@ export function classifyMechanism(
   }
   if (stage === 4) return "composition";
   return null;
-}
-
-function hasCoverageOrBudgetSignal(gold: LongMemEvalGoldDiagnostic): boolean {
-  if (isDeliveryBudgetLoss(gold)) return true;
-  const preCoverage =
-    gold.rank_after_feature_rerank ??
-    gold.rank_after_fusion ??
-    gold.fused_rank;
-  const coverageRank = gold.rank_after_coverage_selector;
-  return (
-    preCoverage !== null &&
-    preCoverage <= 5 &&
-    coverageRank !== null &&
-    coverageRank > 5
-  );
 }
 
 function isMemoryEmitted(question: LongMemEvalQuestionDiagnostic): boolean {

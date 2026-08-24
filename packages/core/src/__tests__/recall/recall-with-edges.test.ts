@@ -27,7 +27,11 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { GraphExploreService } from "../../path-graph/path-relations/graph-explore-service.js";
-import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import {
+  RecallService,
+  type RecallServiceDependencies,
+  type RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -191,7 +195,7 @@ function createServiceWithPathGraphSupport(input: {
     eventLogRepo: { append }
   });
 
-  const deps: RecallServiceDependencies = {
+  const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
       fieldContractSha256,
