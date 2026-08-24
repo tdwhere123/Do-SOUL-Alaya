@@ -7,7 +7,11 @@ import { GardenTaskUnavailableError } from
 describe("createGardenTaskCompletionHandler", () => {
   it("throws GardenTaskUnavailableError when the garden task repo is missing", async () => {
     const handler = createGardenTaskCompletionHandler({
-      deps: {},
+      deps: {
+        signalService: {
+          receiveSignal: vi.fn(async (signal) => ({ signal }))
+        }
+      },
       now: () => "2026-08-18T00:00:00.000Z",
       warn: vi.fn(),
       generateId: () => "id-1"

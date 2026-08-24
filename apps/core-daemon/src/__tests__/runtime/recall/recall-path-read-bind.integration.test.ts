@@ -372,7 +372,7 @@ function admissionRequest(sourceEvent: Readonly<EventLogEntry>) {
       parameters,
       parameter_sha256: digest(parameters),
       source_observations: [{
-        source_kind: "event_log_entry",
+        source_kind: "event_log_entry" as const,
         source_id: sourceEvent.event_id,
         source_sha256: digestRelationFormationEventSource(sourceEvent)
       }],
@@ -431,7 +431,7 @@ function memory(objectId: string): MemoryEntry {
     canonical_entities: null,
     projection_schema_version: 1,
     workspace_id: WORKSPACE_ID,
-    run_id: null,
+    run_id: "run-bind-seam",
     surface_id: null,
     storage_tier: "hot",
     activation_score: 0.5,

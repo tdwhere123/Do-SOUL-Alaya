@@ -123,7 +123,7 @@ describe("invokeBoundRecall shared input contract", () => {
     };
     const selectionBoundaryObserver = vi.fn(
       (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
-    );
+    ) as never;
 
     await invokeBoundRecall({
       sideEffectMode: "benchmark",

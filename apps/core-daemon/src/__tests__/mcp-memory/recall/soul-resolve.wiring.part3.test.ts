@@ -134,7 +134,11 @@ function createHarness(): WiringHarness {
         options?.additionalEventsSink?.push(persisted);
       }
       return updated;
-    }
+    },
+    recordEffectDecision: async (
+      _receipt: unknown,
+      eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    ) => publish(eventInput),
   };
   const memoryService = {
     transitionLifecycle: async (

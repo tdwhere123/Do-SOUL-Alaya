@@ -48,7 +48,7 @@ function createHarness(legacyTopologyMutationsEnabled: boolean | undefined) {
     pairSource: { answerCoRelevantPairs },
     assertionPort: { admit },
     warn
-  });
+  } as never);
   const completions: unknown[] = [];
   const support = createEmbeddingBackfillRuntimeSupport({
     now: () => FIXED_ISO,
@@ -179,7 +179,7 @@ function answerWitness() {
     evidenceReceipts: [{
       evidence_id: "evidence-1",
       source_event_anchor: {
-        event_type: "soul.signal.emitted",
+        event_type: "soul.signal.emitted" as const,
         event_id: "event-1",
         occurred_at: observedAt
       }

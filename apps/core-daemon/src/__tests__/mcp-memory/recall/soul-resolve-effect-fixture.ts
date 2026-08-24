@@ -118,8 +118,9 @@ class TestProofLookup implements ProofEffectLookup {
 
   public readTargetTime(_workspaceId: string, target: string) {
     const claim = this.claims.get(target);
-    const validFrom = claim?.created_at ?? this.proofs.find((proof) =>
-      "target" in proof && proof.target === target)?.valid_from;
+    const validFrom = claim?.created_at ?? (this.proofs.find((proof) =>
+      "target" in proof && (proof as { target?: string }).target === target) as
+      { valid_from?: string | null } | undefined)?.valid_from;
     return validFrom === undefined || validFrom === null ? null : {
       recorded_at: validFrom,
       event_time: validFrom,
@@ -163,14 +164,14 @@ function proof(
     valid_from: input.effectiveAsOf,
     valid_to: null
   } as const;
-  return kind === "actor_authority"
+  return (kind === "actor_authority"
     ? Object.freeze({
         ...common,
         actor_id: input.actorId,
         run_id: input.runId,
         delivery_id: input.deliveryId
       })
-    : Object.freeze(common);
+    : Object.freeze(common)) as ProofRecord;
 }
 
 function isLiveClaim(claim: ClaimForm): boolean {

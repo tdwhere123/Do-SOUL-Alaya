@@ -357,7 +357,7 @@ function createEventLogRepo(
   entries: readonly Record<string, unknown>[]
 ): Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"] {
   type EventLogRepoPort = Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"];
-  type EventLogEntry = ReturnType<EventLogRepoPort["append"]>;
+  type EventLogEntry = Awaited<ReturnType<EventLogRepoPort["append"]>>;
   return {
     queryByEntity: vi.fn<EventLogRepoPort["queryByEntity"]>(async (entityType, entityId) =>
       (entries as readonly EventLogEntry[]).filter(

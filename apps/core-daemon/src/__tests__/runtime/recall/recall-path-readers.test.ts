@@ -416,7 +416,7 @@ function relationReceipt(
       parameters,
       parameter_sha256: relationDigest(parameters),
       source_observations: [{
-        source_kind: "event_log_entry",
+        source_kind: "event_log_entry" as const,
         source_id: event.event_id,
         source_sha256: digestRelationFormationEventSource(event)
       }],

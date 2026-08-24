@@ -209,7 +209,7 @@ function createHarness(initialMemories: MemoryEntry[]) {
 }
 
 async function recallWithMemories(memories: readonly MemoryEntry[], query: string) {
-  const service = new RecallService(createRecallDependencies(memories));
+  const service = new RecallService(createRecallDependencies(memories) as never);
   const policy = createPolicy(service, query);
   return await service.recall({
     taskSurface: createTaskSurface(query),
@@ -220,7 +220,7 @@ async function recallWithMemories(memories: readonly MemoryEntry[], query: strin
   });
 }
 
-function createRecallDependencies(memories: readonly MemoryEntry[]): RecallServiceDependencies {
+function createRecallDependencies(memories: readonly MemoryEntry[]) {
   return {
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(

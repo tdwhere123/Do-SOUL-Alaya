@@ -152,6 +152,11 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       enqueueReplay(enrichPendingRepo, AMBIGUOUS_EVIDENCE_MEMORY_ID);
 
       const temporalRuntime = createPathRelationRuntime({
+        softAssociationPathRepo: {
+          create: (relation: unknown) => relation,
+          findByBackingObjectId: async () => null,
+          findActiveByWorkspace: async () => []
+        },
         coUsageCounterRepo: new SqliteCoUsageCounterRepo(database),
         eventLogRepo,
         eventPublisher,
@@ -162,7 +167,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         relationAssertionRepo,
         runtimeNotifier,
         warn: vi.fn()
-      });
+      } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
       pathRelationEvictionTimer = temporalRuntime.pathRelationEvictionTimer;
       const materializationRouter = createReplayRouter(
         evidenceService,

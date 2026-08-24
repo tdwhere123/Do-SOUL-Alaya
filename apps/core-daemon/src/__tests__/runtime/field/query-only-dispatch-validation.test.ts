@@ -49,7 +49,7 @@ describe("query-only recall-read dispatch validation", () => {
         id: 1,
         operation,
         payload: {}
-      } as RecallReadWorkerRequest)).rejects.toThrow();
+      } as unknown as RecallReadWorkerRequest)).rejects.toThrow();
     }
   });
 

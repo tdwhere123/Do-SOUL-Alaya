@@ -57,8 +57,8 @@ describe("formation eligibility live producer to consumer path", () => {
       expect(JSON.stringify(capture)).not.toContain("gold-atlas");
 
       const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-      expect(supplement.semanticFactorFormationsByEvidenceId[EVIDENCE_ID]).toEqual(capture);
-      expect(supplement.openSemanticFactorCompatibilityTrace).toMatchObject({
+      expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
+      expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
         incomparable_seal: testCase.seal,
         matchable_evidence_count: 0,
         entries: []
@@ -109,12 +109,12 @@ describe("formation eligibility live producer to consumer path", () => {
     )).toBeNull();
 
     const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-    expect(supplement.semanticFactorFormationsByEvidenceId[EVIDENCE_ID]).toBeUndefined();
-    expect(supplement.openSemanticFactorCompatibilityTrace).toMatchObject({
+    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toBeUndefined();
+    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
       matchable_evidence_count: 0,
       entries: []
     });
-    expect(supplement.openSemanticFactorCompatibilityTrace.incomparable_seal)
+    expect(supplement.openSemanticFactorCompatibilityTrace!.incomparable_seal)
       .not.toBe("rejected");
   });
 
@@ -147,8 +147,8 @@ describe("formation eligibility live producer to consumer path", () => {
     });
 
     const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-    expect(supplement.semanticFactorFormationsByEvidenceId[EVIDENCE_ID]).toEqual(capture);
-    expect(supplement.openSemanticFactorCompatibilityTrace).toMatchObject({
+    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
+    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
       incomparable_seal: "none",
       matchable_evidence_count: 1,
       entries: [{ evidence_id: EVIDENCE_ID, receipt: { status: "compatible" } }]
