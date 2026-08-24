@@ -4,7 +4,8 @@ import { buildFineAssessmentSelectGammaBinding } from
 import { createSelectionContext } from
   "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
 import {
-  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID
+  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
+  type OpenSemanticFactorCandidateActivation
 } from "../../../recall/field/open-semantic-factors/candidate-attribution.js";
 import type { IntegratedFloodCandidateDiagnostics } from
   "../../../recall/runtime/recall-service-types.js";
@@ -51,7 +52,9 @@ function bindCoveredCandidate(
   ).candidates[0]!;
 }
 
-function osfActivation(state: "observed" | "reconstructed") {
+function osfActivation(
+  state: "observed" | "reconstructed"
+): OpenSemanticFactorCandidateActivation {
   return {
     schema_version: 1 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,

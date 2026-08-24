@@ -102,10 +102,11 @@ describe("fine-assessment selection boundary field replay", () => {
       keyActivationByOwnerIdentity: new Map()
     }));
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
     expect(boundary.input.supplementary_data.routingKeysByOwnerIdentity).toEqual([]);
     expect(boundary.input.supplementary_data.keyActivationByOwnerIdentity).toEqual([]);
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
   });
 
   it("round-trips the retrieval field seal and rejects a tampered digest", () => {
@@ -130,10 +131,11 @@ describe("fine-assessment selection boundary field replay", () => {
       return undefined;
     }, undefined, true, false, createSupplementaryData({ retrievalFieldSeal }));
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
     expect(boundary.input.supplementary_data.retrievalFieldSeal)
       .toEqual(retrievalFieldSeal);
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
     const tampered = {
       ...boundary,
       input: {
@@ -174,10 +176,11 @@ describe("fine-assessment selection boundary field replay", () => {
       retrievalFieldRefinementReceipts: [receipt]
     }));
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
     expect(boundary.input.supplementary_data.retrievalFieldRefinementReceipts)
       .toEqual([receipt]);
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
     const tampered = {
       ...boundary,
       input: {
@@ -218,10 +221,11 @@ describe("fine-assessment selection boundary field replay", () => {
       queryFactFrameExtraction: capture
     }));
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
     expect(boundary.input.supplementary_data.queryFactFrameExtraction)
       .toEqual(capture);
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
     const tampered = {
       ...boundary,
       input: {
@@ -274,10 +278,11 @@ describe("fine-assessment selection boundary field replay", () => {
       retrievalFieldRefinementReceipts: [receipt]
     }));
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
     expect(boundary.expected.field_refinement_stop_certificate?.reason)
       .toBe("source_unavailable");
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
     const certificate = boundary.expected.field_refinement_stop_certificate!;
     const tampered = {
       ...boundary,
@@ -312,8 +317,9 @@ describe("fine-assessment selection boundary field replay", () => {
       return undefined;
     }, undefined, true, false, supplementary);
     if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const observed = boundary;
 
-    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+    expect(() => replayFineAssessmentSelectionBoundary(observed)).not.toThrow();
     const receipt = boundary.input.supplementary_data
       .evidenceProjectionMatchesByRef?.["evidence-1"]?.[0];
     const tampered = {

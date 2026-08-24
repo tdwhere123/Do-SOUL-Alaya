@@ -8,7 +8,8 @@ import type { RecallCandidateAnswerSupport } from
 import { createSelectionContext } from
   "../../../recall/delivery/fine-assessment-selection/coverage-order.js";
 import {
-  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID
+  OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
+  type OpenSemanticFactorCandidateActivation
 } from "../../../recall/field/open-semantic-factors/candidate-attribution.js";
 import type { IntegratedFloodCandidateDiagnostics } from
   "../../../recall/runtime/recall-service-types.js";
@@ -30,8 +31,11 @@ describe("live Select_Gamma binding", () => {
       evidenceSourceIdentity: "source-1",
       evidenceSourceRole: "user" as const,
       verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "atomic_assertion" as const,
         evidence_ref: "evidence-1",
-        projection_kind: "atomic_assertion" as const
+        support_identity: null
       },
       entry: {
         ...createCandidate("bound").entry,
@@ -394,7 +398,7 @@ describe("live Select_Gamma binding", () => {
     const blockedBase = createCandidate("blocked");
     const blocked = {
       ...blockedBase,
-      entry: { ...blockedBase.entry, scope_class: "global" as const }
+      entry: { ...blockedBase.entry, scope_class: "global_domain" as const }
     };
     const supplementaryData = createSupplementaryData({
       governanceCeilingByMemoryId: { blocked: "hidden" }
@@ -526,7 +530,7 @@ function floodAxes(axes: Readonly<{
   };
 }
 
-function observedOpenSemanticActivation() {
+function observedOpenSemanticActivation(): OpenSemanticFactorCandidateActivation {
   return {
     schema_version: 1 as const,
     operator_id: OPEN_SEMANTIC_FACTOR_CANDIDATE_ACTIVATION_OPERATOR_ID,
