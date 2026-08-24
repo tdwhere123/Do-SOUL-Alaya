@@ -116,7 +116,9 @@ describe("recall diagnostics", () => {
       per_axis_rank: { object: 1, path: 2, evidence: null, temporal: null, control: null },
       per_axis_contribution: { object: 0.2, path: 0.03, evidence: 0, temporal: 0, control: 0 },
       flood_potential: floodPotential,
-      flood_fuel_coverage: floodFuelCoverage
+      flood_fuel_coverage: floodFuelCoverage,
+      admission_attempts: Object.freeze([]),
+      evidence_projection_matches: Object.freeze([])
     });
 
     const diagnostics = buildRecallDiagnostics({

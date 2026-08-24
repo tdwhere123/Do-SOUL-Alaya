@@ -139,8 +139,11 @@ describe("live Select_Gamma binding", () => {
       ...verifiedBase,
       evidenceSourceRole: "user" as const,
       verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "atomic_assertion" as const,
         evidence_ref: "evidence-verified",
-        projection_kind: "atomic_assertion" as const
+        support_identity: null
       },
       entry: {
         ...verifiedBase.entry,

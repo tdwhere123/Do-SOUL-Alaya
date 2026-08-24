@@ -197,6 +197,7 @@ describe("ReconciliationService", () => {
 	          runId: "run-foreign",
 	          signalId: "signal-1",
 	          incomingContent: "The user lives in Berlin.",
+	          incomingDimension: "fact",
 	          incomingDomainTags: ["bench-seed"]
 	        },
 	        applyVerdict

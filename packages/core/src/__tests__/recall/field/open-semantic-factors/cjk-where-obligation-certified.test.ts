@@ -86,7 +86,7 @@ async function certifiedWhereQuery() {
       factor("predicate", obligation.predicate.surface, obligation.predicate.surface),
       factor("tail", constraint.surface, constraint.surface)
     ],
-    variables: [{ variable_id: "answer", surface: obligation.value.surface }],
+    variables: [{ variable_id: "answer", surface: obligation.value.surface, source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{
       proposition_id: "redeem-query",
@@ -189,7 +189,7 @@ function formation(
 }
 
 function factor(factorId: string, surface: string, semanticIdentity: string) {
-  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
+  return { factor_id: factorId, surface, source_occurrence: 0, semantic_identity: semanticIdentity };
 }
 
 function argument(

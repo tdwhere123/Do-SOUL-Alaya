@@ -11,6 +11,10 @@ import type {
   RecallEvidenceSemanticWinnerReceipt
 } from
   "../../../recall/runtime/recall-service-types.js";
+import type {
+  FineAssessmentSelectionBoundaryCase
+} from
+  "../../../recall/delivery/selection-boundary/selection-boundary-replay.js";
 import { captureFineAssessmentSelectionBoundary } from
   "../selection-boundary-live-capture-fixture.js";
 

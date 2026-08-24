@@ -113,7 +113,7 @@ describe("EvidenceDocumentEmbeddingBackfillHandler", () => {
 
   it("fails loudly when a cold batch cannot be persisted", async () => {
     const repo = createRepo([source()], []);
-    repo.upsertMany.mockRejectedValueOnce(new Error("disk unavailable"));
+    vi.mocked(repo.upsertMany).mockRejectedValueOnce(new Error("disk unavailable"));
     const handler = new EvidenceDocumentEmbeddingBackfillHandler({
       evidenceDocumentEmbeddingRepo: repo,
       provider: provider(async () => [new Float32Array([1, 2])])
@@ -167,7 +167,11 @@ function createRepo(
       record.providerKind === input.providerKind &&
       record.modelId === input.modelId &&
       record.schemaVersion === input.schemaVersion &&
-      input.documents.some((document) =>
+      input.documents.some((document: {
+        readonly ownerObjectId: string;
+        readonly documentIdentity: string;
+        readonly contentHash: string;
+      }) =>
         document.ownerObjectId === record.ownerObjectId &&
         document.documentIdentity === record.documentIdentity &&
         document.contentHash === record.contentHash

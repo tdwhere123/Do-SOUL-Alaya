@@ -310,7 +310,7 @@ describe("candidate selector observation", () => {
     });
 
     expect(result.pathInflowAvailability).toBe("unavailable");
-    expect(selectObservation(memory, [], result.pathInflowAvailability).path).toEqual({
+    expect(selectObservation(memory, [], "unavailable").path).toEqual({
       status: "unavailable",
       receipts: []
     });

@@ -88,7 +88,11 @@ describe("JS fallback activation-admission floor", () => {
     const high = createMemoryEntry({ object_id: "memory-high", activation_score: 0.9 });
 
     const selected = await loadActivationAdmissionTopK({
-      memoryRepo: { findByWorkspaceId: async () => [] },
+      memoryRepo: {
+        findByWorkspaceId: async () => [],
+        findByDimension: async () => [],
+        findByScopeClass: async () => []
+      },
       workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
       tier: StorageTier.HOT,
       config: {

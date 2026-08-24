@@ -10,6 +10,7 @@ export function supplementary(overrides: Partial<RecallSupplementaryData> = {}):
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: {},
@@ -28,7 +29,7 @@ export function supplementary(overrides: Partial<RecallSupplementaryData> = {}):
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
     ...overrides
-  };
+  } as RecallSupplementaryData;
 }
 
 export function entityQueryKey(workspaceId: string, value: string) {

@@ -111,7 +111,6 @@ async function runRecall(
   });
   const fixture = createEmbeddingPort(path, embeddingService, embedTexts);
   const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     embeddingRecallService: fixture.port,
     testOnlyAllowInMemoryFieldQuerySession: true

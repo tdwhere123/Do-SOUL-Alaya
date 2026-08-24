@@ -35,9 +35,11 @@ function candidate(
   objectKind: "memory_entry" | "synthesis_capsule" = "memory_entry"
 ) {
   return {
-    entry: { object_id: "shared", evidence_refs: [] },
+    entry: { object_id: "shared", object_kind: "memory_entry" as const, evidence_refs: [] },
     originPlane,
     objectKind,
+    effectiveScore: 1,
+    effectiveFactors: { activation: 1, relevance: 1 },
     fusion: { candidate_key: candidateKey, fused_score: 1 }
   } as const;
 }

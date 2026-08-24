@@ -83,6 +83,9 @@ describe("lexical recall does not wait for query embedding", () => {
           prepareQueryEmbedding,
           prepareQuerySupplement: vi.fn(async () => {
             throw new Error("lexical path must not prepare supplement");
+          }),
+          querySupplement: vi.fn(async () => {
+            throw new Error("lexical path must not query supplement");
           })
         }
       },
@@ -150,7 +153,11 @@ describe("lexical recall does not wait for query embedding", () => {
             supplementaryEntries: Object.freeze([]),
             similarityHintsByObjectId: Object.freeze({})
           })),
-          collectWorkspaceNeighborsWithMetadata
+          collectWorkspaceNeighborsWithMetadata,
+          querySupplement: vi.fn(async () => ({
+            supplementaryEntries: Object.freeze([]),
+            similarityHintsByObjectId: Object.freeze({})
+          }))
         },
         memoryRepo: dependencies.memoryRepo
       },

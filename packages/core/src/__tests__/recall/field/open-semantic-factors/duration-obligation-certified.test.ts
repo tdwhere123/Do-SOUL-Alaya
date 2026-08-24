@@ -122,7 +122,7 @@ describe("certified copular duration obligation contract", () => {
     ["三点", "clock"],
     ["第二次", "ordinal leftover"],
     ["四十五公斤", "wrong unit"]
-  ] as const)("rejects CJK %s evidence on the certified commute query", async (surface) => {
+  ] as const)("rejects CJK %s evidence on the certified commute query", async (surface, _label) => {
     const query = await certifiedDurationQuery(CJK_QUERY);
     expect(materializeOpenSemanticFactorCompatibility({
       evidence_capture: cjkListenEvidence("每天上班通勤", surface),
@@ -141,7 +141,7 @@ describe("certified copular duration obligation contract", () => {
         factor("predicate", "is", "be"),
         factor("subject", "每日通勤上班", "每日通勤上班")
       ],
-      variables: [{ variable_id: "answer", surface: "How long" }],
+      variables: [{ variable_id: "answer", surface: "How long", source_occurrence: 0 }],
       result_variable_ids: ["answer"],
       propositions: [{
         proposition_id: "cjk-query",
@@ -179,7 +179,7 @@ async function certifiedDurationQuery(queryText = QUERY) {
       factor("predicate", obligation.predicate.surface, "be"),
       factor("subject", obligation.subject.surface, obligation.subject.surface)
     ],
-    variables: [{ variable_id: "answer", surface: obligation.value.surface }],
+    variables: [{ variable_id: "answer", surface: obligation.value.surface, source_occurrence: 0 }],
     result_variable_ids: ["answer"],
     propositions: [{
       proposition_id: "commute-query",
@@ -281,7 +281,7 @@ function formation(
 }
 
 function factor(factorId: string, surface: string, semanticIdentity: string) {
-  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
+  return { factor_id: factorId, surface, source_occurrence: 0, semantic_identity: semanticIdentity };
 }
 
 function argument(

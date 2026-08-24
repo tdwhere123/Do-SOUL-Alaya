@@ -466,7 +466,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
           Object.freeze({ status: "ready", embedding: new Float32Array([0, 0]) }),
           { cacheHit: true }
         )
-      } as QueryEmbeddingEngine,
+      } as unknown as QueryEmbeddingEngine,
       queryTimeoutMs: 1000,
       warn: vi.fn()
     });

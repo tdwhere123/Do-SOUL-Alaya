@@ -184,7 +184,7 @@ describe("fine-assessment selection boundary fidelity", () => {
       ...boundary,
       expected: {
         ...boundary.expected,
-        visible_result_sha256: `sha256:${"0".repeat(64)}`
+        visible_result_sha256: `sha256:${"0".repeat(64)}` as `sha256:${string}`
       }
     };
 

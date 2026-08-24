@@ -438,7 +438,7 @@ function evidenceAtom(
     document_identity: null,
     projection: null,
     demand_roles: Object.freeze([]),
-    observation_channels: Object.freeze(["evidence_semantic"])
+    observation_channels: Object.freeze(["evidence_semantic"] as const)
   });
 }
 
@@ -494,7 +494,7 @@ function factAtom(): CandidateCoverageAtom {
       projection_kind: "fact_key",
       matched_fact_key_forms: Object.freeze([Object.freeze({ kind: "complete" as const })])
     }),
-    demand_roles: Object.freeze(["complete"]),
-    observation_channels: Object.freeze(["evidence_semantic"])
+    demand_roles: Object.freeze(["complete"] as const),
+    observation_channels: Object.freeze(["evidence_semantic"] as const)
   });
 }

@@ -23,9 +23,7 @@ type MembershipAuthorization = Readonly<{
   readonly witness: Readonly<Record<string, unknown>>;
 }>;
 
-type V3Observation = RecallPacketPlanObservation & Readonly<{
-  readonly membership_authorizations: readonly MembershipAuthorization[];
-}>;
+type V3Observation = RecallPacketPlanObservation;
 
 const BASELINE = Object.freeze([
   "workspace_local:memory_entry:source-a",
@@ -64,25 +62,25 @@ describe("packet-plan membership authorization receipts", () => {
 
     expect(() => buildSupportSetPacketPlanTrace(
       "snapshot",
-      withoutReceipts
+      withoutReceipts as unknown as RecallPacketPlanObservation
     )).toThrow();
   });
 
   it.each([
     ["satisfied slot", { satisfied_head_slot: 1 }],
-    ["authorized candidate", { authorized_candidate_key: BASELINE[2] }],
-    ["satisfied candidate", { satisfied_by_candidate_key: BASELINE[2] }],
+    ["authorized candidate", { authorized_candidate_key: BASELINE[2]! }],
+    ["satisfied candidate", { satisfied_by_candidate_key: BASELINE[2]! }],
     ["displaced slot", {
-      displaced_head_baseline: { slot: 1, candidate_key: BASELINE[1] }
+      displaced_head_baseline: { slot: 1, candidate_key: BASELINE[1]! }
     }],
     ["displaced candidate", {
-      displaced_head_baseline: { slot: 2, candidate_key: BASELINE[2] }
+      displaced_head_baseline: { slot: 2, candidate_key: BASELINE[2]! }
     }],
     ["evicted packet slot", {
-      evicted_packet_baseline: { slot: 5, candidate_key: BASELINE[5] }
+      evicted_packet_baseline: { slot: 5, candidate_key: BASELINE[5]! }
     }],
     ["evicted packet candidate", {
-      evicted_packet_baseline: { slot: 6, candidate_key: BASELINE[4] }
+      evicted_packet_baseline: { slot: 6, candidate_key: BASELINE[4]! }
     }]
   ])("rejects a receipt with a tampered %s binding", (_name, patch) => {
     const authorization = { ...directAuthorization(), ...patch };
@@ -94,7 +92,7 @@ describe("packet-plan membership authorization receipts", () => {
   });
 
   it.each([
-    ["path target", { target_candidate_key: BASELINE[2] }],
+    ["path target", { target_candidate_key: BASELINE[2]! }],
     ["path id", { path_id: "" }],
     ["path source version", { path_source_version: " " }],
     ["relation kind", { relation_kind: "supports" }],
@@ -155,10 +153,10 @@ function acceptedObservation(
     consensus_head_candidate_keys: planned.slice(0, 5),
     immutable_tail_candidate_keys: planned.slice(5),
     tail_policy: "nested_membership_exchange",
-    membership_authorizations: Object.freeze([authorization]),
+    membership_authorizations: Object.freeze([authorization]) as RecallPacketPlanObservation["membership_authorizations"],
     protected_candidates: [],
     decision: { status: "accepted", reason: "nested_membership_consensus" }
-  };
+  } as V3Observation;
 }
 
 function authorizationBase(
@@ -192,7 +190,7 @@ function graphAuthorization(): MembershipAuthorization {
   return Object.freeze({
     ...authorizationBase("graph_path_opportunity"),
     witness: Object.freeze({
-      source_candidate_key: BASELINE[0],
+      source_candidate_key: BASELINE[0]!,
       target_candidate_key: SATISFIED,
       path_id: "answers-with-path",
       path_source_version: "relation-version-1",
@@ -219,12 +217,12 @@ function selectorConsensusAuthorization(): MembershipAuthorization {
 
 function substitutionAuthorization(): MembershipAuthorization {
   return Object.freeze({
-    ...authorizationBase("same_session_substitution", BASELINE[1]),
+    ...authorizationBase("same_session_substitution", BASELINE[1]!),
     witness: Object.freeze({
-      protected_candidate_key: BASELINE[1],
+      protected_candidate_key: BASELINE[1]!,
       substitute_candidate_key: SATISFIED,
       session_key: "session-1",
-      source_candidate_key: BASELINE[1],
+      source_candidate_key: BASELINE[1]!,
       target_candidate_key: SATISFIED,
       path_id: "answers-with-path",
       path_source_version: "relation-version-1",

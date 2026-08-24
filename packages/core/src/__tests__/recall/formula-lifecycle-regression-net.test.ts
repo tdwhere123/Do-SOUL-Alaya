@@ -135,6 +135,7 @@ function supplementary(
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     evidenceFtsRanksPerRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
@@ -155,7 +156,7 @@ function supplementary(
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
     ...extras
-  };
+  } as RecallSupplementaryData;
 }
 
 async function runFusion(

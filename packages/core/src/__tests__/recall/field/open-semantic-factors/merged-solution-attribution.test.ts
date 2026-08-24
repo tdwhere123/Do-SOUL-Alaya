@@ -71,7 +71,7 @@ describe("open semantic merged-solution attribution", () => {
     expect(() => assertOpenSemanticCandidateActivations(
       cloneSelectionBoundaryJson({
         openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-      }) as SerializedRecallSupplementaryData
+      }) as unknown as SerializedRecallSupplementaryData
     )).not.toThrow();
   });
 });

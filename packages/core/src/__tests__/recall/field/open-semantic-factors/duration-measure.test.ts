@@ -56,7 +56,7 @@ describe("duration measure value unit and direction", () => {
     ["三点", "clock"],
     ["第二次", "ordinal leftover"],
     ["四十五公斤", "wrong unit"]
-  ] as const)("does not parse %s as a duration extent", (surface) => {
+  ] as const)("does not parse %s as a duration extent", (surface, _label) => {
     expect(parseDurationExtent(surface)).toBeNull();
   });
 
@@ -92,7 +92,7 @@ describe("duration measure value unit and direction", () => {
     ["45 minutes ago", "ago"],
     ["since 45 minutes", "since"],
     ["until 45 minutes", "until"]
-  ] as const)("rejects %s as a temporal point rather than an extent", (surface) => {
+  ] as const)("rejects %s as a temporal point rather than an extent", (surface, _label) => {
     expect(receipt(framedExtentEvidence(surface))).toMatchObject({
       status: "incompatible",
       matched_query_proposition_count: 0

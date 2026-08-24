@@ -27,12 +27,12 @@ describe("recall evidence contexts for associative fact keys", () => {
             capsule: evidence,
             verified_user_projection: false,
             matched_fact_key_forms: [{
-              kind: "leave_one_slot_out",
-              omitted_slot: { slot_index: 2, role: "value" }
+              kind: "leave_one_slot_out" as const,
+              omitted_slot: { slot_index: 2, role: "value" as const }
             }],
             matched_projection: {
               projection_id: 5,
-              projection_kind: "fact_key",
+              projection_kind: "fact_key" as const,
               content: "I bought my bookshelf"
             }
           }])

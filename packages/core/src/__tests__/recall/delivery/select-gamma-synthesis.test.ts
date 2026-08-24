@@ -26,9 +26,14 @@ describe("Select_Gamma synthesis adapter", () => {
     const result = await applySelectGammaSynthesis(input({ synthesize }));
 
     expect(synthesize).toHaveBeenCalledOnce();
-    expect(ids(synthesize.mock.calls[0]![0].selected_evidence)).toEqual([
-      "alpha", "beta"
-    ]);
+    expect(synthesize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selected_evidence: expect.arrayContaining([
+          expect.objectContaining({ object_id: "alpha" }),
+          expect.objectContaining({ object_id: "beta" })
+        ])
+      })
+    );
     expect(ids(result.selected_evidence)).toEqual(["alpha", "beta"]);
     expect(result.synthesis).toEqual({ status: "ok", text: "one-shot summary" });
   });

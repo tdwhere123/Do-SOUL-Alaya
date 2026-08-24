@@ -5,12 +5,13 @@ import { EmbeddingRecallService } from
 import type { EvidenceCandidateScoringSelectionReceipt } from
   "../../../embedding-recall/types.js";
 import { createProvider } from "../embedding-recall-test-helpers.js";
+import type { TestMock } from "../../shared/mock-types.js";
 
 describe("evidence scoring selection receipt", () => {
   it("reuses identical content vectors while retaining distinct identities", async () => {
     const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([1, 0]))
-    );
+    ) as TestMock;
     const result = await createService(embedTexts).scoreEvidenceCandidates(request([{
       candidateKey: "memory:1", evidenceObjectId: "evidence-1",
       documentIdentity: "owner_gist_600", content: "shared evidence"
@@ -49,7 +50,7 @@ describe("evidence scoring selection receipt", () => {
   });
 });
 
-function createService(embedTexts: ReturnType<typeof vi.fn>): EmbeddingRecallService {
+function createService(embedTexts: TestMock): EmbeddingRecallService {
   return new EmbeddingRecallService({
     embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
     provider: createProvider({ embedTexts }),

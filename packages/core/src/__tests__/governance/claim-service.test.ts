@@ -23,7 +23,7 @@ function lifecycleAuditInput(
   eventType: string
 ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
   return {
-    event_type: eventType,
+    event_type: eventType as EventLogEntry["event_type"],
     entity_type: "claim_form",
     entity_id: claim.object_id,
     workspace_id: claim.workspace_id,
