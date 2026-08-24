@@ -148,6 +148,7 @@ function buildSupplementaryData(
     synthesisFtsRanks: {},
     evidenceFtsRanks: record((s) => s.evidence),
     evidenceFtsRanksPerRef: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: record((s) => s.sourceProximity),
     sourceCohortKeys: {},
     structuralScores: record((s) => s.structural),

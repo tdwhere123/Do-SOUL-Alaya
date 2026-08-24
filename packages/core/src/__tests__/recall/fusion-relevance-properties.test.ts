@@ -91,6 +91,7 @@ function supplementary(): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes("arbitrary property query"),
     ftsRanks: {}, trigramFtsRanks: {}, synthesisFtsRanks: {}, evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {}, sourceCohortKeys: {}, structuralScores: {},
     graphExpansionScores: {}, entitySeedScores: {}, pathExpansionScores: {},
     pathSuppressionScores: {}, embeddingSimilarityScores: {},

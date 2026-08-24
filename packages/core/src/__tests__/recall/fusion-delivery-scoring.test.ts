@@ -18,6 +18,7 @@ function emptySupplementaryData(query: string): RecallSupplementaryData {
     trigramFtsRanks: {},
     synthesisFtsRanks: {},
     evidenceFtsRanks: {},
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: {},

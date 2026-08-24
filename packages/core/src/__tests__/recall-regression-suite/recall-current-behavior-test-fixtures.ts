@@ -15,7 +15,10 @@ import {
   type SoulActiveConstraint,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { RecallServiceDependencies } from "../../recall/recall-service.js";
+import type {
+  RecallServiceDependencies,
+  RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -112,7 +115,7 @@ export function deps(
     readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
     readonly searchByKeyword?: RecallServiceDependencies["memoryRepo"]["searchByKeyword"];
   } = {}
-): { readonly dependencies: RecallServiceDependencies } {
+): { readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps } {
   const findByWorkspaceId = async (_workspaceId: string, tier?: StorageTier) =>
     tier === undefined ? memories : memories.filter((entry) => entry.storage_tier === tier);
   return {

@@ -14,8 +14,12 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallResult, type RecallServiceDependencies } from
-  "../../../recall/recall-service.js";
+import {
+  RecallService,
+  type RecallResult,
+  type RecallServiceDependencies,
+  type RecallServiceFieldDeps
+} from "../../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -111,7 +115,7 @@ export function createAnchor(
 }
 
 function createDependencies(params: TierCascadeFixtureParams = {}): {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps;
   readonly findByWorkspaceIdSpy: ReturnType<typeof vi.fn>;
   readonly warnSpy: ReturnType<typeof vi.fn>;
 } {

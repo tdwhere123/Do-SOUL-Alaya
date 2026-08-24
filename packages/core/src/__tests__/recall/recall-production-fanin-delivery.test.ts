@@ -25,7 +25,11 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import {
+  RecallService,
+  type RecallServiceDependencies,
+  type RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -230,7 +234,7 @@ function buildRecallService(params: {
     })
   );
 
-  const deps: RecallServiceDependencies = {
+  const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
     now: () => "2026-05-16T00:00:00.000Z",

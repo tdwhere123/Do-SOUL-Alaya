@@ -391,6 +391,7 @@ function coarseResult(candidate?: Readonly<CoarseRecallCandidate>): CoarseFilter
     synthesisFtsRanks: Object.freeze({}),
     evidenceFtsRanks: Object.freeze({}),
     evidenceFtsRanksPerRef: Object.freeze({}),
+    evidenceProjectionMatchesByRef: Object.freeze({}),
     sourceProximityScores: Object.freeze({}),
     sourceCohortKeys: Object.freeze({}),
     structuralScores: Object.freeze({}),

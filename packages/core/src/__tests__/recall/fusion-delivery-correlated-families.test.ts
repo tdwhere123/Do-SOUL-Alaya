@@ -47,6 +47,7 @@ function supplementaryData(objectIds: readonly string[]): RecallSupplementaryDat
     trigramFtsRanks: Object.fromEntries(objectIds.map((id) => [id, 1])),
     synthesisFtsRanks: {},
     evidenceFtsRanks: Object.fromEntries(objectIds.map((id) => [id, 1])),
+    evidenceProjectionMatchesByRef: {},
     sourceProximityScores: {},
     sourceCohortKeys: {},
     structuralScores: Object.fromEntries(objectIds.map((id) => [id, 1])),

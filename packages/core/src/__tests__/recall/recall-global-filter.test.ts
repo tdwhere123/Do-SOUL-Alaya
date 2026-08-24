@@ -13,7 +13,11 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import {
+  RecallService,
+  type RecallServiceDependencies,
+  type RecallServiceFieldDeps
+} from "../../recall/recall-service.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -90,9 +94,9 @@ function createAnchor(overrides: Partial<ProjectMappingAnchor> = {}): ProjectMap
 function createDependencies(
   memories: readonly MemoryEntry[],
   slots: readonly Slot[] = [],
-  overrides: Partial<RecallServiceDependencies> = {}
+  overrides: Partial<RecallServiceDependencies & RecallServiceFieldDeps> = {}
 ): {
-  readonly dependencies: RecallServiceDependencies;
+  readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps;
   readonly appendSpy: ReturnType<typeof vi.fn>;
   readonly findByWorkspaceIdSpy: ReturnType<typeof vi.fn>;
 } {
