@@ -187,6 +187,13 @@ export {
 export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
+export {
+  RECALL_FUSION_FAMILY_IDS,
+  RECALL_FUSION_FAMILY_STREAMS,
+  aggregateFamilyContributions,
+  familyMaxContributionsById,
+  type RecallFusionFamilyId
+} from "./recall/delivery/fusion-delivery-families.js";
 export { buildSelectGammaPacketObservation } from
   "./recall/delivery/select-gamma/packet-observation.js";
 export { captureSupportSetPacketPlanTrace } from

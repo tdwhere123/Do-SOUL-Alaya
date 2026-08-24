@@ -8,11 +8,16 @@ export type AttributionStage =
   | 6
   | 7;
 
-/** Causal owner among waist-present misses; never substitutes for opportunity. */
+/**
+ * Causal owner among waist-present misses; never substitutes for opportunity.
+ * `honest_higher_r_obj` means every delivered top-5 occupier legally outranks
+ * the gold on family-max R_obj — no Gamma reorder or composition to blame.
+ */
 export type AttributionMechanism =
   | "composition"
   | "coverage_admission"
   | "residual_order"
+  | "honest_higher_r_obj"
   | null;
 
 export type StageCountKey =
@@ -64,6 +69,9 @@ export interface GoldObjectStageRow {
   readonly pool_rank: number | null;
   readonly final_rank: number | null;
   readonly proof: string;
+  readonly near_top_class?: "honest_higher_r_obj" | null;
+  readonly gold_family_max?: number | null;
+  readonly rank5_family_max?: number | null;
 }
 
 export interface QuestionStageRow {

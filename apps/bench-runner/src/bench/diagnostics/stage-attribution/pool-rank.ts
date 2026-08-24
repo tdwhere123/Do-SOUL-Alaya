@@ -1,4 +1,5 @@
 import type { LongMemEvalGoldDiagnostic } from "../schema/diagnostics-types.js";
+import { isDeliveryBudgetLoss } from "../schema/diagnostics-private.js";
 
 /** Mirrors quality `classifyBestGoldRank` pool rank: pre_budget_rank ?? fused_rank. */
 export function goldPoolRank(gold: LongMemEvalGoldDiagnostic): number | null {
@@ -34,4 +35,22 @@ export function isRankBucketCandidateAbsent(
   golds: readonly LongMemEvalGoldDiagnostic[]
 ): boolean {
   return golds.length > 0 && bestGoldPoolRank(golds) === null;
+}
+
+/** Coverage displaced a pre-coverage top-5 gold, or budget refused it outright. */
+export function hasCoverageOrBudgetSignal(
+  gold: LongMemEvalGoldDiagnostic
+): boolean {
+  if (isDeliveryBudgetLoss(gold)) return true;
+  const preCoverage =
+    gold.rank_after_feature_rerank ??
+    gold.rank_after_fusion ??
+    gold.fused_rank;
+  const coverageRank = gold.rank_after_coverage_selector;
+  return (
+    preCoverage !== null &&
+    preCoverage <= 5 &&
+    coverageRank !== null &&
+    coverageRank > 5
+  );
 }
