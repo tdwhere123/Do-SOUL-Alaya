@@ -53,6 +53,7 @@ export interface RecallEvalPagerRecallPayload {
 export interface RecallEvalPagerOpenResult {
   readonly evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
   readonly embeddingCacheOverlay: EmbeddingCacheOverlayBinding | null;
+  readonly selectionSpoolRootPath: string | null;
 }
 
 export interface RecallEvalPagerCloseResult {

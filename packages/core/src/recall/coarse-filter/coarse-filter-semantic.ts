@@ -81,9 +81,13 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
     );
   const evidencePromise = loadEvidenceFtsHitBatches(params);
 
-  admitRelaxedKeywordMatches(params, await relaxedPromise);
-  admitExpandedKeywordMatches(params, await expandedPromise);
-  const evidenceHitBatches = await evidencePromise;
+  const [relaxed, expanded, evidenceHitBatches] = await Promise.all([
+    relaxedPromise,
+    expandedPromise,
+    evidencePromise
+  ]);
+  admitRelaxedKeywordMatches(params, relaxed);
+  admitExpandedKeywordMatches(params, expanded);
   if (evidenceHitBatches !== null) {
     await admitEvidenceFtsHitBatches(params, evidenceHitBatches);
   }

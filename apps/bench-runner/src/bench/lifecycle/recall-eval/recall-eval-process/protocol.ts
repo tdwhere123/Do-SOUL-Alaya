@@ -28,6 +28,7 @@ export interface RecallEvalPagerIpcSuccess {
   readonly mapsHint?: RecallEvalPagerMapsHint;
   readonly pack?: unknown;
   readonly selectionArtifact?: unknown;
+  readonly selectionSpoolRootPath?: unknown;
   readonly evidenceProjectionRebuild?: unknown;
   readonly embeddingCacheOverlay?: unknown;
 }

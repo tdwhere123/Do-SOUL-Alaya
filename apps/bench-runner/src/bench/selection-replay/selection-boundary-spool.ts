@@ -59,6 +59,36 @@ export interface LongMemEvalSelectionBoundarySpool {
   dispose(): Promise<void>;
 }
 
+export async function appendLongMemEvalSelectionBoundaryArtifact(
+  spool: LongMemEvalSelectionBoundarySpool,
+  artifactPath: string,
+  expectedQuestionId: string,
+  maxArtifactBytes = LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES
+): Promise<void> {
+  const capture = spool.beginQuestion(expectedQuestionId);
+  let previous: SelectionBoundaryRecord | undefined;
+  const { recordCount } = await forEachSelectionBoundaryGzipRecord(
+    artifactPath,
+    maxArtifactBytes,
+    SELECTION_REPLAY_ARTIFACT_ERRORS,
+    (record, recordIndex) => {
+      assertRecordSequence(record, previous);
+      if (record.question_id !== expectedQuestionId) {
+        throw new Error(
+          `selection replay expected question_id ${expectedQuestionId}, got ${record.question_id}`
+        );
+      }
+      replayRecordWithIdentity(record, recordIndex);
+      capture.observer(record.boundary);
+      previous = record;
+    }
+  );
+  if (recordCount === 0 || previous?.authoritative !== true) {
+    throw new Error("selection replay child artifact is incomplete");
+  }
+  await capture.commit();
+}
+
 type SelectionBoundaryRecord = SelectionBoundaryArtifactRecord;
 
 interface SelectionBoundarySourceIdentity {

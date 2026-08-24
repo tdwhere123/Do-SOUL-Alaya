@@ -76,7 +76,8 @@ async function runChildRequest(
       pid: process.pid,
       mapsHint: childMapsHint(),
       evidenceProjectionRebuild: opened.evidenceProjectionRebuild,
-      embeddingCacheOverlay: opened.embeddingCacheOverlay
+      embeddingCacheOverlay: opened.embeddingCacheOverlay,
+      selectionSpoolRootPath: opened.selectionSpoolRootPath
     };
   }
   const pack = await recallRecallEvalPagerChild(

@@ -43,7 +43,10 @@ import type {
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { validateSnapshotManifest } from "./manifest-validation.js";
 import { parseSnapshotSidecar } from "./sidecar-validation.js";
-import { hashRegularFileNoFollow, rememberFileSha256 } from "./bound-file.js";
+import {
+  copyRegularFileNoFollow,
+  hashRegularFileNoFollow
+} from "./bound-file.js";
 import { atomicCopy } from "./freeze/db-copy.js";
 export { checkpointAndCopyBenchDb } from "./freeze/db-copy.js";
 export { deriveSnapshotAttribution } from "./attribution.js";
@@ -287,11 +290,15 @@ export function readSchemaMigrationVersion(dbPath: string): number {
  * appends delivery/lens events, which must never touch the frozen snapshot).
  * Returns the dataDirRoot so the caller threads it into startBenchDaemon.
  */
+export interface RecallEvalSnapshotRestoreDependencies {
+  readonly copyVerifiedSnapshot?: typeof copyRegularFileNoFollow;
+}
+
 export function restoreSnapshotToDataDir(input: {
   readonly snapshotDbPath: string;
   readonly dataDirRoot: string;
   readonly expectedSha256?: string;
-}): string {
+}, dependencies: RecallEvalSnapshotRestoreDependencies = {}): string {
   if (!existsSync(input.snapshotDbPath)) {
     throw new Error(
       `recall-eval snapshot DB not found at ${input.snapshotDbPath}`
@@ -305,16 +312,22 @@ export function restoreSnapshotToDataDir(input: {
   for (const suffix of ["", "-wal", "-shm"]) {
     rmSync(`${workingDbPath}${suffix}`, { force: true });
   }
-  // Sealed digest already hashed the frozen DB; a copy-time hash would read it again.
   if (input.expectedSha256 !== undefined) {
     const actualSha256 = hashRegularFileNoFollow(input.snapshotDbPath);
     if (actualSha256 !== input.expectedSha256) {
       throw new Error("recall-eval snapshot DB SHA-256 mismatch");
     }
-  }
-  atomicCopy(input.snapshotDbPath, workingDbPath);
-  if (input.expectedSha256 !== undefined) {
-    rememberFileSha256(workingDbPath, input.expectedSha256);
+    // The target is the daemon authority, so cache only the digest observed
+    // while copying its exact completed bytes.
+    const copyVerifiedSnapshot = dependencies.copyVerifiedSnapshot ??
+      copyRegularFileNoFollow;
+    copyVerifiedSnapshot({
+      sourcePath: input.snapshotDbPath,
+      targetPath: workingDbPath,
+      expectedSha256: input.expectedSha256
+    });
+  } else {
+    atomicCopy(input.snapshotDbPath, workingDbPath);
   }
   return input.dataDirRoot;
 }

@@ -16,7 +16,7 @@ import { createBenchDaemonOps } from
   "../../../harness/daemon/handle/daemon-handle-ops.js";
 
 describe("bench daemon selection-boundary observer", () => {
-  it("forwards the observer without requesting answer_features", async () => {
+  it("requests answer features by default for benchmark treatment diagnostics", async () => {
     const operations = createOperations({});
     const observer = vi.fn(
       (_pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined
@@ -28,7 +28,7 @@ describe("bench daemon selection-boundary observer", () => {
     );
 
     expect(captured.selectionBoundaryObserver).toBe(observer);
-    expect(captured.diagnosticCapture).toBeUndefined();
+    expect(captured.diagnosticCapture).toBe("answer_features");
   });
 
   it("still uses packet_trace only when that diagnostic env is set", async () => {

@@ -1,6 +1,28 @@
-import { readFileSync } from "node:fs";
+import { accessSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { selectFineAssessmentCandidates } from
+  "../../../../../../packages/core/src/recall/delivery/fine-assessment-selection.js";
+import { materializeFineAssessmentSelectionBoundary } from
+  "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-capture.js";
+import {
+  FIELD_PINS,
+  createConfig,
+  createRankedCandidate,
+  createSupplementaryData,
+  rankMap
+} from "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
+import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
+import {
+  disposeRecallEvalSelectionBoundaryArtifact,
+  type RecallEvalSelectionBoundaryArtifact
+} from "../../../bench/lifecycle/recall-eval/recall-eval-selection-replay.js";
+import { verifyLongMemEvalSelectionBoundaryArtifact } from
+  "../../../bench/selection-replay/selection-boundary-spool.js";
 import {
   RecallEvalPagerChildExitedError,
   createForkRecallEvalPagerHost,
@@ -14,10 +36,12 @@ const stubChildPath = fileURLToPath(
 
 describe("recall-eval pager IPC isolation", () => {
   const sessions: ReturnType<typeof createRecallEvalPagerSession>[] = [];
+  const roots: string[] = [];
 
   afterEach(async () => {
     const pending = sessions.splice(0);
     await Promise.all(pending.map((session) => session.close().catch(() => undefined)));
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
   it("returns a pack from the child without mapping sqlite in the parent", async () => {
@@ -28,15 +52,15 @@ describe("recall-eval pager IPC isolation", () => {
     expect(parentMapsAlayaDb()).toBe(false);
   });
 
-  it("reuses one child across questions in an arm", async () => {
+  it("spawns a fresh child for each question instead of reusing one address space", async () => {
     const counted = countingHost();
     const session = openSession(undefined, counted.host);
     await session.open({});
     expect(counted.pids).toHaveLength(1);
     await session.recall({ questionId: "q1" });
     await session.recall({ questionId: "q2" });
-    expect(counted.pids).toHaveLength(1);
-    expect(counted.pids[0]).toBeGreaterThan(0);
+    expect(counted.pids).toHaveLength(2);
+    expect(counted.pids[1]).not.toBe(counted.pids[0]);
   });
 
   it("fail-closes when the child exits mid-request", async () => {
@@ -91,12 +115,81 @@ describe("recall-eval pager IPC isolation", () => {
     expect(pack.questionId).toBe("ok");
   });
 
-  it("retains the close selection artifact after sequential recalls", async () => {
+  it("assembles every recycled child selection artifact in evaluated order", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pager-selection-test-"));
+    roots.push(root);
+    const selectionRootLogPath = join(root, "roots.log");
     const session = openSession();
-    await session.open({});
-    await session.recall({ questionId: "artifact" });
-    await session.recall({ questionId: "artifact-2" });
-    await expect(session.close()).resolves.toEqual({ sourcePath: "selection.json" });
+    await session.open({
+      selectionBoundaryFixture: capturedBoundary(),
+      selectionRootLogPath
+    });
+    await session.recall({ questionId: "question-2" });
+    await session.recall({ questionId: "question-1" });
+    const artifact = await session.close() as RecallEvalSelectionBoundaryArtifact;
+    const verified = await verifyLongMemEvalSelectionBoundaryArtifact(
+      artifact.sourcePath
+    );
+    expect(verified).toEqual({
+      recordCount: 2,
+      questionCount: 2,
+      questionIdDigest: computeLongMemEvalQuestionIdDigest([
+        "question-2", "question-1"
+      ])
+    });
+    const records = gunzipSync(readFileSync(artifact.sourcePath))
+      .toString("utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { question_id: string });
+    expect(records.map((record) => record.question_id)).toEqual([
+      "question-2", "question-1"
+    ]);
+    expect(artifact.binding.record_count).toBe(2);
+    const childRoots = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
+    expect(childRoots).toHaveLength(2);
+    for (const childRoot of childRoots) {
+      expect(() => accessSync(childRoot)).toThrow();
+    }
+    await disposeRecallEvalSelectionBoundaryArtifact(artifact);
+    expect(() => accessSync(artifact.rootPath)).toThrow();
+  });
+
+  it("rejects a child artifact outside the evaluated window and disposes every root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pager-selection-failure-test-"));
+    roots.push(root);
+    const selectionRootLogPath = join(root, "roots.log");
+    const session = openSession();
+    await session.open({
+      selectionBoundaryFixture: capturedBoundary(),
+      selectionRootLogPath,
+      selectionQuestionIdOverride: "wrong-question"
+    });
+    await session.recall({ questionId: "expected-question" });
+    await expect(session.close()).rejects.toThrow(/expected question_id/u);
+
+    const childRoots = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
+    expect(childRoots).toHaveLength(1);
+    for (const childRoot of childRoots) {
+      expect(() => accessSync(childRoot)).toThrow();
+    }
+  });
+
+  it("disposes the open selection spool when a child crashes before close", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pager-selection-crash-test-"));
+    roots.push(root);
+    const selectionRootLogPath = join(root, "roots.log");
+    const session = openSession();
+    await session.open({
+      selectionBoundaryFixture: capturedBoundary(),
+      selectionRootLogPath
+    });
+    await expect(session.recall({ questionId: "__crash__" })).rejects.toBeInstanceOf(
+      RecallEvalPagerChildExitedError
+    );
+    await expect(session.close()).resolves.toBeNull();
+
+    const [childRoot] = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
+    expect(childRoot).toBeDefined();
+    expect(() => accessSync(childRoot ?? "")).toThrow();
   });
 
   function openSession(timeoutMs?: number, host?: RecallEvalPagerIpcHost) {
@@ -126,6 +219,34 @@ describe("recall-eval pager IPC isolation", () => {
     };
   }
 });
+
+function capturedBoundary(): FineAssessmentSelectionBoundaryCase {
+  const candidates = [
+    createRankedCandidate("candidate-1", 1, 0.9),
+    createRankedCandidate("candidate-2", 2, 0.8)
+  ];
+  let captured: FineAssessmentSelectionBoundaryCase | undefined;
+  selectFineAssessmentCandidates({
+    ...FIELD_PINS,
+    orderedCandidates: candidates,
+    config: createConfig(),
+    supplementaryData: createSupplementaryData(),
+    tokenEstimator: { estimate: () => 5 },
+    rankByCandidateKey: rankMap(candidates),
+    finalRelevanceByCandidateKey: new Map(candidates.map((candidate) => [
+      candidate.fusion.candidate_key,
+      candidate.fusion.fused_score
+    ])),
+    captureAnswerFeatures: true,
+    capturePacketPlanTrace: true,
+    selectionBoundaryObserver: (pending) => {
+      captured = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }
+  });
+  if (captured === undefined) throw new Error("selection boundary was not observed");
+  return captured;
+}
 
 function parentMapsAlayaDb(): boolean {
   if (process.platform !== "linux") return false;

@@ -41,21 +41,28 @@ type EntitySeedLookup = Readonly<{
   readonly limit: number;
 }>;
 
-type CollectEntityDerivedSeedsParams = Readonly<{
+type EntityDerivedSeedLoadParams = Readonly<{
   readonly workspaceId: string;
   readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly addCandidate: AddCoarseCandidate;
-  readonly lexicalFtsRanks: ReadonlyMap<string, number>;
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
   readonly warn: RecallServiceWarnPort;
   readonly entityExtractionMaxEntities: number;
   readonly entitySeedPerEntityTopKStrong: number;
   readonly entitySeedPerEntityTopKWeak: number;
-  readonly entitySeedTotalAdmitCap: number;
   readonly entitySeedMinSurfaceLength: number;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>;
+
+type EntityDerivedSeedAdmissionParams = Readonly<{
+  readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+  readonly addCandidate: AddCoarseCandidate;
+  readonly lexicalFtsRanks: ReadonlyMap<string, number>;
+  readonly entitySeedTotalAdmitCap: number;
+}>;
+
+type CollectEntityDerivedSeedsParams =
+  EntityDerivedSeedLoadParams & EntityDerivedSeedAdmissionParams;
 
 export type LoadedEntityDerivedSeeds = Readonly<{
   readonly lookups: readonly EntitySeedLookup[];
@@ -63,7 +70,7 @@ export type LoadedEntityDerivedSeeds = Readonly<{
 }>;
 
 export async function loadEntityDerivedSeedHits(
-  params: Omit<CollectEntityDerivedSeedsParams, "addCandidate" | "lexicalFtsRanks">
+  params: EntityDerivedSeedLoadParams
 ): Promise<LoadedEntityDerivedSeeds | null> {
   if (shouldSkipEntitySeedCollection(params)) {
     return null;
@@ -81,7 +88,7 @@ export async function loadEntityDerivedSeedHits(
 }
 
 export function admitLoadedEntityDerivedSeeds(
-  params: CollectEntityDerivedSeedsParams,
+  params: EntityDerivedSeedAdmissionParams,
   loaded: LoadedEntityDerivedSeeds
 ): readonly Readonly<{ memoryId: string; entityConfidence: number }>[] {
   const seedConfidenceById = new Map<string, number>();
@@ -328,7 +335,7 @@ function shouldSkipEntitySeedCollection(params: Readonly<{
 }
 
 function buildEntitySeedLookups(
-  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  params: EntityDerivedSeedLoadParams,
   entities: readonly EntitySeedDescriptor[]
 ): readonly EntitySeedLookup[] {
   return entities.flatMap((entity) => {
@@ -340,7 +347,7 @@ function buildEntitySeedLookups(
 }
 
 async function loadEntitySeedBatchesForCollection(
-  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  params: EntityDerivedSeedLoadParams,
   lookups: readonly EntitySeedLookup[],
   candidateIds: readonly string[]
 ): Promise<readonly (readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[])[]> {
@@ -355,7 +362,7 @@ async function loadEntitySeedBatchesForCollection(
 }
 
 function resolveEntitySeedLimit(
-  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  params: EntityDerivedSeedLoadParams,
   confidence: number
 ): number {
   return confidence >= 0.85
@@ -364,7 +371,7 @@ function resolveEntitySeedLimit(
 }
 
 function admitEntitySeedHits(
-  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  params: EntityDerivedSeedAdmissionParams,
   entityConfidence: number,
   hits: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[],
   seedConfidenceById: Map<string, number>,

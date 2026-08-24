@@ -1,4 +1,8 @@
-import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
+import {
+  serializePathAnchorRef,
+  type PathAnchorRef,
+  type PathRelation
+} from "@do-soul/alaya-protocol";
 import type {
   RecallServicePathExpansionPort,
   RecallTemporalProjectionReadOptions
@@ -44,6 +48,6 @@ function pathFindByAnchorsCacheKey(
   return [
     workspaceId,
     options?.asOf ?? "",
-    ...anchorRefs.map((anchor) => `${anchor.kind}:${anchor.object_id}`)
+    ...anchorRefs.map(serializePathAnchorRef)
   ].join("\0");
 }

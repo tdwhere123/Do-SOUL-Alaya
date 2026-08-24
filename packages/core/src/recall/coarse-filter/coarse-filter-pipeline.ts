@@ -165,30 +165,9 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
   const pathExpansionPort = memoizePathFindByAnchors(params.context.dependencies.pathExpansionPort);
-  const entityHitsPromise = loadEntityDerivedSeedHits({
-    workspaceId: params.workspaceId,
-    queryEntityExtraction: params.queryEntityExtraction,
-    byId: params.byId,
-    memoryRepo: params.context.dependencies.memoryRepo,
-    warn: params.context.warn,
-    entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
-    entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
-    entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
-    entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
-    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
-    degradationReasons: params.context.degradationReasons
-  });
-  const temporalEntriesPromise = loadTemporalWindowEntries({
-    workspaceId: params.workspaceId,
-    tier: params.tier,
-    queryProbes: params.queryProbes,
-    referenceTime: params.referenceTime,
-    budget: params.temporalCandidateBudget,
-    memoryRepo: params.context.dependencies.memoryRepo
-  });
-  await admitSemanticAndContentCandidates(params);
+  const { entityHits, temporalEntries } = await loadDynamicCandidateInputs(params);
   const sourceCohortKeys = await admitSourceProximityCandidates(params);
-  const graphExpansionSeedIds = admitPrefetchedEntityGraphSeeds(params, await entityHitsPromise);
+  const graphExpansionSeedIds = admitPrefetchedEntityGraphSeeds(params, entityHits);
   const graphResult = await admitPathAndGraphExpansionCandidates(
     params,
     graphExpansionSeedIds,
@@ -197,7 +176,7 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   admitTemporalWindowEntries({
     budget: params.temporalCandidateBudget,
     addCandidate: params.state.addCandidate
-  }, await temporalEntriesPromise);
+  }, temporalEntries);
   await collectNegativePathSuppressions({
     workspaceId: params.workspaceId,
     byId: params.byId,
@@ -213,6 +192,42 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
     graphExpansionDiagnostics: graphResult.diagnostics,
     graphExpansionCandidateSources: graphResult.candidateSources
   });
+}
+
+type DynamicCandidateLoads = Readonly<{
+  readonly entityHits: Awaited<ReturnType<typeof loadEntityDerivedSeedHits>>;
+  readonly temporalEntries: Awaited<ReturnType<typeof loadTemporalWindowEntries>>;
+}>;
+
+async function loadDynamicCandidateInputs(
+  params: Parameters<typeof admitDynamicCoarseCandidates>[0]
+): Promise<DynamicCandidateLoads> {
+  const entityHitsPromise = loadEntityDerivedSeedHits({
+    workspaceId: params.workspaceId,
+    queryEntityExtraction: params.queryEntityExtraction,
+    byId: params.byId,
+    memoryRepo: params.context.dependencies.memoryRepo,
+    warn: params.context.warn,
+    entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
+    entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
+    entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
+    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
+    degradationReasons: params.context.degradationReasons
+  });
+  const temporalEntriesPromise = loadTemporalWindowEntries({
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    queryProbes: params.queryProbes,
+    referenceTime: params.referenceTime,
+    budget: params.temporalCandidateBudget,
+    memoryRepo: params.context.dependencies.memoryRepo
+  });
+  const [, entityHits, temporalEntries] = await Promise.all([
+    admitSemanticAndContentCandidates(params),
+    entityHitsPromise,
+    temporalEntriesPromise
+  ]);
+  return Object.freeze({ entityHits, temporalEntries });
 }
 
 export function buildCoarseFilterRunResult(params: Readonly<{
@@ -336,19 +351,10 @@ function admitPrefetchedEntityGraphSeeds(
     return [];
   }
   const entityDerivedSeeds = admitLoadedEntityDerivedSeeds({
-    workspaceId: params.workspaceId,
-    queryEntityExtraction: params.queryEntityExtraction,
     byId: params.byId,
     addCandidate: params.state.addCandidate,
     lexicalFtsRanks: params.state.ftsRanks,
-    memoryRepo: params.context.dependencies.memoryRepo,
-    warn: params.context.warn,
-    entityExtractionMaxEntities: ENTITY_EXTRACTION_MAX_ENTITIES,
-    entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
-    entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
-    entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP,
-    entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
-    degradationReasons: params.context.degradationReasons
+    entitySeedTotalAdmitCap: ENTITY_SEED_TOTAL_ADMIT_CAP
   }, loaded);
   return entityDerivedSeeds
     .filter((seed) => seed.entityConfidence >= ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR)

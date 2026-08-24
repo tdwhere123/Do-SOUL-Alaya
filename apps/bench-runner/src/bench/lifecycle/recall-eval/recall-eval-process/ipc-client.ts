@@ -9,6 +9,8 @@ import {
   type RecallEvalPagerMapsHint
 } from "./protocol.js";
 import { formatRecallEvalPagerMapsHint } from "./maps-hint.js";
+import { RecallEvalSelectionArtifactCollector } from
+  "./selection-artifact-collector.js";
 
 export const DEFAULT_RECALL_EVAL_PAGER_TIMEOUT_MS = 600_000;
 
@@ -91,8 +93,9 @@ export class RecallEvalPagerIpcSession {
   private child: RecallEvalPagerIpcProcess | null = null;
   private nextId = 0;
   private childEpoch = 0;
+  private recycling = false;
   private openPayload: unknown | undefined;
-  private selectionArtifact: unknown = null;
+  private readonly selectionArtifacts = new RecallEvalSelectionArtifactCollector();
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: RecallEvalPagerChildExitedError | null = null;
   private mapsHint: RecallEvalPagerMapsHint | null = null;
@@ -135,6 +138,8 @@ export class RecallEvalPagerIpcSession {
     if (response.pack === undefined || !hasRecallPack(response.pack)) {
       throw new Error("recall-eval pager child returned an empty pack.");
     }
+    await this.recycleChild(timeoutMs);
+    this.selectionArtifacts.recordQuestion(payload);
     return response.pack;
   }
 
@@ -142,10 +147,10 @@ export class RecallEvalPagerIpcSession {
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
     const child = this.child;
-    if (child === null) return this.selectionArtifact;
+    if (child === null) return this.selectionArtifacts.finalize();
     try {
       await this.closeAttachedChild(timeoutMs);
-      return this.selectionArtifact;
+      return await this.selectionArtifacts.finalize();
     } catch (error) {
       this.exitError ??= toPagerExitError(error, this.childPid, this.mapsHint);
       throw this.exitError;
@@ -164,10 +169,23 @@ export class RecallEvalPagerIpcSession {
     this.recordIdentity(response);
   }
 
+  private async recycleChild(timeoutMs: number): Promise<void> {
+    const child = this.child;
+    if (child === null) return;
+    // Long-lived pager SIGBUS'd after Q1; Q2 must not inherit that address space.
+    this.recycling = true;
+    try {
+      await this.closeAttachedChild(timeoutMs);
+    } finally {
+      this.recycling = false;
+      this.reapChild(child, this.exitError !== null);
+    }
+  }
+
   private async closeAttachedChild(timeoutMs: number): Promise<void> {
     try {
       const response = await this.request("close", {}, timeoutMs);
-      this.selectionArtifact = response.selectionArtifact ?? this.selectionArtifact;
+      this.selectionArtifacts.recordArtifact(response.selectionArtifact);
     } catch (error) {
       if (this.exitError !== null) throw this.exitError;
       if (
@@ -235,6 +253,7 @@ export class RecallEvalPagerIpcSession {
   private recordIdentity(response: RecallEvalPagerIpcSuccess): void {
     this.childPid = response.pid ?? this.child?.pid ?? this.childPid;
     this.mapsHint = response.mapsHint ?? this.mapsHint;
+    this.selectionArtifacts.recordOpenRoot(response.selectionSpoolRootPath);
   }
 
   private onMessage(message: unknown): void {
@@ -257,6 +276,10 @@ export class RecallEvalPagerIpcSession {
   ): void {
     if (epoch !== this.childEpoch) return;
     this.child = null;
+    if (this.recycling && isCleanPagerExit(code, exitSignal)) {
+      resolvePendingAsSuccess(this.pending);
+      return;
+    }
     this.exitError = new RecallEvalPagerChildExitedError({
       code,
       exitSignal,
@@ -372,6 +395,21 @@ function rejectPendingIpc(
   for (const current of waiting) {
     current.clearAbort();
     current.reject(error);
+  }
+}
+
+function resolvePendingAsSuccess(
+  pending: Map<number, PendingIpcRequest>
+): void {
+  const waiting = [...pending.entries()];
+  pending.clear();
+  for (const [id, current] of waiting) {
+    current.clearAbort();
+    if (current.op === "close") {
+      current.reject(new Error("recall-eval pager close response was lost before child exit."));
+    } else {
+      current.resolve({ id, ok: true });
+    }
   }
 }
 

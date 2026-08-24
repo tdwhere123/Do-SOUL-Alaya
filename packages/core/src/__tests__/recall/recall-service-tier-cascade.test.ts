@@ -15,7 +15,7 @@ import {
   createMemoryEntry,
   recallWith
 } from "./coarse-filter/recall-tier-cascade-fixtures.js";
-import { MAX_RECALL_TIER_MEMORIES } from
+import { STORAGE_RECALL_TIER_PAGE_SIZE } from
   "../../recall/coarse-filter/pagination/recall-tier-window-pagination.js";
 
 describe("RecallService tier cascade", () => {
@@ -120,12 +120,24 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(result.candidates.length).toBeGreaterThan(0);
-    expect(findRecallTierWindow).toHaveBeenCalledTimes(1);
-    expect(findRecallTierWindow).toHaveBeenCalledWith({
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(2);
+    expect(findRecallTierWindow).toHaveBeenNthCalledWith(1, {
       workspaceId: "workspace-1",
       tier: StorageTier.HOT,
-      limit: MAX_RECALL_TIER_MEMORIES
+      limit: STORAGE_RECALL_TIER_PAGE_SIZE
     });
+    expect(findRecallTierWindow).toHaveBeenNthCalledWith(2, {
+      workspaceId: "workspace-1",
+      tier: StorageTier.HOT,
+      limit: STORAGE_RECALL_TIER_PAGE_SIZE,
+      cursor: {
+        created_at: hot[STORAGE_RECALL_TIER_PAGE_SIZE - 1]?.created_at,
+        object_id: hot[STORAGE_RECALL_TIER_PAGE_SIZE - 1]?.object_id
+      }
+    });
+    expect(findRecallTierWindow.mock.calls.every(
+      ([query]) => query.limit <= STORAGE_RECALL_TIER_PAGE_SIZE
+    )).toBe(true);
     expect(findByWorkspaceIdSpy).not.toHaveBeenCalled();
   }, 30_000);
 

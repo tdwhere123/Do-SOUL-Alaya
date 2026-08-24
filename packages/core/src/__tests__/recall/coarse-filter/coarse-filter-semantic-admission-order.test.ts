@@ -123,6 +123,52 @@ describe("semantic supplement admission order", () => {
     expect(state.ftsRanks.get("expanded-only")).toBeCloseTo(0.7 * EXPANDED_QUERY_RANK_DISCOUNT);
     expect(state.drafts.get("overlap")?.firstAdmissionPlane).toBe("lexical");
   });
+
+  it("does not partially admit a completed lane when a concurrent lane fails", async () => {
+    const relaxed = createMemoryEntry({ object_id: "relaxed-only", content: "alpha router" });
+    const state = createCoarseFilterState({
+      config: coarseFilterConfig(),
+      winnerMemoryIds: new Set()
+    });
+    const retrievalFieldBundle = {
+      searchMemoryKeyword: vi.fn(async ({ variant }) => {
+        if (variant === "lexical_relaxed") {
+          return [{ object_id: relaxed.object_id, normalized_rank: 1 }];
+        }
+        await delay(5);
+        throw new Error("synthetic expanded lane failure");
+      }),
+      searchEvidenceKeywords: vi.fn(async () => [])
+    } as unknown as RecallRetrievalFieldBundle;
+    const queryProbes = {
+      ...compileRecallQueryProbes("alpha router"),
+      expanded_terms: ["routers"]
+    };
+
+    await expect(addSemanticSupplementCandidates({
+      context: {
+        warn: vi.fn(),
+        dependencies: {} as RunCoarseFilterContext["dependencies"]
+      },
+      workspaceId: "workspace-1",
+      config: coarseFilterConfig(),
+      queryText: "alpha router",
+      queryProbes,
+      tier: StorageTier.HOT,
+      tierScopedSearchEligible: true,
+      byId: new Map([[relaxed.object_id, relaxed]]),
+      addCandidate: state.addCandidate,
+      ftsRanks: state.ftsRanks,
+      trigramFtsRanks: state.trigramFtsRanks,
+      evidenceFtsRanks: state.evidenceFtsRanks,
+      evidenceFtsRanksPerRef: state.evidenceFtsRanksPerRef,
+      evidenceProjectionMatchesByRef: state.evidenceProjectionMatchesByRef,
+      retrievalFieldBundle
+    })).rejects.toThrow(/synthetic expanded lane failure/u);
+
+    expect(state.drafts).toHaveLength(0);
+    expect(state.ftsRanks).toHaveLength(0);
+  });
 });
 
 describe("object probe scan skip", () => {

@@ -43,6 +43,7 @@ import {
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
 import { recordedWorktreeIdentityForSlug } from "../../provenance/identity/history-code-slug.js";
 import {
+  disposeRecallEvalSelectionBoundaryArtifact,
   RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
   type RecallEvalSelectionBoundaryArtifact
 } from "./recall-eval-selection-replay.js";
@@ -110,13 +111,15 @@ async function executeManagedRecallEval(
   diagnosticsSpool: RecallEvalDiagnosticsSpool
 ): Promise<RecallEvalResult> {
   let result: RecallEvalResult | undefined;
+  let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;
   let primaryError: unknown;
   try {
     await context.memoryProfile?.sample({ phase: "snapshot_restored" });
     const ran = await executeRecallEvalRun(context, diagnosticsSpool);
+    selectionArtifact = ran.selectionArtifact;
     result = await writeRecallEvalArtifacts(
       withPagerRebuildReport(context, ran.evidenceProjectionRebuild),
-      diagnosticsSpool, ran.collected, ran.selectionArtifact
+      diagnosticsSpool, ran.collected, selectionArtifact
     );
   } catch (error) {
     primaryError = error;
@@ -126,7 +129,16 @@ async function executeManagedRecallEval(
     result !== undefined
   ));
   const selectionError = await captureCleanupError(async () => {
-    await context.selectionBoundarySpool?.dispose();
+    const cleanups = await Promise.allSettled([
+      context.selectionBoundarySpool?.dispose(),
+      disposeRecallEvalSelectionBoundaryArtifact(selectionArtifact)
+    ]);
+    const failures = cleanups.flatMap((cleanup) =>
+      cleanup.status === "rejected" ? [cleanup.reason] : []
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "selection replay cleanup failed");
+    }
   });
   if (result === undefined) {
     throwLifecycleErrors("recall-eval lifecycle failed", [

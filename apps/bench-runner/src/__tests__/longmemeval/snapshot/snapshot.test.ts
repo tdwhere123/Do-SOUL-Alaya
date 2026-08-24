@@ -23,7 +23,10 @@ import {
   type SnapshotExtractionProvenanceV3
 } from "../../../bench/snapshot/materialize.js";
 import { sha256File } from "../../../bench/snapshot/integrity.js";
-import { peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
+import {
+  copyRegularFileNoFollow,
+  peekCachedFileSha256
+} from "../../../bench/snapshot/bound-file.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
@@ -223,6 +226,28 @@ describe("snapshot plumbing", () => {
       expectedSha256: "0".repeat(64)
     })).toThrow(/SHA-256 mismatch/u);
     expect(existsSync(join(mismatchRoot, BENCH_DAEMON_DB_FILENAME))).toBe(false);
+  });
+
+  it("rejects a source swapped after initial validation and leaves no working DB", async () => {
+    const sourcePath = join(tmpDir, "race-source.db");
+    writeFileSync(sourcePath, "sealed source");
+    const expectedSha256 = await sha256File(sourcePath);
+    const restoreRoot = join(tmpDir, "restore-race");
+
+    expect(() => restoreSnapshotToDataDir({
+      snapshotDbPath: sourcePath,
+      dataDirRoot: restoreRoot,
+      expectedSha256
+    }, {
+      copyVerifiedSnapshot(input) {
+        writeFileSync(sourcePath, "swapped after validation");
+        copyRegularFileNoFollow(input);
+      }
+    })).toThrow(/SHA-256 mismatch/u);
+
+    const workingPath = join(restoreRoot, BENCH_DAEMON_DB_FILENAME);
+    expect(existsSync(workingPath)).toBe(false);
+    expect(peekCachedFileSha256(workingPath)).toBeUndefined();
   });
 
   it("round-trips the snapshot manifest + sidecar JSON", () => {

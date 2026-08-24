@@ -1,8 +1,13 @@
-import { join } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "@do-soul/alaya-core";
 import {
+  appendLongMemEvalSelectionBoundaryArtifact,
   createLongMemEvalSelectionBoundarySpool,
+  verifyLongMemEvalSelectionBoundaryArtifact,
   type LongMemEvalSelectionBoundarySpool
 } from "../../selection-replay/selection-boundary-spool.js";
 
@@ -17,6 +22,7 @@ export interface RecallEvalSelectionBoundaryBinding {
 }
 
 export interface RecallEvalSelectionBoundaryArtifact {
+  readonly rootPath: string;
   readonly sourcePath: string;
   readonly binding: RecallEvalSelectionBoundaryBinding;
 }
@@ -37,6 +43,7 @@ export async function finalizeRecallEvalSelectionBoundarySpool(
   );
   const identity = await spool.writeGzipArtifact(artifactPath);
   return {
+    rootPath: spool.rootPath,
     sourcePath: artifactPath,
     binding: {
       filename: RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
@@ -45,6 +52,82 @@ export async function finalizeRecallEvalSelectionBoundarySpool(
       record_count: identity.recordCount
     }
   };
+}
+
+export async function assembleRecallEvalSelectionBoundaryArtifacts(input: {
+  readonly artifacts: readonly RecallEvalSelectionBoundaryArtifact[];
+  readonly expectedQuestionIds: readonly string[];
+}): Promise<RecallEvalSelectionBoundaryArtifact | null> {
+  if (input.artifacts.length === 0 && input.expectedQuestionIds.length === 0) {
+    return null;
+  }
+  if (input.artifacts.length !== input.expectedQuestionIds.length) {
+    throw new Error("selection replay child artifact count differs from evaluated window");
+  }
+  const spool = await createLongMemEvalSelectionBoundarySpool({
+    env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },
+    concurrency: 1
+  });
+  if (spool === null) throw new Error("selection replay assembly spool is unavailable");
+  try {
+    for (let index = 0; index < input.artifacts.length; index += 1) {
+      const artifact = input.artifacts[index];
+      const questionId = input.expectedQuestionIds[index];
+      if (artifact === undefined || questionId === undefined) {
+        throw new Error("selection replay assembly lost an evaluated question");
+      }
+      await appendLongMemEvalSelectionBoundaryArtifact(
+        spool, artifact.sourcePath, questionId
+      );
+    }
+    const assembled = await finalizeRecallEvalSelectionBoundarySpool(spool);
+    if (assembled === null) throw new Error("selection replay assembly produced no artifact");
+    const verified = await verifyLongMemEvalSelectionBoundaryArtifact(
+      assembled.sourcePath
+    );
+    const expectedDigest = computeLongMemEvalQuestionIdDigest(
+      input.expectedQuestionIds
+    );
+    if (verified.questionCount !== input.expectedQuestionIds.length ||
+        verified.questionIdDigest !== expectedDigest) {
+      await assembledArtifactCleanup(assembled);
+      throw new Error("selection replay run artifact differs from evaluated window");
+    }
+    return assembled;
+  } catch (error) {
+    await spool.dispose();
+    throw error;
+  }
+}
+
+export async function disposeRecallEvalSelectionBoundaryArtifact(
+  artifact: RecallEvalSelectionBoundaryArtifact | null
+): Promise<void> {
+  if (artifact === null) return;
+  await assembledArtifactCleanup(artifact);
+}
+
+export async function disposeRecallEvalSelectionBoundaryRoot(
+  rootPath: string
+): Promise<void> {
+  const resolvedRoot = resolve(rootPath);
+  const relativeToTemp = relative(resolve(tmpdir()), resolvedRoot);
+  if (relativeToTemp.startsWith("..") || relativeToTemp.length === 0 ||
+      !basename(resolvedRoot).startsWith("alaya-selection-replay-")) {
+    throw new Error("selection replay root is outside owned temporary storage");
+  }
+  await rm(resolvedRoot, { recursive: true, force: true });
+}
+
+async function assembledArtifactCleanup(
+  artifact: RecallEvalSelectionBoundaryArtifact
+): Promise<void> {
+  const rootPath = resolve(artifact.rootPath);
+  if (resolve(dirname(artifact.sourcePath)) !== rootPath ||
+      basename(artifact.sourcePath) !== RECALL_EVAL_SELECTION_BOUNDARY_FILENAME) {
+    throw new Error("selection replay artifact root is outside owned temporary storage");
+  }
+  await disposeRecallEvalSelectionBoundaryRoot(rootPath);
 }
 
 export async function captureRecallEvalQuestion<T>(

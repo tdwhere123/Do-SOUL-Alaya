@@ -14,8 +14,6 @@ import {
   finalizeRecallEvalSelectionBoundarySpool
 } from "../recall-eval-selection-replay.js";
 import { recallEvalOneQuestion } from "../question/recall-eval-question.js";
-import { RecallEvalWorkspaceSession } from
-  "../question/recall-eval-workspace-session.js";
 import {
   combineSelectionBoundaryObservers,
   createCandidateActivationCapture
@@ -35,7 +33,6 @@ interface PagerRuntime {
   readonly daemon: BenchDaemonHandle;
   readonly spool: LongMemEvalSelectionBoundarySpool | null;
   readonly open: RecallEvalPagerOpenPayload;
-  readonly workspace: RecallEvalWorkspaceSession;
 }
 
 let runtime: PagerRuntime | null = null;
@@ -62,23 +59,19 @@ export async function openRecallEvalPagerChild(
     embeddingProviderKind: payload.daemonLaunch.embeddingProviderKind,
     recallWeightOverrides: payload.recallWeightOverrides
   }, payload.daemonLaunch);
+  const spool = await createRecallEvalSelectionBoundarySpool(process.env);
   runtime = {
     daemon,
-    spool: await createRecallEvalSelectionBoundarySpool(process.env),
-    open: payload,
-    workspace: new RecallEvalWorkspaceSession()
+    spool,
+    open: payload
   };
-  return sqlite;
+  return { ...sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
 }
 
 export async function recallRecallEvalPagerChild(
   payload: RecallEvalPagerRecallPayload
 ): Promise<RecallEvalQuestionResult> {
   const current = requireRuntime();
-  const workspace = await current.workspace.acquire(current.daemon, {
-    workspaceId: payload.question.workspaceId,
-    runId: payload.question.runId
-  });
   const activation = createCandidateActivationCapture(
     current.open.captureOpenSemanticFactorCandidateActivations
   );
@@ -95,8 +88,7 @@ export async function recallRecallEvalPagerChild(
         ...observerFields(observer, activation.observer)
       },
       simulateReport: current.open.simulateReport,
-      measurement: payload.measurement,
-      workspace
+      measurement: payload.measurement
     })
   );
   return activation.attach(result);
@@ -109,21 +101,26 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
   let selectionArtifact = null;
   let primaryError: unknown;
   try {
-    await current.workspace.release();
-  } catch (error) {
-    primaryError = error;
-  }
-  try {
     selectionArtifact = await finalizeRecallEvalSelectionBoundarySpool(current.spool);
   } catch (error) {
-    primaryError ??= error;
+    primaryError = error;
   }
   try {
     await current.daemon.shutdown();
   } catch (error) {
     primaryError ??= error;
   }
-  if (primaryError !== undefined) throw primaryError;
+  if (primaryError !== undefined) {
+    try {
+      await current.spool?.dispose();
+    } catch (error) {
+      primaryError = new AggregateError(
+        [primaryError, error],
+        "recall-eval pager child cleanup failed"
+      );
+    }
+    throw primaryError;
+  }
   return { selectionArtifact };
 }
 

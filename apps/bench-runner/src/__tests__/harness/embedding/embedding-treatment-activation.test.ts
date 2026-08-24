@@ -107,6 +107,20 @@ describe("embedding treatment activation", () => {
     }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" })).not.toThrow();
   });
 
+  it("rejects an enabled benchmark diagnostic without answer-feature candidates", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 4,
+      evidence_embedding_scored_count: 4,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null,
+      candidates: []
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" }))
+      .toThrow(/scored_candidates=0/u);
+  });
+
   it.each([
     ["missing", {}],
     ["not requested", {
