@@ -11,6 +11,10 @@ import { buildDefaultPolicy } from
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
 import { createCandidate } from "../fine-assessment-selection-fixtures.js";
+import type {
+  KeywordSearchLaneScope,
+  RecallServiceMemoryRepoPort
+} from "../../../recall/runtime/recall-service-ports.js";
 
 describe("request-scoped retrieval field bundle", () => {
   it("shares one scored field result between admission and capture", async () => {
@@ -18,7 +22,7 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: { searchByKeywordField }
+      memoryRepo: stubMemoryRepo({ searchByKeywordField })
     });
     const request = {
       variant: "lexical_relaxed" as const,
@@ -55,7 +59,7 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: { searchByKeywordField }
+      memoryRepo: stubMemoryRepo({ searchByKeywordField })
     });
 
     await bundle.searchMemoryKeyword({
@@ -81,7 +85,7 @@ describe("request-scoped retrieval field bundle", () => {
     const absent = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {}
+      memoryRepo: stubMemoryRepo()
     });
     await expect(absent.searchMemoryKeyword({
       variant: "lexical_relaxed",
@@ -96,13 +100,13 @@ describe("request-scoped retrieval field bundle", () => {
     const failed = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {
+      memoryRepo: stubMemoryRepo({
         searchByKeywordField: async () => {
           attempts += 1;
           if (attempts === 1) throw new Error("field failure");
           return fieldResult("retried", 1);
         }
-      },
+      }),
       onFailure
     });
     await expect(failed.searchMemoryKeyword({
@@ -132,7 +136,7 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {},
+      memoryRepo: stubMemoryRepo(),
       evidenceSearchPort: {
         searchByKeyword: vi.fn(),
         searchByKeywordField,
@@ -166,7 +170,7 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {},
+      memoryRepo: stubMemoryRepo(),
       evidenceSearchPort: {
         searchByKeyword: vi.fn(),
         searchByKeywordField,
@@ -204,7 +208,7 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {},
+      memoryRepo: stubMemoryRepo(),
       evidenceSearchPort: {
         searchByKeyword: vi.fn(),
         searchByKeywordField
@@ -223,14 +227,18 @@ describe("request-scoped retrieval field bundle", () => {
   });
 
   it("records prefix-preserving depth growth and score recalibration without widening admission", async () => {
-    const searchByKeywordField = vi.fn(async () => refinementFieldResult());
+    const searchByKeywordField = vi.fn(async (
+      _workspaceId: string,
+      _queryText: string,
+      _limit: number,
+      _scope?: Readonly<KeywordSearchLaneScope>,
+      _refinementDepths?: readonly number[]
+    ) => refinementFieldResult());
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
       refinementMaxDepth: 2,
-      memoryRepo: {
-        searchByKeywordField
-      }
+      memoryRepo: stubMemoryRepo({ searchByKeywordField })
     });
 
     const matches = await bundle.searchMemoryKeyword({
@@ -280,9 +288,9 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: {
+      memoryRepo: stubMemoryRepo({
         searchByKeywordField: vi.fn(async () => fieldResult("memory-1", 1))
-      }
+      })
     });
 
     await bundle.searchMemoryKeyword({
@@ -307,13 +315,13 @@ describe("request-scoped retrieval field bundle", () => {
     const mismatched = {
       ...result,
       refinement_levels: [{
-        ...result.refinement_levels[0],
-        lanes: result.refinement_levels[0].lanes.map((lane) =>
+        ...result.refinement_levels[0]!,
+        lanes: result.refinement_levels[0]!.lanes.map((lane) =>
           lane.lane !== "porter" ? lane : {
             ...lane,
             observations: [
               { object_id: "changed", rank: 1, normalized_rank: 1 },
-              lane.observations[1]
+              lane.observations[1]!
             ]
           })
       }]
@@ -321,7 +329,9 @@ describe("request-scoped retrieval field bundle", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
-      memoryRepo: { searchByKeywordField: vi.fn(async () => mismatched) },
+      memoryRepo: stubMemoryRepo({
+        searchByKeywordField: vi.fn(async () => mismatched)
+      }),
       onFailure
     });
 
@@ -341,7 +351,7 @@ describe("request-scoped retrieval field bundle", () => {
       workspaceId: "workspace-1",
       queryText: "deploy",
       refinementMaxDepth: 2,
-      memoryRepo: { searchByKeywordField }
+      memoryRepo: stubMemoryRepo({ searchByKeywordField })
     });
     const entries = ["memory-1", "memory-2"].map((id) => createCandidate(id).entry);
     const requested = createSemanticAdmissionFixture(bundle, entries);
@@ -412,6 +422,17 @@ function createSemanticAdmissionFixture(
       ([entry]) => entry.object_id as string
     ))]
   });
+}
+
+function stubMemoryRepo(
+  overrides: Partial<RecallServiceMemoryRepoPort> = {}
+): Readonly<RecallServiceMemoryRepoPort> {
+  return {
+    findByWorkspaceId: async () => [],
+    findByDimension: async () => [],
+    findByScopeClass: async () => [],
+    ...overrides
+  };
 }
 
 function fieldResult(objectId: string, normalizedRank: number) {

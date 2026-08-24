@@ -107,9 +107,9 @@ function expectFacilityCells(cells: FourCells): void {
     .toMatch(/^sha256:[0-9a-f]{64}$/u);
 }
 
-function runCell(
+function runCell<State>(
   pool: FrozenParityPool,
-  objective: SelectGammaWalkObjective,
+  objective: SelectGammaWalkObjective<State>,
   sourceHardDedupe: boolean
 ) {
   const walk = selectGammaWalk(
@@ -125,7 +125,7 @@ function runCell(
     Object.fromEntries(PARITY_GOLDS.map((gold) => [
       gold,
       firstSelectGammaExclusionReason(gold, walk)
-    ])) as FourCells["generic_dedupe_on"]["gold_first_exclusion"]
+    ])) as GoldFirstExclusion
   );
 }
 
@@ -134,7 +134,7 @@ function cellSnapshot(
   operatorId: string,
   configurationDigest: string | null,
   sourceHardDedupe: boolean,
-  goldFirstExclusion: FourCells["generic_dedupe_on"]["gold_first_exclusion"]
+  goldFirstExclusion: GoldFirstExclusion
 ) {
   return {
     selected_keys: selectedKeys,
@@ -161,9 +161,16 @@ function decisionKeys(decision: Readonly<{
   });
 }
 
+type GoldFirstExclusion = Readonly<Record<
+  (typeof PARITY_GOLDS)[number],
+  ReturnType<typeof firstSelectGammaExclusionReason>
+>>;
+
+type Cell = ReturnType<typeof cellSnapshot>;
+
 type FourCells = Readonly<{
-  readonly generic_dedupe_on: ReturnType<typeof runCell>;
-  readonly generic_dedupe_off: ReturnType<typeof runCell>;
-  readonly facility_dedupe_on: ReturnType<typeof runCell>;
-  readonly facility_dedupe_off: ReturnType<typeof runCell>;
+  readonly generic_dedupe_on: Cell;
+  readonly generic_dedupe_off: Cell;
+  readonly facility_dedupe_on: Cell;
+  readonly facility_dedupe_off: Cell;
 }>;

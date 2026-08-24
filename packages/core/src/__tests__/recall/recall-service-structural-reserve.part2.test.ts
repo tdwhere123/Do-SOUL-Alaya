@@ -366,7 +366,6 @@ it("keeps lexical and structural legacy stages aligned to fusion", async () => {
       });
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates;
-      const deliveredIds = delivered.map((candidate) => candidate.object_id);
 
       expect(delivered.length).toBeLessThanOrEqual(5);
       const goldDiagnostic = goldDiag(result, "memory-gold");

@@ -12,8 +12,7 @@ import { bindCoverageSelectionWalkObjective } from
 import type {
   SelectGammaBinding,
   SelectGammaFormulaCandidate,
-  SelectGammaRequest,
-  SelectGammaWalkObjective
+  SelectGammaRequest
 } from "../../../recall/delivery/select-gamma/types.js";
 import { createAttributedFacilityCoverageObjective } from
   "../../../recall/field/facility-objective.js";
@@ -87,9 +86,7 @@ export function withSourceDedupe(
   });
 }
 
-export function facilityWalkObjective(
-  pool: FrozenParityPool
-): SelectGammaWalkObjective {
+export function facilityWalkObjective(pool: FrozenParityPool) {
   const demand = materializeAttributedQueryFacilityDemand({
     query_demand: Object.freeze({
       schema_version: 1,

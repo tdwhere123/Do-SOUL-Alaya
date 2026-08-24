@@ -118,24 +118,24 @@ describe("projection reader lifecycle", () => {
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", CLOCK);
     let operationalTime = "2026-08-16T00:04:00.000Z";
-    let heartbeat: (() => void) | null = null;
+    const heartbeat: { fn: (() => void) | null } = { fn: null };
     const guard = startProjectionPinLeaseGuard({
       session,
       pin,
       captureOperationalTime: () => operationalTime,
       scheduler: {
         every: (_intervalMs, callback) => {
-          heartbeat = callback;
-          return () => { heartbeat = null; };
+          heartbeat.fn = callback;
+          return () => { heartbeat.fn = null; };
         }
       }
     });
     operationalTime = "2026-08-16T00:06:00.000Z";
-    heartbeat?.();
+    heartbeat.fn?.();
     guard.assertHealthy();
     expect(() => session.renew(pin, operationalTime)).not.toThrow();
     guard.stop();
-    expect(heartbeat).toBeNull();
+    expect(heartbeat.fn).toBeNull();
     session.release(pin, operationalTime);
   });
 
@@ -143,20 +143,20 @@ describe("projection reader lifecycle", () => {
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", CLOCK);
     let operationalTime = CLOCK;
-    let heartbeat: (() => void) | null = null;
+    const heartbeat: { fn: (() => void) | null } = { fn: null };
     const guard = startProjectionPinLeaseGuard({
       session,
       pin,
       captureOperationalTime: () => operationalTime,
       scheduler: {
         every: (_intervalMs, callback) => {
-          heartbeat = callback;
-          return () => { heartbeat = null; };
+          heartbeat.fn = callback;
+          return () => { heartbeat.fn = null; };
         }
       }
     });
     operationalTime = "2026-08-16T00:04:00.000Z";
-    heartbeat?.();
+    heartbeat.fn?.();
     operationalTime = "2026-08-16T00:06:00.000Z";
     expect(session.selectCandidates(
       queryCondition(pin, operationalTime),
@@ -177,7 +177,7 @@ describe("projection reader lifecycle", () => {
   it("surfaces a stored heartbeat renewal failure only through health", () => {
     const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = delegate.pinActiveGeneration("workspace-1", CLOCK);
-    let heartbeat: (() => void) | null = null;
+    const heartbeat: { fn: (() => void) | null } = { fn: null };
     let renewalFails = false;
     const guard = startProjectionPinLeaseGuard({
       session: {
@@ -191,25 +191,25 @@ describe("projection reader lifecycle", () => {
       captureOperationalTime: () => CLOCK,
       scheduler: {
         every: (_intervalMs, callback) => {
-          heartbeat = callback;
+          heartbeat.fn = callback;
           return () => {
-            heartbeat = null;
+            heartbeat.fn = null;
           };
         }
       }
     });
     renewalFails = true;
-    expect(() => heartbeat?.()).not.toThrow();
+    expect(() => heartbeat.fn?.()).not.toThrow();
     expect(() => guard.assertHealthy()).toThrow(/planted heartbeat renewal failure/u);
     expect(() => guard.stop()).not.toThrow();
-    expect(heartbeat).toBeNull();
+    expect(heartbeat.fn).toBeNull();
     delegate.release(pin, CLOCK);
   });
 
   it("contains heartbeat clock failures until a health checkpoint", () => {
     const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = delegate.pinActiveGeneration("workspace-1", CLOCK);
-    let heartbeat: (() => void) | null = null;
+    const heartbeat: { fn: (() => void) | null } = { fn: null };
     let operationalTime = CLOCK;
     const guard = startProjectionPinLeaseGuard({
       session: delegate,
@@ -217,15 +217,15 @@ describe("projection reader lifecycle", () => {
       captureOperationalTime: () => operationalTime,
       scheduler: {
         every: (_intervalMs, callback) => {
-          heartbeat = callback;
+          heartbeat.fn = callback;
           return () => {
-            heartbeat = null;
+            heartbeat.fn = null;
           };
         }
       }
     });
     operationalTime = "not-a-date";
-    expect(() => heartbeat?.()).not.toThrow();
+    expect(() => heartbeat.fn?.()).not.toThrow();
     expect(() => guard.assertHealthy()).toThrow(/valid date-time/u);
     guard.stop();
     delegate.release(pin, CLOCK);
@@ -349,7 +349,7 @@ describe("projection reader lifecycle", () => {
   it("stops renewal when cancellation and release both fail", async () => {
     const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const renew = vi.fn(delegate.renew.bind(delegate));
-    let heartbeat: (() => void) | null = null;
+    const heartbeat: { fn: (() => void) | null } = { fn: null };
     const onEventAppend = vi.fn();
     await expect(runExecuteRecall({
       ...delegate,
@@ -360,7 +360,7 @@ describe("projection reader lifecycle", () => {
     }, {
       projectionPinHeartbeatScheduler: {
         every: (_intervalMs, callback) => {
-          heartbeat = callback;
+          heartbeat.fn = callback;
           return () => {
             throw new Error("planted combined cancellation failure");
           };
@@ -369,7 +369,7 @@ describe("projection reader lifecycle", () => {
       onEventAppend
     })).rejects.toThrow(/projection pin cleanup failed/u);
     const renewalsAfterFailure = renew.mock.calls.length;
-    heartbeat?.();
+    heartbeat.fn?.();
     expect(renew).toHaveBeenCalledTimes(renewalsAfterFailure);
     expect(onEventAppend).not.toHaveBeenCalled();
   });
@@ -507,7 +507,7 @@ async function runExecuteRecall(
   fieldQuerySession: NonNullable<ConstructorParameters<typeof RecallService>[0]["fieldQuerySession"]>,
   extras: Readonly<{
     readonly warn?: ConstructorParameters<typeof RecallService>[0]["warn"];
-    readonly projectionPinHeartbeatScheduler?: ConstructorParameters<
+    readonly projectionPinHeartbeatScheduler?: Parameters<
       typeof startProjectionPinLeaseGuard
     >[0]["scheduler"];
     readonly onEventAppend?: () => void;

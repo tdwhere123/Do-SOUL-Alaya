@@ -32,8 +32,6 @@ import {
   createSupplementaryData,
   rankMap
 } from "./fine-assessment-selection-fixtures.js";
-import type { FineAssessmentPreProjectionObservation } from
-  "../../recall/delivery/selection-boundary/selection-boundary-types.js";
 import {
   createRecallFiniteFieldChannelCapture,
   materializeRecallRetrievalFieldSeal
