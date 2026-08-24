@@ -30,8 +30,11 @@ complete-form extraction, and the `06af8c83` exclusion of capsule
 2026-08-24 S12 dump-only closeout: the remaining E0 misses are
 classified — `d23cf73b` is coverage displacement of a legal fused top-5
 gold; all 32 waist questions are honest fused-order family-max walls.
-S12 is not a G21, retune, or promotion licence. This is a
-documentation pass against live code, not a KPI claim.
+2026-08-24 S13 dump-only closeout: Dual-13 remaining misses are
+`honest_thinner_r_obj` (representation); the E1-only three are a
+different owner, `gamma_displaced_fused_head`. S12 and S13 are not a
+G21, retune, or promotion licence. This is a documentation pass
+against live code, not a KPI claim.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -243,6 +246,20 @@ strictly higher legal family-max `R_obj` than the best gold. No fused
 residual inversion was observed. S12 authorizes no ranking change, no
 weight retune, and no G21 launch. HEAD `5782391d` remains unmeasured.
 
+## S13 remaining-miss partition (closed)
+
+S13 asked, on the S11 E0-control dump plus E1 `T055902Z`, whether the
+remaining misses share one owner. They do not. Dual-13 (E0 ∩ E1) is
+fused-order `honest_thinner_r_obj`: gold legal family-max is strictly
+below the fused-order top-5 minimum (representation split
+`same_family_weaker` / `gold_missing_family` / `capsule_sparse_families`).
+Embedding semantic ≈0.010–0.016 does not close 12/13. The E1-only
+three (`001be529`, `6f9b354f`, `726462e0`) are
+`gamma_displaced_fused_head`: gold stays in fused head with family-max
+above every delivered occupier, and Gamma `selection_order` is past
+budget. S13 authorizes no ranking change, no weight retune, and no G21
+launch.
+
 ## Semantic formation boundary
 
 The model is optional semantic proposal machinery, not the source-admission or
@@ -289,9 +306,9 @@ The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
 last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
 diagnostic evidence, not a promotion. Later code — including HEAD
 `5782391d` — is unmeasured, and the ancestor `85faef95` missed its
-diagnostic gates. S12 dump-only classification of the remaining E0 composition/coverage
-is closed. G21, retuning, and benchmark promotion are not authorized
-by this document.
+diagnostic gates. S12 and S13 dump-only classification of the remaining
+E0/E1 miss partition is closed. G21, retuning, and benchmark promotion
+are not authorized by this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate

@@ -16,7 +16,8 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Independent-embedding quality | Capsule `evidence_semantic` excluded (`06af8c83`) |
 | Last comparable KPI pin | `3af4fd9`: E1 any@5 81/94, full-gold@5 43/94 — diagnostic only |
 | Recall any@5 promotion | **NOT PROMOTED**; HEAD `5782391d` unmeasured, ancestor `85faef95` missed diagnostic gates |
-| S12 waist/coverage audit | Closed: 1 coverage displacement (`d23cf73b`) plus 32 honest fused-order family-max waist misses. G21, retuning, and promotion not authorized |
+| S12 waist/coverage audit | Closed: 1 coverage displacement (`d23cf73b`) plus 32 honest fused-order family-max waist misses |
+| S13 remaining-miss partition | Closed: Dual-13 `honest_thinner_r_obj` (representation); E1-only 3 `gamma_displaced_fused_head`. G21, retuning, and promotion not authorized |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
 ## Recall posture (2026-08-19 live-source pass)
