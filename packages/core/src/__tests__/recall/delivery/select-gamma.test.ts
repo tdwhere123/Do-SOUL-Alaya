@@ -26,6 +26,10 @@ import {
   createSupplementaryData
 } from "../fine-assessment-selection-fixtures.js";
 
+// The walk fills workspace/pin/weight fields; cases only bind candidate shape.
+type SelectGammaCase = Pick<SelectGammaBinding, "candidates"> &
+  Partial<SelectGammaBinding>;
+
 describe("Select_Gamma", () => {
   it("gates risk and authority before the coverage walk", () => {
     const hidden = {
@@ -106,7 +110,7 @@ describe("Select_Gamma", () => {
         formulaCandidate("k5", { quality: 0.2, token_cost: 1 }),
         formulaCandidate("k6", { quality: 0.2, token_cost: 1 })
       ]
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     const selected = selectKeys(binding, [
       "tie-b", "tie-a", "cheap", "k3", "k4", "k5", "k6"
     ], 20);
@@ -125,7 +129,7 @@ describe("Select_Gamma", () => {
         })
       ],
       max_selected: 1
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
 
     expect(selectKeys(binding, ["unverified-a", "verified-z"], 2))
       .toEqual(["verified-z"]);
@@ -151,7 +155,7 @@ describe("Select_Gamma", () => {
         formulaCandidate("short-high-density", { quality: 2, token_cost: 1 })
       ],
       max_selected: 1
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     const result = selectResult(binding, [
       "long-high-gain", "short-high-density"
     ], 8);
@@ -181,7 +185,7 @@ describe("Select_Gamma", () => {
         formulaCandidate("medium", { quality: 5, token_cost: 4 })
       ],
       max_selected: 2
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     const result = selectResult(binding, [
       "long-high-gain", "short-high-density", "medium"
     ], 7);
@@ -211,7 +215,7 @@ describe("Select_Gamma", () => {
         })
       ],
       max_selected: 2
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
 
     expect(() => selectResult(
       binding,
@@ -227,7 +231,7 @@ describe("Select_Gamma", () => {
         formulaCandidate("overflow", { quality: 0.9, token_cost: 3 }),
         formulaCandidate("tail", { quality: 0.5, token_cost: 2 })
       ]
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     expect(selectKeys(binding, ["head", "overflow", "tail"], 6)).toEqual([
       "overflow",
       "tail"
@@ -254,7 +258,7 @@ describe("Select_Gamma", () => {
         })
       ],
       feature_weights: { lexical: 2, lineage: 2, fresh: 2 }
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     expect(selectKeys(binding, ["lex-1", "lex-2", "novel"], 3)).toEqual([
       "lex-1",
       "novel",
@@ -278,7 +282,7 @@ describe("Select_Gamma", () => {
           })
         })
       ]
-    } satisfies SelectGammaBinding;
+    } satisfies SelectGammaCase;
     expect(selectKeys(binding, ["stale", "current"], 1)).toEqual(["current"]);
   });
 
@@ -321,7 +325,7 @@ describe("Select_Gamma", () => {
 });
 
 function selectKeys(
-  binding: SelectGammaBinding,
+  binding: SelectGammaCase,
   eligible: readonly string[],
   tokenBudget: number
 ): readonly string[] {
@@ -329,7 +333,7 @@ function selectKeys(
 }
 
 function selectResult(
-  binding: SelectGammaBinding,
+  binding: SelectGammaCase,
   eligible: readonly string[],
   tokenBudget: number
 ) {

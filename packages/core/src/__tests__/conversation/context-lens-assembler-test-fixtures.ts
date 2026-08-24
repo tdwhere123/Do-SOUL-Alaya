@@ -204,6 +204,7 @@ export function createRecallPolicy(
 export function createRecallResult(candidates: readonly Readonly<RecallCandidate>[]) {
   return Object.freeze({
     candidates: Object.freeze([...candidates]),
+    synthesis: Object.freeze({ status: "absent" as const }),
     active_constraints: Object.freeze([]),
     active_constraints_count: 0,
     total_scanned: candidates.length,
