@@ -289,7 +289,11 @@ describe("Select_Gamma", () => {
   it("keeps Select_Gamma admission order as the delivered packet", () => {
     const first = withScore(createCandidate("dup-a"), 0.99);
     const second = withScore(createCandidate("dup-b"), 0.98);
-    const novel = withScore(createCandidate("novel"), 0.4);
+    const novelBase = withScore(createCandidate("novel"), 0.4);
+    const novel = {
+      ...novelBase,
+      entry: { ...novelBase.entry, domain_tags: ["location_place"] }
+    };
     const candidates = [first, second, novel];
     const result = selectFineAssessmentCandidates({
     ...FIELD_PINS,
@@ -303,7 +307,8 @@ describe("Select_Gamma", () => {
           "dup-a": "same-gist",
           "dup-b": "same-gist",
           novel: "fresh-gist"
-        }
+        },
+        querySoughtFacets: ["location_place"]
       }),
       tokenEstimator: { estimate: () => 6 },
       rankByCandidateKey: new Map(candidates.map((candidate, index) => [

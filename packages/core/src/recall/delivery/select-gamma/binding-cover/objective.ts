@@ -14,11 +14,13 @@ import {
 export function createBindingAwareWalkObjective(params: Readonly<{
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
   readonly contentKeyByCandidateKey?: ReadonlyMap<string, string>;
+  readonly rankingScoreByCandidateKey?: ReadonlyMap<string, number>;
   readonly configurationDigest: string;
   readonly facility?: SelectGammaWalkObjective<unknown> | null;
 }>): SelectGammaWalkObjective<BindingCoverState> {
   const receipts = params.receiptsByCandidateKey;
   const contentKeys = params.contentKeyByCandidateKey ?? new Map<string, string>();
+  const rankingScores = params.rankingScoreByCandidateKey;
   const facility = params.facility ?? null;
   return Object.freeze({
     operator_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
@@ -26,18 +28,15 @@ export function createBindingAwareWalkObjective(params: Readonly<{
     createState: () => createBindingCoverState(facility),
     cloneState: (state) => cloneBindingCoverState(state, facility),
     marginalGain: (candidate, state) =>
-      bindingAwareGain(candidate, state, receipts, contentKeys, facility),
+      bindingAwareGain(
+        candidate, state, receipts, contentKeys, facility, rankingScores
+      ),
     accept: (candidate, state) =>
       acceptBindingAware(candidate, state, receipts, contentKeys, facility),
-    decomposeGain: (candidate, state) => {
-      const quality = qualityTerm(candidate, state, facility);
-      return Object.freeze({
-        quality,
-        coverage: bindingAwareGain(
-          candidate, state, receipts, contentKeys, facility
-        ) - quality
-      });
-    }
+    decomposeGain: (candidate, state) => Object.freeze({
+      quality: qualityTerm(candidate, state, facility),
+      coverage: incrementalCoverGain(candidate, state, receipts)
+    })
   });
 }
 
@@ -75,16 +74,34 @@ function bindingAwareGain(
   state: BindingCoverState,
   receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
   contentKeys: ReadonlyMap<string, string>,
-  facility: SelectGammaWalkObjective<unknown> | null
+  facility: SelectGammaWalkObjective<unknown> | null,
+  rankingScoreByCandidateKey: ReadonlyMap<string, number> | undefined
 ): number {
-  const positive = qualityTerm(candidate, state, facility) +
-    obligationFacetGain(candidate, state) +
-    BINDING_COVER_VALUE_WEIGHT * newValueCount(candidate.candidate_key, receipts, state);
+  const coverGain = incrementalCoverGain(candidate, state, receipts);
+  const positive = coverGain <= 0
+    ? rankingScore(candidate, rankingScoreByCandidateKey)
+    : qualityTerm(candidate, state, facility) + coverGain;
   const rho = boundRedundancy(
     bindingCoverRho(candidate, state, contentKeys.get(candidate.candidate_key)),
     positive
   );
   return positive - rho;
+}
+
+function incrementalCoverGain(
+  candidate: SelectGammaFormulaCandidate,
+  state: BindingCoverState,
+  receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>
+): number {
+  return obligationFacetGain(candidate, state) +
+    BINDING_COVER_VALUE_WEIGHT * newValueCount(candidate.candidate_key, receipts, state);
+}
+
+function rankingScore(
+  candidate: SelectGammaFormulaCandidate,
+  rankingScoreByCandidateKey: ReadonlyMap<string, number> | undefined
+): number {
+  return rankingScoreByCandidateKey?.get(candidate.candidate_key) ?? candidate.quality;
 }
 
 function qualityTerm(

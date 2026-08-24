@@ -4,15 +4,16 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation identity: package `0.3.11`, code HEAD `5782391d`
-(2026-08-24). Earlier pins — architecture `baa6e35b` (gates 1–6),
-integration base `b329325`, review evidence `263c6600` (2026-08-19),
-handbook prose `ae95e313` — remain historical context. Live owners are
-the modules named under Current live path. Recall any@5 is **NOT
-PROMOTED**: the last comparable KPI evidence pin is `3af4fd9` (E1 arm:
-any@5 81/94, full-gold@5 43/94); HEAD `5782391d` is unmeasured and the
-ancestor `85faef95` missed its diagnostic gates. The earlier `10da1318`
-B-arm dump remains historical benchmark evidence only.
+Current documentation identity: package `0.3.11`, S14 ranking-preserving
+Gamma gain (2026-08-24). Earlier pins — architecture `baa6e35b` (gates
+1–6), integration base `b329325`, review evidence `263c6600`
+(2026-08-19), handbook prose `ae95e313`, last committed code before this
+repair `5782391d` — remain historical context. Live owners are the
+modules named under Current live path. Recall any@5 is **NOT PROMOTED**:
+the last comparable KPI evidence pin is `3af4fd9` (E1 arm: any@5 81/94,
+full-gold@5 43/94); this live path is unmeasured and the ancestor
+`85faef95` missed its diagnostic gates. The earlier `10da1318` B-arm dump
+remains historical benchmark evidence only.
 
 2026-08-23 amendment (algorithm evidence pin `3af4fd9`, source baseline
 `a03dc5d`): recorded the
@@ -35,6 +36,12 @@ gold; all 32 waist questions are honest fused-order family-max walls.
 different owner, `gamma_displaced_fused_head`. S12 and S13 are not a
 G21, retune, or promotion licence. This is a documentation pass
 against live code, not a KPI claim.
+
+2026-08-24 S14 closeout: Dual-13 is honest no-fix. Fused-head skip is
+one general repair on the production binding-aware walk: when
+Values_v/obligation increment is 0, gain is `R_obj` (`fused_score`)
+minus rho. Embedding and facility quality cannot invert a higher
+`R_obj`. Not a KPI claim. G21 stays locked.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -156,6 +163,8 @@ assessment
   -> Select_Gamma with the binding-aware coverage objective under
      eligibility, object-identity dedupe (source hard-dedupe off),
      lineage receipt, dimension, max-entry, and token constraints
+     (when Values_v/obligation increment is 0, gain is fused_score
+     minus rho; embedding/facility quality cannot invert R_obj)
   -> ordered ContextPack and selection-boundary receipt
 ```
 
@@ -191,7 +200,7 @@ The principal owners are:
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Gain is quality plus obligation, binding-value, and facility coverage via the binding-aware objective; production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. |
+| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Gain is quality plus obligation, binding-value, and facility coverage via the binding-aware objective; when Values_v/obligation increment is 0, gain is `R_obj` (`fused_score`) minus rho so embedding/facility quality cannot invert ranking. Production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. S14 ranking-preserve is this gain rule, not a second walk. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
@@ -260,6 +269,18 @@ above every delivered occupier, and Gamma `selection_order` is past
 budget. S13 authorizes no ranking change, no weight retune, and no G21
 launch.
 
+## S14 general repair vs point fix (closed)
+
+S14 asked whether Dual-13 `honest_thinner_r_obj` and E1-only
+`gamma_displaced_fused_head` are general producer-to-consumer defects.
+Dump census on the same E0/E1 snapshots: fused-head golds whose
+family-max strictly exceeds every delivered occupier miss delivery on
+7/46 E1 in-class questions and 0/17 E0. Dual-13 formation did not
+prove a dropped producer ballot. One general repair landed: production
+`createBindingAwareWalkObjective` uses `fused_score` minus rho when
+Values_v/obligation increment is 0. Planted falsifier; no miss-ID
+branch; no G21. This live path remains unmeasured.
+
 ## Semantic formation boundary
 
 The model is optional semantic proposal machinery, not the source-admission or
@@ -304,11 +325,13 @@ not be used to describe current connectedness or to claim a current score gate.
 
 The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
 last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
-diagnostic evidence, not a promotion. Later code — including HEAD
-`5782391d` — is unmeasured, and the ancestor `85faef95` missed its
-diagnostic gates. S12 and S13 dump-only classification of the remaining
-E0/E1 miss partition is closed. G21, retuning, and benchmark promotion
-are not authorized by this document.
+diagnostic evidence, not a promotion. Later code — including `5782391d`
+and this S14 ranking-preserving gain — is unmeasured, and the ancestor
+`85faef95` missed its diagnostic gates. S12 and S13 dump-only
+classification of the remaining E0/E1 miss partition is closed. S14
+landed ranking-preserving Gamma gain; it is not a KPI, G21, or retune
+licence. G21, retuning, and benchmark promotion are not authorized by
+this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate

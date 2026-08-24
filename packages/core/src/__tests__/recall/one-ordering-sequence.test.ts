@@ -109,7 +109,11 @@ describe("one ordering sequence", () => {
   it("records the Select_Gamma walk as the sole delivery rank owner", () => {
     const dupA = createRankedCandidate("dup-a", 1, 0.99);
     const dupB = createRankedCandidate("dup-b", 2, 0.98);
-    const novel = createRankedCandidate("novel", 3, 0.4);
+    const novelBase = createRankedCandidate("novel", 3, 0.4);
+    const novel = {
+      ...novelBase,
+      entry: { ...novelBase.entry, domain_tags: ["location_place"] }
+    };
     const candidates = Object.freeze([dupA, dupB, novel]);
     const result = selectFineAssessmentCandidates({
     ...FIELD_PINS,
@@ -123,7 +127,8 @@ describe("one ordering sequence", () => {
           "dup-a": "same-gist",
           "dup-b": "same-gist",
           novel: "fresh-gist"
-        }
+        },
+        querySoughtFacets: ["location_place"]
       }),
       tokenEstimator: { estimate: () => 6 },
       rankByCandidateKey: deliveryRanks(candidates),

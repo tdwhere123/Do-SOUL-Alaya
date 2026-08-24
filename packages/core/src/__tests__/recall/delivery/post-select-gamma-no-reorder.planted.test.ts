@@ -19,7 +19,9 @@ describe("post-Select_Gamma order is final", () => {
       ...FIELD_PINS,
       orderedCandidates: plant.candidates,
       config: createConfig(),
-      supplementaryData: createSupplementaryData(),
+      supplementaryData: createSupplementaryData({
+        querySoughtFacets: ["location_place"]
+      }),
       tokenEstimator: plant.tokenEstimator,
       rankByCandidateKey: plant.headDropRanks,
       coverageRelevanceByCandidateKey: plant.coverage
@@ -39,7 +41,11 @@ describe("post-Select_Gamma order is final", () => {
 function plantDivergentOrders() {
   const cheap = createRankedCandidate("cheap-gamma", 3, 0.3);
   const fusedHead = createRankedCandidate("fused-head", 1, 0.99);
-  const coverageHead = createRankedCandidate("coverage-head", 2, 0.4);
+  const coverageHeadBase = createRankedCandidate("coverage-head", 2, 0.4);
+  const coverageHead = {
+    ...coverageHeadBase,
+    entry: { ...coverageHeadBase.entry, domain_tags: ["location_place"] }
+  };
   return Object.freeze({
     candidates: Object.freeze([fusedHead, coverageHead, cheap]),
     coverage: new Map([

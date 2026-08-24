@@ -51,6 +51,7 @@ export function bindFineAssessmentBindingCover(
   const objective = createBindingAwareWalkObjective({
     receiptsByCandidateKey,
     contentKeyByCandidateKey: contentKeys(params, context),
+    rankingScoreByCandidateKey: rankingScores(params),
     facility,
     configurationDigest: digestBindingCoverConfiguration({
       receiptsByCandidateKey,
@@ -72,6 +73,15 @@ export function bindFineAssessmentBindingCover(
         formulaCandidates: binding.candidates
       })
   });
+}
+
+function rankingScores(
+  params: FineAssessmentSelectionParams
+): ReadonlyMap<string, number> {
+  return new Map(params.orderedCandidates.map((candidate) => [
+    candidate.fusion.candidate_key,
+    candidate.fusion.fused_score
+  ]));
 }
 
 function contentKeys(
