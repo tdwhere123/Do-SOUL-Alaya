@@ -5,7 +5,6 @@ import {
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { RecallService } from "../../../recall/recall-service.js";
 import { createFieldBackedRecallService } from
   "../fixtures/keyword-field-fixture.js";
 import {

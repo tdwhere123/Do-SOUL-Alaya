@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, MemoryGovernanceEventType, ScopeClass, type PathAnchorRef } from "@do-soul/alaya-protocol";
-import { RecallService } from "../../recall/recall-service.js";
 import { createFieldBackedRecallService } from
   "./fixtures/keyword-field-fixture.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";

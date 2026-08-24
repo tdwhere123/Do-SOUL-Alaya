@@ -214,14 +214,6 @@ async function certifiedDurationQuery(queryText = QUERY) {
   };
 }
 
-async function derive(query: string) {
-  const capture = await captureRecallQueryFactFrames({
-    query_text: query,
-    port: new RuleBasedQueryFactFrameExtractor()
-  });
-  return deriveQueryFactFrameOsfObligation({ query_text: query, fact_frame_capture: capture });
-}
-
 function listenEvidence() {
   return formation("evidence", LISTEN, {
     schema_version: 2,

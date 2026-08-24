@@ -9,11 +9,9 @@ import {
 import {
   createCandidate,
   createConfig,
-  createRankedCandidate,
   createRanks,
   createSupplementaryData,
-  rankMap,
-  stageRanks
+  rankMap
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("selectFineAssessmentCandidates", () => {

@@ -233,7 +233,6 @@ it("respects maxEntries=2 and 3 without post-fusion displacement", async () => {
         });
         const result = await runStructuralRecall(service, maxEntries);
         const delivered = result.candidates;
-        const deliveredIds = delivered.map((candidate) => candidate.object_id);
         const diagnostics = result.diagnostics?.candidates ?? [];
 
         expect(delivered.length).toBeLessThanOrEqual(maxEntries);

@@ -98,7 +98,6 @@ describe("evidence semantic candidate projection", () => {
     const leaders = Array.from({ length: 16 }, (_, index) => candidate(
       createMemoryEntry({ object_id: `memory-leader-${index}` })
     ));
-    const leader = leaders[0]!;
     const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
     const shared = "same grounded source gist";
 
@@ -187,7 +186,6 @@ describe("evidence semantic candidate projection", () => {
     const leaders = Array.from({ length: 32 }, (_, index) => candidate(
       createMemoryEntry({ object_id: `memory-leader-${index}` })
     ));
-    const leader = leaders[0]!;
     const follower = candidate(createMemoryEntry({ object_id: "memory-follower" }));
     const leaveOneOut = {
       projection_id: 2,

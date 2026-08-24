@@ -5,8 +5,6 @@ import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
 } from "../../recall/delivery/fine-assessment-selection.js";
-import { fineAssess } from "../../recall/delivery/fine-assessment.js";
-import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
@@ -23,8 +21,6 @@ import {
   selectionBoundaryJsonSha256
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
-import { createSelectionBoundary } from
-  "../../recall/delivery/fine-assessment-selection/consensus-result.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   projectVerifiedUserAssertionContext
@@ -418,15 +414,6 @@ function captureBoundary(
   }, estimator);
   if (boundary === undefined) throw new Error("selection boundary was not observed");
   return boundary;
-}
-
-function readPreProjection(
-  boundary: FineAssessmentSelectionBoundaryCase
-): FineAssessmentPreProjectionObservation {
-  if (boundary.expected.pre_projection === undefined) {
-    throw new Error("selection boundary did not capture pre-projection");
-  }
-  return boundary.expected.pre_projection;
 }
 
 function fieldLane(

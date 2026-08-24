@@ -26,7 +26,6 @@ import type {
 import type { RecallSupplementaryData } from
   "../../recall/runtime/recall-service-types.js";
 import {
-  createCandidate,
   createConfig,
   createRankedCandidate,
   createSupplementaryData,
