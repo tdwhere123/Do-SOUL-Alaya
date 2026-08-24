@@ -1,5 +1,4 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { resolvePreparedAnswerShapePlan } from "../../query/recall-answer-shape-plan.js";
 import { compileRecallQueryProbes } from "../../query/recall-query-probes.js";
 import { extendQueryProbesWithOpenSemanticFactors } from

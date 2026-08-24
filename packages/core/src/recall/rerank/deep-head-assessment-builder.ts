@@ -105,8 +105,8 @@ export const lightweightDeepHeadFormula: DeepHeadAssessmentFormula = Object.free
     components.fusionBaselineScore !== null,
   resolveScore: (_candidate, components, active) =>
     active ? resolveLightweightScore(components)! : 0,
-  buildTrace: (candidate, components, active) =>
-    buildLightweightTrace(candidate, components, active, LIGHTWEIGHT_OPERATOR_ID)
+  buildTrace: (_candidate, components, active) =>
+    buildLightweightTrace(components, active, LIGHTWEIGHT_OPERATOR_ID)
 });
 
 export const independentEmbeddingEvidenceFormula: DeepHeadAssessmentFormula =
@@ -176,7 +176,6 @@ function resolveLightweightScore(components: LightweightComponents): number | nu
 }
 
 function buildLightweightTrace(
-  candidate: DeliverySelectionCandidate,
   components: LightweightComponents,
   active: boolean,
   operatorId: string

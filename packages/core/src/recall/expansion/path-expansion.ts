@@ -20,8 +20,7 @@ import {
   pathMatchesTimeConcernWindowDigest,
   pathRelationMemoryIds,
   scorePathRelationExpansion,
-  scorePathRelationSuppression,
-  uniqueStrings
+  scorePathRelationSuppression
 } from "./path-relations.js";
 import { resolveTimeConcernQueryDigests } from "./time-concern-query-digests.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
