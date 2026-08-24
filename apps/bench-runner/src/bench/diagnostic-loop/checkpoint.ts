@@ -112,6 +112,10 @@ function isArtifactRecord(phase: DiagnosticLoopPhase, value: unknown): boolean {
     miss_ledger: ["missLedger"],
     report: ["report"]
   };
+  if (phase === "miss_ledger") {
+    return "missLedger" in value &&
+      Object.keys(value).every((key) => key === "missLedger" || key === "mechanismSplit");
+  }
   return hasExactKeys(value, keys[phase]);
 }
 
