@@ -23,8 +23,12 @@ export function createExtractor(rawJson: string): SignalExtractor {
   };
 }
 
+type OpenSemanticFactorGraphFixture = Readonly<Record<string, unknown>> & Readonly<{
+  factors: readonly Readonly<Record<string, unknown>>[];
+}>;
+
 type OpenSemanticSignal<T> = T & Readonly<{
-  semantic_factor_graph: Readonly<Record<string, unknown>>;
+  semantic_factor_graph: OpenSemanticFactorGraphFixture;
 }>;
 
 export function withOpenSemanticFactorGraph<T extends Readonly<Record<string, unknown>>>(

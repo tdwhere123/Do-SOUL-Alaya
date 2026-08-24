@@ -13,9 +13,7 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete: vi.fn(async () => createAssistantMessage(wrapped)),
-      getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
@@ -32,9 +30,7 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete: vi.fn(async () => createAssistantMessage(trailing)),
-      getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
@@ -52,9 +48,7 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete: vi.fn(async () => createAssistantMessage(truncated)),
-      getModel: vi.fn(() => createModel()),
-      sleep: vi.fn(async () => undefined),
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
     const parsed = JSON.parse(result.rawJson) as { signals: unknown[] };
@@ -83,14 +77,11 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
 
   it("throws invalid_json with failure_non_retryable_response on the first attempt", async () => {
     const complete = vi.fn(async () => createAssistantMessage("entirely freeform prose"));
-    const sleep = vi.fn(async () => undefined);
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
       complete,
-      getModel: vi.fn(() => createModel()),
-      sleep,
-      random: vi.fn(() => 0.5)
+      getModel: vi.fn(() => createModel())
     });
     await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
       .rejects.toMatchObject({
@@ -100,7 +91,6 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
         retryClassification: "failure_non_retryable_response"
       } satisfies Partial<SignalExtractorError>);
     expect(complete).toHaveBeenCalledTimes(1);
-    expect(sleep).not.toHaveBeenCalled();
   });
 });
 

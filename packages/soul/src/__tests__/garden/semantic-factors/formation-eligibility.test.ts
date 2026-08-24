@@ -5,6 +5,8 @@ import {
 } from "../../../garden/grounding/semantic-factors/formation-eligibility.js";
 import { createSignalEvidence } from
   "../../../garden/materialization-router/evidence/create-signal-evidence.js";
+import type { EvidenceMaterializationPort } from
+  "../../../garden/materialization-router/contracts.js";
 import { createSignal } from "../materialization-router-fixture.js";
 
 const SOURCE = "I used Atlas for research.";
@@ -145,7 +147,9 @@ describe("open semantic factor formation eligibility", () => {
   });
 
   it("omits semantic admission when the graph is unavailable", async () => {
-    const create = vi.fn(async () => ({
+    const create = vi.fn(async (
+      ..._args: Parameters<EvidenceMaterializationPort["create"]>
+    ) => ({
       object_kind: "evidence_capsule",
       object_id: "evidence-1"
     }));
