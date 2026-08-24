@@ -42,7 +42,7 @@ interface EvidenceCapsuleOverrides {
   readonly evidence_kind?: "conversation_excerpt" | "tool_output";
   readonly evidence_health_state?: "verified" | "questionable";
   readonly gist: string;
-  readonly excerpt: string;
+  readonly excerpt: string | null;
   readonly source_hash?: string | null;
   readonly artifact_ref?: string | null;
 }
@@ -52,7 +52,7 @@ export async function collectWith(params: CollectWithParams) {
   const service = new RecallService(dependencies);
   const referenceTime = captureRecallRequestTime({
     explicitAsOf: params.referenceTime,
-    now: dependencies.now
+    now: dependencies.now ?? (() => new Date().toISOString())
   }).effectiveAsOf;
   return await collectSupplementaryData({
     dependencies: {
@@ -84,6 +84,7 @@ export async function collectWith(params: CollectWithParams) {
     coarseSynthesisFtsRanks: {},
     coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks ?? {},
     coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef ?? {},
+    coarseEvidenceProjectionMatchesByRef: {},
     coarseSourceProximityScores: {},
     coarseSourceCohortKeys: {},
     coarseStructuralScores: {},
@@ -135,11 +136,13 @@ function binaryUseGraph(
     schema_version: 2 as const,
     source_kind: sourceKind,
     factors: [
-      factor("actor", "I", 0, 0, "speaker"),
-      factor("predicate", predicateSurface, 0, 0, "use"),
-      ...(query ? [] : [factor("object", objectSurface, 0, 0, "atlas")])
+      factor("actor", "I", "speaker"),
+      factor("predicate", predicateSurface, "use"),
+      ...(query ? [] : [factor("object", objectSurface, "atlas")])
     ],
-    variables: query ? [{ variable_id: "answer", surface: objectSurface }] : [],
+    variables: query
+      ? [{ variable_id: "answer", surface: objectSurface, source_occurrence: 0 }]
+      : [],
     result_variable_ids: query ? ["answer"] : [],
     propositions: [{
       proposition_id: "use-event",
@@ -154,19 +157,19 @@ function binaryUseGraph(
 
 export function evidenceSemanticGraph() {
   return semanticGraph("evidence", [
-    factor("actor", "I", 0, 1, "speaker"),
-    factor("predicate", "used", 2, 6, "use"),
-    factor("object", "Atlas", 7, 12, "atlas"),
-    factor("purpose", "research", 17, 25, "research")
+    factor("actor", "I", "speaker"),
+    factor("predicate", "used", "use"),
+    factor("object", "Atlas", "atlas"),
+    factor("purpose", "research", "research")
   ], []);
 }
 
 export function querySemanticGraph() {
   return semanticGraph("query", [
-    factor("actor", "I", 8, 9, "speaker"),
-    factor("predicate", "use", 10, 13, "use"),
-    factor("purpose", "research", 18, 26, "research")
-  ], [{ variable_id: "answer", surface: "What" }]);
+    factor("actor", "I", "speaker"),
+    factor("predicate", "use", "use"),
+    factor("purpose", "research", "research")
+  ], [{ variable_id: "answer", surface: "What", source_occurrence: 0 }]);
 }
 
 function semanticGraph(
@@ -175,6 +178,7 @@ function semanticGraph(
   variables: readonly Readonly<{
     readonly variable_id: string;
     readonly surface: string;
+    readonly source_occurrence: number;
   }>[]
 ) {
   return {
@@ -202,13 +206,13 @@ function semanticGraph(
 function factor(
   factorId: string,
   surface: string,
-  _start: number,
-  _end: number,
-  semanticIdentity: string
+  semanticIdentity: string,
+  sourceOccurrence = 0
 ) {
   return {
     factor_id: factorId,
     surface,
+    source_occurrence: sourceOccurrence,
     semantic_identity: semanticIdentity
   };
 }
@@ -234,7 +238,7 @@ export function createEvidenceCapsule(overrides: Readonly<EvidenceCapsuleOverrid
         workspace_id: "workspace-1",
         run_id: "run-1",
         surface_id: null,
-        source_assertion: overrides.excerpt,
+        source_assertion: overrides.excerpt ?? "",
         source_corpus: overrides.gist
       }), "utf8")
     .digest("hex");

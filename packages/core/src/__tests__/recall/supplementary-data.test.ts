@@ -171,7 +171,7 @@ describe("collectSupplementaryData", () => {
         extract: vi.fn(async () => [{
           surface: "Ada Lovelace",
           normalized: "ada lovelace",
-          kind: "proper_noun",
+          kind: "proper_noun" as const,
           confidence: 0.9
         }])
       },
@@ -223,7 +223,7 @@ describe("collectSupplementaryData", () => {
         extract: async () => [{
           surface: "IKEA",
           normalized: "ikea",
-          kind: "proper_noun",
+          kind: "proper_noun" as const,
           confidence: 0.9,
           source_offset: [28, 32]
         }]
