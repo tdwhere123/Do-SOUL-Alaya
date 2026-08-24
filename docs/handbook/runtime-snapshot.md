@@ -1,13 +1,13 @@
 # Runtime Snapshot
 
-Package version is `0.3.11`; the current documentation anchor is the S14
-ranking-preserving Gamma closeout on 2026-08-24 (previous committed code
-`5782391d` remains unmeasured). This file is readiness vocabulary and dated
-snapshots. It is **not** a KPI-promotion or merge-readiness claim.
+Package version is `0.3.11`; the current documentation anchor is the S15
+cache-only measurement of S14 ranking-preserving Gamma on 2026-08-24.
+This file is readiness vocabulary and dated snapshots. It is **not** a
+KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture delta (2026-08-24, S14)
+## Recall posture delta (2026-08-24, S14–S15)
 
 | Fact | Status |
 |---|---|
@@ -16,7 +16,8 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | S11 near-top audit | Closed: ten of ten E0 near-top cases were honest higher `R_obj`, not residual inversion |
 | Independent-embedding quality | Capsule `evidence_semantic` excluded (`06af8c83`) |
 | Last comparable KPI pin | `3af4fd9`: E1 any@5 81/94, full-gold@5 43/94 — diagnostic only |
-| Recall any@5 promotion | **NOT PROMOTED**; S14 live path unmeasured, ancestor `85faef95` missed diagnostic gates |
+| Recall any@5 promotion | **NOT PROMOTED**; S15 is a 3-question cache-only receipt, ancestor `85faef95` missed diagnostic gates |
+| S15 cache-only 1Q→3Q | Closed: KPI E1-only census misses `001be529` `6f9b354f` `726462e0` recovered gold at final≤5; fused ranks unchanged; `physical_calls=0`. Not 100Q |
 | S12 waist/coverage audit | Closed: 1 coverage displacement (`d23cf73b`) plus 32 honest fused-order family-max waist misses |
 | S13 remaining-miss partition | Closed: Dual-13 `honest_thinner_r_obj` (representation); E1-only 3 `gamma_displaced_fused_head`. G21, retuning, and promotion not authorized |
 | S14 general repair | Closed: Dual-13 honest no-fix; fused-head skip is ranking-preserving Gamma gain (`fused_score − rho` when Values_v/obligation increment is 0). Not a KPI. G21 stays locked |

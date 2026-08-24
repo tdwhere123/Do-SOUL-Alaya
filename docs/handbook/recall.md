@@ -4,14 +4,15 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation identity: package `0.3.11`, S14 ranking-preserving
-Gamma gain (2026-08-24). Earlier pins — architecture `baa6e35b` (gates
+Current documentation identity: package `0.3.11`, S15 cache-only
+measurement of S14 ranking-preserving Gamma gain (2026-08-24). Earlier pins — architecture `baa6e35b` (gates
 1–6), integration base `b329325`, review evidence `263c6600`
 (2026-08-19), handbook prose `ae95e313`, last committed code before this
 repair `5782391d` — remain historical context. Live owners are the
 modules named under Current live path. Recall any@5 is **NOT PROMOTED**:
 the last comparable KPI evidence pin is `3af4fd9` (E1 arm: any@5 81/94,
-full-gold@5 43/94); this live path is unmeasured and the ancestor
+full-gold@5 43/94); S15 measured three cache-only questions on this
+live path and is not a 100Q; the ancestor
 `85faef95` missed its diagnostic gates. The earlier `10da1318` B-arm dump
 remains historical benchmark evidence only.
 
@@ -42,6 +43,11 @@ one general repair on the production binding-aware walk: when
 Values_v/obligation increment is 0, gain is `R_obj` (`fused_score`)
 minus rho. Embedding and facility quality cannot invert a higher
 `R_obj`. Not a KPI claim. G21 stays locked.
+
+2026-08-24 S15 closeout: cache-only 1Q then 3Q of the three KPI E1-only
+census misses on the sealed G8 cache, snapshot `6858bca9…`, and the E1
+embedding overlay. Golds recovered at final≤5; fused ranks unchanged;
+`physical_calls=0`. Not a 100Q, not a pin replacement, not a G21 unlock.
 
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
@@ -253,7 +259,8 @@ pushed to delivered rank 7. All 32 waist questions are
 `honest_waist_r_obj`: every fused-order top-5 occupier carries a
 strictly higher legal family-max `R_obj` than the best gold. No fused
 residual inversion was observed. S12 authorizes no ranking change, no
-weight retune, and no G21 launch. HEAD `5782391d` remains unmeasured.
+weight retune, and no G21 launch. S15 later measured three cache-only
+questions on `a4bdb976`; that is not a 100Q.
 
 ## S13 remaining-miss partition (closed)
 
@@ -279,7 +286,8 @@ family-max strictly exceeds every delivered occupier miss delivery on
 prove a dropped producer ballot. One general repair landed: production
 `createBindingAwareWalkObjective` uses `fused_score` minus rho when
 Values_v/obligation increment is 0. Planted falsifier; no miss-ID
-branch; no G21. This live path remains unmeasured.
+branch; no G21. S15 measured the three KPI E1-only census misses
+cache-only; this is not a 100Q or a KPI.
 
 ## Semantic formation boundary
 
@@ -326,7 +334,8 @@ not be used to describe current connectedness or to claim a current score gate.
 The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
 last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
 diagnostic evidence, not a promotion. Later code — including `5782391d`
-and this S14 ranking-preserving gain — is unmeasured, and the ancestor
+and this S14 ranking-preserving gain — has a 3-question S15 cache-only
+receipt, not a 100Q, and the ancestor
 `85faef95` missed its diagnostic gates. S12 and S13 dump-only
 classification of the remaining E0/E1 miss partition is closed. S14
 landed ranking-preserving Gamma gain; it is not a KPI, G21, or retune
