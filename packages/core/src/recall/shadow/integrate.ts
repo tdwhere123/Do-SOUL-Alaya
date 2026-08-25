@@ -6,6 +6,7 @@ import {
 } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
   RecallSupplementaryData,
   TokenEstimator
@@ -94,6 +95,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly utilitiesByKey?: ReadonlyMap<string, ShadowSetUtilityInput>;
   readonly c0Activation?: ShadowC0Seam["activation"];
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly nowIso?: string;
 }>;
 
@@ -112,7 +114,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
   readonly digest: typeof D0_IDENTITY_DIGEST;
   readonly c0_seam: ShadowC0Seam;
-  readonly lexical_mapping: "planted" | "lane_receipts" | "not_observed";
+  readonly lexical_mapping: "planted" | "x0_capture" | "lane_receipts" | "not_observed";
   readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
   readonly relational_o: "excluded";
   readonly eligible_keys: readonly string[];
@@ -200,6 +202,7 @@ function honestObservationField(
     policy: input.policy,
     supplementaryData: input.supplementaryData,
     memoryKeywordLanes: input.memoryKeywordLanes,
+    memoryLexicalCaptures: input.memoryLexicalCaptures,
     nowIso: input.nowIso
   });
   for (const key of keys) {
@@ -340,7 +343,10 @@ function assembleCaptured(
     digest: D0_IDENTITY_DIGEST,
     c0_seam: shadowC0Seam(c0ActivationOf(input)),
     lexical_mapping: input.observationField === undefined
-      ? liveLexicalMapping(observations)
+      ? liveLexicalMapping(
+        observations,
+        (input.memoryLexicalCaptures?.length ?? 0) > 0
+      )
       : "planted" as const,
     admitted_lineages: SHADOW_LINEAGE_IDS,
     relational_o: "excluded" as const,

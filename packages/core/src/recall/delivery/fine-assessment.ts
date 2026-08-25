@@ -10,6 +10,7 @@ import {
 } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
   RecallCandidateDiagnostic,
   RecallServiceWarnPort,
@@ -75,6 +76,9 @@ export interface FineAssessParams {
   readonly shadowObservationField?: ShadowPsiObservationField;
   readonly shadowPsi?: PsiQuery;
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
+  readonly e0Keys?: readonly string[];
+  readonly e1Keys?: readonly string[];
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -126,6 +130,7 @@ function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult
       observationField: params.shadowObservationField,
       psi: params.shadowPsi,
       memoryKeywordLanes: params.memoryKeywordLanes,
+      memoryLexicalCaptures: params.memoryLexicalCaptures,
       nowIso: params.now()
     })
     : undefined;

@@ -74,6 +74,9 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     psi: params.shadowPsi,
     c0Activation: "active",
     memoryKeywordLanes: params.memoryKeywordLanes,
+    memoryLexicalCaptures: params.memoryLexicalCaptures,
+    e0Keys: params.e0Keys,
+    e1Keys: params.e1Keys,
     nowIso: params.now()
   };
 }

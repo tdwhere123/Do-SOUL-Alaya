@@ -186,7 +186,8 @@ export function buildFineAssessParams(
     selectionBoundaryObserver: params.selectionBoundaryObserver,
     generation_id: prepared.queryCondition.generation_id,
     condition_digest: prepared.queryCondition.identity,
-    memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes()
+    memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
+    memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures()
   };
 }
 

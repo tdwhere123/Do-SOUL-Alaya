@@ -6,6 +6,8 @@ import {
 
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import type {
+  KeywordLexicalLaneId,
+  KeywordLexicalMergeCapture,
   KeywordSearchFieldRefinementLevel,
   KeywordSearchFieldResult,
   KeywordSearchLaneObservation,
@@ -52,7 +54,7 @@ function freezeRefinementLevel(value: unknown): Readonly<KeywordSearchFieldRefin
 function freezeFieldView(
   value: unknown,
   maxMatches: number
-): Readonly<Pick<KeywordSearchFieldResult, "matches" | "lanes">> {
+): Readonly<Pick<KeywordSearchFieldResult, "matches" | "lanes" | "lexical_raw_rank">> {
   if (!isRecord(value) || !Array.isArray(value.matches) || !Array.isArray(value.lanes)) {
     throw new TypeError("keyword field result shape is invalid");
   }
@@ -63,7 +65,12 @@ function freezeFieldView(
   const matches = Object.freeze(value.matches.map(freezeSearchResult));
   const lanes = Object.freeze(value.lanes.map(freezeLaneReceipt));
   assertFieldLanes(lanes, maxMatches);
-  return Object.freeze({ matches, lanes });
+  const lexicalRawRank = freezeLexicalMergeCapture(value.lexical_raw_rank);
+  return Object.freeze({
+    matches,
+    lanes,
+    ...(lexicalRawRank === undefined ? {} : { lexical_raw_rank: lexicalRawRank })
+  });
 }
 
 function assertFieldRefinement(
@@ -206,6 +213,58 @@ function assertFieldLanes(
     });
   }
   if (identities.size !== 3) throw new Error("keyword field must report every FTS lane");
+}
+
+function freezeLexicalMergeCapture(value: unknown): Readonly<KeywordLexicalMergeCapture> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || typeof value.query_run_id !== "string" ||
+      !Number.isInteger(value.merge_limit) || !Array.isArray(value.lanes) ||
+      !Array.isArray(value.candidates)) {
+    throw new TypeError("keyword lexical merge capture is invalid");
+  }
+  return Object.freeze({
+    query_run_id: value.query_run_id,
+    merge_limit: Number(value.merge_limit),
+    lanes: Object.freeze(value.lanes.map(freezeLexicalCaptureLane)),
+    candidates: Object.freeze(value.candidates.map(freezeLexicalCaptureCandidate))
+  });
+}
+
+function freezeLexicalCaptureLane(value: unknown): KeywordLexicalMergeCapture["lanes"][number] {
+  if (!isRecord(value) || !isLexicalLaneId(value.lane_id) ||
+      (value.raw_key_kind !== "matched_token_count" && value.raw_key_kind !== "bm25_raw_rank") ||
+      !Number.isInteger(value.list_n) ||
+      (value.status !== "empty" && value.status !== "complete" && value.status !== "truncated")) {
+    throw new TypeError("keyword lexical merge lane is invalid");
+  }
+  return Object.freeze({
+    lane_id: value.lane_id,
+    raw_key_kind: value.raw_key_kind,
+    list_n: Number(value.list_n),
+    status: value.status
+  });
+}
+
+function freezeLexicalCaptureCandidate(
+  value: unknown
+): KeywordLexicalMergeCapture["candidates"][number] {
+  if (!isRecord(value) || typeof value.candidate_key !== "string" ||
+      (value.chosen_lane_id !== null && !isLexicalLaneId(value.chosen_lane_id)) ||
+      (value.chosen_normalized_rank !== null && !unitInterval(value.chosen_normalized_rank)) ||
+      typeof value.admitted !== "boolean") {
+    throw new TypeError("keyword lexical merge candidate is invalid");
+  }
+  return Object.freeze({
+    candidate_key: value.candidate_key,
+    chosen_lane_id: value.chosen_lane_id,
+    chosen_normalized_rank: value.chosen_normalized_rank,
+    admitted: value.admitted
+  });
+}
+
+function isLexicalLaneId(value: unknown): value is KeywordLexicalLaneId {
+  return value === "exact" || value === "porter" || value === "trigram" ||
+    value === "object_key_porter" || value === "object_key_trigram";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

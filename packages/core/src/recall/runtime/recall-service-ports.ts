@@ -54,6 +54,8 @@ import type {
 } from "./recall-service-port-types.js";
 
 export type {
+  KeywordLexicalLaneId,
+  KeywordLexicalMergeCapture,
   KeywordSearchBatchQuery,
   KeywordSearchFieldRefinementLevel,
   KeywordSearchFieldResult,

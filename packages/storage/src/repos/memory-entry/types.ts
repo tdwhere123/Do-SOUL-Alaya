@@ -95,6 +95,22 @@ export interface MemoryEntryKeywordLaneReceipt {
 export interface MemoryEntryKeywordFieldResult {
   readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
   readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
+  readonly lexical_raw_rank?: Readonly<{
+    readonly query_run_id: string;
+    readonly merge_limit: number;
+    readonly lanes: readonly Readonly<{
+      readonly lane_id: string;
+      readonly raw_key_kind: string;
+      readonly list_n: number;
+      readonly status: string;
+    }>[];
+    readonly candidates: readonly Readonly<{
+      readonly candidate_key: string;
+      readonly chosen_lane_id: string | null;
+      readonly chosen_normalized_rank: number | null;
+      readonly admitted: boolean;
+    }>[];
+  }>;
   readonly refinement_levels?: readonly Readonly<{
     readonly requested_depth: number;
     readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];

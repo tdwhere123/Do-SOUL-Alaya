@@ -28,6 +28,7 @@ import {
   type MemoryEntrySearchWorkflowHost
 } from "../search-workflows.js";
 import { searchObjectKeyKeywordLanes } from "./object-key-fts.js";
+import { captureLexicalRawRankReceipt } from "./lexical-raw-rank-capture.js";
 
 type KeywordFieldLane = MemoryEntryKeywordLaneReceipt["lane"];
 
@@ -132,15 +133,18 @@ function buildKeywordFieldView(
   tokens: KeywordLaneTokens,
   depth: number
 ) {
+  const exactRows = rows.exact.slice(0, depth);
+  const trigramRows = rows.trigram.slice(0, depth);
+  const porterRows = rows.porter.slice(0, depth);
+  const objectKeyLanes = Object.freeze({
+    porter: rows.keyPorter.slice(0, depth),
+    trigram: rows.keyTrigram.slice(0, depth)
+  });
+  const matches = mergeKeywordSearchRows(
+    exactRows, trigramRows, depth, porterRows, objectKeyLanes
+  );
   return Object.freeze({
-    matches: mergeKeywordSearchRows(
-      rows.exact.slice(0, depth), rows.trigram.slice(0, depth), depth,
-      rows.porter.slice(0, depth),
-      {
-        porter: rows.keyPorter.slice(0, depth),
-        trigram: rows.keyTrigram.slice(0, depth)
-      }
-    ),
+    matches,
     lanes: Object.freeze([
       buildKeywordFieldLaneReceipt(
         "exact", rows.exact, depth, tokens.exact.length > 0,
@@ -154,7 +158,16 @@ function buildKeywordFieldView(
         "trigram", rows.trigram, depth, tokens.trigram.length > 0,
         (row) => row.raw_rank
       )
-    ])
+    ]),
+    lexical_raw_rank: captureLexicalRawRankReceipt({
+      query_run_id: `memory.keyword.depth:${depth}`,
+      limit: depth,
+      exactRows,
+      trigramRows,
+      porterRows,
+      objectKeyLanes,
+      merged: matches
+    })
   });
 }
 

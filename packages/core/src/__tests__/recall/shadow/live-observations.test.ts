@@ -3,6 +3,7 @@ import { compileRecallQueryProbes } from "../../../recall/query/recall-query-pro
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
 import type {
   CoarseRecallCandidate,
+  KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
@@ -34,6 +35,37 @@ describe("live shadow observations", () => {
       status: "complete",
       raw_key_kind: "bm25_raw_rank"
     });
+  });
+
+  it("uses X0 chosen_lane including object_key_porter", () => {
+    const capture: KeywordLexicalMergeCapture = {
+      query_run_id: "memory.keyword.depth:3",
+      merge_limit: 3,
+      lanes: [{
+        lane_id: "object_key_porter",
+        raw_key_kind: "bm25_raw_rank",
+        list_n: 1,
+        status: "complete"
+      }],
+      candidates: [{
+        candidate_key: "cand-a",
+        chosen_lane_id: "object_key_porter",
+        chosen_normalized_rank: 1,
+        admitted: true
+      }]
+    };
+    const field = buildLiveObservationField(liveInput({
+      query: "operator workspace",
+      lanes: [lane("porter", "cand-a", 0.4, 2)],
+      captures: [capture]
+    }));
+    const lexical = field[keyOf("cand-a")]?.lineages.lexical;
+    expect(lexical && "domain" in lexical ? lexical.domain : null).toMatchObject({
+      lane_id: "object_key_porter",
+      list_n: 1,
+      raw_key_kind: "bm25_raw_rank"
+    });
+    expect(liveLexicalMapping(field, true)).toBe("x0_capture");
   });
 
   it("does not reconstruct lexical O from collapsed ftsRanks", () => {
@@ -102,6 +134,7 @@ describe("live shadow observations", () => {
 function liveInput(options: {
   readonly query: string;
   readonly lanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly captures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly ftsRanks?: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
   readonly embedding_enabled?: boolean;
@@ -131,6 +164,7 @@ function liveInput(options: {
     },
     supplementaryData: supplementaryData(options.query, options.ftsRanks, options.embeddingSimilarityScores),
     memoryKeywordLanes: options.lanes,
+    memoryLexicalCaptures: options.captures,
     nowIso: options.nowIso
   };
 }

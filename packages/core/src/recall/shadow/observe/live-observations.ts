@@ -5,6 +5,8 @@ import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import { buildRecallCandidateDedupeKey } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordLexicalLaneId,
+  KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
@@ -18,7 +20,6 @@ import { shadowLineageApplicability, type ShadowLineageApplicability } from "../
 import { freezeShadow } from "../envelope.js";
 import {
   parsePointwiseObservation,
-  type LexLaneId,
   type ShadowLineageId,
   type ShadowPointwiseObservation,
   type ShadowTemporalDomain,
@@ -27,10 +28,12 @@ import {
 import type { ShadowPsiObservationField } from "../psi.js";
 
 const MERGE_LANES = ["exact", "porter", "trigram"] as const;
-const LANE_PRIORITY: Readonly<Record<(typeof MERGE_LANES)[number], number>> = {
+const LANE_PRIORITY: Readonly<Record<KeywordLexicalLaneId, number>> = {
   exact: 0,
   porter: 1,
-  trigram: 2
+  object_key_porter: 1,
+  trigram: 2,
+  object_key_trigram: 2
 };
 const LIVE_EMB_DOMAIN = freezeShadow({
   provider_kind: "recall.live",
@@ -44,12 +47,14 @@ export type LiveObservationSource = Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly supplementaryData: RecallSupplementaryData;
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly nowIso?: string;
 }>;
 
 type LiveContext = Readonly<{
   readonly applicable: ShadowLineageApplicability;
   readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly captures: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly scores: Readonly<Record<string, number>>;
   readonly probes: Readonly<RecallQueryProbes>;
   readonly nowIso: string | undefined;
@@ -60,10 +65,11 @@ type LiveContext = Readonly<{
 }>;
 
 type LexHit = Readonly<{
-  readonly lane_id: (typeof MERGE_LANES)[number];
+  readonly lane_id: KeywordLexicalLaneId;
   readonly normalized_rank: number;
   readonly list_n: number;
   readonly status: "complete" | "truncated";
+  readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
 }>;
 
 export function buildLiveObservationField(
@@ -81,10 +87,13 @@ export function buildLiveObservationField(
 }
 
 export function liveLexicalMapping(
-  field: ShadowPsiObservationField
-): "lane_receipts" | "not_observed" {
+  field: ShadowPsiObservationField,
+  usedCapture = false
+): "x0_capture" | "lane_receipts" | "not_observed" {
   for (const view of Object.values(field)) {
-    if (view?.lineages.lexical?.envelope.state === "observed") return "lane_receipts";
+    if (view?.lineages.lexical?.envelope.state === "observed") {
+      return usedCapture ? "x0_capture" : "lane_receipts";
+    }
   }
   return "not_observed";
 }
@@ -104,6 +113,7 @@ function liveContext(input: LiveObservationSource): LiveContext {
         : "E0"
     }),
     lanes: input.memoryKeywordLanes ?? Object.freeze([]),
+    captures: input.memoryLexicalCaptures ?? Object.freeze([]),
     scores: input.supplementaryData.embeddingSimilarityScores,
     probes,
     nowIso,
@@ -120,7 +130,7 @@ function liveLineages(
 ): Readonly<Partial<Record<ShadowLineageId, ShadowPointwiseObservation>>> {
   const lineages: Partial<Record<ShadowLineageId, ShadowPointwiseObservation>> = {};
   if (context.applicable.lexical) {
-    lineages.lexical = liveLexical(candidate.entry.object_id, context.lanes);
+    lineages.lexical = liveLexical(candidate.entry.object_id, context);
   }
   if (context.applicable.embedding) {
     lineages.embedding = liveEmbedding(candidate.entry.object_id, context.scores);
@@ -134,9 +144,10 @@ function liveLineages(
 
 function liveLexical(
   objectId: string,
-  lanes: readonly Readonly<KeywordSearchLaneReceipt>[]
+  context: LiveContext
 ): ShadowPointwiseObservation {
-  const hit = chooseLexicalHit(objectId, lanes);
+  const hit = chooseCaptureHit(objectId, context.captures) ??
+    chooseLexicalHit(objectId, context.lanes);
   if (hit === null) {
     return parsePointwiseObservation({
       lineage: "lexical",
@@ -152,12 +163,41 @@ function liveLexical(
     correlation: "dup:lexical-family",
     envelope: { state: "observed", value: hit.normalized_rank },
     domain: {
-      lane_id: hit.lane_id as LexLaneId,
+      lane_id: hit.lane_id,
       list_n: hit.list_n,
       status: hit.status,
-      raw_key_kind: hit.lane_id === "exact" ? "matched_token_count" : "bm25_raw_rank"
+      raw_key_kind: hit.raw_key_kind
     }
   });
+}
+
+function chooseCaptureHit(
+  objectId: string,
+  captures: readonly Readonly<KeywordLexicalMergeCapture>[]
+): LexHit | null {
+  let best: LexHit | null = null;
+  for (const capture of captures) {
+    const row = capture.candidates.find((candidate) =>
+      candidate.candidate_key === objectId &&
+      candidate.admitted &&
+      candidate.chosen_lane_id !== null &&
+      candidate.chosen_normalized_rank !== null
+    );
+    if (row === undefined || row.chosen_lane_id === null ||
+        row.chosen_normalized_rank === null) continue;
+    const lane = capture.lanes.find((item) => item.lane_id === row.chosen_lane_id);
+    if (lane === undefined || (lane.status !== "complete" && lane.status !== "truncated")) {
+      continue;
+    }
+    best = preferLexicalHit(freezeShadow({
+      lane_id: row.chosen_lane_id,
+      normalized_rank: row.chosen_normalized_rank,
+      list_n: lane.list_n,
+      status: lane.status,
+      raw_key_kind: lane.raw_key_kind
+    }), best);
+  }
+  return best;
 }
 
 function chooseLexicalHit(
@@ -178,7 +218,8 @@ function chooseLexicalHit(
         lane_id: lane.lane,
         normalized_rank: observation.normalized_rank,
         list_n: lane.depth,
-        status: lane.status
+        status: lane.status,
+        raw_key_kind: lane.lane === "exact" ? "matched_token_count" as const : "bm25_raw_rank" as const
       }), best);
     }
   }
@@ -190,7 +231,9 @@ function preferLexicalHit(candidate: LexHit, current: LexHit | null): LexHit {
   if (candidate.normalized_rank !== current.normalized_rank) {
     return candidate.normalized_rank > current.normalized_rank ? candidate : current;
   }
-  return LANE_PRIORITY[candidate.lane_id] < LANE_PRIORITY[current.lane_id] ? candidate : current;
+  const candidatePriority = LANE_PRIORITY[candidate.lane_id] ?? 99;
+  const currentPriority = LANE_PRIORITY[current.lane_id] ?? 99;
+  return candidatePriority < currentPriority ? candidate : current;
 }
 
 function liveEmbedding(

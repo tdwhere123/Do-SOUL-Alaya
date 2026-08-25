@@ -141,7 +141,9 @@ describe("C0 reversible delivery cutover", () => {
     const e0 = fineAssess(lexicalAssess(shared, {
       embedding_enabled: false,
       lanes,
-      embeddingSimilarityScores: { "cand-a": 0.2, "cand-b": 0.3, "cand-c": 0.4 }
+      embeddingSimilarityScores: { "cand-a": 0.2, "cand-b": 0.3, "cand-c": 0.4 },
+      e0Keys: shared.map((candidate) => keyOf(candidate.entry.object_id)),
+      e1Keys: shared.map((candidate) => keyOf(candidate.entry.object_id))
     }));
     const e1 = fineAssess(lexicalAssess([...shared, extra], {
       embedding_enabled: true,
@@ -151,7 +153,9 @@ describe("C0 reversible delivery cutover", () => {
         "cand-b": 0.3,
         "cand-c": 0.4,
         "cand-d": 0.99
-      }
+      },
+      e0Keys: shared.map((candidate) => keyOf(candidate.entry.object_id)),
+      e1Keys: [...shared, extra].map((candidate) => keyOf(candidate.entry.object_id))
     }));
     const masked = fineAssess(lexicalAssess([...shared, extra], {
       embedding_enabled: false,
@@ -310,6 +314,8 @@ function lexicalAssess(
     readonly embedding_enabled: boolean;
     readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
     readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
+    readonly e0Keys?: readonly string[];
+    readonly e1Keys?: readonly string[];
   }
 ) {
   return {
@@ -318,6 +324,8 @@ function lexicalAssess(
       embedding_enabled: options.embedding_enabled
     }), "canonical"),
     memoryKeywordLanes: options.lanes,
+    e0Keys: options.e0Keys,
+    e1Keys: options.e1Keys,
     supplementaryData: supplementaryWithInflow(candidates, {
       query: "operator workspace",
       embeddingSimilarityScores: options.embeddingSimilarityScores

@@ -67,9 +67,34 @@ export interface KeywordSearchLaneReceipt {
   readonly unseen_upper_bound: number | null;
 }
 
+export type KeywordLexicalLaneId =
+  | "exact"
+  | "porter"
+  | "trigram"
+  | "object_key_porter"
+  | "object_key_trigram";
+
+export interface KeywordLexicalMergeCapture {
+  readonly query_run_id: string;
+  readonly merge_limit: number;
+  readonly lanes: readonly Readonly<{
+    readonly lane_id: KeywordLexicalLaneId;
+    readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
+    readonly list_n: number;
+    readonly status: "empty" | "complete" | "truncated";
+  }>[];
+  readonly candidates: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly chosen_lane_id: KeywordLexicalLaneId | null;
+    readonly chosen_normalized_rank: number | null;
+    readonly admitted: boolean;
+  }>[];
+}
+
 export interface KeywordSearchFieldResult {
   readonly matches: readonly Readonly<KeywordSearchResult>[];
   readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly lexical_raw_rank?: Readonly<KeywordLexicalMergeCapture>;
   /** Deeper views derived by the producer from the same bounded observation. */
   readonly refinement_levels?: readonly Readonly<KeywordSearchFieldRefinementLevel>[];
 }
