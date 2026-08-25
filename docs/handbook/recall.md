@@ -54,6 +54,12 @@ E1 any@5 63/94 and full-gold@5 27/94; E0 48/94 control and 49/94
 treatment, 21/94 full-gold@5; `physical_calls=0`. Versus ancestor E1
 78/94: +4 / −19. Pin `3af4fd9` retained. Not a retune licence.
 
+2026-08-25 S17 dump-only closeout: S11/S12 fused occupiers that win on
+`structural` or `temporal_facet` do not violate that stream's own
+applicability contract. Zero `producer_ineligible` votes. No producer
+repair, no weight change, no generic SliceKey rule. Dual-13 stays
+honest no-fix. G21 stays MISS. Pin `3af4fd9` retained.
+
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
@@ -305,6 +311,27 @@ branch; no G21. S15 recovered the three
 KPI E1-only census misses.
 G21 100Q then MISSed (E1 63/94); that is not a KPI.
 
+## S17 query-conditioned family eligibility (closed)
+
+S17 asked, on the same E0-control dump as S11/S12, whether fused-order
+top-5 occupiers that win on `structural` or `temporal_facet` violate
+that winning stream's own applicability contract. They do not. Across
+42 questions (10 S11 near-top + 32 S12 waist) there are 210 fused
+occupiers: 112 structural, 79 `temporal_facet`, 19 out of family. Zero
+`producer_ineligible` votes. In-family winning streams are
+`existing_score` (91, always-on `clamp01(effectiveScore)`),
+`temporal_recency` (60, query window or documented no-`date_terms`
+recency fallback after `hasTemporalQuerySignal` lifts weight to 4),
+`evidence_structural_agreement` (21, both legs present), and
+`subject_alignment` (19, `mixed_unproven` because entry content and
+preference-profile fields are unobserved). Question rollup: 35
+`honest_strength`, 7 `mixed_unproven`, 0 `producer_ineligible`.
+Family-max already collapses density. Dual-13 `same_family_weaker`
+remains a counterexample to a universal dense-family claim. S17
+authorizes no producer repair, no weight change, no generic SliceKey
+rule, no Dual-13 retune, and no G21. Dual-13 stays honest no-fix. Pin
+`3af4fd9` retained. Latency stays NOT_VERIFIED.
+
 ## Semantic formation boundary
 
 The model is optional semantic proposal machinery, not the source-admission or
@@ -355,8 +382,9 @@ MISS (E1 63/94), not a pin replacement, and the ancestor
 `85faef95` missed its diagnostic gates. S12 and S13 dump-only
 classification of the remaining E0/E1 miss partition is closed. S14
 landed ranking-preserving Gamma gain; it is not a KPI, G21, or retune
-licence. G21, retuning, and benchmark promotion are not authorized by
-this document.
+licence. S17 closed query-conditioned family eligibility dump-only with
+no producer repair. G21, retuning, and benchmark promotion are not
+authorized by this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate

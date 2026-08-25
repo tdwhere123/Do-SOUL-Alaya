@@ -22,6 +22,7 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | S12 waist/coverage audit | Closed: 1 coverage displacement (`d23cf73b`) plus 32 honest fused-order family-max waist misses |
 | S13 remaining-miss partition | Closed: Dual-13 `honest_thinner_r_obj` (representation); E1-only 3 `gamma_displaced_fused_head`. G21, retuning, and promotion not authorized |
 | S14 general repair | Closed: Dual-13 honest no-fix; fused-head skip is ranking-preserving Gamma gain (`fused_score − rho` when Values_v/obligation increment is 0). Not a KPI |
+| S17 family eligibility | Closed dump-only: 210 fused occupiers on S11/S12, 0 `producer_ineligible`; `existing_score`/`temporal_recency`/`evidence_structural_agreement` honest; 19 `subject_alignment` mixed/unproven. No repair, no weight change |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
 ## Recall posture (2026-08-19 live-source pass)
