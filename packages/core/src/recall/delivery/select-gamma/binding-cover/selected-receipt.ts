@@ -1,4 +1,5 @@
 import { compareText } from "../../../../shared/compare-text.js";
+import { resolveCoverEvidence } from "./composition.js";
 import {
   OBLIGATION_COVER_PREFIX,
   SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID,
@@ -33,6 +34,10 @@ export function materializeSelectedBindingSetReceipt(params: Readonly<{
     operator_id: SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID,
     answer_shape: params.obligation.answer_shape,
     values_status: params.obligation.values_status,
+    cover_evidence: resolveCoverEvidence(
+      params.obligation.values_status,
+      params.obligation.obligation_facets.length
+    ),
     obligation_facets: obligationFacetStandings(
       params.obligation.obligation_facets,
       params.selectedCandidateKeys,

@@ -1,5 +1,5 @@
 import type { RecallAnswerShape } from "../../../query/recall-answer-shape-plan.js";
-import type { BindingValuesStatus } from "./composition.js";
+import type { BindingValuesStatus, CoverEvidence } from "./composition.js";
 
 export const SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID =
   "select_gamma_binding_value_coverage_v1";
@@ -65,6 +65,7 @@ export type SelectedBindingSetReceipt = Readonly<{
   readonly operator_id: typeof SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID;
   readonly answer_shape: RecallAnswerShape | null;
   readonly values_status: BindingValuesStatus;
+  readonly cover_evidence: CoverEvidence;
   readonly obligation_facets: readonly BindingObligationFacetCoverage[];
   readonly variables: readonly SelectedBindingVariable[];
 }>;

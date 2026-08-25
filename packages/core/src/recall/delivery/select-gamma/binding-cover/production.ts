@@ -52,6 +52,8 @@ export function bindFineAssessmentBindingCover(
     receiptsByCandidateKey,
     contentKeyByCandidateKey: contentKeys(params, context),
     rankingScoreByCandidateKey: rankingScores(params),
+    valuesStatus: obligation.values_status,
+    obligationFacetCount: obligation.obligation_facets.length,
     facility,
     configurationDigest: digestBindingCoverConfiguration({
       receiptsByCandidateKey,

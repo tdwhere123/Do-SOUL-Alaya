@@ -1,3 +1,5 @@
+import type { CoverAvailability } from "./binding-cover/composition.js";
+
 export type SelectGammaRisk = "clear" | "blocked";
 export type SelectGammaAuthority = "clear" | "blocked";
 
@@ -63,6 +65,7 @@ export type SelectGammaBinding = Readonly<{
 export type SelectGammaGainParts = Readonly<{
   readonly quality: number;
   readonly coverage: number;
+  readonly cover_availability?: CoverAvailability;
 }>;
 
 export type SelectGammaWalkObjective<State = unknown> = Readonly<{

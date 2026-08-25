@@ -1,7 +1,12 @@
 import type {
   SelectGammaFormulaCandidate,
+  SelectGammaGainParts,
   SelectGammaWalkObjective
 } from "../types.js";
+import {
+  resolveCoverAvailability,
+  type BindingValuesStatus
+} from "./composition.js";
 import { acceptBindingCoverRho, bindingCoverRho, boundRedundancy } from "./rho.js";
 import {
   BINDING_COVER_VALUE_WEIGHT,
@@ -15,6 +20,8 @@ export function createBindingAwareWalkObjective(params: Readonly<{
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
   readonly contentKeyByCandidateKey?: ReadonlyMap<string, string>;
   readonly rankingScoreByCandidateKey?: ReadonlyMap<string, number>;
+  readonly valuesStatus?: BindingValuesStatus;
+  readonly obligationFacetCount?: number;
   readonly configurationDigest: string;
   readonly facility?: SelectGammaWalkObjective<unknown> | null;
 }>): SelectGammaWalkObjective<BindingCoverState> {
@@ -22,6 +29,8 @@ export function createBindingAwareWalkObjective(params: Readonly<{
   const contentKeys = params.contentKeyByCandidateKey ?? new Map<string, string>();
   const rankingScores = params.rankingScoreByCandidateKey;
   const facility = params.facility ?? null;
+  const valuesStatus = params.valuesStatus ?? "observed";
+  const obligationFacetCount = params.obligationFacetCount ?? 0;
   return Object.freeze({
     operator_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
     configuration_digest: params.configurationDigest,
@@ -29,14 +38,15 @@ export function createBindingAwareWalkObjective(params: Readonly<{
     cloneState: (state) => cloneBindingCoverState(state, facility),
     marginalGain: (candidate, state) =>
       bindingAwareGain(
-        candidate, state, receipts, contentKeys, facility, rankingScores
+        candidate, state, receipts, contentKeys, facility, rankingScores,
+        valuesStatus, obligationFacetCount
       ),
     accept: (candidate, state) =>
       acceptBindingAware(candidate, state, receipts, contentKeys, facility),
-    decomposeGain: (candidate, state) => Object.freeze({
-      quality: qualityTerm(candidate, state, facility),
-      coverage: incrementalCoverGain(candidate, state, receipts)
-    })
+    decomposeGain: (candidate, state) =>
+      decomposeBindingGain(
+        candidate, state, receipts, facility, valuesStatus, obligationFacetCount
+      )
   });
 }
 
@@ -75,17 +85,44 @@ function bindingAwareGain(
   receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
   contentKeys: ReadonlyMap<string, string>,
   facility: SelectGammaWalkObjective<unknown> | null,
-  rankingScoreByCandidateKey: ReadonlyMap<string, number> | undefined
+  rankingScoreByCandidateKey: ReadonlyMap<string, number> | undefined,
+  valuesStatus: BindingValuesStatus,
+  obligationFacetCount: number
 ): number {
   const coverGain = incrementalCoverGain(candidate, state, receipts);
-  const positive = coverGain <= 0
-    ? rankingScore(candidate, rankingScoreByCandidateKey)
-    : qualityTerm(candidate, state, facility) + coverGain;
+  const availability = resolveCoverAvailability({
+    valuesStatus,
+    obligationFacetCount,
+    coverGain
+  });
+  const positive = availability === "positive"
+    ? qualityTerm(candidate, state, facility) + coverGain
+    : rankingScore(candidate, rankingScoreByCandidateKey);
   const rho = boundRedundancy(
     bindingCoverRho(candidate, state, contentKeys.get(candidate.candidate_key)),
     positive
   );
   return positive - rho;
+}
+
+function decomposeBindingGain(
+  candidate: SelectGammaFormulaCandidate,
+  state: BindingCoverState,
+  receipts: ReadonlyMap<string, CandidateBindingCoverageReceipt>,
+  facility: SelectGammaWalkObjective<unknown> | null,
+  valuesStatus: BindingValuesStatus,
+  obligationFacetCount: number
+): SelectGammaGainParts {
+  const coverage = incrementalCoverGain(candidate, state, receipts);
+  return Object.freeze({
+    quality: qualityTerm(candidate, state, facility),
+    coverage,
+    cover_availability: resolveCoverAvailability({
+      valuesStatus,
+      obligationFacetCount,
+      coverGain: coverage
+    })
+  });
 }
 
 function incrementalCoverGain(
