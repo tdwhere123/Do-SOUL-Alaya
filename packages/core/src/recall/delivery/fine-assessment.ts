@@ -47,6 +47,10 @@ import {
   type PsiQuery,
   type ShadowPsiObservationField
 } from "../shadow/integrate.js";
+import {
+  deliverCanonicalFineAssessment,
+  resolveFineAssessmentDeliveryPath
+} from "../shadow/canonical-delivery.js";
 
 export interface FineAssessParams {
   readonly workspace_id: string;
@@ -92,10 +96,23 @@ export type FineAssessResult = Readonly<{
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
+  readonly delivery_path: "legacy" | "canonical";
+  readonly d0_identity?: Readonly<{
+    readonly algorithm_id: string;
+    readonly version: string;
+    readonly digest: string;
+  }>;
   readonly shadowTrace?: FineAssessmentShadowTrace;
 }>;
 
 export function fineAssess(params: FineAssessParams): FineAssessResult {
+  if (resolveFineAssessmentDeliveryPath(params.policy.fine_assessment) === "canonical") {
+    return deliverCanonicalFineAssessment(params);
+  }
+  return deliverLegacyFineAssessment(params);
+}
+
+function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult {
   const shadowTrace = params.captureShadowTrace === true
     ? captureShadowIntegration({
       candidates: params.candidates,
@@ -187,7 +204,8 @@ export function deliverFineAssessment(
     coarsePoolSize: preparation.coarsePoolSize,
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
-    finePriorityOverflowCount: preparation.finePriorityOverflowCount
+    finePriorityOverflowCount: preparation.finePriorityOverflowCount,
+    delivery_path: "legacy" as const
   });
 }
 

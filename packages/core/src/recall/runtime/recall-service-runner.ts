@@ -3,7 +3,7 @@ import {
   SoulRecallCompletedPayloadSchema,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import type { FineAssessParams } from "../delivery/fine-assessment.js";
+import { fineAssess, type FineAssessParams } from "../delivery/fine-assessment.js";
 import { captureSupportSetPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import {
@@ -36,9 +36,10 @@ import {
 } from "./orchestration/recall-embedding-assessment.js";
 import { buildRecallResult } from "./recall-result-builder.js";
 import {
+  buildFineAssessParams,
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
-  prepareSnapshotAssessment
+  prepareAssessmentAfterEmbedding
 } from "./orchestration/recall-fine-assessment.js";
 import {
   instantTimedResult,
@@ -53,7 +54,6 @@ import { applySelectGammaSynthesis } from
 import {
   capturesRecallAnswerFeatures,
   type FineAssessmentResult,
-  type FineAssessmentPreparation,
   type PreparedEmbeddingQuery,
   type PreparedRecallRequest,
   type RecallAssessmentStageResult,
@@ -211,20 +211,18 @@ async function assessLegacyCandidateStage(
     coarse.combinedCoarseCandidates,
     preparedEmbeddingQuery.value
   ));
-  const assessment = measureSync(() => prepareSnapshotAssessment(
-    context, params, prepared, coarse, base.value, embedding.value
-  ));
   return completeCandidateAssessment(
     context,
     params,
     prepared,
     coarse,
-    assessment.value.preparedCandidates,
-    assessment.value.supplementaryData,
+    prepareAssessmentAfterEmbedding(
+      context, params, prepared, coarse, base.value, embedding.value
+    ),
     embedding.value,
     Object.freeze({
       embedding: preparedEmbeddingQuery.latencyMs + embedding.latencyMs,
-      assessment: base.latencyMs + assessment.latencyMs,
+      assessment: base.latencyMs,
       delivery: 0
     }),
     "legacy"
@@ -263,20 +261,18 @@ async function assessSnapshotCandidateStage(
     coarse.combinedCoarseCandidates,
     base.value.supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {}
   ));
-  const assessment = measureSync(() => prepareSnapshotAssessment(
-    context, params, prepared, coarse, base.value, embedding.value
-  ));
   return completeCandidateAssessment(
     context,
     params,
     prepared,
     coarse,
-    assessment.value.preparedCandidates,
-    assessment.value.supplementaryData,
+    prepareAssessmentAfterEmbedding(
+      context, params, prepared, coarse, base.value, embedding.value
+    ),
     embedding.value,
     Object.freeze({
       embedding: embedding.latencyMs,
-      assessment: base.latencyMs + assessment.latencyMs,
+      assessment: base.latencyMs,
       delivery: 0
     }),
     "snapshot"
@@ -288,17 +284,21 @@ async function completeCandidateAssessment(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  preparedCandidates: FineAssessmentPreparation,
-  supplementaryData: FineAssessParams["supplementaryData"],
+  assessment: ReturnType<typeof prepareAssessmentAfterEmbedding>,
   embeddingData: EmbeddingAssessmentData,
   phaseLatency: AssessmentPhaseSeed,
   assessmentPath: "legacy" | "snapshot"
 ): Promise<AssessmentStageResult> {
   const { preparedEmbeddingQuery } = embeddingData;
-  const rerank = instantTimedResult(collectAnswerRerankStage(supplementaryData));
-  const delivery = deliverOrReuseAssessment(
-    context, params, prepared, preparedCandidates, rerank.value
-  );
+  const preparedCandidates = assessment.preparedCandidates;
+  const rerank = instantTimedResult(collectAnswerRerankStage(assessment.supplementaryData));
+  const delivery = preparedCandidates === null
+    ? measureSync(() => fineAssess(buildFineAssessParams(
+      context, params, prepared, assessment.supplementaryData, coarse.combinedCoarseCandidates
+    )))
+    : deliverOrReuseAssessment(
+      context, params, prepared, preparedCandidates, rerank.value
+    );
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
   if (embeddingData.evidenceScoring.status === "failed") {
     context.degradationReasons?.add("evidence_candidate_embedding_failed");
@@ -320,8 +320,8 @@ async function completeCandidateAssessment(
     ...(packetPlanTrace === undefined ? {} : { packetPlanTrace }),
     phaseLatencyMs: Object.freeze({
       embedding: phaseLatency.embedding,
-      assessment: phaseLatency.assessment,
-      cross_rerank: rerank.latencyMs,
+      assessment: phaseLatency.assessment + assessment.assessmentLatencyMs,
+      cross_rerank: preparedCandidates === null ? 0 : rerank.latencyMs,
       delivery: phaseLatency.delivery + delivery.latencyMs
     })
   });

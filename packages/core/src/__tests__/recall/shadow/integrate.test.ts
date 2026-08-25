@@ -21,7 +21,7 @@ import {
 } from "../../../recall/shadow/integrate.js";
 import { prefixSK as walkPrefixSK } from "../../../recall/shadow/walk.js";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
-import { createMemoryEntry } from "../recall-service-test-fixtures.js";
+import { createMemoryEntry, withFineDeliveryPath } from "../recall-service-test-fixtures.js";
 import {
   embeddingObserved,
   field,
@@ -34,7 +34,7 @@ const IDS = ["cand-a", "cand-b", "cand-c"] as const;
 
 describe("J1 shadow integration at fineAssess", () => {
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {
-    const params = assessParams(fieldCandidates());
+    const params = assessParams(fieldCandidates(), "legacy");
     const planted = plantedTransitivity();
     const off = fineAssess(params);
     const on = fineAssess({
@@ -53,7 +53,7 @@ describe("J1 shadow integration at fineAssess", () => {
   });
 
   it("cycle in planted Psi fails closed and leaves production unchanged", () => {
-    const params = assessParams(fieldCandidates());
+    const params = assessParams(fieldCandidates(), "legacy");
     const keys = IDS.map(keyOf);
     const cyclic = (dominator: string, dominated: string) =>
       (dominator === keys[0] && dominated === keys[1]) ||
@@ -106,7 +106,7 @@ describe("J1 shadow integration at fineAssess", () => {
     );
     expect(captured.digest).toBe(D0_IDENTITY_DIGEST);
     expect(captured.version).toBe("d0.safe-dominance-capture.v1.0.0");
-    expect(captured.c0_seam.activation).toBe("inactive");
+    expect(captured.c0_seam.activation).toBe("active");
     expect(captured.c0_seam.future_delivery_order).toBe("prefixSK(S_infty, K)");
     expect(captured.c0_seam.rollback).toBe("deliverFineAssessment");
   });
@@ -205,11 +205,14 @@ function shadowInput() {
   };
 }
 
-function assessParams(candidates: readonly CoarseRecallCandidate[]) {
+function assessParams(
+  candidates: readonly CoarseRecallCandidate[],
+  path: "legacy" | "canonical" = "canonical"
+) {
   return {
     ...FIELD_PINS,
     candidates,
-    policy: policy(),
+    policy: withFineDeliveryPath(policy(), path),
     winnerMemoryIds: new Set<string>(),
     supplementaryData: supplementaryWithInflow(candidates),
     tokenEstimator: { estimate: () => 4 },

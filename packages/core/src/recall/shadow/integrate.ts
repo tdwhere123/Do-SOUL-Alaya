@@ -53,12 +53,25 @@ export type { PsiQuery } from "./walk.js";
 export type { ShadowPsiObservationField } from "./psi.js";
 export { prefixSK } from "./walk.js";
 
-export const SHADOW_C0_SEAM = freezeShadow({
-  owner: "fineAssess",
-  activation: "inactive",
-  future_delivery_order: "prefixSK(S_infty, K)",
-  rollback: "deliverFineAssessment"
-} as const);
+export type ShadowC0Seam = Readonly<{
+  readonly owner: "fineAssess";
+  readonly activation: "active" | "inactive";
+  readonly future_delivery_order: "prefixSK(S_infty, K)";
+  readonly rollback: "deliverFineAssessment";
+}>;
+
+export function shadowC0Seam(
+  activation: ShadowC0Seam["activation"]
+): ShadowC0Seam {
+  return freezeShadow({
+    owner: "fineAssess",
+    activation,
+    future_delivery_order: "prefixSK(S_infty, K)",
+    rollback: "deliverFineAssessment"
+  } as const);
+}
+
+export const SHADOW_C0_SEAM = shadowC0Seam("inactive");
 
 export type ShadowFailClosedReason =
   | "psi_cycle_contract_failure"
@@ -76,6 +89,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
   readonly utilitiesByKey?: ReadonlyMap<string, ShadowSetUtilityInput>;
+  readonly c0Activation?: ShadowC0Seam["activation"];
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -84,7 +98,7 @@ export type ShadowFailClosedTrace = Readonly<{
   readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
   readonly digest: typeof D0_IDENTITY_DIGEST;
-  readonly c0_seam: typeof SHADOW_C0_SEAM;
+  readonly c0_seam: ShadowC0Seam;
 }>;
 
 export type ShadowCapturedTrace = Readonly<{
@@ -92,7 +106,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
   readonly digest: typeof D0_IDENTITY_DIGEST;
-  readonly c0_seam: typeof SHADOW_C0_SEAM;
+  readonly c0_seam: ShadowC0Seam;
   readonly lexical_mapping: "planted" | "not_observed";
   readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
   readonly relational_o: "excluded";
@@ -118,7 +132,7 @@ export function captureShadowIntegration(
   try {
     return runShadowIntegration(input);
   } catch {
-    return failClosed("invalid_state");
+    return failClosed("invalid_state", c0ActivationOf(input));
   }
 }
 
@@ -131,19 +145,20 @@ export function isFailClosedShadowTrace(
 function runShadowIntegration(
   input: ShadowIntegrateInput
 ): FineAssessmentShadowTrace {
+  const activation = c0ActivationOf(input);
   const keys = input.candidates.map(buildRecallCandidateDedupeKey);
-  if (!membershipHolds(input, keys)) return failClosed("membership_shrink");
+  if (!membershipHolds(input, keys)) return failClosed("membership_shrink", activation);
   const observations = resolveObservations(input, keys);
   const channels = resolveChannels(observations, input);
   const eligible = eligibleCandidateKeys(observations).filter((key) => keys.includes(key));
   const psi = input.psi ?? psiPredicate(observations, channels);
   const peeled = peelUndominated(eligible, psi);
-  if (isPsiCycleFailure(peeled)) return failClosed("psi_cycle_contract_failure");
+  if (isPsiCycleFailure(peeled)) return failClosed("psi_cycle_contract_failure", activation);
   const walked = walkShadowCapture(
     buildWalkInput(input, keys, observations, peeled, psi, channels)
   );
-  if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure");
-  if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation");
+  if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
+  if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
   return assembleCaptured(input, eligible, peeled, walked);
 }
 
@@ -386,7 +401,7 @@ function assembleCaptured(
     algorithm_id: SHADOW_ALGORITHM_ID,
     version: SHADOW_ALGORITHM_VERSION,
     digest: D0_IDENTITY_DIGEST,
-    c0_seam: SHADOW_C0_SEAM,
+    c0_seam: shadowC0Seam(c0ActivationOf(input)),
     lexical_mapping: input.observationField === undefined ? "not_observed" as const : "planted" as const,
     admitted_lineages: SHADOW_LINEAGE_IDS,
     relational_o: "excluded" as const,
@@ -409,13 +424,20 @@ function assembleCaptured(
   });
 }
 
-function failClosed(reason: ShadowFailClosedReason): ShadowFailClosedTrace {
+function failClosed(
+  reason: ShadowFailClosedReason,
+  activation: ShadowC0Seam["activation"] = "inactive"
+): ShadowFailClosedTrace {
   return freezeShadow({
     kind: "fail_closed" as const,
     reason,
     algorithm_id: SHADOW_ALGORITHM_ID,
     version: SHADOW_ALGORITHM_VERSION,
     digest: D0_IDENTITY_DIGEST,
-    c0_seam: SHADOW_C0_SEAM
+    c0_seam: shadowC0Seam(activation)
   });
+}
+
+function c0ActivationOf(input: ShadowIntegrateInput): ShadowC0Seam["activation"] {
+  return input.c0Activation ?? "inactive";
 }

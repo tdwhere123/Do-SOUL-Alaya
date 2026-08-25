@@ -5,6 +5,7 @@ import {
   prepareFineAssessment,
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
+import { resolveFineAssessmentDeliveryPath } from "../../shadow/canonical-delivery.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import {
   capturesRecallAnswerFeatures,
@@ -66,6 +67,51 @@ export function collectTimedSupplementaryData(
   });
 }
 
+export function mergeSnapshotSupplementaryData(
+  coarse: CoarseStageResult,
+  base: CollectedFineAssessmentData,
+  embeddingData: EmbeddingAssessmentData
+): FineAssessParams["supplementaryData"] {
+  return withEmbeddingSimilarityScores(
+    base.supplementaryData,
+    embeddingData.supplement.similarityHintsByObjectId,
+    coarse.embeddingCoarseInjection.similarityScores,
+    embeddingData.poolRescoreScores,
+    attributedEvidenceActivations(base.supplementaryData, embeddingData),
+    embeddingData.retrievalFieldSeal,
+    embeddingData.retrievalFieldRefinementReceipts
+  );
+}
+
+export function prepareAssessmentAfterEmbedding(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult,
+  base: CollectedFineAssessmentData,
+  embeddingData: EmbeddingAssessmentData
+): Readonly<{
+  readonly preparedCandidates: FineAssessmentPreparation | null;
+  readonly supplementaryData: FineAssessParams["supplementaryData"];
+  readonly assessmentLatencyMs: number;
+}> {
+  if (resolveFineAssessmentDeliveryPath(prepared.policy.fine_assessment) === "canonical") {
+    return Object.freeze({
+      preparedCandidates: null,
+      supplementaryData: mergeSnapshotSupplementaryData(coarse, base, embeddingData),
+      assessmentLatencyMs: 0
+    });
+  }
+  const assessment = measureSync(() => prepareSnapshotAssessment(
+    context, params, prepared, coarse, base, embeddingData
+  ));
+  return Object.freeze({
+    preparedCandidates: assessment.value.preparedCandidates,
+    supplementaryData: assessment.value.supplementaryData,
+    assessmentLatencyMs: assessment.latencyMs
+  });
+}
+
 export function prepareSnapshotAssessment(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -77,15 +123,7 @@ export function prepareSnapshotAssessment(
   readonly preparedCandidates: FineAssessmentPreparation;
   readonly supplementaryData: FineAssessParams["supplementaryData"];
 }> {
-  const supplementaryData = withEmbeddingSimilarityScores(
-    base.supplementaryData,
-    embeddingData.supplement.similarityHintsByObjectId,
-    coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores,
-    attributedEvidenceActivations(base.supplementaryData, embeddingData),
-    embeddingData.retrievalFieldSeal,
-    embeddingData.retrievalFieldRefinementReceipts
-  );
+  const supplementaryData = mergeSnapshotSupplementaryData(coarse, base, embeddingData);
   return Object.freeze({
     supplementaryData,
     preparedCandidates: prepareFineAssessment(buildFineAssessParams(
@@ -126,7 +164,7 @@ export function deliverOrReuseAssessment(
   ));
 }
 
-function buildFineAssessParams(
+export function buildFineAssessParams(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
