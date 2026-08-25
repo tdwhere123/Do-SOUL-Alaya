@@ -106,6 +106,13 @@ export interface RecallResult {
   readonly degradation_reason: SoulMemorySearchDegradationReason | null;
   readonly working_projection: null;
   readonly diagnostics?: Readonly<RecallDiagnostics>;
+  readonly delivery_path?: "legacy" | "canonical";
+  readonly d0_identity?: Readonly<{
+    readonly algorithm_id: string;
+    readonly version: string;
+    readonly digest: string;
+  }>;
+  readonly ranking_authority?: "d0_prefix" | "select_gamma";
 }
 
 export interface RecallSupplementaryData {

@@ -4,11 +4,13 @@ import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import {
+  assertUniqueCandidateField,
   buildRecallCandidateDedupeKey,
   isSynthesisChildCandidate
 } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordSearchLaneReceipt,
   RecallCandidateDiagnostic,
   RecallServiceWarnPort,
   RecallSupplementaryData,
@@ -72,6 +74,7 @@ export interface FineAssessParams {
   readonly captureShadowTrace?: boolean;
   readonly shadowObservationField?: ShadowPsiObservationField;
   readonly shadowPsi?: PsiQuery;
+  readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -102,6 +105,7 @@ export type FineAssessResult = Readonly<{
     readonly version: string;
     readonly digest: string;
   }>;
+  readonly ranking_authority: "d0_prefix" | "select_gamma";
   readonly shadowTrace?: FineAssessmentShadowTrace;
 }>;
 
@@ -120,7 +124,9 @@ function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult
       supplementaryData: params.supplementaryData,
       tokenEstimator: params.tokenEstimator,
       observationField: params.shadowObservationField,
-      psi: params.shadowPsi
+      psi: params.shadowPsi,
+      memoryKeywordLanes: params.memoryKeywordLanes,
+      nowIso: params.now()
     })
     : undefined;
   const production = deliverFineAssessment(params, prepareFineAssessment(params));
@@ -143,19 +149,6 @@ export function prepareFineAssessment(
     params.captureAnswerFeatures === true
   );
   return preparationFromCompleteField(params.candidates, fusedCandidates);
-}
-
-function assertUniqueCandidateField(
-  candidates: readonly Readonly<CoarseRecallCandidate>[]
-): void {
-  const keys = new Set<string>();
-  for (const candidate of candidates) {
-    const key = buildRecallCandidateDedupeKey(candidate);
-    if (keys.has(key)) {
-      throw new Error(`duplicate recall candidate field key: ${key}`);
-    }
-    keys.add(key);
-  }
 }
 
 export function deliverFineAssessment(
@@ -205,7 +198,8 @@ export function deliverFineAssessment(
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
     finePriorityOverflowCount: preparation.finePriorityOverflowCount,
-    delivery_path: "legacy" as const
+    delivery_path: "legacy" as const,
+    ranking_authority: "select_gamma" as const
   });
 }
 

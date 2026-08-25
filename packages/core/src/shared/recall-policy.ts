@@ -34,6 +34,7 @@ export type RecallPolicyBuilderInput = Readonly<{
   readonly embeddingInjectionCap?: number | null;
   readonly embeddingInjectionSimilarityFloor?: number | null;
   readonly embeddingSupplementEnabled?: boolean;
+  readonly deliveryPath?: "legacy" | "canonical";
 }>;
 
 export type RecallPolicyEmbeddingStateInput = Readonly<{
@@ -44,7 +45,7 @@ export type RecallPolicyEmbeddingStateInput = Readonly<{
 
 export type MemorySearchRecallPolicyInput = Readonly<Pick<
   RecallPolicyBuilderInput,
-  "runtimeId" | "taskSurfaceId" | "maxResults" | "filters"
+  "runtimeId" | "taskSurfaceId" | "maxResults" | "filters" | "deliveryPath"
 >>;
 
 export function buildMemorySearchRecallPolicy(
@@ -104,7 +105,8 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
         max_entries: maxResults,
         per_dimension_limits: null
       },
-      conflict_awareness: input.conflictAwareness
+      conflict_awareness: input.conflictAwareness,
+      ...(input.deliveryPath === undefined ? {} : { delivery_path: input.deliveryPath })
     }
   };
   if (input.embeddingInjectionCap == null && input.embeddingInjectionSimilarityFloor == null) {

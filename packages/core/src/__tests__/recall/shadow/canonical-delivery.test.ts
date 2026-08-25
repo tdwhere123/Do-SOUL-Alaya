@@ -15,6 +15,7 @@ import { compileRecallQueryProbes } from "../../../recall/query/recall-query-pro
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
 import type {
   CoarseRecallCandidate,
+  KeywordSearchLaneReceipt,
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
 import * as scoring from "../../../recall/scoring/scoring.js";
@@ -63,6 +64,9 @@ describe("C0 reversible delivery cutover", () => {
     expect(resolveFineAssessmentDeliveryPath(policy.fine_assessment)).toBe("canonical");
     const result = fineAssess(assessParams(fieldCandidates()));
     expect(result.delivery_path).toBe("canonical");
+    expect(result.ranking_authority).toBe("d0_prefix");
+    expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
+    expect(result.candidates.every((candidate) => candidate.relevance_score === 0)).toBe(true);
   });
 
   it("does not import legacy stages into canonical delivery", () => {
@@ -126,19 +130,58 @@ describe("C0 reversible delivery cutover", () => {
       .toEqual(["cand-a", "cand-b"]);
   });
 
-  it("keeps H_E0 keys a subset of H_E1 on the canonical path", () => {
-    const candidates = fieldCandidates();
-    const e0 = fineAssess({
-      ...assessParams(candidates, "canonical"),
-      policy: withFineDeliveryPath(policyOf({ embedding_enabled: false }), "canonical")
+  it("keeps H_E0 a subset of H_E1 and recovers the E0 prefix after masking embedding", () => {
+    const shared = fieldCandidates();
+    const extra = extraCandidate("cand-d");
+    const lanes = porterLanes({
+      "cand-a": 0.9,
+      "cand-b": 0.6,
+      "cand-c": 0.3
     });
-    const e1 = fineAssess({
-      ...assessParams(candidates, "canonical"),
-      policy: withFineDeliveryPath(policyOf({ embedding_enabled: true }), "canonical")
-    });
+    const e0 = fineAssess(lexicalAssess(shared, {
+      embedding_enabled: false,
+      lanes,
+      embeddingSimilarityScores: { "cand-a": 0.2, "cand-b": 0.3, "cand-c": 0.4 }
+    }));
+    const e1 = fineAssess(lexicalAssess([...shared, extra], {
+      embedding_enabled: true,
+      lanes,
+      embeddingSimilarityScores: {
+        "cand-a": 0.2,
+        "cand-b": 0.3,
+        "cand-c": 0.4,
+        "cand-d": 0.99
+      }
+    }));
+    const masked = fineAssess(lexicalAssess([...shared, extra], {
+      embedding_enabled: false,
+      lanes,
+      embeddingSimilarityScores: {}
+    }));
     const e0Keys = asCaptured(e0.shadowTrace).eligible_keys;
-    const e1Keys = new Set(asCaptured(e1.shadowTrace).eligible_keys);
-    expect(e0Keys.every((key) => e1Keys.has(key))).toBe(true);
+    const e1Keys = asCaptured(e1.shadowTrace).eligible_keys;
+    expect(e0Keys.every((key) => e1Keys.includes(key))).toBe(true);
+    expect(e1Keys).toContain(keyOf("cand-d"));
+    expect(e0.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["cand-a", "cand-b", "cand-c"]);
+    expect(masked.candidates.map((candidate) => candidate.object_id)
+      .filter((objectId) => objectId !== "cand-d"))
+      .toEqual(e0.candidates.map((candidate) => candidate.object_id));
+  });
+
+  it("orders canonical prefix from live lane receipts instead of candidate_key", () => {
+    const result = fineAssess(lexicalAssess(fieldCandidates(), {
+      embedding_enabled: false,
+      lanes: porterLanes({
+        "cand-c": 0.9,
+        "cand-b": 0.6,
+        "cand-a": 0.3
+      })
+    }));
+    expect(asCaptured(result.shadowTrace).lexical_mapping).toBe("lane_receipts");
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["cand-c", "cand-b", "cand-a"]);
+    expect(result.ranking_authority).toBe("d0_prefix");
   });
 
   it("binds the frozen D0 identity triple on canonical result and trace", () => {
@@ -246,7 +289,11 @@ function policyOf(overrides: {
 }
 
 function fieldCandidates(): readonly CoarseRecallCandidate[] {
-  return IDS.map((objectId, index) => ({
+  return IDS.map((objectId, index) => extraCandidate(objectId, index));
+}
+
+function extraCandidate(objectId: string, index = 0): CoarseRecallCandidate {
+  return {
     entry: createMemoryEntry({
       object_id: objectId,
       content: `Operator workspace fact ${index}`,
@@ -254,20 +301,68 @@ function fieldCandidates(): readonly CoarseRecallCandidate[] {
     }),
     admissionPlanes: ["activation"],
     firstAdmissionPlane: "activation"
-  }));
+  };
+}
+
+function lexicalAssess(
+  candidates: readonly CoarseRecallCandidate[],
+  options: {
+    readonly embedding_enabled: boolean;
+    readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
+    readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
+  }
+) {
+  return {
+    ...assessParams(candidates, "canonical"),
+    policy: withFineDeliveryPath(policyOf({
+      embedding_enabled: options.embedding_enabled
+    }), "canonical"),
+    memoryKeywordLanes: options.lanes,
+    supplementaryData: supplementaryWithInflow(candidates, {
+      query: "operator workspace",
+      embeddingSimilarityScores: options.embeddingSimilarityScores
+    })
+  };
+}
+
+function porterLanes(
+  ranks: Readonly<Record<string, number>>
+): readonly Readonly<KeywordSearchLaneReceipt>[] {
+  const observations = Object.entries(ranks).map(([objectId, normalized_rank], index) =>
+    Object.freeze({ object_id: objectId, rank: index + 1, normalized_rank })
+  );
+  return Object.freeze([
+    Object.freeze({
+      lane: "porter" as const,
+      status: "complete" as const,
+      depth: observations.length,
+      observations: Object.freeze(observations),
+      unseen_upper_bound: 0
+    })
+  ]);
 }
 
 function supplementaryWithInflow(
-  candidates: readonly CoarseRecallCandidate[]
+  candidates: readonly CoarseRecallCandidate[],
+  overrides: {
+    readonly query?: string;
+    readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
+  } = {}
 ): RecallSupplementaryData {
   const ftsRanks: Record<string, number> = {};
-  const embeddingSimilarityScores: Record<string, number> = {};
+  const embeddingSimilarityScores: Record<string, number> = {
+    ...(overrides.embeddingSimilarityScores ?? {})
+  };
   for (const [index, candidate] of candidates.entries()) {
     ftsRanks[candidate.entry.object_id] = Math.max(0, 1 - index * 0.07);
-    embeddingSimilarityScores[candidate.entry.object_id] = 0.2 + index * 0.1;
+    if (overrides.embeddingSimilarityScores === undefined) {
+      embeddingSimilarityScores[candidate.entry.object_id] = 0.2 + index * 0.1;
+    }
   }
   return {
-    queryProbes: compileRecallQueryProbes("where does the operator work on 2026-03-19?"),
+    queryProbes: compileRecallQueryProbes(
+      overrides.query ?? "where does the operator work on 2026-03-19?"
+    ),
     ftsRanks,
     trigramFtsRanks: {},
     synthesisFtsRanks: {},

@@ -129,7 +129,7 @@ describe("J1 shadow integration at fineAssess", () => {
     }
   });
 
-  it("maps live ftsRanks as lexical not_observed unless a field is planted", () => {
+  it("maps collapsed ftsRanks as lexical not_observed unless a field is planted", () => {
     const honest = captureShadowIntegration(shadowInput());
     const planted = captureShadowIntegration({
       ...shadowInput(),

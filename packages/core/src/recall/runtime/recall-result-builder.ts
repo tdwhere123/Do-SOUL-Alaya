@@ -48,6 +48,11 @@ export function buildRecallResult(
     fine_assessment_count: manifested.candidates.length,
     degradation_reason: coarse.coarseFilter.degradation_reason,
     working_projection: null,
+    delivery_path: assessment.finalAssessment.delivery_path,
+    ranking_authority: assessment.finalAssessment.ranking_authority,
+    ...(assessment.finalAssessment.d0_identity === undefined
+      ? {}
+      : { d0_identity: assessment.finalAssessment.d0_identity }),
     diagnostics: buildRecallDiagnostics({
       queryProbes: prepared.queryProbes,
       queryEntityExtraction: prepared.queryEntityExtraction,

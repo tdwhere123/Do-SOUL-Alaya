@@ -185,7 +185,8 @@ export function buildFineAssessParams(
     answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver,
     generation_id: prepared.queryCondition.generation_id,
-    condition_digest: prepared.queryCondition.identity
+    condition_digest: prepared.queryCondition.identity,
+    memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes()
   };
 }
 

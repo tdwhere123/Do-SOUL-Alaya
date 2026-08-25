@@ -6,6 +6,7 @@ import {
 } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordSearchLaneReceipt,
   RecallSupplementaryData,
   TokenEstimator
 } from "../runtime/recall-service-types.js";
@@ -24,11 +25,13 @@ import {
   SHADOW_ALGORITHM_VERSION
 } from "./identity.js";
 import {
-  parsePointwiseObservation,
   SHADOW_LINEAGE_IDS,
-  type ShadowLineageId,
-  type ShadowPointwiseObservation
+  type ShadowLineageId
 } from "./observations.js";
+import {
+  buildLiveObservationField,
+  liveLexicalMapping
+} from "./live-observations.js";
 import {
   eligibleCandidateKeys,
   e0MembershipSubsetOfE1,
@@ -90,6 +93,8 @@ export type ShadowIntegrateInput = Readonly<{
   readonly e1Keys?: readonly string[];
   readonly utilitiesByKey?: ReadonlyMap<string, ShadowSetUtilityInput>;
   readonly c0Activation?: ShadowC0Seam["activation"];
+  readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly nowIso?: string;
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -107,7 +112,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
   readonly digest: typeof D0_IDENTITY_DIGEST;
   readonly c0_seam: ShadowC0Seam;
-  readonly lexical_mapping: "planted" | "not_observed";
+  readonly lexical_mapping: "planted" | "lane_receipts" | "not_observed";
   readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
   readonly relational_o: "excluded";
   readonly eligible_keys: readonly string[];
@@ -159,7 +164,7 @@ function runShadowIntegration(
   );
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
-  return assembleCaptured(input, eligible, peeled, walked);
+  return assembleCaptured(input, eligible, peeled, walked, observations);
 }
 
 function membershipHolds(
@@ -190,88 +195,19 @@ function honestObservationField(
   input: ShadowIntegrateInput,
   keys: readonly string[]
 ): ShadowPsiObservationField {
-  const probes = input.supplementaryData.queryProbes;
-  const applicable = shadowLineageApplicability({
-    demand: compileRecallQueryDemand(probes),
-    probes,
-    arm: input.policy.coarse_filter.semantic_supplement.embedding_enabled === true
-      ? "E1"
-      : "E0"
+  const field = buildLiveObservationField({
+    candidates: input.candidates,
+    policy: input.policy,
+    supplementaryData: input.supplementaryData,
+    memoryKeywordLanes: input.memoryKeywordLanes,
+    nowIso: input.nowIso
   });
-  const lineages = honestLineages(applicable);
-  const field: Record<string, ShadowPsiObservationField[string]> = {};
   for (const key of keys) {
-    field[key] = freezeShadow({ h_gate: "none" as const, lineages });
+    if (field[key] === undefined) {
+      throw new Error("live observation field missing substrate key");
+    }
   }
   return field;
-}
-
-function honestLineages(
-  applicable: Readonly<Record<ShadowLineageId, boolean>>
-): Readonly<Partial<Record<ShadowLineageId, ShadowPointwiseObservation>>> {
-  const lineages: Partial<Record<ShadowLineageId, ShadowPointwiseObservation>> = {};
-  if (applicable.lexical) lineages.lexical = honestLexical();
-  if (applicable.embedding) lineages.embedding = honestEmbedding();
-  if (applicable.temporal) lineages.temporal = honestTemporal();
-  if (applicable.subject_preference) lineages.subject_preference = honestSubject();
-  return freezeShadow(lineages);
-}
-
-function honestLexical(): ShadowPointwiseObservation {
-  return parsePointwiseObservation({
-    lineage: "lexical",
-    receipt: "fts.lexical.observe.v1",
-    correlation: "dup:lexical-family",
-    envelope: { state: "not_observed", reason: "missing_rank" },
-    domain: null
-  });
-}
-
-function honestEmbedding(): ShadowPointwiseObservation {
-  return parsePointwiseObservation({
-    lineage: "embedding",
-    receipt: "embed.observe.v1",
-    correlation: "dup:embed-max-v1",
-    envelope: { state: "not_observed", reason: "missing_vector" },
-    snapshot: { status: "not_observed", value: null, domain: null, content_hash: null }
-  });
-}
-
-function honestTemporal(): ShadowPointwiseObservation {
-  return parsePointwiseObservation({
-    lineage: "temporal",
-    receipt: "temporal.observe.v1",
-    correlation: "temporal.observe.v1",
-    envelope: { state: "not_observed", reason: "missing_event_time" },
-    evaluator: {
-      applicable: true,
-      parse_state: "window",
-      clock_state: "ok",
-      candidate_evaluated: false,
-      event_time: null,
-      domain: null,
-      finite_value: null
-    }
-  });
-}
-
-function honestSubject(): ShadowPointwiseObservation {
-  return parsePointwiseObservation({
-    lineage: "subject_preference",
-    receipt: "subject.observe.v1",
-    correlation: "subject.observe.v1",
-    envelope: { state: "not_observed", reason: "not_run" },
-    domain: {
-      query_id: "shadow.honest",
-      applicable_component_ids: ["preference"],
-      component_operator_ids: ["scorePreferenceProfileAlignment"]
-    },
-    components: [{
-      component_id: "preference",
-      operator_id: "scorePreferenceProfileAlignment",
-      envelope: { state: "not_observed", reason: "not_run" }
-    }]
-  });
 }
 
 function resolveChannels(
@@ -392,7 +328,8 @@ function assembleCaptured(
   input: ShadowIntegrateInput,
   eligible: readonly string[],
   frontiers: ShadowFrontierReceipt,
-  walked: ShadowCapturedWalk
+  walked: ShadowCapturedWalk,
+  observations: ShadowPsiObservationField
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
@@ -402,7 +339,9 @@ function assembleCaptured(
     version: SHADOW_ALGORITHM_VERSION,
     digest: D0_IDENTITY_DIGEST,
     c0_seam: shadowC0Seam(c0ActivationOf(input)),
-    lexical_mapping: input.observationField === undefined ? "not_observed" as const : "planted" as const,
+    lexical_mapping: input.observationField === undefined
+      ? liveLexicalMapping(observations)
+      : "planted" as const,
     admitted_lineages: SHADOW_LINEAGE_IDS,
     relational_o: "excluded" as const,
     eligible_keys: Object.freeze([...eligible]),
@@ -424,7 +363,7 @@ function assembleCaptured(
   });
 }
 
-function failClosed(
+export function failClosedShadowTrace(
   reason: ShadowFailClosedReason,
   activation: ShadowC0Seam["activation"] = "inactive"
 ): ShadowFailClosedTrace {
@@ -436,6 +375,13 @@ function failClosed(
     digest: D0_IDENTITY_DIGEST,
     c0_seam: shadowC0Seam(activation)
   });
+}
+
+function failClosed(
+  reason: ShadowFailClosedReason,
+  activation: ShadowC0Seam["activation"] = "inactive"
+): ShadowFailClosedTrace {
+  return failClosedShadowTrace(reason, activation);
 }
 
 function c0ActivationOf(input: ShadowIntegrateInput): ShadowC0Seam["activation"] {

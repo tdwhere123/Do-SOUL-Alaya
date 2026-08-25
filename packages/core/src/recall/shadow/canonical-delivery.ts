@@ -10,6 +10,7 @@ import type {
   FineAssessResult
 } from "../delivery/fine-assessment.js";
 import {
+  assertUniqueCandidateField,
   assignManifestation,
   buildRecallCandidateDedupeKey,
   createContentPreview,
@@ -28,14 +29,13 @@ import {
 } from "./identity.js";
 import {
   captureShadowIntegration,
+  failClosedShadowTrace,
   isFailClosedShadowTrace,
   type FineAssessmentShadowTrace,
   type ShadowCapturedTrace,
-  type ShadowFailClosedReason,
   type ShadowFailClosedTrace,
   type ShadowIntegrateInput
 } from "./integrate.js";
-import { freezeShadow } from "./envelope.js";
 
 export const CANONICAL_D0_IDENTITY = Object.freeze({
   algorithm_id: SHADOW_ALGORITHM_ID,
@@ -72,7 +72,9 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     tokenEstimator: params.tokenEstimator,
     observationField: params.shadowObservationField,
     psi: params.shadowPsi,
-    c0Activation: "active"
+    c0Activation: "active",
+    memoryKeywordLanes: params.memoryKeywordLanes,
+    nowIso: params.now()
   };
 }
 
@@ -112,7 +114,8 @@ function emptyCanonicalShell(
     finePriorityOverflowCount: 0,
     shadowTrace,
     delivery_path: "canonical" as const,
-    d0_identity: CANONICAL_D0_IDENTITY
+    d0_identity: CANONICAL_D0_IDENTITY,
+    ranking_authority: "d0_prefix" as const
   };
 }
 
@@ -126,23 +129,7 @@ function canonicalObjective(): CoverageSelectionObjectiveReceipt {
 }
 
 function mappingFailClosed(): ShadowFailClosedTrace {
-  return failClosedTrace("invalid_state");
-}
-
-function failClosedTrace(reason: ShadowFailClosedReason): ShadowFailClosedTrace {
-  return freezeShadow({
-    kind: "fail_closed" as const,
-    reason,
-    algorithm_id: SHADOW_ALGORITHM_ID,
-    version: SHADOW_ALGORITHM_VERSION,
-    digest: D0_IDENTITY_DIGEST,
-    c0_seam: freezeShadow({
-      owner: "fineAssess" as const,
-      activation: "active" as const,
-      future_delivery_order: "prefixSK(S_infty, K)" as const,
-      rollback: "deliverFineAssessment" as const
-    })
-  });
+  return failClosedShadowTrace("invalid_state", "active");
 }
 
 function materializePrefix(
@@ -220,15 +207,4 @@ function sourceChannels(
   return Object.freeze([candidate.sourceChannel]);
 }
 
-function assertUniqueCandidateField(
-  candidates: FineAssessParams["candidates"]
-): void {
-  const keys = new Set<string>();
-  for (const candidate of candidates) {
-    const key = buildRecallCandidateDedupeKey(candidate);
-    if (keys.has(key)) {
-      throw new Error(`duplicate recall candidate field key: ${key}`);
-    }
-    keys.add(key);
-  }
-}
+
