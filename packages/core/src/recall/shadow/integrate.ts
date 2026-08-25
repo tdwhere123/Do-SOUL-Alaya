@@ -31,7 +31,7 @@ import {
 import {
   buildLiveObservationField,
   liveLexicalMapping
-} from "./live-observations.js";
+} from "./observe/live-observations.js";
 import {
   eligibleCandidateKeys,
   e0MembershipSubsetOfE1,

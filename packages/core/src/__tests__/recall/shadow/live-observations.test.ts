@@ -9,7 +9,7 @@ import type {
 import {
   buildLiveObservationField,
   liveLexicalMapping
-} from "../../../recall/shadow/live-observations.js";
+} from "../../../recall/shadow/observe/live-observations.js";
 import { captureShadowIntegration, isFailClosedShadowTrace } from
   "../../../recall/shadow/integrate.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";

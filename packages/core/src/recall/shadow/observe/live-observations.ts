@@ -1,21 +1,21 @@
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
-import { clamp01 } from "../../shared/clamp.js";
-import { compileRecallQueryDemand } from "../query/recall-query-demand.js";
-import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { buildRecallCandidateDedupeKey } from "../runtime/recall-service-helpers.js";
+import { clamp01 } from "../../../shared/clamp.js";
+import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
+import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
+import { buildRecallCandidateDedupeKey } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   KeywordSearchLaneReceipt,
   RecallSupplementaryData
-} from "../runtime/recall-service-types.js";
+} from "../../runtime/recall-service-types.js";
 import {
   parseQueryTimeWindow,
   scoreTemporalEventTime,
   scoreTemporalQueryWindow,
   type QueryTimeWindow
-} from "../scoring/temporal-fusion-scoring.js";
-import { shadowLineageApplicability, type ShadowLineageApplicability } from "./demand.js";
-import { freezeShadow } from "./envelope.js";
+} from "../../scoring/temporal-fusion-scoring.js";
+import { shadowLineageApplicability, type ShadowLineageApplicability } from "../demand.js";
+import { freezeShadow } from "../envelope.js";
 import {
   parsePointwiseObservation,
   type LexLaneId,
@@ -23,8 +23,8 @@ import {
   type ShadowPointwiseObservation,
   type ShadowTemporalDomain,
   type ShadowTemporalEvaluator
-} from "./observations.js";
-import type { ShadowPsiObservationField } from "./psi.js";
+} from "../observations.js";
+import type { ShadowPsiObservationField } from "../psi.js";
 
 const MERGE_LANES = ["exact", "porter", "trigram"] as const;
 const LANE_PRIORITY: Readonly<Record<(typeof MERGE_LANES)[number], number>> = {

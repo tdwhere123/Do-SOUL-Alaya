@@ -6,6 +6,7 @@ import {
   requireInteger,
   requireNonemptyString,
   requireShadowRecord,
+  requireStringList,
   ShadowContractError,
   type ShadowEnvelope
 } from "./envelope.js";
@@ -400,8 +401,8 @@ function parseSubjDomain(
 ): SubjDomain {
   const record = requireShadowRecord(input, "SubjDomain");
   assertAllowedKeys(record, ["query_id", "applicable_component_ids", "component_operator_ids"]);
-  const applicable = asStringList(record.applicable_component_ids, "applicable_component_ids");
-  const operators = asStringList(record.component_operator_ids, "component_operator_ids");
+  const applicable = requireStringList(record.applicable_component_ids, "applicable_component_ids");
+  const operators = requireStringList(record.component_operator_ids, "component_operator_ids");
   if (applicable.some((id) => !SUBJECT_COMPONENT_IDS.has(id))) {
     throw new ShadowContractError("invalid applicable subject component id");
   }
@@ -467,13 +468,6 @@ function sameEnvelope(left: ShadowEnvelope, right: ShadowEnvelope): boolean {
 
 function sameStringList(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function asStringList(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new ShadowContractError(`${label} must be a string list`);
-  }
-  return value as string[];
 }
 
 function parseOptionalString(value: unknown): string | null {

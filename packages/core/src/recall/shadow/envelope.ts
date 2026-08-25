@@ -142,6 +142,13 @@ export function requireInteger(value: unknown, label: string): number {
   return value;
 }
 
+export function requireStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new ShadowContractError(`${label} must be a string list`);
+  }
+  return value;
+}
+
 export function freezeShadow<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value);
 }

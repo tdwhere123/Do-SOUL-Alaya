@@ -8,6 +8,7 @@ import {
   isShadowRecord,
   requireFiniteNumber,
   requireInteger,
+  requireStringList,
   ShadowContractError
 } from "./envelope.js";
 import {
@@ -392,7 +393,7 @@ function freezeCaptureDecision(
     G_status: parseDecisionGStatus(input.G_status),
     named_novelty: parseNamedNovelty(input.named_novelty, input.capture_reason),
     novelty_core_known_absence: absence,
-    max_g_cohort: Object.freeze(parseStringList(input.max_g_cohort)),
+    max_g_cohort: Object.freeze(requireStringList(input.max_g_cohort, "max_g_cohort")),
     equal_g_dominance_rejects: rejects,
     deterministic_tail: "candidate_key_code_unit_ascending",
     unresolved_pointwise_tradeoff: input.unresolved_pointwise_tradeoff,
@@ -452,9 +453,9 @@ function parseNamedNovelty(
   }
   assertAllowedKeys(input, ["facility_keys", "value_pairs", "content_ids"]);
   const novelty = freezeShadow({
-    facility_keys: Object.freeze(parseStringList(input.facility_keys)),
-    value_pairs: Object.freeze(parseStringList(input.value_pairs)),
-    content_ids: Object.freeze(parseStringList(input.content_ids))
+    facility_keys: Object.freeze(requireStringList(input.facility_keys, "facility_keys")),
+    value_pairs: Object.freeze(requireStringList(input.value_pairs, "value_pairs")),
+    content_ids: Object.freeze(requireStringList(input.content_ids, "content_ids"))
   });
   const named = novelty.facility_keys.length + novelty.value_pairs.length +
     novelty.content_ids.length;
@@ -465,13 +466,6 @@ function parseNamedNovelty(
     throw new ShadowContractError("core capture must not name novelty");
   }
   return novelty;
-}
-
-function parseStringList(input: unknown): string[] {
-  if (!Array.isArray(input) || input.some((value) => typeof value !== "string")) {
-    throw new ShadowContractError("expected a string list");
-  }
-  return input as string[];
 }
 
 function parseHGate(value: unknown): ShadowCaptureDecisionReceipt["h_gate"] {
