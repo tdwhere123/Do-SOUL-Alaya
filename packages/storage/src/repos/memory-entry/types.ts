@@ -99,14 +99,25 @@ export interface MemoryEntryKeywordFieldResult {
     readonly query_run_id: string;
     readonly merge_limit: number;
     readonly lanes: readonly Readonly<{
-      readonly lane_id: string;
-      readonly raw_key_kind: string;
+      readonly lane_id:
+        | "exact"
+        | "porter"
+        | "trigram"
+        | "object_key_porter"
+        | "object_key_trigram";
+      readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
       readonly list_n: number;
-      readonly status: string;
+      readonly status: "empty" | "complete" | "truncated";
     }>[];
     readonly candidates: readonly Readonly<{
       readonly candidate_key: string;
-      readonly chosen_lane_id: string | null;
+      readonly chosen_lane_id:
+        | "exact"
+        | "porter"
+        | "trigram"
+        | "object_key_porter"
+        | "object_key_trigram"
+        | null;
       readonly chosen_normalized_rank: number | null;
       readonly admitted: boolean;
     }>[];

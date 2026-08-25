@@ -319,8 +319,7 @@ function collectMemoryLexicalCaptures(
   records: readonly Readonly<RecordedFieldResult>[]
 ): readonly Readonly<KeywordLexicalMergeCapture>[] {
   return Object.freeze(records.flatMap((record) =>
-    (record.prefix === "lexical_relaxed" || record.prefix === "lexical_expanded") &&
-      record.result.lexical_raw_rank !== undefined
+    record.prefix === "lexical_relaxed" && record.result.lexical_raw_rank !== undefined
       ? [record.result.lexical_raw_rank]
       : []
   ));
