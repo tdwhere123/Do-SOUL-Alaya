@@ -1,5 +1,3 @@
-import type { CoverAvailability } from "./binding-cover/composition.js";
-
 export type SelectGammaRisk = "clear" | "blocked";
 export type SelectGammaAuthority = "clear" | "blocked";
 
@@ -61,6 +59,8 @@ export type SelectGammaBinding = Readonly<{
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly source_hard_dedupe?: boolean;
 }>;
+
+export type CoverAvailability = "positive" | "known_zero" | "unavailable";
 
 export type SelectGammaGainParts = Readonly<{
   readonly quality: number;

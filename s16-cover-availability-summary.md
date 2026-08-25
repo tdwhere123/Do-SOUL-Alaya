@@ -24,7 +24,7 @@
 - Cover evidence is available iff `values_status !== "unavailable"` or `obligation_facets.length > 0`. Truncated composed OSF is available, not unavailable.
 - Per-candidate state: `unavailable` / `known_zero` / `positive`. Unavailable and known-zero both use `fused_score − rho`; only positive uses `quality + coverGain − rho`. Numerics match HEAD; the branch is now explicit and observable.
 - Classification stays in `composition.ts` (no 11th `binding-cover/` sibling). `bindingAwareGain` applies the number; receipts remain the audit surface.
-- `createBindingAwareWalkObjective` defaults omitted `valuesStatus` to `"observed"` so existing unit helpers that pass receipts without status keep cover increments. Production always supplies `obligation.values_status` and facet count.
+- `createBindingAwareWalkObjective` requires `valuesStatus`. Production supplies `obligation.values_status`. Unit helpers that intend cover increments pass `"observed"` explicitly.
 - `SelectGammaGainParts.cover_availability` is optional so `walk-objective.ts` quality/coverage-only decompose is unchanged.
 
 ## Deviations

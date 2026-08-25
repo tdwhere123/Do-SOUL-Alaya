@@ -20,7 +20,7 @@ export function createBindingAwareWalkObjective(params: Readonly<{
   readonly receiptsByCandidateKey: ReadonlyMap<string, CandidateBindingCoverageReceipt>;
   readonly contentKeyByCandidateKey?: ReadonlyMap<string, string>;
   readonly rankingScoreByCandidateKey?: ReadonlyMap<string, number>;
-  readonly valuesStatus?: BindingValuesStatus;
+  readonly valuesStatus: BindingValuesStatus;
   readonly obligationFacetCount?: number;
   readonly configurationDigest: string;
   readonly facility?: SelectGammaWalkObjective<unknown> | null;
@@ -29,7 +29,7 @@ export function createBindingAwareWalkObjective(params: Readonly<{
   const contentKeys = params.contentKeyByCandidateKey ?? new Map<string, string>();
   const rankingScores = params.rankingScoreByCandidateKey;
   const facility = params.facility ?? null;
-  const valuesStatus = params.valuesStatus ?? "observed";
+  const valuesStatus = params.valuesStatus;
   const obligationFacetCount = params.obligationFacetCount ?? 0;
   return Object.freeze({
     operator_id: SELECT_GAMMA_BINDING_COVERAGE_OPERATOR_ID,
@@ -113,15 +113,16 @@ function decomposeBindingGain(
   valuesStatus: BindingValuesStatus,
   obligationFacetCount: number
 ): SelectGammaGainParts {
-  const coverage = incrementalCoverGain(candidate, state, receipts);
+  const coverGain = incrementalCoverGain(candidate, state, receipts);
+  const cover_availability = resolveCoverAvailability({
+    valuesStatus,
+    obligationFacetCount,
+    coverGain
+  });
   return Object.freeze({
     quality: qualityTerm(candidate, state, facility),
-    coverage,
-    cover_availability: resolveCoverAvailability({
-      valuesStatus,
-      obligationFacetCount,
-      coverGain: coverage
-    })
+    coverage: cover_availability === "unavailable" ? 0 : coverGain,
+    cover_availability
   });
 }
 

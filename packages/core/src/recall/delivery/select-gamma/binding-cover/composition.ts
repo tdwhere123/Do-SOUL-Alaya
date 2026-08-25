@@ -1,9 +1,10 @@
 import type { OpenSemanticFactorCompositionReceipt } from
   "../../../field/open-semantic-factors/composition.js";
+import type { CoverAvailability } from "../types.js";
 
 export type BindingValuesStatus = "observed" | "truncated" | "unavailable";
 export type CoverEvidence = "available" | "unavailable";
-export type CoverAvailability = "positive" | "known_zero" | "unavailable";
+export type { CoverAvailability };
 
 export function usableOpenSemanticFactorComposition(
   composition: Readonly<OpenSemanticFactorCompositionReceipt> | undefined

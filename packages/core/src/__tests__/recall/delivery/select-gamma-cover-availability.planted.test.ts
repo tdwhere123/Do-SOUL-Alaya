@@ -162,6 +162,33 @@ describe("Select_Gamma cover availability", () => {
     expect(objective.marginalGain(fusedHead, state)).toBe(0.9);
   });
 
+  it("does not treat leftover valued receipts as cover when composition is unavailable", () => {
+    const fusedHead = formulaCandidate("fused-head", {
+      quality: 0.2, cover: {}, source: "head"
+    });
+    const facility = {
+      operator_id: "test_facility",
+      createState: () => null,
+      marginalGain: () => 99,
+      accept: () => undefined
+    };
+    const objective = createBindingAwareWalkObjective({
+      receiptsByCandidateKey: new Map([
+        ["fused-head", valueReceipt("fused-head", "count", "three")]
+      ]),
+      rankingScoreByCandidateKey: new Map([["fused-head", 0.9]]),
+      valuesStatus: "unavailable",
+      obligationFacetCount: 0,
+      configurationDigest: DIGEST,
+      facility
+    });
+    const state = objective.createState();
+    const parts = requireDecompose(objective, fusedHead, state);
+    expect(parts.cover_availability).toBe("unavailable");
+    expect(parts.coverage).toBe(0);
+    expect(objective.marginalGain(fusedHead, state)).toBe(0.9);
+  });
+
   it("treats truncated composition as available cover evidence", () => {
     const apple = withEvidence(createRankedCandidate("gold-a", 1, 0.8), "ev-apple");
     const composition = {

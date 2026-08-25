@@ -229,6 +229,7 @@ describe("Select_Gamma binding-value coverage", () => {
       bindingOf([facilityWinner, qualityLoser], 1),
       createBindingAwareWalkObjective({
         receiptsByCandidateKey: new Map(),
+        valuesStatus: "unavailable",
         configurationDigest: `sha256:${"c".repeat(64)}`,
         facility
       })
@@ -260,6 +261,7 @@ describe("Select_Gamma binding-value coverage", () => {
         receiptsByCandidateKey: new Map([
           ["facility-hit", valueReceipt("facility-hit", "count", "three")]
         ]),
+        valuesStatus: "observed",
         configurationDigest: `sha256:${"c".repeat(64)}`,
         facility
       })
@@ -492,6 +494,7 @@ function bindingObjective(
 ) {
   return createBindingAwareWalkObjective({
     receiptsByCandidateKey,
+    valuesStatus: "observed",
     configurationDigest: `sha256:${"b".repeat(64)}`
   });
 }
