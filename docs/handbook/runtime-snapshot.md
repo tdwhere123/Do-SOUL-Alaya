@@ -7,7 +7,7 @@ KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture delta (2026-08-24, S14–G21)
+## Recall posture delta (2026-08-24–25, S14–S18)
 
 | Fact | Status |
 |---|---|
