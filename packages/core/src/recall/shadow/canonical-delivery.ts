@@ -103,7 +103,8 @@ function failClosedCanonicalResult(
 ): FineAssessResult {
   return Object.freeze({
     ...emptyCanonicalShell(params, shadowTrace),
-    candidates: Object.freeze([])
+    candidates: Object.freeze([]),
+    diagnostics: buildCanonicalDeliveryDiagnostics(params, Object.freeze([]))
   });
 }
 
