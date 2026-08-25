@@ -68,6 +68,10 @@ describe("Select_Gamma cover availability", () => {
     expect(unavailable.binding_set_receipt.cover_evidence).toBe("unavailable");
     expect(knownZero.binding_set_receipt.values_status).toBe("observed");
     expect(knownZero.binding_set_receipt.cover_evidence).toBe("available");
+    expect(unavailable.diagnostics.find((candidate) => candidate.object_id === "waist-emb")
+      ?.dropped_reason).toBe("rank_displaced");
+    expect(knownZero.diagnostics.find((candidate) => candidate.object_id === "waist-emb")
+      ?.dropped_reason).toBe("rank_displaced");
 
     const fusedHead = formulaCandidate("fused-head", {
       quality: 0.2, cover: {}, source: "head"
@@ -189,7 +193,7 @@ describe("Select_Gamma cover availability", () => {
     expect(objective.marginalGain(fusedHead, state)).toBe(0.9);
   });
 
-  it("treats truncated composition as available cover evidence", () => {
+  it("treats truncated zero increment as unavailable, not known-zero", () => {
     const apple = withEvidence(createRankedCandidate("gold-a", 1, 0.8), "ev-apple");
     const composition = {
       ...compositionOf([["count", "three", ["ev-apple"]]]),
@@ -218,6 +222,58 @@ describe("Select_Gamma cover availability", () => {
     }).cover_availability).toBe("positive");
     expect(decomposeAt(gold, {
       valuesStatus: "truncated",
+      obligationFacetCount: 0
+    }).cover_availability).toBe("unavailable");
+  });
+
+  it("pins known-zero gain to rankingScore minus rho", () => {
+    const fusedHead = formulaCandidate("fused-head", {
+      quality: 0.2, cover: {}, source: "head"
+    });
+    const facility = {
+      operator_id: "test_facility",
+      createState: () => null,
+      marginalGain: () => 99,
+      accept: () => undefined
+    };
+    const objective = createBindingAwareWalkObjective({
+      receiptsByCandidateKey: new Map(),
+      rankingScoreByCandidateKey: new Map([["fused-head", 0.9]]),
+      valuesStatus: "observed",
+      obligationFacetCount: 0,
+      configurationDigest: DIGEST,
+      facility
+    });
+    const state = objective.createState();
+    const parts = requireDecompose(objective, fusedHead, state);
+    expect(parts.cover_availability).toBe("known_zero");
+    expect(parts.coverage).toBe(0);
+    expect(objective.marginalGain(fusedHead, state)).toBe(0.9);
+  });
+
+  it("treats exhaustive no_match composition as observed known-zero", () => {
+    const apple = withEvidence(createRankedCandidate("gold-a", 1, 0.8), "ev-apple");
+    const result = selectFineAssessmentCandidates({
+      ...productionParams([apple, createRankedCandidate("noise-0", 2, 0.1)]),
+      supplementaryData: createSupplementaryData({
+        openSemanticFactorComposition: {
+          ...compositionOf([]),
+          status: "no_match",
+          solution_count: 0,
+          observed_binding_count: 0,
+          binding_observation_count: 0,
+          result_variable_ids: Object.freeze([]),
+          variable_collections: Object.freeze([])
+        }
+      })
+    });
+    expect(result.binding_set_receipt.values_status).toBe("observed");
+    expect(result.binding_set_receipt.cover_evidence).toBe("available");
+    const gold = formulaCandidate("gold-a", {
+      quality: 0.8, cover: {}, source: "receipt"
+    });
+    expect(decomposeAt(gold, {
+      valuesStatus: "observed",
       obligationFacetCount: 0
     }).cover_availability).toBe("known_zero");
   });

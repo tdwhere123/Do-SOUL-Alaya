@@ -237,7 +237,7 @@ describe("Select_Gamma binding-value coverage", () => {
 
     expect(walk.selected_candidate_keys).toEqual(["quality-loser"]);
     expect(walk.decisions.find((decision) => decision.candidate_key === "facility-hit")
-      ?.receipt.kind).toBe("quality_displaced");
+      ?.receipt.kind).toBe("rank_displaced");
   });
 
   it("lets facility-hit with a new Values_v still win under budget 1", () => {

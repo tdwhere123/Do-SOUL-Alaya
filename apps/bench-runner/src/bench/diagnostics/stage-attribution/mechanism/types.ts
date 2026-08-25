@@ -4,6 +4,7 @@ export const MECHANISM_PREFIX_OPERATOR_ID = "recall_mechanism_prefix_eligibility
 export const GOLD_EXCLUSION_FIRST_REASONS = Object.freeze([
   "quality_displaced",
   "coverage_displaced",
+  "rank_displaced",
   "duplicate_source",
   "duplicate_object",
   "dimension_limit",

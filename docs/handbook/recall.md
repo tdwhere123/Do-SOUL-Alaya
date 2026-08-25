@@ -177,7 +177,12 @@ assessment
      (positive cover: quality plus Values_v/obligation increment;
      known-zero increment: fused_score minus rho so embedding/facility
      quality cannot invert R_obj; unavailable cover: the same rank-only
-     fused_score minus rho fallback, not a proof of zero cover)
+     fused_score minus rho fallback, not a proof of zero cover.
+     decomposeGain.coverage is 0 when unavailable; rank-only parts do
+     not satisfy quality+coverage=gain. Truncated composition may
+     still show a positive increment; a zero increment under truncated
+     is unavailable, not known-zero. Last-slot losers under rank-only
+     are rank_displaced, not quality_displaced.)
   -> ordered ContextPack and selection-boundary receipt
 ```
 
@@ -213,7 +218,7 @@ The principal owners are:
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
 | Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Binding-aware gain is tri-state: positive incremental cover is quality plus cover; known-zero cover is `R_obj` (`fused_score`) minus rho so embedding/facility quality cannot invert ranking; unavailable cover is that same rank-only fallback, not a proof of zero cover. Production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. S14 ranking-preserve is the known-zero numeric, not a second walk. |
+| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Binding-aware gain is tri-state: positive incremental cover is quality plus cover; known-zero cover is `R_obj` (`fused_score`) minus rho so embedding/facility quality cannot invert ranking; unavailable cover is that same rank-only fallback, not a proof of zero cover. `decomposeGain.coverage` is 0 when unavailable, so rank-only parts are not an additive identity. Truncated composition cannot prove known-zero. Last-slot displacement under rank-only is `rank_displaced`. Production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. S14 ranking-preserve is the known-zero numeric, not a second walk. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
@@ -294,7 +299,9 @@ prove a dropped producer ballot. One general repair landed: production
 `createBindingAwareWalkObjective` uses `fused_score` minus rho when
 Values_v/obligation increment is 0. Unavailable cover uses that same
 numeric as an explicit rank-only fallback, not as proof of zero cover.
-Planted falsifier; no miss-ID branch; no G21. S15 recovered the three
+Last-slot losers under that fallback are `rank_displaced`. Truncated
+composition cannot prove known-zero. Planted falsifier; no miss-ID
+branch; no G21. S15 recovered the three
 KPI E1-only census misses.
 G21 100Q then MISSed (E1 63/94); that is not a KPI.
 

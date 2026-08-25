@@ -1,3 +1,4 @@
+import { isSelectGammaDisplacementReceipt } from "./displacement.js";
 import type {
   SelectGammaDecisionReceipt,
   SelectGammaWalkResult
@@ -6,6 +7,7 @@ import type {
 export type SelectGammaFirstExclusionReason =
   | "quality_displaced"
   | "coverage_displaced"
+  | "rank_displaced"
   | "duplicate_source"
   | "duplicate_object"
   | "dimension_limit"
@@ -36,7 +38,7 @@ export function mapSelectGammaConstraintReceipt(
   if (receipt.kind === "dimension_limit") return "dimension_limit";
   if (receipt.kind === "max_total_tokens") return "token_budget";
   if (receipt.kind === "max_entries") return "entry_budget";
-  if (receipt.kind === "coverage_displaced" || receipt.kind === "quality_displaced") {
+  if (isSelectGammaDisplacementReceipt(receipt)) {
     return receipt.kind;
   }
   throw new Error(`Select_Gamma exclusion receipt is unmapped: ${receipt.kind}`);

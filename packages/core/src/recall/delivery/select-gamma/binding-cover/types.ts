@@ -61,7 +61,7 @@ export type BindingObligationFacetCoverage = Readonly<{
 }>;
 
 export type SelectedBindingSetReceipt = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly operator_id: typeof SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID;
   readonly answer_shape: RecallAnswerShape | null;
   readonly values_status: BindingValuesStatus;

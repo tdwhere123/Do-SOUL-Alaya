@@ -64,6 +64,7 @@ export const DiagnosticSelectGammaDecisionSchema = z.object({
     "duplicate",
     "quality_displaced",
     "coverage_displaced",
+    "rank_displaced",
     "dimension_limit",
     "max_entries",
     "max_total_tokens"

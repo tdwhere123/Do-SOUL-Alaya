@@ -71,6 +71,14 @@ export function bindCoverageSelectionWalkObjective<
     marginalGain: (candidate, state) =>
       objective.marginalGain(observation(candidate.candidate_key, state)),
     accept: (candidate, state) =>
-      objective.accept(observation(candidate.candidate_key, state))
+      objective.accept(observation(candidate.candidate_key, state)),
+    decomposeGain: (candidate, state) => {
+      const bound = observation(candidate.candidate_key, state);
+      const gain = objective.marginalGain(bound);
+      return Object.freeze({
+        quality: bound.relevance,
+        coverage: gain - bound.relevance
+      });
+    }
   });
 }

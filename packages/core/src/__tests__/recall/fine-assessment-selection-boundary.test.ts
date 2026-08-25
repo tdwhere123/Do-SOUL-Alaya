@@ -152,9 +152,9 @@ describe("fine-assessment selection boundary fidelity", () => {
         action: "exclude",
         selection_order: index + 3,
         pre_projection_rank: null,
-        dropped_reason: "quality_displaced",
+        dropped_reason: "rank_displaced",
         witness: {
-          kind: "quality_displaced",
+          kind: "rank_displaced",
           competing_candidate_key: "workspace_local:memory_entry:candidate-2",
           competing_marginal_gain: expect.any(Number),
           candidate_marginal_gain: expect.any(Number)

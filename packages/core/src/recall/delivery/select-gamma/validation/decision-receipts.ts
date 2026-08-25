@@ -1,3 +1,4 @@
+import { isSelectGammaDisplacementReceipt } from "../admission/displacement.js";
 import type {
   SelectGammaDecision,
   SelectGammaDecisionReceipt,
@@ -145,7 +146,7 @@ function validExclusionGain(
   decision: SelectGammaDecision,
   receipt: SelectGammaDecisionReceipt
 ): boolean {
-  if (receipt.kind === "coverage_displaced" || receipt.kind === "quality_displaced") {
+  if (isSelectGammaDisplacementReceipt(receipt)) {
     return decision.marginal_gain === receipt.candidate_marginal_gain &&
       nonNegativeFinite(decision.marginal_gain);
   }
@@ -168,7 +169,7 @@ function validExclusion(
       nonEmpty(receipt.retained_candidate_key) &&
       retainedKeys.includes(receipt.retained_candidate_key);
   }
-  if (receipt.kind === "coverage_displaced" || receipt.kind === "quality_displaced") {
+  if (isSelectGammaDisplacementReceipt(receipt)) {
     return nonEmpty(receipt.competing_candidate_key) &&
       retainedKeys.includes(receipt.competing_candidate_key) &&
       nonNegativeFinite(receipt.competing_marginal_gain) &&

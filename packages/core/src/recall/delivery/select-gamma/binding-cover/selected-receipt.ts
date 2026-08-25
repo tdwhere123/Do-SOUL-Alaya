@@ -30,7 +30,7 @@ export function materializeSelectedBindingSetReceipt(params: Readonly<{
     })
   ));
   return Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     operator_id: SELECT_GAMMA_SELECTED_BINDING_SET_OPERATOR_ID,
     answer_shape: params.obligation.answer_shape,
     values_status: params.obligation.values_status,

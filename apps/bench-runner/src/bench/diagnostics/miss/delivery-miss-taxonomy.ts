@@ -7,7 +7,8 @@ const DROP_REASON_VALUES = [
   "max_entries",
   "max_total_tokens",
   "coverage_displaced",
-  "quality_displaced"
+  "quality_displaced",
+  "rank_displaced"
 ] as const satisfies readonly RecallCandidateDropReason[];
 
 type ExhaustiveDropReasons<T extends readonly RecallCandidateDropReason[]> =
@@ -43,7 +44,8 @@ const DELIVERY_ADMISSION_REASONS = [
   "ineligible",
   "duplicate",
   "coverage_displaced",
-  "quality_displaced"
+  "quality_displaced",
+  "rank_displaced"
 ] as const satisfies readonly DeliveryMissDropReason[];
 
 export type DeliveryMissTaxonomy =

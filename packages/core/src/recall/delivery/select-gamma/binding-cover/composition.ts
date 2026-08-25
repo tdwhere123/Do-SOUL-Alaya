@@ -4,7 +4,6 @@ import type { CoverAvailability } from "../types.js";
 
 export type BindingValuesStatus = "observed" | "truncated" | "unavailable";
 export type CoverEvidence = "available" | "unavailable";
-export type { CoverAvailability };
 
 export function usableOpenSemanticFactorComposition(
   composition: Readonly<OpenSemanticFactorCompositionReceipt> | undefined
@@ -15,6 +14,7 @@ export function usableOpenSemanticFactorComposition(
 export function bindingValuesStatus(
   composition: Readonly<OpenSemanticFactorCompositionReceipt> | undefined
 ): BindingValuesStatus {
+  if (composition?.status === "no_match") return "observed";
   if (!usableOpenSemanticFactorComposition(composition)) return "unavailable";
   return composition.truncated ? "truncated" : "observed";
 }
@@ -40,8 +40,11 @@ export function resolveCoverAvailability(params: Readonly<{
   readonly obligationFacetCount: number;
   readonly coverGain: number;
 }>): CoverAvailability {
-  if (!coverEvidenceIsAvailable(params.valuesStatus, params.obligationFacetCount)) {
-    return "unavailable";
+  const incrementProvable =
+    params.valuesStatus === "observed" || params.obligationFacetCount > 0;
+  if (params.coverGain > 0 && (incrementProvable || params.valuesStatus === "truncated")) {
+    return "positive";
   }
-  return params.coverGain > 0 ? "positive" : "known_zero";
+  if (incrementProvable) return "known_zero";
+  return "unavailable";
 }

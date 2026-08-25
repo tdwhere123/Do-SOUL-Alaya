@@ -171,7 +171,8 @@ function mapGammaDecision(
   if (decision.kind === "max_total_tokens") return "token_budget";
   if (decision.kind === "max_entries") return "entry_budget";
   if (decision.kind === "quality_displaced" ||
-      decision.kind === "coverage_displaced") return decision.kind;
+      decision.kind === "coverage_displaced" ||
+      decision.kind === "rank_displaced") return decision.kind;
   return "unavailable";
 }
 

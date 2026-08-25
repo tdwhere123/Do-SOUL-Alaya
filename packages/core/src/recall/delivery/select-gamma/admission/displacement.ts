@@ -5,6 +5,25 @@ import type {
   SelectGammaWalkObjective
 } from "../types.js";
 
+export type SelectGammaDisplacementKind =
+  "coverage_displaced" | "quality_displaced" | "rank_displaced";
+
+export function isSelectGammaDisplacementKind(
+  kind: string
+): kind is SelectGammaDisplacementKind {
+  return kind === "coverage_displaced" ||
+    kind === "quality_displaced" ||
+    kind === "rank_displaced";
+}
+
+export function isSelectGammaDisplacementReceipt(
+  receipt: SelectGammaDecisionReceipt
+): receipt is Extract<SelectGammaDecisionReceipt, {
+  readonly kind: SelectGammaDisplacementKind
+}> {
+  return isSelectGammaDisplacementKind(receipt.kind);
+}
+
 export function lastSlotDisplacementDecisions<State>(
   losers: readonly SelectGammaFormulaCandidate[],
   winner: SelectGammaFormulaCandidate,
@@ -53,11 +72,18 @@ function classifyDisplacement<State>(
   loser: SelectGammaFormulaCandidate,
   state: State,
   objective: SelectGammaWalkObjective<State>
-): "coverage_displaced" | "quality_displaced" {
+): SelectGammaDisplacementKind {
   const decompose = objective.decomposeGain;
   if (decompose === undefined) return "quality_displaced";
   const winnerParts = decompose(winner, state);
   const loserParts = decompose(loser, state);
+  // Rank-only admission must not be receipted as quality: quality did not compete.
+  if (
+    winnerParts.cover_availability !== undefined &&
+    winnerParts.cover_availability !== "positive"
+  ) {
+    return "rank_displaced";
+  }
   // Cover wins only when extra cover, not a higher quality term, took the slot.
   return winnerParts.coverage > loserParts.coverage &&
     winnerParts.quality <= loserParts.quality

@@ -14,6 +14,7 @@ const DECISION_KINDS = new Set([
   "dimension_limit",
   "quality_displaced",
   "coverage_displaced",
+  "rank_displaced",
   "max_entries",
   "max_total_tokens"
 ]);

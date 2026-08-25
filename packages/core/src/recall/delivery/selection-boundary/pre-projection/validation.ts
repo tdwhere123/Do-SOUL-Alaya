@@ -198,7 +198,8 @@ function witnessMatchesExclusion(witness: unknown, reason: string): boolean {
       isNonNegativeFinite(witness.token_estimate) &&
       isNonNegativeFinite(witness.limit);
   }
-  if (reason === "coverage_displaced" || reason === "quality_displaced") {
+  if (reason === "coverage_displaced" || reason === "quality_displaced" ||
+    reason === "rank_displaced") {
     return isNonEmptyString(witness.competing_candidate_key) &&
       isNonNegativeFinite(witness.competing_marginal_gain) &&
       isNonNegativeFinite(witness.candidate_marginal_gain);

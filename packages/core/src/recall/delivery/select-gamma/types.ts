@@ -132,7 +132,7 @@ export type SelectGammaDecisionReceipt =
       readonly retained_candidate_key: string;
     }>
   | Readonly<{
-      readonly kind: "coverage_displaced" | "quality_displaced";
+      readonly kind: "coverage_displaced" | "quality_displaced" | "rank_displaced";
       readonly competing_candidate_key: string;
       readonly competing_marginal_gain: number;
       readonly candidate_marginal_gain: number;

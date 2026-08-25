@@ -35,7 +35,7 @@ export function classifyOpenSemanticFactorCompositionStatus(params: Readonly<{
   if (trace.incomparable_seal === "ineligible" || statuses.has("ineligible")) {
     return "ineligible";
   }
-  // Truncation is not a completed incompatible search.
+  // Truncation and empty traces are unobserved, not exhaustive no_match.
   return truncated || trace.truncated || trace.entries.length === 0
     ? "unavailable"
     : "no_match";
