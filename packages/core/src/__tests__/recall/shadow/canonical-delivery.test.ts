@@ -67,6 +67,35 @@ describe("C0 reversible delivery cutover", () => {
     expect(result.ranking_authority).toBe("d0_prefix");
     expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
     expect(result.candidates.every((candidate) => candidate.relevance_score === 0)).toBe(true);
+    expect(result.diagnostics).toHaveLength(result.candidates.length);
+    expect(result.diagnostics.every((diagnostic) => diagnostic.relevance_score === 0)).toBe(true);
+    expect(result.diagnostics.every((diagnostic) => diagnostic.score_factors.relevance === 0)).toBe(true);
+  });
+
+  it("publishes embedding_similarity as a diagnostic factor without ranking", () => {
+    const result = fineAssess(lexicalAssess(fieldCandidates(), {
+      embedding_enabled: true,
+      lanes: porterLanes({
+        "cand-c": 0.9,
+        "cand-b": 0.6,
+        "cand-a": 0.3
+      }),
+      embeddingSimilarityScores: {
+        "cand-c": 0.1,
+        "cand-b": 0.2,
+        "cand-a": 0.99
+      }
+    }));
+    expect(result.ranking_authority).toBe("d0_prefix");
+    const scores = {
+      "cand-c": 0.1,
+      "cand-b": 0.2,
+      "cand-a": 0.99
+    };
+    expect(result.candidates.map((candidate) => candidate.score_factors?.embedding_similarity))
+      .toEqual(result.candidates.map((candidate) => scores[candidate.object_id as keyof typeof scores]));
+    expect(result.diagnostics.map((diagnostic) => diagnostic.score_factors.embedding_similarity))
+      .toEqual(result.candidates.map((candidate) => candidate.score_factors?.embedding_similarity));
   });
 
   it("does not import legacy stages into canonical delivery", () => {
@@ -183,7 +212,7 @@ describe("C0 reversible delivery cutover", () => {
       .toEqual(e0Ids);
     expect(e0.preparedCandidates).toEqual([]);
     expect(e0.prunedCandidates).toEqual([]);
-    expect(e0.diagnostics).toEqual([]);
+    expect(e0.diagnostics).toHaveLength(e0.candidates.length);
   });
 
   it("orders canonical prefix from live lane receipts instead of candidate_key", () => {

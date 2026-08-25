@@ -28,6 +28,10 @@ import {
   SHADOW_CAPTURE_OPERATOR_ID
 } from "./identity.js";
 import {
+  buildCanonicalDeliveryDiagnostics,
+  canonicalDiagnosticScoreFactors
+} from "./observe/canonical-diagnostics.js";
+import {
   captureShadowIntegration,
   failClosedShadowTrace,
   isFailClosedShadowTrace,
@@ -88,7 +92,8 @@ function capturedCanonicalResult(
 ): FineAssessResult {
   return Object.freeze({
     ...emptyCanonicalShell(params, shadowTrace),
-    candidates
+    candidates,
+    diagnostics: buildCanonicalDeliveryDiagnostics(params, candidates)
   });
 }
 
@@ -187,6 +192,7 @@ function materializeCanonicalCandidate(
     scope_class: entry.scope_class,
     origin_plane: candidate.originPlane ?? "workspace_local",
     selection_reason: "d0.safe-dominance-capture.v1 prefixSK",
+    score_factors: canonicalDiagnosticScoreFactors(entry.object_id, activation, params),
     ...(candidate.isAdvisory === undefined ? {} : { is_advisory: candidate.isAdvisory }),
     ...(channels === undefined ? {} : { source_channels: channels })
   });
