@@ -87,16 +87,23 @@ export function walkShadowCapture(
     applyInfeasibleDrops(state);
     if (state.remaining.size === 0) break;
     const picked = computePick(state);
-    if (picked === CYCLE) return CYCLE;
+    if (isCycleFailure(picked)) return picked;
     applyPick(state, picked);
   }
-  return freezeShadow({
-    kind: "captured" as const,
+  const captured: ShadowCapturedWalk = {
+    kind: "captured",
     operator_id: SHADOW_CAPTURE_OPERATOR_ID,
     S_infty: Object.freeze([...state.selected_keys]),
     decisions: Object.freeze([...state.decisions]),
     walk_rejects: Object.freeze([...state.walk_rejects])
-  });
+  };
+  return freezeShadow(captured);
+}
+
+function isCycleFailure(
+  value: ShadowCaptureWalkCandidate | ShadowPsiCycleFailure
+): value is ShadowPsiCycleFailure {
+  return "kind" in value && value.kind === "psi_cycle_contract_failure";
 }
 
 export function prefixSK(

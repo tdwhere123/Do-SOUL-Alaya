@@ -32,7 +32,6 @@ import {
 import {
   eligibleCandidateKeys,
   e0MembershipSubsetOfE1,
-  isNotADominanceCompare,
   psiOutcome,
   psiPredicate,
   type ShadowPsiObservationField
@@ -361,7 +360,7 @@ function tradeoffQuery(
 ): (left: string, right: string) => boolean {
   return (left, right) => {
     const outcome = psiOutcome(left, right, observations, channels);
-    return !isNotADominanceCompare(outcome) && outcome.kind === "tradeoff";
+    return outcome.kind === "tradeoff";
   };
 }
 
