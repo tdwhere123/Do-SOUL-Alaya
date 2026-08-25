@@ -247,6 +247,7 @@ export function createDependencies(
         queryByEntity: vi.fn(async () => [])
       },
       warn: warnSpy,
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       claimResolverPort: {
         findByIds: vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
           ids
@@ -272,5 +273,18 @@ export function overridePolicy(base: Readonly<RecallPolicy>, patch: Partial<Reca
     ...patch,
     coarse_filter: patch.coarse_filter ?? base.coarse_filter,
     fine_assessment: patch.fine_assessment ?? base.fine_assessment
+  };
+}
+
+export function withFineDeliveryPath(
+  policy: Readonly<RecallPolicy>,
+  path: "legacy" | "canonical"
+): RecallPolicy {
+  return {
+    ...policy,
+    fine_assessment: {
+      ...policy.fine_assessment,
+      delivery_path: path
+    }
   };
 }

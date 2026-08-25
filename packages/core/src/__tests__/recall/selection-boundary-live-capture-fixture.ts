@@ -6,6 +6,7 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
 import {
@@ -173,12 +174,12 @@ function buildLiveCaptureBase(
   options: LiveCaptureOptions
 ) {
   const candidates = buildLiveCaptureCandidates();
-  const policy = buildDefaultPolicy({
+  const policy = withFineDeliveryPath(buildDefaultPolicy({
     strategy: "chat",
     taskSurfaceRef,
     now: () => "2026-07-29T00:00:00.000Z",
     generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
-  });
+  }), "legacy");
   return {
     candidates,
     policy: options.maxEntries === undefined

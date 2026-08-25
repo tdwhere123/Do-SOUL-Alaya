@@ -136,6 +136,32 @@ describe("v0.2 recall protocol contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts optional fine-assessment delivery_path without rewriting omitted policies", () => {
+    expect(RecallPolicySchema.parse(recallPolicyBase).fine_assessment.delivery_path)
+      .toBeUndefined();
+    expect(RecallPolicySchema.parse({
+      ...recallPolicyBase,
+      fine_assessment: {
+        ...recallPolicyBase.fine_assessment,
+        delivery_path: "legacy"
+      }
+    }).fine_assessment.delivery_path).toBe("legacy");
+    expect(RecallPolicySchema.parse({
+      ...recallPolicyBase,
+      fine_assessment: {
+        ...recallPolicyBase.fine_assessment,
+        delivery_path: "canonical"
+      }
+    }).fine_assessment.delivery_path).toBe("canonical");
+    expect(RecallPolicySchema.safeParse({
+      ...recallPolicyBase,
+      fine_assessment: {
+        ...recallPolicyBase.fine_assessment,
+        delivery_path: "mixed"
+      }
+    }).success).toBe(false);
+  });
+
   it("publishes one bounded temporal candidate limit for recall consumers", () => {
     expect(MAX_TEMPORAL_RECALL_CANDIDATES).toBe(500);
   });

@@ -32,13 +32,15 @@ export function uniqueObjectIds(
 export function buildRecallPolicy(
   request: SoulMemorySearchRequest,
   taskSurfaceId: string,
-  policyId: string
+  policyId: string,
+  deliveryPath?: "legacy" | "canonical"
 ): RecallPolicy {
   const filters = resolveRecallPolicyFiltersFromSearchRequest(request);
   return buildMemorySearchRecallPolicy({
     runtimeId: policyId,
     taskSurfaceId,
     maxResults: request.max_results,
-    filters
+    filters,
+    ...(deliveryPath === undefined ? {} : { deliveryPath })
   });
 }

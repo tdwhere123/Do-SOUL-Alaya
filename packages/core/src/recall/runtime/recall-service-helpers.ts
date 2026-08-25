@@ -60,6 +60,23 @@ export function buildRecallCandidateDedupeKey(candidate: Readonly<{
   return `${candidate.originPlane ?? "workspace_local"}:${candidate.objectKind ?? "memory_entry"}:${candidate.entry.object_id}`;
 }
 
+export function assertUniqueCandidateField(
+  candidates: readonly Readonly<{
+    readonly entry: Readonly<{ readonly object_id: string }>;
+    readonly originPlane?: RecallOriginPlane;
+    readonly objectKind?: RecallCandidate["object_kind"];
+  }>[]
+): void {
+  const keys = new Set<string>();
+  for (const candidate of candidates) {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    if (keys.has(key)) {
+      throw new Error(`duplicate recall candidate field key: ${key}`);
+    }
+    keys.add(key);
+  }
+}
+
 export function buildRecallLogicalObjectKey(candidate: Readonly<{
   readonly entry: Readonly<{
     readonly object_id: string;

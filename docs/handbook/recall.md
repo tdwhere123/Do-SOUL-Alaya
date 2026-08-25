@@ -221,7 +221,23 @@ reorder, or head-drop rule to repair benchmark coverage.
 
 ## Current live path
 
-The integrated path now present on HEAD is:
+Admission and order have two owners, chosen once at `fineAssess` by optional
+`fine_assessment.delivery_path` (omitted means canonical; `"legacy"` is
+rollback). Mixed stages are impossible.
+
+- **Canonical (default):** D0 `prefixSK(S_infty, K)` via
+  `deliverCanonicalFineAssessment` / `walkShadowCapture`. Live Psi consumes
+  pre-collapse memory keyword lane receipts (`LexDomain`), embedding scores
+  when the object_id is present (including finite zero), and temporal
+  evaluation when the query has temporal demand and `event_time_start`
+  exists. Canonical `relevance_score` is non-authority and stays `0`; public
+  `RecallResult.ranking_authority` is `"d0_prefix"` with `delivery_path` and
+  `d0_identity`.
+- **Legacy rollback:** binding-aware `Select_Gamma` via
+  `deliverFineAssessment` / `selectGammaWalk`. `ranking_authority` is
+  `"select_gamma"`.
+
+The integrated legacy path now present on HEAD is:
 
 ```text
 prepare
@@ -274,8 +290,9 @@ The principal owners are:
 - Slice compatibility: `resolveSliceAxis` in `flood-slice-axis.ts`;
 - path/evidence flood: `computeIntegratedFloodScore` in
   `integrated-flood-scoring.ts`;
-- final admission and order: `selectFineAssessmentCandidates` and
-  `selectGammaWalk`;
+- final admission and order: canonical D0 prefix
+  (`deliverCanonicalFineAssessment`) or, on `delivery_path: "legacy"`,
+  `selectFineAssessmentCandidates` and `selectGammaWalk`;
 - binding-value and facility coverage objective:
   `bindFineAssessmentBindingCover` in
   `select-gamma/binding-cover/production.ts`;
@@ -294,7 +311,7 @@ The principal owners are:
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
 | Embedding supplement | Live, relevance role noncompliant | Embedding may inject candidates, cast the semantic family ballot, modulate graph/path contribution, independently rescore the pool, and supply facility relevance. It never authorizes durable truth. The shadow target makes E1 a monotonic field extension: admission cannot evict E0 or create preference, and shared candidates add one embedding observation only. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The current ranking scalar is family-max `fused_score`; flood and evidence residuals are diagnostic. This preserves one scalar mutation path but does not validate family-max as canonical relevance. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner; relevance role noncompliant | Decision order is materialized as delivery order and asserted after materialization. Current positive-cover gain uses embedding/facility quality plus cover; known-zero and unavailable use `fused_score` minus rho. This piecewise pointwise source is the diagnosed second authority. The shadow target permits only S-dependent novelty/coverage/redundancy, no frontier-index gain, and one prefix-monotonic walk. Production source hard-dedupe is off. G17a/G17b ownership is closed; replacement algebra is not. |
+| `Select_Gamma` | Live owner on the legacy rollback path; canonical default is D0 prefix | Omitted `delivery_path` uses `prefixSK(S_infty, K)`. `delivery_path: "legacy"` keeps `selectGammaWalk` as the sole admission-order owner of that mode. Canonical `relevance_score` is not ranking authority (`ranking_authority: "d0_prefix"`). Legacy positive-cover gain still uses embedding/facility quality plus cover; known-zero and unavailable use `fused_score` minus rho. The shadow target permits only S-dependent novelty/coverage/redundancy, no frontier-index gain, and one prefix-monotonic walk. Production source hard-dedupe is off. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |

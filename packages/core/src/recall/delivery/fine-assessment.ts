@@ -4,11 +4,14 @@ import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import {
+  assertUniqueCandidateField,
   buildRecallCandidateDedupeKey,
   isSynthesisChildCandidate
 } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  KeywordLexicalMergeCapture,
+  KeywordSearchLaneReceipt,
   RecallCandidateDiagnostic,
   RecallServiceWarnPort,
   RecallSupplementaryData,
@@ -41,6 +44,16 @@ import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
 import type { RecallAnswerShapePlan } from
   "../query/recall-answer-shape-plan.js";
+import {
+  captureShadowIntegration,
+  type FineAssessmentShadowTrace,
+  type PsiQuery,
+  type ShadowPsiObservationField
+} from "../shadow/integrate.js";
+import {
+  deliverCanonicalFineAssessment,
+  resolveFineAssessmentDeliveryPath
+} from "../shadow/canonical-delivery.js";
 
 export interface FineAssessParams {
   readonly workspace_id: string;
@@ -59,6 +72,13 @@ export interface FineAssessParams {
   ) => undefined;
   readonly generation_id?: string;
   readonly condition_digest?: string;
+  readonly captureShadowTrace?: boolean;
+  readonly shadowObservationField?: ShadowPsiObservationField;
+  readonly shadowPsi?: PsiQuery;
+  readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
+  readonly e0Keys?: readonly string[];
+  readonly e1Keys?: readonly string[];
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -70,7 +90,7 @@ export type FineAssessmentPreparation = Readonly<{
   readonly finePriorityOverflowCount: number;
 }>;
 
-export function fineAssess(params: FineAssessParams): Readonly<{
+export type FineAssessResult = Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
@@ -83,8 +103,41 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
-}> {
-  return deliverFineAssessment(params, prepareFineAssessment(params));
+  readonly delivery_path: "legacy" | "canonical";
+  readonly d0_identity?: Readonly<{
+    readonly algorithm_id: string;
+    readonly version: string;
+    readonly digest: string;
+  }>;
+  readonly ranking_authority: "d0_prefix" | "select_gamma";
+  readonly shadowTrace?: FineAssessmentShadowTrace;
+}>;
+
+export function fineAssess(params: FineAssessParams): FineAssessResult {
+  if (resolveFineAssessmentDeliveryPath(params.policy.fine_assessment) === "canonical") {
+    return deliverCanonicalFineAssessment(params);
+  }
+  return deliverLegacyFineAssessment(params);
+}
+
+function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult {
+  const shadowTrace = params.captureShadowTrace === true
+    ? captureShadowIntegration({
+      candidates: params.candidates,
+      policy: params.policy,
+      supplementaryData: params.supplementaryData,
+      tokenEstimator: params.tokenEstimator,
+      observationField: params.shadowObservationField,
+      psi: params.shadowPsi,
+      memoryKeywordLanes: params.memoryKeywordLanes,
+      memoryLexicalCaptures: params.memoryLexicalCaptures,
+      nowIso: params.now()
+    })
+    : undefined;
+  const production = deliverFineAssessment(params, prepareFineAssessment(params));
+  return shadowTrace === undefined
+    ? production
+    : Object.freeze({ ...production, shadowTrace });
 }
 
 export function prepareFineAssessment(
@@ -103,23 +156,10 @@ export function prepareFineAssessment(
   return preparationFromCompleteField(params.candidates, fusedCandidates);
 }
 
-function assertUniqueCandidateField(
-  candidates: readonly Readonly<CoarseRecallCandidate>[]
-): void {
-  const keys = new Set<string>();
-  for (const candidate of candidates) {
-    const key = buildRecallCandidateDedupeKey(candidate);
-    if (keys.has(key)) {
-      throw new Error(`duplicate recall candidate field key: ${key}`);
-    }
-    keys.add(key);
-  }
-}
-
 export function deliverFineAssessment(
   params: FineAssessParams,
   preparation: FineAssessmentPreparation
-): ReturnType<typeof fineAssess> {
+): FineAssessResult {
   const answerRelevanceScores =
     params.supplementaryData.answerRelevanceScoresByCandidateKey ?? new Map();
   const deepHead = resolveFineAssessmentDeepHead({
@@ -162,7 +202,9 @@ export function deliverFineAssessment(
     coarsePoolSize: preparation.coarsePoolSize,
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
-    finePriorityOverflowCount: preparation.finePriorityOverflowCount
+    finePriorityOverflowCount: preparation.finePriorityOverflowCount,
+    delivery_path: "legacy" as const,
+    ranking_authority: "select_gamma" as const
   });
 }
 

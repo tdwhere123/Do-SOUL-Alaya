@@ -47,6 +47,41 @@ describe("request-scoped retrieval field bundle", () => {
         rank: 1
       }]
     });
+    expect(bundle.memoryKeywordLanes()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        lane: "porter",
+        status: "complete",
+        depth: 1,
+        observations: [expect.objectContaining({
+          object_id: "memory-1",
+          normalized_rank: 0.75
+        })]
+      })
+    ]));
+  });
+
+  it("exposes memory keyword lanes from recorded field results, not evidence", async () => {
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1",
+      queryText: "deploy",
+      memoryRepo: stubMemoryRepo({
+        searchByKeywordField: vi.fn(async () => fieldResult("memory-1", 0.75))
+      }),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(),
+        searchByKeywordField: vi.fn(async () => fieldResult("evidence-1", 0.9))
+      }
+    });
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_expanded",
+      queryText: "deploy",
+      limit: 10,
+      scope: {}
+    });
+    await bundle.searchEvidenceKeyword({ queryText: "deploy", limit: 10 });
+    expect(bundle.memoryKeywordLanes().flatMap((lane) =>
+      lane.observations.map((observation) => observation.object_id)
+    )).toEqual(["memory-1"]);
   });
 
   it("keeps scope in the request identity and aggregates both receipts", async () => {

@@ -22,7 +22,8 @@ import type {
 } from "../../recall/runtime/recall-service-types.js";
 import {
   createDependencies,
-  createTaskSurface
+  createTaskSurface,
+  withFineDeliveryPath
 } from "./recall-service-test-fixtures.js";
 
 const NOW = "2026-07-12T00:00:00.000Z";
@@ -379,12 +380,12 @@ function projectMemoryEntries(fixture: ReturnType<typeof buildRelevanceFixture>)
 }
 
 function buildPolicy() {
-  return buildDefaultPolicy({
+  return withFineDeliveryPath(buildDefaultPolicy({
     strategy: "build",
     taskSurfaceRef: "task-surface-1",
     now: () => NOW,
     generateRuntimeId: () => "33333333-3333-4333-8333-333333333333"
-  });
+  }), "legacy");
 }
 
 function createCoarseCandidate(entry: MemoryEntry): CoarseRecallCandidate {

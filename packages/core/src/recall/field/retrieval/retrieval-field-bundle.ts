@@ -1,6 +1,8 @@
 import type {
+  KeywordLexicalMergeCapture,
   KeywordSearchBatchQuery,
   KeywordSearchFieldResult,
+  KeywordSearchLaneReceipt,
   KeywordSearchLaneScope,
   KeywordSearchResult,
   RecallServiceEvidenceSearchPort,
@@ -56,6 +58,8 @@ export interface RecallRetrievalFieldBundle {
   readonly captures: () => readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly refinementReceipts: () =>
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
+  readonly memoryKeywordLanes: () => readonly Readonly<KeywordSearchLaneReceipt>[];
+  readonly memoryLexicalCaptures: () => readonly Readonly<KeywordLexicalMergeCapture>[];
 }
 
 export type FieldPrefix =
@@ -119,7 +123,9 @@ function createBundleView(
     ...createEvidenceFieldSearches(params, store, observationView),
     ...createSynthesisFieldSearches(params, store, observationView),
     captures: () => materializeRetrievalFieldBundleCaptures(params, records),
-    refinementReceipts: () => materializeRefinementReceipts(records)
+    refinementReceipts: () => materializeRefinementReceipts(records),
+    memoryKeywordLanes: () => collectMemoryKeywordLanes(records),
+    memoryLexicalCaptures: () => collectMemoryLexicalCaptures(records)
   });
 }
 
@@ -297,6 +303,26 @@ function selectObservationMatches(
   return view === "maximum"
     ? result.refinement_levels?.at(-1)?.matches ?? Object.freeze([])
     : result.matches;
+}
+
+function collectMemoryKeywordLanes(
+  records: readonly Readonly<RecordedFieldResult>[]
+): readonly Readonly<KeywordSearchLaneReceipt>[] {
+  return Object.freeze(records.flatMap((record) =>
+    record.prefix === "lexical_relaxed" || record.prefix === "lexical_expanded"
+      ? record.result.lanes
+      : []
+  ));
+}
+
+function collectMemoryLexicalCaptures(
+  records: readonly Readonly<RecordedFieldResult>[]
+): readonly Readonly<KeywordLexicalMergeCapture>[] {
+  return Object.freeze(records.flatMap((record) =>
+    record.prefix === "lexical_relaxed" && record.result.lexical_raw_rank !== undefined
+      ? [record.result.lexical_raw_rank]
+      : []
+  ));
 }
 
 function materializeRefinementReceipts(

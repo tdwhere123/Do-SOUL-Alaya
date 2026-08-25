@@ -10,7 +10,7 @@ import type {
   RecallSupplementaryData
 } from "../../recall/runtime/recall-service-types.js";
 import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
-import { createMemoryEntry } from "./recall-service-test-fixtures.js";
+import { createMemoryEntry, withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 
 const NOW = "2026-07-12T00:00:00.000Z";
 
@@ -97,12 +97,12 @@ function assessParams(
 }
 
 function policy() {
-  return buildDefaultPolicy({
+  return withFineDeliveryPath(buildDefaultPolicy({
     strategy: "build",
     taskSurfaceRef: "task-surface-1",
     now: () => NOW,
     generateRuntimeId: () => "33333333-3333-4333-8333-333333333333"
-  });
+  }), "legacy");
 }
 
 function fieldCandidates(count: number): readonly CoarseRecallCandidate[] {

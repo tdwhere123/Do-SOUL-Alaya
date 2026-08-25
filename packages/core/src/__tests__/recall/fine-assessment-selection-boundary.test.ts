@@ -7,6 +7,7 @@ import {
 } from "../../recall/delivery/fine-assessment-selection.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
@@ -362,12 +363,12 @@ describe("fine-assessment selection boundary fidelity", () => {
     const observer = vi.fn(
       (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
     );
-    const policy = buildDefaultPolicy({
+    const policy = withFineDeliveryPath(buildDefaultPolicy({
       strategy: "chat",
       taskSurfaceRef: "surface-selection-boundary",
       now: () => "2026-07-29T00:00:00.000Z",
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
-    });
+    }), "legacy");
 
     const result = fineAssess({
     ...FIELD_PINS,
