@@ -210,8 +210,23 @@ proved runtime. Current HEAD connects the principal field, path, Slice,
 activation, and Select_Gamma owners; `recall.md` records the remaining
 algorithm-closure proofs.
 
-**Lexical Recall** — BM25 / FTS-based search. Live family-max RRF
-still moves scores (`fusion-delivery-families.ts`).
+**Safe Dominance** — The first shadow architecture's strict query-conditioned
+pointwise partial order over applicable attributed observations. It is not a
+scalar score or general outranking; a cycle is a contract failure.
+
+**Pointwise Frontier** — A deterministic layer of safe-dominance structure.
+Frontier index is not Gamma gain and does not require F1-before-F2 capture when
+a lower frontier supplies otherwise unavailable set-level novelty.
+
+**Budgeted Capture Walk** — One deterministic Select_Gamma walk whose prefixes
+define every budget K. K truncates the walk, so each smaller captured set is a
+prefix subset of the next.
+
+**Lexical Recall** — BM25 / FTS-based search. Live family-max RRF still moves
+scores (`fusion-delivery-families.ts`), but that scalarization is diagnosed as
+noncompliant and is not the target relevance contract. FTS admission and
+structural scoring also currently duplicate one upstream receipt across
+families; see `recall.md`.
 
 **Path-Aware Recall** — Intended runtime manifestation of
 `PathRelation` via typed transfer \(G_L\). Active recall-eligible paths can
@@ -224,7 +239,10 @@ live field, seed \(\Omega\). The bundled local ONNX provider is enabled
 by default after verified startup warmup; operators can explicitly
 disable it. It never decides durable truth (invariant §18). On the
 current path it can inject candidates and rescore an eligible pool. Historical
-discovery rates belong to their frozen benchmark commit; see `recall.md`.
+discovery rates belong to their frozen benchmark commit. In the shadow target,
+embedding admission monotonically extends the E0 field without eviction or
+preference reward, and shared candidates add exactly one embedding observation;
+see `recall.md`.
 
 **API Embedding Provider** — A network-backed embedding supplement. API use is
 always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires

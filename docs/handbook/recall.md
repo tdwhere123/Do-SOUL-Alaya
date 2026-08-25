@@ -4,15 +4,17 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-Current documentation identity: package `0.3.11`, G21 cache-only 100Q
-of S14 ranking-preserving Gamma gain (2026-08-24). Earlier pins — architecture `baa6e35b` (gates
+Current documentation identity: package `0.3.11`, the 2026-08-25
+relevance-authority and budgeted-capture shadow adjudications plus the sharded
+execution plan over G21/S11-S19 evidence. Earlier pins —
+architecture `baa6e35b` (gates
 1–6), integration base `b329325`, review evidence `263c6600`
 (2026-08-19), handbook prose `ae95e313`, last committed code before this
 repair `5782391d` — remain historical context. Live owners are the
 modules named under Current live path. Recall any@5 is **NOT PROMOTED**:
-the last comparable KPI evidence pin is `3af4fd9` (E1 arm: any@5 81/94,
-full-gold@5 43/94); G21 cache-only 100Q on this live path is a gate
-MISS (E1 63/94, E0 48–49/94); the ancestor
+the last comparable any@5 evidence pin is `3af4fd9` (E1 arm: any@5 81/94;
+full-gold@5 43/94 is historical diagnostic reference only, not a gate). G21
+cache-only 100Q on this live path is a gate MISS (E1 63/94, E0 48–49/94); the ancestor
 `85faef95` missed its diagnostic gates. The earlier `10da1318` B-arm dump
 remains historical benchmark evidence only.
 
@@ -33,13 +35,13 @@ complete-form extraction, and the `06af8c83` exclusion of capsule
 classified — `d23cf73b` is coverage displacement of a legal fused top-5
 gold; all 32 waist questions are honest fused-order family-max walls.
 2026-08-24 S13 dump-only closeout: Dual-13 remaining misses are
-`honest_thinner_r_obj` (representation); the E1-only three are a
-different owner, `gamma_displaced_fused_head`. S12 and S13 are not a
+`honest_thinner_r_obj` under the current family-max scalar; the E1-only three
+are a different owner, `gamma_displaced_fused_head`. S12 and S13 are not a
 G21, retune, or promotion licence. This is a documentation pass
 against live code, not a KPI claim.
 
-2026-08-24 S14 closeout: Dual-13 is honest no-fix. Fused-head skip is
-one general repair on the production binding-aware walk: when
+2026-08-24 S14 closeout: Dual-13 had no local family-max patch. Fused-head
+skip is one general repair on the production binding-aware walk: when
 Values_v/obligation increment is 0, gain is `R_obj` (`fused_score`)
 minus rho. Embedding and facility quality cannot invert a higher
 `R_obj`. Not a KPI claim. G21 later ran and MISSed; pin retained.
@@ -67,9 +69,53 @@ runtime expected count. No completeness atom and no S16 objective
 change. G21 E1 partition independently matches 27/94, 2 absent, 65
 all-present-not-delivered.
 
+2026-08-25 relevance-authority ruling: family-max additive RRF is a
+**noncompliant scalarization**, not the final UGAF decision algebra. It
+suppresses correlated producer duplicates, then discards magnitude and adds
+uncalibrated family ballots. Candidate admission also self-rewards through
+`structural`, and missing/not-applicable/unavailable states collapse to zero.
+Permitted object/factor embedding observations enter fusion and downstream
+deep-head/facility/Gamma relevance. The live implementation therefore has one
+final selector but more than one query-object relevance authority.
+
+The later location adjudication selected route B: `effectiveScore` is not a
+latent canonical relevance estimator and family-max `fused_score` is not target
+authority. `effectiveScore` mixes query-independent priors, pool-level state,
+and repeated query evidence; embedding has no additive magnitude there. The
+target path begins again from original attributed observations and later
+retires the `existing_score` recycle lane. S19's sparse rank/Pareto probe is
+closed and non-discriminating; it supports aggregation failure but proves
+neither a shared scalar nor the replacement's reachability. No weight, RRF,
+Gamma, flood, retrieval, cache, or miss-ID repair follows from this ruling.
+
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
+
+The frozen **shadow direction**, not current production behavior, is:
+
+```text
+A(q) -> demand/applicability graph
+O(v,q) -> attributed observations with explicit state and provenance
+Psi_q(v,u) -> strict safe dominance / incomparable / uncertain
+Frontiers(Psi) -> pointwise dominance structure
+Gamma(frontiers, set obligations, K) -> one prefix-monotonic capture walk
+```
+
+First-version `Psi` is a strict safe-dominance partial order. A cycle is a
+contract failure; general outranking and SCC recovery are deferred. Frontier
+index is pointwise structure, never Gamma gain or mandatory F1-before-F2
+selection. Set-level novelty may select across frontiers. Gamma owns only
+S-dependent obligation, Values/evidence novelty, and redundancy. One canonical
+walk owns every K, so `S_K` is a subset of `S_(K+1)`. Prior may act only on the
+final unresolved evidence/set-utility tie and cannot reverse dominance.
+
+E1 is a monotonic field extension: `H_E0` is a subset of `H_E1`. Its separately
+receipted embedding admission cannot evict E0 candidates and creates no
+preference. Shared candidates use the same preference/capture algebra and E1
+adds one embedding observation. Exact safe-dominance and capture rules remain
+unselected until the active plan's boundary audits and D0 algorithm contract
+close; shadow proof must precede any delivery cutover.
 
 ## Contract (UGAF)
 
@@ -77,7 +123,7 @@ Recall is one governed associative field, not a stack of independent rankers:
 
 ```text
 q, S_t -> Q_q -> Omega(H_q, C_seal) -> A(X_q) -> G_L(~X_q)
-       -> M(Z_q) -> Select_Gamma -> D_q
+       -> O_q -> Psi_q -> F_q -> Select_Gamma -> D_q
 ```
 
 | Piece | Meaning | Must not |
@@ -87,6 +133,9 @@ q, S_t -> Q_q -> Omega(H_q, C_seal) -> A(X_q) -> G_L(~X_q)
 | \(C_q^{seal}\) | Per-channel depth and unseen-frontier proof | Digest claiming closure without a bound |
 | \(A_i(q)\) | Attributed multi-channel activation | Global scalar that erases provenance |
 | \(G_L\) | Bounded typed path transfer | Second ranker or unbounded flood |
+| \(O_q\) | Attributed observations with applicability, state, correlation, and uncertainty | Membership or prior impersonates evidence |
+| \(\Psi_q\) | Strict safe-dominance relation | Cardinal family sum, general outranking, or cycle recovery |
+| \(F_q\) | Pointwise dominance frontiers | Frontier index becomes gain or mandatory selection order |
 | \(\operatorname{Select}_\Gamma\) | One budgeted marginal-gain walk; order is admission | Reorder after the selected set exists |
 | \(D_q\) | Unique evidence pack within entry and token budgets | Later membership change or hidden destructive cut |
 
@@ -98,9 +147,14 @@ is the one destructive budget cut and its admission order is delivery order.
 The `Select_Gamma` marginal-gain objective is defined against the query
 condition: gain measures incremental coverage of the query's own answer
 set and obligation facets (2026-08-22 contract ruling). The field has no
-intrinsic preference for source or dimension diversity; source
-multiplicity may only modulate a candidate's activation strength, never
-act as an admission objective. Implementation state (2026-08-24): the
+intrinsic preference for source identity diversity. In the shadow target,
+Gamma owns only terms that depend on selected set S: obligation, Values and
+independent-evidence novelty, plus redundancy. Pointwise frontier index,
+embedding/facility/temporal evidence, admission source, and prior do not enter
+gain. Lower-frontier candidates may be selected for otherwise unavailable set
+novelty. Prior can break only a final evidence/set-utility tie. Coverage
+availability must not switch pointwise preference. Implementation state
+(2026-08-24): the
 production walk objective is binding-aware. `runSelectGammaSession` in
 `delivery/fine-assessment-selection.ts` calls
 `bindFineAssessmentBindingCover` (`select-gamma/binding-cover/production.ts`),
@@ -110,11 +164,16 @@ drives `selectGammaWalk` admission and is what `prepareSelectGammaProof`
 consumes. Query-conditioned facility coverage therefore drives live admission
 and has a production proof consumer. This closure is not a licence for a
 second walk or post-selection reorder, and it is not a KPI claim.
+The 2026-08-25 audit additionally found that facility base relevance consumes
+the independent embedding map when present, while zero/unavailable cover
+consumes `fused_score`. That piecewise A-type relevance source is current
+runtime behavior and a diagnosed contract violation, not target semantics.
 
 For a query q, the planned obligation set O_q includes entity, relation, time,
-logical-object, independent-evidence, and answer-shape atoms. Gamma gain is
-base relevance plus the incremental coverage of unmet atoms in O_q. Source
-multiplicity can strengthen activation, but cannot be an admission objective.
+logical-object, independent-evidence, and answer-shape atoms. Target Gamma gain
+contains only incremental set coverage/novelty and redundancy. Pointwise
+safe-dominance/frontier structure constrains and explains capture but is not
+added as `FrontierPriority`. Source identity is not an admission-diversity key.
 Cardinality/enumerative obligations are required for full-gold completeness
 claims even if an initial any@5 experiment can proceed without them.
 
@@ -179,11 +238,15 @@ candidate field
 assessment
   collect routing keys, evidence support, path inflow, governance,
   semantic activation, and field receipts
-  -> effective object scoring
-  -> family-max RRF fusion (ranking scalar is R_obj)
+  -> effective object scoring (current prior/relevance mixture;
+     legacy, not target authority)
+  -> family-max RRF fusion (current fused_score/R_obj scalar;
+     diagnosed noncompliant, not target preference/capture algebra)
   -> integrated Slice/path/evidence flood (diagnostics and Gamma cover;
      does not enter the ranking scalar)
-  -> deep-head relevance (rescores the pool only when embedding is observed)
+  -> deep-head relevance (independently rescores the pool when embedding is
+     observed and also supplies coverageRelevance; diagnosed second
+     relevance authority)
   -> Select_Gamma with the binding-aware coverage objective under
      eligibility, object-identity dedupe (source hard-dedupe off),
      lineage receipt, dimension, max-entry, and token constraints
@@ -229,9 +292,9 @@ The principal owners are:
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
-| Embedding supplement | Live | Embedding may inject candidates and rescore an eligible pool when embedding is observed. It never authorizes durable truth, and embedding-off deep-head must not replace fused order. |
-| Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The ranking scalar is family-max R_obj; flood and evidence residuals are diagnostic and must not invert a higher object score. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live and sole final admission owner | Decision order is materialized as delivery order and asserted after materialization. Packet observations and optional synthesis do not change membership or order. Binding-aware gain is tri-state: positive incremental cover is quality plus cover; known-zero cover is `R_obj` (`fused_score`) minus rho so embedding/facility quality cannot invert ranking; unavailable cover is that same rank-only fallback, not a proof of zero cover. `decomposeGain.coverage` is 0 when unavailable, so rank-only parts are not an additive identity. Truncated composition cannot prove known-zero. Last-slot displacement under rank-only is `rank_displaced`. Production source hard-dedupe is off (object-identity dedupe only). G17a and G17b are closed. S14 ranking-preserve is the known-zero numeric, not a second walk. |
+| Embedding supplement | Live, relevance role noncompliant | Embedding may inject candidates, cast the semantic family ballot, modulate graph/path contribution, independently rescore the pool, and supply facility relevance. It never authorizes durable truth. The shadow target makes E1 a monotonic field extension: admission cannot evict E0 or create preference, and shared candidates add one embedding observation only. |
+| Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The current ranking scalar is family-max `fused_score`; flood and evidence residuals are diagnostic. This preserves one scalar mutation path but does not validate family-max as canonical relevance. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
+| `Select_Gamma` | Live and sole final admission owner; relevance role noncompliant | Decision order is materialized as delivery order and asserted after materialization. Current positive-cover gain uses embedding/facility quality plus cover; known-zero and unavailable use `fused_score` minus rho. This piecewise pointwise source is the diagnosed second authority. The shadow target permits only S-dependent novelty/coverage/redundancy, no frontier-index gain, and one prefix-monotonic walk. Production source hard-dedupe is off. G17a/G17b ownership is closed; replacement algebra is not. |
 | Selection-boundary replay | Live | Generation, condition, inputs, receipts, selected keys, order, and visible digest are captured for deterministic replay. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
@@ -259,6 +322,15 @@ This closure covers field membership, selector ordering, and — since the
 G17a/G17b closures — the query-conditioned coverage objective with its
 production consumer and selection receipts. It is an implementation
 claim, not a KPI promotion.
+
+It does **not** close Recall decision algebra. Neither live `effectiveScore` nor
+family-max `fused_score` is target authority, and deep-head/facility embedding
+is another pointwise path. The active sharded plan owns source freeze; parallel
+demand/observation/safe-dominance/Gamma audits; exact capture-algebra freeze;
+behavior-neutral shadow trace; explicit cutover authorization; reversible
+delivery; measurement; and only then legacy deletion. Do not describe
+connectedness or shadow presence as algorithmic correctness, and do not lower
+the fixed E0 >=85/94 and E1 >=90/94 gates.
 
 Do not add a second field, selector, query condition, or recall path.
 
@@ -326,24 +398,31 @@ that winning stream's own applicability contract. They do not. Across
 42 questions (10 S11 near-top + 32 S12 waist) there are 210 fused
 occupiers: 112 structural, 79 `temporal_facet`, 19 out of family. Zero
 `producer_ineligible` votes. In-family winning streams are
-`existing_score` (91, always-on `clamp01(effectiveScore)`),
+`existing_score` (91 winning slots, not 91 top-5 questions; always-on
+`clamp01(effectiveScore)`),
 `temporal_recency` (60, query window or documented no-`date_terms`
 recency fallback after `hasTemporalQuerySignal` lifts weight to 4),
 `evidence_structural_agreement` (21, both legs present), and
 `subject_alignment` (19, `mixed_unproven` because entry content and
 preference-profile fields are unobserved). Question rollup: 35
 `honest_strength`, 7 `mixed_unproven`, 0 `producer_ineligible`.
-Family-max already collapses density. Dual-13 `same_family_weaker`
-remains a counterexample to a universal dense-family claim. S17
+Family-max already collapses within-family density. Dual-13
+`same_family_weaker` remains a counterexample to a universal dense-family
+claim. This establishes duplicate suppression only; it does not validate
+cross-family addition or missing-family semantics. S17
 authorizes no producer repair, no weight change, no generic SliceKey
-rule, no Dual-13 retune, and no G21. Dual-13 stays honest no-fix. Pin
+rule, no Dual-13 retune, and no G21. The canonical authority adjudication
+supersedes the algorithm-level no-fix interpretation. Pin
 `3af4fd9` retained. Latency stays NOT_VERIFIED.
 
 ## S18 full-gold runtime completeness (closed, read-only)
 
 S18 is a read-only semantics card (no production change). Full-gold@5
 and any@5 share the same delivered set and the one `Select_Gamma`
-objective. Evaluator gold count is **not** a runtime expected count.
+objective. Evaluator gold count is **not** a runtime expected count. Full-gold
+has no current hard KPI threshold: report both E0/E1 arms and seek improvement,
+while treating historical E1 43/94 only as reference data until a current
+source-bound baseline and grounded product completeness contract exist.
 
 Independent recompute of G21 E1 `2026-08-24T094913Z` matches the
 partition: 94 scorable, 27 full-gold@5, 67 failures, 2 questions with
@@ -421,7 +500,8 @@ It correctly described that old commit's inactive path/Slice behavior. It must
 not be used to describe current connectedness or to claim a current score gate.
 
 The 2026-08-23 evidence pin `3af4fd9` (source baseline `a03dc5d`) is the
-last comparable KPI measurement: E1 any@5 81/94, full-gold@5 43/94. It is
+last comparable any@5 measurement: E1 any@5 81/94; full-gold@5 43/94 is
+only its historical secondary-metric reference. It is
 diagnostic evidence, not a promotion. Later code — including `5782391d`
 and this S14 ranking-preserving gain — has a G21 cache-only 100Q gate
 MISS (E1 63/94), not a pin replacement, and the ancestor
@@ -429,9 +509,12 @@ MISS (E1 63/94), not a pin replacement, and the ancestor
 classification of the remaining E0/E1 miss partition is closed. S14
 landed ranking-preserving Gamma gain; it is not a KPI, G21, or retune
 licence. S17 closed query-conditioned family eligibility dump-only with
-no producer repair. S18 closed the full-gold runtime-semantics card
+no producer repair; legal votes do not validate family-max algebra. S18 closed
+the full-gold runtime-semantics card
 read-only: evaluator gold count is not a runtime expected count. G21,
-retuning, and benchmark promotion are not authorized by this document.
+retuning, and benchmark promotion are not authorized by this document. Active
+execution starts at `.do-it/plans/recall-any5-evidence-first/README.md`; S19 is
+closed and must not be rerun as a target proof.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate

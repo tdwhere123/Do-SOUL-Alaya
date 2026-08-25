@@ -121,6 +121,16 @@ the remaining any@5 diagnostic work, live under the recall authority — not as
 additional architecture axes. Kind/category projections remain independent
 rebuildable routing projections and must not be schema-coupled to strict base
 graph acceptance.
+
+Connectedness does not certify relevance algebra. The current `effectiveScore`,
+family-max scalarization, and downstream independent-embedding relevance path
+are diagnosed as noncanonical in [`recall.md`](recall.md). Route B rebuilds the
+decision path from attributed observations. The shadow target uses one strict
+safe-dominance relation plus one prefix-monotonic budgeted-capture walk; it does
+not add a second field or selector. The architectural invariants remain one
+monotonically extended field, one pointwise preference authority, and one
+destructive `Select_Gamma` set-capture walk.
+
 Owner and current closure boundary:
 
 [`recall.md`](recall.md)

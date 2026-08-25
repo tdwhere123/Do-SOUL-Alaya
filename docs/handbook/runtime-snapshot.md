@@ -1,13 +1,14 @@
 # Runtime Snapshot
 
-Package version is `0.3.11`; the current documentation anchor is the G21
-cache-only 100Q of S14 ranking-preserving Gamma on 2026-08-24.
+Package version is `0.3.11`; the current documentation anchor is the
+2026-08-25 budgeted-capture shadow adjudication and sharded plan over the
+relevance-authority/G21/S11-S19 evidence.
 This file is readiness vocabulary and dated snapshots. It is **not** a
 KPI-promotion or merge-readiness claim.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture delta (2026-08-24–25, S14–S18)
+## Recall posture delta (2026-08-24–25, S14–S20)
 
 | Fact | Status |
 |---|---|
@@ -15,15 +16,21 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Source hard-dedupe | Off in production; object-identity dedupe only, policy recorded in the selection receipt (G17a closed) |
 | S11 near-top audit | Closed: ten of ten E0 near-top cases were honest higher `R_obj`, not residual inversion |
 | Independent-embedding quality | Capsule `evidence_semantic` excluded (`06af8c83`) |
-| Last comparable KPI pin | `3af4fd9`: E1 any@5 81/94, full-gold@5 43/94 — diagnostic only |
+| Last comparable any@5 pin | `3af4fd9`: E1 any@5 81/94; full-gold@5 43/94 is historical diagnostic reference, not a gate |
 | Recall any@5 promotion | **NOT PROMOTED**; G21 100Q gate MISS; pin `3af4fd9` retained |
 | S15 cache-only 1Q→3Q | Closed: KPI E1-only census misses `001be529` `6f9b354f` `726462e0` recovered gold at final≤5; fused ranks unchanged; `physical_calls=0` |
 | G21 cache-only 100Q | Closed MISS on `32a3250e`: E1 63/94 any@5 and 27/94 full-gold@5; E0 48/94 control, 49/94 treatment, 21/94 full-gold@5. Versus ancestor E1 78/94: +4/−19. Do not retune |
 | S12 waist/coverage audit | Closed: 1 coverage displacement (`d23cf73b`) plus 32 honest fused-order family-max waist misses |
-| S13 remaining-miss partition | Closed: Dual-13 `honest_thinner_r_obj` (representation); E1-only 3 `gamma_displaced_fused_head`. G21, retuning, and promotion not authorized |
-| S14 general repair | Closed: Dual-13 honest no-fix; fused-head skip is ranking-preserving Gamma gain (`fused_score − rho` when Values_v/obligation increment is 0). Not a KPI |
+| S13 remaining-miss partition | Closed as legacy-runtime classification: Dual-13 `honest_thinner_r_obj`; E1-only 3 `gamma_displaced_fused_head`. Canonical adjudication rejects representation-only attribution and authorizes no local patch |
+| S14 general repair | Closed: Dual-13 had no local family-max patch; fused-head skip is ranking-preserving Gamma gain (`fused_score − rho` at zero cover). Canonical adjudication supersedes the algorithm-level no-fix interpretation |
 | S17 family eligibility | Closed dump-only: 210 fused occupiers on S11/S12, 0 `producer_ineligible`; `existing_score`/`temporal_recency`/`evidence_structural_agreement` honest; 19 `subject_alignment` mixed/unproven. No repair, no weight change |
 | S18 full-gold completeness | Read-only card closed: three-way split (enumerative / independent-evidence / dataset-only golds). Evaluator gold count is not a runtime expected count. No production change |
+| Relevance-authority verdict | **D (B + C)**: family-max additive RRF loses magnitude; short rank lists, uncalibrated intent weights, and a bounded breadth cohort distort relevance. Object/factor embedding re-enters deep-head/facility/Gamma as a second relevance authority |
+| Route adjudication | **B**: neither `effectiveScore` nor family-max `fused_score` is target authority; rebuild from attributed observations and later retire the `existing_score` recycle lane |
+| S19 probe | Closed: sparse Pareto/per-question-linear results are non-discriminating; tie-corrected 89/90/91 claims withdrawn; target reachability remains NOT_VERIFIED |
+| S20 active plan | P0–M1 umbrella: parallel demand/observation/safe-dominance/Gamma audits; exact capture-algebra freeze; behavior-neutral shadow trace; explicit cutover gate; reversible delivery; 100Q isolation; legacy deletion/proof; source-bound 500Q |
+| Shadow algorithm direction | Strict safe dominance; cycles fail contract; frontier index is not gain; cross-frontier set novelty is legal; one prefix-monotonic capture walk; prior only on the final unresolved tie |
+| E0/E1 target | E1 monotonically extends the candidate field, cannot evict E0 candidates, and adds one embedding observation on shared candidates; admission receipt creates no preference |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
 ## Recall posture (2026-08-19 live-source pass)
@@ -45,8 +52,10 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Official 100Q / 500Q promotion | **Not claimed** |
 
 The previous integrated implementation is therefore not a degenerate
-projection and must not be reimplemented wholesale. P217 was a planted
-end-to-end acceptance gate that repaired only a demonstrated missing live seam.
+projection and must not be reimplemented wholesale. Its connectedness and
+single-selector ownership remain live, while its relevance scalarization is
+explicitly not algorithmically closed. P217 was a planted end-to-end
+acceptance gate that repaired only a demonstrated missing live seam.
 The legacy MiMo cache predates the completion-witness contract and is not a
 current replay authority. Cache regeneration and the 1Q -> 3Q -> 100Q ladder
 remain not started at this documentation anchor.
