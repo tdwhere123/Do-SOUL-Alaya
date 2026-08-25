@@ -412,7 +412,9 @@ async function recordRecallSideEffects(
   manifested: ManifestedRecallResult,
   completedAt: string
 ): Promise<void> {
-  await appendRecallCompletedEvent(params, coarse, manifested, completedAt, context);
+  await appendRecallCompletedEvent(
+    params, coarse, manifested, completedAt, context, assessment
+  );
   await Promise.all([
     appendWeightTransferTelemetry({
       eventLogRepo: context.dependencies.eventLogRepo,
@@ -438,7 +440,8 @@ async function appendRecallCompletedEvent(
   coarse: CoarseStageResult,
   manifested: ManifestedRecallResult,
   completedAt: string,
-  context: RecallExecutionContext
+  context: RecallExecutionContext,
+  assessment: AssessmentStageResult
 ): Promise<void> {
   await context.dependencies.eventLogRepo.append({
     event_type: RecallContextEventType.SOUL_RECALL_COMPLETED,
@@ -454,7 +457,12 @@ async function appendRecallCompletedEvent(
       coarse_filter_count: coarse.combinedCoarseCandidates.length,
       fine_assessment_count: manifested.candidates.length,
       workspace_id: params.workspaceId,
-      occurred_at: completedAt
+      occurred_at: completedAt,
+      delivery_path: assessment.finalAssessment.delivery_path,
+      ranking_authority: assessment.finalAssessment.ranking_authority,
+      ...(assessment.finalAssessment.d0_identity === undefined
+        ? {}
+        : { d0_identity: assessment.finalAssessment.d0_identity })
     })
   });
 }

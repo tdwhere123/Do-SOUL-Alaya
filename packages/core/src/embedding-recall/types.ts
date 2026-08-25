@@ -97,6 +97,7 @@ export interface EmbeddingWorkspaceNeighborResult {
   readonly provider_kind?: string;
   readonly model_id?: string;
   readonly schema_version?: number;
+  readonly dimensions?: number;
   readonly query_embedding_status?:
     | "provider_returned"
     | "provider_pending"

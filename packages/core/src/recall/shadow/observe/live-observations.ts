@@ -1,4 +1,9 @@
-import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
+import {
+  FTS_LANE_IDS,
+  type FtsLaneId,
+  type MemoryEntry,
+  type RecallPolicy
+} from "@do-soul/alaya-protocol";
 import { clamp01 } from "../../../shared/clamp.js";
 import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
@@ -27,13 +32,12 @@ import {
 } from "../observations.js";
 import type { ShadowPsiObservationField } from "../psi.js";
 
-const MERGE_LANES = ["exact", "porter", "trigram"] as const;
 const LANE_PRIORITY: Readonly<Record<KeywordLexicalLaneId, number>> = {
-  exact: 0,
-  porter: 1,
-  object_key_porter: 1,
-  trigram: 2,
-  object_key_trigram: 2
+  exact: FTS_LANE_IDS.indexOf("exact"),
+  porter: FTS_LANE_IDS.indexOf("porter"),
+  object_key_porter: FTS_LANE_IDS.indexOf("porter"),
+  trigram: FTS_LANE_IDS.indexOf("trigram"),
+  object_key_trigram: FTS_LANE_IDS.indexOf("trigram")
 };
 const LIVE_EMB_DOMAIN = freezeShadow({
   provider_kind: "recall.live",
@@ -56,6 +60,8 @@ type LiveContext = Readonly<{
   readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly captures: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly scores: Readonly<Record<string, number>>;
+  readonly embeddingDomain: LiveObservationSource["supplementaryData"]["embeddingObservationDomain"];
+  readonly contentHashes: Readonly<Record<string, string>>;
   readonly probes: Readonly<RecallQueryProbes>;
   readonly nowIso: string | undefined;
   readonly clockOk: boolean;
@@ -88,14 +94,18 @@ export function buildLiveObservationField(
 
 export function liveLexicalMapping(
   field: ShadowPsiObservationField,
-  usedCapture = false
+  captures: readonly Readonly<KeywordLexicalMergeCapture>[] = []
 ): "x0_capture" | "lane_receipts" | "not_observed" {
-  for (const view of Object.values(field)) {
-    if (view?.lineages.lexical?.envelope.state === "observed") {
-      return usedCapture ? "x0_capture" : "lane_receipts";
-    }
+  let observed = false;
+  let captureOnly = true;
+  for (const [key, view] of Object.entries(field)) {
+    if (view?.lineages.lexical?.envelope.state !== "observed") continue;
+    observed = true;
+    const objectId = key.split(":").slice(2).join(":");
+    if (chooseCaptureHit(objectId, captures) === null) captureOnly = false;
   }
-  return "not_observed";
+  if (!observed) return "not_observed";
+  return captureOnly && captures.length > 0 ? "x0_capture" : "lane_receipts";
 }
 
 function liveContext(input: LiveObservationSource): LiveContext {
@@ -115,6 +125,8 @@ function liveContext(input: LiveObservationSource): LiveContext {
     lanes: input.memoryKeywordLanes ?? Object.freeze([]),
     captures: input.memoryLexicalCaptures ?? Object.freeze([]),
     scores: input.supplementaryData.embeddingSimilarityScores,
+    embeddingDomain: input.supplementaryData.embeddingObservationDomain,
+    contentHashes: input.supplementaryData.embeddingContentHashByObjectId ?? Object.freeze({}),
     probes,
     nowIso,
     clockOk,
@@ -133,7 +145,7 @@ function liveLineages(
     lineages.lexical = liveLexical(candidate.entry.object_id, context);
   }
   if (context.applicable.embedding) {
-    lineages.embedding = liveEmbedding(candidate.entry.object_id, context.scores);
+    lineages.embedding = liveEmbedding(candidate.entry.object_id, context);
   }
   if (context.applicable.temporal) {
     lineages.temporal = liveTemporal(candidate.entry, context);
@@ -175,7 +187,6 @@ function chooseCaptureHit(
   objectId: string,
   captures: readonly Readonly<KeywordLexicalMergeCapture>[]
 ): LexHit | null {
-  let best: LexHit | null = null;
   for (const capture of captures) {
     const row = capture.candidates.find((candidate) =>
       candidate.candidate_key === objectId &&
@@ -189,15 +200,15 @@ function chooseCaptureHit(
     if (lane === undefined || (lane.status !== "complete" && lane.status !== "truncated")) {
       continue;
     }
-    best = preferLexicalHit(freezeShadow({
+    return freezeShadow({
       lane_id: row.chosen_lane_id,
       normalized_rank: row.chosen_normalized_rank,
       list_n: lane.list_n,
       status: lane.status,
       raw_key_kind: lane.raw_key_kind
-    }), best);
+    });
   }
-  return best;
+  return null;
 }
 
 function chooseLexicalHit(
@@ -238,8 +249,9 @@ function preferLexicalHit(candidate: LexHit, current: LexHit | null): LexHit {
 
 function liveEmbedding(
   objectId: string,
-  scores: Readonly<Record<string, number>>
+  context: LiveContext
 ): ShadowPointwiseObservation {
+  const scores = context.scores;
   if (!Object.hasOwn(scores, objectId) || !Number.isFinite(scores[objectId])) {
     return parsePointwiseObservation({
       lineage: "embedding",
@@ -250,6 +262,7 @@ function liveEmbedding(
     });
   }
   const value = clamp01(scores[objectId]!);
+  const contentHash = context.contentHashes[objectId];
   return parsePointwiseObservation({
     lineage: "embedding",
     receipt: "embed.observe.v1",
@@ -258,8 +271,10 @@ function liveEmbedding(
     snapshot: {
       status: "observed",
       value,
-      domain: LIVE_EMB_DOMAIN,
-      content_hash: `live.embed:${objectId}`
+      domain: context.embeddingDomain ?? LIVE_EMB_DOMAIN,
+      content_hash: contentHash !== undefined && contentHash.length > 0
+        ? contentHash
+        : `live.embed:${objectId}`
     }
   });
 }
@@ -389,6 +404,6 @@ function parseEventTime(value: string | null | undefined): string | null {
   return Number.isFinite(Date.parse(value)) ? value : null;
 }
 
-function isMergeLane(lane: string): lane is (typeof MERGE_LANES)[number] {
-  return lane === "exact" || lane === "porter" || lane === "trigram";
+function isMergeLane(lane: string): lane is FtsLaneId {
+  return FTS_LANE_IDS.some((id) => id === lane);
 }

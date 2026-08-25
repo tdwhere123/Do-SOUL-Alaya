@@ -133,44 +133,57 @@ describe("C0 reversible delivery cutover", () => {
   it("keeps H_E0 a subset of H_E1 and recovers the E0 prefix after masking embedding", () => {
     const shared = fieldCandidates();
     const extra = extraCandidate("cand-d");
-    const lanes = porterLanes({
-      "cand-a": 0.9,
+    const inverted = porterLanes({
+      "cand-c": 0.9,
       "cand-b": 0.6,
-      "cand-c": 0.3
+      "cand-a": 0.3
     });
+    const e0Keys = shared.map((candidate) => keyOf(candidate.entry.object_id));
+    const e1KeyList = [...shared, extra].map((candidate) => keyOf(candidate.entry.object_id));
     const e0 = fineAssess(lexicalAssess(shared, {
       embedding_enabled: false,
-      lanes,
+      max_entries: 4,
+      lanes: inverted,
       embeddingSimilarityScores: { "cand-a": 0.2, "cand-b": 0.3, "cand-c": 0.4 },
-      e0Keys: shared.map((candidate) => keyOf(candidate.entry.object_id)),
-      e1Keys: shared.map((candidate) => keyOf(candidate.entry.object_id))
+      e0Keys,
+      e1Keys: e1KeyList
     }));
     const e1 = fineAssess(lexicalAssess([...shared, extra], {
       embedding_enabled: true,
-      lanes,
+      max_entries: 4,
+      lanes: inverted,
       embeddingSimilarityScores: {
         "cand-a": 0.2,
         "cand-b": 0.3,
         "cand-c": 0.4,
         "cand-d": 0.99
       },
-      e0Keys: shared.map((candidate) => keyOf(candidate.entry.object_id)),
-      e1Keys: [...shared, extra].map((candidate) => keyOf(candidate.entry.object_id))
+      e0Keys,
+      e1Keys: e1KeyList
     }));
     const masked = fineAssess(lexicalAssess([...shared, extra], {
-      embedding_enabled: false,
-      lanes,
-      embeddingSimilarityScores: {}
+      embedding_enabled: true,
+      max_entries: 4,
+      lanes: inverted,
+      embeddingSimilarityScores: {},
+      e0Keys,
+      e1Keys: e1KeyList
     }));
-    const e0Keys = asCaptured(e0.shadowTrace).eligible_keys;
-    const e1Keys = asCaptured(e1.shadowTrace).eligible_keys;
-    expect(e0Keys.every((key) => e1Keys.includes(key))).toBe(true);
-    expect(e1Keys).toContain(keyOf("cand-d"));
-    expect(e0.candidates.map((candidate) => candidate.object_id))
-      .toEqual(["cand-a", "cand-b", "cand-c"]);
+    const e0Eligible = asCaptured(e0.shadowTrace).eligible_keys;
+    const e1Eligible = asCaptured(e1.shadowTrace).eligible_keys;
+    expect(e0Eligible.every((key) => e1Eligible.includes(key))).toBe(true);
+    expect(e1Eligible).toContain(keyOf("cand-d"));
+    const e0Ids = e0.candidates.map((candidate) => candidate.object_id);
+    expect(e0Ids).toEqual(["cand-c", "cand-b", "cand-a"]);
+    expect(e0Ids.every((objectId) =>
+      e1.candidates.some((candidate) => candidate.object_id === objectId)
+    )).toBe(true);
     expect(masked.candidates.map((candidate) => candidate.object_id)
       .filter((objectId) => objectId !== "cand-d"))
-      .toEqual(e0.candidates.map((candidate) => candidate.object_id));
+      .toEqual(e0Ids);
+    expect(e0.preparedCandidates).toEqual([]);
+    expect(e0.prunedCandidates).toEqual([]);
+    expect(e0.diagnostics).toEqual([]);
   });
 
   it("orders canonical prefix from live lane receipts instead of candidate_key", () => {
@@ -312,6 +325,7 @@ function lexicalAssess(
   candidates: readonly CoarseRecallCandidate[],
   options: {
     readonly embedding_enabled: boolean;
+    readonly max_entries?: number;
     readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
     readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
     readonly e0Keys?: readonly string[];
@@ -321,7 +335,8 @@ function lexicalAssess(
   return {
     ...assessParams(candidates, "canonical"),
     policy: withFineDeliveryPath(policyOf({
-      embedding_enabled: options.embedding_enabled
+      embedding_enabled: options.embedding_enabled,
+      max_entries: options.max_entries
     }), "canonical"),
     memoryKeywordLanes: options.lanes,
     e0Keys: options.e0Keys,

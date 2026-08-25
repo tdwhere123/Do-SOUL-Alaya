@@ -305,24 +305,24 @@ function selectObservationMatches(
     : result.matches;
 }
 
+function firstRelaxedRecord(
+  records: readonly Readonly<RecordedFieldResult>[]
+): Readonly<RecordedFieldResult> | undefined {
+  return records.find((record) => record.prefix === "lexical_relaxed");
+}
+
 function collectMemoryKeywordLanes(
   records: readonly Readonly<RecordedFieldResult>[]
 ): readonly Readonly<KeywordSearchLaneReceipt>[] {
-  return Object.freeze(records.flatMap((record) =>
-    record.prefix === "lexical_relaxed" || record.prefix === "lexical_expanded"
-      ? record.result.lanes
-      : []
-  ));
+  const record = firstRelaxedRecord(records);
+  return Object.freeze(record === undefined ? [] : [...record.result.lanes]);
 }
 
 function collectMemoryLexicalCaptures(
   records: readonly Readonly<RecordedFieldResult>[]
 ): readonly Readonly<KeywordLexicalMergeCapture>[] {
-  return Object.freeze(records.flatMap((record) =>
-    record.prefix === "lexical_relaxed" && record.result.lexical_raw_rank !== undefined
-      ? [record.result.lexical_raw_rank]
-      : []
-  ));
+  const capture = firstRelaxedRecord(records)?.result.lexical_raw_rank;
+  return Object.freeze(capture === undefined ? [] : [capture]);
 }
 
 function materializeRefinementReceipts(

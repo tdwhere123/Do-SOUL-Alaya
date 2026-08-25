@@ -343,10 +343,7 @@ function assembleCaptured(
     digest: D0_IDENTITY_DIGEST,
     c0_seam: shadowC0Seam(c0ActivationOf(input)),
     lexical_mapping: input.observationField === undefined
-      ? liveLexicalMapping(
-        observations,
-        (input.memoryLexicalCaptures?.length ?? 0) > 0
-      )
+      ? liveLexicalMapping(observations, input.memoryLexicalCaptures ?? [])
       : "planted" as const,
     admitted_lineages: SHADOW_LINEAGE_IDS,
     relational_o: "excluded" as const,

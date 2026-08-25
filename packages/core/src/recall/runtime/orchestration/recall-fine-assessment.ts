@@ -1,3 +1,5 @@
+import type { EmbeddingWorkspaceNeighborResult } from
+  "../../../embedding-recall/types.js";
 import { withEmbeddingSimilarityScores } from
   "../../coarse-filter/embedding/embedding-similarity-supplement.js";
 import {
@@ -73,7 +75,12 @@ export function mergeSnapshotSupplementaryData(
   embeddingData: EmbeddingAssessmentData
 ): FineAssessParams["supplementaryData"] {
   return withEmbeddingSimilarityScores(
-    base.supplementaryData,
+    {
+      ...base.supplementaryData,
+      ...snapshotEmbeddingObservation(
+        coarse.embeddingCoarseInjection.requestScoreSnapshot?.workspaceNeighbors
+      )
+    },
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
     embeddingData.poolRescoreScores,
@@ -81,6 +88,43 @@ export function mergeSnapshotSupplementaryData(
     embeddingData.retrievalFieldSeal,
     embeddingData.retrievalFieldRefinementReceipts
   );
+}
+
+function snapshotEmbeddingObservation(
+  neighbors: Readonly<EmbeddingWorkspaceNeighborResult> | undefined
+): Pick<
+  FineAssessParams["supplementaryData"],
+  "embeddingObservationDomain" | "embeddingContentHashByObjectId"
+> {
+  if (neighbors === undefined) return {};
+  const dimensions = neighbors.dimensions;
+  const domain =
+    neighbors.provider_kind !== undefined &&
+    neighbors.provider_kind.length > 0 &&
+    neighbors.model_id !== undefined &&
+    neighbors.model_id.length > 0 &&
+    neighbors.schema_version !== undefined &&
+    dimensions !== undefined &&
+    dimensions > 0
+      ? Object.freeze({
+        provider_kind: neighbors.provider_kind,
+        model_id: neighbors.model_id,
+        dimensions,
+        schema_version: neighbors.schema_version
+      })
+      : undefined;
+  const hashes: Record<string, string> = {};
+  for (const hit of neighbors.hits) {
+    if (hit.content_hash !== undefined && hit.content_hash.length > 0) {
+      hashes[hit.object_id] = hit.content_hash;
+    }
+  }
+  return {
+    ...(domain === undefined ? {} : { embeddingObservationDomain: domain }),
+    ...(Object.keys(hashes).length === 0
+      ? {}
+      : { embeddingContentHashByObjectId: Object.freeze(hashes) })
+  };
 }
 
 export function prepareAssessmentAfterEmbedding(

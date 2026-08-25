@@ -302,6 +302,33 @@ describe("resolveMcpDegradationReason", () => {
     ).toBe("cold_cascade_engaged");
   });
 
+  it("names ranking_authority on the packet and does not treat relevance as ranking", () => {
+    const parsed = SoulMemorySearchResponseSchema.parse({
+      delivery_id: "delivery-1",
+      protocol_version: 1,
+      results: [],
+      total_count: 0,
+      strategy_mix: {
+        deterministic_match: true,
+        precomputed_rank: true,
+        semantic_supplement: false,
+        graph_support: false,
+        path_plasticity: false,
+        global_recall: false
+      },
+      delivery_path: "canonical",
+      ranking_authority: "d0_prefix",
+      d0_identity: {
+        algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1",
+        version: "d0.safe-dominance-capture.v1.0.0",
+        digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa"
+      }
+    });
+    expect(parsed.ranking_authority).toBe("d0_prefix");
+    expect(parsed.delivery_path).toBe("canonical");
+    expect(parsed.results).toEqual([]);
+  });
+
   it("emits schema-valid SoulMemorySearchResponse degradation_reason values", () => {
     for (const reason of [
       "provider_missing",

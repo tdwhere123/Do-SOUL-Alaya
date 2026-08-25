@@ -481,7 +481,16 @@ function buildBenchRecallResponse(
     degradation_reason: resolveBenchRecallDegradationReason(
       results,
       recallResult.degradation_reason
-    )
+    ),
+    ...(recallResult.delivery_path === undefined
+      ? {}
+      : { delivery_path: recallResult.delivery_path }),
+    ...(recallResult.ranking_authority === undefined
+      ? {}
+      : { ranking_authority: recallResult.ranking_authority }),
+    ...(recallResult.d0_identity === undefined
+      ? {}
+      : { d0_identity: recallResult.d0_identity })
   });
   return recallResult.diagnostics === undefined
     ? response

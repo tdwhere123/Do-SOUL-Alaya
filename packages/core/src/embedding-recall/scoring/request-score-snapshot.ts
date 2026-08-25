@@ -473,6 +473,7 @@ function buildNeighborResult(
   hits: readonly Readonly<EmbeddingNeighborHit>[],
   provider: EmbeddingProviderPort
 ): Readonly<EmbeddingWorkspaceNeighborResult> {
+  const dimensions = query.embedding?.length ?? scan.records[0]?.dimensions;
   return Object.freeze({
     hits,
     embedding_inference_calls: query.inferenceCalls,
@@ -485,7 +486,8 @@ function buildNeighborResult(
       workspace_scanned_count: scan.returned,
       provider_kind: provider.providerKind,
       model_id: provider.modelId,
-      schema_version: provider.schemaVersion
+      schema_version: provider.schemaVersion,
+      ...(dimensions === undefined || dimensions <= 0 ? {} : { dimensions })
     } : {})
   });
 }

@@ -45,11 +45,13 @@ export const MemorySearchResultSchema = z
   .object({
     object_id: NonEmptyStringSchema,
     object_kind: NonEmptyStringSchema,
+    // Not ranking authority. Delivery order is the parent `results` array.
+    // Do not re-sort on this field or score_factors.relevance.
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
-    // Diagnostic-only prose. Agents must not branch on its wording; use
-    // numeric score_factors and relevance_score for ranking/explainability.
+    // Diagnostic-only prose. Agents must not branch on its wording or use it
+    // as a ranking key. ranking_authority on the parent packet names the owner.
     selection_reason: BoundedReasonSchema,
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     // Public numeric explainability API for soul.recall consumers.
@@ -155,7 +157,14 @@ export const SoulMemorySearchResponseSchema = z
     active_constraints_count: NonNegativeIntSchema.optional(),
     total_count: NonNegativeIntSchema,
     strategy_mix: SoulRecallStrategyMixSchema,
-    degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional()
+    degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
+    delivery_path: z.enum(["legacy", "canonical"]).optional(),
+    ranking_authority: z.enum(["d0_prefix", "select_gamma"]).optional(),
+    d0_identity: z.object({
+      algorithm_id: NonEmptyStringSchema,
+      version: NonEmptyStringSchema,
+      digest: NonEmptyStringSchema
+    }).strict().readonly().optional()
   })
   .strict()
   .readonly();

@@ -65,7 +65,56 @@ describe("live shadow observations", () => {
       list_n: 1,
       raw_key_kind: "bm25_raw_rank"
     });
-    expect(liveLexicalMapping(field, true)).toBe("x0_capture");
+    expect(liveLexicalMapping(field, [capture])).toBe("x0_capture");
+  });
+
+  it("does not report x0_capture when a live hit used the lane fallback", () => {
+    const capture: KeywordLexicalMergeCapture = {
+      query_run_id: "memory.keyword.depth:3",
+      merge_limit: 3,
+      lanes: [{
+        lane_id: "porter",
+        raw_key_kind: "bm25_raw_rank",
+        list_n: 1,
+        status: "complete"
+      }],
+      candidates: [{
+        candidate_key: "cand-a",
+        chosen_lane_id: "porter",
+        chosen_normalized_rank: 1,
+        admitted: true
+      }]
+    };
+    const field = buildLiveObservationField(liveInput({
+      query: "operator workspace",
+      ids: ["cand-a", "cand-b"],
+      lanes: [lane("porter", "cand-b", 0.8, 2)],
+      captures: [capture]
+    }));
+    expect(liveLexicalMapping(field, [capture])).toBe("lane_receipts");
+  });
+
+  it("projects the score-snapshot EmbDomain when the seam provides it", () => {
+    const domain = Object.freeze({
+      provider_kind: "local_onnx",
+      model_id: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+      dimensions: 384,
+      schema_version: 1
+    });
+    const field = buildLiveObservationField(liveInput({
+      query: "operator workspace",
+      embedding_enabled: true,
+      embeddingSimilarityScores: { "cand-a": 0.5 },
+      embeddingObservationDomain: domain,
+      embeddingContentHashByObjectId: { "cand-a": "abc123" }
+    }));
+    const embedding = field[keyOf("cand-a")]?.lineages.embedding;
+    expect(embedding && "snapshot" in embedding ? embedding.snapshot : null).toMatchObject({
+      status: "observed",
+      value: 0.5,
+      domain,
+      content_hash: "abc123"
+    });
   });
 
   it("does not reconstruct lexical O from collapsed ftsRanks", () => {
@@ -137,6 +186,8 @@ function liveInput(options: {
   readonly captures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly ftsRanks?: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
+  readonly embeddingObservationDomain?: RecallSupplementaryData["embeddingObservationDomain"];
+  readonly embeddingContentHashByObjectId?: Readonly<Record<string, string>>;
   readonly embedding_enabled?: boolean;
   readonly nowIso?: string;
   readonly eventTime?: string;
@@ -162,7 +213,13 @@ function liveInput(options: {
         }
       }
     },
-    supplementaryData: supplementaryData(options.query, options.ftsRanks, options.embeddingSimilarityScores),
+    supplementaryData: supplementaryData(
+      options.query,
+      options.ftsRanks,
+      options.embeddingSimilarityScores,
+      options.embeddingObservationDomain,
+      options.embeddingContentHashByObjectId
+    ),
     memoryKeywordLanes: options.lanes,
     memoryLexicalCaptures: options.captures,
     nowIso: options.nowIso
@@ -207,7 +264,9 @@ function keyOf(objectId: string): string {
 function supplementaryData(
   query: string,
   ftsRanks: Readonly<Record<string, number>> = {},
-  embeddingSimilarityScores: Readonly<Record<string, number>> = {}
+  embeddingSimilarityScores: Readonly<Record<string, number>> = {},
+  embeddingObservationDomain?: RecallSupplementaryData["embeddingObservationDomain"],
+  embeddingContentHashByObjectId?: Readonly<Record<string, string>>
 ): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes(query),
@@ -224,6 +283,12 @@ function supplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores,
+    ...(embeddingObservationDomain === undefined
+      ? {}
+      : { embeddingObservationDomain }),
+    ...(embeddingContentHashByObjectId === undefined
+      ? {}
+      : { embeddingContentHashByObjectId }),
     evidenceSemanticActivationsByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,

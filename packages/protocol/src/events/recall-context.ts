@@ -50,7 +50,14 @@ export const SoulRecallCompletedPayloadSchema = z
     coarse_filter_count: NonNegativeIntSchema,
     fine_assessment_count: NonNegativeIntSchema,
     workspace_id: NonEmptyStringSchema,
-    occurred_at: IsoDatetimeStringSchema
+    occurred_at: IsoDatetimeStringSchema,
+    delivery_path: z.enum(["legacy", "canonical"]).optional(),
+    ranking_authority: z.enum(["d0_prefix", "select_gamma"]).optional(),
+    d0_identity: z.object({
+      algorithm_id: NonEmptyStringSchema,
+      version: NonEmptyStringSchema,
+      digest: NonEmptyStringSchema
+    }).readonly().optional()
   })
   .readonly();
 

@@ -60,7 +60,7 @@ describe("request-scoped retrieval field bundle", () => {
     ]));
   });
 
-  it("exposes memory keyword lanes from recorded field results, not evidence", async () => {
+  it("exposes memory keyword lanes from the relaxed query_run only", async () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "deploy",
@@ -79,6 +79,13 @@ describe("request-scoped retrieval field bundle", () => {
       scope: {}
     });
     await bundle.searchEvidenceKeyword({ queryText: "deploy", limit: 10 });
+    expect(bundle.memoryKeywordLanes()).toEqual([]);
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_relaxed",
+      queryText: "deploy",
+      limit: 10,
+      scope: {}
+    });
     expect(bundle.memoryKeywordLanes().flatMap((lane) =>
       lane.observations.map((observation) => observation.object_id)
     )).toEqual(["memory-1"]);
@@ -113,6 +120,9 @@ describe("request-scoped retrieval field bundle", () => {
     expect(searchByKeywordField).toHaveBeenCalledTimes(2);
     expect(bundle.captures().find(({ channel }) =>
       channel.channel_id === "lexical_relaxed_porter")?.channel.depth).toBe(2);
+    expect(bundle.memoryKeywordLanes().flatMap((lane) =>
+      lane.observations.map((observation) => observation.object_id)
+    )).toEqual(["memory-hot"]);
   });
 
   it("fails closed when a producer is absent or rejects", async () => {
