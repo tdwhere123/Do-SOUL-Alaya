@@ -1,0 +1,422 @@
+import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { compileRecallQueryDemand } from "../query/recall-query-demand.js";
+import {
+  buildRecallCandidateDedupeKey,
+  buildRecallLogicalObjectKey
+} from "../runtime/recall-service-helpers.js";
+import type {
+  CoarseRecallCandidate,
+  RecallSupplementaryData,
+  TokenEstimator
+} from "../runtime/recall-service-types.js";
+import {
+  parseSetUtilityInput,
+  type ShadowGStatus,
+  type ShadowSetUtilityInput
+} from "./capture.js";
+import { shadowLineageApplicability } from "./demand.js";
+import { freezeShadow } from "./envelope.js";
+import { isPsiCycleFailure, peelUndominated } from "./frontier-peel.js";
+import type { ShadowFrontierReceipt } from "./frontiers.js";
+import {
+  D0_IDENTITY_DIGEST,
+  SHADOW_ALGORITHM_ID,
+  SHADOW_ALGORITHM_VERSION
+} from "./identity.js";
+import {
+  parsePointwiseObservation,
+  SHADOW_LINEAGE_IDS,
+  type ShadowLineageId,
+  type ShadowPointwiseObservation
+} from "./observations.js";
+import {
+  eligibleCandidateKeys,
+  e0MembershipSubsetOfE1,
+  isNotADominanceCompare,
+  psiOutcome,
+  psiPredicate,
+  type ShadowPsiObservationField
+} from "./psi.js";
+import type {
+  ShadowCoreKnownNoWitness,
+  ShadowEqualGReject
+} from "./receipts.js";
+import {
+  isCapturedWalk,
+  prefixSK,
+  walkShadowCapture,
+  type PsiQuery,
+  type ShadowCapturedWalk,
+  type ShadowCaptureWalkCandidate
+} from "./walk.js";
+
+export type { PsiQuery } from "./walk.js";
+export type { ShadowPsiObservationField } from "./psi.js";
+export { prefixSK } from "./walk.js";
+
+export const SHADOW_C0_SEAM = freezeShadow({
+  owner: "fineAssess",
+  activation: "inactive",
+  future_delivery_order: "prefixSK(S_infty, K)",
+  rollback: "deliverFineAssessment"
+} as const);
+
+export type ShadowFailClosedReason =
+  | "psi_cycle_contract_failure"
+  | "invalid_state"
+  | "membership_shrink"
+  | "prefix_violation";
+
+export type ShadowIntegrateInput = Readonly<{
+  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly policy: Readonly<RecallPolicy>;
+  readonly supplementaryData: RecallSupplementaryData;
+  readonly tokenEstimator: TokenEstimator;
+  readonly observationField?: ShadowPsiObservationField;
+  readonly psi?: PsiQuery;
+  readonly e0Keys?: readonly string[];
+  readonly e1Keys?: readonly string[];
+  readonly utilitiesByKey?: ReadonlyMap<string, ShadowSetUtilityInput>;
+}>;
+
+export type ShadowFailClosedTrace = Readonly<{
+  readonly kind: "fail_closed";
+  readonly reason: ShadowFailClosedReason;
+  readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
+  readonly version: typeof SHADOW_ALGORITHM_VERSION;
+  readonly digest: typeof D0_IDENTITY_DIGEST;
+  readonly c0_seam: typeof SHADOW_C0_SEAM;
+}>;
+
+export type ShadowCapturedTrace = Readonly<{
+  readonly kind: "captured";
+  readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
+  readonly version: typeof SHADOW_ALGORITHM_VERSION;
+  readonly digest: typeof D0_IDENTITY_DIGEST;
+  readonly c0_seam: typeof SHADOW_C0_SEAM;
+  readonly lexical_mapping: "planted" | "not_observed";
+  readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
+  readonly relational_o: "excluded";
+  readonly eligible_keys: readonly string[];
+  readonly frontiers: ShadowFrontierReceipt;
+  readonly S_infty: readonly string[];
+  readonly prefix_proposal: readonly string[];
+  readonly K: number;
+  readonly decisions: ShadowCapturedWalk["decisions"];
+  readonly walk_rejects: ShadowCapturedWalk["walk_rejects"];
+  readonly max_g_cohort: readonly string[];
+  readonly equal_g_dominance_rejects: readonly ShadowEqualGReject[];
+  readonly gamma_availability: ShadowGStatus | null;
+  readonly unresolved_pointwise_tradeoff: boolean;
+  readonly core_known_no_witness: readonly ShadowCoreKnownNoWitness[];
+}>;
+
+export type FineAssessmentShadowTrace = ShadowCapturedTrace | ShadowFailClosedTrace;
+
+export function captureShadowIntegration(
+  input: ShadowIntegrateInput
+): FineAssessmentShadowTrace {
+  try {
+    return runShadowIntegration(input);
+  } catch {
+    return failClosed("invalid_state");
+  }
+}
+
+export function isFailClosedShadowTrace(
+  trace: FineAssessmentShadowTrace
+): trace is ShadowFailClosedTrace {
+  return trace.kind === "fail_closed";
+}
+
+function runShadowIntegration(
+  input: ShadowIntegrateInput
+): FineAssessmentShadowTrace {
+  const keys = input.candidates.map(buildRecallCandidateDedupeKey);
+  if (!membershipHolds(input, keys)) return failClosed("membership_shrink");
+  const observations = resolveObservations(input, keys);
+  const channels = resolveChannels(observations, input);
+  const eligible = eligibleCandidateKeys(observations).filter((key) => keys.includes(key));
+  const psi = input.psi ?? psiPredicate(observations, channels);
+  const peeled = peelUndominated(eligible, psi);
+  if (isPsiCycleFailure(peeled)) return failClosed("psi_cycle_contract_failure");
+  const walked = walkShadowCapture(
+    buildWalkInput(input, keys, observations, peeled, psi, channels)
+  );
+  if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure");
+  if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation");
+  return assembleCaptured(input, eligible, peeled, walked);
+}
+
+function membershipHolds(
+  input: ShadowIntegrateInput,
+  keys: readonly string[]
+): boolean {
+  const e1 = input.e1Keys ?? keys;
+  const e0 = input.e0Keys ?? keys;
+  return e0MembershipSubsetOfE1(e0, e1);
+}
+
+function resolveObservations(
+  input: ShadowIntegrateInput,
+  keys: readonly string[]
+): ShadowPsiObservationField {
+  if (input.observationField !== undefined) {
+    for (const key of keys) {
+      if (input.observationField[key] === undefined) {
+        throw new Error("planted observation field missing substrate key");
+      }
+    }
+    return input.observationField;
+  }
+  return honestObservationField(input, keys);
+}
+
+function honestObservationField(
+  input: ShadowIntegrateInput,
+  keys: readonly string[]
+): ShadowPsiObservationField {
+  const probes = input.supplementaryData.queryProbes;
+  const applicable = shadowLineageApplicability({
+    demand: compileRecallQueryDemand(probes),
+    probes,
+    arm: input.policy.coarse_filter.semantic_supplement.embedding_enabled === true
+      ? "E1"
+      : "E0"
+  });
+  const lineages = honestLineages(applicable);
+  const field: Record<string, ShadowPsiObservationField[string]> = {};
+  for (const key of keys) {
+    field[key] = freezeShadow({ h_gate: "none" as const, lineages });
+  }
+  return field;
+}
+
+function honestLineages(
+  applicable: Readonly<Record<ShadowLineageId, boolean>>
+): Readonly<Partial<Record<ShadowLineageId, ShadowPointwiseObservation>>> {
+  const lineages: Partial<Record<ShadowLineageId, ShadowPointwiseObservation>> = {};
+  if (applicable.lexical) lineages.lexical = honestLexical();
+  if (applicable.embedding) lineages.embedding = honestEmbedding();
+  if (applicable.temporal) lineages.temporal = honestTemporal();
+  if (applicable.subject_preference) lineages.subject_preference = honestSubject();
+  return freezeShadow(lineages);
+}
+
+function honestLexical(): ShadowPointwiseObservation {
+  return parsePointwiseObservation({
+    lineage: "lexical",
+    receipt: "fts.lexical.observe.v1",
+    correlation: "dup:lexical-family",
+    envelope: { state: "not_observed", reason: "missing_rank" },
+    domain: null
+  });
+}
+
+function honestEmbedding(): ShadowPointwiseObservation {
+  return parsePointwiseObservation({
+    lineage: "embedding",
+    receipt: "embed.observe.v1",
+    correlation: "dup:embed-max-v1",
+    envelope: { state: "not_observed", reason: "missing_vector" },
+    snapshot: { status: "not_observed", value: null, domain: null, content_hash: null }
+  });
+}
+
+function honestTemporal(): ShadowPointwiseObservation {
+  return parsePointwiseObservation({
+    lineage: "temporal",
+    receipt: "temporal.observe.v1",
+    correlation: "temporal.observe.v1",
+    envelope: { state: "not_observed", reason: "missing_event_time" },
+    evaluator: {
+      applicable: true,
+      parse_state: "window",
+      clock_state: "ok",
+      candidate_evaluated: false,
+      event_time: null,
+      domain: null,
+      finite_value: null
+    }
+  });
+}
+
+function honestSubject(): ShadowPointwiseObservation {
+  return parsePointwiseObservation({
+    lineage: "subject_preference",
+    receipt: "subject.observe.v1",
+    correlation: "subject.observe.v1",
+    envelope: { state: "not_observed", reason: "not_run" },
+    domain: {
+      query_id: "shadow.honest",
+      applicable_component_ids: ["preference"],
+      component_operator_ids: ["scorePreferenceProfileAlignment"]
+    },
+    components: [{
+      component_id: "preference",
+      operator_id: "scorePreferenceProfileAlignment",
+      envelope: { state: "not_observed", reason: "not_run" }
+    }]
+  });
+}
+
+function resolveChannels(
+  observations: ShadowPsiObservationField,
+  input: ShadowIntegrateInput
+): readonly ShadowLineageId[] {
+  const present = new Set<ShadowLineageId>();
+  for (const view of Object.values(observations)) {
+    for (const lineage of SHADOW_LINEAGE_IDS) {
+      if (view?.lineages[lineage] !== undefined) present.add(lineage);
+    }
+  }
+  if (present.size > 0) {
+    return SHADOW_LINEAGE_IDS.filter((lineage) => present.has(lineage));
+  }
+  const probes = input.supplementaryData.queryProbes;
+  const applicable = shadowLineageApplicability({
+    demand: compileRecallQueryDemand(probes),
+    probes,
+    arm: input.policy.coarse_filter.semantic_supplement.embedding_enabled === true
+      ? "E1"
+      : "E0"
+  });
+  return SHADOW_LINEAGE_IDS.filter((lineage) => applicable[lineage]);
+}
+
+function buildWalkInput(
+  input: ShadowIntegrateInput,
+  keys: readonly string[],
+  observations: ShadowPsiObservationField,
+  frontiers: ShadowFrontierReceipt,
+  psi: PsiQuery,
+  channels: readonly ShadowLineageId[]
+): Parameters<typeof walkShadowCapture>[0] {
+  const budgets = input.policy.fine_assessment.budgets;
+  const indexByKey = frontierIndexByKey(frontiers);
+  const candidates = input.candidates.map((candidate, offset) =>
+    toWalkCandidate(candidate, keys[offset]!, observations, input, indexByKey)
+  );
+  return {
+    candidates,
+    psi,
+    token_budget: budgets.max_total_tokens,
+    per_dimension_limits: budgets.per_dimension_limits,
+    unresolved_tradeoff: input.psi === undefined
+      ? tradeoffQuery(observations, channels)
+      : undefined
+  };
+}
+
+function toWalkCandidate(
+  candidate: Readonly<CoarseRecallCandidate>,
+  key: string,
+  observations: ShadowPsiObservationField,
+  input: ShadowIntegrateInput,
+  indexByKey: ReadonlyMap<string, number>
+): ShadowCaptureWalkCandidate {
+  const objectKey = buildRecallLogicalObjectKey(candidate);
+  const tokens = input.tokenEstimator.estimate(candidate.entry.content);
+  return freezeShadow({
+    candidate_key: key,
+    object_key: objectKey,
+    token_cost: Number.isFinite(tokens) && tokens > 0 ? tokens : 1,
+    dimension: candidate.entry.dimension,
+    h_eligible: observations[key]?.h_gate === "none",
+    utility: input.utilitiesByKey?.get(key) ?? emptyUtility(key, objectKey),
+    static_frontier_index: indexByKey.get(key) ?? null
+  });
+}
+
+function emptyUtility(candidateKey: string, objectKey: string): ShadowSetUtilityInput {
+  return parseSetUtilityInput({
+    schema_version: 1,
+    candidate_key: candidateKey,
+    object_key: objectKey,
+    obligations: [],
+    matches: [],
+    values: { status: "no_match", values: [] },
+    cid: { status: "unavailable" },
+    availability: {
+      facility: "not_applicable",
+      values: "no_match",
+      evidence_identity: "unavailable"
+    }
+  });
+}
+
+function frontierIndexByKey(
+  frontiers: ShadowFrontierReceipt
+): ReadonlyMap<string, number> {
+  const indexByKey = new Map<string, number>();
+  for (const layer of frontiers.layers) {
+    for (const key of layer.member_keys) indexByKey.set(key, layer.index);
+  }
+  return indexByKey;
+}
+
+function tradeoffQuery(
+  observations: ShadowPsiObservationField,
+  channels: readonly ShadowLineageId[]
+): (left: string, right: string) => boolean {
+  return (left, right) => {
+    const outcome = psiOutcome(left, right, observations, channels);
+    return !isNotADominanceCompare(outcome) && outcome.kind === "tradeoff";
+  };
+}
+
+function prefixMonotone(S_infty: readonly string[]): boolean {
+  for (let k = 1; k <= S_infty.length; k += 1) {
+    const prefix = prefixSK(S_infty, k);
+    const next = prefixSK(S_infty, k + 1);
+    if (prefix.some((key, offset) => key !== next[offset])) return false;
+  }
+  return true;
+}
+
+function assembleCaptured(
+  input: ShadowIntegrateInput,
+  eligible: readonly string[],
+  frontiers: ShadowFrontierReceipt,
+  walked: ShadowCapturedWalk
+): ShadowCapturedTrace {
+  const k = input.policy.fine_assessment.budgets.max_entries;
+  const first = walked.decisions[0];
+  return freezeShadow({
+    kind: "captured" as const,
+    algorithm_id: SHADOW_ALGORITHM_ID,
+    version: SHADOW_ALGORITHM_VERSION,
+    digest: D0_IDENTITY_DIGEST,
+    c0_seam: SHADOW_C0_SEAM,
+    lexical_mapping: input.observationField === undefined ? "not_observed" as const : "planted" as const,
+    admitted_lineages: SHADOW_LINEAGE_IDS,
+    relational_o: "excluded" as const,
+    eligible_keys: Object.freeze([...eligible]),
+    frontiers,
+    S_infty: walked.S_infty,
+    prefix_proposal: prefixSK(walked.S_infty, k),
+    K: k,
+    decisions: walked.decisions,
+    walk_rejects: walked.walk_rejects,
+    max_g_cohort: first?.max_g_cohort ?? Object.freeze([]),
+    equal_g_dominance_rejects: first?.equal_g_dominance_rejects ?? Object.freeze([]),
+    gamma_availability: first?.G_status ?? null,
+    unresolved_pointwise_tradeoff: walked.decisions.some(
+      (decision) => decision.unresolved_pointwise_tradeoff
+    ),
+    core_known_no_witness: Object.freeze(
+      walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
+    )
+  });
+}
+
+function failClosed(reason: ShadowFailClosedReason): ShadowFailClosedTrace {
+  return freezeShadow({
+    kind: "fail_closed" as const,
+    reason,
+    algorithm_id: SHADOW_ALGORITHM_ID,
+    version: SHADOW_ALGORITHM_VERSION,
+    digest: D0_IDENTITY_DIGEST,
+    c0_seam: SHADOW_C0_SEAM
+  });
+}

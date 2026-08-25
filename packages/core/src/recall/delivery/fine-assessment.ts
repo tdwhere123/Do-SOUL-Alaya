@@ -41,6 +41,12 @@ import type { RecallFieldRefinementStopCertificate } from
   "../field/refinement/field-refinement-stop-certificate.js";
 import type { RecallAnswerShapePlan } from
   "../query/recall-answer-shape-plan.js";
+import {
+  captureShadowIntegration,
+  type FineAssessmentShadowTrace,
+  type PsiQuery,
+  type ShadowPsiObservationField
+} from "../shadow/integrate.js";
 
 export interface FineAssessParams {
   readonly workspace_id: string;
@@ -59,6 +65,9 @@ export interface FineAssessParams {
   ) => undefined;
   readonly generation_id?: string;
   readonly condition_digest?: string;
+  readonly captureShadowTrace?: boolean;
+  readonly shadowObservationField?: ShadowPsiObservationField;
+  readonly shadowPsi?: PsiQuery;
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -70,7 +79,7 @@ export type FineAssessmentPreparation = Readonly<{
   readonly finePriorityOverflowCount: number;
 }>;
 
-export function fineAssess(params: FineAssessParams): Readonly<{
+export type FineAssessResult = Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
@@ -83,8 +92,24 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
-}> {
-  return deliverFineAssessment(params, prepareFineAssessment(params));
+  readonly shadowTrace?: FineAssessmentShadowTrace;
+}>;
+
+export function fineAssess(params: FineAssessParams): FineAssessResult {
+  const shadowTrace = params.captureShadowTrace === true
+    ? captureShadowIntegration({
+      candidates: params.candidates,
+      policy: params.policy,
+      supplementaryData: params.supplementaryData,
+      tokenEstimator: params.tokenEstimator,
+      observationField: params.shadowObservationField,
+      psi: params.shadowPsi
+    })
+    : undefined;
+  const production = deliverFineAssessment(params, prepareFineAssessment(params));
+  return shadowTrace === undefined
+    ? production
+    : Object.freeze({ ...production, shadowTrace });
 }
 
 export function prepareFineAssessment(
@@ -119,7 +144,7 @@ function assertUniqueCandidateField(
 export function deliverFineAssessment(
   params: FineAssessParams,
   preparation: FineAssessmentPreparation
-): ReturnType<typeof fineAssess> {
+): FineAssessResult {
   const answerRelevanceScores =
     params.supplementaryData.answerRelevanceScoresByCandidateKey ?? new Map();
   const deepHead = resolveFineAssessmentDeepHead({
