@@ -23,6 +23,7 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | S13 remaining-miss partition | Closed: Dual-13 `honest_thinner_r_obj` (representation); E1-only 3 `gamma_displaced_fused_head`. G21, retuning, and promotion not authorized |
 | S14 general repair | Closed: Dual-13 honest no-fix; fused-head skip is ranking-preserving Gamma gain (`fused_score − rho` when Values_v/obligation increment is 0). Not a KPI |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
+| S18 full-gold completeness | Read-only card closed: three-way split (enumerative / independent-evidence / dataset-only golds). Evaluator gold count is not a runtime expected count. No production change |
 
 ## Recall posture (2026-08-19 live-source pass)
 
