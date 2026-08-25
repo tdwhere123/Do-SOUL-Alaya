@@ -60,6 +60,13 @@ applicability contract. Zero `producer_ineligible` votes. No producer
 repair, no weight change, no generic SliceKey rule. Dual-13 stays
 honest no-fix. G21 stays MISS. Pin `3af4fd9` retained.
 
+2026-08-25 S18 read-only closeout: full-gold runtime completeness is
+three product semantics (enumerative/aggregate, independent-evidence
+diversity, dataset-only extra golds). Evaluator gold count is not a
+runtime expected count. No completeness atom and no S16 objective
+change. G21 E1 partition independently matches 27/94, 2 absent, 65
+all-present-not-delivered.
+
 The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
@@ -332,6 +339,45 @@ authorizes no producer repair, no weight change, no generic SliceKey
 rule, no Dual-13 retune, and no G21. Dual-13 stays honest no-fix. Pin
 `3af4fd9` retained. Latency stays NOT_VERIFIED.
 
+## S18 full-gold runtime completeness (closed, read-only)
+
+S18 is a read-only semantics card (no production change). Full-gold@5
+and any@5 share the same delivered set and the one `Select_Gamma`
+objective. Evaluator gold count is **not** a runtime expected count.
+
+Independent recompute of G21 E1 `2026-08-24T094913Z` matches the
+partition: 94 scorable, 27 full-gold@5, 67 failures, 2 questions with
+at least one absent gold (`gpt4_15e38248`, `gpt4_f2262a51`), 65 with
+every gold in-pool but not all delivered, 63 multi-gold. Ancestor E1
+has the same two absent ids; the 65 (versus ancestor 53) is the G21
+full-gold drop 39→27 on that shared set. Cite
+`.do-it/bench-runs/recall-any5-evidence-first/s18-dump/partition.json`.
+
+Three product semantics, detected from query/evidence, never from the
+gold list:
+
+1. **Explicit aggregate or enumeration** (`count`, `sum`,
+   `distinct_entities` via `compileRecallAnswerShapePlan`). Shape
+   detection is live and receipt-only; it does not enter Gamma gain.
+   Distinct `Values_v` is the live enumerative cover increment when OSF
+   composition is `composed`. On G21 E1 composition is `unavailable`
+   100/100, so Values_v does not apply. No producer currently emits an
+   expected cardinality K.
+2. **Independent evidence / support diversity.** Facility
+   `independent_evidence` demand and Values_v diversity are the live
+   path. Source multiplicity is not an admission quota (G17a). This
+   100Q has zero query `evidence_ref` demands.
+3. **Dataset-only multiple acceptable golds.** The runtime query
+   carries no expected count. Extra evaluator golds are acceptable or
+   supporting answers. This remains evaluator-only.
+
+Cardinality/enumerative obligations named in Contract above remain
+required for a full-gold *completeness claim*, and they must come from
+query/evidence authority. S18 does not add a completeness atom, does
+not copy gold cardinality into `O_q`, and does not change the S16
+tri-state (positive / known-zero / unavailable; unavailable is
+rank-only `fused_score − rho`).
+
 ## Semantic formation boundary
 
 The model is optional semantic proposal machinery, not the source-admission or
@@ -383,8 +429,9 @@ MISS (E1 63/94), not a pin replacement, and the ancestor
 classification of the remaining E0/E1 miss partition is closed. S14
 landed ranking-preserving Gamma gain; it is not a KPI, G21, or retune
 licence. S17 closed query-conditioned family eligibility dump-only with
-no producer repair. G21, retuning, and benchmark promotion are not
-authorized by this document.
+no producer repair. S18 closed the full-gold runtime-semantics card
+read-only: evaluator gold count is not a runtime expected count. G21,
+retuning, and benchmark promotion are not authorized by this document.
 
 Historical scores, caches, and fixed-candidate replays remain diagnostic
 evidence. Promotion requires a current source-bound authority, real candidate
