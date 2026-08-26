@@ -59,9 +59,35 @@ describe("remainder separates empty-Psi capture from candidate_key tail", () => 
     expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
   });
 
+  it("covers from stored content when the candidate has no evidence_refs", async () => {
+    const { coverKey, distractorKey, cover, distractor, walked } =
+      await plantDegreeWalk({ omitEvidenceRefs: true });
+    expect(distractorKey < coverKey).toBe(true);
+    expect(cover.obligations.some((row) =>
+      row.key.kind === "entity" && row.key.value === "degree" &&
+      row.availability === "available" && row.cover > 0
+    )).toBe(true);
+    expect(distractor.obligations.filter((row) =>
+      row.key.kind === "entity" && row.key.value === "degree"
+    ).every((row) => row.cover === 0)).toBe(true);
+    expect(walked.S_infty[0]).toBe(coverKey);
+    expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
+  });
+
+  it("does not grant remainder from inflection-only content without a porter lane", async () => {
+    const { coverKey, distractorKey, walked } = await plantDegreeWalk({
+      omitEvidenceRefs: true,
+      coverContent: "she graduated yesterday"
+    });
+    expect(distractorKey < coverKey).toBe(true);
+    expect(walked.S_infty[0]).toBe(distractorKey);
+    expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(true);
+  });
+
   it("serializes by candidate_key when remainder is zero for both", async () => {
     const { coverKey, distractorKey, walked } = await plantDegreeWalk({
-      coverSlots: appleSlots()
+      coverSlots: appleSlots(),
+      coverContent: "a red apple"
     });
     expect(distractorKey < coverKey).toBe(true);
     expect(walked.S_infty[0]).toBe(distractorKey);
@@ -82,16 +108,22 @@ describe("remainder separates empty-Psi capture from candidate_key tail", () => 
 
 async function plantDegreeWalk(options: Readonly<{
   readonly coverSlots?: RecallEvidenceProjectionMatchReceipt["fact_slots"];
+  readonly coverContent?: string;
+  readonly omitEvidenceRefs?: boolean;
 }> = {}) {
   const distractor = candidate(DISTRACTOR_ID, "noise about weather");
   const cover = candidate(
     COVER_ID,
-    "an undergraduate degree",
-    ["evidence-degree"]
+    options.coverContent ?? "an undergraduate degree",
+    options.omitEvidenceRefs === true ? [] : ["evidence-degree"]
   );
   const utilities = buildProductionSetUtilities({
     candidates: [distractor, cover],
-    supplementaryData: await supplementary(cover, options.coverSlots ?? degreeSlots())
+    supplementaryData: await supplementary(
+      cover,
+      options.coverSlots ?? degreeSlots(),
+      options.omitEvidenceRefs === true
+    )
   });
   const distractorKey = buildRecallCandidateDedupeKey(distractor);
   const coverKey = buildRecallCandidateDedupeKey(cover);
@@ -154,7 +186,8 @@ function candidate(
 
 async function supplementary(
   cover: CoarseRecallCandidate,
-  slots: RecallEvidenceProjectionMatchReceipt["fact_slots"]
+  slots: RecallEvidenceProjectionMatchReceipt["fact_slots"],
+  omitEvidenceRefs: boolean = false
 ): Promise<RecallSupplementaryData> {
   const capture = await captureRecallQueryFactFrames({
     query_text: QUERY,
@@ -175,9 +208,11 @@ async function supplementary(
     queryProbes: compileRecallQueryProbes(QUERY),
     queryFactFrameExtraction: capture,
     ftsRanks: {}, trigramFtsRanks: {}, synthesisFtsRanks: {}, evidenceFtsRanks: {},
-    evidenceProjectionMatchesByRef: {
-      [evidenceRef]: [projection(evidenceRef, slots)]
-    },
+    evidenceProjectionMatchesByRef: omitEvidenceRefs
+      ? {}
+      : {
+        [evidenceRef]: [projection(evidenceRef, slots)]
+      },
     sourceProximityScores: {}, sourceCohortKeys: {},
     structuralScores: {}, graphExpansionScores: {}, entitySeedScores: {},
     pathExpansionScores: {}, pathSuppressionScores: {}, embeddingSimilarityScores: {},
