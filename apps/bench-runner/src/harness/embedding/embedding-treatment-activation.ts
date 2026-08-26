@@ -16,7 +16,7 @@ interface EmbeddingTreatmentDiagnostics {
   readonly embedding_workspace_provider_kind?: string;
   readonly embedding_workspace_model_id?: string;
   readonly embedding_workspace_schema_version?: number;
-  readonly d0_receipt?: Readonly<{
+  readonly capture_receipt?: Readonly<{
     readonly observations_by_candidate_key: Readonly<Record<string, Readonly<{
       readonly lineages: Readonly<{
         readonly embedding?: Readonly<{
@@ -29,7 +29,7 @@ interface EmbeddingTreatmentDiagnostics {
     | Readonly<{
       readonly score_factors: Readonly<{ readonly embedding_similarity?: number }>;
     }>
-    | Readonly<{ readonly ranking_authority: "d0_prefix" }>
+    | Readonly<{ readonly ranking_authority: "prefix_sk" }>
   )[];
 }
 
@@ -134,7 +134,7 @@ function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void
 function hasLegacyEmbeddingEvidenceKey(
   diagnostics: EmbeddingTreatmentDiagnostics
 ): boolean {
-  if (diagnostics.d0_receipt !== undefined) return false;
+  if (diagnostics.capture_receipt !== undefined) return false;
   return diagnostics.candidates.some((candidate) =>
     "score_factors" in candidate &&
     "embedding_similarity" in candidate.score_factors
@@ -144,7 +144,7 @@ function hasLegacyEmbeddingEvidenceKey(
 function readEmbeddingSimilarities(
   diagnostics: EmbeddingTreatmentDiagnostics
 ): readonly (number | undefined)[] {
-  const observations = diagnostics.d0_receipt?.observations_by_candidate_key;
+  const observations = diagnostics.capture_receipt?.observations_by_candidate_key;
   if (observations !== undefined && observations !== null) {
     return Object.values(observations).map((observation) => {
       const envelope = observation.lineages.embedding?.envelope;

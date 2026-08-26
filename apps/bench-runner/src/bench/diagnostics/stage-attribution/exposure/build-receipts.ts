@@ -44,14 +44,14 @@ function buildReceipt(input: {
   const { control, treatment } = input;
   if (control !== undefined) assertProductPhaseAuthority(control);
   const ledger = assertProductPhaseAuthority(treatment);
-  const d0ReceiptDigest = treatment.d0_receipt?.receipt_digest ?? null;
-  const evidence = treatmentEvidence(treatment, d0ReceiptDigest);
+  const captureReceiptDigest = treatment.capture_receipt?.receipt_digest ?? null;
+  const evidence = treatmentEvidence(treatment, captureReceiptDigest);
   const body: TreatmentExposureReceiptBody = {
     schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: treatment.question_id,
     ranking_authority: treatment.ranking_authority ?? null,
-    d0_receipt_digest: d0ReceiptDigest,
+    capture_receipt_digest: captureReceiptDigest,
     product_phase_ledger: ledger,
     ...evidence,
     control_non_exposure: controlWitness(control),
@@ -76,7 +76,7 @@ function buildReceipt(input: {
 
 function treatmentEvidence(
   treatment: LongMemEvalQuestionDiagnostic,
-  d0ReceiptDigest: string | null
+  captureReceiptDigest: string | null
 ) {
   const formation = treatment.query_open_semantic_factor_formation;
   const compatibility = treatment.open_semantic_factor_compatibility_trace;
@@ -108,7 +108,7 @@ function treatmentEvidence(
       status: activation?.status ?? null,
       activated_evidence_count: activatedCount
     },
-    candidate_attribution: candidateAttribution(candidateEntries, d0ReceiptDigest)
+    candidate_attribution: candidateAttribution(candidateEntries, captureReceiptDigest)
   };
 }
 
@@ -116,10 +116,10 @@ function candidateAttribution(
   entries: NonNullable<LongMemEvalQuestionDiagnostic[
     "open_semantic_factor_candidate_activations"
   ]>,
-  d0ReceiptDigest: string | null
+  captureReceiptDigest: string | null
 ) {
   return {
-    d0_receipt_digest: d0ReceiptDigest,
+    capture_receipt_digest: captureReceiptDigest,
     entries,
     candidate_keys: entries.map((entry) => entry.candidate_key),
     activated_evidence_ids: [...new Set(entries.flatMap(

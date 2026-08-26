@@ -159,7 +159,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
       expect(signal?.source_observation).toBeNull();
 
-      // A caller-supplied reference is preserved, but S4 does not mint a
+      // A caller-supplied reference is preserved, but this path does not mint a
       // temporal relationship without a daemon-issued source observation.
       const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
       expect(pathRow).toBeUndefined();

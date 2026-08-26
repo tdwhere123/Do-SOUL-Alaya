@@ -12,17 +12,17 @@ import {
   type CachedF3ExposureSli
 } from "./exposure/exposure-sli.js";
 import {
-  evaluateGate7PolarityMatrix,
-  type Gate7PolarityMatrixVerdict
-} from "./exposure/gate7-polarity-matrix.js";
+  evaluateCanaryPolarityMatrix,
+  type CanaryPolarityMatrixVerdict
+} from "./exposure/canary-polarity-matrix.js";
 
 export const DIAGNOSTIC_100Q_STAGES = [
-  "S0",
-  "S1",
-  "S2",
-  "S3",
-  "S4",
-  "S5"
+  "eval_or_write_loss",
+  "early_absent",
+  "formation_rejected",
+  "pre_waist",
+  "waist_or_later",
+  "delivered_top5"
 ] as const;
 
 export type Diagnostic100QStage = (typeof DIAGNOSTIC_100Q_STAGES)[number];
@@ -37,7 +37,7 @@ export interface Diagnostic100QQuestion {
 }
 
 export interface Diagnostic100QComparison {
-  readonly schema_version: 6;
+  readonly schema_version: 7;
   readonly kind: "diagnostic_100q_f0f2_vs_cached_f3";
   readonly physical_calls: 0;
   readonly five_hundred_q_closed: true;
@@ -50,25 +50,25 @@ export interface Diagnostic100QComparison {
   readonly treatment_exposure_receipts: readonly TreatmentExposureReceipt[];
   readonly causal_comparison_status: "eligible" | "inconclusive";
   readonly exposure_sli: CachedF3ExposureSli;
-  readonly gate7_polarity_matrix: Gate7PolarityMatrixVerdict;
+  readonly canary_polarity_matrix: CanaryPolarityMatrixVerdict;
   readonly diagnostic_100q_unlock: Diagnostic100QUnlock;
 }
 
 export function mapQuestionToDiagnosticStage(
   row: Pick<QuestionStageRow, "stage" | "hit_at_5" | "proof" | "miss_taxonomy">
 ): Diagnostic100QStage {
-  if (row.hit_at_5 || row.stage === 7) return "S5";
-  if (row.stage === 1) {
+  if (row.hit_at_5 || row.stage === "delivered_top5") return "delivered_top5";
+  if (row.stage === "write_or_unevaluable") {
     if (row.miss_taxonomy === "evaluation_or_gold_issue" ||
         row.proof.includes("empty_gold") ||
         row.proof.includes("write_loss")) {
-      return "S0";
+      return "eval_or_write_loss";
     }
-    return "S1";
+    return "early_absent";
   }
-  if (row.proof === "semantic_factor_formation_rejected") return "S2";
-  if (row.stage === 2 || row.stage === 3) return "S3";
-  return "S4";
+  if (row.proof === "semantic_factor_formation_rejected") return "formation_rejected";
+  if (row.stage === "raw_pool_absent" || row.stage === "pre_waist_prune") return "pre_waist";
+  return "waist_or_later";
 }
 
 export function compareF0F2VsCachedF3(input: {
@@ -85,10 +85,10 @@ export function compareF0F2VsCachedF3(input: {
   const receipts = [...input.treatmentExposure]
     .sort((left, right) => left.question_id.localeCompare(right.question_id));
   const exposureSli = buildCachedF3ExposureSli(receipts);
-  const polarityMatrix = evaluateGate7PolarityMatrix(receipts);
+  const polarityMatrix = evaluateCanaryPolarityMatrix(receipts);
   const unlock = buildDiagnostic100QUnlock(polarityMatrix);
   return {
-    schema_version: 6,
+    schema_version: 7,
     kind: "diagnostic_100q_f0f2_vs_cached_f3",
     physical_calls: 0,
     five_hundred_q_closed: DIAGNOSTIC_500Q_CLOSED,
@@ -96,13 +96,13 @@ export function compareF0F2VsCachedF3(input: {
     treatment_exposure_receipts: receipts,
     causal_comparison_status: deriveCausalStatus(polarityMatrix, exposureSli),
     exposure_sli: exposureSli,
-    gate7_polarity_matrix: polarityMatrix,
+    canary_polarity_matrix: polarityMatrix,
     diagnostic_100q_unlock: unlock
   };
 }
 
 export function deriveCausalStatus(
-  matrix: Gate7PolarityMatrixVerdict,
+  matrix: CanaryPolarityMatrixVerdict,
   sli: CachedF3ExposureSli
 ): "eligible" | "inconclusive" {
   if (matrix.applicable) return matrix.passed ? "eligible" : "inconclusive";
@@ -188,5 +188,5 @@ function assertSameQuestionSet(
 }
 
 function emptyCounts(): Record<Diagnostic100QStage, number> {
-  return { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 };
+  return { eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
 }

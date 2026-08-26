@@ -48,8 +48,8 @@ describe("Phase 3A event schemas", () => {
       coarse_filter_count: 8,
       fine_assessment_count: 4,
       delivery_path: "canonical",
-      ranking_authority: "d0_prefix",
-      d0_execution: {
+      ranking_authority: "prefix_sk",
+      capture_execution: {
         status: "fail_closed",
         reason: "membership_shrink"
       },

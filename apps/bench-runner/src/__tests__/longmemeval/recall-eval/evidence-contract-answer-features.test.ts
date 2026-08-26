@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { createCanonicalD0SelectionReceipt } from "@do-soul/alaya-protocol";
+import { createCanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   RecallAnswerSupportObservationSchema,
@@ -24,16 +24,16 @@ import { canonicalCandidatePoolComplete } from
   "../../../bench/diagnostics/artifacts/candidate-readers/canonical-candidate-row.js";
 
 describe("LongMemEval evidence contract answer features", () => {
-  it("accepts a complete canonical D0 pool without legacy deep-head evidence", () => {
+  it("accepts a complete canonical selection pool without legacy deep-head evidence", () => {
     const candidateKey = "workspace_local:memory_entry:gold-a";
     const receipt = canonicalReceipt(candidateKey);
     const row = diagnostic({
-      id: "q-canonical-d0",
+      id: "q-canonical-capture",
       gold: ["gold-a"],
       recallResult: {
-        ranking_authority: "d0_prefix",
+        ranking_authority: "prefix_sk",
         diagnostics: {
-          d0_receipt: receipt,
+          capture_receipt: receipt,
           candidate_pool_count: 1,
           fine_assessment_pruned_candidates: [],
           token_economy: {
@@ -43,8 +43,8 @@ describe("LongMemEval evidence contract answer features", () => {
           },
           candidates: [{
             schema_version: 1,
-            ranking_authority: "d0_prefix",
-            d0_receipt_digest: receipt.receipt_digest,
+            ranking_authority: "prefix_sk",
+            capture_receipt_digest: receipt.receipt_digest,
             legacy_selection: {
               fusion: "not_applicable",
               deep_head: "not_applicable",
@@ -67,13 +67,13 @@ describe("LongMemEval evidence contract answer features", () => {
             dropped_reason: null,
             within_budget: true,
             source_channels: ["local_lexical"],
-            d0_disposition: receipt.dispositions[0]
+            capture_disposition: receipt.dispositions[0]
           }]
         }
       }
     });
 
-    expect(row.ranking_authority).toBe("d0_prefix");
+    expect(row.ranking_authority).toBe("prefix_sk");
     expect(row.candidate_pool_complete).toBe(true);
     expect(row.candidates[0]?.answer_features).toBeNull();
     expect(row.candidates[0]?.deep_head_trace).toBeNull();
@@ -332,7 +332,7 @@ describe("LongMemEval evidence contract answer features", () => {
     );
   });
 
-  it("rejects candidate rows mixed across exact D0 receipt instances", () => {
+  it("rejects candidate rows mixed across exact selection receipt instances", () => {
     const key = "workspace_local:memory_entry:gold-a";
     const selected = canonicalReceipt(key);
     const ineligible = canonicalIneligibleReceipt(key);
@@ -340,7 +340,7 @@ describe("LongMemEval evidence contract answer features", () => {
     expect(canonicalCandidatePoolComplete({ receipt: selected, rows: [selectedRow],
       candidateKeys: [key] })).toBe(true);
     expect(canonicalCandidatePoolComplete({ receipt: ineligible, rows: [{
-      ...selectedRow, d0_receipt_digest: ineligible.receipt_digest
+      ...selectedRow, capture_receipt_digest: ineligible.receipt_digest
     }], candidateKeys: [key] })).toBe(false);
     expect(canonicalCandidatePoolComplete({ receipt: selected, rows: [{
       ...selectedRow, final_rank: 2, post_rank: 2
@@ -480,13 +480,13 @@ describe("LongMemEval evidence contract answer features", () => {
 });
 
 function canonicalReceipt(candidateKey: string) {
-  return createCanonicalD0SelectionReceipt({
+  return createCanonicalSelectionReceipt({
     schema_version: 1 as const,
-    ranking_authority: "d0_prefix" as const,
+    ranking_authority: "prefix_sk" as const,
     identity: {
-      algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1" as const,
-      version: "d0.safe-dominance-capture.v1.0.0" as const,
-      digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa" as const
+      algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1" as const,
+      version: "safe-dominance-capture.v1.0.0" as const,
+      digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3" as const
     },
     execution: { status: "captured" as const, reason: null },
     field_membership: {
@@ -523,7 +523,7 @@ function canonicalReceipt(candidateKey: string) {
 function canonicalIneligibleReceipt(candidateKey: string) {
   const selected = canonicalReceipt(candidateKey);
   const { receipt_digest: _receiptDigest, ...body } = selected;
-  return createCanonicalD0SelectionReceipt({
+  return createCanonicalSelectionReceipt({
     ...body,
     field_membership: { ...selected.field_membership, eligible_keys: [] },
     frontiers: { ...selected.frontiers!, layers: [] },
@@ -536,8 +536,8 @@ function canonicalIneligibleReceipt(candidateKey: string) {
 
 function canonicalRow(receipt: ReturnType<typeof canonicalReceipt>, candidateKey: string) {
   return {
-    schema_version: 1 as const, ranking_authority: "d0_prefix" as const,
-    d0_receipt_digest: receipt.receipt_digest,
+    schema_version: 1 as const, ranking_authority: "prefix_sk" as const,
+    capture_receipt_digest: receipt.receipt_digest,
     legacy_selection: { fusion: "not_applicable" as const, deep_head: "not_applicable" as const,
       coverage: "not_applicable" as const },
     object_id: "gold-a", object_kind: "memory_entry" as const, candidate_key: candidateKey,
@@ -545,6 +545,6 @@ function canonicalRow(receipt: ReturnType<typeof canonicalReceipt>, candidateKey
     dimension: "procedure", admission_planes: ["lexical"], plane_first_admitted: "lexical",
     plane_winning_admission: "lexical", admission_attempts: [], final_rank: 1, post_rank: 1,
     in_final_packet: true, eviction_reason: null, dropped_reason: null, within_budget: true,
-    source_channels: ["local_lexical"], d0_disposition: receipt.dispositions[0]!
+    source_channels: ["local_lexical"], capture_disposition: receipt.dispositions[0]!
   };
 }

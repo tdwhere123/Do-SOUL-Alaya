@@ -9,8 +9,8 @@ import type {
 
 export interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
-  readonly rankingAuthority: "d0_prefix" | "select_gamma" | null;
-  readonly d0Receipt: NonNullable<BenchRecallDiagnostics["d0_receipt"]> | null;
+  readonly rankingAuthority: "prefix_sk" | "select_gamma" | null;
+  readonly captureReceipt: NonNullable<BenchRecallDiagnostics["capture_receipt"]> | null;
   readonly queryProbes: DiagnosticQueryProbes | null;
   readonly retrievalFieldCaptures: NonNullable<BenchRecallDiagnostics["retrieval_field_captures"]> | null;
   readonly retrievalFieldRefinementReceipts: NonNullable<BenchRecallDiagnostics["retrieval_field_refinement_receipts"]> | null;

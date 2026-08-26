@@ -21,7 +21,7 @@ import { freezeShadow, ShadowContractError } from "./envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "./frontier-peel.js";
 import type { ShadowFrontierReceipt } from "./frontiers.js";
 import {
-  D0_IDENTITY_DIGEST,
+  CAPTURE_IDENTITY_DIGEST,
   SHADOW_ALGORITHM_ID,
   SHADOW_ALGORITHM_VERSION
 } from "./identity.js";
@@ -57,16 +57,16 @@ export type { PsiQuery } from "./walk.js";
 export type { ShadowPsiObservationField } from "./psi.js";
 export { prefixSK } from "./walk.js";
 
-export type ShadowC0Seam = Readonly<{
+export type ShadowCutoverSeam = Readonly<{
   readonly owner: "fineAssess";
   readonly activation: "active" | "inactive";
   readonly future_delivery_order: "prefixSK(S_infty, K)";
   readonly rollback: "deliverFineAssessment";
 }>;
 
-export function shadowC0Seam(
-  activation: ShadowC0Seam["activation"]
-): ShadowC0Seam {
+export function shadowCutoverSeam(
+  activation: ShadowCutoverSeam["activation"]
+): ShadowCutoverSeam {
   return freezeShadow({
     owner: "fineAssess",
     activation,
@@ -75,9 +75,9 @@ export function shadowC0Seam(
   } as const);
 }
 
-export const SHADOW_C0_SEAM = shadowC0Seam("inactive");
+export const SHADOW_CUTOVER_SEAM = shadowCutoverSeam("inactive");
 
-export type ShadowFailClosedReason = import("@do-soul/alaya-protocol").D0ExecutionReason;
+export type ShadowFailClosedReason = import("@do-soul/alaya-protocol").CaptureExecutionReason;
 
 export type ShadowIntegrateInput = Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -89,7 +89,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
   readonly utilitiesByKey?: ReadonlyMap<string, ShadowSetUtilityInput>;
-  readonly c0Activation?: ShadowC0Seam["activation"];
+  readonly cutoverActivation?: ShadowCutoverSeam["activation"];
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly nowIso?: string;
@@ -100,17 +100,17 @@ export type ShadowFailClosedTrace = Readonly<{
   readonly reason: ShadowFailClosedReason;
   readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
-  readonly digest: typeof D0_IDENTITY_DIGEST;
-  readonly c0_seam: ShadowC0Seam;
+  readonly digest: typeof CAPTURE_IDENTITY_DIGEST;
+  readonly cutover_seam: ShadowCutoverSeam;
 }>;
 
 export type ShadowCapturedTrace = Readonly<{
   readonly kind: "captured";
   readonly algorithm_id: typeof SHADOW_ALGORITHM_ID;
   readonly version: typeof SHADOW_ALGORITHM_VERSION;
-  readonly digest: typeof D0_IDENTITY_DIGEST;
-  readonly c0_seam: ShadowC0Seam;
-  readonly lexical_mapping: "planted" | "x0_capture" | "lane_receipts" | "not_observed";
+  readonly digest: typeof CAPTURE_IDENTITY_DIGEST;
+  readonly cutover_seam: ShadowCutoverSeam;
+  readonly lexical_mapping: "planted" | "raw_rank_capture" | "lane_receipts" | "not_observed";
   readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
   readonly relational_o: "excluded";
   readonly eligible_keys: readonly string[];
@@ -142,7 +142,7 @@ export function captureShadowIntegration(
     return runShadowIntegration(input);
   } catch (error) {
     if (error instanceof ShadowContractError) {
-      return failClosed("invalid_state", c0ActivationOf(input));
+      return failClosed("invalid_state", cutoverActivationOf(input));
     }
     throw error;
   }
@@ -157,7 +157,7 @@ export function isFailClosedShadowTrace(
 function runShadowIntegration(
   input: ShadowIntegrateInput
 ): FineAssessmentShadowTrace {
-  const activation = c0ActivationOf(input);
+  const activation = cutoverActivationOf(input);
   const keys = input.candidates.map(buildRecallCandidateDedupeKey);
   if (!membershipHolds(input, keys)) return failClosed("membership_shrink", activation);
   const observations = resolveObservations(input, keys);
@@ -353,8 +353,8 @@ function assembleCaptured(
     kind: "captured" as const,
     algorithm_id: SHADOW_ALGORITHM_ID,
     version: SHADOW_ALGORITHM_VERSION,
-    digest: D0_IDENTITY_DIGEST,
-    c0_seam: shadowC0Seam(c0ActivationOf(input)),
+    digest: CAPTURE_IDENTITY_DIGEST,
+    cutover_seam: shadowCutoverSeam(cutoverActivationOf(input)),
     lexical_mapping: input.observationField === undefined
       ? liveLexicalMapping(observations, input.memoryLexicalCaptures ?? [])
       : "planted" as const,
@@ -394,25 +394,25 @@ function assembleCaptured(
 
 export function failClosedShadowTrace(
   reason: ShadowFailClosedReason,
-  activation: ShadowC0Seam["activation"] = "inactive"
+  activation: ShadowCutoverSeam["activation"] = "inactive"
 ): ShadowFailClosedTrace {
   return freezeShadow({
     kind: "fail_closed" as const,
     reason,
     algorithm_id: SHADOW_ALGORITHM_ID,
     version: SHADOW_ALGORITHM_VERSION,
-    digest: D0_IDENTITY_DIGEST,
-    c0_seam: shadowC0Seam(activation)
+    digest: CAPTURE_IDENTITY_DIGEST,
+    cutover_seam: shadowCutoverSeam(activation)
   });
 }
 
 function failClosed(
   reason: ShadowFailClosedReason,
-  activation: ShadowC0Seam["activation"] = "inactive"
+  activation: ShadowCutoverSeam["activation"] = "inactive"
 ): ShadowFailClosedTrace {
   return failClosedShadowTrace(reason, activation);
 }
 
-function c0ActivationOf(input: ShadowIntegrateInput): ShadowC0Seam["activation"] {
-  return input.c0Activation ?? "inactive";
+function cutoverActivationOf(input: ShadowIntegrateInput): ShadowCutoverSeam["activation"] {
+  return input.cutoverActivation ?? "inactive";
 }

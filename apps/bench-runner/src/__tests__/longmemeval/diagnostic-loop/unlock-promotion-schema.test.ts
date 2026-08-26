@@ -74,7 +74,7 @@ describe("diagnostic-loop unlock/promotion schema authority", () => {
         schema_version: 1,
         kind: "diagnostic_100q_unlock",
         eligible: true,
-        reason: "gate7_polarity_matrix_passed",
+        reason: "canary_polarity_matrix_passed",
         binds: { polarity_matrix_passed: true, physical_calls: 0 }
       }
     })}\n`);

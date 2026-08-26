@@ -79,7 +79,7 @@ function gold(overrides: Record<string, unknown> & { object_id: string }) {
   };
 }
 
-describe("gate1 stage attribution (fixtures)", () => {
+describe("stage attribution (fixtures)", () => {
   it("classifies gold-object stages for write / pool / prune / coverage / near-top / delivered", () => {
     const writeQ = baseQuestion({
       question_id: "q-write",
@@ -103,7 +103,7 @@ describe("gate1 stage attribution (fixtures)", () => {
         final_verdict: "miss_at_5"
       }
     });
-    expect(classifyQuestionStage(writeQ).stage).toBe(1);
+    expect(classifyQuestionStage(writeQ).stage).toBe("write_or_unevaluable");
 
     const f3Q = baseQuestion({
       question_id: "q-f3",
@@ -180,7 +180,7 @@ describe("gate1 stage attribution (fixtures)", () => {
       gold: poolQ.gold[0]!,
       opportunityQuestion: false
     });
-    expect(poolGold.stage).toBe(2);
+    expect(poolGold.stage).toBe("raw_pool_absent");
 
     const pruneQ = baseQuestion({
       question_id: "q-prune",
@@ -210,7 +210,7 @@ describe("gate1 stage attribution (fixtures)", () => {
         gold: pruneQ.gold[0]!,
         opportunityQuestion: false
       }).stage
-    ).toBe(3);
+    ).toBe("pre_waist_prune");
 
     const coverageGold = gold({
       object_id: "g-cov",
@@ -232,7 +232,7 @@ describe("gate1 stage attribution (fixtures)", () => {
       gold: coverageGold,
       opportunityQuestion: true
     });
-    expect(coverageRow.stage).toBe(5);
+    expect(coverageRow.stage).toBe("coverage_or_budget");
     expect(coverageRow.mechanism).toBe("coverage_admission");
     expect(coverageRow.opportunity_pre_budget_6_10).toBe(true);
 
@@ -250,7 +250,7 @@ describe("gate1 stage attribution (fixtures)", () => {
       gold: [nearTop]
     });
     const nearRow = classifyQuestionStage(nearQ);
-    expect(nearRow.stage).toBe(6);
+    expect(nearRow.stage).toBe("near_top_final_order");
     expect(nearRow.opportunity_pre_budget_6_10).toBe(true);
     expect(nearRow.mechanism).toBe("composition");
 
@@ -288,7 +288,7 @@ describe("gate1 stage attribution (fixtures)", () => {
         })
       ]
     });
-    expect(classifyQuestionStage(hitQ).stage).toBe(7);
+    expect(classifyQuestionStage(hitQ).stage).toBe("delivered_top5");
   });
 
   it("keeps the three candidate-absence views separate with explicit denominators", () => {
@@ -430,7 +430,7 @@ describe("gate1 stage attribution (fixtures)", () => {
   });
 });
 
-describe("gate1 stage attribution (p81 diagnostics)", () => {
+describe("stage attribution (p81 diagnostics)", () => {
   it.skipIf(!existsSync(P81_A) || !existsSync(P81_B))(
     "builds A/B stage tables with KPI pre610 23/6 and delivery_order 83/44",
     async () => {

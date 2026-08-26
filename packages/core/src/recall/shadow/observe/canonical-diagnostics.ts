@@ -1,6 +1,6 @@
 import type {
-  CanonicalD0Disposition,
-  CanonicalD0SelectionReceipt,
+  CanonicalDisposition,
+  CanonicalSelectionReceipt,
   RecallCandidate,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
@@ -11,21 +11,21 @@ import {
   normalizeActivationScore
 } from "../../runtime/recall-service-helpers.js";
 import type {
-  CanonicalD0CandidateDiagnostic
+  CanonicalCandidateDiagnostic
 } from "../../runtime/recall-service-types.js";
 import type { FineAssessParams } from "../../delivery/fine-assessment.js";
 
 export function buildCanonicalDeliveryDiagnostics(
   params: FineAssessParams,
   delivered: readonly Readonly<RecallCandidate>[],
-  receipt: Readonly<CanonicalD0SelectionReceipt>
-): readonly CanonicalD0CandidateDiagnostic[] {
+  receipt: Readonly<CanonicalSelectionReceipt>
+): readonly CanonicalCandidateDiagnostic[] {
   const dispositions = receipt.dispositions;
   const deliveredRank = new Map(delivered.map((candidate, index) => [
     `${candidate.origin_plane}:${candidate.object_kind}:${candidate.object_id}`,
     index + 1
   ]));
-  return Object.freeze(params.candidates.map((coarse, index) => {
+  return Object.freeze(params.candidates.map((coarse) => {
     const key = buildRecallCandidateDedupeKey(coarse);
     const rank = deliveredRank.get(key);
     const disposition = dispositions.find((row) => row.candidate_key === key);
@@ -39,9 +39,9 @@ export function buildCanonicalDeliveryDiagnostics(
     ]);
     return Object.freeze({
       schema_version: 1 as const,
-      ranking_authority: "d0_prefix" as const,
-      d0_receipt_digest: receipt.receipt_digest,
-      d0_disposition: disposition,
+      ranking_authority: "prefix_sk" as const,
+      capture_receipt_digest: receipt.receipt_digest,
+      capture_disposition: disposition,
       legacy_selection: Object.freeze({
         fusion: "not_applicable" as const,
         deep_head: "not_applicable" as const,
@@ -72,7 +72,7 @@ export function buildCanonicalDeliveryDiagnostics(
 }
 
 function dropReason(
-  disposition: Readonly<CanonicalD0Disposition>,
+  disposition: Readonly<CanonicalDisposition>,
   delivered: boolean
 ): "ineligible" | "duplicate" | "dimension_limit" | "max_entries" |
   "max_total_tokens" | null {

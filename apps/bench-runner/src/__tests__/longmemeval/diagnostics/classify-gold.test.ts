@@ -55,10 +55,10 @@ describe("classifyGoldObjectStage admission refusals", () => {
       dropReason: "ineligible"
     });
     expect(rows.gold.miss_taxonomy).toBe("delivery_order_drop");
-    expect(rows.gold.stage).toBe(5);
+    expect(rows.gold.stage).toBe("coverage_or_budget");
     expect(rows.gold.mechanism).toBe("coverage_admission");
     expect(rows.gold.proof).toBe("delivery_admission_refusal");
-    expect(rows.question.stage).toBe(5);
+    expect(rows.question.stage).toBe("coverage_or_budget");
     expect(rows.question.mechanism).toBe("coverage_admission");
     expect(rows.question.proof).toBe("delivery_admission_refusal");
   });
@@ -70,10 +70,10 @@ describe("classifyGoldObjectStage admission refusals", () => {
       dropReason: "duplicate"
     });
     expect(rows.gold.miss_taxonomy).toBe("delivery_order_drop");
-    expect(rows.gold.stage).toBe(5);
+    expect(rows.gold.stage).toBe("coverage_or_budget");
     expect(rows.gold.mechanism).toBe("coverage_admission");
     expect(rows.gold.proof).toBe("delivery_admission_refusal");
-    expect(rows.question.stage).toBe(5);
+    expect(rows.question.stage).toBe("coverage_or_budget");
     expect(rows.question.proof).toBe("delivery_admission_refusal");
   });
 });

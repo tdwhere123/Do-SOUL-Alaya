@@ -4,34 +4,34 @@ import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
 import { buildQuestionDiagnostic } from
   "../../../bench/diagnostics/diagnostics-question.js";
 import {
-  GATE7_CANARY_Q1,
-  GATE7_CANARY_Q2,
-  GATE7_CANARY_Q3,
-  GATE7_CANARY_QUERY_TEXTS
-} from "../../../bench/diagnostics/stage-attribution/exposure/gate7-canary-ids.js";
+  CANARY_Q1,
+  CANARY_Q2,
+  CANARY_Q3,
+  CANARY_QUERY_TEXTS
+} from "../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
 import { candidateAttribution } from "../diagnostics/phase/exposure-receipt-fixture.js";
 
 export function controlCanaryDiagnostics() {
   return [
-    controlQuestion(GATE7_CANARY_Q1),
-    controlQuestion(GATE7_CANARY_Q2),
-    controlQuestion(GATE7_CANARY_Q3)
+    controlQuestion(CANARY_Q1),
+    controlQuestion(CANARY_Q2),
+    controlQuestion(CANARY_Q3)
   ];
 }
 
 export function passingTreatmentCanaryDiagnostics() {
   return [
-    exposedQuestion(GATE7_CANARY_Q1),
-    negativeQuestion(GATE7_CANARY_Q2),
-    negativeQuestion(GATE7_CANARY_Q3)
+    exposedQuestion(CANARY_Q1),
+    negativeQuestion(CANARY_Q2),
+    negativeQuestion(CANARY_Q3)
   ];
 }
 
 export function failingTreatmentCanaryDiagnostics() {
   return [
-    negativeQuestion(GATE7_CANARY_Q1),
-    negativeQuestion(GATE7_CANARY_Q2),
-    negativeQuestion(GATE7_CANARY_Q3)
+    negativeQuestion(CANARY_Q1),
+    negativeQuestion(CANARY_Q2),
+    negativeQuestion(CANARY_Q3)
   ];
 }
 
@@ -223,8 +223,8 @@ function selectedCandidate() {
 }
 
 function formedFormation(questionId: string) {
-  const sourceText = GATE7_CANARY_QUERY_TEXTS[
-    questionId as keyof typeof GATE7_CANARY_QUERY_TEXTS
+  const sourceText = CANARY_QUERY_TEXTS[
+    questionId as keyof typeof CANARY_QUERY_TEXTS
   ] ?? questionId;
   const tokens = sourceText.split(/\s+/u).map((token) => token.replace(/[^\p{L}\p{N}]/gu, ""))
     .filter((token) => token.length > 0);
@@ -273,8 +273,8 @@ function formedFormation(questionId: string) {
 }
 
 function unavailableFormation(questionId: string) {
-  const sourceText = GATE7_CANARY_QUERY_TEXTS[
-    questionId as keyof typeof GATE7_CANARY_QUERY_TEXTS
+  const sourceText = CANARY_QUERY_TEXTS[
+    questionId as keyof typeof CANARY_QUERY_TEXTS
   ] ?? questionId;
   return materializeOpenSemanticFactorFormation({
     source_kind: "query",

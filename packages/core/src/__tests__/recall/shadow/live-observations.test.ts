@@ -42,7 +42,7 @@ describe("live shadow observations", () => {
     });
   });
 
-  it("uses X0 chosen_lane including object_key_porter", () => {
+  it("uses chosen_lane including object_key_porter", () => {
     const capture: KeywordLexicalMergeCapture = {
       query_run_id: "memory.keyword.depth:3",
       merge_limit: 3,
@@ -70,10 +70,10 @@ describe("live shadow observations", () => {
       list_n: 1,
       raw_key_kind: "bm25_raw_rank"
     });
-    expect(liveLexicalMapping(field, [capture])).toBe("x0_capture");
+    expect(liveLexicalMapping(field, [capture])).toBe("raw_rank_capture");
   });
 
-  it("does not fall back to lane receipts when X0 omitted a candidate", () => {
+  it("does not fall back to lane receipts when raw-rank capture omitted a candidate", () => {
     const capture: KeywordLexicalMergeCapture = {
       query_run_id: "memory.keyword.depth:3",
       merge_limit: 3,
@@ -100,7 +100,7 @@ describe("live shadow observations", () => {
       state: "not_observed",
       reason: "missing_rank"
     });
-    expect(liveLexicalMapping(field, [capture])).toBe("x0_capture");
+    expect(liveLexicalMapping(field, [capture])).toBe("raw_rank_capture");
   });
 
   it("projects the score-snapshot EmbDomain when the seam provides it", () => {

@@ -9,15 +9,15 @@ import { resolvedDiagnosticLoopIdentityDigest, resolveDiagnosticLoopIdentity } f
   "../../../bench/diagnostic-loop/authority/identity.js";
 import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
 import {
-  assertGate7DiagnosticUnlock,
-  gate7UnlockRequired
-} from "../../../bench/diagnostic-loop/gate7-unlock-admission.js";
+  assertCanaryDiagnosticUnlock,
+  canaryUnlockRequired
+} from "../../../bench/diagnostic-loop/canary-unlock-admission.js";
 import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
   "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
 import { parseDiagnosticLoopArgs } from "../../../cli/diagnostic-loop/args.js";
 import { digest, loopRequest, trackingAdapters } from "./fixture.js";
-import { writeRebuildableUnlockRoot } from "./gate7-unlock-root-fixture.js";
+import { writeRebuildableUnlockRoot } from "./canary-unlock-root-fixture.js";
 
 const roots: string[] = [];
 
@@ -25,18 +25,18 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("Gate 7 diagnostic unlock admission", () => {
+describe("Canary diagnostic unlock admission", () => {
   it("requires an unlock token for any window larger than 3", () => {
-    expect(gate7UnlockRequired(loopRequest({ limit: 3 }))).toBe(false);
-    expect(gate7UnlockRequired(loopRequest({ limit: 100 }))).toBe(true);
-    expect(gate7UnlockRequired(loopRequest({
+    expect(canaryUnlockRequired(loopRequest({ limit: 3 }))).toBe(false);
+    expect(canaryUnlockRequired(loopRequest({ limit: 100 }))).toBe(true);
+    expect(canaryUnlockRequired(loopRequest({
       requestedKeys: [digest("a"), digest("b"), digest("c"), digest("d")]
     }))).toBe(true);
   });
 
   it("admits a rebuilt current 3Q matrix token", async () => {
     const token = await writeToken();
-    await assertGate7DiagnosticUnlock({
+    await assertCanaryDiagnosticUnlock({
       unlockWorkRoot: token.unlockRoot,
       currentRequest: token.currentRequest,
       currentIdentity: await resolveDiagnosticLoopIdentity(token.currentRequest)
@@ -100,20 +100,20 @@ describe("Gate 7 diagnostic unlock admission", () => {
   it("fail-closes bypass, foreign identity, old schema, and failed matrix", async () => {
     const token = await writeToken();
     const identity = await resolveDiagnosticLoopIdentity(token.currentRequest);
-    await expect(assertGate7DiagnosticUnlock({
+    await expect(assertCanaryDiagnosticUnlock({
       unlockWorkRoot: undefined,
       currentRequest: token.currentRequest,
       currentIdentity: identity
-    })).rejects.toThrow(/requires --gate7-unlock/u);
+    })).rejects.toThrow(/requires --canary-unlock/u);
 
-    await expect(assertGate7DiagnosticUnlock({
-      unlockWorkRoot: join(tmpdir(), "missing-gate7-unlock"),
+    await expect(assertCanaryDiagnosticUnlock({
+      unlockWorkRoot: join(tmpdir(), "missing-canary-unlock"),
       currentRequest: token.currentRequest,
       currentIdentity: identity
     })).rejects.toThrow(/missing|ENOENT/u);
 
     const foreign = await writeToken({ promptDigest: digest("foreign-prompt") });
-    await expect(assertGate7DiagnosticUnlock({
+    await expect(assertCanaryDiagnosticUnlock({
       unlockWorkRoot: foreign.unlockRoot,
       currentRequest: token.currentRequest,
       currentIdentity: identity
@@ -207,7 +207,7 @@ describe("Gate 7 diagnostic unlock admission", () => {
       mode: "cache-only",
       adapters: trackingAdapters().adapters,
       argv: ["--limit", "100"],
-      gate7UnlockPath: token.unlockRoot
+      canaryUnlockPath: token.unlockRoot
     })).resolves.toMatchObject({ reportPath: expect.stringContaining("report.json") });
   });
 
@@ -219,10 +219,10 @@ describe("Gate 7 diagnostic unlock admission", () => {
       mode: "cache-only",
       adapters: trackingAdapters().adapters,
       argv: ["--limit", "100"]
-    })).rejects.toThrow(/requires --gate7-unlock/u);
+    })).rejects.toThrow(/requires --canary-unlock/u);
   });
 
-  it("parses --gate7-unlock onto the shared run input", () => {
+  it("parses --canary-unlock onto the shared run input", () => {
     const parsed = parseDiagnosticLoopArgs([
       "--work-root", "/tmp/loop",
       "--dataset-revision", digest("dataset"),
@@ -234,9 +234,9 @@ describe("Gate 7 diagnostic unlock admission", () => {
       "--schema-digest", digest("schema"),
       "--operator-digest", digest("operator"),
       "--limit", "100",
-      "--gate7-unlock", "/tmp/gate7-3q"
+      "--canary-unlock", "/tmp/canary-3q"
     ]);
-    expect(parsed.gate7UnlockPath).toBe("/tmp/gate7-3q");
+    expect(parsed.canaryUnlockPath).toBe("/tmp/canary-3q");
     expect(parsed.request.limit).toBe(100);
   });
 });
@@ -255,7 +255,7 @@ async function admit(token: {
   readonly unlockRoot: string;
   readonly currentRequest: ReturnType<typeof loopRequest>;
 }) {
-  return await assertGate7DiagnosticUnlock({
+  return await assertCanaryDiagnosticUnlock({
     unlockWorkRoot: token.unlockRoot,
     currentRequest: token.currentRequest,
     currentIdentity: await resolveDiagnosticLoopIdentity(token.currentRequest)
@@ -263,7 +263,7 @@ async function admit(token: {
 }
 
 async function tempRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "gate7-unlock-"));
+  const root = await mkdtemp(join(tmpdir(), "canary-unlock-"));
   await mkdir(root, { recursive: true });
   roots.push(root);
   return root;

@@ -18,10 +18,10 @@ import {
   type StageAttributionTables
 } from "./types.js";
 
-const GATE1_NOT_CHECKED = [
+const STAGE_ATTRIBUTION_NOT_CHECKED = [
   "why_raw_pool_absent_admit_fts_planes",
   "pre_waist_proof_from_f0",
-  "stage_4_causal_owner_inside_composition",
+  "waist_composition_causal_owner",
   "f0_waist_join"
 ] as const;
 
@@ -101,12 +101,12 @@ export function buildStageAttributionTables(input: {
     kpi_pre_budget_6_10: kpiPre610,
     delivery_order_drop: deliveryOrder,
     candidate_absence_views: absenceViews,
-    not_checked: [...GATE1_NOT_CHECKED]
+    not_checked: [...STAGE_ATTRIBUTION_NOT_CHECKED]
   };
 
   return {
     schema_version: 1,
-    kind: "gate1-stage-attribution-tables",
+    kind: "stage-attribution-tables",
     cell: input.cell,
     source_diagnostics: input.sourceDiagnostics,
     summary,

@@ -15,7 +15,7 @@ import type {
 } from "../../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";
 
-describe("production D0 set utility states", () => {
+describe("production capture set utility states", () => {
   it("keeps unobserved producer absence unknown and unavailable", () => {
     const utility = onlyUtility(candidate("candidate-a"), supplementary());
 

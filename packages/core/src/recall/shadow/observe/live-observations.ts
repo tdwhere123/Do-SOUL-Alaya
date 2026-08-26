@@ -87,7 +87,7 @@ export function buildLiveObservationField(
 export function liveLexicalMapping(
   field: ShadowPsiObservationField,
   captures: readonly Readonly<KeywordLexicalMergeCapture>[] = []
-): "x0_capture" | "lane_receipts" | "not_observed" {
+): "raw_rank_capture" | "lane_receipts" | "not_observed" {
   let observed = false;
   let captureOnly = true;
   for (const [key, view] of Object.entries(field)) {
@@ -97,7 +97,7 @@ export function liveLexicalMapping(
     if (chooseCaptureHit(objectId, captures) === null) captureOnly = false;
   }
   if (!observed) return "not_observed";
-  return captureOnly && captures.length > 0 ? "x0_capture" : "lane_receipts";
+  return captureOnly && captures.length > 0 ? "raw_rank_capture" : "lane_receipts";
 }
 
 function liveContext(input: LiveObservationSource): LiveContext {

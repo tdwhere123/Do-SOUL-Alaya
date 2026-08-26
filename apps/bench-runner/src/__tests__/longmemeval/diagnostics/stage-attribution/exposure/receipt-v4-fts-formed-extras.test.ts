@@ -167,7 +167,7 @@ function arm(questionId: string, expandedTerms: readonly string[]) {
 function stage(questionId: string): QuestionStageRow {
   return {
     question_id: questionId,
-    stage: 7,
+    stage: "delivered_top5",
     mechanism: null,
     opportunity_pre_budget_6_10: false,
     miss_taxonomy: null,

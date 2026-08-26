@@ -10,7 +10,7 @@ import {
   type LexicalRawRankReceipt
 } from "../../../repos/memory-entry/search/lexical-raw-rank-capture.js";
 
-const PLANTED_QUERY_RUN = "x0-lex-raw-rank.planted.v1";
+const PLANTED_QUERY_RUN = "lex-raw-rank.planted.v1";
 
 const DIVERGENT_LANES = Object.freeze({
   exactRows: Object.freeze([
@@ -57,7 +57,7 @@ function laneOrder(receipt: LexicalRawRankReceipt, laneId: string): readonly str
     .map((row) => row.candidate_key) ?? [];
 }
 
-describe("X0-LEX-RAW-RANK diagnostics capture", () => {
+describe("lexical raw-rank diagnostics capture", () => {
   it("is schema-versioned and does not choose a lexical comparison policy", () => {
     const { receipt } = capturePlanted(DIVERGENT_LANES);
     expect(receipt.schema_version).toBe(LEXICAL_RAW_RANK_RECEIPT_SCHEMA_VERSION);

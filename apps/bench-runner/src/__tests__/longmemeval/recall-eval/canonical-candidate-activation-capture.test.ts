@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createCandidateActivationCapture } from
   "../../../bench/lifecycle/recall-eval/recall-eval-candidate-activation.js";
-import { CanonicalD0SelectionReceiptSchema } from
-  "../../../harness/recall/d0/d0-receipt-schema.js";
+import { CanonicalSelectionReceiptSchema } from
+  "../../../harness/recall/capture/capture-receipt-schema.js";
 
 describe("canonical candidate activation capture", () => {
   it("keeps the sidecar field missing when the observer never fired", () => {
@@ -18,7 +18,7 @@ describe("canonical candidate activation capture", () => {
     const capture = createCandidateActivationCapture(true);
     capture.observer?.({
       supplementaryData: {},
-      result: { ranking_authority: "d0_prefix" }
+      result: { ranking_authority: "prefix_sk" }
     } as never);
 
     const attached = capture.attach({ diagnostics: {} } as never) as Readonly<{
@@ -39,7 +39,7 @@ describe("canonical candidate activation capture", () => {
           ["candidate:b", receipt]
         ])
       },
-      result: { ranking_authority: "d0_prefix" }
+      result: { ranking_authority: "prefix_sk" }
     } as never);
     const attached = capture.attach({ diagnostics: {} } as never) as Readonly<{
       diagnostics: Readonly<{ open_semantic_factor_candidate_activations: readonly unknown[] }>;
@@ -50,13 +50,13 @@ describe("canonical candidate activation capture", () => {
   });
 
   it("accepts the shared membership failure reason with empty delivery", () => {
-    const receipt = createCanonicalD0SelectionReceipt({
+    const receipt = createCanonicalSelectionReceipt({
       schema_version: 1,
-      ranking_authority: "d0_prefix",
+      ranking_authority: "prefix_sk",
       identity: {
-        algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1",
-        version: "d0.safe-dominance-capture.v1.0.0",
-        digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa"
+        algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1",
+        version: "safe-dominance-capture.v1.0.0",
+        digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
       },
       execution: { status: "fail_closed", reason: "membership_shrink" },
       field_membership: {
@@ -68,11 +68,11 @@ describe("canonical candidate activation capture", () => {
       dispositions: [],
       delivery: []
     }, (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex"));
-    const parsed = CanonicalD0SelectionReceiptSchema.parse(receipt);
+    const parsed = CanonicalSelectionReceiptSchema.parse(receipt);
 
     expect(parsed.execution.reason).toBe("membership_shrink");
     expect(parsed.delivery).toEqual([]);
   });
 });
 import { createHash } from "node:crypto";
-import { createCanonicalD0SelectionReceipt } from "@do-soul/alaya-protocol";
+import { createCanonicalSelectionReceipt } from "@do-soul/alaya-protocol";

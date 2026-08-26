@@ -64,7 +64,7 @@ const COMPLETE_WITNESSES = {
   proven_absence: true
 } as const;
 
-describe("psiQ D0 §4.3", () => {
+describe("psiQ safe dominance", () => {
   it("is irreflexive", () => {
     const obs = field({ A: view({ lexical: lexicalAt("observed", 0.8) }) });
     expect(psiQ("A", "A", obs, LEX)).toBe(false);
@@ -85,7 +85,7 @@ describe("psiQ D0 §4.3", () => {
     expect(() => psiPredicate(obs, TEMP)("A", "B")).toThrow(/not a dominance compare/u);
   });
 
-  it("D0-F01 membership-neutrality: graph admit cannot create a Psi edge", () => {
+  it("membership-neutrality: graph admit cannot create a Psi edge", () => {
     const obs = field({
       A: view({ temporal: temporalObserved(0.75) }),
       B: view({ temporal: temporalObserved(0.75) })
@@ -114,7 +114,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiQ("B", "A", obs, LEX)).toBe(false);
   });
 
-  it("rejects Graph/Path/Flood O construction via I0 parse", () => {
+  it("rejects Graph/Path/Flood O construction via parse", () => {
     for (const lineage of ["path", "flood", "graph", "relation"]) {
       expect(() => parsePointwiseObservation({ lineage })).toThrow(
         /relational observation is not admitted/u
@@ -128,7 +128,7 @@ describe("psiQ D0 §4.3", () => {
     expect(diagnostic.source).toBe("flood");
   });
 
-  it("D0-F02 no-admission-eviction: embed.admit does not create Psi", () => {
+  it("no-admission-eviction: embed.admit does not create Psi", () => {
     const e0 = ["A", "B", "C"];
     const e1 = ["A", "B", "C", "D"];
     expect(e0MembershipSubsetOfE1(e0, e1)).toBe(true);
@@ -153,7 +153,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiQ("C", "D", obs, LEX)).toBe(false);
   });
 
-  it("D0-F03 duplicate invariance: one lexical O, siblings are not a second axis", () => {
+  it("duplicate invariance: one lexical O, siblings are not a second axis", () => {
     const chosen = lexicalObs({ state: "observed", value: 0.8 }, PORTER_3);
     const weaker = lexicalObs({ state: "observed", value: 0.4 }, PORTER_3);
     const without = field({
@@ -170,7 +170,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiQ("A", "Aprime", withClone, LEX)).toBe(false);
   });
 
-  it("D0-F30 sibling FTS cannot mint a second axis: cross-lane incomparable", () => {
+  it("sibling FTS cannot mint a second axis: cross-lane incomparable", () => {
     const obs = field({
       A: view({ lexical: lexicalObs({ state: "observed", value: 1 }, EXACT_2) }),
       B: view({ lexical: lexicalObs({ state: "observed", value: 1 }, PORTER_3) })
@@ -227,7 +227,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiOutcome("A", "B", obs, SUBJ).kind).toBe("blocked");
   });
 
-  it("D0-F36 candidate-N/A versus unavailable is incomparable, not skip", () => {
+  it("candidate-N/A versus unavailable is incomparable, not skip", () => {
     const unavailablePref = subjectComponent("preference", {
       state: "not_observed", reason: "not_run"
     });
@@ -260,7 +260,7 @@ describe("psiQ D0 §4.3", () => {
     });
   });
 
-  it("D0-F23 truncated vs complete LexDomain is incomparable", () => {
+  it("truncated vs complete LexDomain is incomparable", () => {
     const obs = field({
       A: view({
         lexical: lexicalObs({ state: "observed", value: 1 }, PORTER_TRUNCATED)
@@ -312,7 +312,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiQ("C", "D", obs, LEX)).toBe(false);
   });
 
-  it("D0-F09 transitivity of a 3-chain", () => {
+  it("transitivity of a 3-chain", () => {
     const obs = transitivityField();
     expect(psiQ("A", "B", obs, TEMP_EMB)).toBe(true);
     expect(psiQ("B", "C", obs, TEMP_EMB)).toBe(true);
@@ -342,7 +342,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiOutcome("A", "C", obs, channels).kind).toBe("tradeoff");
   });
 
-  it("D0-F08 E0/E1 refinement: masking embedding recovers E0", () => {
+  it("E0/E1 refinement: masking embedding recovers E0", () => {
     const obs = field({
       A: view({
         temporal: temporalObserved(0.5),
@@ -359,7 +359,7 @@ describe("psiQ D0 §4.3", () => {
     expect(psiQ("A", "B", obs, TEMP_EMB)).toBe(false);
   });
 
-  it("D0-F22 missing embedding is incomparable, not mid-scale", () => {
+  it("missing embedding is incomparable, not mid-scale", () => {
     const obs = field({
       A: view({ embedding: embeddingObserved(0.4) }),
       B: view({ embedding: embeddingMissing() })

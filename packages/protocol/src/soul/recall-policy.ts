@@ -66,7 +66,7 @@ export const FineAssessmentConfigSchema = z
   .object({
     budgets: RecallBudgetsSchema,
     conflict_awareness: z.boolean(),
-    // Omitted means canonical D0 prefix delivery; "legacy" restores deliverFineAssessment.
+    // Omitted means canonical prefixSK delivery; "legacy" restores deliverFineAssessment.
     delivery_path: z.enum(["legacy", "canonical"]).optional()
   })
   .strict()

@@ -7,7 +7,7 @@ import type {
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
 import {
-  D0_IDENTITY_DIGEST,
+  CAPTURE_IDENTITY_DIGEST,
   SHADOW_ALGORITHM_VERSION,
   SHADOW_LINEAGE_IDS
 } from "../../../recall/shadow/index.js";
@@ -15,7 +15,7 @@ import {
   captureShadowIntegration,
   isFailClosedShadowTrace,
   prefixSK,
-  SHADOW_C0_SEAM,
+  SHADOW_CUTOVER_SEAM,
   type FineAssessmentShadowTrace,
   type ShadowCapturedTrace
 } from "../../../recall/shadow/integrate.js";
@@ -32,7 +32,7 @@ import {
 const NOW = "2026-07-12T00:00:00.000Z";
 const IDS = ["cand-a", "cand-b", "cand-c"] as const;
 
-describe("J1 shadow integration at fineAssess", () => {
+describe("shadow integration at fineAssess", () => {
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {
     const params = assessParams(fieldCandidates(), "legacy");
     const planted = plantedTransitivity();
@@ -72,8 +72,8 @@ describe("J1 shadow integration at fineAssess", () => {
       kind: "fail_closed",
       reason: "psi_cycle_contract_failure",
       version: SHADOW_ALGORITHM_VERSION,
-      digest: D0_IDENTITY_DIGEST,
-      c0_seam: SHADOW_C0_SEAM
+      digest: CAPTURE_IDENTITY_DIGEST,
+      cutover_seam: SHADOW_CUTOVER_SEAM
     });
   });
 
@@ -94,7 +94,7 @@ describe("J1 shadow integration at fineAssess", () => {
     expect(captured.prefix_proposal).toEqual(prefixSK(s, captured.K));
   });
 
-  it("binds the frozen D0 digest and version", () => {
+  it("binds the frozen capture digest and version", () => {
     const on = fineAssess({
       ...assessParams(fieldCandidates()),
       captureShadowTrace: true,
@@ -102,13 +102,13 @@ describe("J1 shadow integration at fineAssess", () => {
     });
     const captured = asCaptured(on.shadowTrace);
     expect(captured.digest).toBe(
-      "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa"
+      "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
     );
-    expect(captured.digest).toBe(D0_IDENTITY_DIGEST);
-    expect(captured.version).toBe("d0.safe-dominance-capture.v1.0.0");
-    expect(captured.c0_seam.activation).toBe("active");
-    expect(captured.c0_seam.future_delivery_order).toBe("prefixSK(S_infty, K)");
-    expect(captured.c0_seam.rollback).toBe("deliverFineAssessment");
+    expect(captured.digest).toBe(CAPTURE_IDENTITY_DIGEST);
+    expect(captured.version).toBe("safe-dominance-capture.v1.0.0");
+    expect(captured.cutover_seam.activation).toBe("active");
+    expect(captured.cutover_seam.future_delivery_order).toBe("prefixSK(S_infty, K)");
+    expect(captured.cutover_seam.rollback).toBe("deliverFineAssessment");
   });
 
   it("excludes Graph/Path/Flood O and FrontierPriority from G", () => {
@@ -149,7 +149,7 @@ describe("J1 shadow integration at fineAssess", () => {
     expect(trace).toMatchObject({
       kind: "fail_closed",
       reason: "membership_shrink",
-      digest: D0_IDENTITY_DIGEST
+      digest: CAPTURE_IDENTITY_DIGEST
     });
   });
 });

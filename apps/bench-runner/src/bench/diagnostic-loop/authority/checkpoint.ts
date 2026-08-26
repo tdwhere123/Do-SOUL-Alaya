@@ -75,7 +75,7 @@ async function assertMissLedgerArtifact(
   }
   if (!isDeepStrictEqual(checkpoint.details.exposure_sli, artifact.exposure_sli) ||
       !isDeepStrictEqual(
-        checkpoint.details.gate7_polarity_matrix, artifact.gate7_polarity_matrix
+        checkpoint.details.canary_polarity_matrix, artifact.canary_polarity_matrix
       ) ||
       !isDeepStrictEqual(
         checkpoint.details.diagnostic_100q_unlock, artifact.diagnostic_100q_unlock
@@ -158,7 +158,7 @@ function isReportUnlockPromotionBound(
     isDeepStrictEqual(unlock, comparison.diagnostic_100q_unlock) &&
     isDeepStrictEqual(value.miss_ledger, summarizeMissLedgerCheckpoint(missLedger)) &&
     isDeepStrictEqual(parsedLedger.exposure_sli, comparison.exposure_sli) &&
-    isDeepStrictEqual(parsedLedger.gate7_polarity_matrix, comparison.gate7_polarity_matrix) &&
+    isDeepStrictEqual(parsedLedger.canary_polarity_matrix, comparison.canary_polarity_matrix) &&
     isDeepStrictEqual(parsedLedger.diagnostic_100q_unlock, comparison.diagnostic_100q_unlock);
 }
 

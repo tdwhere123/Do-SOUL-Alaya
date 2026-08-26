@@ -49,7 +49,7 @@ export type {
   RecallFloodH1TransitionCounts
 } from "./diagnostics/flood-diagnostics.js";
 export type {
-  CanonicalD0CandidateDiagnostic,
+  CanonicalCandidateDiagnostic,
   FineAssessmentPrunedCandidateDiagnostic,
   RecallAdmissionAttemptDiagnostic,
   RecallAdmissionDiagnosticPass,
@@ -107,8 +107,8 @@ export interface RecallGraphExpansionDiagnostics {
 }
 
 export interface RecallDiagnostics {
-  readonly d0_receipt?: Readonly<
-    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  readonly capture_receipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalSelectionReceipt
   >;
   readonly query_probes: {
     readonly normalized_query: string | null;

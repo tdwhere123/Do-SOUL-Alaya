@@ -135,7 +135,7 @@ export interface RecallCandidateDiagnostic {
   readonly source_cohort_key?: string | null;
 }
 
-export type CanonicalD0CandidateDiagnostic = Readonly<Pick<
+export type CanonicalCandidateDiagnostic = Readonly<Pick<
   RecallCandidateDiagnostic,
   "candidate_key" | "object_id" | "object_kind" | "created_at" | "dimension" |
   "origin_plane" | "admission_planes" | "plane_first_admitted" |
@@ -144,9 +144,9 @@ export type CanonicalD0CandidateDiagnostic = Readonly<Pick<
   "source_channels"
 > & {
   readonly schema_version: 1;
-  readonly ranking_authority: "d0_prefix";
-  readonly d0_receipt_digest: string;
-  readonly d0_disposition: import("@do-soul/alaya-protocol").CanonicalD0Disposition;
+  readonly ranking_authority: "prefix_sk";
+  readonly capture_receipt_digest: string;
+  readonly capture_disposition: import("@do-soul/alaya-protocol").CanonicalDisposition;
   readonly legacy_selection: Readonly<{
     readonly fusion: "not_applicable";
     readonly deep_head: "not_applicable";
@@ -155,7 +155,7 @@ export type CanonicalD0CandidateDiagnostic = Readonly<Pick<
 }>;
 
 export type RecallFineAssessmentCandidateDiagnostic =
-  RecallCandidateDiagnostic | CanonicalD0CandidateDiagnostic;
+  RecallCandidateDiagnostic | CanonicalCandidateDiagnostic;
 
 export interface FineAssessmentPrunedCandidateDiagnostic {
   readonly candidate_key: string;

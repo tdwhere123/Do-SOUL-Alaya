@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fineAssessment from "../../../recall/delivery/fine-assessment.js";
 import * as gamma from "../../../recall/delivery/select-gamma/select-gamma.js";
 import { RecallService } from "../../../recall/recall-service.js";
-import { CANONICAL_D0_IDENTITY } from "../../../recall/shadow/canonical-delivery.js";
+import { CANONICAL_CAPTURE_IDENTITY } from "../../../recall/shadow/canonical-delivery.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -39,15 +39,15 @@ describe("omitted delivery_path executeRecall", () => {
     });
 
     expect(result.delivery_path).toBe("canonical");
-    expect(result.ranking_authority).toBe("d0_prefix");
-    expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
+    expect(result.ranking_authority).toBe("prefix_sk");
+    expect(result.capture_identity).toEqual(CANONICAL_CAPTURE_IDENTITY);
     expect(result.candidates.every((candidate) => candidate.relevance_score === 0)).toBe(true);
     expect(assess).toHaveBeenCalled();
     expect(prepare).not.toHaveBeenCalled();
     expect(gammaWalk).not.toHaveBeenCalled();
     expect(diagnosticObserver).toHaveBeenCalledOnce();
     expect(diagnosticObserver.mock.calls[0]?.[0].result.ranking_authority)
-      .toBe("d0_prefix");
+      .toBe("prefix_sk");
   });
 
   it("fails closed duplicate live candidates with one exact diagnostic row", async () => {
@@ -71,10 +71,10 @@ describe("omitted delivery_path executeRecall", () => {
     });
 
     expect(result.candidates).toEqual([]);
-    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "invalid_state" });
+    expect(result.capture_execution).toEqual({ status: "fail_closed", reason: "invalid_state" });
     expect(result.diagnostics?.candidates).toHaveLength(1);
-    expect(result.diagnostics?.d0_receipt?.dispositions).toHaveLength(1);
+    expect(result.diagnostics?.capture_receipt?.dispositions).toHaveLength(1);
     expect(result.diagnostics?.candidates[0]?.candidate_key)
-      .toBe(result.diagnostics?.d0_receipt?.dispositions[0]?.candidate_key);
+      .toBe(result.diagnostics?.capture_receipt?.dispositions[0]?.candidate_key);
   });
 });

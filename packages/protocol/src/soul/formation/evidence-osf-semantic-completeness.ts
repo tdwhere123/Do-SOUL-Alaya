@@ -13,7 +13,7 @@ import {
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorGraphProposal
 } from "../open-semantic-factor-graph.js";
-import { canonicalJson } from "../selection/d0/canonical-json.js";
+import { canonicalJson } from "../selection/capture/canonical-json.js";
 
 export const EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID =
   "evidence_osf_semantic_completeness_v2" as const;

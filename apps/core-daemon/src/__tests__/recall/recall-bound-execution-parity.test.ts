@@ -75,10 +75,10 @@ describe("invokeBoundRecall shared input contract", () => {
       workspaceId: "workspace-1", strategy: "chat", policyOverride: policy
     });
 
-    expect(production.d0_execution).toEqual({
+    expect(production.capture_execution).toEqual({
       status: "fail_closed", reason: "membership_shrink"
     });
-    expect(benchmark.d0_execution).toEqual(production.d0_execution);
+    expect(benchmark.capture_execution).toEqual(production.capture_execution);
     expect(production.candidates).toEqual([]);
     expect(benchmark.candidates).toEqual([]);
   });

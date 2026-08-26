@@ -107,13 +107,13 @@ export interface RecallResult {
   readonly working_projection: null;
   readonly diagnostics?: Readonly<RecallDiagnostics>;
   readonly delivery_path?: "legacy" | "canonical";
-  readonly d0_identity?: Readonly<{
+  readonly capture_identity?: Readonly<{
     readonly algorithm_id: string;
     readonly version: string;
     readonly digest: string;
   }>;
-  readonly ranking_authority?: "d0_prefix" | "select_gamma";
-  readonly d0_execution?: Readonly<import("@do-soul/alaya-protocol").D0Execution>;
+  readonly ranking_authority?: "prefix_sk" | "select_gamma";
+  readonly capture_execution?: Readonly<import("@do-soul/alaya-protocol").CaptureExecution>;
 }
 
 export interface RecallSupplementaryData {

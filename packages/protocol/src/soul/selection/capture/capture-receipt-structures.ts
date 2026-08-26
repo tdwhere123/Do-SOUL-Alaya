@@ -68,7 +68,7 @@ const SubjectObservation = z.object({
     ]), envelope: Envelope }).strict()).readonly()
 }).strict();
 
-export const D0CandidateObservationSchema = z.object({
+export const CaptureCandidateObservationSchema = z.object({
   h_gate: z.enum(["none", "event", "temporal", "hidden"]),
   lineages: z.object({ lexical: LexicalObservation.optional(),
     embedding: EmbeddingObservation.optional(), temporal: TemporalObservation.optional(),
@@ -80,7 +80,7 @@ const ObligationKey = z.object({ kind: z.enum([
 ]), value: Key }).strict().readonly();
 const Coordinate = z.enum(["available", "known_zero", "unavailable", "not_observed", "not_applicable"]);
 const OsfStatus = z.enum(["composed", "no_match", "truncated", "rejected", "ineligible", "unavailable"]);
-export const D0SetUtilitySchema = z.object({
+export const CaptureSetUtilitySchema = z.object({
   schema_version: z.literal(1), candidate_key: Key, object_key: Key,
   obligations: z.array(z.object({ key: ObligationKey, raw_atom_ids: z.array(Key).readonly(),
     availability: Coordinate, cover: Finite.min(0).max(1), evaluated: z.boolean() }).strict()).readonly(),
@@ -91,7 +91,7 @@ export const D0SetUtilitySchema = z.object({
     semantic_identity: Key }).strict()).readonly() }).strict(),
   cid: z.union([z.object({ status: z.literal("unavailable") }).strict(),
     z.object({ status: z.literal("available"), cid: Key,
-      grounding: z.enum(["evidence", "gist", "ref"]) }).strict()]),
+      grounding: z.enum(["content", "gist", "ref"]) }).strict()]),
   availability: z.object({ facility: z.enum(["not_applicable", "available",
     "partially_unavailable", "unavailable"]), values: OsfStatus,
     evidence_identity: z.enum(["available", "unavailable"]) }).strict()
@@ -100,7 +100,7 @@ export const D0SetUtilitySchema = z.object({
 const GStatus = z.object({ facility: z.enum(["not_applicable", "available",
   "partially_unavailable", "unavailable"]), values: OsfStatus,
   evidence_identity: z.enum(["available", "unavailable"]) }).strict();
-export const D0DecisionSchema = z.object({
+export const CaptureDecisionSchema = z.object({
   schema_version: z.literal(1), candidate_key: Key,
   capture_reason: z.enum(["core_undominated", "cross_frontier_novelty"]),
   G: z.object({ unscaled_remainder: Finite.nonnegative(), Values_v: z.number().int().nonnegative(),
@@ -119,10 +119,10 @@ export const D0DecisionSchema = z.object({
   static_frontier_index: z.number().int().positive().nullable()
 }).strict().readonly();
 
-export const D0RejectSchema = z.object({ candidate_key: Key, walk_reject: z.enum([
+export const CaptureRejectSchema = z.object({ candidate_key: Key, walk_reject: z.enum([
   "duplicate_object", "dimension_limit", "max_total_tokens"
 ]) }).strict().readonly();
-export const D0FrontierSchema = z.object({ schema_version: z.literal(1),
+export const CaptureFrontierSchema = z.object({ schema_version: z.literal(1),
   operator_id: z.literal("shadow.frontiers.peel_undominated.v1"),
   layers: z.array(z.object({ index: z.number().int().positive(),
     member_keys: z.array(Key).readonly() }).strict()).readonly() }).strict().readonly();

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { CanonicalD0SelectionReceiptSchema } from
-  "../../../../harness/recall/d0/d0-receipt-schema.js";
-import { CanonicalD0CandidateDiagnosticSchema } from
-  "../../../../harness/recall/d0/canonical-d0-candidate-diagnostic-schema.js";
+import { CanonicalSelectionReceiptSchema } from
+  "../../../../harness/recall/capture/capture-receipt-schema.js";
+import { CanonicalCandidateDiagnosticSchema } from
+  "../../../../harness/recall/capture/canonical-candidate-diagnostic-schema.js";
 
 const LegacySelectionNotApplicableSchema = z.object({
   fusion: z.literal("not_applicable"),
@@ -17,10 +17,10 @@ const LEGACY_OBSERVATION_FIELDS = Object.freeze([
   "coverage_selector_action", "select_gamma_decision"
 ]);
 
-export function isCanonicalD0CandidateRow(value: unknown): boolean {
+export function isCanonicalCandidateRow(value: unknown): boolean {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Readonly<Record<string, unknown>>;
-  return record.schema_version === 1 && record.ranking_authority === "d0_prefix" &&
+  return record.schema_version === 1 && record.ranking_authority === "prefix_sk" &&
     LegacySelectionNotApplicableSchema.safeParse(record.legacy_selection).success &&
     LEGACY_OBSERVATION_FIELDS.every((field) => record[field] === undefined);
 }
@@ -30,7 +30,7 @@ export function canonicalCandidatePoolComplete(input: Readonly<{
   rows: readonly unknown[] | undefined;
   candidateKeys: Iterable<string>;
 }>): boolean | null {
-  const receipt = CanonicalD0SelectionReceiptSchema.safeParse(input.receipt);
+  const receipt = CanonicalSelectionReceiptSchema.safeParse(input.receipt);
   if (!receipt.success) return null;
   return receipt.data.execution.status === "captured" && input.rows !== undefined &&
     sameKeys(receipt.data.field_membership.e1_keys, input.candidateKeys) &&
@@ -39,18 +39,18 @@ export function canonicalCandidatePoolComplete(input: Readonly<{
 
 function rowsMatchReceipt(
   rows: readonly unknown[],
-  receipt: z.infer<typeof CanonicalD0SelectionReceiptSchema>
+  receipt: z.infer<typeof CanonicalSelectionReceiptSchema>
 ): boolean {
   if (rows.length !== receipt.field_membership.e1_keys.length) return false;
   const dispositions = new Map(receipt.dispositions.map((row) => [row.candidate_key, row]));
   const delivery = new Map(receipt.delivery.map((row) => [row.candidate_key, row.delivery_rank]));
   return rows.every((value) => {
-    const parsed = CanonicalD0CandidateDiagnosticSchema.safeParse(value);
-    if (!parsed.success || parsed.data.d0_receipt_digest !== receipt.receipt_digest) return false;
+    const parsed = CanonicalCandidateDiagnosticSchema.safeParse(value);
+    if (!parsed.success || parsed.data.capture_receipt_digest !== receipt.receipt_digest) return false;
     const row = parsed.data;
     const disposition = dispositions.get(row.candidate_key);
     const rank = delivery.get(row.candidate_key) ?? null;
-    return disposition !== undefined && JSON.stringify(row.d0_disposition) === JSON.stringify(disposition) &&
+    return disposition !== undefined && JSON.stringify(row.capture_disposition) === JSON.stringify(disposition) &&
       row.final_rank === rank && row.post_rank === rank && row.in_final_packet === (rank !== null);
   });
 }

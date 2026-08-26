@@ -4,7 +4,7 @@ import { sealTreatmentExposureReceipt } from
 import { notObservedPhaseLedger } from "../diagnostics/phase/not-observed-ledger.js";
 
 export function forgedExposureReceipt() {
-  const d0ReceiptDigest = `sha256:${"d".repeat(64)}`;
+  const captureReceiptDigest = `sha256:${"d".repeat(64)}`;
   const activationBody = {
     schema_version: 1 as const,
     operator_id: "open_semantic_factor_candidate_activation_v1" as const,
@@ -18,8 +18,8 @@ export function forgedExposureReceipt() {
     schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: "forged",
-    ranking_authority: "d0_prefix",
-    d0_receipt_digest: d0ReceiptDigest,
+    ranking_authority: "prefix_sk",
+    capture_receipt_digest: captureReceiptDigest,
     evidence_chain: { linked: true },
     control_non_exposure: {
       observed: true, formation_status: null, compatible_count: 0,
@@ -31,7 +31,7 @@ export function forgedExposureReceipt() {
     composition: { status: "composed", solution_count: 1, binding_count: 0 },
     activation: { status: "composed", activated_evidence_count: 1 },
     candidate_attribution: {
-      d0_receipt_digest: d0ReceiptDigest,
+      capture_receipt_digest: captureReceiptDigest,
       entries: [{
         candidate_key: "candidate:f3",
         receipt: { ...activationBody, receipt_digest: digestRecallFieldIdentity(activationBody) }
@@ -47,7 +47,7 @@ export function forgedExposureReceipt() {
       observed: false, changed: false, added_expanded_terms: [], removed_expanded_terms: []
     },
     retrieval_channel_delta: { observed: false, changed: false, changed_channels: [] },
-    outcome: { control: { stage: "S5", hit_at_5: true }, treatment: { stage: "S5", hit_at_5: true } },
+    outcome: { control: { stage: "delivered_top5", hit_at_5: true }, treatment: { stage: "delivered_top5", hit_at_5: true } },
     product_phase_ledger: notObservedPhaseLedger(),
     exposure_status: "exposed"
   });

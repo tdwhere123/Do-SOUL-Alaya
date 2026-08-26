@@ -12,8 +12,8 @@ import {
   SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
+  type CaptureExecution,
   type ContextDeliveryRecord,
-  type D0Execution,
   type MemoryEntry,
   type RecallCandidate,
   type RecallPolicy,
@@ -82,13 +82,13 @@ export interface RecallUsageHandlerDependencies {
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
       readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
       readonly delivery_path?: "legacy" | "canonical";
-      readonly ranking_authority?: "d0_prefix" | "select_gamma";
-      readonly d0_identity?: Readonly<{
+      readonly ranking_authority?: "prefix_sk" | "select_gamma";
+      readonly capture_identity?: Readonly<{
         readonly algorithm_id: string;
         readonly version: string;
         readonly digest: string;
       }>;
-      readonly d0_execution?: Readonly<D0Execution>;
+      readonly capture_execution?: Readonly<CaptureExecution>;
     }>>;
   };
   readonly trustStateRecorder: {
@@ -284,12 +284,12 @@ function buildRecallResponse(
     ...(recallResult.ranking_authority === undefined
       ? {}
       : { ranking_authority: recallResult.ranking_authority }),
-    ...(recallResult.d0_identity === undefined
+    ...(recallResult.capture_identity === undefined
       ? {}
-      : { d0_identity: recallResult.d0_identity }),
-    ...(recallResult.d0_execution === undefined
+      : { capture_identity: recallResult.capture_identity }),
+    ...(recallResult.capture_execution === undefined
       ? {}
-      : { d0_execution: recallResult.d0_execution })
+      : { capture_execution: recallResult.capture_execution })
   });
 }
 

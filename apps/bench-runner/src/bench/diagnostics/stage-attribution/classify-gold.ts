@@ -32,14 +32,14 @@ export function classifyGoldObjectStage(input: {
   let proof: string;
 
   if (finalRank !== null && finalRank <= 5) {
-    stage = 7;
+    stage = "delivered_top5";
     proof = "final_rank<=5";
   } else if (
     taxonomy === "materialization_drop" ||
     isExtractionDrop(question) ||
     (taxonomy === "candidate_absent" && !emitted)
   ) {
-    stage = 1;
+    stage = "write_or_unevaluable";
     proof = taxonomy === "materialization_drop"
       ? "gold.materialization_drop"
       : "write_or_unevaluable";
@@ -47,7 +47,7 @@ export function classifyGoldObjectStage(input: {
     taxonomy === "fine_assessment_drop" ||
     prunedIds.has(gold.object_id)
   ) {
-    stage = 3;
+    stage = "pre_waist_prune";
     proof = taxonomy === "fine_assessment_drop"
       ? "gold.fine_assessment_drop"
       : "id_in_fine_assessment_pruned_candidates";
@@ -57,7 +57,7 @@ export function classifyGoldObjectStage(input: {
     !candidateIds.has(gold.object_id) &&
     !prunedIds.has(gold.object_id)
   ) {
-    stage = 2;
+    stage = "raw_pool_absent";
     proof = "memory_emitted_and_absent_from_candidates_and_prune";
   } else if (
     taxonomy === "budget_drop" ||
@@ -65,26 +65,28 @@ export function classifyGoldObjectStage(input: {
     isDeliveryAdmissionLoss(gold) ||
     hasCoverageOrBudgetSignal(gold)
   ) {
-    stage = 5;
+    stage = "coverage_or_budget";
     proof = isDeliveryAdmissionLoss(gold)
       ? "delivery_admission_refusal"
       : (taxonomy ?? "coverage_or_budget_signal");
   } else if (poolRank !== null && poolRank <= 10) {
-    stage = 6;
+    stage = "near_top_final_order";
     proof = "pool_rank<=10_not_delivered_top5";
   } else if (poolRank !== null) {
-    stage = 4;
+    stage = "waist_composition";
     proof = "waist_present_pool_rank_gt_10";
   } else if (taxonomy === "candidate_absent") {
-    stage = 2;
+    stage = "raw_pool_absent";
     proof = "gold.candidate_absent_without_ranks";
   } else {
-    stage = 1;
+    stage = "write_or_unevaluable";
     proof = "unevaluable_or_unranked_fallback";
   }
 
   const nearTop =
-    stage === 6 ? classifyHonestHigherRObj({ question, gold }) : null;
+    stage === "near_top_final_order"
+      ? classifyHonestHigherRObj({ question, gold })
+      : null;
 
   return {
     question_id: question.question_id,
@@ -114,7 +116,12 @@ export function classifyMechanism(
   poolRank: number | null,
   nearTop: HonestHigherRObjVerdict | null = null
 ): AttributionMechanism {
-  if (stage === 7 || stage === 1 || stage === 2 || stage === 3) return null;
+  if (
+    stage === "delivered_top5" ||
+    stage === "write_or_unevaluable" ||
+    stage === "raw_pool_absent" ||
+    stage === "pre_waist_prune"
+  ) return null;
   if (
     gold.miss_taxonomy === "budget_drop" ||
     gold.miss_taxonomy === "answer_set_coverage_drop" ||
@@ -131,10 +138,10 @@ export function classifyMechanism(
   }
   // Fused already outside top-5 means composition owned the loss before final order.
   if (gold.fused_rank !== null && gold.fused_rank > 5) return "composition";
-  if (gold.miss_taxonomy === "delivery_order_drop" || stage === 6) {
+  if (gold.miss_taxonomy === "delivery_order_drop" || stage === "near_top_final_order") {
     return "residual_order";
   }
-  if (stage === 4) return "composition";
+  if (stage === "waist_composition") return "composition";
   return null;
 }
 

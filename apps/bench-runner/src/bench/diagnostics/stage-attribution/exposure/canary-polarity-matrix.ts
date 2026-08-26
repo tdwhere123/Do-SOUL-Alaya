@@ -5,19 +5,19 @@ import type {
   TreatmentFormationStatus
 } from "./contract.js";
 import {
-  GATE7_CANARY_Q1,
-  GATE7_CANARY_Q2,
-  GATE7_CANARY_Q3,
-  GATE7_CANARY_QUESTION_IDS,
-  normalizeGate7CanaryQuestionId,
-  type Gate7CanaryQuestionId
-} from "./gate7-canary-ids.js";
+  CANARY_Q1,
+  CANARY_Q2,
+  CANARY_Q3,
+  CANARY_QUESTION_IDS,
+  normalizeCanaryQuestionId,
+  type CanaryQuestionId
+} from "./canary-ids.js";
 
-export type Gate7ExpectedPolarity = "positive" | "negative";
+export type CanaryExpectedPolarity = "positive" | "negative";
 
-export interface Gate7PolarityExpectation {
-  readonly question_id: Gate7CanaryQuestionId;
-  readonly expected_polarity: Gate7ExpectedPolarity;
+export interface CanaryPolarityExpectation {
+  readonly question_id: CanaryQuestionId;
+  readonly expected_polarity: CanaryExpectedPolarity;
   readonly reason: string;
   readonly formation: "formed";
   readonly compatible_count: { readonly min?: number; readonly exact?: number };
@@ -26,9 +26,9 @@ export interface Gate7PolarityExpectation {
   readonly exposure: TreatmentExposureStatus;
 }
 
-export const GATE7_POLARITY_EXPECTATIONS: readonly Gate7PolarityExpectation[] = [
+export const CANARY_POLARITY_EXPECTATIONS: readonly CanaryPolarityExpectation[] = [
   {
-    question_id: GATE7_CANARY_Q1,
+    question_id: CANARY_Q1,
     expected_polarity: "positive",
     reason: "formed_compatible_composed_exposed",
     formation: "formed",
@@ -38,7 +38,7 @@ export const GATE7_POLARITY_EXPECTATIONS: readonly Gate7PolarityExpectation[] = 
     exposure: "exposed"
   },
   {
-    question_id: GATE7_CANARY_Q2,
+    question_id: CANARY_Q2,
     expected_polarity: "negative",
     reason: "source_bound_subject_uncovered",
     formation: "formed",
@@ -48,7 +48,7 @@ export const GATE7_POLARITY_EXPECTATIONS: readonly Gate7PolarityExpectation[] = 
     exposure: "not_exercised"
   },
   {
-    question_id: GATE7_CANARY_Q3,
+    question_id: CANARY_Q3,
     expected_polarity: "negative",
     reason: "no_formed_location_join_partner",
     formation: "formed",
@@ -59,7 +59,7 @@ export const GATE7_POLARITY_EXPECTATIONS: readonly Gate7PolarityExpectation[] = 
   }
 ];
 
-export interface Gate7ObservedPolarity {
+export interface CanaryObservedPolarity {
   readonly formation: TreatmentFormationStatus;
   readonly compatible_count: number;
   readonly composition: TreatmentCompositionStatus;
@@ -67,38 +67,38 @@ export interface Gate7ObservedPolarity {
   readonly exposure: TreatmentExposureStatus;
 }
 
-export interface Gate7PolarityRow {
+export interface CanaryPolarityRow {
   readonly question_id: string;
-  readonly expected_polarity: Gate7ExpectedPolarity | null;
+  readonly expected_polarity: CanaryExpectedPolarity | null;
   readonly expected_reason: string | null;
-  readonly observed: Gate7ObservedPolarity | null;
+  readonly observed: CanaryObservedPolarity | null;
   readonly verdict: "pass" | "fail";
   readonly failure_reason: string | null;
   readonly failure_reasons: readonly string[];
 }
 
-export interface Gate7PolarityMatrixVerdict {
+export interface CanaryPolarityMatrixVerdict {
   readonly schema_version: 1;
-  readonly kind: "gate7_canary_polarity_matrix";
+  readonly kind: "canary_polarity_matrix";
   readonly applicable: boolean;
   readonly passed: boolean;
-  readonly reason: "gate7_polarity_matrix_passed" | "gate7_polarity_matrix_failed" |
-    "not_gate7_canary_window";
-  readonly rows: readonly Gate7PolarityRow[];
+  readonly reason: "canary_polarity_matrix_passed" | "canary_polarity_matrix_failed" |
+    "not_canary_window";
+  readonly rows: readonly CanaryPolarityRow[];
   readonly failure_reasons: readonly string[];
 }
 
-export function evaluateGate7PolarityMatrix(
+export function evaluateCanaryPolarityMatrix(
   receipts: readonly TreatmentExposureReceipt[]
-): Gate7PolarityMatrixVerdict {
-  if (receipts.length !== GATE7_CANARY_QUESTION_IDS.length) {
+): CanaryPolarityMatrixVerdict {
+  if (receipts.length !== CANARY_QUESTION_IDS.length) {
     return notApplicableMatrix();
   }
   const windowFailures = collectWindowFailures(receipts);
   if (windowFailures.length > 0) {
     return failedMatrix(windowFailures, windowFailureRows(receipts, windowFailures));
   }
-  const rows = GATE7_POLARITY_EXPECTATIONS.map((expectation) =>
+  const rows = CANARY_POLARITY_EXPECTATIONS.map((expectation) =>
     evaluateExpectedRow(expectation, requireReceipt(receipts, expectation.question_id))
   );
   const failure_reasons = rows.flatMap((row) => row.failure_reasons);
@@ -108,14 +108,14 @@ export function evaluateGate7PolarityMatrix(
 }
 
 function collectWindowFailures(receipts: readonly TreatmentExposureReceipt[]): string[] {
-  const normalized = receipts.map((receipt) => normalizeGate7CanaryQuestionId(receipt.question_id));
+  const normalized = receipts.map((receipt) => normalizeCanaryQuestionId(receipt.question_id));
   const failures: string[] = [];
   if (new Set(normalized).size !== normalized.length) failures.push("duplicate_question");
-  for (const questionId of GATE7_CANARY_QUESTION_IDS) {
+  for (const questionId of CANARY_QUESTION_IDS) {
     if (!normalized.includes(questionId)) failures.push(`missing_question:${questionId}`);
   }
   for (const questionId of normalized) {
-    if (!(GATE7_CANARY_QUESTION_IDS as readonly string[]).includes(questionId)) {
+    if (!(CANARY_QUESTION_IDS as readonly string[]).includes(questionId)) {
       failures.push(`unknown_question:${questionId}`);
     }
   }
@@ -123,9 +123,9 @@ function collectWindowFailures(receipts: readonly TreatmentExposureReceipt[]): s
 }
 
 function evaluateExpectedRow(
-  expectation: Gate7PolarityExpectation,
+  expectation: CanaryPolarityExpectation,
   receipt: TreatmentExposureReceipt
-): Gate7PolarityRow {
+): CanaryPolarityRow {
   const observed = observedPolarity(receipt);
   const failure_reasons = polarityFailures(expectation, observed);
   return {
@@ -140,8 +140,8 @@ function evaluateExpectedRow(
 }
 
 function polarityFailures(
-  expectation: Gate7PolarityExpectation,
-  observed: Gate7ObservedPolarity
+  expectation: CanaryPolarityExpectation,
+  observed: CanaryObservedPolarity
 ): string[] {
   const reasons: string[] = [];
   if (observed.formation !== expectation.formation) {
@@ -163,14 +163,14 @@ function polarityFailures(
 }
 
 function compatibleCountMatches(
-  expected: Gate7PolarityExpectation["compatible_count"],
+  expected: CanaryPolarityExpectation["compatible_count"],
   actual: number
 ): boolean {
   if (expected.exact !== undefined) return actual === expected.exact;
   return expected.min !== undefined && actual >= expected.min;
 }
 
-function observedPolarity(receipt: TreatmentExposureReceipt): Gate7ObservedPolarity {
+function observedPolarity(receipt: TreatmentExposureReceipt): CanaryObservedPolarity {
   return {
     formation: receipt.formation.status,
     compatible_count: receipt.compatible_evidence.compatible_count,
@@ -182,35 +182,35 @@ function observedPolarity(receipt: TreatmentExposureReceipt): Gate7ObservedPolar
 
 function requireReceipt(
   receipts: readonly TreatmentExposureReceipt[],
-  questionId: Gate7CanaryQuestionId
+  questionId: CanaryQuestionId
 ): TreatmentExposureReceipt {
   return receipts.find((receipt) =>
-    normalizeGate7CanaryQuestionId(receipt.question_id) === questionId
+    normalizeCanaryQuestionId(receipt.question_id) === questionId
   )!;
 }
 
 function windowFailureRows(
   receipts: readonly TreatmentExposureReceipt[],
   failureReasons: readonly string[]
-): Gate7PolarityRow[] {
+): CanaryPolarityRow[] {
   return receipts.map((receipt) => ({
-    question_id: normalizeGate7CanaryQuestionId(receipt.question_id),
+    question_id: normalizeCanaryQuestionId(receipt.question_id),
     expected_polarity: null,
     expected_reason: null,
     observed: observedPolarity(receipt),
     verdict: "fail" as const,
-    failure_reason: failureReasons[0] ?? "invalid_gate7_window",
+    failure_reason: failureReasons[0] ?? "invalid_canary_window",
     failure_reasons: failureReasons
   }));
 }
 
-function passedMatrix(rows: readonly Gate7PolarityRow[]): Gate7PolarityMatrixVerdict {
+function passedMatrix(rows: readonly CanaryPolarityRow[]): CanaryPolarityMatrixVerdict {
   return {
     schema_version: 1,
-    kind: "gate7_canary_polarity_matrix",
+    kind: "canary_polarity_matrix",
     applicable: true,
     passed: true,
-    reason: "gate7_polarity_matrix_passed",
+    reason: "canary_polarity_matrix_passed",
     rows,
     failure_reasons: []
   };
@@ -218,26 +218,26 @@ function passedMatrix(rows: readonly Gate7PolarityRow[]): Gate7PolarityMatrixVer
 
 function failedMatrix(
   failure_reasons: readonly string[],
-  rows: readonly Gate7PolarityRow[]
-): Gate7PolarityMatrixVerdict {
+  rows: readonly CanaryPolarityRow[]
+): CanaryPolarityMatrixVerdict {
   return {
     schema_version: 1,
-    kind: "gate7_canary_polarity_matrix",
+    kind: "canary_polarity_matrix",
     applicable: true,
     passed: false,
-    reason: "gate7_polarity_matrix_failed",
+    reason: "canary_polarity_matrix_failed",
     rows,
     failure_reasons
   };
 }
 
-function notApplicableMatrix(): Gate7PolarityMatrixVerdict {
+function notApplicableMatrix(): CanaryPolarityMatrixVerdict {
   return {
     schema_version: 1,
-    kind: "gate7_canary_polarity_matrix",
+    kind: "canary_polarity_matrix",
     applicable: false,
     passed: false,
-    reason: "not_gate7_canary_window",
+    reason: "not_canary_window",
     rows: [],
     failure_reasons: []
   };

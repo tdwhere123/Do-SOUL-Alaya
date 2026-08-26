@@ -101,7 +101,7 @@ describe("diagnostic-loop run", () => {
     expect(report).toMatchObject({
       diagnostic_100q_unlock: {
         eligible: false,
-        reason: "not_gate7_canary_window"
+        reason: "not_canary_window"
       }
     });
   });

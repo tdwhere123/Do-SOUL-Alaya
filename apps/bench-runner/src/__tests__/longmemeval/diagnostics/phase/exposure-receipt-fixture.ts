@@ -5,23 +5,23 @@ import type { QuestionStageRow } from
   "../../../../bench/diagnostics/stage-attribution/types.js";
 import { notObservedPhaseLedger } from "./not-observed-ledger.js";
 
-export const FIXTURE_D0_RECEIPT_DIGEST = `sha256:${"d".repeat(64)}`;
+export const FIXTURE_CAPTURE_RECEIPT_DIGEST = `sha256:${"d".repeat(64)}`;
 
 export function exposure(
   questionId: string,
   exposureStatus: "exposed" | "not_exercised" | "inconclusive",
   changed: boolean,
   outcome = {
-    control: { stage: "S4" as const, hit_at_5: false },
-    treatment: { stage: "S4" as const, hit_at_5: false }
+    control: { stage: "waist_or_later" as const, hit_at_5: false },
+    treatment: { stage: "waist_or_later" as const, hit_at_5: false }
   }
 ) {
   return sealTreatmentExposureReceipt({
     schema_version: 4 as const,
     kind: "cached_f3_treatment_exposure" as const,
     question_id: questionId,
-    ranking_authority: "d0_prefix" as const,
-    d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
+    ranking_authority: "prefix_sk" as const,
+    capture_receipt_digest: FIXTURE_CAPTURE_RECEIPT_DIGEST,
     evidence_chain: { linked: exposureStatus !== "inconclusive" },
     control_non_exposure: {
       observed: true,
@@ -127,7 +127,7 @@ export function replaceCandidateReceipt(
 }
 
 export function candidateAttribution(exposed: boolean) {
-  if (!exposed) return { d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
+  if (!exposed) return { capture_receipt_digest: FIXTURE_CAPTURE_RECEIPT_DIGEST,
     entries: [], candidate_keys: [], activated_evidence_ids: [] };
   const body = {
     schema_version: 1 as const,
@@ -139,7 +139,7 @@ export function candidateAttribution(exposed: boolean) {
     proposition_match_count: 1
   };
   return {
-    d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
+    capture_receipt_digest: FIXTURE_CAPTURE_RECEIPT_DIGEST,
     entries: [{
       candidate_key: "candidate:f3",
       receipt: { ...body, receipt_digest: digestRecallFieldIdentity(body) }

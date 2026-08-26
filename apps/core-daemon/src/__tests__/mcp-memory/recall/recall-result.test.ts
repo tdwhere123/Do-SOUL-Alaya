@@ -317,21 +317,21 @@ describe("resolveMcpDegradationReason", () => {
         global_recall: false
       },
       delivery_path: "canonical",
-      ranking_authority: "d0_prefix",
-      d0_identity: {
-        algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1",
-        version: "d0.safe-dominance-capture.v1.0.0",
-        digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa"
+      ranking_authority: "prefix_sk",
+      capture_identity: {
+        algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1",
+        version: "safe-dominance-capture.v1.0.0",
+        digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
       },
-      d0_execution: {
+      capture_execution: {
         status: "fail_closed",
         reason: "psi_cycle_contract_failure"
       }
     });
-    expect(parsed.ranking_authority).toBe("d0_prefix");
+    expect(parsed.ranking_authority).toBe("prefix_sk");
     expect(parsed.delivery_path).toBe("canonical");
     expect(parsed.results).toEqual([]);
-    expect(parsed.d0_execution).toEqual({
+    expect(parsed.capture_execution).toEqual({
       status: "fail_closed",
       reason: "psi_cycle_contract_failure"
     });

@@ -43,8 +43,8 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Graph/PathRelation candidate expansion | Live; path fuel activates only with attributed eligible inflow |
 | Slice compatibility and integrated flood | Live; missing or rejected inputs retain explicit status |
 | F3-only field membership | Live; planted SQLite/daemon proof — see [`recall.md`](recall.md) |
-| Final selector | Two-mode: omitted `delivery_path` is D0 `prefixSK`; `"legacy"` keeps `Select_Gamma` as the sole admission-order owner of that mode |
-| Exact selection-boundary replay | Live on `delivery_path: "legacy"`; canonical-absent (`shadowTrace` / D0 prefix) |
+| Final selector | Two-mode: omitted `delivery_path` is `prefixSK`; `"legacy"` keeps `Select_Gamma` as the sole admission-order owner of that mode |
+| Exact selection-boundary replay | Live on `delivery_path: "legacy"`; canonical-absent (`shadowTrace` / capture prefix) |
 | Provider execution authority | One exported engine-gateway executor owns attempts, retry timing, timeout/abort classification, response inspection, usage, and completion witnesses |
 | Provider-backed cache admission | New writes and all live readers require versioned completion authority; deterministic no-provider shards remain explicit |
 | Cache-only replay authority | Canonical manifest binds the exact dataset window, cache closure, provider route, and source digests; replay emits a structured zero-call receipt |

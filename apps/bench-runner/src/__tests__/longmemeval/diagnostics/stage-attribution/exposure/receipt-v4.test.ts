@@ -10,7 +10,7 @@ import type { LongMemEvalQuestionDiagnostic } from
 import type { QuestionStageRow } from
   "../../../../../bench/diagnostics/stage-attribution/types.js";
 import { controlCanaryDiagnostics, passingTreatmentCanaryDiagnostics } from
-  "../../../diagnostic-loop/gate7-canary-arm-diagnostics.js";
+  "../../../diagnostic-loop/canary-arm-diagnostics.js";
 
 describe("treatment exposure receipt v4", () => {
   it("distinguishes observed empty canonical attribution from a missing receipt", () => {
@@ -43,10 +43,10 @@ describe("treatment exposure receipt v4", () => {
     expect(missing?.evidence_chain.linked).toBe(false);
   });
 
-  it("makes canonical exposure inconclusive without its instance D0 digest", () => {
+  it("makes canonical exposure inconclusive without its instance capture digest", () => {
     const treatment = {
       ...passingTreatmentCanaryDiagnostics()[1]!,
-      ranking_authority: "d0_prefix" as const
+      ranking_authority: "prefix_sk" as const
     };
     const control = controlCanaryDiagnostics()[1]!;
     const questionId = treatment.question_id;
@@ -55,7 +55,7 @@ describe("treatment exposure receipt v4", () => {
       controlStages: [stage(questionId, false)],
       treatmentStages: [stage(questionId, false)]
     });
-    expect(receipt?.d0_receipt_digest).toBeNull();
+    expect(receipt?.capture_receipt_digest).toBeNull();
     expect(receipt?.exposure_status).toBe("inconclusive");
   });
 
@@ -377,21 +377,21 @@ describe("treatment exposure receipt v4", () => {
       .toThrow(/treatment exposure receipt/u);
   });
 
-  it("rejects candidate attribution bound to another D0 receipt instance", () => {
+  it("rejects candidate attribution bound to another selection receipt instance", () => {
     const [original] = buildTreatmentExposureReceipts({
       control: [],
-      treatment: [arm({ questionId: "q-mixed-d0", poolComplete: true, topFive: [] })],
-      controlStages: [stage("q-mixed-d0", false)],
-      treatmentStages: [stage("q-mixed-d0", false)]
+      treatment: [arm({ questionId: "q-mixed-capture", poolComplete: true, topFive: [] })],
+      controlStages: [stage("q-mixed-capture", false)],
+      treatmentStages: [stage("q-mixed-capture", false)]
     });
     const { receipt_digest: _digest, ...body } = original!;
     const resealed = sealTreatmentExposureReceipt({
       ...body,
-      ranking_authority: "d0_prefix",
-      d0_receipt_digest: `sha256:${"a".repeat(64)}`,
+      ranking_authority: "prefix_sk",
+      capture_receipt_digest: `sha256:${"a".repeat(64)}`,
       candidate_attribution: {
         ...body.candidate_attribution,
-        d0_receipt_digest: `sha256:${"b".repeat(64)}`
+        capture_receipt_digest: `sha256:${"b".repeat(64)}`
       }
     } as never);
 
@@ -439,7 +439,7 @@ function arm(input: {
 function stage(questionId: string, hitAt5: boolean): QuestionStageRow {
   return {
     question_id: questionId,
-    stage: 7,
+    stage: "delivered_top5",
     mechanism: null,
     opportunity_pre_budget_6_10: false,
     miss_taxonomy: null,

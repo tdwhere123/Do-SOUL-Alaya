@@ -6,9 +6,9 @@ import {
   type LongMemEvalSidecarEntry
 } from "../../../longmemeval/runner.js";
 
-// S4 part 3 — buildSessionSynthesisInput is the deterministic, LLM-free
-// digest that feeds the session-level potential_synthesis seed.
-describe("buildSessionSynthesisInput (S4 synthesis emission)", () => {
+// buildSessionSynthesisInput is the deterministic, LLM-free digest that
+// feeds the session-level potential_synthesis seed.
+describe("buildSessionSynthesisInput (synthesis emission)", () => {
   it("emits a synthesis seed when >= 2 turns carry a real evidence id", () => {
     const input = buildSessionSynthesisInput({
       topicKey: "q1-s0",
@@ -59,7 +59,7 @@ describe("buildSessionSynthesisInput (S4 synthesis emission)", () => {
   });
 });
 
-describe("synthesis scoring boundary (S4 part 4)", () => {
+describe("synthesis scoring boundary", () => {
   it("does not count a delivered synthesis_capsule as a LongMemEval memory-gold hit", () => {
     const sidecar = new Map<string, LongMemEvalSidecarEntry>([
       [

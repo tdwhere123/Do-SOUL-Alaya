@@ -50,14 +50,14 @@ export function buildRecallResult(
     working_projection: null,
     delivery_path: assessment.finalAssessment.delivery_path,
     ranking_authority: assessment.finalAssessment.ranking_authority,
-    ...(assessment.finalAssessment.d0_execution === undefined
+    ...(assessment.finalAssessment.capture_execution === undefined
       ? {}
-      : { d0_execution: assessment.finalAssessment.d0_execution }),
-    ...(assessment.finalAssessment.d0_identity === undefined
+      : { capture_execution: assessment.finalAssessment.capture_execution }),
+    ...(assessment.finalAssessment.capture_identity === undefined
       ? {}
-      : { d0_identity: assessment.finalAssessment.d0_identity }),
+      : { capture_identity: assessment.finalAssessment.capture_identity }),
     diagnostics: buildRecallDiagnostics({
-      d0Receipt: assessment.finalAssessment.d0_receipt,
+      captureReceipt: assessment.finalAssessment.capture_receipt,
       queryProbes: prepared.queryProbes,
       queryEntityExtraction: prepared.queryEntityExtraction,
       queryFactFrameExtraction:

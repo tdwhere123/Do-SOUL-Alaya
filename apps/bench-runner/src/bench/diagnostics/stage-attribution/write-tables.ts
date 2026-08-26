@@ -54,7 +54,7 @@ export async function writeStageAttributionTables(input: {
     `${JSON.stringify(
       {
         schema_version: 1,
-        kind: "gate1-stage-attribution-summary",
+        kind: "stage-attribution-summary",
         cells: summaryByCell
       },
       null,

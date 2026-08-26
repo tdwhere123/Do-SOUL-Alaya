@@ -45,9 +45,9 @@ import {     OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompat
     "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
 import { KindConstraintAlignmentReceiptSchema } from
     "./semantic-factors/kind-constraint-alignment-schema.js";
-import { CanonicalD0SelectionReceiptSchema } from "./d0/d0-receipt-schema.js";
-import { CanonicalD0CandidateDiagnosticSchema } from
-  "./d0/canonical-d0-candidate-diagnostic-schema.js";
+import { CanonicalSelectionReceiptSchema } from "./capture/capture-receipt-schema.js";
+import { CanonicalCandidateDiagnosticSchema } from
+  "./capture/canonical-candidate-diagnostic-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -334,7 +334,7 @@ const RecallDegradationReasonSchema = z.enum([
 
 export const BenchRecallDiagnosticsSchema = z
   .object({
-    d0_receipt: CanonicalD0SelectionReceiptSchema.optional(),
+    capture_receipt: CanonicalSelectionReceiptSchema.optional(),
     query_probes: z
       .object({
         normalized_query: z.string().nullable().default(null),
@@ -448,7 +448,7 @@ export const BenchRecallDiagnosticsSchema = z
       )
       .readonly(),
     candidates: z.array(z.union([
-      RecallCandidateDiagnosticSchema, CanonicalD0CandidateDiagnosticSchema
+      RecallCandidateDiagnosticSchema, CanonicalCandidateDiagnosticSchema
     ])).readonly(),
     fine_assessment_pruned_candidates:
       z.array(FineAssessmentPrunedCandidateDiagnosticSchema).readonly(),

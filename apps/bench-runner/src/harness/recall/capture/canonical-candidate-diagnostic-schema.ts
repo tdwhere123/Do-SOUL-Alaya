@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  CanonicalD0DispositionSchema,
+  CanonicalDispositionSchema,
   RecallOriginPlaneSchema
 } from "@do-soul/alaya-protocol";
 
@@ -10,10 +10,10 @@ const RecallDiagnosticObjectKindSchema = z.enum([
   "synthesis_capsule"
 ]);
 
-export const CanonicalD0CandidateDiagnosticSchema = z.object({
+export const CanonicalCandidateDiagnosticSchema = z.object({
   schema_version: z.literal(1),
-  ranking_authority: z.literal("d0_prefix"),
-  d0_receipt_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  ranking_authority: z.literal("prefix_sk"),
+  capture_receipt_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
   candidate_key: z.string().min(1),
   object_id: z.string().min(1),
   object_kind: RecallDiagnosticObjectKindSchema,
@@ -31,7 +31,7 @@ export const CanonicalD0CandidateDiagnosticSchema = z.object({
   dropped_reason: z.string().min(1).nullable(),
   within_budget: z.boolean(),
   source_channels: z.array(z.string().min(1)).readonly(),
-  d0_disposition: CanonicalD0DispositionSchema,
+  capture_disposition: CanonicalDispositionSchema,
   legacy_selection: z.object({
     fusion: z.literal("not_applicable"),
     deep_head: z.literal("not_applicable"),

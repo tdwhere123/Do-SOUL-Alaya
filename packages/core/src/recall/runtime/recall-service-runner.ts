@@ -139,7 +139,7 @@ async function collectPreparedRecallOutcome(
     params,
     synthesis.selected_evidence,
     assessment.finalAssessment.diagnostics,
-    assessment.finalAssessment.d0_receipt
+    assessment.finalAssessment.capture_receipt
   );
   prepared.projectionPinLease.assertHealthy();
   return Object.freeze({
@@ -387,7 +387,7 @@ async function manifestCandidateStage(
   params: RecallExecutionParams,
   selectedCandidates: FineAssessmentResult["candidates"],
   selectedDiagnostics: FineAssessmentResult["diagnostics"],
-  d0Receipt: FineAssessmentResult["d0_receipt"]
+  captureReceipt: FineAssessmentResult["capture_receipt"]
 ): Promise<ManifestedRecallResult> {
   const manifested = await measureAsync(async () => {
     const candidates = await applyManifestationBiasSidecar({
@@ -401,7 +401,7 @@ async function manifestCandidateStage(
     return Object.freeze({
       candidates,
       candidateDiagnostics: capturesRecallAnswerFeatures(params.diagnosticCapture)
-        ? finalizeRecallCandidateDiagnostics(selectedDiagnostics, candidates, d0Receipt)
+        ? finalizeRecallCandidateDiagnostics(selectedDiagnostics, candidates, captureReceipt)
         : EMPTY_RECALL_CANDIDATE_DIAGNOSTICS
     });
   });
@@ -467,12 +467,12 @@ async function appendRecallCompletedEvent(
       occurred_at: completedAt,
       delivery_path: assessment.finalAssessment.delivery_path,
       ranking_authority: assessment.finalAssessment.ranking_authority,
-      ...(assessment.finalAssessment.d0_execution === undefined
+      ...(assessment.finalAssessment.capture_execution === undefined
         ? {}
-        : { d0_execution: assessment.finalAssessment.d0_execution }),
-      ...(assessment.finalAssessment.d0_identity === undefined
+        : { capture_execution: assessment.finalAssessment.capture_execution }),
+      ...(assessment.finalAssessment.capture_identity === undefined
         ? {}
-        : { d0_identity: assessment.finalAssessment.d0_identity })
+        : { capture_identity: assessment.finalAssessment.capture_identity })
     })
   });
 }

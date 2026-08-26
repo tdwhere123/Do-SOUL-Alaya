@@ -35,11 +35,11 @@ export function buildBenchRecallResponse(
     ...(recallResult.ranking_authority === undefined ? {} : {
       ranking_authority: recallResult.ranking_authority
     }),
-    ...(recallResult.d0_identity === undefined ? {} : {
-      d0_identity: recallResult.d0_identity
+    ...(recallResult.capture_identity === undefined ? {} : {
+      capture_identity: recallResult.capture_identity
     }),
-    ...(recallResult.d0_execution === undefined ? {} : {
-      d0_execution: recallResult.d0_execution
+    ...(recallResult.capture_execution === undefined ? {} : {
+      capture_execution: recallResult.capture_execution
     })
   });
   return recallResult.diagnostics === undefined

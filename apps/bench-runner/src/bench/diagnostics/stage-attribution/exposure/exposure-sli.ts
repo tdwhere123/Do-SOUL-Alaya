@@ -1,6 +1,6 @@
 import { CACHED_F3_EXPOSURE_POLICY } from "./contract.js";
 import type { TreatmentExposureReceipt } from "./contract.js";
-import { isNamedNegativeControl } from "./gate7-canary-ids.js";
+import { isNamedNegativeControl } from "./canary-ids.js";
 
 export interface CachedF3ExposureSli {
   readonly schema_version: 1;

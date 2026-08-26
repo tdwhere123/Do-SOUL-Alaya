@@ -21,11 +21,11 @@ import type {
 } from "../../../recall/runtime/recall-service-types.js";
 import * as scoring from "../../../recall/scoring/scoring.js";
 import {
-  CANONICAL_D0_IDENTITY,
+  CANONICAL_CAPTURE_IDENTITY,
   resolveFineAssessmentDeliveryPath
 } from "../../../recall/shadow/canonical-delivery.js";
 import {
-  D0_IDENTITY_DIGEST,
+  CAPTURE_IDENTITY_DIGEST,
   SHADOW_ALGORITHM_ID,
   SHADOW_ALGORITHM_VERSION
 } from "../../../recall/shadow/index.js";
@@ -42,7 +42,7 @@ import {
   evidenceCandidate,
   extraCandidate,
   fieldCandidates as createFieldCandidates,
-  x0Captures
+  rawRankCaptures
 } from "./canonical-delivery-fixtures.js";
 import {
   embeddingObserved,
@@ -61,7 +61,7 @@ const CANONICAL_SRC = readFileSync(
   "utf8"
 );
 
-describe("C0 reversible delivery cutover", () => {
+describe("reversible delivery cutover", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -72,12 +72,12 @@ describe("C0 reversible delivery cutover", () => {
     expect(resolveFineAssessmentDeliveryPath(policy.fine_assessment)).toBe("canonical");
     const result = fineAssess(assessParams(fieldCandidates()));
     expect(result.delivery_path).toBe("canonical");
-    expect(result.ranking_authority).toBe("d0_prefix");
-    expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
+    expect(result.ranking_authority).toBe("prefix_sk");
+    expect(result.capture_identity).toEqual(CANONICAL_CAPTURE_IDENTITY);
     expect(result.candidates.every((candidate) => candidate.relevance_score === 0)).toBe(true);
     expect(result.diagnostics).toHaveLength(result.candidates.length);
     expect(result.diagnostics[0]).toMatchObject({
-      ranking_authority: "d0_prefix",
+      ranking_authority: "prefix_sk",
       legacy_selection: {
         fusion: "not_applicable",
         deep_head: "not_applicable",
@@ -105,7 +105,7 @@ describe("C0 reversible delivery cutover", () => {
         "cand-a": 0.99
       }
     }));
-    expect(result.ranking_authority).toBe("d0_prefix");
+    expect(result.ranking_authority).toBe("prefix_sk");
     const scores = {
       "cand-c": 0.1,
       "cand-b": 0.2,
@@ -195,14 +195,14 @@ describe("C0 reversible delivery cutover", () => {
     });
     expect(result.candidates.map((candidate) => candidate.object_id))
       .toEqual(["cand-a", "cand-c", "cand-b"]);
-    expect(result.d0_receipt?.gamma.set_utilities.map((utility) => ({
+    expect(result.capture_receipt?.gamma.set_utilities.map((utility) => ({
       key: utility.candidate_key,
       values: utility.values,
       cid: utility.cid
     }))).toMatchObject([
-      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } },
-      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } },
-      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } }
+      { values: { status: "composed" }, cid: { status: "available", grounding: "content" } },
+      { values: { status: "composed" }, cid: { status: "available", grounding: "content" } },
+      { values: { status: "composed" }, cid: { status: "available", grounding: "content" } }
     ]);
   });
 
@@ -262,7 +262,7 @@ describe("C0 reversible delivery cutover", () => {
     expect(e0.diagnostics).toHaveLength(e0.candidates.length);
   });
 
-  it("orders canonical prefix from the merge-chosen X0 capture", () => {
+  it("orders canonical prefix from the merge-chosen raw-rank capture", () => {
     const result = fineAssess(lexicalAssess(fieldCandidates(), {
       embedding_enabled: false,
       lanes: porterLanes({
@@ -271,18 +271,18 @@ describe("C0 reversible delivery cutover", () => {
         "cand-a": 0.3
       })
     }));
-    expect(asCaptured(result.shadowTrace).lexical_mapping).toBe("x0_capture");
+    expect(asCaptured(result.shadowTrace).lexical_mapping).toBe("raw_rank_capture");
     expect(result.candidates.map((candidate) => candidate.object_id))
       .toEqual(["cand-c", "cand-b", "cand-a"]);
-    expect(result.ranking_authority).toBe("d0_prefix");
+    expect(result.ranking_authority).toBe("prefix_sk");
   });
 
-  it("binds the frozen D0 identity triple on canonical result and trace", () => {
+  it("binds the frozen capture identity triple on canonical result and trace", () => {
     const result = fineAssess(assessParams(fieldCandidates(), "canonical"));
     const captured = asCaptured(result.shadowTrace);
-    expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
-    expect(result.d0_execution).toEqual({ status: "captured", reason: null });
-    expect(result.d0_receipt?.delivery).toEqual(
+    expect(result.capture_identity).toEqual(CANONICAL_CAPTURE_IDENTITY);
+    expect(result.capture_execution).toEqual({ status: "captured", reason: null });
+    expect(result.capture_receipt?.delivery).toEqual(
       captured.prefix_proposal.map((candidate_key, index) => ({
         candidate_key,
         delivery_rank: index + 1
@@ -290,8 +290,8 @@ describe("C0 reversible delivery cutover", () => {
     );
     expect(captured.algorithm_id).toBe(SHADOW_ALGORITHM_ID);
     expect(captured.version).toBe(SHADOW_ALGORITHM_VERSION);
-    expect(captured.digest).toBe(D0_IDENTITY_DIGEST);
-    expect(captured.c0_seam.activation).toBe("active");
+    expect(captured.digest).toBe(CAPTURE_IDENTITY_DIGEST);
+    expect(captured.cutover_seam.activation).toBe("active");
   });
 
   it("fail-closes canonical delivery instead of falling back to legacy", () => {
@@ -304,11 +304,11 @@ describe("C0 reversible delivery cutover", () => {
     const legacy = fineAssess({ ...params, policy: withFineDeliveryPath(params.policy, "legacy") });
     const closed = fineAssess({ ...params, shadowPsi: cyclic });
     expect(isFailClosedShadowTrace(closed.shadowTrace)).toBe(true);
-    expect(closed.d0_execution).toEqual({
+    expect(closed.capture_execution).toEqual({
       status: "fail_closed",
       reason: "psi_cycle_contract_failure"
     });
-    expect(closed.d0_receipt?.execution).toEqual(closed.d0_execution);
+    expect(closed.capture_receipt?.execution).toEqual(closed.capture_execution);
     expect(closed.candidates).toEqual([]);
     expect(closed.delivery_path).toBe("canonical");
     expect(legacy.candidates.length).toBeGreaterThan(0);
@@ -325,7 +325,7 @@ describe("C0 reversible delivery cutover", () => {
     const result = fineAssess({ ...assessParams(candidates), ...membership });
 
     expect(result.candidates).toEqual([]);
-    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
+    expect(result.capture_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
   });
 });
 
@@ -425,7 +425,7 @@ function lexicalAssess(
       max_entries: options.max_entries
     }), "canonical"),
     memoryKeywordLanes: options.lanes,
-    memoryLexicalCaptures: x0Captures(options.lanes),
+    memoryLexicalCaptures: rawRankCaptures(options.lanes),
     e0Keys: options.e0Keys,
     e1Keys: options.e1Keys,
     supplementaryData: supplementaryWithInflow(candidates, {

@@ -147,7 +147,7 @@ describe("RecallService embedding-on coarse injection", () => {
     });
 
     expect(result.candidates).toEqual([]);
-    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
+    expect(result.capture_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
   });
 
   it("injects a lexically-absent cosine neighbor as a coarse candidate when embedding is enabled", async () => {
@@ -226,8 +226,8 @@ describe("RecallService embedding-on coarse injection", () => {
       policyOverride: buildPolicy(service, true)
     });
 
-    expect(result.d0_execution).toEqual({ status: "captured", reason: null });
-    const field = result.diagnostics?.d0_receipt?.field_membership;
+    expect(result.capture_execution).toEqual({ status: "captured", reason: null });
+    const field = result.diagnostics?.capture_receipt?.field_membership;
     expect(field?.e0_keys).toEqual([
       `workspace_local:memory_entry:${lexicalMemory.object_id}`
     ]);
@@ -235,11 +235,11 @@ describe("RecallService embedding-on coarse injection", () => {
     expect(field?.e1_keys).toEqual(expect.arrayContaining(field?.e0_keys ?? []));
     expect(result.candidates.some(({ object_id }) =>
       object_id === lexicallyAbsentMemory.object_id)).toBe(true);
-    const shared = result.diagnostics?.d0_receipt?.observations_by_candidate_key?.[
+    const shared = result.diagnostics?.capture_receipt?.observations_by_candidate_key?.[
       `workspace_local:memory_entry:${lexicalMemory.object_id}`
     ];
     expect(shared?.lineages.embedding?.envelope.state).toBe("observed");
-    const controlShared = control.diagnostics?.d0_receipt?.observations_by_candidate_key?.[
+    const controlShared = control.diagnostics?.capture_receipt?.observations_by_candidate_key?.[
       `workspace_local:memory_entry:${lexicalMemory.object_id}`
     ];
     const { embedding: _embedding, ...enabledStableLineages } = shared?.lineages ?? {};

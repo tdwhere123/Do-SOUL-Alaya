@@ -21,8 +21,8 @@ import {
 } from "../artifacts/diagnostics-candidate-readers.js";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
-import { CanonicalD0SelectionReceiptSchema } from
-  "../../../harness/recall/d0/d0-receipt-schema.js";
+import { CanonicalSelectionReceiptSchema } from
+  "../../../harness/recall/capture/capture-receipt-schema.js";
 import { readDiagnosticFields } from "./field/diagnostic-field-readers.js";
 import {
   readAnswerRerankFailureClass,
@@ -64,12 +64,12 @@ export function readRecallDiagnostics(
   const stages = readDiagnosticStages(record, embeddingMode);
   if (fields === null || stages === null) return null;
   const candidates = readCandidates(record);
-  const d0Receipt = CanonicalD0SelectionReceiptSchema.safeParse(record.d0_receipt);
-  if (record.d0_receipt !== undefined && !d0Receipt.success) return null;
+  const captureReceipt = CanonicalSelectionReceiptSchema.safeParse(record.capture_receipt);
+  if (record.capture_receipt !== undefined && !captureReceipt.success) return null;
   return {
     keys: Object.keys(record).sort(),
     rankingAuthority: readRankingAuthority(recallResult),
-    d0Receipt: d0Receipt.success ? d0Receipt.data : null,
+    captureReceipt: captureReceipt.success ? captureReceipt.data : null,
     ...fields,
     ...buildNarrowCandidateEvidence(candidates),
     ...stages,
@@ -87,7 +87,7 @@ export function readRecallDiagnostics(
 function readRankingAuthority(
   recallResult: Readonly<Record<string, unknown>>
 ): NarrowRecallDiagnostics["rankingAuthority"] {
-  return recallResult.ranking_authority === "d0_prefix" ||
+  return recallResult.ranking_authority === "prefix_sk" ||
     recallResult.ranking_authority === "select_gamma"
     ? recallResult.ranking_authority
     : null;

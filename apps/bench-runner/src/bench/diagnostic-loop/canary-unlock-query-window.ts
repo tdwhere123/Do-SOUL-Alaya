@@ -11,7 +11,7 @@ import type {
 } from "../query-factors/query-semantic-factor-cache-identity.js";
 import type { ResolvedDiagnosticLoopIdentity } from "./authority/identity.js";
 
-export async function assertGate7QueryWindowCompatibility(
+export async function assertCanaryQueryWindowCompatibility(
   prior: ResolvedDiagnosticLoopIdentity,
   current: ResolvedDiagnosticLoopIdentity
 ): Promise<void> {
@@ -23,13 +23,13 @@ export async function assertGate7QueryWindowCompatibility(
       priorCache.system_prompt_sha256 !== currentCache.system_prompt_sha256 ||
       priorCache.request_template_sha256 !== currentCache.request_template_sha256 ||
       priorCache.schema_version !== currentCache.schema_version) {
-    throw new Error("gate7 unlock query cache identity does not match the current request");
+    throw new Error("canary unlock query cache identity does not match the current request");
   }
   if (!isDeepStrictEqual(
     windowEntries(priorCache),
     matchingWindowEntries(currentCache, priorCache)
   )) {
-    throw new Error("gate7 unlock query window canary entries do not match the current cache");
+    throw new Error("canary unlock query window canary entries do not match the current cache");
   }
 }
 
@@ -38,23 +38,23 @@ function loadVerifiedQueryCache(
   label: string
 ): QuerySemanticFactorCache {
   if (identity === undefined || identity.path.trim().length === 0) {
-    throw new Error(`gate7 unlock ${label} is missing a bound query cache file`);
+    throw new Error(`canary unlock ${label} is missing a bound query cache file`);
   }
   let bytes: Buffer;
   try {
     bytes = readRegularFileNoFollow(resolve(identity.path));
   } catch {
-    throw new Error(`gate7 unlock ${label} query cache is missing or unreadable`);
+    throw new Error(`canary unlock ${label} query cache is missing or unreadable`);
   }
   if (sha256Buffer(bytes) !== identity.file_sha256) {
-    throw new Error(`gate7 unlock ${label} query cache file digest does not match identity`);
+    throw new Error(`canary unlock ${label} query cache file digest does not match identity`);
   }
   const cache = QuerySemanticFactorCacheSchema.parse(JSON.parse(bytes.toString("utf8")));
   assertQuerySemanticFactorCacheSelfSeal(cache);
   if (cache.cache_content_sha256 !== identity.cache_content_sha256 ||
       cache.source_set_sha256 !== identity.source_set_sha256 ||
       cache.model_id !== identity.model_id) {
-    throw new Error(`gate7 unlock ${label} query cache identity drifted from the file`);
+    throw new Error(`canary unlock ${label} query cache identity drifted from the file`);
   }
   return cache;
 }
@@ -74,7 +74,7 @@ function matchingWindowEntries(
   return windowEntries(prior).map(({ source_text }) => {
     const entry = byText.get(source_text);
     if (entry === undefined) {
-      throw new Error("gate7 unlock current query cache is missing a 3Q window entry");
+      throw new Error("canary unlock current query cache is missing a 3Q window entry");
     }
     return { source_text, entry };
   });

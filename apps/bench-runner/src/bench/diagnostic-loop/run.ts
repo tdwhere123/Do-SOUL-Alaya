@@ -36,7 +36,7 @@ import {
 } from "./authority/identity.js";
 import { assertCheckpointAuthorities } from "./authority/checkpoint.js";
 import { withDiagnosticLoopRunLock } from "./authority/run-lock.js";
-import { gate7UnlockRequired } from "./gate7-unlock-policy.js";
+import { canaryUnlockRequired } from "./canary-unlock-policy.js";
 
 export async function runDiagnosticLoop(
   input: DiagnosticLoopRunInput
@@ -53,10 +53,10 @@ async function runDiagnosticLoopLocked(
   assertDiagnosticLoopIdentity(input.request);
   assertSmokeLimit(input);
   const resolvedIdentity = await resolveDiagnosticLoopIdentity(input.request);
-  if (gate7UnlockRequired(input.request)) {
-    const { assertGate7DiagnosticUnlock } = await import("./gate7-unlock-admission.js");
-    await assertGate7DiagnosticUnlock({
-      unlockWorkRoot: input.gate7UnlockPath,
+  if (canaryUnlockRequired(input.request)) {
+    const { assertCanaryDiagnosticUnlock } = await import("./canary-unlock-admission.js");
+    await assertCanaryDiagnosticUnlock({
+      unlockWorkRoot: input.canaryUnlockPath,
       currentRequest: input.request,
       currentIdentity: resolvedIdentity
     });

@@ -238,14 +238,14 @@ describe("classifyHonestHigherRObj (S11 findings table)", () => {
         gold,
         opportunityQuestion: true
       });
-      expect(row.stage).toBe(6);
+      expect(row.stage).toBe("near_top_final_order");
       expect(row.mechanism).toBe("honest_higher_r_obj");
       expect(row.near_top_class).toBe("honest_higher_r_obj");
       expect(row.gold_family_max).toBe(verdict.gold_family_max);
       expect(row.rank5_family_max).toBe(verdict.rank5_family_max);
 
       const questionRow = classifyQuestionStage(question);
-      expect(questionRow.stage).toBe(6);
+      expect(questionRow.stage).toBe("near_top_final_order");
       expect(questionRow.mechanism).toBe("honest_higher_r_obj");
     }
   );
@@ -290,7 +290,7 @@ describe("classifyHonestHigherRObj boundaries", () => {
       gold,
       opportunityQuestion: true
     });
-    expect(row.stage).toBe(6);
+    expect(row.stage).toBe("near_top_final_order");
     expect(row.mechanism).toBe("composition");
     expect(row.near_top_class).toBeNull();
   });

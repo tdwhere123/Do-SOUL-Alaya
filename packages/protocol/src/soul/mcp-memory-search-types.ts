@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { D0ExecutionSchema } from "./selection/d0/d0-execution.js";
+import { CaptureExecutionSchema } from "./selection/capture/capture-execution.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedLabelSchema,
@@ -160,13 +160,13 @@ export const SoulMemorySearchResponseSchema = z
     strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
-    ranking_authority: z.enum(["d0_prefix", "select_gamma"]).optional(),
-    d0_identity: z.object({
+    ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
+    capture_identity: z.object({
       algorithm_id: NonEmptyStringSchema,
       version: NonEmptyStringSchema,
       digest: NonEmptyStringSchema
     }).strict().readonly().optional(),
-    d0_execution: D0ExecutionSchema.optional()
+    capture_execution: CaptureExecutionSchema.optional()
   })
   .strict()
   .readonly();

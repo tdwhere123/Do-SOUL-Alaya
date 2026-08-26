@@ -1,28 +1,28 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  createCanonicalD0SelectionReceipt,
-  CANONICAL_D0_IDENTITY_BLOB,
-  CANONICAL_D0_IDENTITY_DIGEST,
-  verifyCanonicalD0SelectionReceipt
-} from "../../soul/selection/d0/canonical-d0-selection-receipt.js";
-import { canonicalJson } from "../../soul/selection/d0/canonical-json.js";
+  createCanonicalSelectionReceipt,
+  CANONICAL_CAPTURE_IDENTITY_BLOB,
+  CANONICAL_CAPTURE_IDENTITY_DIGEST,
+  verifyCanonicalSelectionReceipt
+} from "../../soul/selection/capture/canonical-selection-receipt.js";
+import { canonicalJson } from "../../soul/selection/capture/canonical-json.js";
 
-describe("canonical D0 instance receipt", () => {
+describe("canonical selection receipt", () => {
   it("owns an identity blob whose bytes match the published digest", () => {
-    expect(sha256(CANONICAL_D0_IDENTITY_BLOB)).toBe(CANONICAL_D0_IDENTITY_DIGEST);
+    expect(sha256(CANONICAL_CAPTURE_IDENTITY_BLOB)).toBe(CANONICAL_CAPTURE_IDENTITY_DIGEST);
   });
   it("binds the exact body and rejects a recomposed digest", () => {
-    const receipt = createCanonicalD0SelectionReceipt(failedBody(), sha256);
-    expect(verifyCanonicalD0SelectionReceipt(receipt, sha256)).toEqual(receipt);
-    expect(() => verifyCanonicalD0SelectionReceipt({
+    const receipt = createCanonicalSelectionReceipt(failedBody(), sha256);
+    expect(verifyCanonicalSelectionReceipt(receipt, sha256)).toEqual(receipt);
+    expect(() => verifyCanonicalSelectionReceipt({
       ...receipt,
       execution: { status: "fail_closed", reason: "prefix_violation" }
     }, sha256)).toThrow(/digest mismatch/u);
   });
 
   it("requires fail-closed Gamma to be empty and E1 to be unavailable", () => {
-    expect(() => createCanonicalD0SelectionReceipt({
+    expect(() => createCanonicalSelectionReceipt({
       ...failedBody(),
       dispositions: []
     }, sha256)).toThrow(/not closed/u);
@@ -40,7 +40,7 @@ describe("canonical D0 instance receipt", () => {
     { name: "wrong disposition reason", patch: { dispositions: [{ candidate_key: "a",
       status: "unavailable", reason: "ineligible" }] } }
   ])("rejects fail-closed $name", ({ patch }) => {
-    expect(() => createCanonicalD0SelectionReceipt({ ...failedBody(), ...patch }, sha256))
+    expect(() => createCanonicalSelectionReceipt({ ...failedBody(), ...patch }, sha256))
       .toThrow();
   });
 
@@ -65,7 +65,7 @@ describe("canonical D0 instance receipt", () => {
       ] }, dispositions: [{ candidate_key: "a", status: "rejected",
       reason: "max_total_tokens" }], delivery: [] } }
   ])("rejects captured $name", ({ patch }) => {
-    expect(() => createCanonicalD0SelectionReceipt({ ...capturedBody(), ...patch }, sha256))
+    expect(() => createCanonicalSelectionReceipt({ ...capturedBody(), ...patch }, sha256))
       .toThrow();
   });
 });
@@ -73,11 +73,11 @@ describe("canonical D0 instance receipt", () => {
 function failedBody() {
   return {
     schema_version: 1 as const,
-    ranking_authority: "d0_prefix" as const,
+    ranking_authority: "prefix_sk" as const,
     identity: {
-      algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1" as const,
-      version: "d0.safe-dominance-capture.v1.0.0" as const,
-      digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa" as const
+      algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1" as const,
+      version: "safe-dominance-capture.v1.0.0" as const,
+      digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3" as const
     },
     execution: { status: "fail_closed" as const, reason: "invalid_state" as const },
     field_membership: { e0_keys: ["a"], e1_keys: ["a"], eligible_keys: [] },

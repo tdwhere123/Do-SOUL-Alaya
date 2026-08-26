@@ -37,7 +37,7 @@ export function classifyQuestionStage(
   let mechanism: AttributionMechanism = null;
 
   if (question.hit_at_5) {
-    stage = 7;
+    stage = "delivered_top5";
     proof = "hit_at_5";
   } else if (
     emptyGold ||
@@ -45,12 +45,12 @@ export function classifyQuestionStage(
     taxonomy === "evaluation_or_gold_issue" ||
     taxonomy === "materialization_drop"
   ) {
-    stage = 1;
+    stage = "write_or_unevaluable";
     proof = emptyGold
       ? "empty_gold_or_write_loss"
       : (taxonomy ?? "extraction_materialization_drop");
   } else if (taxonomy === "fine_assessment_drop") {
-    stage = 3;
+    stage = "pre_waist_prune";
     proof = "miss_taxonomy.fine_assessment_drop";
   } else if (taxonomy === "candidate_absent") {
     const formation = question.query_open_semantic_factor_formation;
@@ -60,10 +60,10 @@ export function classifyQuestionStage(
       question.cohort_ledger?.extraction_materialization.status ===
         "evidence_preserved";
     if (formation?.status === "rejected") {
-      stage = 2;
+      stage = "raw_pool_absent";
       proof = "semantic_factor_formation_rejected";
     } else {
-      stage = emitted && !emptyGold ? 2 : 1;
+      stage = emitted && !emptyGold ? "raw_pool_absent" : "write_or_unevaluable";
       proof = emitted
         ? "miss_taxonomy.candidate_absent_with_emitted_gold"
         : "miss_taxonomy.candidate_absent_unevaluable";
@@ -73,21 +73,21 @@ export function classifyQuestionStage(
     taxonomy === "answer_set_coverage_drop" ||
     question.gold.some(isDeliveryAdmissionLoss)
   ) {
-    stage = 5;
+    stage = "coverage_or_budget";
     proof = taxonomy === "budget_drop" || taxonomy === "answer_set_coverage_drop"
       ? `miss_taxonomy.${taxonomy}`
       : "delivery_admission_refusal";
     mechanism = "coverage_admission";
   } else if (bestPoolRank !== null && bestPoolRank <= 10) {
-    stage = 6;
+    stage = "near_top_final_order";
     proof = "kpi_pre_budget_6_10_opportunity";
     mechanism = mechanismFromBestGold(question, stage);
   } else if (bestPoolRank !== null) {
-    stage = 4;
+    stage = "waist_composition";
     proof = "waist_present_best_pool_rank_gt_10";
     mechanism = mechanismFromBestGold(question, stage);
   } else {
-    stage = 1;
+    stage = "write_or_unevaluable";
     proof = "unranked_miss_fallback";
   }
 
@@ -118,7 +118,9 @@ function mechanismFromBestGold(
     }
   }
   const nearTop =
-    stage === 6 ? classifyHonestHigherRObj({ question, gold: best }) : null;
+    stage === "near_top_final_order"
+      ? classifyHonestHigherRObj({ question, gold: best })
+      : null;
   return classifyMechanism(stage, best, bestRank, nearTop);
 }
 

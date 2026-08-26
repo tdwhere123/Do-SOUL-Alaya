@@ -61,7 +61,7 @@ export function compositionForValues(): RecallSupplementaryData[
   } as RecallSupplementaryData["openSemanticFactorComposition"];
 }
 
-export function x0Captures(
+export function rawRankCaptures(
   lanes: readonly Readonly<KeywordSearchLaneReceipt>[]
 ): readonly Readonly<KeywordLexicalMergeCapture>[] {
   const lane = lanes[0];

@@ -22,8 +22,8 @@ describe("treatment exposure receipt authority", () => {
     const receipts = buildTreatmentExposureReceipts({
       control: [diagnostic("q1", [])],
       treatment: [diagnostic("q1", ["candidate:f3"], true)],
-      controlStages: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
 
     expect(receipts[0]).toMatchObject({
@@ -64,12 +64,12 @@ describe("treatment exposure receipt authority", () => {
     const receipts = buildTreatmentExposureReceipts({
       control: [diagnostic("q-no-compatible", [])],
       treatment: [treatment as never],
-      controlStages: [row({ question_id: "q-no-compatible", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q-no-compatible", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q-no-compatible", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q-no-compatible", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
     const comparison = compareF0F2VsCachedF3({
-      control: [row({ question_id: "q-no-compatible", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q-no-compatible", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q-no-compatible", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q-no-compatible", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: receipts
     });
 
@@ -98,8 +98,8 @@ describe("treatment exposure receipt authority", () => {
     const [receipt] = buildTreatmentExposureReceipts({
       control: [diagnostic("q-zero-activation", [])],
       treatment: [treatment as never],
-      controlStages: [row({ question_id: "q-zero-activation", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q-zero-activation", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q-zero-activation", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q-zero-activation", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
 
     expect(receipt?.activation.activated_evidence_count).toBe(0);
@@ -112,8 +112,8 @@ describe("treatment exposure receipt authority", () => {
     treatment.open_semantic_factor_candidate_activations = [];
     const [receipt] = buildTreatmentExposureReceipts({
       control: [diagnostic("q-no-attribution", [])], treatment: [treatment as never],
-      controlStages: [row({ question_id: "q-no-attribution", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q-no-attribution", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q-no-attribution", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q-no-attribution", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
     expect(receipt?.membership_delta.changed).toBe(true);
     expect(receipt?.candidate_attribution.entries).toEqual([]);
@@ -124,8 +124,8 @@ describe("treatment exposure receipt authority", () => {
     const [receipt] = buildTreatmentExposureReceipts({
       control: [diagnostic("q-dual", ["candidate:f3"], true)],
       treatment: [diagnostic("q-dual", ["candidate:f3"], true)],
-      controlStages: [row({ question_id: "q-dual", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q-dual", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q-dual", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q-dual", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
     expect(receipt?.control_non_exposure).toMatchObject({ observed: true, pure: false });
     expect(receipt?.exposure_status).toBe("inconclusive");
@@ -144,8 +144,8 @@ describe("treatment exposure receipt authority", () => {
   ] as const)("makes %s candidate attribution inconclusive", (_name, treatment) => {
     const [receipt] = buildTreatmentExposureReceipts({
       control: [diagnostic("q-cross", [])], treatment: [treatment()],
-      controlStages: [row({ question_id: "q-cross", stage: 5, proof: "budget_drop" })],
-      treatmentStages: [row({ question_id: "q-cross", stage: 5, proof: "budget_drop" })]
+      controlStages: [row({ question_id: "q-cross", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatmentStages: [row({ question_id: "q-cross", stage: "coverage_or_budget", proof: "budget_drop" })]
     });
     expect(receipt?.evidence_chain.linked).toBe(false);
     expect(receipt?.exposure_status).toBe("inconclusive");

@@ -22,48 +22,48 @@ describe("diagnostic 100Q stage map", () => {
   it("maps the earliest failed stage and keeps 500Q closed", () => {
     expect(DIAGNOSTIC_500Q_CLOSED).toBe(true);
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 1, proof: "empty_gold_or_write_loss", miss_taxonomy: "evaluation_or_gold_issue"
-    }))).toBe("S0");
+      stage: "write_or_unevaluable", proof: "empty_gold_or_write_loss", miss_taxonomy: "evaluation_or_gold_issue"
+    }))).toBe("eval_or_write_loss");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 1, proof: "extraction_materialization_drop"
-    }))).toBe("S1");
+      stage: "write_or_unevaluable", proof: "extraction_materialization_drop"
+    }))).toBe("early_absent");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 2, proof: "semantic_factor_formation_rejected"
-    }))).toBe("S2");
+      stage: "raw_pool_absent", proof: "semantic_factor_formation_rejected"
+    }))).toBe("formation_rejected");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 2, proof: "semantic_factor_formation_unavailable"
-    }))).toBe("S3");
+      stage: "raw_pool_absent", proof: "semantic_factor_formation_unavailable"
+    }))).toBe("pre_waist");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 2, proof: "miss_taxonomy.candidate_absent_with_emitted_gold"
-    }))).toBe("S3");
+      stage: "raw_pool_absent", proof: "miss_taxonomy.candidate_absent_with_emitted_gold"
+    }))).toBe("pre_waist");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 5, proof: "miss_taxonomy.budget_drop"
-    }))).toBe("S4");
+      stage: "coverage_or_budget", proof: "miss_taxonomy.budget_drop"
+    }))).toBe("waist_or_later");
     expect(mapQuestionToDiagnosticStage(row({
-      stage: 7, hit_at_5: true, proof: "hit_at_5"
-    }))).toBe("S5");
+      stage: "delivered_top5", hit_at_5: true, proof: "hit_at_5"
+    }))).toBe("delivered_top5");
   });
 
   it("compares F0-F2 control with cached-F3 treatment without provider calls", () => {
     const comparison = compareF0F2VsCachedF3({
       control: [
-        row({ question_id: "q-improved", stage: 2, proof: "candidate_absent" }),
-        row({ question_id: "q-still", stage: 5, proof: "budget_drop" })
+        row({ question_id: "q-improved", stage: "raw_pool_absent", proof: "candidate_absent" }),
+        row({ question_id: "q-still", stage: "coverage_or_budget", proof: "budget_drop" })
       ],
       treatment: [
-        row({ question_id: "q-improved", stage: 7, hit_at_5: true, proof: "hit_at_5" }),
-        row({ question_id: "q-still", stage: 5, proof: "budget_drop" })
+        row({ question_id: "q-improved", stage: "delivered_top5", hit_at_5: true, proof: "hit_at_5" }),
+        row({ question_id: "q-still", stage: "coverage_or_budget", proof: "budget_drop" })
       ],
       treatmentExposure: [
         exposure("q-improved", "exposed", true, {
-          control: { stage: "S3", hit_at_5: false },
-          treatment: { stage: "S5", hit_at_5: true }
+          control: { stage: "pre_waist", hit_at_5: false },
+          treatment: { stage: "delivered_top5", hit_at_5: true }
         }),
         exposure("q-still", "exposed", false)
       ]
     });
     expect(comparison.physical_calls).toBe(0);
-    expect(comparison.schema_version).toBe(6);
+    expect(comparison.schema_version).toBe(7);
     expect(comparison.five_hundred_q_closed).toBe(true);
     expect(comparison.membership_improved).toEqual(["q-improved"]);
     expect(comparison.still_missing).toEqual(["q-still"]);
@@ -76,17 +76,17 @@ describe("diagnostic 100Q stage map", () => {
       rate: 1
     });
     expect(comparison.diagnostic_100q_unlock.eligible).toBe(false);
-    expect(comparison.diagnostic_100q_unlock.reason).toBe("not_gate7_canary_window");
+    expect(comparison.diagnostic_100q_unlock.reason).toBe("not_canary_window");
     expect(DIAGNOSTIC_100Q_KPI_PROMOTION.eligible).toBe(false);
     expect(comparison.causal_comparison_status).toBe("eligible");
-    expect(comparison.control_misses.S3).toBe(1);
-    expect(comparison.treatment_misses.S4).toBe(1);
+    expect(comparison.control_misses.pre_waist).toBe(1);
+    expect(comparison.treatment_misses.waist_or_later).toBe(1);
   });
 
   it("does not call an unexposed treatment miss still_missing", () => {
     const comparison = compareF0F2VsCachedF3({
-      control: [row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q-unexposed", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q-unexposed", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: [exposure("q-unexposed", "not_exercised", false)]
     });
 
@@ -114,8 +114,8 @@ describe("diagnostic 100Q stage map", () => {
     );
 
     const comparison = compareF0F2VsCachedF3({
-      control: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: [exposure("q1", "exposed", false)]
     });
     const [receipt] = comparison.treatment_exposure_receipts;
@@ -138,12 +138,12 @@ describe("diagnostic 100Q stage map", () => {
     const path = join(root, "comparison.json");
     const comparison = compareF0F2VsCachedF3({
       control: [
-        row({ question_id: "q-exposed", stage: 5, proof: "budget_drop" }),
-        row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })
+        row({ question_id: "q-exposed", stage: "coverage_or_budget", proof: "budget_drop" }),
+        row({ question_id: "q-unexposed", stage: "coverage_or_budget", proof: "budget_drop" })
       ],
       treatment: [
-        row({ question_id: "q-exposed", stage: 5, proof: "budget_drop" }),
-        row({ question_id: "q-unexposed", stage: 5, proof: "budget_drop" })
+        row({ question_id: "q-exposed", stage: "coverage_or_budget", proof: "budget_drop" }),
+        row({ question_id: "q-unexposed", stage: "coverage_or_budget", proof: "budget_drop" })
       ],
       treatmentExposure: [
         exposure("q-exposed", "exposed", false),
@@ -171,7 +171,7 @@ describe("diagnostic 100Q stage map", () => {
       diagnostic_100q_unlock: {
         ...comparison.diagnostic_100q_unlock,
         eligible: true,
-        reason: "gate7_polarity_matrix_passed"
+        reason: "canary_polarity_matrix_passed"
       }
     }));
     await expect(readDiagnostic100QComparisonArtifact(path)).rejects.toThrow(
@@ -190,10 +190,10 @@ describe("diagnostic 100Q stage map", () => {
       ...comparison, still_missing: [], membership_improved: ["q1"]
     })],
     ["wrong stage counts", (comparison: ReturnType<typeof compareF0F2VsCachedF3>) => ({
-      ...comparison, control_misses: { ...comparison.control_misses, S4: 99 }
+      ...comparison, control_misses: { ...comparison.control_misses, waist_or_later: 99 }
     })],
     ["wrong treatment counts", (comparison: ReturnType<typeof compareF0F2VsCachedF3>) => ({
-      ...comparison, treatment_misses: { ...comparison.treatment_misses, S4: 99 }
+      ...comparison, treatment_misses: { ...comparison.treatment_misses, waist_or_later: 99 }
     })],
     ["physical calls", (comparison: ReturnType<typeof compareF0F2VsCachedF3>) => ({
       ...comparison, physical_calls: 1
@@ -205,8 +205,8 @@ describe("diagnostic 100Q stage map", () => {
     const root = await mkdtemp(join(tmpdir(), "diagnostic-100q-classification-"));
     const path = join(root, "comparison.json");
     const comparison = compareF0F2VsCachedF3({
-      control: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: [exposure("q1", "exposed", false)]
     });
     await writeFile(path, JSON.stringify(mutate(comparison)));
@@ -215,8 +215,8 @@ describe("diagnostic 100Q stage map", () => {
 
   it("fails closed when a treatment question lacks an exposure receipt", () => {
     expect(() => compareF0F2VsCachedF3({
-      control: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: []
     })).toThrow(/exposure receipts do not match/u);
   });
@@ -236,8 +236,8 @@ describe("diagnostic 100Q stage map", () => {
     );
 
     const comparison = compareF0F2VsCachedF3({
-      control: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
-      treatment: [row({ question_id: "q1", stage: 5, proof: "budget_drop" })],
+      control: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
+      treatment: [row({ question_id: "q1", stage: "coverage_or_budget", proof: "budget_drop" })],
       treatmentExposure: [exposure("q1", "exposed", false)]
     });
     await writeFile(path, JSON.stringify(comparison));

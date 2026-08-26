@@ -28,13 +28,13 @@ describe("recall-any5-mimo-loop", () => {
     });
   });
 
-  it("refuses limit>3 with confirm-window but no Gate 7 unlock token", async () => {
+  it("refuses limit>3 with confirm-window but no Canary unlock token", async () => {
     await chmod(script, 0o755);
     await expect(execFileAsync("bash", [
       script, "diagnostic", "--limit", "100", "--confirm-window", "100"
     ], { timeout: 10_000 })).rejects.toMatchObject({
       code: 2,
-      stderr: expect.stringContaining("without --gate7-unlock")
+      stderr: expect.stringContaining("without --canary-unlock")
     });
   });
 
@@ -83,21 +83,21 @@ describe("recall-any5-mimo-loop", () => {
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
-    it("forwards --gate7-unlock on a confirmed 100Q window", async () => {
+    it("forwards --canary-unlock on a confirmed 100Q window", async () => {
       const harness = await writeOperatorLoopHarness(tmpDir);
-      const unlock = path.join(tmpDir, "gate7-3q");
+      const unlock = path.join(tmpDir, "canary-3q");
       await writeFile(unlock, "");
       const argv = await invokeDiagnosticLoop(harness, [
         "--limit",
         "100",
         "--confirm-window",
         "100",
-        "--gate7-unlock",
+        "--canary-unlock",
         unlock,
         "--work-root",
         harness.workRoot
       ]);
-      expect(flagValue(argv, "--gate7-unlock")).toBe(unlock);
+      expect(flagValue(argv, "--canary-unlock")).toBe(unlock);
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 

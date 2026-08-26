@@ -33,7 +33,7 @@ export interface DiagnosticLoopArgs {
   readonly mode: DiagnosticLoopMode;
   readonly fromPhase?: DiagnosticLoopPhase;
   readonly requestManifestPath?: string;
-  readonly gate7UnlockPath?: string;
+  readonly canaryUnlockPath?: string;
   readonly request: DiagnosticLoopRequest;
 }
 
@@ -52,8 +52,8 @@ export function parseDiagnosticLoopArgs(
       mode,
       ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
       requestManifestPath: parsed.requestManifest,
-      ...(parsed.gate7Unlock === undefined ? {} : {
-        gate7UnlockPath: path.resolve(parsed.gate7Unlock)
+      ...(parsed.canaryUnlock === undefined ? {} : {
+        canaryUnlockPath: path.resolve(parsed.canaryUnlock)
       }),
       request: operationalOverrides(manifest.request, parsed, mode)
     };
@@ -81,8 +81,8 @@ function parseScalarArgs(
     workRoot: path.resolve(parsed.workRoot!),
     mode,
     ...(parsed.fromPhase === undefined ? {} : { fromPhase: parsed.fromPhase }),
-    ...(parsed.gate7Unlock === undefined ? {} : {
-      gate7UnlockPath: path.resolve(parsed.gate7Unlock)
+    ...(parsed.canaryUnlock === undefined ? {} : {
+      canaryUnlockPath: path.resolve(parsed.canaryUnlock)
     }),
     request: {
       datasetRevision: parsed.datasetRevision!,
@@ -139,7 +139,7 @@ interface RawArgs {
   historyRoot?: string;
   dataDir?: string;
   requestManifest?: string;
-  gate7Unlock?: string;
+  canaryUnlock?: string;
 }
 
 function readArgs(args: ReadonlyArray<string>): RawArgs {
@@ -193,7 +193,7 @@ function consumeToken(
       assignString(parsed, args, index, token, "--embedding-cache-overlay", "embeddingCacheOverlay") ||
       assignString(parsed, args, index, token, "--history-root", "historyRoot") ||
       assignString(parsed, args, index, token, "--data-dir", "dataDir") ||
-      assignString(parsed, args, index, token, "--gate7-unlock", "gate7Unlock")) {
+      assignString(parsed, args, index, token, "--canary-unlock", "canaryUnlock")) {
     return nextIndex(index, token);
   }
   if (token === "--worker") {

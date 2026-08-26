@@ -1,7 +1,7 @@
-import type { CanonicalD0SelectionReceipt, RecallCandidate } from "@do-soul/alaya-protocol";
+import type { CanonicalSelectionReceipt, RecallCandidate } from "@do-soul/alaya-protocol";
 import { ShadowContractError } from "../../shadow/envelope.js";
 import type {
-  CanonicalD0CandidateDiagnostic,
+  CanonicalCandidateDiagnostic,
   RecallCandidateDiagnostic,
   RecallFineAssessmentCandidateDiagnostic
 } from "../recall-service-types.js";
@@ -9,9 +9,9 @@ import type {
 export function finalizeRecallCandidateDiagnostics(
   diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[],
   deliveredCandidates: readonly Readonly<RecallCandidate>[],
-  d0Receipt?: Readonly<CanonicalD0SelectionReceipt>
+  captureReceipt?: Readonly<CanonicalSelectionReceipt>
 ): readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[] {
-  if (d0Receipt !== undefined) validateD0Rows(diagnostics, deliveredCandidates, d0Receipt);
+  if (captureReceipt !== undefined) validateCaptureRows(diagnostics, deliveredCandidates, captureReceipt);
   const deliveredRankByCandidateKey = new Map<string, number>(
     deliveredCandidates.map((candidate, index) => [
       `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`,
@@ -58,44 +58,44 @@ function finalizeCandidate(
 }
 
 function finalizeCanonicalCandidate(
-  diagnostic: CanonicalD0CandidateDiagnostic,
+  diagnostic: CanonicalCandidateDiagnostic,
   deliveredRank: number | null
 ): Readonly<RecallFineAssessmentCandidateDiagnostic> {
-  const disposition = diagnostic.d0_disposition;
+  const disposition = diagnostic.capture_disposition;
   if (disposition.status === "unavailable") return Object.freeze({
     ...diagnostic, final_rank: null, post_rank: null, in_final_packet: false,
     eviction_reason: null, dropped_reason: null, within_budget: false
   });
   if (deliveredRank === null) return diagnostic;
   if (disposition.status !== "selected") {
-    throw new ShadowContractError("delivered candidate contradicts canonical D0 disposition");
+    throw new ShadowContractError("delivered candidate contradicts canonical capture disposition");
   }
   return Object.freeze({ ...diagnostic, final_rank: deliveredRank, post_rank: deliveredRank,
     in_final_packet: true, eviction_reason: null, dropped_reason: null, within_budget: true });
 }
 
-function validateD0Rows(
+function validateCaptureRows(
   diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[],
   delivered: readonly Readonly<RecallCandidate>[],
-  receipt: Readonly<CanonicalD0SelectionReceipt>
+  receipt: Readonly<CanonicalSelectionReceipt>
 ): void {
   const canonical = diagnostics.filter(isCanonicalCandidateDiagnostic);
   const dispositions = new Map(receipt.dispositions.map((row) => [row.candidate_key, row]));
   if (canonical.length !== receipt.dispositions.length || canonical.some((row) =>
-    JSON.stringify(row.d0_disposition) !== JSON.stringify(dispositions.get(row.candidate_key)))) {
-    throw new ShadowContractError("canonical diagnostic rows do not match D0 receipt");
+    JSON.stringify(row.capture_disposition) !== JSON.stringify(dispositions.get(row.candidate_key)))) {
+    throw new ShadowContractError("canonical diagnostic rows do not match capture receipt");
   }
   const deliveredKeys = delivered.map((candidate) =>
     `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`);
   if (deliveredKeys.some((key, index) => key !== receipt.delivery[index]?.candidate_key) ||
       deliveredKeys.length !== receipt.delivery.length) {
-    throw new ShadowContractError("delivered candidates do not match D0 receipt prefix");
+    throw new ShadowContractError("delivered candidates do not match capture receipt prefix");
   }
 }
 
 function isCanonicalCandidateDiagnostic(
   value: Readonly<RecallFineAssessmentCandidateDiagnostic>
-): value is Readonly<CanonicalD0CandidateDiagnostic> {
+): value is Readonly<CanonicalCandidateDiagnostic> {
   return "legacy_selection" in value;
 }
 

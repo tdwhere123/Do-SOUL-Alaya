@@ -139,7 +139,7 @@ async function trackingMissLedgerDetails(
     ...sharedSubstrateIdentities(context),
     artifact_sha256: await sha256File(paths.missLedger!),
     exposure_sli: comparison.exposure_sli,
-    gate7_polarity_matrix: comparison.gate7_polarity_matrix,
+    canary_polarity_matrix: comparison.canary_polarity_matrix,
     diagnostic_100q_unlock: comparison.diagnostic_100q_unlock
   };
 }

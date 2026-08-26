@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { D0ExecutionSchema } from "../soul/selection/d0/d0-execution.js";
+import { CaptureExecutionSchema } from "../soul/selection/capture/capture-execution.js";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SoulContextUsageTrustModeSchema } from "../soul/mcp-types.js";
 
@@ -53,13 +53,13 @@ export const SoulRecallCompletedPayloadSchema = z
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema,
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
-    ranking_authority: z.enum(["d0_prefix", "select_gamma"]).optional(),
-    d0_identity: z.object({
+    ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
+    capture_identity: z.object({
       algorithm_id: NonEmptyStringSchema,
       version: NonEmptyStringSchema,
       digest: NonEmptyStringSchema
     }).readonly().optional(),
-    d0_execution: D0ExecutionSchema.optional()
+    capture_execution: CaptureExecutionSchema.optional()
   })
   .readonly();
 

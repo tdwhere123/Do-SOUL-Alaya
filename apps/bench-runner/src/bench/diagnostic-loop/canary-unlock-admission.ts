@@ -19,35 +19,35 @@ import type {
 } from "./authority/identity.js";
 import { missLedgerContentIdentity } from "./miss-ledger-authority.js";
 import { parseContainedCheckpoint, readContainedFile, resolveContainedPath } from
-  "./gate7-unlock-closure.js";
-import { assertGate7QueryWindowCompatibility } from "./gate7-unlock-query-window.js";
-import { GATE7_CANARY_LIMIT, gate7UnlockRequired } from "./gate7-unlock-policy.js";
+  "./canary-unlock-closure.js";
+import { assertCanaryQueryWindowCompatibility } from "./canary-unlock-query-window.js";
+import { CANARY_QUESTION_LIMIT, canaryUnlockRequired } from "./canary-unlock-policy.js";
 
-export { gate7UnlockRequired };
+export { canaryUnlockRequired };
 
-export async function assertGate7DiagnosticUnlock(input: {
+export async function assertCanaryDiagnosticUnlock(input: {
   readonly unlockWorkRoot: string | undefined;
   readonly currentRequest: DiagnosticLoopRequest;
   readonly currentIdentity: ResolvedDiagnosticLoopIdentity;
 }): Promise<void> {
   if (input.unlockWorkRoot === undefined || input.unlockWorkRoot.trim().length === 0) {
-    throw new Error("diagnostic-loop limit>3 requires --gate7-unlock <3q-work-root>");
+    throw new Error("diagnostic-loop limit>3 requires --canary-unlock <3q-work-root>");
   }
   const workRoot = resolveContainedPath(input.unlockWorkRoot, input.unlockWorkRoot);
   const prior = readRunRecord((await readContainedFile(workRoot, runRecordPath(workRoot))).path);
-  if ((prior.identity.request.limit ?? 0) !== GATE7_CANARY_LIMIT ||
+  if ((prior.identity.request.limit ?? 0) !== CANARY_QUESTION_LIMIT ||
       (prior.identity.request.offset ?? 0) !== 0) {
-    throw new Error("gate7 unlock is not an exact 3Q canary window");
+    throw new Error("canary unlock is not an exact 3Q canary window");
   }
   assertMatchingAuthorities(prior.identity, input.currentIdentity);
-  await assertGate7QueryWindowCompatibility(prior.identity, input.currentIdentity);
+  await assertCanaryQueryWindowCompatibility(prior.identity, input.currentIdentity);
   const comparison = await rebuildContainedComparison(workRoot, prior.run_record_digest);
   if (comparison.physical_calls !== 0 ||
       !comparison.diagnostic_100q_unlock.eligible ||
-      comparison.diagnostic_100q_unlock.reason !== "gate7_polarity_matrix_passed" ||
-      !comparison.gate7_polarity_matrix.applicable ||
-      !comparison.gate7_polarity_matrix.passed) {
-    throw new Error("gate7 unlock comparison is not a passing current polarity matrix");
+      comparison.diagnostic_100q_unlock.reason !== "canary_polarity_matrix_passed" ||
+      !comparison.canary_polarity_matrix.applicable ||
+      !comparison.canary_polarity_matrix.passed) {
+    throw new Error("canary unlock comparison is not a passing current polarity matrix");
   }
   await assertUnlockReport(workRoot, comparison);
 }
@@ -57,13 +57,13 @@ function assertMatchingAuthorities(
   current: ResolvedDiagnosticLoopIdentity
 ): void {
   if (!codeIdentityMatches(prior.request, current.request)) {
-    throw new Error("gate7 unlock code identity does not match the current request");
+    throw new Error("canary unlock code identity does not match the current request");
   }
   if (!extractionMatches(prior.extraction_cache, current.extraction_cache)) {
-    throw new Error("gate7 unlock extraction authority does not match the current request");
+    throw new Error("canary unlock extraction authority does not match the current request");
   }
   if (!snapshotBindingMatches(prior.snapshot, current.snapshot)) {
-    throw new Error("gate7 unlock snapshot authority does not match the current request");
+    throw new Error("canary unlock snapshot authority does not match the current request");
   }
 }
 
@@ -127,10 +127,10 @@ async function rebuildContainedComparison(
   if (control.identity_digest !== identityDigest ||
       treatment.identity_digest !== identityDigest ||
       miss.identity_digest !== identityDigest) {
-    throw new Error("gate7 unlock arm checkpoints do not bind the current run record");
+    throw new Error("canary unlock arm checkpoints do not bind the current run record");
   }
   if (miss.content_identity !== missLedgerContentIdentity(control, treatment)) {
-    throw new Error("gate7 unlock miss-ledger does not bind the arm checkpoint identities");
+    throw new Error("canary unlock miss-ledger does not bind the arm checkpoint identities");
   }
   const missLedger = await readContainedFile(
     workRoot, requiredArtifactPath(miss.artifact_paths.missLedger, "miss_ledger")
@@ -142,7 +142,7 @@ async function rebuildContainedComparison(
   const treatmentDiag = await readContainedFile(
     workRoot, requiredArtifactPath(treatment.artifact_paths.diagnostics, "treatment_recall")
   );
-  const snapshot = await mkdtemp(join(tmpdir(), "gate7-unlock-arms-"));
+  const snapshot = await mkdtemp(join(tmpdir(), "canary-unlock-arms-"));
   const controlCopy = join(snapshot, "control.diagnostics.json.gz");
   const treatmentCopy = join(snapshot, "treatment.diagnostics.json.gz");
   // Rebuild from the first-read bytes; later replacement of the originals is residual.
@@ -153,14 +153,14 @@ async function rebuildContainedComparison(
     treatmentDiagnosticsPath: treatmentCopy
   });
   if (!isDeepStrictEqual(artifact, rebuilt)) {
-    throw new Error("gate7 unlock comparison does not rebuild from arm diagnostics");
+    throw new Error("canary unlock comparison does not rebuild from arm diagnostics");
   }
   return rebuilt;
 }
 
 function requiredArtifactPath(path: string | undefined, phase: string): string {
   if (path === undefined || path.trim().length === 0) {
-    throw new Error(`gate7 unlock ${phase} is missing a bound artifact path`);
+    throw new Error(`canary unlock ${phase} is missing a bound artifact path`);
   }
   return path;
 }
@@ -172,7 +172,7 @@ function assertZeroCallCheckpoint(
   const receipt = checkpoint.details.no_provider_call_receipt;
   if (checkpoint.physical_calls !== 0 || !isRecord(receipt) ||
       receipt.provider_port !== "absent" || receipt.physical_calls !== 0) {
-    throw new Error(`gate7 unlock ${phase} is missing a zero-call no-provider receipt`);
+    throw new Error(`canary unlock ${phase} is missing a zero-call no-provider receipt`);
   }
 }
 
@@ -183,7 +183,7 @@ async function assertUnlockReport(
   const reportFile = await readContainedFile(workRoot, join(workRoot, "report.json"));
   const report = JSON.parse(reportFile.bytes.toString("utf8")) as unknown;
   if (!isRecord(report)) {
-    throw new Error("gate7 unlock report is not a current diagnostic-loop report");
+    throw new Error("canary unlock report is not a current diagnostic-loop report");
   }
   if (report.schema_version === 3) {
     throw new Error(
@@ -193,7 +193,7 @@ async function assertUnlockReport(
   if (report.schema_version !== 4 || report.kind !== "diagnostic_loop_report" ||
       !isDeepStrictEqual(report.diagnostic_100q_unlock, comparison.diagnostic_100q_unlock) ||
       !isDeepStrictEqual(report.diagnostic_100q_promotion, DIAGNOSTIC_100Q_KPI_PROMOTION)) {
-    throw new Error("gate7 unlock report does not bind the rebuilt polarity matrix");
+    throw new Error("canary unlock report does not bind the rebuilt polarity matrix");
   }
 }
 

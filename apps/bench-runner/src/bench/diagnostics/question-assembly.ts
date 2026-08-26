@@ -85,7 +85,7 @@ export function assembleQuestionDiagnostic(
     ...buildRecallTelemetryFields(input, parts, candidatePoolComplete),
     query_probes: parts.diagnostics?.queryProbes ?? null,
     ranking_authority: parts.diagnostics?.rankingAuthority ?? null,
-    d0_receipt: parts.diagnostics?.d0Receipt ?? null,
+    capture_receipt: parts.diagnostics?.captureReceipt ?? null,
     retrieval_field_captures: parts.diagnostics?.retrievalFieldCaptures ?? null,
     retrieval_field_refinement_receipts:
       parts.diagnostics?.retrievalFieldRefinementReceipts ?? null,
@@ -227,9 +227,9 @@ function buildRecallTelemetryFields(
 
 function isCandidatePoolComplete(parts: QuestionDiagnosticParts): boolean {
   const diagnostics = parts.diagnostics;
-  if (diagnostics?.rankingAuthority === "d0_prefix") {
+  if (diagnostics?.rankingAuthority === "prefix_sk") {
     return diagnostics.candidatePoolComplete === true &&
-      diagnostics.d0Receipt?.execution.status === "captured";
+      diagnostics.captureReceipt?.execution.status === "captured";
   }
   return diagnostics?.candidatePoolComplete === true &&
     parts.candidates.every((candidate) =>

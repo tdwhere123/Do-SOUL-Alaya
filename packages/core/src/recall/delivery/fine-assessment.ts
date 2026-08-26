@@ -12,7 +12,6 @@ import type {
   CoarseRecallCandidate,
   KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
-  RecallCandidateDiagnostic,
   RecallServiceWarnPort,
   RecallSupplementaryData,
   TokenEstimator
@@ -114,15 +113,15 @@ export type FineAssessResult = Readonly<{
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
   readonly delivery_path: "legacy" | "canonical";
-  readonly d0_identity?: Readonly<{
+  readonly capture_identity?: Readonly<{
     readonly algorithm_id: string;
     readonly version: string;
     readonly digest: string;
   }>;
-  readonly ranking_authority: "d0_prefix" | "select_gamma";
-  readonly d0_execution?: Readonly<import("@do-soul/alaya-protocol").D0Execution>;
-  readonly d0_receipt?: Readonly<
-    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  readonly ranking_authority: "prefix_sk" | "select_gamma";
+  readonly capture_execution?: Readonly<import("@do-soul/alaya-protocol").CaptureExecution>;
+  readonly capture_receipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalSelectionReceipt
   >;
   readonly shadowTrace?: FineAssessmentShadowTrace;
 }>;

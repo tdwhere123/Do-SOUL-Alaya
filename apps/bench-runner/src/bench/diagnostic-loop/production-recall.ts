@@ -205,7 +205,7 @@ export async function runProductionMissLedgerPhase(
       artifact_sha256: await sha256File(missLedgerPath),
       mechanism_split_sha256: await sha256File(mechanismSplitPath),
       exposure_sli: comparison.exposure_sli,
-      gate7_polarity_matrix: comparison.gate7_polarity_matrix,
+      canary_polarity_matrix: comparison.canary_polarity_matrix,
       diagnostic_100q_unlock: comparison.diagnostic_100q_unlock
     }
   };

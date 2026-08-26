@@ -22,8 +22,8 @@ describe("diagnostic-loop miss-ledger authority", () => {
     const workRoot = await completedRun();
     const missPath = join(workRoot, "miss-ledger.json");
     const forged = compareF0F2VsCachedF3({
-      control: [row({ question_id: "forged", stage: 7, hit_at_5: true, proof: "hit_at_5" })],
-      treatment: [row({ question_id: "forged", stage: 7, hit_at_5: true, proof: "hit_at_5" })],
+      control: [row({ question_id: "forged", stage: "delivered_top5", hit_at_5: true, proof: "hit_at_5" })],
+      treatment: [row({ question_id: "forged", stage: "delivered_top5", hit_at_5: true, proof: "hit_at_5" })],
       treatmentExposure: [forgedExposureReceipt()]
     });
     await writeFile(missPath, `${JSON.stringify(forged)}\n`);
@@ -33,7 +33,7 @@ describe("diagnostic-loop miss-ledger authority", () => {
         ...(body.details as object),
         artifact_sha256: awaitSha(missPath),
         exposure_sli: forged.exposure_sli,
-        gate7_polarity_matrix: forged.gate7_polarity_matrix,
+        canary_polarity_matrix: forged.canary_polarity_matrix,
         diagnostic_100q_unlock: forged.diagnostic_100q_unlock
       }
     }));
@@ -79,7 +79,7 @@ async function resealReportAuthority(
     miss_ledger: {
       ...(report.miss_ledger as object),
       exposure_sli: forged.exposure_sli,
-      gate7_polarity_matrix: forged.gate7_polarity_matrix,
+      canary_polarity_matrix: forged.canary_polarity_matrix,
       diagnostic_100q_unlock: forged.diagnostic_100q_unlock
     },
     diagnostic_100q_unlock: forged.diagnostic_100q_unlock,

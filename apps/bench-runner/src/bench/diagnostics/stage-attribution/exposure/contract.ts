@@ -7,18 +7,18 @@ import {
   PRODUCT_PHASES,
   type ProductPhaseLedger
 } from "../../phase/phase-authority.js";
-import { GATE7_NAMED_NEGATIVE_CONTROL_IDS } from "./gate7-canary-ids.js";
+import { CANARY_NEGATIVE_CONTROL_IDS } from "./canary-ids.js";
 
 export const CACHED_F3_EXPOSURE_POLICY = {
   schema_version: 3 as const,
   kind: "cached_f3_exposure_sli_policy" as const,
   denominator_kind: "formed_osf_answerable" as const,
-  named_negative_control_ids: GATE7_NAMED_NEGATIVE_CONTROL_IDS,
+  named_negative_control_ids: CANARY_NEGATIVE_CONTROL_IDS,
   candidate_attribution_required: true,
   control_non_exposure_required: true
 };
 export type TreatmentExposureStatus = "exposed" | "not_exercised" | "inconclusive";
-export type TreatmentExposureStage = "S0" | "S1" | "S2" | "S3" | "S4" | "S5";
+export type TreatmentExposureStage = "eval_or_write_loss" | "early_absent" | "formation_rejected" | "pre_waist" | "waist_or_later" | "delivered_top5";
 export type TreatmentFormationStatus = "formed" | "ineligible" | "unavailable" | "rejected" | null;
 export type TreatmentCompositionStatus = "composed" | "no_match" | "ineligible" | "unavailable" | "rejected" | null;
 type RetrievalChannelStatus = "complete" | "truncated" | "unavailable" | "ineligible";
@@ -71,8 +71,8 @@ export interface TreatmentExposureReceiptBody {
   readonly schema_version: 4;
   readonly kind: "cached_f3_treatment_exposure";
   readonly question_id: string;
-  readonly ranking_authority: "d0_prefix" | "select_gamma" | null;
-  readonly d0_receipt_digest: string | null;
+  readonly ranking_authority: "prefix_sk" | "select_gamma" | null;
+  readonly capture_receipt_digest: string | null;
   readonly evidence_chain: { readonly linked: boolean };
   readonly control_non_exposure: ControlNonExposureWitness;
   readonly formation: { readonly status: TreatmentFormationStatus };
@@ -80,7 +80,7 @@ export interface TreatmentExposureReceiptBody {
   readonly composition: { readonly status: TreatmentCompositionStatus; readonly solution_count: number; readonly binding_count: number };
   readonly activation: { readonly status: TreatmentCompositionStatus; readonly activated_evidence_count: number };
   readonly candidate_attribution: {
-    readonly d0_receipt_digest: string | null;
+    readonly capture_receipt_digest: string | null;
     readonly entries: readonly OpenSemanticFactorCandidateActivationEntry[];
     readonly candidate_keys: readonly string[];
     readonly activated_evidence_ids: readonly string[];
@@ -113,7 +113,7 @@ export function assertTreatmentExposureReceipt(value: unknown): asserts value is
 export function deriveTreatmentExposureStatus(receipt: TreatmentExposureReceiptBody): TreatmentExposureStatus {
   if (!receipt.control_non_exposure.observed || !receipt.control_non_exposure.pure ||
       !receipt.evidence_chain.linked ||
-      (receipt.ranking_authority === "d0_prefix" && receipt.d0_receipt_digest === null)) {
+      (receipt.ranking_authority === "prefix_sk" && receipt.capture_receipt_digest === null)) {
     return "inconclusive";
   }
   return hasCompleteExposure(receipt) ? "exposed" : "not_exercised";
@@ -126,7 +126,7 @@ export function deriveControlPurity(witness: ControlNonExposureWitness): boolean
 }
 
 function isReceiptConsistent(receipt: TreatmentExposureReceipt): boolean {
-  if (receipt.candidate_attribution.d0_receipt_digest !== receipt.d0_receipt_digest) return false;
+  if (receipt.candidate_attribution.capture_receipt_digest !== receipt.capture_receipt_digest) return false;
   if (receipt.evidence_chain.linked && receipt.candidate_attribution.entries.length > 0 &&
       (receipt.formation.status === null || receipt.composition.status === null ||
         receipt.activation.status === null)) return false;
@@ -145,7 +145,7 @@ function isReceiptConsistent(receipt: TreatmentExposureReceipt): boolean {
 
 function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
   if (!isRecord(value) || !hasExactKeys(value, [
-    "schema_version", "kind", "question_id", "ranking_authority", "d0_receipt_digest",
+    "schema_version", "kind", "question_id", "ranking_authority", "capture_receipt_digest",
     "evidence_chain", "control_non_exposure",
     "formation", "compatible_evidence", "composition", "activation", "candidate_attribution",
     "membership_delta", "candidate_pool", "query_probe_delta", "retrieval_channel_delta",
@@ -153,7 +153,7 @@ function isReceiptShape(value: unknown): value is TreatmentExposureReceipt {
   ])) return false;
   return value.schema_version === 4 && value.kind === "cached_f3_treatment_exposure" &&
     isNonEmptyString(value.question_id) && isRankingAuthority(value.ranking_authority) &&
-    isNullableD0Digest(value.d0_receipt_digest) &&
+    isNullableCaptureDigest(value.capture_receipt_digest) &&
     isDigest(value.receipt_digest) &&
     isBooleanBox(value.evidence_chain, "linked") && isControlWitness(value.control_non_exposure) &&
     isStatusBox(value.formation, true) && isCountBox(value.compatible_evidence, "compatible_count") &&
@@ -181,8 +181,8 @@ function isControlValid(value: ControlNonExposureWitness): boolean {
 
 function isCandidateAttribution(value: unknown): value is TreatmentExposureReceipt["candidate_attribution"] {
   return isRecord(value) && hasExactKeys(value, [
-    "d0_receipt_digest", "entries", "candidate_keys", "activated_evidence_ids"
-  ]) && isNullableD0Digest(value.d0_receipt_digest) &&
+    "capture_receipt_digest", "entries", "candidate_keys", "activated_evidence_ids"
+  ]) && isNullableCaptureDigest(value.capture_receipt_digest) &&
     OpenSemanticFactorCandidateActivationsSchema.safeParse(value.entries).success &&
     isSortedUniqueStrings(value.candidate_keys) && isSortedUniqueStrings(value.activated_evidence_ids);
 }
@@ -255,7 +255,7 @@ function isOutcome(value: unknown): boolean {
 }
 function isArmOutcome(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, ["stage", "hit_at_5"]) &&
-    ["S0", "S1", "S2", "S3", "S4", "S5"].includes(value.stage as never) && typeof value.hit_at_5 === "boolean";
+    ["eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"].includes(value.stage as never) && typeof value.hit_at_5 === "boolean";
 }
 
 function isObservedDeltaValid(
@@ -325,11 +325,11 @@ function invalidReceipt(questionId = "unknown"): Error {
 }
 function isCount(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
 function isDigest(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value); }
-function isNullableD0Digest(value: unknown): value is string | null {
+function isNullableCaptureDigest(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && /^sha256:[a-f0-9]{64}$/u.test(value));
 }
 function isRankingAuthority(value: unknown): value is TreatmentExposureReceiptBody["ranking_authority"] {
-  return value === null || value === "d0_prefix" || value === "select_gamma";
+  return value === null || value === "prefix_sk" || value === "select_gamma";
 }
 function isNonEmptyString(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }

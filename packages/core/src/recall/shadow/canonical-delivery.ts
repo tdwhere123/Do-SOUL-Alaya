@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import {
-  createCanonicalD0SelectionReceipt,
-  CANONICAL_D0_IDENTITY,
+  createCanonicalSelectionReceipt,
+  CANONICAL_CAPTURE_IDENTITY,
   RecallCandidateSchema,
-  type CanonicalD0SelectionReceipt,
+  type CanonicalSelectionReceipt,
   type FineAssessmentConfig,
   type RecallCandidate
 } from "@do-soul/alaya-protocol";
@@ -27,9 +27,7 @@ import type { CoarseRecallCandidate } from "../runtime/recall-service-types.js";
 import type { CoverageSelectionObjectiveReceipt } from
   "../delivery/coverage-selection.js";
 import {
-  D0_IDENTITY_DIGEST,
-  SHADOW_ALGORITHM_ID,
-  SHADOW_ALGORITHM_VERSION,
+  CAPTURE_IDENTITY_DIGEST,
   SHADOW_CAPTURE_OPERATOR_ID
 } from "./identity.js";
 import {
@@ -48,8 +46,8 @@ import {
 import { buildProductionSetUtilities } from "./utility/production.js";
 import { ShadowContractError } from "./envelope.js";
 
-export { CANONICAL_D0_IDENTITY } from "@do-soul/alaya-protocol";
-export type { CanonicalD0SelectionReceipt } from "@do-soul/alaya-protocol";
+export { CANONICAL_CAPTURE_IDENTITY } from "@do-soul/alaya-protocol";
+export type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
 
 export function resolveFineAssessmentDeliveryPath(
   config: FineAssessmentConfig
@@ -93,7 +91,7 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     tokenEstimator: params.tokenEstimator,
     observationField: params.shadowObservationField,
     psi: params.shadowPsi,
-    c0Activation: "active",
+    cutoverActivation: "active",
     memoryKeywordLanes: params.memoryKeywordLanes,
     memoryLexicalCaptures: params.memoryLexicalCaptures,
     e0Keys: params.e0Keys,
@@ -111,12 +109,12 @@ function capturedCanonicalResult(
   shadowTrace: ShadowCapturedTrace,
   candidates: readonly Readonly<RecallCandidate>[]
 ): FineAssessResult {
-  const receipt = capturedD0Receipt(shadowTrace);
+  const receipt = capturedSelectionReceipt(shadowTrace);
   return Object.freeze({
     ...emptyCanonicalShell(params, shadowTrace),
     candidates,
     diagnostics: buildCanonicalDeliveryDiagnostics(params, candidates, receipt),
-    d0_receipt: receipt
+    capture_receipt: receipt
   });
 }
 
@@ -124,7 +122,7 @@ function failClosedCanonicalResult(
   params: FineAssessParams,
   shadowTrace: ShadowFailClosedTrace
 ): FineAssessResult {
-  const receipt = failClosedD0Receipt(params, shadowTrace);
+  const receipt = failClosedSelectionReceipt(params, shadowTrace);
   const e1 = new Set(receipt.field_membership.e1_keys);
   const diagnosticParams = Object.freeze({
     ...params,
@@ -136,7 +134,7 @@ function failClosedCanonicalResult(
     diagnostics: buildCanonicalDeliveryDiagnostics(
       diagnosticParams, Object.freeze([]), receipt
     ),
-    d0_receipt: receipt
+    capture_receipt: receipt
   });
 }
 
@@ -153,13 +151,13 @@ function uniqueCandidatesForKeys(
   }));
 }
 
-function capturedD0Receipt(
+function capturedSelectionReceipt(
   trace: ShadowCapturedTrace
-): CanonicalD0SelectionReceipt {
-  return createCanonicalD0SelectionReceipt({
+): CanonicalSelectionReceipt {
+  return createCanonicalSelectionReceipt({
     schema_version: 1,
-    ranking_authority: "d0_prefix" as const,
-    identity: CANONICAL_D0_IDENTITY,
+    ranking_authority: "prefix_sk" as const,
+    identity: CANONICAL_CAPTURE_IDENTITY,
     execution: Object.freeze({ status: "captured" as const, reason: null }),
     field_membership: Object.freeze({
       ...trace.field_membership,
@@ -179,18 +177,18 @@ function capturedD0Receipt(
   }, sha256);
 }
 
-function failClosedD0Receipt(
+function failClosedSelectionReceipt(
   params: FineAssessParams,
   trace: ShadowFailClosedTrace
-): CanonicalD0SelectionReceipt {
+): CanonicalSelectionReceipt {
   const membership = failClosedMembership(params);
   const reason = membership.e0_keys.some((key) => !membership.e1_keys.includes(key))
     ? "membership_shrink" as const
     : trace.reason;
-  return createCanonicalD0SelectionReceipt({
+  return createCanonicalSelectionReceipt({
     schema_version: 1,
-    ranking_authority: "d0_prefix" as const,
-    identity: CANONICAL_D0_IDENTITY,
+    ranking_authority: "prefix_sk" as const,
+    identity: CANONICAL_CAPTURE_IDENTITY,
     execution: Object.freeze({ status: "fail_closed" as const, reason }),
     field_membership: Object.freeze({
       ...membership,
@@ -223,7 +221,7 @@ function failClosedMembership(params: FineAssessParams): Readonly<{
   });
 }
 
-function capturedDispositions(trace: ShadowCapturedTrace): CanonicalD0SelectionReceipt["dispositions"] {
+function capturedDispositions(trace: ShadowCapturedTrace): CanonicalSelectionReceipt["dispositions"] {
   const decisions = new Set(trace.decisions.map(({ candidate_key }) => candidate_key));
   const rejects = new Map(trace.walk_rejects.map((row) => [row.candidate_key, row.walk_reject]));
   const eligible = new Set(trace.eligible_keys);
@@ -234,7 +232,7 @@ function capturedDispositions(trace: ShadowCapturedTrace): CanonicalD0SelectionR
     if (reject !== undefined) return Object.freeze({ candidate_key,
       status: "rejected" as const, reason: reject });
     if (eligible.has(candidate_key)) {
-      throw new ShadowContractError("captured D0 eligible candidate lacks decision or reject");
+      throw new ShadowContractError("captured eligible candidate lacks decision or reject");
     }
     return Object.freeze({ candidate_key, status: "ineligible" as const,
       reason: "h_ineligible" as const });
@@ -260,9 +258,9 @@ function emptyCanonicalShell(
     finePriorityOverflowCount: 0,
     shadowTrace,
     delivery_path: "canonical" as const,
-    d0_identity: CANONICAL_D0_IDENTITY,
-    ranking_authority: "d0_prefix" as const,
-    d0_execution: Object.freeze({
+    capture_identity: CANONICAL_CAPTURE_IDENTITY,
+    ranking_authority: "prefix_sk" as const,
+    capture_execution: Object.freeze({
       status: shadowTrace.kind === "captured" ? "captured" as const : "fail_closed" as const,
       reason: shadowTrace.kind === "captured" ? null : shadowTrace.reason
     })
@@ -274,7 +272,7 @@ function canonicalObjective(): CoverageSelectionObjectiveReceipt {
     schema_version: 1,
     operator_id: SHADOW_CAPTURE_OPERATOR_ID,
     mathematical_class: null,
-    configuration_digest: D0_IDENTITY_DIGEST
+    configuration_digest: CAPTURE_IDENTITY_DIGEST
   });
 }
 
@@ -333,7 +331,7 @@ function materializeCanonicalCandidate(
     dimension: entry.dimension,
     scope_class: entry.scope_class,
     origin_plane: candidate.originPlane ?? "workspace_local",
-    selection_reason: "d0.safe-dominance-capture.v1 prefixSK",
+    selection_reason: "safe-dominance-capture.v1 prefixSK",
     score_factors: canonicalDiagnosticScoreFactors(entry.object_id, activation, params),
     ...(candidate.isAdvisory === undefined ? {} : { is_advisory: candidate.isAdvisory }),
     ...(channels === undefined ? {} : { source_channels: channels })

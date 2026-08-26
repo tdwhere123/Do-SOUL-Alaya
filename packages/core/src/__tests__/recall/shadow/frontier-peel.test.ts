@@ -30,8 +30,8 @@ const SHADOW_DIR = join(
   "../../../recall/shadow"
 );
 
-describe("peelUndominated D0 §5", () => {
-  it("D0-F09 peels a transitive chain into structural layers", () => {
+describe("peelUndominated frontiers", () => {
+  it("peels a transitive chain into structural layers", () => {
     const obs = transitivityField();
     const receipt = peelUndominated(
       eligibleCandidateKeys(obs),
@@ -53,7 +53,7 @@ describe("peelUndominated D0 §5", () => {
     )).toBe(true);
   });
 
-  it("D0-F10 cycle fails closed with no SCC", () => {
+  it("cycle fails closed with no SCC", () => {
     const cyclic = (v: string, u: string) =>
       (v === "A" && u === "B") || (v === "B" && u === "C") || (v === "C" && u === "A");
     const result = peelUndominated(["A", "B", "C"], cyclic);
@@ -83,7 +83,7 @@ describe("peelUndominated D0 §5", () => {
     ]);
   });
 
-  it("D0-F11 stable frontiers serialize members by candidate_key only", () => {
+  it("stable frontiers serialize members by candidate_key only", () => {
     const obs = field({
       ...transitivityField(),
       D: view({

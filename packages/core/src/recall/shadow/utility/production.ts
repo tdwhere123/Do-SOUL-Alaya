@@ -216,6 +216,6 @@ function groundedCid(
   parts: readonly string[]
 ): string {
   return `${grounding}:sha256:${fieldContractSha256(JSON.stringify([
-    "d0-grounded-cid-v1", grounding, parts
+    "capture-grounded-cid-v1", grounding, parts
   ]))}`;
 }

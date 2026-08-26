@@ -116,6 +116,6 @@ export interface DiagnosticLoopRunInput {
   readonly fromPhase?: DiagnosticLoopPhase;
   readonly adapters: DiagnosticLoopAdapters;
   readonly argv: readonly string[];
-  readonly gate7UnlockPath?: string;
+  readonly canaryUnlockPath?: string;
   readonly now?: () => string;
 }

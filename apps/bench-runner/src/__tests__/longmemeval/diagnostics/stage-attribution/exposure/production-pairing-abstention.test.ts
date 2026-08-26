@@ -5,17 +5,17 @@ import { compareF0F2VsCachedF3 } from
   "../../../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
 import { buildTreatmentExposureReceipts } from
   "../../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
-import { evaluateGate7PolarityMatrix } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/gate7-polarity-matrix.js";
+import { evaluateCanaryPolarityMatrix } from
+  "../../../../../bench/diagnostics/stage-attribution/exposure/canary-polarity-matrix.js";
 import {
-  GATE7_CANARY_Q1,
-  GATE7_CANARY_Q2,
-  GATE7_CANARY_Q3
-} from "../../../../../bench/diagnostics/stage-attribution/exposure/gate7-canary-ids.js";
+  CANARY_Q1,
+  CANARY_Q2,
+  CANARY_Q3
+} from "../../../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
 import {
   controlCanaryDiagnostics,
   passingTreatmentCanaryDiagnostics
-} from "../../../diagnostic-loop/gate7-canary-arm-diagnostics.js";
+} from "../../../diagnostic-loop/canary-arm-diagnostics.js";
 import {
   assembledQuestion,
   cohortOnlyQuestion,
@@ -24,7 +24,7 @@ import {
 import type { LongMemEvalQuestionDiagnostic } from
   "../../../../../bench/diagnostics/schema/diagnostics-types.js";
 
-const CANARY_IDS = [GATE7_CANARY_Q1, GATE7_CANARY_Q2, GATE7_CANARY_Q3];
+const CANARY_IDS = [CANARY_Q1, CANARY_Q2, CANARY_Q3];
 const ABS_TWIN_ID = "0862e8bf_abs";
 const ORDINARY_ID = "58bf7951";
 
@@ -46,11 +46,11 @@ describe("production stage/receipt pairing with abstention twins", () => {
     expect(mixed.receipts.map((receipt) => receipt.question_id)).toEqual(
       [...CANARY_IDS].sort()
     );
-    expect(evaluateGate7PolarityMatrix(mixed.receipts))
-      .toEqual(evaluateGate7PolarityMatrix(baseline.receipts));
-    expect(mixed.comparison.gate7_polarity_matrix.passed).toBe(true);
-    expect(mixed.comparison.gate7_polarity_matrix)
-      .toEqual(baseline.comparison.gate7_polarity_matrix);
+    expect(evaluateCanaryPolarityMatrix(mixed.receipts))
+      .toEqual(evaluateCanaryPolarityMatrix(baseline.receipts));
+    expect(mixed.comparison.canary_polarity_matrix.passed).toBe(true);
+    expect(mixed.comparison.canary_polarity_matrix)
+      .toEqual(baseline.comparison.canary_polarity_matrix);
     expect(mixed.comparison.exposure_sli).toMatchObject({
       denominator_kind: "formed_osf_answerable",
       denominator_count: 1,
@@ -102,8 +102,8 @@ describe("exposure abstention disjuncts", () => {
       .toEqual([...CANARY_IDS].sort());
     expect(cohortPair.receipts.map((receipt) => receipt.question_id))
       .toEqual([...CANARY_IDS].sort());
-    expect(flagPair.comparison.gate7_polarity_matrix.passed).toBe(true);
-    expect(cohortPair.comparison.gate7_polarity_matrix.passed).toBe(true);
+    expect(flagPair.comparison.canary_polarity_matrix.passed).toBe(true);
+    expect(cohortPair.comparison.canary_polarity_matrix.passed).toBe(true);
   });
 
   it("does not skip an ordinary empty-gold id from receipts", () => {
@@ -113,7 +113,7 @@ describe("exposure abstention disjuncts", () => {
       [...passingTreatmentCanaryDiagnostics(), ordinary]
     );
     expect(paired.receipts.map((receipt) => receipt.question_id))
-      .toEqual([GATE7_CANARY_Q2, GATE7_CANARY_Q3, ORDINARY_ID, GATE7_CANARY_Q1]);
+      .toEqual([CANARY_Q2, CANARY_Q3, ORDINARY_ID, CANARY_Q1]);
   });
 
   it("fail-closes when the same id is abstention on only one arm", () => {

@@ -31,7 +31,7 @@ import { readCandidateSelectorObservation } from
 import { CandidateActivationReceiptSchema } from "../../../harness/recall/answer-trace/semantic-activation-schema.js";
 import { readDiagnosticLabelArray } from
   "./candidate-readers/source-label-reader.js";
-import { canonicalCandidatePoolComplete, isCanonicalD0CandidateRow } from
+import { canonicalCandidatePoolComplete, isCanonicalCandidateRow } from
   "./candidate-readers/canonical-candidate-row.js";
 import { readDiagnosticCandidateSource } from
   "./candidate-readers/candidate-source.js";
@@ -83,13 +83,13 @@ export function readCandidates(
     diagnostics,
     new Set(byCandidateKey.keys())
   );
-  const d0Complete = canonicalCandidatePoolComplete({
-    receipt: diagnostics.d0_receipt,
+  const captureComplete = canonicalCandidatePoolComplete({
+    receipt: diagnostics.capture_receipt,
     rows: source?.rows,
     candidateKeys: byCandidateKey.keys()
   });
   return {
-    candidatePoolComplete: pruned.complete && (d0Complete ?? scoredComplete),
+    candidatePoolComplete: pruned.complete && (captureComplete ?? scoredComplete),
     candidatePoolCount: pruned.candidatePoolCount,
     finePrunedCount: pruned.finePrunedCount,
     fineAssessmentPrunedCandidates: pruned.candidates,
@@ -112,7 +112,7 @@ function readCandidateRow(
 }> | null {
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
-  if (record.ranking_authority === "d0_prefix" && !isCanonicalD0CandidateRow(record)) {
+  if (record.ranking_authority === "prefix_sk" && !isCanonicalCandidateRow(record)) {
     return null;
   }
   const identity = readDiagnosticCandidateIdentity(record, mode);

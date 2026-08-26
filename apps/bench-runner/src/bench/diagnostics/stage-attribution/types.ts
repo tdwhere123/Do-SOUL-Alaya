@@ -1,12 +1,12 @@
-/** Offline Gate-1 stage ids; 6 is the near-top opportunity stage, not a mechanism. */
+/** Near-top opportunity is an attribution stage, not a mechanism. */
 export type AttributionStage =
-  | 1
-  | 2
-  | 3
-  | 4
-  | 5
-  | 6
-  | 7;
+  | "write_or_unevaluable"
+  | "raw_pool_absent"
+  | "pre_waist_prune"
+  | "waist_composition"
+  | "coverage_or_budget"
+  | "near_top_final_order"
+  | "delivered_top5";
 
 /**
  * Causal owner among waist-present misses; never substitutes for opportunity.
@@ -20,14 +20,7 @@ export type AttributionMechanism =
   | "honest_higher_r_obj"
   | null;
 
-export type StageCountKey =
-  | "stage_1_write_or_unevaluable"
-  | "stage_2_raw_pool_absent"
-  | "stage_3_pre_waist_prune"
-  | "stage_4_waist_composition"
-  | "stage_5_coverage_or_budget"
-  | "stage_6_near_top_final_order"
-  | "stage_7_delivered_top5";
+export type StageCountKey = AttributionStage;
 
 export interface StageAttributionDenominators {
   readonly D_Q_evaluated: number;
@@ -97,7 +90,7 @@ export interface StageAttributionSummary {
 
 export interface StageAttributionTables {
   readonly schema_version: 1;
-  readonly kind: "gate1-stage-attribution-tables";
+  readonly kind: "stage-attribution-tables";
   readonly cell: string;
   readonly source_diagnostics: string;
   readonly summary: StageAttributionSummary;
@@ -106,42 +99,27 @@ export interface StageAttributionTables {
 }
 
 export const STAGE_COUNT_KEYS: readonly StageCountKey[] = [
-  "stage_1_write_or_unevaluable",
-  "stage_2_raw_pool_absent",
-  "stage_3_pre_waist_prune",
-  "stage_4_waist_composition",
-  "stage_5_coverage_or_budget",
-  "stage_6_near_top_final_order",
-  "stage_7_delivered_top5"
+  "write_or_unevaluable",
+  "raw_pool_absent",
+  "pre_waist_prune",
+  "waist_composition",
+  "coverage_or_budget",
+  "near_top_final_order",
+  "delivered_top5"
 ] as const;
 
 export function emptyStageCounts(): Record<StageCountKey, number> {
   return {
-    stage_1_write_or_unevaluable: 0,
-    stage_2_raw_pool_absent: 0,
-    stage_3_pre_waist_prune: 0,
-    stage_4_waist_composition: 0,
-    stage_5_coverage_or_budget: 0,
-    stage_6_near_top_final_order: 0,
-    stage_7_delivered_top5: 0
+    write_or_unevaluable: 0,
+    raw_pool_absent: 0,
+    pre_waist_prune: 0,
+    waist_composition: 0,
+    coverage_or_budget: 0,
+    near_top_final_order: 0,
+    delivered_top5: 0
   };
 }
 
 export function stageCountKey(stage: AttributionStage): StageCountKey {
-  switch (stage) {
-    case 1:
-      return "stage_1_write_or_unevaluable";
-    case 2:
-      return "stage_2_raw_pool_absent";
-    case 3:
-      return "stage_3_pre_waist_prune";
-    case 4:
-      return "stage_4_waist_composition";
-    case 5:
-      return "stage_5_coverage_or_budget";
-    case 6:
-      return "stage_6_near_top_final_order";
-    case 7:
-      return "stage_7_delivered_top5";
-  }
+  return stage;
 }

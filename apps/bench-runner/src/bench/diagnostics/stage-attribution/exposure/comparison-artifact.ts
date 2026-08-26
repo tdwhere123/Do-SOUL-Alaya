@@ -11,9 +11,9 @@ import {
 } from "../diagnostic-100q.js";
 import { buildDiagnostic100QUnlock } from "./diagnostic-unlock.js";
 import { buildCachedF3ExposureSli } from "./exposure-sli.js";
-import { evaluateGate7PolarityMatrix } from "./gate7-polarity-matrix.js";
+import { evaluateCanaryPolarityMatrix } from "./canary-polarity-matrix.js";
 
-const STAGES: readonly TreatmentExposureStage[] = ["S0", "S1", "S2", "S3", "S4", "S5"];
+const STAGES: readonly TreatmentExposureStage[] = ["eval_or_write_loss", "early_absent", "formation_rejected", "pre_waist", "waist_or_later", "delivered_top5"];
 
 export async function readDiagnostic100QComparisonArtifact(
   path: string
@@ -41,7 +41,7 @@ function assertComparison(value: unknown): asserts value is Diagnostic100QCompar
   receipts.forEach(assertTreatmentExposureReceipt);
   const typedReceipts = receipts as TreatmentExposureReceipt[];
   assertUniqueQuestionIds(typedReceipts);
-  assertGateAndStatus(value, typedReceipts);
+  assertPolarityAndStatus(value, typedReceipts);
   assertClassifications(value, typedReceipts);
   assertStageCounts(value, typedReceipts);
 }
@@ -51,10 +51,10 @@ function isComparisonShape(value: unknown): value is Diagnostic100QComparison {
     "schema_version", "kind", "physical_calls", "five_hundred_q_closed",
     "control_misses", "treatment_misses", "membership_improved", "still_missing",
     "not_exercised", "inconclusive", "treatment_exposure_receipts",
-    "causal_comparison_status", "exposure_sli", "gate7_polarity_matrix",
+    "causal_comparison_status", "exposure_sli", "canary_polarity_matrix",
     "diagnostic_100q_unlock"
   ])) return false;
-  return value.schema_version === 6 &&
+  return value.schema_version === 7 &&
     value.kind === "diagnostic_100q_f0f2_vs_cached_f3" &&
     value.physical_calls === 0 && value.five_hundred_q_closed === true &&
     isStageCounts(value.control_misses) && isStageCounts(value.treatment_misses) &&
@@ -65,20 +65,20 @@ function isComparisonShape(value: unknown): value is Diagnostic100QComparison {
     Array.isArray(value.treatment_exposure_receipts) &&
     (value.causal_comparison_status === "eligible" ||
       value.causal_comparison_status === "inconclusive") &&
-    isRecord(value.exposure_sli) && isRecord(value.gate7_polarity_matrix) &&
+    isRecord(value.exposure_sli) && isRecord(value.canary_polarity_matrix) &&
     isRecord(value.diagnostic_100q_unlock);
 }
 
-function assertGateAndStatus(
+function assertPolarityAndStatus(
   comparison: Diagnostic100QComparison,
   receipts: readonly TreatmentExposureReceipt[]
 ): void {
   const sli = buildCachedF3ExposureSli(receipts);
-  const matrix = evaluateGate7PolarityMatrix(receipts);
+  const matrix = evaluateCanaryPolarityMatrix(receipts);
   const unlock = buildDiagnostic100QUnlock(matrix);
   const causal = deriveCausalStatus(matrix, sli);
   if (!isDeepStrictEqual(comparison.exposure_sli, sli) ||
-      !isDeepStrictEqual(comparison.gate7_polarity_matrix, matrix) ||
+      !isDeepStrictEqual(comparison.canary_polarity_matrix, matrix) ||
       !isDeepStrictEqual(comparison.diagnostic_100q_unlock, unlock) ||
       comparison.causal_comparison_status !== causal) {
     throw new Error("diagnostic 100Q exposure contracts do not match their receipts");
@@ -147,7 +147,7 @@ function isStageCounts(value: unknown): value is Readonly<Record<TreatmentExposu
 }
 
 function emptyStageCounts(): Record<TreatmentExposureStage, number> {
-  return { S0: 0, S1: 0, S2: 0, S3: 0, S4: 0, S5: 0 };
+  return { eval_or_write_loss: 0, early_absent: 0, formation_rejected: 0, pre_waist: 0, waist_or_later: 0, delivered_top5: 0 };
 }
 
 function sameStageCounts(

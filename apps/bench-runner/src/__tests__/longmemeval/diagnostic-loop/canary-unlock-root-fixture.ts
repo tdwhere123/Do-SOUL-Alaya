@@ -23,7 +23,7 @@ import {
   controlCanaryDiagnostics,
   failingTreatmentCanaryDiagnostics,
   passingTreatmentCanaryDiagnostics
-} from "./gate7-canary-arm-diagnostics.js";
+} from "./canary-arm-diagnostics.js";
 
 const SNAPSHOT_QUERY = currentSnapshotSidecarFor("q-1").questions[0]!.question;
 
@@ -198,7 +198,7 @@ function missCheckpoint(
         provider_port: "absent", physical_calls: 0
       },
       diagnostic_100q_unlock: comparison.diagnostic_100q_unlock,
-      gate7_polarity_matrix: comparison.gate7_polarity_matrix,
+      canary_polarity_matrix: comparison.canary_polarity_matrix,
       exposure_sli: comparison.exposure_sli
     },
     completed_at: "2026-08-19T00:00:00.000Z"

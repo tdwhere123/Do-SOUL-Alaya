@@ -12,10 +12,10 @@ SMALL_WINDOW_CEILING=3
 
 usage() {
   cat <<'EOF'
-usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--gate7-unlock PATH] [--snapshot PATH] [--embedding-cache-overlay PATH]
+usage: recall-any5-mimo-loop.sh <replay|query-factor-fill|diagnostic|inspect-seed> --limit N [--offset N] [--confirm-window N] [--canary-unlock PATH] [--snapshot PATH] [--embedding-cache-overlay PATH]
 
   --limit is required. Windows larger than 3 also need --confirm-window equal
-  to that limit and --gate7-unlock <3q-work-root> from a current Gate 7
+  to that limit and --canary-unlock <3q-work-root> from a current canary
   polarity-matrix pass. That unlock is diagnostic-only, not an Any@5 KPI.
 
   replay             cache-only provider-preflight + full-window zero-call proof
@@ -42,7 +42,7 @@ SEED_DB=""
 SNAPSHOT=""
 SNAPSHOT_FLAG=0
 EMBEDDING_CACHE_OVERLAY=""
-GATE7_UNLOCK=""
+CANARY_UNLOCK=""
 TEMP_REQUEST_FILE=""
 TEMP_RECEIPT_FILE=""
 
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     --limit) LIMIT="${2:-}"; shift 2 ;;
     --offset) OFFSET="${2:-}"; shift 2 ;;
     --confirm-window) CONFIRM_WINDOW="${2:-}"; shift 2 ;;
-    --gate7-unlock) GATE7_UNLOCK="${2:-}"; shift 2 ;;
+    --canary-unlock) CANARY_UNLOCK="${2:-}"; shift 2 ;;
     --work-root) WORK_ROOT="${2:-}"; shift 2 ;;
     --seed-db) SEED_DB="${2:-}"; shift 2 ;;
     --snapshot)
@@ -100,8 +100,8 @@ if [[ "$COMMAND" != "inspect-seed" ]]; then
     if [[ "$CONFIRM_WINDOW" != "$LIMIT" ]]; then
       die "refusing limit=$LIMIT (>$SMALL_WINDOW_CEILING) without --confirm-window $LIMIT"
     fi
-    if [[ -z "$GATE7_UNLOCK" ]]; then
-      die "refusing limit=$LIMIT without --gate7-unlock <3q-work-root>"
+    if [[ -z "$CANARY_UNLOCK" ]]; then
+      die "refusing limit=$LIMIT without --canary-unlock <3q-work-root>"
     fi
   fi
 fi
@@ -239,8 +239,8 @@ invoke_cache_only_diagnostic() {
   if [[ -f "$qcache" ]]; then
     extra+=(--query-semantic-factor-cache "$qcache")
   fi
-  if [[ -n "$GATE7_UNLOCK" ]]; then
-    extra+=(--gate7-unlock "$GATE7_UNLOCK")
+  if [[ -n "$CANARY_UNLOCK" ]]; then
+    extra+=(--canary-unlock "$CANARY_UNLOCK")
   fi
   if [[ -n "$EMBEDDING_CACHE_OVERLAY" ]]; then
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")

@@ -54,8 +54,8 @@ import type { PinnedProjectionCandidateSelection } from
   "../field/retrieval/projection/pinned-projection-selection.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
-  readonly d0Receipt?: Readonly<
-    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  readonly captureReceipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalSelectionReceipt
   >;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
@@ -121,7 +121,7 @@ export function buildRecallDiagnostics(
 ): Readonly<RecallDiagnostics> {
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
-    ...(params.d0Receipt === undefined ? {} : { d0_receipt: params.d0Receipt }),
+    ...(params.captureReceipt === undefined ? {} : { capture_receipt: params.captureReceipt }),
     query_probes: freezeRecallQueryProbes(params.queryProbes),
     ...buildOptionalQueryDiagnosticFields(params),
     query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
