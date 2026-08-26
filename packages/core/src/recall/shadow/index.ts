@@ -115,3 +115,26 @@ export {
   type ShadowUnsupportedRelationalDiagnostic,
   type ShadowUnsupportedRelationalSource
 } from "./receipts.js";
+
+export {
+  deterministicTailDecidedThisPick,
+  type DeterministicTailPickEvidence
+} from "./walk.js";
+
+export {
+  FIRST_PICK_TAIL_DEGENERACY_PROPERTY,
+  FIRST_PICK_TAIL_DECIDED_SHARE_MAX,
+  evaluateFirstPickTailDegeneracy,
+  evaluateFirstPickTailDegeneracyStream,
+  type FirstPickTailDegeneracyReport
+} from "./ranking/tail-degeneracy.js";
+
+export {
+  CHEAP_RANKING_RUNG_COST,
+  CHEAP_RANKING_RUNG_ID,
+  CHEAP_RANKING_RUNG_K,
+  cheapRungAnyAt5,
+  scoreCheapRankingRung,
+  type CheapRankingRungReport,
+  type CheapRankingRungRow
+} from "./ranking/cheap-rung.js";

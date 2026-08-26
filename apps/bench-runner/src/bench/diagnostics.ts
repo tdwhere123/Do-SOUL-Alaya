@@ -49,3 +49,7 @@ export {
   reclassifyQuestionDiagnostic,
   reclassifyQuestionDiagnostics
 } from "./diagnostics/miss/reclassify-question-diagnostics.js";
+export {
+  evaluateRecallEvalGzipTailDegeneracy,
+  scoreRecallEvalGzipRankingRung
+} from "./diagnostics/ranking/score-stored-ranking-rung.js";

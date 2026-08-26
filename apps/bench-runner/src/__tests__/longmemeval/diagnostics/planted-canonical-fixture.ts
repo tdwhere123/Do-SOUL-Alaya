@@ -16,6 +16,7 @@ export function plantedCandidateKey(objectId: string): string {
 export function plantedCanonicalReceipt(input: {
   readonly objectIds: readonly string[];
   readonly deliveredObjectIds: readonly string[];
+  readonly firstPickMaxGCohort?: readonly string[];
 }) {
   const keys = input.objectIds.map(plantedCandidateKey);
   const deliveredKeys = input.deliveredObjectIds.map(plantedCandidateKey);
@@ -46,7 +47,11 @@ export function plantedCanonicalReceipt(input: {
     },
     gamma: {
       set_utilities: keys.map((key, index) => plantedUtility(key, input.objectIds[index]!)),
-      decisions: decisions.map((key, index) => plantedDecision(key, index + 1)),
+      decisions: decisions.map((key, index) => plantedDecision(
+        key,
+        index + 1,
+        index === 0 ? input.firstPickMaxGCohort : undefined
+      )),
       rejects: []
     },
     dispositions: keys.map((key) => ({
@@ -112,11 +117,13 @@ export function plantedCanonicalQuestion(input: {
   readonly deliveredObjectIds: readonly string[];
   readonly includeGoldCandidateRow?: boolean;
   readonly goldAdmissionPlanes?: readonly string[];
+  readonly firstPickMaxGCohort?: readonly string[];
 }) {
   const goldObjectId = input.goldObjectId ?? PLANTED_GOLD_ID;
   const receipt = plantedCanonicalReceipt({
     objectIds: input.fieldObjectIds,
-    deliveredObjectIds: input.deliveredObjectIds
+    deliveredObjectIds: input.deliveredObjectIds,
+    firstPickMaxGCohort: input.firstPickMaxGCohort
   });
   const deliveredRankById = new Map(
     input.deliveredObjectIds.map((objectId, index) => [objectId, index + 1] as const)
@@ -179,7 +186,11 @@ function plantedUtility(candidateKey: string, objectId: string) {
   };
 }
 
-function plantedDecision(candidateKey: string, frontierIndex: number) {
+function plantedDecision(
+  candidateKey: string,
+  frontierIndex: number,
+  maxGCohort?: readonly string[]
+) {
   return {
     schema_version: 1 as const,
     candidate_key: candidateKey,
@@ -192,7 +203,7 @@ function plantedDecision(candidateKey: string, frontierIndex: number) {
     },
     named_novelty: { facility_keys: [], value_pairs: [], content_ids: [] },
     novelty_core_known_absence: [],
-    max_g_cohort: [candidateKey],
+    max_g_cohort: maxGCohort === undefined ? [candidateKey] : [...maxGCohort],
     equal_g_dominance_rejects: [],
     deterministic_tail: "candidate_key_code_unit_ascending" as const,
     unresolved_pointwise_tradeoff: false,

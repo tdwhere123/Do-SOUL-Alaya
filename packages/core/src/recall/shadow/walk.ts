@@ -120,8 +120,13 @@ export function isCapturedWalk(
   return result.kind === "captured";
 }
 
+export type DeterministicTailPickEvidence = Pick<
+  ShadowCaptureDecisionReceipt,
+  "max_g_cohort" | "equal_g_dominance_rejects"
+>;
+
 export function deterministicTailDecidedThisPick(
-  receipt: ShadowCaptureDecisionReceipt
+  receipt: DeterministicTailPickEvidence
 ): boolean {
   return receipt.max_g_cohort.length > 1 &&
     receipt.equal_g_dominance_rejects.length === 0;
