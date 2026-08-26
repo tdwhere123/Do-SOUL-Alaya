@@ -11,6 +11,7 @@ import {
 import { WORKSPACE_SLICE_DB_FILENAME } from "./names.js";
 import { replicateEmbeddingOverlayBind } from "./overlay-replicate.js";
 import { rebuildWorkspaceFts } from "./rebuild-fts.js";
+import { rebindTemporalProjectionIdentity } from "./rebind-temporal.js";
 import {
   applyGlobalTablePolicies,
   copyWorkspaceTablesOnce,
@@ -97,6 +98,7 @@ function copyIntoDests(
   try {
     copyWorkspaceTablesOnce({ packed, destByWorkspace, catalog });
     applyGlobalTablePolicies({ packed, destByWorkspace, catalog });
+    for (const dest of dests) rebindTemporalProjectionIdentity(dest.database.connection);
     for (const dest of dests) dest.database.connection.exec("COMMIT");
   } catch (error) {
     for (const dest of dests) {

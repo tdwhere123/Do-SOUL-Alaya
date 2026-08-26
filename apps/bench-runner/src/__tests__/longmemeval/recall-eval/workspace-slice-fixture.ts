@@ -40,6 +40,8 @@ const CLOCK = "2026-08-10T00:00:00.000Z";
 const fieldSha256: FieldContractSha256 = (preimage) =>
   createHash("sha256").update(preimage, "utf8").digest("hex");
 
+const PLANTED_PACKED_PROJECTION_DIGEST = "c".repeat(64);
+
 export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
   const database = initDatabase({ filename: path });
   await seedHaystack(database, {
@@ -57,6 +59,78 @@ export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
     token: TOKEN_B
   });
   database.close();
+}
+
+// Packed receipts stay corpus-wide; each slice keeps only one workspace's
+// relation_path_projections. The runtime gate compares those two numbers.
+export function plantPackedPathProjections(path: string): void {
+  const database = initDatabase({ filename: path });
+  try {
+    const generation = readActiveProjectionGeneration(database);
+    plantOneWorkspaceProjection(database, generation, WORKSPACE_A, "path-a");
+    plantOneWorkspaceProjection(database, generation, WORKSPACE_B, "path-b");
+    database.connection.prepare(`
+      UPDATE temporal_projection_generations
+      SET projection_count = 2, projection_digest = ?
+      WHERE generation = ?
+    `).run(PLANTED_PACKED_PROJECTION_DIGEST, generation);
+    database.connection.prepare(`
+      UPDATE temporal_schema_state
+      SET projection_count = 2, projection_digest = ?
+      WHERE state_id = 1
+    `).run(PLANTED_PACKED_PROJECTION_DIGEST);
+  } finally {
+    database.close();
+  }
+}
+
+function readActiveProjectionGeneration(
+  database: ReturnType<typeof initDatabase>
+): string {
+  const row = database.connection.prepare(`
+    SELECT active_projection_generation AS generation
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get() as { readonly generation: string | null } | undefined;
+  if (row?.generation === undefined || row.generation === null || row.generation.length === 0) {
+    throw new Error("planted packed db is missing an active temporal projection generation");
+  }
+  return row.generation;
+}
+
+function plantOneWorkspaceProjection(
+  database: ReturnType<typeof initDatabase>,
+  generation: string,
+  workspaceId: string,
+  pathId: string
+): void {
+  database.connection.prepare(`
+    INSERT INTO relation_assertions (
+      assertion_id, workspace_id, admission_event_id, identity_key,
+      anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    `assertion-${pathId}`,
+    workspaceId,
+    `admission-${pathId}`,
+    `identity-${pathId}`,
+    "[]",
+    "related_to",
+    JSON.stringify({ kind: "open", valid_from: CLOCK }),
+    "{}",
+    CLOCK
+  );
+  database.connection.prepare(`
+    INSERT INTO relation_path_projections (
+      generation, path_id, assertion_id, workspace_id, projection_json
+    ) VALUES (?, ?, ?, ?, ?)
+  `).run(
+    generation,
+    pathId,
+    `assertion-${pathId}`,
+    workspaceId,
+    JSON.stringify({ path_id: pathId, workspace_id: workspaceId })
+  );
 }
 
 export function writeOverlayBindBeside(dbPath: string, overlaySha256: string): string {
