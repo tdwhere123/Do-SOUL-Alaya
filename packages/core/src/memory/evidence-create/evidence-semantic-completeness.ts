@@ -48,7 +48,7 @@ export function certifyEvidenceSemanticCompleteness(input: Readonly<{
       "upstream_not_formed", null));
   }
   if (input.factFrame.status !== "formed") {
-    return rejected(input, "upstream_not_formed", null);
+    return unavailableUpstream(input);
   }
   const obligation = buildObligation(input.sourceText, input.factFrame);
   if (obligation === null) {
@@ -178,10 +178,24 @@ function sourceOccurrence(source: string, surface: string, expectedStart: number
   return 0;
 }
 
+function unavailableUpstream(
+  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0]
+): ReturnType<typeof certifyEvidenceSemanticCompleteness> {
+  const formation = materializeOpenSemanticFactorFormation({
+    source_kind: "evidence",
+    source_text: input.sourceText
+  });
+  return result(formation, receipt(
+    Object.freeze({ ...input, semanticFormation: formation }),
+    "not_applicable",
+    "upstream_not_formed",
+    null
+  ));
+}
+
 function rejected(
   input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
-  reason: "upstream_not_formed" | "invalid_fact_frame_obligation" |
-    "semantic_graph_incomplete",
+  reason: "invalid_fact_frame_obligation" | "semantic_graph_incomplete",
   obligation: EvidenceObligation | null
 ): ReturnType<typeof certifyEvidenceSemanticCompleteness> {
   const formation = materializeOpenSemanticFactorFormation({

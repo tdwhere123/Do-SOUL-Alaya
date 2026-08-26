@@ -53,6 +53,55 @@ describe("open semantic composition complete incompatible status", () => {
     expect(composition.compatibility_trace_digest).toBe(trace.trace_digest);
   });
 
+  it("reports no_match for a finished matchable search despite remainder rejected seal", () => {
+    const query = formedQuery();
+    const remainder = rejectedEvidence();
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: {
+        disjoint: disjointEvidence(),
+        remainder
+      }
+    });
+
+    expect(remainder.status).toBe("rejected");
+    expect(trace).toMatchObject({
+      truncated: false,
+      incomparable_seal: "rejected",
+      evaluated_evidence_count: 1
+    });
+    expect(trace.entries.map((entry) => entry.receipt.status)).toEqual(["incompatible"]);
+    expect(materializeOpenSemanticFactorComposition({
+      trace,
+      query_capture: query
+    })).toMatchObject({
+      status: "no_match",
+      solution_count: 0,
+      truncated: false
+    });
+  });
+
+  it("keeps an all-rejected remainder rejected instead of claiming no_match", () => {
+    const query = formedQuery();
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: { remainder: rejectedEvidence() }
+    });
+
+    expect(trace).toMatchObject({
+      truncated: false,
+      evaluated_evidence_count: 0,
+      incomparable_seal: "rejected"
+    });
+    expect(materializeOpenSemanticFactorComposition({
+      trace,
+      query_capture: query
+    })).toMatchObject({
+      status: "rejected",
+      solution_count: 0
+    });
+  });
+
   it("keeps an all-unformed remainder unavailable instead of claiming no_match", () => {
     const query = formedQuery();
     const trace = materializeOpenSemanticFactorCompatibilityTrace({
@@ -313,6 +362,14 @@ function unformedEvidence() {
   return materializeOpenSemanticFactorFormation({
     source_kind: "evidence",
     source_text: "I bought three books."
+  });
+}
+
+function rejectedEvidence() {
+  return materializeOpenSemanticFactorFormation({
+    source_kind: "evidence",
+    source_text: "I bought three books.",
+    negative_status: "rejected"
   });
 }
 

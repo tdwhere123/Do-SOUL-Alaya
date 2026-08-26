@@ -112,20 +112,21 @@ describe("cross-turn join identity and reconstruction source", () => {
       rejected,
       unavailable
     };
+    const trace = materializeOpenSemanticFactorCompatibilityTrace({
+      query_capture: query,
+      evidence_formations: observed,
+      unavailable_evidence_ids: ["absent-gold"]
+    });
     const composition = materializeOpenSemanticFactorComposition({
-      trace: materializeOpenSemanticFactorCompatibilityTrace({
-        query_capture: query,
-        evidence_formations: observed,
-        unavailable_evidence_ids: ["absent-gold"]
-      }),
+      trace,
       query_capture: query,
       evidence_formations: { ...observed, "gold-unobserved": gold }
     });
+    expect(trace.incomparable_seal).toBe("rejected");
     expect(composition.solutions.flatMap((solution) => solution.evidence_ids))
       .not.toEqual(expect.arrayContaining(["rejected", "unavailable", "absent-gold", "gold-unobserved"]));
     expect(composition.solution_count).toBe(0);
-    // Rejected remainder seals the search; gold must not convert that into a match.
-    expect(composition.status).toBe("rejected");
+    expect(composition.status).toBe("no_match");
   });
 
   it("does not join when reconstruction source formations are omitted", () => {

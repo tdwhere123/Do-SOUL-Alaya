@@ -5,6 +5,8 @@ import {
 } from "@do-soul/alaya-soul";
 import { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
   "@do-soul/alaya-protocol";
+import { FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID } from
+  "../../../../../../packages/core/src/memory/evidence-create/evidence-semantic-completeness.js";
 import { binaryUseEvidenceSemanticGraph } from
   "../../../../../../packages/core/src/__tests__/recall/supplementary-data-test-fixtures.js";
 import { EVIDENCE_ID } from "../../runtime/field/p217-planted-harness.js";
@@ -27,12 +29,6 @@ const QUALIFIED_NEGATIVE_CASES = [
   {
     name: "unbound",
     payload: { semantic_factor_graph: unboundEvidenceGraph() },
-    status: "rejected",
-    seal: "rejected"
-  },
-  {
-    name: "incomplete",
-    payload: { semantic_factor_graph: unaryUseEvidenceGraph() },
     status: "rejected",
     seal: "rejected"
   },
@@ -152,6 +148,34 @@ describe("formation eligibility live producer to consumer path", () => {
     });
     expect(supplement.openSemanticFactorCompatibilityTrace!.incomparable_seal)
       .not.toBe("rejected");
+  });
+
+  it("canonicalizes an incomplete Official API graph from the live fact-frame", async () => {
+    const runtime = await openEligibilityRuntime();
+    const received = await runtime.signalService.receiveSignal(
+      assertionSignal("signal-incomplete", {
+        semantic_factor_graph: unaryUseEvidenceGraph()
+      })
+    );
+    expect(createdEvidenceId(received)).toBe(EVIDENCE_ID);
+    const capture = await readQualifiedCapture(runtime.evidenceRepo, EVIDENCE_ID);
+    expect(capture).toMatchObject({
+      status: "formed",
+      producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
+      graph: { source_kind: "evidence" }
+    });
+    expect(hasGoldAuthorityKey(capture)).toBe(false);
+    expect(f3Factors(runtime.field)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
+      expect.objectContaining({ family: "f3", canonical_payload: "use" })
+    ]));
+    expect(f3CaptureJob(
+      runtime.field,
+      EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
+    )).toMatchObject({
+      status: "succeeded",
+      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
+    });
   });
 
   it("keeps a source-bound formed graph matchable on the same live path", async () => {
