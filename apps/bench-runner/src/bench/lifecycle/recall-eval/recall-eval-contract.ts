@@ -22,6 +22,7 @@ import type { RecallEvalMemoryProfileCompletion } from
 import type { BoundedLifecycleFailure } from "../errors.js";
 import type { SnapshotConsumeAuthority } from
   "../../snapshot/current/diagnostic-write-authority.js";
+import type { BenchEmbeddingMode } from "../../../harness/daemon.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -51,6 +52,7 @@ export interface RecallEvalOptions {
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
   readonly captureOpenSemanticFactorCandidateActivations?: boolean;
+  readonly embeddingMode?: BenchEmbeddingMode;
 }
 
 export interface RecallEvalResult {

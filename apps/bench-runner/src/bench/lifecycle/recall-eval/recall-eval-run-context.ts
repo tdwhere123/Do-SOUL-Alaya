@@ -120,7 +120,8 @@ export async function prepareRecallEvalRunContext(
     "recall-eval invocation"
   );
   assertCacheOnlyEnvironment(ambientEnv);
-  if (recallEvalEmbeddingMode(ambientEnv) === "env") {
+  const embeddingMode = options.embeddingMode ?? recallEvalEmbeddingMode(ambientEnv);
+  if (embeddingMode === "env") {
     assertProductDefaultBiEncoderEnvironment(
       ambientEnv,
       "recall-eval product treatment"
@@ -350,7 +351,7 @@ function resolveRecallEvalLaunch(
   const plannedDataDir = planRecallEvalDataRoot(options);
   const daemonLaunch = createBenchDaemonLaunchConfig({
     dataDir: plannedDataDir.path,
-    embeddingMode: recallEvalEmbeddingMode(ambientEnv),
+    embeddingMode: options.embeddingMode ?? recallEvalEmbeddingMode(ambientEnv),
     embeddingProviderKind: recallEvalEmbeddingProviderKind(ambientEnv),
     ambientEnv
   });

@@ -6,6 +6,7 @@ const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted((
       readonly snapshotConsumeAuthority?: string;
       readonly snapshotDbPath?: string;
       readonly embeddingCacheOverlayReceiptPath?: string;
+      readonly embeddingMode?: string;
     };
   } = {};
   return {
@@ -73,6 +74,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
     expect(capturedOptions.current?.snapshotConsumeAuthority).toBe("diagnostic");
     expect(capturedOptions.current?.snapshotDbPath).toBe("/tmp/checkpoint-snapshot.db");
+    expect(capturedOptions.current?.embeddingMode).toBe("disabled");
   });
 
   it("revalidates the checkpoint-bound snapshot before recall", async () => {
@@ -126,7 +128,36 @@ describe("diagnostic-loop production recall consume authority", () => {
     expect(runRecallEval).not.toHaveBeenCalled();
   });
 
-  it("threads a source-bound embedding overlay into recall-eval", async () => {
+  it("threads a source-bound embedding overlay into treatment recall", async () => {
+    const { runProductionRecallPhase } = await import(
+      "../../../bench/diagnostic-loop/production-recall.js"
+    );
+    runRecallEval.mockClear();
+
+    await runProductionRecallPhase({
+      request: {
+        variant: "longmemeval_s",
+        snapshotPath: "/tmp/request-snapshot.db",
+        historyRoot: "/tmp/history",
+        treatmentFactorCachePath: "/tmp/query-factors.json",
+        embeddingCacheOverlayReceiptPath: "/tmp/overlay-receipt.json"
+      },
+      checkpoints: new Map([
+        ["extraction", { artifact_paths: {}, content_identity: "cache" }],
+        ["snapshot", {
+          artifact_paths: { snapshot: "/tmp/checkpoint-snapshot.db" },
+          content_identity: "identity:/tmp/checkpoint-snapshot.db"
+        }]
+      ]),
+      workRoot: "/tmp/work"
+    } as never, "treatment");
+
+    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath)
+      .toBe("/tmp/overlay-receipt.json");
+    expect(capturedOptions.current?.embeddingMode).toBe("env");
+  });
+
+  it("keeps the source-bound embedding overlay out of control recall", async () => {
     const { runProductionRecallPhase } = await import(
       "../../../bench/diagnostic-loop/production-recall.js"
     );
@@ -149,7 +180,7 @@ describe("diagnostic-loop production recall consume authority", () => {
       workRoot: "/tmp/work"
     } as never, "control");
 
-    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath)
-      .toBe("/tmp/overlay-receipt.json");
+    expect(capturedOptions.current?.embeddingCacheOverlayReceiptPath).toBeUndefined();
+    expect(capturedOptions.current?.embeddingMode).toBe("disabled");
   });
 });
