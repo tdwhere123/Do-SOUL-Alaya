@@ -29,10 +29,16 @@ export async function defaultCheckPortAvailable(port: number): Promise<boolean> 
   });
 }
 
+const INSPECT_DAEMON_FETCH_TIMEOUT_MS = 30_000;
+
+function fetchDaemon(url: URL, init?: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(INSPECT_DAEMON_FETCH_TIMEOUT_MS) });
+}
+
 export async function defaultProbeDaemon(url: string, auth?: DaemonRequestAuth): Promise<InspectDaemonProbeResult> {
   const baseUrl = normalizeBaseUrl(url);
   try {
-    const response = await fetch(new URL("/health", baseUrl), {
+    const response = await fetchDaemon(new URL("/health", baseUrl), {
       method: "GET"
     });
     if (!response.ok) {
@@ -43,7 +49,7 @@ export async function defaultProbeDaemon(url: string, auth?: DaemonRequestAuth):
   }
 
   try {
-    const capability = await fetch(new URL("/config/runtime/garden-compute", baseUrl), {
+    const capability = await fetchDaemon(new URL("/config/runtime/garden-compute", baseUrl), {
       ...buildDaemonRequestInit("GET", auth)
     });
     if (capability.ok) {
@@ -63,7 +69,7 @@ export async function defaultListWorkspaces(
   auth?: DaemonRequestAuth
 ): Promise<readonly WorkspaceSummary[]> {
   const baseUrl = normalizeBaseUrl(daemonUrl);
-  const response = await fetch(new URL("workspaces", baseUrl), buildDaemonRequestInit("GET", auth));
+  const response = await fetchDaemon(new URL("workspaces", baseUrl), buildDaemonRequestInit("GET", auth));
   if (response.status === 403 && auth?.requestToken === undefined) {
     throw new Error(
       "daemon /workspaces requires request-token auth; set ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN or let `alaya inspect` manage the daemon"
@@ -88,7 +94,7 @@ export async function defaultGetWorkspaceById(
   const baseUrl = normalizeBaseUrl(daemonUrl);
   let response: Response;
   try {
-    response = await fetch(new URL(`workspaces/${encodeURIComponent(workspaceId)}`, baseUrl), {
+    response = await fetchDaemon(new URL(`workspaces/${encodeURIComponent(workspaceId)}`, baseUrl), {
       ...buildDaemonRequestInit("GET", auth)
     });
   } catch (error) {

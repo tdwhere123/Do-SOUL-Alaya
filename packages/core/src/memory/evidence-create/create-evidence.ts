@@ -17,6 +17,7 @@ import {
   appendEventLogSynchronously,
   EventLogSyncAppendRequiredError
 } from "../../runtime/event-publisher.js";
+import { runEventLogTransaction } from "../memory-service/memory-audit-append.js";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import type { EvidenceFactFrameProposalNormalizer } from
@@ -197,30 +198,28 @@ function persistCreatedEvidence(
   evidence: EvidenceCapsule,
   formation: EvidenceFormationPlan
 ): { readonly event: EventLogEntry; readonly created: Readonly<EvidenceCapsule> } {
-  const transactional = input.eventLogRepo.transactional;
-  if (transactional === undefined) {
-    throw new CoreError("CONFLICT", "Evidence create requires a transactional EventLog port", {
-      subCode: "PORT_UNAVAILABLE"
-    });
-  }
   const createInCurrentTransaction = input.evidenceCapsuleRepo.createInCurrentTransaction;
   if (createInCurrentTransaction === undefined) {
     throw new CoreError("CONFLICT", "Evidence create transaction port is not available", {
       subCode: "PORT_UNAVAILABLE"
     });
   }
-  return transactional.call(input.eventLogRepo, () => {
-    const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
-    const created = createInCurrentTransaction.call(
-      input.evidenceCapsuleRepo,
-      evidence,
-      formation.searchProjections,
-      formation.factFrameCapture,
-      formation.semanticFormation,
-      formation.semanticCompleteness
-    );
-    return { event, created };
-  });
+  return runEventLogTransaction(
+    input.eventLogRepo,
+    () => {
+      const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
+      const created = createInCurrentTransaction.call(
+        input.evidenceCapsuleRepo,
+        evidence,
+        formation.searchProjections,
+        formation.factFrameCapture,
+        formation.semanticFormation,
+        formation.semanticCompleteness
+      );
+      return { event, created };
+    },
+    "Evidence create requires a transactional EventLog port"
+  );
 }
 
 function appendCreatedSynchronously(

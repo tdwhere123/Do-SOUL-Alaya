@@ -8,7 +8,7 @@ import type { SoulPathGraphContract } from "@do-soul/alaya-protocol";
 // never participates in agent control flow. It is workspace-scoped: the
 // workspace is validated before deriving the contract.
 // see also: packages/core/src/path-graph/graph-contract-service.ts GraphContractService.derive
-//           apps/inspector/web/src/pages/Graph.tsx (BuiltPathGraph consumer)
+//           apps/inspector/web/src/pages/graph-page/ (BuiltPathGraph consumer)
 export interface PathGraphRouteServices {
   readonly workspaceService: {
     getById(workspaceId: string): Promise<Readonly<{ readonly workspace_id: string }>>;

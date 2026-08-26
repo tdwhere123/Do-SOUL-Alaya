@@ -138,18 +138,15 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
       .toThrow(/ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object/);
   });
 
-  it("ignores MCP tool catalog when the JSON envelope is not an object", () => {
-    const warn = vi.fn();
+  it("throws when MCP tool catalog JSON is invalid", () => {
+    expect(() =>
+      readDaemonMcpCatalogEnvironment({ ALAYA_MCP_TOOL_CATALOG_JSON: "{not-json" }, vi.fn())
+    ).toThrow(/ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON/);
+  });
 
-    const snapshot = readDaemonMcpCatalogEnvironment(
-      { ALAYA_MCP_TOOL_CATALOG_JSON: JSON.stringify(42) },
-      warn
-    );
-
-    expect(snapshot.rawToolCatalog.size).toBe(0);
-    expect(warn).toHaveBeenCalledWith(
-      "failed to parse ALAYA_MCP_TOOL_CATALOG_JSON; ignoring MCP discovery catalog",
-      expect.objectContaining({ error: expect.anything() })
-    );
+  it("throws when the MCP tool catalog JSON envelope is not an object", () => {
+    expect(() =>
+      readDaemonMcpCatalogEnvironment({ ALAYA_MCP_TOOL_CATALOG_JSON: JSON.stringify(42) }, vi.fn())
+    ).toThrow(/ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON/);
   });
 });

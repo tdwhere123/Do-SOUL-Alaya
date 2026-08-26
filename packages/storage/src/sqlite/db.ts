@@ -271,7 +271,7 @@ function openDatabase(filename: string): SqliteConnection {
   try {
     if (filename !== ":memory:") {
       const directory = path.dirname(filename);
-      fs.mkdirSync(directory, { recursive: true });
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
 
     const database = new BetterSqlite3(filename);

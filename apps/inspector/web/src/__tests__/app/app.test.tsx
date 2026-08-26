@@ -134,7 +134,7 @@ describe("AppContent", () => {
 
   it("keeps the launch session after redirecting from / to the real overview surface", async () => {
     const fetchMock = vi.mocked(fetch);
-    renderApp("/?workspaceId=ws1&launch=launch-code");
+    renderApp({ pathname: "/", search: "?workspaceId=ws1", hash: "#launch=launch-code" });
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(await screen.findByTestId("overview-card-proposals")).toBeTruthy();
@@ -145,7 +145,7 @@ describe("AppContent", () => {
   });
 
   it("renders the real legacy /status redirect through the system surface", async () => {
-    renderApp("/status?workspaceId=ws1&launch=launch-code");
+    renderApp("/status?workspaceId=ws1#launch=launch-code");
 
     expect(await screen.findByText("Startup Log")).toBeTruthy();
     expect(screen.getByText("repo opened")).toBeTruthy();
@@ -155,7 +155,7 @@ describe("AppContent", () => {
   it("clears stale workspace state when a fresh launch URL omits workspaceId", async () => {
     setWorkspaceId("stale-ws");
 
-    renderApp("/?launch=fresh-launch-code");
+    renderApp("/#launch=fresh-launch-code");
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(getWorkspaceId()).toBeNull();
@@ -164,7 +164,7 @@ describe("AppContent", () => {
   it("renders the lazy graph route through the app router", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null);
 
-    renderApp("/graph?launch=launch-code");
+    renderApp("/graph#launch=launch-code");
 
     expect(await screen.findByTestId("graph-no-workspace")).toBeTruthy();
     expect(
@@ -179,7 +179,7 @@ describe("AppContent", () => {
       onLaunchRedeem: () => jsonResponse({ error: "already redeemed" }, 410)
     });
 
-    renderApp("/?workspaceId=ws1&launch=used-once-code");
+    renderApp({ pathname: "/", search: "?workspaceId=ws1", hash: "#launch=used-once-code" });
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(
@@ -203,7 +203,10 @@ describe("AppContent", () => {
       }
     });
 
-    renderApp("/?workspaceId=ws1&launch=strict-launch-code", { strict: true });
+    renderApp(
+      { pathname: "/", search: "?workspaceId=ws1", hash: "#launch=strict-launch-code" },
+      { strict: true }
+    );
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(

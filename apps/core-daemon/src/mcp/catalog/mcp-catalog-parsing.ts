@@ -113,7 +113,7 @@ export function readDaemonMcpCatalogEnvironment(
 ): DaemonMcpCatalogEnvironmentSnapshot {
   return Object.freeze({
     allowedServerNames: parseAllowedMcpServerNames(env.ALAYA_ALLOWED_MCP_SERVERS),
-    rawToolCatalog: parseMcpToolCatalogByServer(env.ALAYA_MCP_TOOL_CATALOG_JSON, warn)
+    rawToolCatalog: parseMcpToolCatalogByServer(env.ALAYA_MCP_TOOL_CATALOG_JSON)
   });
 }
 
@@ -188,8 +188,7 @@ function isLoopbackMcpEndpoint(url: URL): boolean {
 }
 
 function parseMcpToolCatalogByServer(
-  rawValue: string | undefined,
-  warn: WarnLogger = defaultWarn
+  rawValue: string | undefined
 ): ReadonlyMap<string, readonly DaemonMcpCatalogToolEntry[]> {
   if (rawValue === undefined || rawValue.trim().length === 0) {
     return new Map<string, readonly DaemonMcpCatalogToolEntry[]>();
@@ -217,10 +216,7 @@ function parseMcpToolCatalogByServer(
 
     return byServer;
   } catch (error) {
-    warn("failed to parse ALAYA_MCP_TOOL_CATALOG_JSON; ignoring MCP discovery catalog", {
-      error
-    });
-    return new Map<string, readonly DaemonMcpCatalogToolEntry[]>();
+    throw new Error("ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON", { cause: error });
   }
 }
 

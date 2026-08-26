@@ -324,9 +324,10 @@ review finding:
 4. **Garden engine**: GardenScheduler started AFTER all services are
    ready; Garden roles register port adapters at this step.
 5. **Engine gateway**: provider registry + MCP bridge constructed.
-6. **MCP transport**: stdio / HTTP listener bound. From this point,
-   external agents may attach. Tool calls fail-closed if any prior
-   step did not complete.
+6. **MCP stdio + daemon HTTP**: Alaya MCP is stdio only. The HTTP listener
+   is the daemon/Inspector API, not an MCP server. From this point,
+   external agents may attach over MCP stdio. Tool calls fail-closed if any
+   prior step did not complete.
 7. **CLI bridge**: bin/alaya.mjs subcommands wired.
 
 File-backed recall reads may run on worker threads. In temporal mode, the

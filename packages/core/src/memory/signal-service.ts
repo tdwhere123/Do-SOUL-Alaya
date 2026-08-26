@@ -37,7 +37,10 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
-import { appendMemoryEventLogSynchronously } from "./memory-service/memory-audit-append.js";
+import {
+  appendMemoryEventLogSynchronously,
+  runEventLogTransaction
+} from "./memory-service/memory-audit-append.js";
 export type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
@@ -272,44 +275,42 @@ export class SignalService {
     readonly triagedEvent: EventLogEntry;
     readonly triagedSignal: CandidateMemorySignal;
   } {
-    const transactional = this.dependencies.eventLogRepo.transactional;
-    if (transactional === undefined) {
-      throw new CoreError("CONFLICT", "Signal triage requires a transactional EventLog port", {
-        subCode: "PORT_UNAVAILABLE"
-      });
-    }
     const updateStateInCurrentTransaction = this.dependencies.signalRepo.updateStateInCurrentTransaction;
     if (updateStateInCurrentTransaction === undefined) {
       throw new CoreError("CONFLICT", "Signal triage transaction port is not available", {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    return transactional.call(this.dependencies.eventLogRepo, () => {
-      const triagedEvent = appendMemoryEventLogSynchronously(
-        this.dependencies.eventLogRepo,
-        {
-          event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-          entity_type: "candidate_memory_signal",
-          entity_id: storedSignal.signal_id,
-          workspace_id: storedSignal.workspace_id,
-          run_id: storedSignal.run_id,
-          caused_by: "deterministic_rule",
-          payload_json: SoulSignalTriagedPayloadSchema.parse({
-            signal_id: storedSignal.signal_id,
+    return runEventLogTransaction(
+      this.dependencies.eventLogRepo,
+      () => {
+        const triagedEvent = appendMemoryEventLogSynchronously(
+          this.dependencies.eventLogRepo,
+          {
+            event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
+            entity_type: "candidate_memory_signal",
+            entity_id: storedSignal.signal_id,
             workspace_id: storedSignal.workspace_id,
             run_id: storedSignal.run_id,
-            triage_result: triageResult
-          })
-        },
-        "Signal triage transaction requires a synchronous EventLog append port."
-      );
-      const triagedSignal = updateStateInCurrentTransaction.call(
-        this.dependencies.signalRepo,
-        storedSignal.signal_id,
-        triagedState
-      );
-      return { triagedEvent, triagedSignal };
-    });
+            caused_by: "deterministic_rule",
+            payload_json: SoulSignalTriagedPayloadSchema.parse({
+              signal_id: storedSignal.signal_id,
+              workspace_id: storedSignal.workspace_id,
+              run_id: storedSignal.run_id,
+              triage_result: triageResult
+            })
+          },
+          "Signal triage transaction requires a synchronous EventLog append port."
+        );
+        const triagedSignal = updateStateInCurrentTransaction.call(
+          this.dependencies.signalRepo,
+          storedSignal.signal_id,
+          triagedState
+        );
+        return { triagedEvent, triagedSignal };
+      },
+      "Signal triage requires a transactional EventLog port"
+    );
   }
 
   /** Compatibility path for isolated fakes; daemon wiring always supplies emissionWriter. */
