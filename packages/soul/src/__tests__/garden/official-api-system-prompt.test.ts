@@ -89,7 +89,10 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
       '"arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]'
     );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain('"fact_frame"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"fact_frame"');
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      "fact_frame and semantic_factor_graph must describe the same complete proposition"
+    );
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       `response signal contract version is ${OFFICIAL_API_SIGNAL_CONTRACT_VERSION}`
     );
@@ -148,8 +151,11 @@ describe("official API system prompt", () => {
       "5ec2740bd63923305b376b240d5a219383f3cbfe8a7d9198d504f7f8de542326";
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
+    const g19cSha256 =
+      "785cbdcc8645424b94cb9ed030508bf66413258b38fb05236e98ed979e83acac";
     const historical = resolveOfficialApiSystemPrompt(historicalSha256);
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
+    const g19c = resolveOfficialApiSystemPrompt(g19cSha256);
 
     expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(historical).toBeDefined();
@@ -158,6 +164,10 @@ describe("official API system prompt", () => {
     expect(g8).toBeDefined();
     expect(sha256(g8!)).toBe(g8Sha256);
     expect(g8).not.toContain("kind_projection");
+    expect(g19c).toBeDefined();
+    expect(sha256(g19c!)).toBe(g19cSha256);
+    expect(g19c).toContain("kind_projection");
+    expect(g19c).not.toContain('"fact_frame"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("kind_projection");
     expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
   });
