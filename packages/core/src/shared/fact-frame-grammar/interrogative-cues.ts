@@ -12,7 +12,7 @@ export type InterrogativeCueScan = Readonly<{
 
 const TIME_WH: ReadonlySet<string> = new Set(["when"]);
 const CJK_TIME_CUES = ["几点", "什么时候"] as const;
-const CJK_INTERROGATIVE_CUES = [
+export const CJK_INTERROGATIVE_CUES = [
   ...CJK_INTERROGATIVE_RESULT_FORMS,
   ...CJK_TIME_CUES,
   "什么", "谁", "哪", "几", "吗", "多大", "多少"
