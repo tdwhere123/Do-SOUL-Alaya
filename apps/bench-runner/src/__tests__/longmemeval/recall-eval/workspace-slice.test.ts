@@ -25,6 +25,7 @@ import {
   EVIDENCE_B,
   MEMORY_A,
   MEMORY_B,
+  plantPackedPathProjections,
   TOKEN_A,
   TOKEN_B,
   WORKSPACE_A,
@@ -139,6 +140,45 @@ describe("packed workspace slice explode", () => {
       destDir: join(root, "slices-unhandled"),
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
     })).toThrow(/unhandled table orphan_global_probe/u);
+  });
+
+  it("rebinds temporal receipts so a sliced dest still passes the runtime gate", () => {
+    plantPackedPathProjections(packedPath);
+    closeCachedDatabase(packedPath);
+    const destDir = join(root, "slices-temporal");
+    const exploded = explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir,
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
+    });
+    const sliceA = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_A]! });
+    const sliceB = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_B]! });
+    try {
+      expect(countTable(sliceA, "relation_path_projections")).toBe(1);
+      expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(0);
+      expect(readProjectionCount(sliceA)).toBe(1);
+      expect(countTable(sliceB, "relation_path_projections")).toBe(1);
+      expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(0);
+      expect(readProjectionCount(sliceB)).toBe(1);
+    } finally {
+      sliceA.close();
+      sliceB.close();
+    }
+    const dataDir = join(root, "temporal-install");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: dataDir,
+      workspaceId: WORKSPACE_A,
+      slices: exploded
+    });
+    const working = initDatabase({ filename: workingAlayaDbPath(dataDir) });
+    try {
+      expect(countTable(working, "relation_path_projections")).toBe(1);
+      expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(0);
+      expect(readProjectionCount(working)).toBe(1);
+    } finally {
+      working.close();
+    }
   });
 });
 
@@ -370,6 +410,13 @@ function countTable(database: ReturnType<typeof initDatabase>, table: string): n
   const row = database.connection.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
     n: number;
   };
+  return row.n;
+}
+
+function readProjectionCount(database: ReturnType<typeof initDatabase>): number {
+  const row = database.connection.prepare(
+    "SELECT projection_count AS n FROM temporal_schema_state WHERE state_id = 1"
+  ).get() as { n: number };
   return row.n;
 }
 
