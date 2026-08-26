@@ -9,12 +9,18 @@ import type {
   DiagnosticLoopPhaseResult
 } from "./types.js";
 import { resolveSnapshotIdentity } from "./authority/identity.js";
+import { maybeEmitSnapshotEmbeddingOverlay } from
+  "../snapshot/recall-eval/embedding-cache-overlay/ensure.js";
 
 export async function runProductionSnapshotPhase(
   context: DiagnosticLoopPhaseContext
 ): Promise<DiagnosticLoopPhaseResult> {
   if (context.request.snapshotPath !== undefined) {
-    return reuseSnapshot(context.request.snapshotPath, context.request.variant);
+    return reuseSnapshot(
+      context.request.snapshotPath,
+      context.request.variant,
+      context.request.embeddingCacheOverlayReceiptPath
+    );
   }
   if (context.request.snapshotOutPath === undefined) {
     throw new DiagnosticLoopFailure({
@@ -53,6 +59,12 @@ export async function runProductionSnapshotPhase(
     });
   }
   const identity = await resolveSnapshotIdentity(result.snapshotPath, context.request.variant);
+  await maybeEmitSnapshotEmbeddingOverlay({
+    snapshotDbPath: result.snapshotPath,
+    ...(context.request.embeddingCacheOverlayReceiptPath === undefined
+      ? {}
+      : { receiptPathOverride: context.request.embeddingCacheOverlayReceiptPath })
+  });
   return {
     contentIdentity: identity.identity_digest,
     physicalCalls: 0,
@@ -63,7 +75,8 @@ export async function runProductionSnapshotPhase(
 
 async function reuseSnapshot(
   snapshotPath: string,
-  variant: DiagnosticLoopPhaseContext["request"]["variant"]
+  variant: DiagnosticLoopPhaseContext["request"]["variant"],
+  overlayReceiptPath?: string
 ): Promise<DiagnosticLoopPhaseResult> {
   if (!existsSync(snapshotPath)) {
     throw new DiagnosticLoopFailure({
@@ -74,6 +87,10 @@ async function reuseSnapshot(
     });
   }
   const identity = await resolveSnapshotIdentity(snapshotPath, variant);
+  await maybeEmitSnapshotEmbeddingOverlay({
+    snapshotDbPath: snapshotPath,
+    ...(overlayReceiptPath === undefined ? {} : { receiptPathOverride: overlayReceiptPath })
+  });
   return {
     contentIdentity: identity.identity_digest,
     physicalCalls: 0,

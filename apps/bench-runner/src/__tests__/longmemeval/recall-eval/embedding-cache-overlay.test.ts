@@ -300,6 +300,29 @@ describe("readonly snapshot overlay emit", () => {
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/alaya-onnx-cache"
     }).cacheDir).toBe("/tmp/alaya-onnx-cache");
   });
+
+  it("fails closed when emit produces no vectors", async () => {
+    const emptyPath = join(root, "empty.db");
+    const emptyReceipt = join(root, "empty-overlay.json");
+    const empty = initDatabase({ filename: emptyPath });
+    empty.close();
+
+    await expect(emitEmbeddingCacheOverlay({
+      snapshotDbPath: emptyPath,
+      receiptPath: emptyReceipt,
+      provider: {
+        providerKind: VECTOR_SPACE.provider_kind,
+        modelId: VECTOR_SPACE.model_id,
+        schemaVersion: VECTOR_SPACE.schema_version,
+        isAvailable: true,
+        embedTexts: async () => []
+      },
+      source: {
+        ...expectedBinding(),
+        source_schema_version: readSchemaMigrationLedger(emptyPath).at(-1)!
+      }
+    })).rejects.toThrow(/produced no vectors/u);
+  });
 });
 
 async function writeFixtureOverlay() {

@@ -100,6 +100,12 @@ export interface LoadedEmbeddingCacheOverlay {
 
 export type EmbeddingCacheOverlayReceiptDocument = z.infer<typeof ReceiptSchema>;
 
+export function readEmbeddingCacheOverlayReceipt(
+  receiptPath: string
+): EmbeddingCacheOverlayReceiptDocument {
+  return parseReceipt(readRegularFileNoFollow(receiptPath, MAX_RECEIPT_BYTES));
+}
+
 export function readEmbeddingCacheOverlay(input: {
   readonly receiptPath: string;
   readonly expected: EmbeddingCacheOverlayExpectedSourceBinding;
@@ -175,7 +181,7 @@ function assertSourceBinding(
   }
 }
 
-function sameVectorSpace(
+export function sameVectorSpace(
   left: EmbeddingCacheVectorSpace,
   right: EmbeddingCacheVectorSpaceExpectation
 ): boolean {
