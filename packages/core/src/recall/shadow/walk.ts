@@ -120,6 +120,13 @@ export function isCapturedWalk(
   return result.kind === "captured";
 }
 
+export function deterministicTailDecidedThisPick(
+  receipt: ShadowCaptureDecisionReceipt
+): boolean {
+  return receipt.max_g_cohort.length > 1 &&
+    receipt.equal_g_dominance_rejects.length === 0;
+}
+
 function createWalkState(input: ShadowCaptureWalkInput): WalkState {
   const remaining = new Map<string, ShadowCaptureWalkCandidate>();
   for (const candidate of input.candidates) {

@@ -6,6 +6,7 @@ import {
   type ShadowSetUtilityInput
 } from "../../../recall/shadow/index.js";
 import {
+  deterministicTailDecidedThisPick,
   isCapturedWalk,
   prefixSK,
   walkShadowCapture,
@@ -169,6 +170,7 @@ describe("shadow lexicographic capture walk", () => {
       equal_g_dominance_rejects: [{ candidate_key: "B", dominated_by: "A" }],
       deterministic_tail: "candidate_key_code_unit_ascending"
     });
+    expect(deterministicTailDecidedThisPick(result.decisions[0]!)).toBe(false);
   });
 
   it("guards equal-G three-level Psi chain so the tail cannot pick B or C", () => {
@@ -264,6 +266,7 @@ describe("shadow lexicographic capture walk", () => {
       unresolved_pointwise_tradeoff: true,
       deterministic_tail: "candidate_key_code_unit_ascending"
     });
+    expect(deterministicTailDecidedThisPick(equal.decisions[0]!)).toBe(true);
   });
 
   it.each([
