@@ -9,6 +9,8 @@ import { materializeAttributedFacilityMatches } from
   "../../field/facility/match-materialization.js";
 import { resolveCandidateCoverageReceipt } from
   "../../delivery/fine-assessment-selection/coverage-atoms.js";
+import { attachContentOwnedFactProjection } from
+  "../../delivery/fine-assessment-selection/content-owned-fact-key.js";
 import {
   buildRecallCandidateDedupeKey,
   buildRecallLogicalObjectKey
@@ -88,7 +90,10 @@ function candidateCoverage(
   return Object.freeze({
     candidate_key: candidateKey,
     object_id: candidate.entry.object_id,
-    coverage
+    coverage: attachContentOwnedFactProjection(coverage, {
+      objectId: candidate.entry.object_id,
+      content: candidate.entry.content
+    })
   });
 }
 
