@@ -1,3 +1,5 @@
+import type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
+
 export const PRODUCT_PHASES = [
   "formation",
   "composition",
@@ -40,6 +42,7 @@ export type ProductPhaseQuestion = Readonly<{
   open_semantic_factor_composition?: { readonly status?: string | null } | null;
   open_semantic_factor_activation?: { readonly status?: string | null } | null;
   open_semantic_factor_archive?: { readonly replayable?: false } | null;
+  capture_receipt?: Pick<CanonicalSelectionReceipt, "execution" | "dispositions"> | null;
   delivered_results?: readonly unknown[];
   candidates?: readonly Readonly<{
     selection_order?: number | null;
@@ -106,6 +109,15 @@ function semanticPhase(
 }
 
 function selectionPhase(question: ProductPhaseQuestion): ProductPhaseRecord {
+  if (question.capture_receipt != null) {
+    const selected = question.capture_receipt.execution.status === "captured" &&
+      question.capture_receipt.dispositions.some((row) => row.status === "selected");
+    return {
+      phase: "selection",
+      status: selected ? "selected" : "not_selected",
+      authority: "product"
+    };
+  }
   const candidates = question.candidates ?? [];
   const observed = candidates.some((candidate) =>
     candidate.selection_order != null ||

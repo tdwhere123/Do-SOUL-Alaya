@@ -90,6 +90,38 @@ describe("product phase authority", () => {
     expect(() => assertProductPhaseAuthority(selectedWithoutDelivery)).not.toThrow();
   });
 
+  it("uses the canonical capture receipt as the product selection observation", () => {
+    const selected = assertProductPhaseAuthority({
+      open_semantic_factor_activation: { status: "composed" },
+      capture_receipt: {
+        execution: { status: "captured", reason: null },
+        dispositions: [{
+          candidate_key: "candidate:a",
+          status: "selected",
+          reason: "selected_by_gamma"
+        }]
+      }
+    });
+    expect(selected.selection).toEqual({
+      phase: "selection", status: "selected", authority: "product"
+    });
+
+    const failClosed = assertProductPhaseAuthority({
+      open_semantic_factor_activation: { status: "composed" },
+      capture_receipt: {
+        execution: { status: "fail_closed", reason: "invalid_state" },
+        dispositions: [{
+          candidate_key: "candidate:a",
+          status: "unavailable",
+          reason: "fail_closed_unavailable"
+        }]
+      }
+    });
+    expect(failClosed.selection).toEqual({
+      phase: "selection", status: "not_selected", authority: "product"
+    });
+  });
+
   it("rejects a live question that omits delivered_results", () => {
     const live = {
       question_id: "q-live",

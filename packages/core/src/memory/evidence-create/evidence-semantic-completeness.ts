@@ -2,13 +2,15 @@ import { createHash } from "node:crypto";
 import type {
   AssociativeFactSlotRole,
   EvidenceFactFrameFormationCapture,
-  OpenSemanticFactorFormationCapture
+  OpenSemanticFactorFormationCapture,
+  OpenSemanticFactorGraph
 } from "@do-soul/alaya-protocol";
 import {
   EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
   EvidenceOsfSemanticCompletenessReceiptSchema,
   evidenceFactFrameGraphIsComplete,
   evidenceOsfSemanticCompletenessPreimage,
+  normalizeMemoryObjectKeySurface,
   verifyEvidenceOsfSemanticCompleteness,
   type EvidenceOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
@@ -17,6 +19,12 @@ import { materializeOpenSemanticFactorFormation } from
 
 export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
   "@do-soul/alaya-protocol";
+
+export const FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID =
+  "core_fact_frame_canonical_open_semantic_factor_v1";
+
+const GARDEN_SOURCE_BOUND_OSF_PRODUCER_OPERATOR_ID =
+  "garden_source_bound_open_semantic_factor_v3";
 
 type GroundedObligationSlot = Readonly<{
   readonly role: AssociativeFactSlotRole;
@@ -51,7 +59,12 @@ export function certifyEvidenceSemanticCompleteness(input: Readonly<{
     fact_frame: input.factFrame.fact_frame,
     graph: input.semanticFormation.graph
   })) {
-    return rejected(input, "semantic_graph_incomplete", obligation);
+    const canonical = canonicalizeGardenSemanticFormation(input, obligation);
+    if (canonical === null) {
+      return rejected(input, "semantic_graph_incomplete", obligation);
+    }
+    const canonicalInput = Object.freeze({ ...input, semanticFormation: canonical });
+    return result(canonical, receipt(canonicalInput, "certified", "complete", obligation));
   }
   return result(input.semanticFormation, receipt(input, "certified", "complete", obligation));
 }
@@ -60,6 +73,110 @@ type EvidenceObligation = Readonly<{
   readonly predicate: GroundedObligationSlot;
   readonly arguments: readonly GroundedObligationSlot[];
 }>;
+
+function canonicalizeGardenSemanticFormation(
+  input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
+  obligation: EvidenceObligation
+): OpenSemanticFactorFormationCapture | null {
+  const upstream = input.semanticFormation;
+  if (upstream.producer_operator_id !== GARDEN_SOURCE_BOUND_OSF_PRODUCER_OPERATOR_ID ||
+      upstream.graph === null) return null;
+  const proposal = canonicalGraphProposal(input.sourceText, obligation, upstream.graph);
+  const formation = materializeOpenSemanticFactorFormation({
+    source_kind: "evidence",
+    source_text: input.sourceText,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
+      source_text: input.sourceText,
+      graph: proposal
+    }
+  });
+  return formation.status === "formed" && formation.graph !== null &&
+    evidenceFactFrameGraphIsComplete({
+      source_text: input.sourceText,
+      fact_frame: input.factFrame.fact_frame,
+      graph: formation.graph
+    })
+    ? formation
+    : null;
+}
+
+function canonicalGraphProposal(
+  source: string,
+  obligation: EvidenceObligation,
+  upstream: Readonly<OpenSemanticFactorGraph>
+) {
+  const slots = [obligation.predicate, ...obligation.arguments];
+  const factors = slots.map((slot, index) => ({
+    factor_id: index === 0 ? "predicate" : `argument_${index - 1}`,
+    surface: slot.surface,
+    source_occurrence: sourceOccurrence(source, slot.surface, slot.source_span[0]),
+    semantic_identity: semanticIdentityForSlot(slot, upstream)
+  }));
+  return Object.freeze({
+    schema_version: 2 as const,
+    source_kind: "evidence" as const,
+    result_variable_ids: Object.freeze([]),
+    propositions: Object.freeze([Object.freeze({
+      proposition_id: "fact_frame",
+      predicate_factor_id: "predicate",
+      arguments: Object.freeze(obligation.arguments.map((slot, index) => Object.freeze({
+        position: index,
+        binding_identity: slot.role,
+        reference_kind: "factor" as const,
+        reference_id: `argument_${index}`
+      })))
+    })]),
+    factors: Object.freeze(factors.map(Object.freeze)),
+    variables: Object.freeze([])
+  });
+}
+
+function semanticIdentityForSlot(
+  slot: GroundedObligationSlot,
+  graph: Readonly<OpenSemanticFactorGraph>
+): string {
+  const aligned = [...graph.factors]
+    .filter((factor) => spansOverlap(factor.source_span, slot.source_span))
+    .sort((left, right) =>
+      alignmentClass(left.source_span, slot.source_span) -
+        alignmentClass(right.source_span, slot.source_span) ||
+      left.source_span[0] - right.source_span[0] ||
+      left.source_span[1] - right.source_span[1] ||
+      left.factor_id.localeCompare(right.factor_id));
+  return aligned[0]?.semantic_identity ?? normalizeMemoryObjectKeySurface(slot.surface);
+}
+
+function alignmentClass(
+  factor: readonly [number, number],
+  slot: readonly [number, number]
+): number {
+  if (factor[0] === slot[0] && factor[1] === slot[1]) return 0;
+  if (factor[0] >= slot[0] && factor[1] <= slot[1]) return 1;
+  if (slot[0] >= factor[0] && slot[1] <= factor[1]) return 2;
+  return 3;
+}
+
+function spansOverlap(
+  left: readonly [number, number],
+  right: readonly [number, number]
+): boolean {
+  return left[0] < right[1] && right[0] < left[1];
+}
+
+function sourceOccurrence(source: string, surface: string, expectedStart: number): number {
+  let occurrence = 0;
+  let cursor = 0;
+  while (cursor <= expectedStart) {
+    const start = source.indexOf(surface, cursor);
+    if (start === expectedStart) return occurrence;
+    if (start < 0 || start > expectedStart) break;
+    occurrence += 1;
+    cursor = start + surface.length;
+  }
+  return 0;
+}
 
 function rejected(
   input: Parameters<typeof certifyEvidenceSemanticCompleteness>[0],
