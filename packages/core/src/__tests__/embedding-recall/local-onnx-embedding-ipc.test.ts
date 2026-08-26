@@ -31,6 +31,18 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     expect(parentMapsOnnxRuntime()).toBe(false);
   });
 
+  it("keeps the isolated child referenced while an IPC request is pending", async () => {
+    const tracking = trackingHost();
+    const client = openClient(tracking.host);
+
+    await expect(client.embedTexts(["ok"], { timeoutMs: 5_000 })).resolves.toHaveLength(1);
+
+    expect(tracking.processRefs).toBeGreaterThan(0);
+    expect(tracking.channelRefs).toBeGreaterThan(0);
+    expect(tracking.processUnrefs).toBeGreaterThan(tracking.processRefs);
+    expect(tracking.channelUnrefs).toBeGreaterThan(tracking.channelRefs);
+  });
+
   it("fail-closes when the child exits mid-request", async () => {
     const client = openClient();
     await expect(client.embedTexts(["__crash__"], { timeoutMs: 5_000 })).rejects.toBeInstanceOf(
@@ -99,7 +111,62 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
       }
     };
   }
+
+  function trackingHost(): TrackingHost {
+    const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    const counts = {
+      processRefs: 0,
+      processUnrefs: 0,
+      channelRefs: 0,
+      channelUnrefs: 0
+    };
+    return {
+      host: {
+        spawn() {
+          const child = inner.spawn();
+          const channel = (child as { channel?: { ref?(): void; unref?(): void } }).channel;
+          return new Proxy(child, {
+            get(target, property, receiver) {
+              if (property === "ref") return () => {
+                counts.processRefs += 1;
+                (target as { ref?(): void }).ref?.();
+              };
+              if (property === "unref") return () => {
+                counts.processUnrefs += 1;
+                target.unref?.();
+              };
+              if (property === "channel" && channel !== undefined) {
+                return {
+                  ref: () => {
+                    counts.channelRefs += 1;
+                    channel.ref?.();
+                  },
+                  unref: () => {
+                    counts.channelUnrefs += 1;
+                    channel.unref?.();
+                  }
+                };
+              }
+              return Reflect.get(target, property, receiver);
+            }
+          });
+        }
+      },
+      get processRefs() { return counts.processRefs; },
+      get processUnrefs() { return counts.processUnrefs; },
+      get channelRefs() { return counts.channelRefs; },
+      get channelUnrefs() { return counts.channelUnrefs; }
+    };
+  }
 });
+
+interface TrackingHost {
+  readonly host: LocalOnnxEmbeddingIpcHost;
+  readonly processRefs: number;
+  readonly processUnrefs: number;
+  readonly channelRefs: number;
+  readonly channelUnrefs: number;
+}
 
 function parentMapsOnnxRuntime(): boolean {
   if (process.platform !== "linux") return false;

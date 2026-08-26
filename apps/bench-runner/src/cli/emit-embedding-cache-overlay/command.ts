@@ -25,32 +25,36 @@ export async function runEmitEmbeddingCacheOverlayCommand(
       throw new Error("emit-embedding-cache-overlay requires embedding admission");
     }
     const provider = createProductOverlayEmbeddingProvider(env);
-    const supplement = await resolveEmbeddingSupplementRuntimeProvenance(
-      "env",
-      "local_onnx",
-      env
-    );
-    if (!supplement.enabled || supplement.provider_kind !== "local_onnx") {
-      throw new Error("emit-embedding-cache-overlay requires product local_onnx");
+    try {
+      const supplement = await resolveEmbeddingSupplementRuntimeProvenance(
+        "env",
+        "local_onnx",
+        env
+      );
+      if (!supplement.enabled || supplement.provider_kind !== "local_onnx") {
+        throw new Error("emit-embedding-cache-overlay requires product local_onnx");
+      }
+      const source = await bindOverlaySourceFromSnapshot({
+        snapshotDbPath: parsed.snapshot,
+        provider,
+        dimensions: LOCAL_ONNX_EMBEDDING_DIMENSIONS,
+        modelArtifactSha256: supplement.model_artifact_sha256
+      });
+      const binding = await emitEmbeddingCacheOverlay({
+        snapshotDbPath: parsed.snapshot,
+        receiptPath: parsed.receipt,
+        provider,
+        source
+      });
+      process.stdout.write(
+        `Done. Overlay receipt: ${parsed.receipt}\n` +
+          `  memory_embeddings=${binding.memory_embedding_count}\n` +
+          `  evidence_embeddings=${binding.evidence_embedding_count}\n`
+      );
+      return 0;
+    } finally {
+      await provider.close();
     }
-    const source = await bindOverlaySourceFromSnapshot({
-      snapshotDbPath: parsed.snapshot,
-      provider,
-      dimensions: LOCAL_ONNX_EMBEDDING_DIMENSIONS,
-      modelArtifactSha256: supplement.model_artifact_sha256
-    });
-    const binding = await emitEmbeddingCacheOverlay({
-      snapshotDbPath: parsed.snapshot,
-      receiptPath: parsed.receipt,
-      provider,
-      source
-    });
-    process.stdout.write(
-      `Done. Overlay receipt: ${parsed.receipt}\n` +
-        `  memory_embeddings=${binding.memory_embedding_count}\n` +
-        `  evidence_embeddings=${binding.evidence_embedding_count}\n`
-    );
-    return 0;
   } catch (error) {
     process.stderr.write(
       `alaya-bench-runner emit-embedding-cache-overlay: ${

@@ -11,6 +11,7 @@ import { decodeLocalOnnxIpcVectors } from "./vectors.js";
 
 export interface LocalOnnxEmbeddingIpcProcess {
   readonly pid?: number;
+  readonly channel?: Readonly<{ ref?(): void; unref?(): void }> | null;
   send(message: unknown, callback?: (error: Error | null) => void): boolean;
   on(event: "message", listener: (message: unknown) => void): unknown;
   on(
@@ -19,6 +20,7 @@ export interface LocalOnnxEmbeddingIpcProcess {
   ): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
   kill(signal?: NodeJS.Signals): boolean;
+  ref?(): void;
   unref?(): void;
 }
 
@@ -138,13 +140,20 @@ export class LocalOnnxEmbeddingIpcSession {
     const child = this.ensureChild();
     const id = ++this.nextId;
     const message = this.buildRequest(id, op, texts, timeoutMs);
-    return await waitForLocalOnnxIpcResponse(
-      this.pending,
-      child,
-      message,
-      signal,
-      (error) => this.recycleAfterAbort(child, message.id, error)
-    );
+    refLocalOnnxEmbeddingChild(child);
+    try {
+      return await waitForLocalOnnxIpcResponse(
+        this.pending,
+        child,
+        message,
+        signal,
+        (error) => this.recycleAfterAbort(child, message.id, error)
+      );
+    } finally {
+      if (this.child === child && this.pending.size === 0) {
+        unrefLocalOnnxEmbeddingChild(child);
+      }
+    }
   }
 
   private ensureChild(): LocalOnnxEmbeddingIpcProcess {
@@ -159,7 +168,7 @@ export class LocalOnnxEmbeddingIpcSession {
     child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
     child.on("error", (error) => this.onSpawnError(epoch, error));
     // IPC must not pin the pager/daemon event loop after recall finishes.
-    child.unref?.();
+    unrefLocalOnnxEmbeddingChild(child);
     return child;
   }
 
@@ -246,6 +255,16 @@ function spawnLocalOnnxEmbeddingChild(scriptPath: string): ChildProcess {
   child.unref();
   child.channel?.unref();
   return child;
+}
+
+function refLocalOnnxEmbeddingChild(child: LocalOnnxEmbeddingIpcProcess): void {
+  child.ref?.();
+  child.channel?.ref?.();
+}
+
+function unrefLocalOnnxEmbeddingChild(child: LocalOnnxEmbeddingIpcProcess): void {
+  child.unref?.();
+  child.channel?.unref?.();
 }
 
 function waitForLocalOnnxIpcResponse(
