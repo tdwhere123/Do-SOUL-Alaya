@@ -5,6 +5,11 @@ import {
 import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
   "../../../snapshot/recall-eval/recall-eval-working-sqlite.js";
 import {
+  explodeRecallEvalWorkingCopyIfNeeded,
+  installRecallEvalWorkspaceSlice,
+  type ExplodedWorkspaceSlices
+} from "../../../snapshot/recall-eval/workspace-slice/index.js";
+import {
   readWarmDerivedSnapshotReceipt,
   type WarmDerivedSnapshotReceipt
 } from "../../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
@@ -33,6 +38,7 @@ interface PagerRuntime {
   readonly daemon: BenchDaemonHandle;
   readonly spool: LongMemEvalSelectionBoundarySpool | null;
   readonly open: RecallEvalPagerOpenPayload;
+  readonly slices: ExplodedWorkspaceSlices | null;
 }
 
 let runtime: PagerRuntime | null = null;
@@ -53,6 +59,16 @@ export async function openRecallEvalPagerChild(
       ? {}
       : { overlayExpected: payload.overlayExpected })
   });
+  const slices = explodeRecallEvalWorkingCopyIfNeeded({
+    dataDirRoot: payload.dataDirRoot
+  });
+  if (slices !== null && slices.workspaceIds[0] !== undefined) {
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: payload.dataDirRoot,
+      workspaceId: slices.workspaceIds[0],
+      slices
+    });
+  }
   const daemon = await startBenchDaemon({
     dataDirRoot: payload.dataDirRoot,
     embeddingMode: payload.daemonLaunch.embeddingMode,
@@ -63,7 +79,8 @@ export async function openRecallEvalPagerChild(
   runtime = {
     daemon,
     spool,
-    open: payload
+    open: payload,
+    slices
   };
   return { ...sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
 }
@@ -72,6 +89,14 @@ export async function recallRecallEvalPagerChild(
   payload: RecallEvalPagerRecallPayload
 ): Promise<RecallEvalQuestionResult> {
   const current = requireRuntime();
+  if (current.slices !== null) {
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: current.open.dataDirRoot,
+      workspaceId: payload.question.workspaceId,
+      slices: current.slices
+    });
+    current.daemon.reloadWorkingDatabase();
+  }
   const activation = createCandidateActivationCapture(
     current.open.captureOpenSemanticFactorCandidateActivations
   );

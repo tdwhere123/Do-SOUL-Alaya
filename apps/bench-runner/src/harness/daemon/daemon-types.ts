@@ -313,6 +313,8 @@ export interface BenchDaemonHandle {
     readonly workspaceId: string;
     readonly runId: string;
   }): Promise<BenchWorkspaceHandle>;
+  /** Reopen StorageDatabase after the working file at dataDir/alaya.db is replaced. */
+  reloadWorkingDatabase(): void;
   shutdown(): Promise<void>;
 }
 

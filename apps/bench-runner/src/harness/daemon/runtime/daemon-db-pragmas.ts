@@ -99,6 +99,16 @@ export function optimizeBenchDb(dataDir: string): void {
   }
 }
 
+// Slice install may close the cached handle; reopen so prepared statements
+// bind the current alaya.db inode instead of a renamed packed copy.
+export function reloadBenchWorkingDatabase(dataDir: string): void {
+  const live = initDatabase({ filename: join(dataDir, "alaya.db") });
+  live.reopenIfClosed();
+  applyBenchFastPragmaIfRequested(dataDir);
+  optimizeBenchDb(dataDir);
+  live.connection.exec("ANALYZE");
+}
+
 export function applyBenchFastPragmaIfRequested(
   dataDir: string
 ): BenchFastPragmaResult {

@@ -1,8 +1,12 @@
 import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { cascadeDeleteWorkspace } from "../path/cascade-delete.js";
-import { prepareWorkspaceStatements, type SqliteStatement } from "./workspace-statements.js";
+import {
+  prepareWorkspaceStatements,
+  type WorkspaceStatements
+} from "./workspace-statements.js";
 
 // Walk the underlying better-sqlite3 error and any wrapped causes to detect
 // a UNIQUE-constraint collision on a specific qualified column. Driver
@@ -67,25 +71,14 @@ interface CountRow {
 }
 
 export class SqliteWorkspaceRepo implements WorkspaceRepo {
-  private readonly createStatement: SqliteStatement;
-  private readonly getByIdStatement: SqliteStatement;
-  private readonly listStatement: SqliteStatement;
-  private readonly listPagedStatement: SqliteStatement;
-  private readonly countStatement: SqliteStatement;
-  private readonly updateRepoPathStatement: SqliteStatement;
-  private readonly updateDefaultEngineBindingStatement: SqliteStatement;
-  private readonly updateDefaultEngineClassStatement: SqliteStatement;
+  private readonly statementHolder: RefreshableStatementHolder<WorkspaceStatements>;
 
   public constructor(private readonly db: StorageDatabase) {
-    const statements = prepareWorkspaceStatements(db);
-    this.createStatement = statements.createStatement;
-    this.getByIdStatement = statements.getByIdStatement;
-    this.listStatement = statements.listStatement;
-    this.listPagedStatement = statements.listPagedStatement;
-    this.countStatement = statements.countStatement;
-    this.updateRepoPathStatement = statements.updateRepoPathStatement;
-    this.updateDefaultEngineBindingStatement = statements.updateDefaultEngineBindingStatement;
-    this.updateDefaultEngineClassStatement = statements.updateDefaultEngineClassStatement;
+    this.statementHolder = new RefreshableStatementHolder(db, prepareWorkspaceStatements);
+  }
+
+  private active(): WorkspaceStatements {
+    return this.statementHolder.active();
   }
 
   public create(data: WorkspaceCreateInput): Workspace {
@@ -98,7 +91,7 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     });
 
     try {
-      this.createStatement.run(
+      this.active().createStatement.run(
         workspace.workspace_id,
         workspace.name,
         workspace.root_path,
@@ -130,7 +123,7 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
 
   public async getById(id: string): Promise<Workspace | null> {
     try {
-      const row = this.getByIdStatement.get(id) as WorkspaceRow | undefined;
+      const row = this.active().getByIdStatement.get(id) as WorkspaceRow | undefined;
       return row === undefined ? null : parseWorkspace(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load workspace ${id}.`, error);
@@ -141,8 +134,8 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     try {
       const rows =
         page === undefined
-          ? (this.listStatement.all() as WorkspaceRow[])
-          : (this.listPagedStatement.all(page.limit, page.offset) as WorkspaceRow[]);
+          ? (this.active().listStatement.all() as WorkspaceRow[])
+          : (this.active().listPagedStatement.all(page.limit, page.offset) as WorkspaceRow[]);
       return rows.map((row) => parseWorkspace(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to list workspaces.", error);
@@ -151,7 +144,7 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
 
   public async count(): Promise<number> {
     try {
-      const row = this.countStatement.get() as CountRow | undefined;
+      const row = this.active().countStatement.get() as CountRow | undefined;
       return row === undefined ? 0 : Number(row.total);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
@@ -159,12 +152,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
   }
 
   public delete(id: string): void {
+    this.active();
     cascadeDeleteWorkspace(this.db.connection, id);
   }
 
   public async updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace> {
     try {
-      const result = this.updateRepoPathStatement.run(repoPath, id);
+      const result = this.active().updateRepoPathStatement.run(repoPath, id);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found.`);
@@ -188,13 +182,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
 
   public updateDefaultEngineBinding(id: string, bindingId: string | null): Workspace {
     try {
-      const result = this.updateDefaultEngineBindingStatement.run(bindingId, id);
+      const result = this.active().updateDefaultEngineBindingStatement.run(bindingId, id);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found.`);
       }
 
-      const row = this.getByIdStatement.get(id) as WorkspaceRow | undefined;
+      const row = this.active().getByIdStatement.get(id) as WorkspaceRow | undefined;
 
       if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found after update.`);
@@ -215,13 +209,13 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     engineClass: Workspace["default_engine_class"]
   ): Workspace {
     try {
-      const result = this.updateDefaultEngineClassStatement.run(engineClass ?? null, id);
+      const result = this.active().updateDefaultEngineClassStatement.run(engineClass ?? null, id);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found.`);
       }
 
-      const row = this.getByIdStatement.get(id) as WorkspaceRow | undefined;
+      const row = this.active().getByIdStatement.get(id) as WorkspaceRow | undefined;
 
       if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Workspace ${id} was not found after update.`);
