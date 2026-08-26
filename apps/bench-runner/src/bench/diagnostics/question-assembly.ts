@@ -1,5 +1,7 @@
 import { resolvePremiseInvalid } from "./abstention.js";
+import { classifyMiss } from "./miss/classify-miss.js";
 import { classifyQuestionMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
+import { readDiagnosticsFieldContext } from "./gold-field-membership.js";
 import { buildQuestionCohortLedger } from "./diagnostics-cohort.js";
 import type {
   CandidateIdentityObservation,
@@ -19,9 +21,7 @@ import {
 import {
   buildObjectIdentityKey,
   createEmptyGraphExpansionPlaneCountPerEdgeType,
-  createEmptyGraphExpansionPlaneCountPerHop,
-  hasStructuralPlane,
-  isDeliveryBudgetLoss
+  createEmptyGraphExpansionPlaneCountPerHop
 } from "./schema/diagnostics-private.js";
 import { buildGoldObjectIds } from "./gold-object-identities.js";
 
@@ -146,13 +146,14 @@ function buildQuestionMissFields(
 ) {
   const goldObjectIds = buildGoldObjectIds(input);
   return {
-    miss_classification: classifyMiss(
-      input.hitAt5,
-      parts.gold,
-      parts.diagnostics !== null,
-      input.isAbstention === true,
-      input.seedDropReasons
-    ),
+    miss_classification: classifyMiss({
+      hitAt5: input.hitAt5,
+      gold: parts.gold,
+      diagnosticsAvailable: parts.diagnostics !== null,
+      isAbstention: input.isAbstention === true,
+      seedDropReasons: input.seedDropReasons,
+      field: readDiagnosticsFieldContext(parts.diagnostics)
+    }),
     miss_taxonomy: classifyQuestionMissTaxonomy({
       hitAt5: input.hitAt5,
       goldMemoryIds: input.goldMemoryIds,
@@ -404,40 +405,4 @@ function hasIdentityConflict(observations: readonly CandidateIdentityObservation
 function knownValuesConflict(values: readonly (string | null)[]): boolean {
   const known = values.filter((value): value is string => value !== null);
   return new Set(known).size > 1;
-}
-
-function classifyMiss(
-  hitAt5: boolean,
-  gold: readonly LongMemEvalGoldDiagnostic[],
-  diagnosticsAvailable: boolean,
-  isAbstention: boolean,
-  seedDropReasons: LongMemEvalSeedDropReasons | undefined
-): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (isAbstention) return "abstention_uncalibrated";
-  if (gold.length === 0) {
-    return hasLongMemEvalSeedDropReasons(seedDropReasons)
-      ? "candidate_absent"
-      : "no_gold";
-  }
-  if (hitAt5) return "hit_at_5";
-  if (!diagnosticsAvailable) return "diagnostics_unavailable";
-  if (gold.some(isDeliveryBudgetLoss)) return "budget_dropped";
-  if (gold.some((item) =>
-    (item.final_rank !== null && item.final_rank > 5) ||
-    item.pre_budget_rank !== null ||
-    item.fused_rank !== null
-  )) return "under_ranked";
-  if (gold.some((item) => item.candidate_status === "active_constraint_delivered")) {
-    return "active_constraint_only";
-  }
-  const notDelivered = gold.filter(
-    (item) => item.candidate_status === "candidate_not_delivered"
-  );
-  if (notDelivered.some((item) => !item.source_planes.includes("lexical"))) {
-    return "lexical_gap";
-  }
-  if (notDelivered.some((item) => !hasStructuralPlane(item.source_planes))) {
-    return "structural_gap";
-  }
-  return "candidate_absent";
 }

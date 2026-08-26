@@ -1,5 +1,9 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
-import { buildPerPlaneRecallCoverage, ratio } from "../../../bench/diagnostics/quality/diagnostics-quality-helpers.js";
+import {
+  buildPerPlaneRecallCoverage,
+  emptyGoldRankBucketTally,
+  ratio
+} from "../../../bench/diagnostics/quality/diagnostics-quality-helpers.js";
 import { createEmptyMissTaxonomyDistribution } from "../../../bench/diagnostics/miss/diagnostics-miss-taxonomy.js";
 import {
   accumulateMeasurementAccounting,
@@ -82,7 +86,7 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
     measurementAccounting: createMeasurementAccountingState(),
     planeGoldCounts: new Map(),
     planeHitAt5Counts: new Map(),
-    goldRankBuckets: emptyRankTally(),
+    goldRankBuckets: emptyGoldRankBucketTally(),
     topDistractorBreakdown: emptyDistractorTally(),
     objectKindDelivery: {
       memory_entry: 0,
@@ -93,8 +97,8 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
     goldFacetSeparation: { separable: 0, overlapping: 0, indeterminate: 0 },
     goldDimensionCounts: {},
     perGoldRankBuckets: {
-      gold_ordinal_0: emptyRankTally(),
-      gold_ordinal_1plus: emptyRankTally()
+      gold_ordinal_0: emptyGoldRankBucketTally(),
+      gold_ordinal_1plus: emptyGoldRankBucketTally()
     },
     perGoldDisplacedBy: emptyDistractorTally(),
     optional: createOptionalPresence(),
@@ -450,18 +454,6 @@ function buildGoldFacet(
   return {
     ...state.goldFacetSeparation,
     gold_dimension_counts: state.goldDimensionCounts
-  };
-}
-
-function emptyRankTally(): GoldRankBuckets {
-  return {
-    delivered_top5: 0,
-    pre_budget_6_10: 0,
-    pre_budget_11_25: 0,
-    pre_budget_26_50: 0,
-    pre_budget_51_100: 0,
-    pre_budget_gt_100: 0,
-    candidate_absent: 0
   };
 }
 

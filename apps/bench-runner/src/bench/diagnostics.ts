@@ -44,3 +44,8 @@ export {
   readQuestionMissTaxonomy,
   summarizeLongMemEvalMissTaxonomy
 } from "./diagnostics/miss/diagnostics-miss-taxonomy.js";
+export {
+  reclassifyDiagnosticsGzipArtifact,
+  reclassifyQuestionDiagnostic,
+  reclassifyQuestionDiagnostics
+} from "./diagnostics/miss/reclassify-question-diagnostics.js";

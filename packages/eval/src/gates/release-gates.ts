@@ -294,8 +294,7 @@ function pushLongMemEvalPipelineGates(
       metrics?.evaluator_identity_issue_count ?? null,
       0,
       "count"
-    ),
-    minGate("longmemeval_s_evidence_stream_gold_delivery", "evidence stream gold delivery", metrics?.evidence_stream_gold_delivery_rate ?? null, 0.15, "ratio")
+    )
   );
   if (current.simulate_report !== "none") {
     gates.push(

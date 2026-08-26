@@ -94,6 +94,7 @@ export function classifyGoldMissTaxonomy(input: {
   readonly fineAssessmentPruned?: boolean;
   readonly anyObjectFineAssessmentPruned?: boolean;
   readonly diagnosticsAvailable: boolean;
+  readonly inField?: boolean;
 }): LongMemEvalMissTaxonomy | null {
   return classifyGoldDeliveryMissTaxonomy(input);
 }

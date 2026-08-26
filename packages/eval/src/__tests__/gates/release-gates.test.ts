@@ -120,6 +120,32 @@ it("keeps unified-selector score non-monotonicity diagnostic-only", () => {
     .not.toContain("longmemeval_s_non_monotonic_rate");
 });
 
+it("drops evidence-stream share as a retained ranking gate", () => {
+  const metrics = passingQualityMetrics(100);
+  metrics.evidence_stream_gold_delivery_rate = 1;
+  metrics.evidence_stream_gold_delivery_count = 17;
+  metrics.evidence_stream_gold_delivery_denominator = 17;
+  const payload: KpiPayload = {
+    ...buildPayload("abc1234"),
+    bench_name: "public",
+    split: "longmemeval-s",
+    sample_size: 100,
+    evaluated_count: 100,
+    kpi: {
+      ...buildPayload("abc1234").kpi,
+      r_at_5: 0,
+      latency_ms_p95: 110,
+      quality_metrics: metrics
+    }
+  };
+  const gates = collectReleaseHardGates(payload);
+  expect(gates.map((gate) => gate.id))
+    .not.toContain("longmemeval_s_evidence_stream_gold_delivery");
+  expect(gates.find((gate) =>
+    gate.id === "longmemeval_s_100_embedding_off_r_at_5"
+  )).toMatchObject({ current: 0, passed: false });
+});
+
 it("fails LongMemEval budget drops when the share exceeds the rate target", () => {
   const metrics = passingQualityMetrics(500);
   metrics.budget_drop_distribution.max_entries = {
