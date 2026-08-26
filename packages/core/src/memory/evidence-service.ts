@@ -25,6 +25,11 @@ import { createEvidenceCapsule } from "./evidence-create/create-evidence.js";
 import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js";
 import { fieldContractSha256 } from "../shared/field-hash.js";
 import {
+  appendEventLogSynchronously,
+  EventLogSyncAppendRequiredError
+} from "../runtime/event-publisher.js";
+import { runEventLogTransaction } from "./memory-service/memory-audit-append.js";
+import {
   createInMemoryFieldStores,
   type FieldFormationStores
 } from "./evidence-create/field-stores.js";
@@ -46,6 +51,7 @@ export type EvidenceCapsuleInput = Omit<
 
 export interface EvidenceServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+  transactional?<T>(fn: () => T): T;
 }
 
 export interface EvidenceListPageOptions {
@@ -62,6 +68,14 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
       .EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>>;
+  createInCurrentTransaction?(
+    capsule: EvidenceCapsule,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
+      .EvidenceOsfSemanticCompletenessReceipt>
+  ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -85,6 +99,11 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>>;
+  updateHealthInCurrentTransaction?(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Readonly<EvidenceCapsule>;
 }
 
 export interface EvidenceRuntimeNotifier {
@@ -205,30 +224,12 @@ export class EvidenceService {
     ensureValidHealthTransition(existing.evidence_health_state, parsedHealth);
 
     const occurredAt = this.now();
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
-      entity_type: "evidence_capsule",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: parsedCausedBy,
-      payload_json: SoulEvidenceHealthChangedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        from_state: existing.evidence_health_state,
-        to_state: parsedHealth,
-        reason_code: parsedReason,
-        caused_by: parsedCausedBy,
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    });
-
-    const updated = await this.dependencies.evidenceCapsuleRepo.updateHealth(
-      existing.object_id,
+    const { event, updated } = persistHealthTransition(
+      this.dependencies,
+      existing,
       parsedHealth,
+      parsedReason,
+      parsedCausedBy,
       occurredAt
     );
 
@@ -390,6 +391,85 @@ function parseTransitionCausedBy(value: TransitionCausedBy): TransitionCausedBy 
     return TransitionCausedBySchema.parse(value);
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid transition caused_by", { cause: error });
+  }
+}
+
+function persistHealthTransition(
+  dependencies: EvidenceServiceDependencies,
+  existing: Readonly<EvidenceCapsule>,
+  parsedHealth: EvidenceHealthState,
+  parsedReason: string,
+  parsedCausedBy: TransitionCausedBy,
+  occurredAt: string
+): { readonly event: EventLogEntry; readonly updated: Readonly<EvidenceCapsule> } {
+  const updateHealthInCurrentTransaction =
+    dependencies.evidenceCapsuleRepo.updateHealthInCurrentTransaction;
+  if (updateHealthInCurrentTransaction === undefined) {
+    throw new CoreError("CONFLICT", "Evidence health transition transaction port is not available", {
+      subCode: "PORT_UNAVAILABLE"
+    });
+  }
+  return runEventLogTransaction(
+    dependencies.eventLogRepo,
+    () => {
+      const event = appendHealthChangedSynchronously(
+        dependencies.eventLogRepo,
+        existing,
+        parsedHealth,
+        parsedReason,
+        parsedCausedBy,
+        occurredAt
+      );
+      const updated = updateHealthInCurrentTransaction.call(
+        dependencies.evidenceCapsuleRepo,
+        existing.object_id,
+        parsedHealth,
+        occurredAt
+      );
+      return { event, updated };
+    },
+    "Evidence health transition requires a transactional EventLog port"
+  );
+}
+
+function appendHealthChangedSynchronously(
+  eventLogRepo: EvidenceServiceEventLogRepoPort,
+  existing: Readonly<EvidenceCapsule>,
+  parsedHealth: EvidenceHealthState,
+  parsedReason: string,
+  parsedCausedBy: TransitionCausedBy,
+  occurredAt: string
+): EventLogEntry {
+  try {
+    return appendEventLogSynchronously(eventLogRepo, {
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
+      entity_type: "evidence_capsule",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: existing.run_id,
+      caused_by: parsedCausedBy,
+      payload_json: SoulEvidenceHealthChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: existing.run_id,
+        from_state: existing.evidence_health_state,
+        to_state: parsedHealth,
+        reason_code: parsedReason,
+        caused_by: parsedCausedBy,
+        evidence_refs: null,
+        occurred_at: occurredAt
+      })
+    });
+  } catch (error) {
+    if (error instanceof EventLogSyncAppendRequiredError) {
+      throw new CoreError(
+        "CONFLICT",
+        "Evidence health transition requires a synchronous EventLog append port.",
+        { cause: error }
+      );
+    }
+    throw error;
   }
 }
 

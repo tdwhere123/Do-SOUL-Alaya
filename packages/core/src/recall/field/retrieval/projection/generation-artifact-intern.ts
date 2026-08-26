@@ -1,4 +1,8 @@
-import type { SelectedSliceKeyV2 } from "../../../flood/slice-key-contract.js";
+import { z } from "zod";
+import {
+  SelectedSliceKeyV2Schema,
+  type SelectedSliceKeyV2
+} from "../../../flood/slice-key-contract.js";
 import type {
   L2MaterializationPolicy,
   ProjectionL2Bundle
@@ -10,9 +14,11 @@ import type { SourceProjectionState } from "./source-projection.js";
 
 export const INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT = "interned_source_state_v1" as const;
 
-export type InternedProjectionSliceKey = SelectedSliceKeyV2 & Readonly<{
-  readonly source_state_id?: string;
-}>;
+const InternedProjectionSliceKeySchema = SelectedSliceKeyV2Schema.extend({
+  source_state_id: z.string().min(1).optional()
+}).strict();
+
+export type InternedProjectionSliceKey = z.infer<typeof InternedProjectionSliceKeySchema>;
 
 export type InternedProjectionGenerationArtifacts = Readonly<{
   readonly artifacts_format: typeof INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT;
@@ -163,10 +169,9 @@ function requireArtifactsGraph(input: unknown): ArtifactsGraph {
 function freezeInternedSliceKey(
   record: Record<string, unknown>
 ): InternedProjectionSliceKey {
-  if (typeof record.key_id !== "string" || typeof record.schema_version !== "number") {
-    invalidArtifacts();
-  }
-  return Object.freeze({ ...record }) as unknown as InternedProjectionSliceKey;
+  const parsed = InternedProjectionSliceKeySchema.safeParse(record);
+  if (!parsed.success) invalidArtifacts();
+  return Object.freeze(parsed.data);
 }
 
 function omitStateFields(key: Record<string, unknown>): Record<string, unknown> {

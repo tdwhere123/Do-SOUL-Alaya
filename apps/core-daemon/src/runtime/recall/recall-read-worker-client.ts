@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import type { PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
+  RecallReadSnapshotPort,
   RecallServiceActiveConstraintsPort,
   RecallServiceEvidenceSearchPort,
   RecallServiceMemoryRepoPort,
@@ -28,6 +29,7 @@ import {
   createWorkerMemoryRepo,
   type WorkerTierWindowResult
 } from "../recall-read-worker/memory-client.js";
+import { createRecallReadSnapshotSession } from "../recall-read-worker/snapshot-session.js";
 type SuccessConsumption = Readonly<{ readonly done: boolean; readonly value?: unknown }>;
 
 export interface RecallReadWorkerClient {
@@ -37,6 +39,7 @@ export interface RecallReadWorkerClient {
   readonly pathExpansionPort: RecallServicePathExpansionPort;
   readonly pathPlasticityPort: RecallServicePathPlasticityPort;
   readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
+  readonly readSnapshot: RecallReadSnapshotPort;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -93,6 +96,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private closeStarted = false;
   private closePromise: Promise<void> | null = null;
   private readyPromise: Promise<void> | null = null;
+  private readonly snapshotSession: ReturnType<typeof createRecallReadSnapshotSession>;
+  public readonly readSnapshot: RecallReadSnapshotPort;
 
   public readonly memoryRepo: RecallServiceMemoryRepoPort = createWorkerMemoryRepo({
     request: async (operation, payload) => await this.request(operation, payload),
@@ -204,6 +209,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     const workerCount = normalizeWorkerCount(input.workerCount);
     this.workers = Array.from({ length: workerCount }, () => null);
     this.workers[0] = this.spawnWorker(0);
+    this.snapshotSession = createRecallReadSnapshotSession({
+      workerCount,
+      getWorker: (index) => this.workerAt(index),
+      dispatch: async (worker, operation) =>
+        await this.dispatchToWorker(worker, operation, {})
+    });
+    this.readSnapshot = this.snapshotSession.port;
   }
 
   public async ready(): Promise<void> {
@@ -360,9 +372,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     if (this.closed || this.closeStarted) {
       throw new Error("recall read worker is closed");
     }
+    const pinned = this.snapshotSession.pinnedWorker();
+    if (pinned !== undefined) return pinned;
     const index = isPathAffinityOperation(operation)
       ? 0
       : this.nextWorkerIndex++ % this.workers.length;
+    return this.workerAt(index);
+  }
+
+  private workerAt(index: number): Worker {
     const existing = this.workers[index] ?? null;
     if (existing !== null) return existing;
     const worker = this.spawnWorker(index);

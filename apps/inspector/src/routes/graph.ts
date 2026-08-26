@@ -6,7 +6,7 @@ import { assertInspectorWorkspace, proxyDaemonJson, type InspectorProxyOptions }
 // The Inspector is a memory-tooling loopback, not an agent surface; this
 // route only forwards the workspace-scoped GET to the daemon.
 // see also: apps/core-daemon/src/routes/path-graph.ts
-//           apps/inspector/web/src/pages/Graph.tsx
+//           apps/inspector/web/src/pages/graph-page/
 export function registerInspectorGraphRoutes(app: Hono, options: InspectorProxyOptions): void {
   app.get("/api/graph/:workspaceId", async (context) => {
     const workspaceId = context.req.param("workspaceId");

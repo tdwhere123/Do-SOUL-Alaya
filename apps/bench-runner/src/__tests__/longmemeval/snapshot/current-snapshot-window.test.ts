@@ -30,7 +30,9 @@ vi.mock("../../../bench/snapshot/integrity.js", async (loadOriginal) => ({
 vi.mock("../../../bench/snapshot/substrate-binding.js", () => ({
   assertSnapshotDatasetSubstrateIdentity: vi.fn()
 }));
-const assertSnapshotSeedLedgerBinding = vi.fn();
+const { assertSnapshotSeedLedgerBinding } = vi.hoisted(() => ({
+  assertSnapshotSeedLedgerBinding: vi.fn()
+}));
 vi.mock("../../../bench/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
   assertSnapshotSeedLedgerBinding
 }));

@@ -54,7 +54,10 @@ function createWorkerRun(overrides: Partial<DelegatedWorkerRun> = {}): Delegated
 function fakeAppendManyWithMutation(
   publishedEvents?: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at" | "revision">>
 ): ReturnType<typeof vi.fn> {
-  return vi.fn(async (events: any[], mutate: (entries: any[]) => any) => {
+  return vi.fn(async (
+    events: Array<EventLogEntry | Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
+    mutate: (entries: EventLogEntry[]) => unknown
+  ) => {
     if (publishedEvents) {
       for (const event of events) publishedEvents.push(event);
     }

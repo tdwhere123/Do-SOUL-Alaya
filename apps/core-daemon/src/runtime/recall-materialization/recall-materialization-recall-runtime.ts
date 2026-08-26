@@ -8,7 +8,8 @@ import {
   parseSourceRefRobust,
   RecallService,
   RuleBasedEntityExtractor,
-  RuleBasedQueryFactFrameExtractor
+  RuleBasedQueryFactFrameExtractor,
+  type RecallReadSnapshotPort
 } from "@do-soul/alaya-core";
 import {
   findActiveConstraints,
@@ -165,12 +166,14 @@ export function createRecallActiveConstraintsPort(
         memoryRepo: input.memoryEntryRepo,
         claimFormRepo: input.claimFormRepo,
         pathRelationRepo: {
-          findActiveAll: async (workspaceId: string) =>
-            activeConstraintsInput.asOf === undefined
+          findActiveAll: async (workspaceId: string) => {
+            const relations = activeConstraintsInput.asOf === undefined
               ? await directPathReadPorts.findActiveByWorkspace(workspaceId)
               : await directPathReadPorts.findActiveByWorkspace(workspaceId, {
                   asOf: activeConstraintsInput.asOf
-                })
+                });
+            return { relations, truncated: false };
+          }
         },
         cap: activeConstraintsInput.cap
       });
@@ -212,6 +215,7 @@ export function createRecallServiceRuntime(input: {
   };
   readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
+  readonly readSnapshot: RecallReadSnapshotPort;
 }) {
   const recallService = createRecallService(input);
   const contextLensAssembler = createRecallContextLensAssembler(input.input, recallService);
@@ -239,6 +243,7 @@ function createRecallService(input: {
   };
   readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
+  readonly readSnapshot: RecallReadSnapshotPort;
 }) {
   const service = new RecallService({
     memoryRepo: input.recallSearchRuntime.recallMemoryRepo,
@@ -274,7 +279,8 @@ function createRecallService(input: {
       : { openSemanticFactorExtractionPort: input.input.openSemanticFactorExtractionPort }),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn,
-    fieldQuerySession: input.input.fieldQuerySession
+    fieldQuerySession: input.input.fieldQuerySession,
+    readSnapshot: input.readSnapshot
   });
   return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
 }

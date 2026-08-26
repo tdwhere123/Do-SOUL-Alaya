@@ -51,15 +51,19 @@ export function openCommandCandidates(
 ): readonly (readonly [string, readonly string[]])[] {
   const os = options.os ?? platform();
   if (os === "darwin") return [["open", [url]]];
-  if (os === "win32") return [["cmd", ["/c", "start", "", url]]];
+  if (os === "win32") return [["cmd", ["/c", "start", "", quoteWindowsStartUrl(url)]]];
   if (os === "linux" && isWslEnvironment(options.env ?? process.env, options.osRelease ?? release())) {
     return [
       ["wslview", [url]],
-      ["cmd.exe", ["/c", "start", "", url]],
+      ["cmd.exe", ["/c", "start", "", quoteWindowsStartUrl(url)]],
       ["xdg-open", [url]]
     ];
   }
   return [["xdg-open", [url]]];
+}
+
+function quoteWindowsStartUrl(url: string): string {
+  return `"${url.replaceAll('"', "")}"`;
 }
 
 async function spawnBrowserCandidate(

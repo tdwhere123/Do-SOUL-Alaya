@@ -126,7 +126,7 @@ describe("HealthInboxPage", () => {
       if (url.includes("/workspaces/ws1/health-inbox")) {
         return jsonResponse({
           success: true,
-          data: { workspace_id: "ws1", groups, total_count: groups.length }
+          data: { workspace_id: "ws1", groups, returned_count: groups.length }
         });
       }
       return jsonResponse({}, 404);
@@ -146,7 +146,7 @@ describe("HealthInboxPage", () => {
 
   it("forwards the state filter to the daemon route", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], total_count: 0 } })
+      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], returned_count: 0 } })
     );
     renderHealthInbox();
     await waitFor(() => {
@@ -160,7 +160,7 @@ describe("HealthInboxPage", () => {
 
   it("renders the empty-state when the daemon returns zero groups", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], total_count: 0 } })
+      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], returned_count: 0 } })
     );
     renderHealthInbox();
     await waitFor(() =>
@@ -172,7 +172,7 @@ describe("HealthInboxPage", () => {
 
   it("forwards the path_relation_failure cause filter to the daemon route", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], total_count: 0 } })
+      jsonResponse({ success: true, data: { workspace_id: "ws1", groups: [], returned_count: 0 } })
     );
     renderHealthInbox();
 

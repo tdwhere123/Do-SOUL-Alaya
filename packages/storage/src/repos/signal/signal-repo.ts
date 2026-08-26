@@ -18,6 +18,7 @@ export interface SignalRepo {
   listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
   countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
+  updateStateInCurrentTransaction(signalId: string, state: SignalStateType): CandidateMemorySignal;
   compareAndSwapState(input: SignalStateCasInput): CandidateMemorySignal | null;
 }
 
@@ -238,27 +239,35 @@ export class SqliteSignalRepo implements SignalRepo {
   }
 
   public async updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal> {
-    const parsedState = parseSignalState(state);
+    try {
+      return this.updateStateInCurrentTransaction(signalId, state);
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw new StorageError("QUERY_FAILED", `Failed to update signal state for ${signalId}.`, error);
+    }
+  }
 
+  public updateStateInCurrentTransaction(
+    signalId: string,
+    state: SignalStateType
+  ): CandidateMemorySignal {
+    const parsedState = parseSignalState(state);
     try {
       const result = this.updateStateStatement.run(parsedState, signalId);
-
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Signal ${signalId} was not found.`);
       }
-
-      const signal = await this.getById(signalId);
-
+      const signal = this.getByIdInCurrentTransaction(signalId);
       if (signal === null) {
         throw new StorageError("NOT_FOUND", `Signal ${signalId} was not found after update.`);
       }
-
       return signal;
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
       }
-
       throw new StorageError("QUERY_FAILED", `Failed to update signal state for ${signalId}.`, error);
     }
   }

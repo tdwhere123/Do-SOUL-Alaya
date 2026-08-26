@@ -57,9 +57,10 @@ describe("path graph routes", () => {
       makePathRelation({ pathId: "path-2", sourceObjectId: "mem-2", targetObjectId: "mem-3" })
     ];
     const pathRelationRepo: GraphContractServicePathRelationRepoPort = {
-      findActiveAll: vi.fn(async (workspaceId: string) =>
-        workspaceId === "ws-1" ? relations : []
-      )
+      findActiveAll: vi.fn(async (workspaceId: string) => ({
+        relations: workspaceId === "ws-1" ? relations : [],
+        truncated: false
+      }))
     };
     const graphContractService = new GraphContractService({ pathRelationRepo });
     const workspaceService = {
@@ -85,6 +86,7 @@ describe("path graph routes", () => {
     expect(graph.edges.map((edge) => edge.id).sort()).toEqual(["path-1", "path-2"]);
     expect(graph.topology.total_nodes).toBe(3);
     expect(graph.topology.total_edges).toBe(2);
+    expect(graph.truncated).toBe(false);
     const firstEdge = graph.edges.find((edge) => edge.id === "path-1");
     expect(firstEdge?.relation_kind).toBe("supports");
     expect(firstEdge?.strength).toBe(0.7);
@@ -96,7 +98,7 @@ describe("path graph routes", () => {
   it("is workspace-scoped: an empty workspace yields an empty graph", async () => {
     const app = new Hono();
     const pathRelationRepo: GraphContractServicePathRelationRepoPort = {
-      findActiveAll: vi.fn(async () => [])
+      findActiveAll: vi.fn(async () => ({ relations: [], truncated: false }))
     };
     const graphContractService = new GraphContractService({ pathRelationRepo });
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-2" })) };

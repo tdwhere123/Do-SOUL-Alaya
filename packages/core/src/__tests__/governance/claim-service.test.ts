@@ -69,7 +69,7 @@ describe("ClaimService", () => {
 
     const { dependencies, broadcastSpy } = createDependencies({
       eventLogRepo: {
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           order.push("event_log");
           return {
             event_id: "event-created",
@@ -185,7 +185,7 @@ describe("ClaimService", () => {
     const { dependencies, slotElectionSpy, broadcastSpy } = createDependencies({
       eventLogRepo: {
         queryByEntity: vi.fn(async () => createEventLogHistory(2)),
-        append: vi.fn(async (event) => ({
+        append: vi.fn((event) => ({
           event_id: "event-lifecycle",
           created_at: "2026-03-21T02:00:00.000Z",
           revision: 0,
@@ -199,6 +199,9 @@ describe("ClaimService", () => {
         findByStatus: vi.fn(async () => []),
         findByCanonicalKey: vi.fn(async () => []),
         updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        ),
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
           Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
         )
       }
@@ -344,11 +347,14 @@ describe("ClaimService", () => {
         findByCanonicalKey: vi.fn(async () => []),
         updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
           Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        ),
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
         )
       },
       eventLogRepo: {
         queryByEntity: vi.fn(async () => createEventLogHistory(1)),
-        append: vi.fn(async (event) => ({
+        append: vi.fn((event) => ({
           event_id: "event-lifecycle",
           created_at: "2026-03-21T03:00:00.000Z",
           revision: 0,
@@ -372,7 +378,7 @@ describe("ClaimService", () => {
   it("marks claim as contested when slot election requires review", async () => {
     const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
     let appendSeq = 0;
-    const contestedAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+    const contestedAppendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${event.event_type}-${(appendSeq += 1)}`,
       created_at: "2026-03-21T00:00:00.000Z",
       revision: 0,
@@ -399,6 +405,9 @@ describe("ClaimService", () => {
         findByStatus: vi.fn(async () => []),
         findByCanonicalKey: vi.fn(async () => []),
         updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        ),
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
           Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
         )
       },
@@ -444,6 +453,9 @@ describe("ClaimService", () => {
         findByStatus: vi.fn(async () => []),
         findByCanonicalKey: vi.fn(async () => []),
         updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        ),
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
           Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
         )
       }
@@ -568,6 +580,52 @@ describe("ClaimService", () => {
     const service = new ClaimService(dependencies);
 
     await expect(service.findByIdScoped(claim.object_id, "workspace-1")).resolves.toEqual(claim);
+  });
+
+  it("rejects create when EventPublisher is missing", async () => {
+    const { dependencies } = createDependencies({ eventPublisher: undefined });
+    const service = new ClaimService(dependencies);
+
+    await expect(service.create(createClaimInput())).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Event publisher is required for atomic claim operations"
+    });
+  });
+
+  it("rejects lifecycle transition when EventPublisher is missing", async () => {
+    const existing = createClaimForm({ claim_status: ClaimLifecycleState.DRAFT });
+    const { dependencies } = createDependencies({
+      eventPublisher: undefined,
+      claimFormRepo: {
+        create: vi.fn((claim) => claim),
+        findById: vi.fn(async () => existing),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByStatus: vi.fn(async () => []),
+        findByCanonicalKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        ),
+        updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
+          Object.freeze({ ...existing, claim_status: status, updated_at: updatedAt })
+        )
+      }
+    });
+    const service = new ClaimService(dependencies);
+
+    await expect(
+      service.transitionLifecycle(
+        existing.object_id,
+        ClaimLifecycleState.ACTIVE,
+        "review_accept",
+        TransitionCausedBy.REVIEW,
+        { skipSlotElection: true }
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Event publisher is required for atomic claim operations"
+    });
   });
 
   it("findByIdScoped hides a claim that belongs to a different workspace", async () => {

@@ -128,7 +128,7 @@ describe("cli inspect", () => {
 
     expect(result.exitCode).toBe(0);
     expect(stdoutChunks.join("")).toBe(
-      "http://127.0.0.1:5174/?workspaceId=ws-1&launch=cccccccccccccccccccccccccccccccc\n"
+      "http://127.0.0.1:5174/?workspaceId=ws-1#launch=cccccccccccccccccccccccccccccccc\n"
     );
     expect(stdoutChunks.join("")).not.toContain("#token=");
     expect(stdoutChunks.join("")).not.toContain("a".repeat(64));
@@ -224,9 +224,38 @@ describe("cli inspect", () => {
       }
     ]);
     expect(opened).toEqual([
-      "http://127.0.0.1:5175/?workspaceId=ws-1&launch=dddddddddddddddddddddddddddddddd"
+      "http://127.0.0.1:5175/?workspaceId=ws-1#launch=dddddddddddddddddddddddddddddddd"
     ]);
     expect(opened[0]).not.toContain("#token=");
+  });
+
+  it("does not print the launch code when --open succeeds", async () => {
+    const child = new FakeInspectorChild();
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk) => stdoutChunks.push(chunk.toString()));
+    const command = createInspectCommand({
+      checkPortAvailable: async () => true,
+      startDaemonServer: async () => fakeDaemonServer(),
+      generateLaunchCode: () => "e".repeat(32),
+      spawnInspector: () => child,
+      openUrl: async () => undefined,
+      listWorkspaces: oneWorkspaceList()
+    });
+
+    const promise = command.handler(createContext({ stdout }), {
+      open: true,
+      port: 5174,
+      token: null,
+      workspace: null
+    });
+    setTimeout(() => child.stdout.write("inspector_ready\n"), 0);
+    setTimeout(() => child.emitExit(0, null), 10);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(stdoutChunks.join("")).toBe("http://127.0.0.1:5174/?workspaceId=ws-1\n");
+    expect(stdoutChunks.join("")).not.toContain("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
   });
 
   it("starts a loopback daemon and passes its URL to the inspector child", async () => {

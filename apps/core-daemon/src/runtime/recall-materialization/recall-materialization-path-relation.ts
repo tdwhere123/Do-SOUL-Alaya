@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   ControlPlaneObjectKind,
   MemoryGovernanceEventType,
@@ -8,22 +8,18 @@ import {
   RetentionPolicy,
   SoulProposalCreatedPayloadSchema
 } from "@do-soul/alaya-protocol";
+import { createGardenRelationNominationPort } from "./recall-materialization-garden-nomination.js";
 import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PathRelationProposalService,
   RelationAssertionService,
   type RelationAssertionAdmissionPort,
-  scheduleAuditedAsyncSideEffect,
-  stableStringify
+  scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
 import type {
   PathRelationProposalPayload,
   TemporalRelationAssertionPort as SoulTemporalRelationAssertionPort
 } from "@do-soul/alaya-soul";
-import {
-  digestRelationFormationEventSource,
-  type RelationFormationEventSource
-} from "@do-soul/alaya-storage";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 import {
   createRelationProjectionModePorts,
@@ -57,6 +53,7 @@ type PathRelationRuntimeInput = Pick<
   | "proposalRepo"
   | "relationProjectionAdmissionMode"
   | "relationAssertionRepo"
+  | "evidenceCapsuleRepo"
   | "runtimeNotifier"
   | "warn"
 >;
@@ -90,9 +87,9 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
       relationAssertionService,
       admissionMode
     );
-  const temporalRelationAssertionPort = createTemporalRelationAssertionPort(
+  const temporalRelationAssertionPort = createGardenRelationNominationPort(
     input,
-    relationAssertionAdmissionPort
+    pathRelationProposalPort
   );
   return Object.freeze({
     pathRelationProposalService,
@@ -103,95 +100,6 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
     temporalRelationAssertionPort,
     pathRelationEvictionTimer
   });
-}
-
-function createTemporalRelationAssertionPort(
-  input: Pick<PathRelationRuntimeInput, "eventLogRepo">,
-  assertionPort: RelationAssertionAdmissionPort
-): TemporalRelationAssertionPort {
-  return {
-    admit: async (admission) => {
-      const sourceEventAnchor = {
-        event_type: admission.sourceEventAnchor.event_type,
-        event_id: admission.sourceEventAnchor.event_id,
-        occurred_at: admission.sourceEventAnchor.occurred_at
-      };
-      const sourceEvent = (await input.eventLogRepo.queryByEntity(
-        "candidate_memory_signal",
-        admission.sourceSignalId
-      )).find((event) => event.event_id === sourceEventAnchor.event_id);
-      if (
-        sourceEvent === undefined ||
-        sourceEvent.event_type !== sourceEventAnchor.event_type ||
-        sourceEvent.entity_type !== "candidate_memory_signal" ||
-        sourceEvent.entity_id !== admission.sourceSignalId ||
-        sourceEvent.workspace_id !== admission.workspaceId
-      ) {
-        throw new Error(`Relation source event ${sourceEventAnchor.event_id} does not match its anchor.`);
-      }
-      const evidenceReceipts = admission.evidenceIds.map((evidenceId) => ({
-        evidence_id: evidenceId,
-        source_event_anchor: sourceEventAnchor
-      }));
-      const formationReceipt = buildSignalFormationReceipt({
-        sourceEvent,
-        evidenceReceipts,
-        anchors: admission.anchors,
-        relationKind: admission.relationKind,
-        validity: admission.validity
-      });
-      const result = await assertionPort.admit({
-        workspaceId: admission.workspaceId,
-        runId: admission.runId,
-        causedBy: "garden",
-        evidenceReceipts,
-        formationReceipt,
-        anchors: admission.anchors,
-        relationKind: admission.relationKind,
-        validity: admission.validity
-      });
-      return {
-        object_kind: "relation_assertion",
-        object_id: result.assertion.assertion_id
-      };
-    }
-  };
-}
-
-function buildSignalFormationReceipt(input: Readonly<{
-  readonly sourceEvent: Readonly<RelationFormationEventSource>;
-  readonly evidenceReceipts: readonly Readonly<unknown>[];
-  readonly anchors: Readonly<unknown>;
-  readonly relationKind: string;
-  readonly validity: Readonly<unknown>;
-}>) {
-  const eventSha256 = digestRelationFormationEventSource(input.sourceEvent);
-  const operatorId = "signal_relation_assertion_admission_v1";
-  const parameters = { relation_kind: input.relationKind };
-  const decision = {
-    event_sha256: eventSha256,
-    evidence_receipts: input.evidenceReceipts,
-    anchors: input.anchors,
-    relation_kind: input.relationKind,
-    validity: input.validity
-  };
-  return {
-    operator_id: operatorId,
-    operator_sha256: sha256(`${operatorId}:verified-event-and-evidence-receipts`),
-    parameters,
-    parameter_sha256: sha256(stableStringify(parameters)),
-    source_observations: [{
-      source_kind: "event_log_entry" as const,
-      source_id: input.sourceEvent.event_id,
-      source_sha256: eventSha256
-    }],
-    decision,
-    decision_sha256: sha256(stableStringify(decision))
-  };
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function readPositiveNumberEnv(name: string): number | undefined {

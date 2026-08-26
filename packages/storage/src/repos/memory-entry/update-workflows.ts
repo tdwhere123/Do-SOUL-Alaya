@@ -69,41 +69,7 @@ export async function updateMemoryEntry(
   objectId: string,
   fields: MemoryEntryRepoUpdateFields
 ): Promise<Readonly<MemoryEntry>> {
-  const parsedFields = parseUpdateFields(fields);
-
-  try {
-    return this.transaction(() => {
-      const result = this.updateStatement.run(
-        parsedFields.content ?? null,
-        parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
-        parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
-        parsedFields.storage_tier ?? null,
-        parsedFields.confidence ?? null,
-        parsedFields.retention_state ?? null,
-        parsedFields.last_used_at ?? null,
-        parsedFields.last_hit_at ?? null,
-        ...buildProjectionUpdateParams(parsedFields),
-        parsedFields.updated_at,
-        objectId
-      );
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-      }
-
-      const updated = loadUpdatedMemoryEntry(this, objectId, "update");
-      if (parsedFields.evidence_refs !== undefined) {
-        syncMemoryEntryEvidenceRefIndex(this, updated);
-      }
-      return updated;
-    }, { immediate: true });
-  } catch (error) {
-    if (error instanceof StorageError) {
-      throw error;
-    }
-
-    throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
-  }
+  return commitMemoryEntryUpdate.call(this, objectId, fields, undefined);
 }
 
 export async function updateScopedMemoryEntry(
@@ -112,46 +78,105 @@ export async function updateScopedMemoryEntry(
   workspaceId: string,
   fields: MemoryEntryRepoUpdateFields
 ): Promise<Readonly<MemoryEntry>> {
-  const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+  return commitMemoryEntryUpdate.call(
+    this,
+    objectId,
+    fields,
+    parseNonEmptyString(workspaceId, "workspace_id")
+  );
+}
+
+export function updateMemoryEntryWithinTransaction(
+  this: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  fields: MemoryEntryRepoUpdateFields,
+  callbacks: {
+    readonly beforeUpdate?: () => void;
+    readonly afterUpdate?: () => void;
+  },
+  workspaceId?: string
+): Readonly<MemoryEntry> {
+  const parsedWorkspaceId =
+    workspaceId === undefined ? undefined : parseNonEmptyString(workspaceId, "workspace_id");
   const parsedFields = parseUpdateFields(fields);
+  return this.transaction(() => {
+    callbacks.beforeUpdate?.();
+    const updated = runParsedMemoryEntryUpdate(this, objectId, parsedFields, parsedWorkspaceId);
+    callbacks.afterUpdate?.();
+    return updated;
+  }, { immediate: true });
+}
 
+function commitMemoryEntryUpdate(
+  this: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  fields: MemoryEntryRepoUpdateFields,
+  workspaceId: string | undefined
+): Readonly<MemoryEntry> {
+  const parsedFields = parseUpdateFields(fields);
   try {
-    return this.transaction(() => {
-      const result = this.updateScopedStatement.run(
-        parsedFields.content ?? null,
-        parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
-        parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
-        parsedFields.storage_tier ?? null,
-        parsedFields.confidence ?? null,
-        parsedFields.retention_state ?? null,
-        parsedFields.last_used_at ?? null,
-        parsedFields.last_hit_at ?? null,
-        ...buildProjectionUpdateParams(parsedFields),
-        parsedFields.updated_at,
-        objectId,
-        parsedWorkspaceId
-      );
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-      }
-
-      const updated = loadUpdatedMemoryEntry(this, objectId, "scoped update");
-      if (updated.workspace_id !== parsedWorkspaceId) {
-        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
-      }
-      if (parsedFields.evidence_refs !== undefined) {
-        syncMemoryEntryEvidenceRefIndex(this, updated);
-      }
-      return updated;
-    }, { immediate: true });
+    return this.transaction(
+      () => runParsedMemoryEntryUpdate(this, objectId, parsedFields, workspaceId),
+      { immediate: true }
+    );
   } catch (error) {
-    if (error instanceof StorageError) {
-      throw error;
-    }
-
-    throw new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
+    throw wrapMemoryEntryUpdateError(objectId, error);
   }
+}
+
+function runParsedMemoryEntryUpdate(
+  host: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  parsedFields: MemoryEntryRepoUpdateFields,
+  workspaceId: string | undefined
+): Readonly<MemoryEntry> {
+  try {
+    const params = buildMemoryEntryUpdateParams(parsedFields, objectId);
+    const result =
+      workspaceId === undefined
+        ? host.updateStatement.run(...params)
+        : host.updateScopedStatement.run(...params, workspaceId);
+    if (result.changes === 0) {
+      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+    }
+    const operation = workspaceId === undefined ? "update" : "scoped update";
+    const updated = loadUpdatedMemoryEntry(host, objectId, operation);
+    if (workspaceId !== undefined && updated.workspace_id !== workspaceId) {
+      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
+    }
+    if (parsedFields.evidence_refs !== undefined) {
+      syncMemoryEntryEvidenceRefIndex(host, updated);
+    }
+    return updated;
+  } catch (error) {
+    throw wrapMemoryEntryUpdateError(objectId, error);
+  }
+}
+
+function buildMemoryEntryUpdateParams(
+  parsedFields: MemoryEntryRepoUpdateFields,
+  objectId: string
+): readonly unknown[] {
+  return [
+    parsedFields.content ?? null,
+    parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
+    parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
+    parsedFields.storage_tier ?? null,
+    parsedFields.confidence ?? null,
+    parsedFields.retention_state ?? null,
+    parsedFields.last_used_at ?? null,
+    parsedFields.last_hit_at ?? null,
+    ...buildProjectionUpdateParams(parsedFields),
+    parsedFields.updated_at,
+    objectId
+  ];
+}
+
+function wrapMemoryEntryUpdateError(objectId: string, error: unknown): StorageError {
+  if (error instanceof StorageError) {
+    return error;
+  }
+  return new StorageError("QUERY_FAILED", `Failed to update memory entry ${objectId}.`, error);
 }
 
 function buildProjectionUpdateParams(fields: MemoryEntryRepoUpdateFields): readonly unknown[] {

@@ -501,7 +501,7 @@ fixtures before a final provider prompt is selected.
 | Name | Current fact |
 | --- | --- |
 | `ALAYA_RECALL_PROJECTIONS` | Default-on read-side scoring control. It is not projection-generation authority and does not prove field connectedness. |
-| `ALAYA_RECALL_CONF_RHO_PATH`, `ALAYA_RECALL_CONF_RHO_EVIDENCE`, `ALAYA_RECALL_CONF_W_PATH`, flood caps | Parsed advanced runtime parameters. Do not tune them against an unclosed candidate/frontier proof. |
+| `ALAYA_RECALL_CONF_RHO_PATH`, `ALAYA_RECALL_CONF_RHO_EVIDENCE`, `ALAYA_RECALL_CONF_W_PATH`, flood caps | Parsed advanced runtime parameters. Unset `ALAYA_RECALL_CONF_FLOOD_CAP` (or `1.0`) means no flood suppression. Do not tune them against an unclosed candidate/frontier proof. |
 | `ALAYA_RECALL_CONF_EVIDENCE_BETA` | Deleted from the runtime contract. Legacy tests/manifests may reject or strip it; it is not a live scoring knob. |
 | `ALAYA_RECALL_ANSWERS_WITH` | Not parsed by Core. answers_with / flood path fuel has no off-switch; benchmark provenance may still stamp the historical name. |
 | `ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP` | Parsed for compatibility/provenance but has no production delivery consumer. It must not become a post-`Select_Gamma` reorder authority. |

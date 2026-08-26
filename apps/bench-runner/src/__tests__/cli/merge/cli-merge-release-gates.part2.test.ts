@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 
 import {
   makeQualityMetrics,
@@ -77,7 +77,7 @@ describe("merge-longmemeval release gates", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history-hard-gates");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -158,7 +158,7 @@ describe("merge-longmemeval release gates", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-budget-entry-gate");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",

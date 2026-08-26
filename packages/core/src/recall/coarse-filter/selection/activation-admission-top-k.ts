@@ -2,9 +2,13 @@ import type { MemoryEntry, RecallPolicy, StorageTier } from "@do-soul/alaya-prot
 import {
   compareMemoryEntriesForActivationAdmission,
   matchesDeterministicFilter,
-  matchesPrecomputedRankFilter
+  matchesPrecomputedRankFilter,
+  toErrorMessage
 } from "../../runtime/recall-service-helpers.js";
-import type { RecallServiceMemoryRepoPort } from "../../runtime/recall-service-types.js";
+import type {
+  RecallServiceMemoryRepoPort,
+  RecallServiceWarnPort
+} from "../../runtime/recall-service-types.js";
 import { selectBoundedTopK } from "./bounded-top-k.js";
 
 export function selectActivationAdmissionTopKFromWindow(
@@ -23,6 +27,7 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
   readonly excludeObjectIds: ReadonlySet<string>;
   readonly allowSql: boolean;
   readonly fallbackOnSqlFailure?: boolean;
+  readonly warn?: RecallServiceWarnPort;
 }>): Promise<readonly Readonly<MemoryEntry>[]> {
   const limit = params.config.precomputed_rank.max_candidates;
   const eligible = params.eligible.filter((entry) =>
@@ -54,6 +59,11 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
   } catch (error) {
     // Empty eligible is not a HOT window; swallowing would drop the activation plane.
     if (params.fallbackOnSqlFailure === false) throw error;
+    params.warn?.("activation top-k sql fallback", {
+      code: "activation_topk_sql_fallback",
+      workspace_id: params.workspaceId,
+      error: toErrorMessage(error)
+    });
     return selectActivationAdmissionTopKFromWindow(eligible, limit);
   }
 }

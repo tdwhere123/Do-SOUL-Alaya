@@ -8,6 +8,7 @@ export {
   TEMPORAL_OFFLINE_MIGRATION_VERSION,
   type InitDatabaseOptions
 } from "./db.js";
+export { openReadOnlyDatabase } from "./open-readonly.js";
 export {
   EMBEDDING_OVERLAY_ALIAS,
   EMBEDDING_OVERLAY_BIND_FILENAME,

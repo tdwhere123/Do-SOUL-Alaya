@@ -63,6 +63,9 @@ describe("createWarnLogger (pino-backed)", () => {
       token: "TOP_SECRET_TOKEN",
       apiKey: "AKIA_TOP",
       authorization: "Bearer top",
+      nested: {
+        child: { token: "DEEP_SECRET_TOKEN" }
+      },
       details: {
         password: "nested_pw",
         secret: "nested_secret",
@@ -73,6 +76,7 @@ describe("createWarnLogger (pino-backed)", () => {
     });
 
     expect(record.token).toBe("[Redacted]");
+    expect((record.nested as { child: { token: string } }).child.token).toBe("[Redacted]");
     expect(record.apiKey).toBe("[Redacted]");
     expect(record.authorization).toBe("[Redacted]");
     const details = record.details as Record<string, unknown>;

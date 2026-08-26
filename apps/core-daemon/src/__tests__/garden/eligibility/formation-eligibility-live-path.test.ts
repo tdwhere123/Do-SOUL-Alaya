@@ -164,6 +164,7 @@ describe("formation eligibility live producer to consumer path", () => {
       producer_operator_id: FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID,
       graph: { source_kind: "evidence" }
     });
+    expect(capture?.graph).not.toBeNull();
     expect(hasGoldAuthorityKey(capture)).toBe(false);
     expect(f3Factors(runtime.field)).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
@@ -175,6 +176,14 @@ describe("formation eligibility live producer to consumer path", () => {
     )).toMatchObject({
       status: "succeeded",
       operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
+    });
+
+    const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
+    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
+    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
+      incomparable_seal: "none",
+      matchable_evidence_count: 1,
+      entries: [{ evidence_id: EVIDENCE_ID, receipt: { status: "compatible" } }]
     });
   });
 

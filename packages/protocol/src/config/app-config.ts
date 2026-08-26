@@ -199,7 +199,10 @@ export const AlayaStatusSchema = z
       .object({
         ready: z.boolean(),
         startup_steps: z.array(NonEmptyStringSchema).readonly(),
-        principal_coding_engine_available: z.boolean()
+        principal_coding_engine_available: z.boolean(),
+        uptime_s: z.number().nonnegative().optional(),
+        db_reachable: z.boolean().optional(),
+        write_queue_depth: z.number().int().nonnegative().optional()
       })
       .readonly(),
     mcp: z

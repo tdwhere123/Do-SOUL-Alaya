@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { StorageError } from "../../../shared/errors.js";
 import {
   RunMode,
   RunState,
@@ -69,6 +70,24 @@ describe("SqliteRecallRoutingKeyProjectionRepo", () => {
     expect(evidenceGrouped[0]?.independence_group).toBe("evidence:evidence-1");
     await expect(repo.findByOwnerIds("other-workspace", ["memory-1"]))
       .resolves.toEqual([]);
+  });
+
+  it("throws VALIDATION_FAILED when a stored payload JSON column is corrupt", async () => {
+    const database = await createDatabase();
+    const signal = createSignal();
+    const signalRepo = new SqliteSignalRepo(database);
+    await signalRepo.create(signal);
+    await signalRepo.updateState(signal.signal_id, "materialized");
+    insertMaterialization(database, signal, "memory_entry", "memory-1");
+    database.connection.prepare(
+      "UPDATE signals SET raw_payload_json = ? WHERE signal_id = ?"
+    ).run("{not-json", signal.signal_id);
+
+    const repo = new SqliteRecallRoutingKeyProjectionRepo(database);
+    await expect(repo.findByOwnerIds("workspace-1", ["memory-1"])).rejects.toThrow(StorageError);
+    await expect(repo.findByOwnerIds("workspace-1", ["memory-1"])).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
   });
 });
 

@@ -35,6 +35,14 @@ export function wrapRecallFaultWarn(
   }
   return (message, meta) => {
     baseWarn(message, meta);
+    if (meta.code === "activation_topk_sql_fallback") {
+      void recordRecallFailureBestEffort(healthInbox, {
+        workspaceId,
+        operation: "activation_topk_sql_fallback",
+        observedAt: now()
+      });
+      return;
+    }
     const errorName = typeof meta.errorName === "string" ? meta.errorName : undefined;
     if (!isUnexpectedRecallErrorName(errorName)) {
       return;

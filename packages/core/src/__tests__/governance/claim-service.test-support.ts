@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { ClaimLifecycleState, canonicalGovernanceSubject, type ClaimForm, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
 import { type ClaimFormInput, type ClaimServiceDependencies } from "../../governance/claims/claim-service.js";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 
 export function createClaimInput(overrides: Partial<ClaimFormInput> = {}): ClaimFormInput {
@@ -74,7 +75,7 @@ export function createDependencies(overrides: Partial<ClaimServiceDependencies> 
   readonly broadcastSpy: ReturnType<typeof vi.fn>;
   readonly slotElectionSpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+  const appendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}-${Math.random()}`,
     created_at: "2026-03-21T00:00:00.000Z",
     revision: 0,
@@ -114,6 +115,9 @@ export function createDependencies(overrides: Partial<ClaimServiceDependencies> 
       findByCanonicalKey: vi.fn(async () => []),
       updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
         Object.freeze(createClaimForm({ claim_status: status, updated_at: updatedAt }))
+      ),
+      updateStatusSync: vi.fn((_objectId, status, updatedAt) =>
+        Object.freeze(createClaimForm({ claim_status: status, updated_at: updatedAt }))
       )
     },
     eventLogRepo: {
@@ -129,8 +133,30 @@ export function createDependencies(overrides: Partial<ClaimServiceDependencies> 
     ...overrides
   };
 
+  const eventPublisher =
+    "eventPublisher" in overrides
+      ? overrides.eventPublisher
+      : new EventPublisher({
+          eventLogRepo: {
+            append: (event) => {
+              const entry = dependencies.eventLogRepo.append(event);
+              if (entry instanceof Promise) {
+                throw new Error("Claim test EventLog append must be synchronous");
+              }
+              return entry;
+            },
+            deleteById: () => undefined,
+            transactional: <T>(fn: () => T) => fn()
+          },
+          runHotStateService: { apply: async () => undefined },
+          runtimeNotifier: {
+            notify: async () => undefined,
+            notifyEntry: dependencies.runtimeNotifier.notifyEntry
+          }
+        });
+
   return {
-    dependencies,
+    dependencies: { ...dependencies, eventPublisher },
     appendSpy,
     queryByEntitySpy,
     broadcastSpy,

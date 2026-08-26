@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import {
+  DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS,
   INSPECTOR_CORRELATION_ID_HEADER,
   INSPECTOR_REQUEST_ID_HEADER
 } from "../runtime/app.js";
@@ -18,7 +19,7 @@ export interface InspectorProxyOptions {
   readonly reviewerIdentity?: string;
 }
 
-const DEFAULT_DAEMON_PROXY_TIMEOUT_MS = 10_000;
+
 
 export function assertInspectorWorkspace(
   context: Context,
@@ -91,7 +92,7 @@ function createProxyInvocation(
   request: ProxyDaemonRequest
 ): ProxyInvocation {
   const controller = new AbortController();
-  const timeoutMs = options.daemonTimeoutMs ?? DEFAULT_DAEMON_PROXY_TIMEOUT_MS;
+  const timeoutMs = options.daemonTimeoutMs ?? DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS;
   const requestId = readRequestId(context);
   return {
     fetchImpl: options.fetchImpl ?? fetch,

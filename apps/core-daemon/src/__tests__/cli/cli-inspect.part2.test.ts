@@ -334,7 +334,7 @@ describe("cli inspect", () => {
   });
 
   it("prefers Windows browser bridge candidates when running in WSL", () => {
-    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1&launch=launch-code";
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1#launch=launch-code";
     expect(
       openCommandCandidates(launchUrl, {
         os: "linux",
@@ -342,14 +342,14 @@ describe("cli inspect", () => {
       })
     ).toEqual([
       ["wslview", [launchUrl]],
-      ["cmd.exe", ["/c", "start", "", launchUrl]],
+      ["cmd.exe", ["/c", "start", "", `"${launchUrl}"`]],
       ["xdg-open", [launchUrl]]
     ]);
   });
 
   it("falls back to the next browser opener when the first command is missing", async () => {
     const attempts: string[] = [];
-    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1&launch=launch-code";
+    const launchUrl = "http://127.0.0.1:5174/?workspaceId=ws-1#launch=launch-code";
 
     await openUrlWithSpawn(launchUrl, {
       env: { WSL_INTEROP: "/run/WSL/1_interop" },

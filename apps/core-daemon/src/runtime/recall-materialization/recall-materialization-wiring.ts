@@ -19,6 +19,7 @@ import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { SqliteHandoffGapAdapter } from "../../handoff/gap-adapter.js";
 import { createRecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
+import { createSqliteConnectionReadSnapshot } from "../recall/sqlite-read-snapshot.js";
 import { createCausalUsageTemporalPathReader } from
   "../recall/causal-usage-temporal-path-reader.js";
 import {
@@ -145,7 +146,9 @@ function createRecallReadRuntime(
       globalMemoryRuntime,
       recallPathRuntime,
       manifestationSidecarPort: manifestationRuntime.manifestationSidecarPort,
-      recallSearchRuntime
+      recallSearchRuntime,
+      readSnapshot: recallReadWorkerClient?.readSnapshot
+        ?? createSqliteConnectionReadSnapshot(input.database.connection)
     })
   };
 }

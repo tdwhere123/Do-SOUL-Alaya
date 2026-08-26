@@ -92,14 +92,13 @@ type UnhandledRejectionProcessState = UnhandledRejectionProcessPort & {
   [FATAL_SHUTDOWN_CLEAR_TIMEOUT_KEY]?: typeof clearTimeout;
 };
 
-// Defense-in-depth field redaction. pino paths only match a single level
-// (`token` = top-level, `*.token` = one nested level); there is no recursive
-// `**`. The summarizers in middleware/error-handler.ts remain the first line —
-// this is the belt-and-suspenders second line for secrets that slip through.
+// Defense-in-depth field redaction. pino `**.token` matches token at any
+// depth; keep the bare `token` path for the top-level field.
 const REDACT_PATHS: readonly string[] = [
-  // tokens / api keys / secrets / credentials (top-level + one nested level)
+  // tokens / api keys / secrets / credentials (top-level + recursive)
   "token",
-  "*.token",
+  "**.token",
+  "*.*.token",
   "request_token",
   "*.request_token",
   "reviewer_token",
@@ -167,6 +166,24 @@ function getSharedPinoLogger(): Logger {
   return sharedPinoLogger;
 }
 
+function redactDeepTokenFields(value: Record<string, unknown>): Record<string, unknown> {
+  return redactDeepTokenValue(value) as Record<string, unknown>;
+}
+
+function redactDeepTokenValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactDeepTokenValue);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = key === "token" ? "[Redacted]" : redactDeepTokenValue(nested);
+  }
+  return result;
+}
+
 function formatUnknownErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -186,7 +203,7 @@ export function createWarnLogger(): LoggerPort {
     // pino is object-first: warn(meta, message). The WarnLogger port is
     // message-first, so swap the argument order at the boundary.
     warn: (message: string, meta: Record<string, unknown>) => {
-      logger.warn(meta, message);
+      logger.warn(redactDeepTokenFields(meta), message);
     },
     error: (message: string, meta: Record<string, unknown>) => {
       logger.error(meta, message);

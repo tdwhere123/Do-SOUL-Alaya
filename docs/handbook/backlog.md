@@ -7,8 +7,8 @@ Do not add a fusion stream, ranker, promoter, or weight/cap retune from
 this list — that is the UGAF §1.1 failure mode.
 
 Scheduled work keeps detailed acceptance criteria in the owning phase
-README or task card. Resolved issues are archived to
-`docs/archive/backlog-resolved-historical.md`.
+README or task card. Closed `#BL-*` items stay closed; do not relist them
+as open.
 
 ## Issue Numbering
 

@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 import {
-  initDatabase,
+  openReadOnlyDatabase,
   SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
@@ -30,8 +30,7 @@ if (parentPort === null) {
 }
 
 const databaseFilename = readDatabaseFilename(workerData);
-const database = initDatabase({ filename: databaseFilename });
-database.connection.pragma("query_only = ON");
+const database = openReadOnlyDatabase(databaseFilename);
 const runtime: RecallReadWorkerRuntime = {
   database,
   memoryEntryRepo: new SqliteMemoryEntryRepo(database),

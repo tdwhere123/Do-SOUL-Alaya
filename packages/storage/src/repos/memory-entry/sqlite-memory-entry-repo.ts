@@ -44,6 +44,7 @@ import {
   updateMemoryEntryDynamics,
   updateMemoryEntryDynamicsSync,
   updateMemoryEntryTier,
+  updateMemoryEntryWithinTransaction,
   updateScopedMemoryEntry,
   type MemoryEntryUpdateWorkflowHost
 } from "./update-workflows.js";
@@ -174,6 +175,24 @@ export class SqliteMemoryEntryRepo
     }
   ): Readonly<MemoryEntry> {
     return createMemoryEntryWithinTransaction.call(this, entry, callbacks);
+  }
+
+  public updateWithinTransaction(
+    objectId: string,
+    fields: MemoryEntryRepoUpdateFields,
+    callbacks: {
+      readonly beforeUpdate?: () => void;
+      readonly afterUpdate?: () => void;
+    },
+    workspaceId?: string
+  ): Readonly<MemoryEntry> {
+    return updateMemoryEntryWithinTransaction.call(
+      this,
+      objectId,
+      fields,
+      callbacks,
+      workspaceId
+    );
   }
 
   public activeConnection(): StorageDatabase["connection"] {

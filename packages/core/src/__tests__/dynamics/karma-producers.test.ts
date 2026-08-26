@@ -198,15 +198,23 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
               evidence_health_state: health,
               updated_at: updatedAt
             })
+          ),
+          updateHealthInCurrentTransaction: vi.fn((_objectId, health, updatedAt) =>
+            Object.freeze({
+              ...evidenceCapsule,
+              evidence_health_state: health,
+              updated_at: updatedAt
+            })
           )
         },
         eventLogRepo: {
-          append: vi.fn(async (entry) => ({
+          append: vi.fn((entry) => ({
             event_id: "evt-1",
             created_at: "2026-03-23T00:00:00.000Z",
             revision: 0,
             ...entry
-          }))
+          })),
+          transactional: <T>(fn: () => T) => fn()
         },
         runtimeNotifier: { notifyEntry: vi.fn(async () => {}) },
         karmaEmitter: { emitKarmaEvent },
@@ -267,15 +275,19 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
           findByHealth: vi.fn(),
           updateHealth: vi.fn(async (_objectId, health, updatedAt) =>
             Object.freeze({ ...baseCapsule, evidence_health_state: health, updated_at: updatedAt })
+          ),
+          updateHealthInCurrentTransaction: vi.fn((_objectId, health, updatedAt) =>
+            Object.freeze({ ...baseCapsule, evidence_health_state: health, updated_at: updatedAt })
           )
         },
         eventLogRepo: {
-          append: vi.fn(async (entry) => ({
+          append: vi.fn((entry) => ({
             event_id: "evt-1",
             created_at: "2026-03-23T00:00:00.000Z",
             revision: 0,
             ...entry
-          }))
+          })),
+          transactional: <T>(fn: () => T) => fn()
         },
         runtimeNotifier: { notifyEntry: vi.fn(async () => {}) },
         karmaEmitter: { emitKarmaEvent },
@@ -383,7 +395,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       });
 
       const ruleContradicts = submitCandidate.mock.calls.filter(
-        (call: any[]) => call[0].relationKind === "contradicts"
+        (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
       );
       expect(ruleContradicts.length).toBeGreaterThan(0);
       expect(emitKarmaEvent).not.toHaveBeenCalled();

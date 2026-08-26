@@ -49,7 +49,7 @@ export interface MemoryWriteServiceDependencies {
 }
 
 // invariant: write path is the create/update truth boundary; it appends
-// EventLog audit (create EventLog-first, update repo-then-event) and validates
+// EventLog audit EventLog-first and validates
 // evidence refs before mutation.
 export class MemoryWriteService {
   private readonly dependencies: MemoryWriteServiceDependencies;
@@ -280,18 +280,7 @@ export class MemoryWriteService {
 
     const updatedFields = toUpdatedFieldNames(parsedFields);
     const occurredAt = this.now();
-
-    // invariant: append SOUL_MEMORY_UPDATED only after repo write succeeds.
-    const repoFields = {
-      ...parsedFields,
-      updated_at: occurredAt
-    };
-    const updated =
-      parsedWorkspaceId === undefined
-        ? await this.dependencies.memoryEntryRepo.update(parsedObjectId, repoFields)
-        : await this.updateRepoScoped(parsedObjectId, parsedWorkspaceId, repoFields);
-
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -305,7 +294,14 @@ export class MemoryWriteService {
         run_id: existing.run_id,
         updated_fields: updatedFields
       })
-    });
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    const { updated, event } = this.updateRowAtomically(
+      parsedObjectId,
+      { ...parsedFields, updated_at: occurredAt },
+      eventInput,
+      parsedWorkspaceId
+    );
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(updated);
@@ -323,16 +319,49 @@ export class MemoryWriteService {
     return updated;
   }
 
-  private async updateRepoScoped(
+  // invariant: production update commits audit + memory row in one transaction, EventLog-first.
+  private updateRowAtomically(
     objectId: string,
-    workspaceId: string,
-    fields: MemoryEntryRepoUpdateFields
-  ): Promise<Readonly<MemoryEntry>> {
-    if (this.dependencies.memoryEntryRepo.updateScoped === undefined) {
-      throw new CoreError("VALIDATION", "Scoped memory update is not available");
+    repoFields: MemoryEntryRepoUpdateFields,
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
+    workspaceId: string | undefined
+  ): {
+    readonly updated: Readonly<MemoryEntry>;
+    readonly event: EventLogEntry;
+  } {
+    const updateWithinTransaction = this.dependencies.memoryEntryRepo.updateWithinTransaction;
+    if (updateWithinTransaction === undefined) {
+      throw new CoreError("CONFLICT", "Memory update transaction port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
     }
 
-    return await this.dependencies.memoryEntryRepo.updateScoped(objectId, workspaceId, fields);
+    let event: EventLogEntry | undefined;
+    const updated = updateWithinTransaction.call(
+      this.dependencies.memoryEntryRepo,
+      objectId,
+      repoFields,
+      {
+        beforeUpdate: () => {
+          event = this.appendUpdatedEventSynchronously(eventInput);
+        }
+      },
+      workspaceId
+    );
+    if (event === undefined) {
+      throw new CoreError("CONFLICT", "Memory update transaction did not append its audit event.");
+    }
+    return { updated, event };
+  }
+
+  private appendUpdatedEventSynchronously(
+    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry {
+    return appendMemoryEventLogSynchronously(
+      this.dependencies.eventLogRepo,
+      eventInput,
+      "Memory update transaction requires a synchronous EventLog append port."
+    );
   }
 
   private async validateEvidenceRefs(workspaceId: string, evidenceRefs: readonly string[]): Promise<void> {

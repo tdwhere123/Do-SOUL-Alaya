@@ -8,6 +8,7 @@ import {
   trackedDatabases,
   withActiveLifecycle
 } from "./path-relation-repo-fixture.js";
+import { capPathRelationList } from "../../../repos/path/path-relation-read-queries.js";
 
 const databases = trackedDatabases;
 
@@ -88,11 +89,25 @@ describe("SqlitePathRelationRepo", () => {
     await expect(repo.findByWorkspace("workspace-1")).resolves.toHaveLength(500);
     await expect(repo.findByWorkspaceAll("workspace-1")).resolves.toHaveLength(1002);
     await expect(repo.findActive("workspace-1")).resolves.toHaveLength(500);
-    await expect(repo.findActiveAll("workspace-1")).resolves.toHaveLength(501);
+    await expect(repo.findActiveAll("workspace-1")).resolves.toEqual(
+      expect.objectContaining({ truncated: false, relations: expect.any(Array) })
+    );
+    await expect(repo.findActiveAll("workspace-1").then((listed) => listed.relations)).resolves.toHaveLength(501);
     await expect(repo.findDormant("workspace-1", dormantCutoff)).resolves.toHaveLength(500);
     await expect(repo.findDormantAll("workspace-1", dormantCutoff)).resolves.toHaveLength(501);
     await expect(repo.findActivePage("workspace-1", { limit: 501, offset: 0 })).rejects.toMatchObject({
       code: "VALIDATION_FAILED"
+    });
+  });
+
+  it("caps an active path list and reports truncated", () => {
+    expect(capPathRelationList(["a", "b", "c"], 2)).toEqual({
+      relations: ["a", "b"],
+      truncated: true
+    });
+    expect(capPathRelationList(["a", "b"], 2)).toEqual({
+      relations: ["a", "b"],
+      truncated: false
     });
   });
 

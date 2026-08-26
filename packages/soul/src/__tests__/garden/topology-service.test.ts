@@ -20,6 +20,7 @@ describe("TopologyService", () => {
       max_in_degree: 0,
       avg_degree: 0,
       strongly_connected_components: 0,
+      truncated: false,
       explored_at: "2026-04-21T08:00:00.000Z"
     });
   });
@@ -127,6 +128,7 @@ describe("TopologyService", () => {
       max_in_degree: 1,
       avg_degree: 2,
       strongly_connected_components: 2,
+      truncated: false,
       trend: {
         snapshot_count: 2,
         edge_count_trend: "growing",

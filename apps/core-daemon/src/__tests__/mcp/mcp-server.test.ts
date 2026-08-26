@@ -42,6 +42,16 @@ describe("mcp server", () => {
       tool_name: "soul.open_pointer",
       output: { object_id: "mem1" }
     });
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          tool_name: "soul.open_pointer",
+          output: { object_id: "mem1" }
+        })
+      }
+    ]);
   });
 
   it("converts handler failures into MCP error results", async () => {

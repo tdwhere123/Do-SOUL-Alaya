@@ -52,7 +52,13 @@ export type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
 export function resolveFineAssessmentDeliveryPath(
   config: FineAssessmentConfig
 ): "legacy" | "canonical" {
-  return config.delivery_path ?? "canonical";
+  const path = config.delivery_path ?? "canonical";
+  if (path === "legacy" && process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY !== "1") {
+    throw new Error(
+      "legacy recall delivery is disabled; set ALAYA_RECALL_ALLOW_LEGACY_DELIVERY=1 to opt in"
+    );
+  }
+  return path;
 }
 
 export function deliverCanonicalFineAssessment(

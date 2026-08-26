@@ -8,7 +8,10 @@ import { deepFreeze } from "../shared/deep-freeze.js";
 
 export interface PathGraphSnapshotterDependencies {
   readonly pathRelationRepo: {
-    findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+    findActiveAll(workspaceId: string): Promise<
+      | readonly Readonly<PathRelation>[]
+      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+    >;
   };
   readonly now?: () => Date;
 }
@@ -37,7 +40,8 @@ export class PathGraphSnapshotter {
     workspaceId: string,
     previousSnapshot: Readonly<PathGraphSnapshot> | null = null
   ): Promise<Readonly<PathGraphSnapshot>> {
-    const relations = await this.deps.pathRelationRepo.findActiveAll(workspaceId);
+    const listed = await this.deps.pathRelationRepo.findActiveAll(workspaceId);
+    const relations = unwrapActivePathRelations(listed);
     const snapshotAt = this.now().toISOString();
     const metrics = summarizePathRelations(relations, previousSnapshot);
 
@@ -90,6 +94,22 @@ export function reviewPathGraphSnapshotHistory(
       total_active_paths: latestSnapshot.total_active_paths
     }
   });
+}
+
+function unwrapActivePathRelations(
+  listed:
+    | readonly Readonly<PathRelation>[]
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+): readonly Readonly<PathRelation>[] {
+  return isCappedPathRelationList(listed) ? listed.relations : listed;
+}
+
+function isCappedPathRelationList(
+  listed:
+    | readonly Readonly<PathRelation>[]
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+): listed is Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }> {
+  return typeof listed === "object" && listed !== null && "relations" in listed;
 }
 
 function summarizePathRelations(

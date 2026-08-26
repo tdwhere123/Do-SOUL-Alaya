@@ -168,7 +168,7 @@ describe("prepareTemporalCandidate", () => {
     }
   });
 
-  it("permits legacy path mutations until an operator explicitly selects the temporal projection", async () => {
+  it("blocks legacy path mutations once the temporal selection schema is required", async () => {
     seedLegacySource(fixture.sourceFilename);
     const sourceBefore = sourceFileSet(fixture.sourceFilename);
     await prepareTemporalCandidate({
@@ -179,9 +179,11 @@ describe("prepareTemporalCandidate", () => {
 
     const candidateConnection = new BetterSqlite3(fixture.candidateFilename);
     try {
-      expect(candidateConnection.prepare(
+      expect(() => candidateConnection.prepare(
         "UPDATE path_relations SET updated_at = ? WHERE path_id = ?"
-      ).run("2026-07-17T01:00:00.000Z", "legacy-path-1").changes).toBe(1);
+      ).run("2026-07-17T01:00:00.000Z", "legacy-path-1")).toThrow(
+        /Legacy path relation writes are disabled/
+      );
     } finally {
       candidateConnection.close();
     }
@@ -197,10 +199,10 @@ describe("prepareTemporalCandidate", () => {
         selected: false,
         audit: []
       });
-      expect(() => selectTemporalProjection(candidate, {
-        receiptFilename: fixture.receiptFilename,
-        reason: "test candidate must reconcile before selection"
-      })).toThrow(/no longer matches its prepared receipt seal/);
+      const repo = new SqlitePathRelationRepo(candidate);
+      expect(() => repo.update("legacy-path-1", {
+        updated_at: "2026-07-17T01:00:00.000Z"
+      })).toThrow(expect.objectContaining({ code: "CONFLICT" }));
     } finally {
       candidate.close();
     }
@@ -369,9 +371,11 @@ describe("prepareTemporalCandidate", () => {
 
         const reopened = new BetterSqlite3(fixture.candidateFilename);
         try {
-          expect(reopened.prepare(
+          expect(() => reopened.prepare(
             "UPDATE path_relations SET updated_at = ? WHERE path_id = ?"
-          ).run("2026-07-17T04:00:00.000Z", "legacy-path-1").changes).toBe(1);
+          ).run("2026-07-17T04:00:00.000Z", "legacy-path-1")).toThrow(
+            /Legacy path relation writes are disabled/
+          );
         } finally {
           reopened.close();
         }

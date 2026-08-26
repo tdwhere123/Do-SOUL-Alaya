@@ -6,7 +6,8 @@ import {
   parseRuntimeGovernanceEventPayload,
   type EventType,
   type GardenTaskDescriptor,
-  type PathGraphSnapshot
+  type PathGraphSnapshot,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
 import { PathGraphSnapshotter, reviewPathGraphSnapshotHistory } from "@do-soul/alaya-soul";
 import type { CreateGardenSchedulerRuntimeSupportInput } from "./scheduler-runtime-types.js";
@@ -32,14 +33,19 @@ function createPathGraphSnapshotter(
   input: CreateGardenSchedulerRuntimeSupportInput
 ): PathGraphSnapshotter {
   const pathRelationRepo = input.pathRelationRepo as typeof input.pathRelationRepo & {
-    findActiveAll?: (workspaceId: string) => Promise<readonly unknown[]>;
-    findActive?: (workspaceId: string) => Promise<readonly unknown[]>;
+    findActiveAll?: (workspaceId: string) => Promise<
+      | readonly Readonly<PathRelation>[]
+      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+    >;
+    findActive?: (workspaceId: string) => Promise<readonly Readonly<PathRelation>[]>;
   };
+  const findActiveAll = wrapSnapshotterFindActiveAll(pathRelationRepo);
+  if (findActiveAll === undefined) {
+    throw new Error("path graph snapshotter requires findActiveAll or findActive");
+  }
   return new PathGraphSnapshotter({
     pathRelationRepo: {
-      findActiveAll:
-        pathRelationRepo.findActiveAll?.bind(input.pathRelationRepo) ??
-        pathRelationRepo.findActive?.bind(input.pathRelationRepo)
+      findActiveAll
     },
     now: () => new Date(input.now())
   });
@@ -219,4 +225,18 @@ function isPathGraphSnapshotDue(
     return true;
   }
   return nowMs - snapshotAtMs >= PATH_GRAPH_SNAPSHOT_INTERVAL_MS;
+}
+
+function wrapSnapshotterFindActiveAll(pathRelationRepo: {
+  findActiveAll?: (workspaceId: string) => Promise<
+    | readonly Readonly<PathRelation>[]
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+  >;
+  findActive?: (workspaceId: string) => Promise<readonly Readonly<PathRelation>[]>;
+}): ((workspaceId: string) => Promise<
+  | readonly Readonly<PathRelation>[]
+  | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+>) | undefined {
+  return pathRelationRepo.findActiveAll?.bind(pathRelationRepo)
+    ?? pathRelationRepo.findActive?.bind(pathRelationRepo);
 }

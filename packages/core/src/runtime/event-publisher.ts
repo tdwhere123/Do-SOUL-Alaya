@@ -4,6 +4,7 @@ import {
   type EventLogEntry,
   type WorkspaceRunEvent
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "../shared/errors.js";
 import { isPromiseLike } from "../shared/promise-utils.js";
 import { reportAsyncSideEffectFailure, scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
 
@@ -250,12 +251,7 @@ export class EventPublisher {
     mutate: (entries: readonly EventLogEntry[]) => T
   ): { readonly entries: readonly EventLogEntry[]; readonly mutateResult: T } {
     if (eventInputs.length === 0) {
-      // No events to append; still run the mutation for parity with the
-      // prior empty-batch behavior. There is no transaction needed because
-      // there is nothing to roll back atomically.
-      const result = mutate([]);
-      assertSynchronousMutationResult(result);
-      return { entries: [], mutateResult: result };
+      throw new CoreError("CONFLICT", "Empty EventPublisher batches cannot mutate");
     }
 
     const repo = this.dependencies.eventLogRepo;

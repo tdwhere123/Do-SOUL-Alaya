@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { Context, Hono } from "hono";
 import {
@@ -10,6 +10,7 @@ import {
   type SupportedMimeType
 } from "@do-soul/alaya-protocol";
 import {
+  CoreError,
   reportAsyncSideEffectFailure,
   resolveStoredFilePath,
   type AsyncSideEffectAuditEventLogPort
@@ -133,7 +134,8 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   if (mismatch !== null) return mismatch;
   const record = buildFileRecord(upload.file, upload.normalizedMimeType, scope);
   const absolutePath = join(services.filesDirectory, record.storage_path);
-  await mkdir(services.filesDirectory, { recursive: true });
+  await mkdir(services.filesDirectory, { recursive: true, mode: 0o700 });
+  await chmod(services.filesDirectory, 0o700);
   await writeFile(absolutePath, Buffer.from(await upload.file.arrayBuffer()));
   let stored: Awaited<ReturnType<typeof persistFileRecord>>;
   try {
@@ -211,8 +213,8 @@ async function downloadFile(context: Context, services: FileRouteServices): Prom
   }
   try {
     await services.workspaceService.getById(workspaceId);
-  } catch {
-    return fileNotFound(context);
+  } catch (error) {
+    return mapLookupErrorToResponse(context, error, "workspace");
   }
   const record = await services.fileRepo.findById(fileId);
   if (record === null || record.workspace_id !== workspaceId) {
@@ -263,6 +265,20 @@ async function sendStoredFile(context: Context, record: FileRecord, absolutePath
 
 function fileNotFound(context: Context): Response {
   return context.json({ success: false, error: "File not found" }, 404);
+}
+
+function mapLookupErrorToResponse(
+  context: Context,
+  error: unknown,
+  resource: "workspace" | "run"
+): Response {
+  if (error instanceof CoreError && error.code === "NOT_FOUND") {
+    return fileNotFound(context);
+  }
+  return context.json(
+    { success: false, error: `Failed to load ${resource}` },
+    500
+  );
 }
 
 function getUploadedFile(value: UploadBodyValue | UploadBodyValue[] | undefined): File | null {

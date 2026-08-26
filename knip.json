@@ -43,9 +43,12 @@
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "packages/core": {
-      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tsconfig.json"],
-      "ignoreDependencies": ["@huggingface/transformers"]
+      "entry": [
+        "src/index.ts",
+        "src/embedding-recall/local-onnx-embedding-client.ts",
+        "src/__tests__/**/*.test.ts"
+      ],
+      "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "packages/soul": {
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],

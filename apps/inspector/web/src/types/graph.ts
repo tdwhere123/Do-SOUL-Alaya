@@ -12,7 +12,7 @@ export interface GraphNode {
   // edge source/target matching), which is NOT a memory object id; the
   // proposal + open_pointer flows need the bare object id, so it is carried
   // separately here. Undefined for non-object anchors (obligation / concern).
-  // see also: apps/inspector/web/src/pages/Graph.tsx mapPathGraphNode
+  // see also: apps/inspector/web/src/pages/graph-page/support.tsx mapPathGraphNode
   object_id?: string;
   summary?: string;
   scope_id?: string;

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { compareText } from "../../shared/compare-text.js";
 export const SELECTED_SLICE_KEY_SCHEMA_VERSION = 2 as const;
 
@@ -82,6 +83,28 @@ export interface SelectedSliceKeyV2 {
   readonly source_version: string;
   readonly freshness: SelectedSliceKeyFreshnessV2;
 }
+
+export const SelectedSliceKeyV2Schema = z.object({
+  schema_version: z.literal(SELECTED_SLICE_KEY_SCHEMA_VERSION),
+  key_id: z.string().min(1),
+  match_id: z.string().min(1),
+  workspace_id: z.string().min(1),
+  owner_id: z.string().min(1).nullable(),
+  dimension: z.string().min(1),
+  normalized_value: z.string().min(1),
+  authority: z.enum(SELECTED_SLICE_KEY_V2_AUTHORITIES),
+  reliability: z.number().finite().min(0).max(1).nullable(),
+  independence_group: z.string().min(1),
+  provenance: z.object({
+    kind: z.enum(SELECTED_SLICE_KEY_V2_PROVENANCE_KINDS),
+    source_ref: z.string().min(1)
+  }).strict(),
+  source_version: z.string().min(1),
+  freshness: z.object({
+    state: z.enum(["fresh", "stale"]),
+    as_of_ms: z.number().int().nonnegative()
+  }).strict()
+}).strict();
 
 export interface SelectedSliceKeyMatchV2 {
   readonly match_id: string;

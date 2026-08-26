@@ -181,6 +181,7 @@ export const SoulPathGraphContractSchema = z
     nodes: z.array(SoulPathGraphNodeSchema).readonly(),
     edges: z.array(SoulPathGraphEdgeSchema).readonly(),
     topology: SoulPathGraphTopologySchema,
+    truncated: z.boolean().default(false),
     snapshot_trend: SoulPathGraphSnapshotTrendSchema.optional()
   })
   .strict()

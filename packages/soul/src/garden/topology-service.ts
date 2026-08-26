@@ -20,7 +20,13 @@ type SnapshotHistoryPort = {
 
 export interface TopologyServiceDependencies {
   readonly pathRelationRepo: {
-    findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+    findActiveAll(workspaceId: string): Promise<
+      | readonly Readonly<PathRelation>[]
+      | Readonly<{
+          readonly relations: readonly Readonly<PathRelation>[];
+          readonly truncated: boolean;
+        }>
+    >;
   };
   readonly snapshotHistory?: SnapshotHistoryPort;
   readonly now?: () => Date;
@@ -48,8 +54,8 @@ export class TopologyService {
   }
 
   public async explore(workspaceId: string): Promise<Readonly<TopologyExplorationResult>> {
-    const relations = await this.deps.pathRelationRepo.findActiveAll(workspaceId);
-    const built = buildTopology(relations);
+    const listed = unwrapActivePathList(await this.deps.pathRelationRepo.findActiveAll(workspaceId));
+    const built = buildTopology(listed.relations);
     const exploredAt = this.now().toISOString();
     const trend = await this.buildTrend(workspaceId);
 
@@ -62,6 +68,7 @@ export class TopologyService {
       max_in_degree: built.maxInDegree,
       avg_degree: built.avgDegree,
       strongly_connected_components: built.stronglyConnectedComponents,
+      truncated: listed.truncated,
       trend,
       explored_at: exploredAt
     });
@@ -225,6 +232,37 @@ function estimateAverageStrength(snapshot: Readonly<PathGraphSnapshot>): number 
     snapshot.strength_distribution.very_strong * 0.9;
 
   return weightedStrength / snapshot.total_active_paths;
+}
+
+function unwrapActivePathList(
+  listed:
+    | readonly Readonly<PathRelation>[]
+    | Readonly<{
+        readonly relations: readonly Readonly<PathRelation>[];
+        readonly truncated: boolean;
+      }>
+): Readonly<{
+  readonly relations: readonly Readonly<PathRelation>[];
+  readonly truncated: boolean;
+}> {
+  if (isCappedPathRelationList(listed)) {
+    return listed;
+  }
+  return { relations: listed, truncated: false };
+}
+
+function isCappedPathRelationList(
+  listed:
+    | readonly Readonly<PathRelation>[]
+    | Readonly<{
+        readonly relations: readonly Readonly<PathRelation>[];
+        readonly truncated: boolean;
+      }>
+): listed is Readonly<{
+  readonly relations: readonly Readonly<PathRelation>[];
+  readonly truncated: boolean;
+}> {
+  return typeof listed === "object" && listed !== null && "relations" in listed;
 }
 
 function parseTopologyTrend(value: TopologyTrend): Readonly<TopologyTrend> {

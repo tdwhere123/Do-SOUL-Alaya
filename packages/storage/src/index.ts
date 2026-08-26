@@ -7,6 +7,7 @@ export {
   getCurrentSchemaSummary,
   configureSqliteWriteQueuePort,
   getSqliteWriteQueuePort,
+  openReadOnlyDatabase,
   EMBEDDING_OVERLAY_ALIAS,
   EMBEDDING_OVERLAY_BIND_FILENAME,
   bindEmbeddingOverlay,
@@ -185,6 +186,8 @@ export {
 } from "./repos/memory/index.js";
 export {
   SqlitePathRelationRepo,
+  PATH_RELATION_ACTIVE_LIST_HARD_CAP,
+  type PathRelationListResult,
   type PathRelationPageOptions,
   type PathRelationRepo
 } from "./repos/path/index.js";

@@ -76,7 +76,7 @@ it("rule path fires in the 0.35..0.5 tag overlap wedge (v0.3.11 §C C3)", async 
     });
 
     const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
-      (call: any[]) => call[0].relationKind === "contradicts"
+      (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(1);
   });
@@ -192,8 +192,14 @@ it("shared-tag candidate narrowing yields the SAME INCOMPATIBLE_WITH edges as a 
     expect(queriedTags).toEqual([newMemoryDomainTags]);
 
     const incompatibleTargets = pathCandidatePort.submitCandidate.mock.calls
-      .filter((call: any[]) => call[0].relationKind === "incompatible_with")
-      .map((call: any[]) => call[0].targetAnchor.object_id)
+      .filter((call: readonly [{
+        readonly relationKind: string;
+        readonly targetAnchor: { readonly object_id: string };
+      }]) => call[0].relationKind === "incompatible_with")
+      .map((call: readonly [{
+        readonly relationKind: string;
+        readonly targetAnchor: { readonly object_id: string };
+      }]) => call[0].targetAnchor.object_id)
       .sort();
 
     // The narrowed-candidate edges equal the full-scan edges exactly.

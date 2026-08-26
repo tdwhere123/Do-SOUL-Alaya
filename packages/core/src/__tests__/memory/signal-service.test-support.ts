@@ -32,19 +32,32 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
   };
 }
 
+export function atomicUpdateState(
+  impl: (
+    signalId: string,
+    state: CandidateMemorySignal["signal_state"]
+  ) => CandidateMemorySignal = (signalId, state) => createSignal({ signal_id: signalId, signal_state: state })
+) {
+  const updateState = vi.fn(impl);
+  return { updateState, updateStateInCurrentTransaction: updateState };
+}
+
 export function signalServiceDependencies(
   overrides: Partial<SignalServiceDependencies> = {}
 ): SignalServiceDependencies {
+  const updateState = vi.fn();
   return {
     eventLogRepo: {
       append: vi.fn(),
-      queryByEntity: vi.fn(async () => [])
+      queryByEntity: vi.fn(async () => []),
+      transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {
       create: vi.fn(),
       getById: vi.fn(async () => null),
       listByRun: vi.fn(async () => []),
-      updateState: vi.fn()
+      updateState,
+      updateStateInCurrentTransaction: updateState
     },
     runtimeNotifier: {
       notifyEntry: vi.fn()

@@ -194,8 +194,9 @@ Alaya has no agent-frontend GUI and no conversation TUI. The outward
 surfaces are:
 
 - **MCP server** (in `apps/core-daemon`) — primary agent-attach
-  surface, consumed by agents like Codex and Claude Code via stdio or
-  HTTP transport.
+  surface, consumed by agents like Codex and Claude Code over **stdio
+  only**. HTTP is the daemon/Inspector API and the outbound MCP *client*
+  (loopback), not an Alaya MCP server transport.
 - **CLI commands** (`bin/alaya.mjs` → `apps/core-daemon`) — `alaya
   doctor`, `alaya install`, `alaya attach <target>`, `alaya detach
   <target>`, `alaya status`, `alaya tools list`, `alaya tools call
@@ -238,6 +239,9 @@ Remote daemon bind (`ALAYA_ALLOW_REMOTE_DAEMON=1` with non-loopback
 `DAEMON_HOST`) is break-glass only: a single `ALAYA_REQUEST_TOKEN` is not
 sufficient for multi-host exposure, desktop originless bypass is disabled, and
 loopback remains the supported default.
+
+`ALAYA_RETAIN_UNROUTED_FACTS` is default-off: Garden keeps unrouted
+high-confidence facts only when the env is `1` or `true`.
 
 ## Runtime Write Model
 
@@ -320,9 +324,10 @@ review finding:
 4. **Garden engine**: GardenScheduler started AFTER all services are
    ready; Garden roles register port adapters at this step.
 5. **Engine gateway**: provider registry + MCP bridge constructed.
-6. **MCP transport**: stdio / HTTP listener bound. From this point,
-   external agents may attach. Tool calls fail-closed if any prior
-   step did not complete.
+6. **MCP stdio + daemon HTTP**: Alaya MCP is stdio only. The HTTP listener
+   is the daemon/Inspector API, not an MCP server. From this point,
+   external agents may attach over MCP stdio. Tool calls fail-closed if any
+   prior step did not complete.
 7. **CLI bridge**: bin/alaya.mjs subcommands wired.
 
 File-backed recall reads may run on worker threads. In temporal mode, the

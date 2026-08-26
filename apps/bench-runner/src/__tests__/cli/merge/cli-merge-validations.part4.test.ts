@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import {
   makeShardKpi,
   writeShardRoot
@@ -147,7 +147,7 @@ describe("merge-longmemeval scalar identity validations", () => {
   });
 
   function merge(shardA: string, shardB: string): Promise<number> {
-    return runCli([
+    return runMergeCli(tmpRoot, [
       "merge-longmemeval", "--variant", "s", "--history-root",
       path.join(tmpRoot, "history"), "--shards", shardA, shardB
     ]);

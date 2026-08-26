@@ -13,6 +13,7 @@ export interface CoreDaemonRateLimitConfig {
   readonly maxRequests?: number;
   readonly windowMs?: number;
   readonly nowMs?: () => number;
+  readonly failClosedOnUnknownSocket?: boolean;
 }
 
 export function registerSecurityHeadersMiddleware(app: Hono): void {
@@ -32,9 +33,22 @@ export function registerRateLimitMiddleware(
       windowMs: config?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
       ...(config?.nowMs === undefined ? {} : { nowMs: config.nowMs }),
       skip: (context) => !isProtectedRequest(context.req.method, context.req.path),
-      resolveKey: resolveProtectedRateLimitKey
+      failClosedOnUnknownSocket: config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind(),
+      resolveKey: (context) =>
+        resolveProtectedRateLimitKey(
+          context,
+          config?.failClosedOnUnknownSocket ?? isRemoteDaemonBind()
+        )
     })
   );
+}
+
+function isRemoteDaemonBind(env: NodeJS.ProcessEnv = process.env): boolean {
+  const host = (env.DAEMON_HOST ?? "127.0.0.1").trim();
+  if (host.length === 0 || host === "localhost" || host === "::1" || host === "[::1]") {
+    return false;
+  }
+  return !/^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 export function isProtectedRequest(method: string, path: string): boolean {

@@ -145,6 +145,27 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
       .EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>> {
+    const run = () => this.createInCurrentTransaction(
+      capsule,
+      searchProjections,
+      factFrameFormation,
+      semanticFactorFormation,
+      semanticCompleteness
+    );
+    if (this.db.connection.inTransaction) {
+      return run();
+    }
+    return this.db.connection.transaction(run)();
+  }
+
+  public createInCurrentTransaction(
+    capsule: EvidenceCapsule,
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
+      .EvidenceOsfSemanticCompletenessReceipt>
+  ): Readonly<EvidenceCapsule> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
     const formationInsert = prepareFactFrameFormationInsert(
       parsedCapsule,
@@ -157,48 +178,13 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       semanticCompleteness,
       factFrameFormation
     );
-
     try {
-      this.db.connection.transaction(() => {
-        this.statements.createStatement.run(
-          parsedCapsule.object_id,
-          parsedCapsule.object_kind,
-          parsedCapsule.schema_version,
-          parsedCapsule.lifecycle_state,
-          parsedCapsule.created_at,
-          parsedCapsule.updated_at,
-          parsedCapsule.created_by,
-          parsedCapsule.evidence_kind,
-          JSON.stringify(parsedCapsule.semantic_anchor),
-          parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
-          parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
-          parsedCapsule.evidence_health_state,
-          parsedCapsule.gist,
-          parsedCapsule.excerpt,
-          parsedCapsule.source_hash,
-          parsedCapsule.run_id,
-          parsedCapsule.workspace_id,
-          parsedCapsule.surface_id
-        );
-        for (const projection of searchProjections) {
-          this.statements.createSearchProjectionStatement.run(
-            parsedCapsule.object_id,
-            projection.projection_id,
-            projection.projection_kind,
-            parsedCapsule.workspace_id,
-            parsedCapsule.source_hash,
-            projection.content
-          );
-        }
-        if (formationInsert !== null) {
-          this.statements.createFactFrameFormationStatement.run(...formationInsert);
-        }
-        if (semanticFormationInsert !== null) {
-          this.statements.createSemanticFactorFormationStatement.run(
-            ...semanticFormationInsert
-          );
-        }
-      })();
+      this.insertCreatedCapsule(
+        parsedCapsule,
+        searchProjections,
+        formationInsert,
+        semanticFormationInsert
+      );
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -206,8 +192,53 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
         error
       );
     }
-
     return parsedCapsule;
+  }
+
+  private insertCreatedCapsule(
+    parsedCapsule: EvidenceCapsule,
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[],
+    formationInsert: ReturnType<typeof prepareFactFrameFormationInsert>,
+    semanticFormationInsert: ReturnType<typeof prepareSemanticFactorFormationInsert>
+  ): void {
+    this.statements.createStatement.run(
+      parsedCapsule.object_id,
+      parsedCapsule.object_kind,
+      parsedCapsule.schema_version,
+      parsedCapsule.lifecycle_state,
+      parsedCapsule.created_at,
+      parsedCapsule.updated_at,
+      parsedCapsule.created_by,
+      parsedCapsule.evidence_kind,
+      JSON.stringify(parsedCapsule.semantic_anchor),
+      parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
+      parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
+      parsedCapsule.evidence_health_state,
+      parsedCapsule.gist,
+      parsedCapsule.excerpt,
+      parsedCapsule.source_hash,
+      parsedCapsule.run_id,
+      parsedCapsule.workspace_id,
+      parsedCapsule.surface_id
+    );
+    for (const projection of searchProjections) {
+      this.statements.createSearchProjectionStatement.run(
+        parsedCapsule.object_id,
+        projection.projection_id,
+        projection.projection_kind,
+        parsedCapsule.workspace_id,
+        parsedCapsule.source_hash,
+        projection.content
+      );
+    }
+    if (formationInsert !== null) {
+      this.statements.createFactFrameFormationStatement.run(...formationInsert);
+    }
+    if (semanticFormationInsert !== null) {
+      this.statements.createSemanticFactorFormationStatement.run(
+        ...semanticFormationInsert
+      );
+    }
   }
 
   public async deleteById(objectId: string): Promise<void> {
@@ -419,29 +450,35 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>> {
+    return this.updateHealthInCurrentTransaction(objectId, health, updatedAt);
+  }
+
+  public updateHealthInCurrentTransaction(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Readonly<EvidenceCapsule> {
     const parsedHealth = parseEvidenceHealthState(health);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
     try {
       const result = this.statements.updateHealthStatement.run(parsedHealth, parsedUpdatedAt, objectId);
-
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found.`);
       }
-
-      const capsule = await this.findById(objectId);
-
+      const capsule = parseOptionalRow(
+        this.statements.findByIdStatement.get(objectId),
+        EvidenceCapsuleRowParser,
+        "evidence capsule row"
+      );
       if (capsule === null) {
         throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found after update.`);
       }
-
       return capsule;
     } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", `Failed to update evidence health for ${objectId}.`, error);
+      throw wrapEvidenceCapsuleQueryError(
+        `Failed to update evidence health for ${objectId}.`,
+        error
+      );
     }
   }
 }

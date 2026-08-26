@@ -1,26 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
 
-import { createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
 
 describe("SignalService", () => {
 it("marks the signal failed when post-triage materializer throws", async () => {
     const warn = vi.fn();
     const service = new SignalService({
       eventLogRepo: {
-        append: vi.fn(async (event) => ({
+        append: vi.fn((event) => ({
           event_id: "evt_1",
           created_at: "2026-03-18T00:00:01.000Z",
           revision: 0,
           ...event
         })),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: <T>(fn: () => T) => fn()
       },
       signalRepo: {
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        updateState: vi.fn(async (signalId, state) => createSignal({ signal_id: signalId, signal_state: state }))
+        ...atomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -81,7 +82,7 @@ it("emits a corrective soul.signal.triaged deferred event after materialization 
 
     const service = new SignalService({
       eventLogRepo: {
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           appendCallCount++;
           appendedEvents.push({ event_type: event.event_type, caused_by: event.caused_by, payload_json: event.payload_json as Record<string, unknown> });
           return {
@@ -91,13 +92,14 @@ it("emits a corrective soul.signal.triaged deferred event after materialization 
             ...event
           };
         }),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => []),
+        transactional: <T>(fn: () => T) => fn()
       },
       signalRepo: {
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        updateState: vi.fn(async (signalId, state) => createSignal({ signal_id: signalId, signal_state: state }))
+        ...atomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async (entry) => {

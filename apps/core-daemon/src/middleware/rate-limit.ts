@@ -16,6 +16,7 @@ export interface FixedWindowRateLimitOptions {
   readonly nowMs?: () => number;
   readonly skip?: (context: Context) => boolean;
   readonly resolveKey?: (context: Context) => string;
+  readonly failClosedOnUnknownSocket?: boolean;
 }
 
 const DEFAULT_RESPONSE_BODY = {
@@ -25,11 +26,7 @@ const DEFAULT_RESPONSE_BODY = {
 
 const CLEANUP_INTERVAL = 128;
 const DEFAULT_MAX_BUCKETS = 4_096;
-// When unique clients exceed maxBuckets, LRU eviction drops the oldest bucket
-// and the next request from that client starts a fresh window — a deliberate
-// memory cap tradeoff for local-first daemons under connection churn.
-
-let rateLimitEvictionWarningEmitted = false;
+const UNKNOWN_SOCKET_KEY = "__alaya_rate_limit_unknown_socket__";
 
 export function createFixedWindowRateLimitMiddleware(
   options: FixedWindowRateLimitOptions
@@ -51,8 +48,21 @@ export function createFixedWindowRateLimitMiddleware(
       requestsSinceCleanup = 0;
     }
 
-    const key = options.resolveKey?.(context) ?? defaultRateLimitKey(context);
-    const bucket = readBucket(buckets, key, now, options.windowMs);
+    const key = options.resolveKey?.(context)
+      ?? resolveProtectedRateLimitKey(context, options.failClosedOnUnknownSocket === true);
+    if (key === UNKNOWN_SOCKET_KEY) {
+      return context.json({ success: false, error: "Rate limit identity unavailable" }, 403);
+    }
+    const bucket = readBucket(
+      buckets,
+      key,
+      now,
+      options.windowMs,
+      options.maxBuckets ?? DEFAULT_MAX_BUCKETS
+    );
+    if (bucket === null) {
+      return context.json(DEFAULT_RESPONSE_BODY, 429);
+    }
     if (bucket.count >= options.maxRequests) {
       const retryAfterSeconds = Math.max(
         1,
@@ -97,40 +107,45 @@ function readBucket(
   buckets: LruCache<string, Bucket>,
   key: string,
   now: number,
-  windowMs: number
-): Bucket {
+  windowMs: number,
+  maxBuckets: number
+): Bucket | null {
   const existing = buckets.get(key);
-  if (existing === undefined || now - existing.startedAtMs >= windowMs) {
+  if (existing !== undefined && now - existing.startedAtMs < windowMs) {
+    return existing;
+  }
+  if (existing !== undefined) {
     const fresh = { startedAtMs: now, count: 0 };
-    buckets.setWithEvictionNotice(key, fresh, (evictedKey, evictedBucket) => {
-      if (now - evictedBucket.startedAtMs < windowMs && !rateLimitEvictionWarningEmitted) {
-        rateLimitEvictionWarningEmitted = true;
-        emitWarning(
-          `rate-limit LRU evicted active bucket for key ${String(evictedKey)}; client may receive a fresh window`
-        );
-      }
-    });
+    buckets.set(key, fresh);
     return fresh;
   }
-
-  return existing;
+  if (buckets.size >= maxBuckets) {
+    emitWarning("rate-limit LRU is full of active buckets; refusing a new client instead of resetting counters");
+    return null;
+  }
+  const fresh = { startedAtMs: now, count: 0 };
+  buckets.set(key, fresh);
+  return fresh;
 }
 
-export function resolveProtectedRateLimitKey(context: Context): string {
+export function resolveProtectedRateLimitKey(
+  context: Context,
+  failClosedOnUnknownSocket = false
+): string {
   const token = normalizeHeader(context.req.header("x-request-token"));
-  const socket = readSocketRemoteAddress(context) ?? "anonymous";
-  if (token !== undefined) {
-    return `token:${hashRateLimitCredential(token)}:${socket}`;
+  const socket = readSocketRemoteAddress(context);
+  if (socket === undefined && failClosedOnUnknownSocket) {
+    return UNKNOWN_SOCKET_KEY;
   }
-  return socket;
+  const identity = socket ?? "anonymous";
+  if (token !== undefined) {
+    return `token:${hashRateLimitCredential(token)}:${identity}`;
+  }
+  return identity;
 }
 
 function hashRateLimitCredential(credential: string): string {
   return createHash("sha256").update(credential).digest("hex").slice(0, 16);
-}
-
-function defaultRateLimitKey(context: Context): string {
-  return resolveProtectedRateLimitKey(context);
 }
 
 function normalizeRemoteAddress(address: string | undefined): string | undefined {

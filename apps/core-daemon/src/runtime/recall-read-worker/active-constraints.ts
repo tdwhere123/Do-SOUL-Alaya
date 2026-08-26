@@ -18,11 +18,13 @@ export async function runWorkerActiveConstraints(input: Readonly<{
     memoryRepo: input.memoryRepo,
     claimFormRepo: input.claimFormRepo,
     pathRelationRepo: {
-      findActiveAll: async () =>
-        await input.pathReadPorts.findActiveByWorkspace(
+      findActiveAll: async () => ({
+        relations: await input.pathReadPorts.findActiveByWorkspace(
           workspaceId,
           asOf === undefined ? {} : { asOf }
-        )
+        ),
+        truncated: false
+      })
     },
     cap: readNullableNumber(input.payload.cap, "cap")
   });

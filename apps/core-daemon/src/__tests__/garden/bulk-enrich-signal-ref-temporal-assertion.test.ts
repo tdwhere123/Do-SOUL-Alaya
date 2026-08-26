@@ -165,6 +165,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         pathRelationRepo,
         proposalRepo: new SqliteProposalRepo(database),
         relationAssertionRepo,
+        evidenceCapsuleRepo,
         runtimeNotifier,
         warn: vi.fn()
       } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
@@ -225,23 +226,8 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
           audit_entries: expect.arrayContaining(["bulk_enrich:processed_1", "bulk_enrich:failed_2"])
         })
       ]);
-      const assertions = relationAssertionRepo.listAssertionsInCurrentTransaction();
-      expect(assertions).toHaveLength(1);
-      expect(assertions[0]).toMatchObject({
-        workspace_id: WORKSPACE_ID,
-        evidence_receipts: [expect.objectContaining({ evidence_id: EVIDENCE_ID })],
-        formation_receipt: expect.objectContaining({ operator_id: "signal_relation_assertion_admission_v1" }),
-        relation_kind: "derives_from",
-        anchors: {
-          source_anchor: { kind: "object", object_id: SOURCE_MEMORY_ID },
-          target_anchor: { kind: "object", object_id: TARGET_MEMORY_ID }
-        }
-      });
-      await expect(relationAssertionRepo.findActiveProjectionByWorkspace(WORKSPACE_ID)).resolves.toEqual([
-        expect.objectContaining({
-          constitution: expect.objectContaining({ relation_kind: "derives_from" })
-        })
-      ]);
+      expect(relationAssertionRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
+      expect(await new SqliteProposalRepo(database).countPending(WORKSPACE_ID)).toBeGreaterThan(0);
       await expect(pathRelationRepo.findByAnchors(WORKSPACE_ID, [
         { kind: "object", object_id: SOURCE_MEMORY_ID }
       ])).resolves.toEqual([]);
@@ -251,8 +237,7 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         memoryEvidenceIds: [EVIDENCE_ID],
         signal: persistedSignal!
       });
-      expect(relationAssertionRepo.listAssertionsInCurrentTransaction()).toHaveLength(1);
-      await expect(relationAssertionRepo.findActiveProjectionByWorkspace(WORKSPACE_ID)).resolves.toHaveLength(1);
+      expect(relationAssertionRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
     } finally {
       if (pathRelationEvictionTimer !== null) clearInterval(pathRelationEvictionTimer);
       database.close();

@@ -122,7 +122,7 @@ describe("security middleware", () => {
     expect((await app.request("/api/example")).status).toBe(429);
   });
 
-  it("evicts oldest rate-limit buckets when capacity is exceeded", async () => {
+  it("refuses new clients instead of resetting counters when the LRU is full", async () => {
     let keyCounter = 0;
     const app = new Hono();
     app.use(
@@ -139,9 +139,28 @@ describe("security middleware", () => {
 
     expect((await app.request("/api/example")).status).toBe(200);
     expect((await app.request("/api/example")).status).toBe(200);
-    expect((await app.request("/api/example")).status).toBe(200);
+    expect((await app.request("/api/example")).status).toBe(429);
 
     keyCounter = 0;
-    expect((await app.request("/api/example")).status).toBe(200);
+    expect((await app.request("/api/example")).status).toBe(429);
+  });
+
+  it("fails closed on unknown sockets when remote bind is enabled", async () => {
+    mockedGetConnInfo.mockImplementation(() => {
+      throw new Error("conninfo unavailable");
+    });
+    const app = new Hono();
+    app.use(
+      "*",
+      createFixedWindowRateLimitMiddleware({
+        maxRequests: 10,
+        windowMs: 60_000,
+        nowMs: () => 1_000,
+        failClosedOnUnknownSocket: true
+      })
+    );
+    app.get("/api/example", (context) => context.json({ ok: true }));
+
+    expect((await app.request("/api/example")).status).toBe(403);
   });
 });

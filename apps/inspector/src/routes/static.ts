@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Hono } from "hono";
+import { INSPECTOR_HTML_CONTENT_SECURITY_POLICY } from "../middleware/security-headers.js";
 
 const STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const STATIC_HTML_CACHE_CONTROL = "no-cache";
@@ -41,7 +42,13 @@ export function registerInspectorStaticRoutes(app: Hono, options: { readonly sta
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
-        "cache-control": STATIC_HTML_CACHE_CONTROL
+        "cache-control": STATIC_HTML_CACHE_CONTROL,
+        "content-security-policy": INSPECTOR_HTML_CONTENT_SECURITY_POLICY,
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "no-referrer",
+        "permissions-policy":
+          "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), usb=()"
       }
     });
   });

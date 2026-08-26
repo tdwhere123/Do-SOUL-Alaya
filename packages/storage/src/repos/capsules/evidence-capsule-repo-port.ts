@@ -26,6 +26,13 @@ export interface EvidenceCapsuleRepo {
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
     semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>>;
+  createInCurrentTransaction(
+    capsule: EvidenceCapsule,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
+    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>
+  ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -64,6 +71,11 @@ export interface EvidenceCapsuleRepo {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>>;
+  updateHealthInCurrentTransaction(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Readonly<EvidenceCapsule>;
   // see also: memory_content_fts -- parallel raw FTS surface
   searchByKeyword?(
     workspaceId: string,

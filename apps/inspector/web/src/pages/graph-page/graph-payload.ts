@@ -1,0 +1,38 @@
+import { z } from "zod";
+import {
+  SoulPathGraphContractSchema,
+  type SoulPathGraphContract
+} from "@do-soul/alaya-protocol";
+
+const InspectorPathGraphEnvelopeSchema = z.object({
+  success: z.literal(true),
+  data: SoulPathGraphContractSchema,
+  truncated: z.boolean().optional()
+}).passthrough();
+
+export type InspectorPathGraphParse = Readonly<{
+  readonly graph: SoulPathGraphContract;
+  readonly truncated: boolean;
+}>;
+
+export function parseInspectorPathGraph(payload: unknown): InspectorPathGraphParse {
+  const envelope = InspectorPathGraphEnvelopeSchema.safeParse(payload);
+  if (envelope.success) {
+    return {
+      graph: envelope.data.data,
+      truncated: envelope.data.truncated === true || envelope.data.data.truncated === true
+    };
+  }
+  const graph = SoulPathGraphContractSchema.parse(payload);
+  return {
+    graph,
+    truncated: graph.truncated === true || truncatedFlag(payload)
+  };
+}
+
+function truncatedFlag(payload: unknown): boolean {
+  return typeof payload === "object" &&
+    payload !== null &&
+    "truncated" in payload &&
+    (payload as { readonly truncated?: unknown }).truncated === true;
+}

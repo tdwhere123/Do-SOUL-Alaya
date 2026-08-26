@@ -75,6 +75,26 @@ export function createMemoryCreatedEventInput(
   };
 }
 
+export function createMemoryUpdatedEventInput(
+  entry: MemoryEntry
+): Parameters<SqliteEventLogRepo["append"]>[0] {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+    entity_type: "memory_entry",
+    entity_id: entry.object_id,
+    workspace_id: entry.workspace_id,
+    run_id: entry.run_id,
+    caused_by: "manual_update",
+    payload_json: {
+      object_id: entry.object_id,
+      object_kind: entry.object_kind,
+      workspace_id: entry.workspace_id,
+      run_id: entry.run_id,
+      updated_fields: ["content"]
+    }
+  };
+}
+
 export async function createRepo(options: { readonly filename?: string } = {}): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteMemoryEntryRepo;

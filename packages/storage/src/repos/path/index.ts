@@ -12,10 +12,12 @@ export {
 } from "./edge-proposal-repo.js";
 export {
   SqlitePathRelationRepo,
+  PATH_RELATION_ACTIVE_LIST_HARD_CAP,
   PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_ANCHOR_KEY_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL,
+  type PathRelationListResult,
   type PathRelationPageOptions,
   type PathRelationRepo
 } from "./path-relation-repo.js";

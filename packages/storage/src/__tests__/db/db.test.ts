@@ -102,6 +102,30 @@ describe("initDatabase PRAGMA hardening", () => {
     cleanupTempDirectory(context.directory);
   });
 
+  it("restricts the database directory to 0700 and sqlite files to 0600", () => {
+    fs.chmodSync(context.directory, 0o755);
+    const database = initDatabase({ filename: context.filename });
+    try {
+      expect(fs.statSync(context.directory).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(context.filename).mode & 0o777).toBe(0o600);
+      expect(fs.existsSync(`${context.filename}-wal`)).toBe(true);
+      expect(fs.existsSync(`${context.filename}-shm`)).toBe(true);
+      expect(fs.statSync(`${context.filename}-wal`).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(`${context.filename}-shm`).mode & 0o777).toBe(0o600);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not chmod a :memory: database", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      expect(database.filename).toBe(":memory:");
+    } finally {
+      database.close();
+    }
+  });
+
   it("enables WAL journal mode on file-backed databases", () => {
     const database = initDatabase({ filename: context.filename });
     try {

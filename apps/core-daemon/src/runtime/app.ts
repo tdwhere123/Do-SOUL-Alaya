@@ -361,7 +361,7 @@ function registerRequestBodyLimitMiddleware(app: Hono): void {
 
 function registerLivenessRoute(app: Hono): void {
   app.get(LIVENESS_PATH, (context) =>
-    context.json({ status: "ok", service: "alaya-core-daemon", uptime_s: process.uptime() }, 200)
+    context.json({ status: "ok", service: "alaya-core-daemon" }, 200)
   );
 }
 

@@ -11,7 +11,7 @@ import {
   type KpiPayload
 } from "@do-soul/alaya-eval";
 
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import { mergeSeedExtractionPath } from "../../../cli/merge-shared.js";
 
 import {
@@ -96,7 +96,7 @@ describe("merge-longmemeval release gates", () => {
       "utf8"
     );
 
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -183,7 +183,7 @@ describe("merge-longmemeval release gates", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-seed-extraction-path");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -285,7 +285,7 @@ describe("merge-longmemeval release gates", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-seed-offline-fallback");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -382,7 +382,7 @@ describe("merge-longmemeval release gates", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-seed-official-zero");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",

@@ -1,6 +1,7 @@
 import {
   configureSqliteWriteQueuePort,
   initDatabase,
+  inspectTemporalProjectionSelection,
   installDefaultSqliteWriteQueue,
   type SqliteWriteQueuePort
 } from "@do-soul/alaya-storage";
@@ -14,9 +15,21 @@ export async function openDaemonDatabase(filename: string) {
   await closeDaemonSqliteWriteQueue();
   installedWriteQueue = await installDefaultSqliteWriteQueue();
   const database = initDatabase({ filename });
+  assertTemporalProjectionReady(database);
   // Without stats, SQLite can pick a low-selectivity index on a growing alaya.db.
   database.optimize();
   return database;
+}
+
+export function assertTemporalProjectionReady(
+  database: Parameters<typeof inspectTemporalProjectionSelection>[0]
+): void {
+  const state = inspectTemporalProjectionSelection(database);
+  if (state.schema === "temporal" && state.selectionRequired && !state.selected) {
+    throw new Error(
+      "Temporal schema exists but is unselected (mixed-mode). Storage blocks writes until cutover selection or rollback completes."
+    );
+  }
 }
 
 export async function closeDaemonSqliteWriteQueue(): Promise<void> {

@@ -52,18 +52,14 @@ export default defineConfig({
         "**/dist/**",
         "bin/**"
       ],
-      // Ratchet floor: thresholds run PER-PROJECT (run-vitest-projects.mjs runs
-      // each project separately with --coverage.enabled), so a single global
-      // floor must hold for EVERY project. Set below the weakest measured
-      // project (bench-runner lines/stmts ~42%, engine-gateway branches ~13% /
-      // functions ~28%); raise as projects improve. perFile off so it gates
-      // the project aggregate.
+      // Per-project include + floors live in scripts/ci/run-vitest-projects.mjs.
+      // Mixed fallback must not sit below the old diluted 42/42 statements/lines.
       thresholds: {
         perFile: false,
         statements: 42,
         lines: 42,
-        functions: 28,
-        branches: 13
+        functions: 30,
+        branches: 20
       }
     }
   },

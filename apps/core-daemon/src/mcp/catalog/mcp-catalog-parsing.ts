@@ -72,25 +72,26 @@ export function parseDaemonMcpServerRuntimeConfigs(
     return Object.freeze({});
   }
 
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(rawValue);
-    const envelope = JsonObjectRecordSchema.parse(parsed);
-
-    const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
-    for (const [serverName, rawConfig] of Object.entries(envelope)) {
-      const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
-      if (config !== null) {
-        runtimeConfigs[serverName] = config;
-      }
-    }
-
-    return Object.freeze(runtimeConfigs);
+    parsed = JSON.parse(rawValue);
   } catch (error) {
-    warn("failed to parse ALAYA_MCP_SERVER_CONFIG_JSON; ignoring MCP runtime config", {
-      error
-    });
-    return Object.freeze({});
+    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON", { cause: error });
   }
+  const envelope = JsonObjectRecordSchema.safeParse(parsed);
+  if (!envelope.success) {
+    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object of server configs");
+  }
+
+  const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
+  for (const [serverName, rawConfig] of Object.entries(envelope.data)) {
+    const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
+    if (config !== null) {
+      runtimeConfigs[serverName] = config;
+    }
+  }
+
+  return Object.freeze(runtimeConfigs);
 }
 
 export function parseAllowedMcpServerNames(rawValue: string | undefined): readonly string[] {
@@ -112,7 +113,7 @@ export function readDaemonMcpCatalogEnvironment(
 ): DaemonMcpCatalogEnvironmentSnapshot {
   return Object.freeze({
     allowedServerNames: parseAllowedMcpServerNames(env.ALAYA_ALLOWED_MCP_SERVERS),
-    rawToolCatalog: parseMcpToolCatalogByServer(env.ALAYA_MCP_TOOL_CATALOG_JSON, warn)
+    rawToolCatalog: parseMcpToolCatalogByServer(env.ALAYA_MCP_TOOL_CATALOG_JSON)
   });
 }
 
@@ -187,8 +188,7 @@ function isLoopbackMcpEndpoint(url: URL): boolean {
 }
 
 function parseMcpToolCatalogByServer(
-  rawValue: string | undefined,
-  warn: WarnLogger = defaultWarn
+  rawValue: string | undefined
 ): ReadonlyMap<string, readonly DaemonMcpCatalogToolEntry[]> {
   if (rawValue === undefined || rawValue.trim().length === 0) {
     return new Map<string, readonly DaemonMcpCatalogToolEntry[]>();
@@ -216,10 +216,7 @@ function parseMcpToolCatalogByServer(
 
     return byServer;
   } catch (error) {
-    warn("failed to parse ALAYA_MCP_TOOL_CATALOG_JSON; ignoring MCP discovery catalog", {
-      error
-    });
-    return new Map<string, readonly DaemonMcpCatalogToolEntry[]>();
+    throw new Error("ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON", { cause: error });
   }
 }
 

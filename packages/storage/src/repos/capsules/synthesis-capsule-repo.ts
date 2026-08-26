@@ -33,6 +33,7 @@ export type { SynthesisCapsuleKeywordHit } from
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
+  createInCurrentTransaction(capsule: SynthesisCapsule): Readonly<SynthesisCapsule>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
   findByIds(
     workspaceId: string,
@@ -51,6 +52,11 @@ export interface SynthesisCapsuleRepo {
     status: SynthesisStatus,
     updatedAt: string
   ): Promise<Readonly<SynthesisCapsule>>;
+  updateStatusInCurrentTransaction(
+    objectId: string,
+    status: SynthesisStatus,
+    updatedAt: string
+  ): Readonly<SynthesisCapsule>;
   // see also: 079-synthesis-capsule-fts-dual.sql — porter + trigram FTS
   // over `summary`. Optional, mirroring evidence-capsule-repo.ts.
   searchByKeyword?(
@@ -187,8 +193,15 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   }
 
   public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {
-    const parsedCapsule = parseSynthesisCapsule(capsule);
+    const run = () => this.createInCurrentTransaction(capsule);
+    if (this.db.connection.inTransaction) {
+      return run();
+    }
+    return this.db.connection.transaction(run)();
+  }
 
+  public createInCurrentTransaction(capsule: SynthesisCapsule): Readonly<SynthesisCapsule> {
+    const parsedCapsule = parseSynthesisCapsule(capsule);
     try {
       this.statements.createStatement.run(
         parsedCapsule.object_id,
@@ -214,7 +227,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
         error
       );
     }
-
     return parsedCapsule;
   }
 
@@ -287,28 +299,30 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     status: SynthesisStatus,
     updatedAt: string
   ): Promise<Readonly<SynthesisCapsule>> {
+    return this.updateStatusInCurrentTransaction(objectId, status, updatedAt);
+  }
+
+  public updateStatusInCurrentTransaction(
+    objectId: string,
+    status: SynthesisStatus,
+    updatedAt: string
+  ): Readonly<SynthesisCapsule> {
     const parsedStatus = parseSynthesisStatus(status);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
     try {
       const result = this.statements.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
-
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
       }
-
-      const updated = await this.findById(objectId);
-
-      if (updated === null) {
+      const row = this.statements.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
+      if (row === undefined) {
         throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found after update.`);
       }
-
-      return updated;
+      return parseSynthesisCapsuleRow(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
       }
-
       throw new StorageError("QUERY_FAILED", `Failed to update status for synthesis ${objectId}.`, error);
     }
   }

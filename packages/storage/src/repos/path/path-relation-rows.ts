@@ -7,6 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseJsonColumnWithSchema } from "../shared/parse-json-column.js";
 import {
   DEFAULT_REPO_LIST_PAGE_LIMIT,
   parsePageLimit,
@@ -32,6 +33,7 @@ type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
 };
 
 export const PARSED_ROW_CACHE_MAX = 50_000;
+export const PATH_RELATION_ACTIVE_LIST_HARD_CAP = 10_000;
 export const DEFAULT_PATH_RELATION_PAGE = Object.freeze({
   limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
   offset: 0
@@ -72,28 +74,36 @@ export function parsePathRelationRow(row: PathRelationRow): Readonly<PathRelatio
   return parsePathRelation({
     path_id: row.path_id,
     workspace_id: row.workspace_id,
-    anchors: parseJsonFieldWithSchema(row.anchors_json, "anchors", pathRelationFieldSchemas.anchors),
-    constitution: parseJsonFieldWithSchema(
+    anchors: parseJsonColumnWithSchema(
+      row.anchors_json,
+      "path relation anchors",
+      pathRelationFieldSchemas.anchors
+    ),
+    constitution: parseJsonColumnWithSchema(
       row.constitution_json,
-      "constitution",
+      "path relation constitution",
       pathRelationFieldSchemas.constitution
     ),
-    effect_vector: parseJsonFieldWithSchema(
+    effect_vector: parseJsonColumnWithSchema(
       row.effect_vector_json,
-      "effect_vector",
+      "path relation effect_vector",
       pathRelationFieldSchemas.effect_vector
     ),
-    plasticity_state: parseJsonFieldWithSchema(
+    plasticity_state: parseJsonColumnWithSchema(
       row.plasticity_state_json,
-      "plasticity_state",
+      "path relation plasticity_state",
       pathRelationFieldSchemas.plasticity_state
     ),
     lifecycle: normalizeLifecycle(
-      parseJsonFieldWithSchema(row.lifecycle_json, "lifecycle", pathRelationFieldSchemas.lifecycle)
+      parseJsonColumnWithSchema(
+        row.lifecycle_json,
+        "path relation lifecycle",
+        pathRelationFieldSchemas.lifecycle
+      )
     ),
-    legitimacy: parseJsonFieldWithSchema(
+    legitimacy: parseJsonColumnWithSchema(
       row.legitimacy_json,
-      "legitimacy",
+      "path relation legitimacy",
       pathRelationFieldSchemas.legitimacy
     ),
     created_at: row.created_at,
@@ -120,29 +130,3 @@ function normalizeLifecycle(lifecycle: PathRelation["lifecycle"]): PathRelation[
 }
 
 const pathRelationFieldSchemas = PathRelationSchema.unwrap().shape;
-
-function parseJsonFieldWithSchema<T>(
-  value: string,
-  fieldName: string,
-  schema: { parse(input: unknown): T }
-): T {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (error) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Failed to parse path relation ${fieldName}.`,
-      error
-    );
-  }
-  try {
-    return schema.parse(parsed);
-  } catch (error) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Invalid path relation ${fieldName}.`,
-      error
-    );
-  }
-}

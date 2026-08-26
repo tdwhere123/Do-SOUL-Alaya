@@ -118,6 +118,8 @@ export async function runPathPlasticityWithinBudget<T>(
 
   try {
     const operation = startOperation(controller.signal, onMutationBoundaryEntered);
+    // Abandoned work that rejects after timeout must not become an unhandledRejection.
+    operation.catch(() => undefined);
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         if (mutationBoundaryEntered) {

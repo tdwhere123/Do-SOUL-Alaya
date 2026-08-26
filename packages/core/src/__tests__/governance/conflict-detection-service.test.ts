@@ -178,7 +178,7 @@ it("rule-path contradicts does NOT fire supersede_penalty karma (strength-gated 
     // karma penalty must be withheld — an agent-controllable Jaccard hit
     // cannot program a durable retention/activation demotion of the peer.
     const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
-      (call: any[]) => call[0].relationKind === "contradicts"
+      (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls.length).toBeGreaterThan(0);
     expect(emitKarmaEvent).not.toHaveBeenCalled();
@@ -255,7 +255,7 @@ it("skips contradicts when content is nearly identical (high token overlap)", as
     });
 
     const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
-      (call: any[]) => call[0].relationKind === "contradicts"
+      (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(0);
   });
@@ -285,7 +285,7 @@ it("writes an incompatible_with edge across dimensions when tags overlap", async
     });
 
     const incompatibleCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
-      (call: any[]) => call[0].relationKind === "incompatible_with"
+      (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "incompatible_with"
     ) as unknown[][];
     expect(incompatibleCalls).toHaveLength(1);
     expect(requireAt(incompatibleCalls, 0)[0]).toMatchObject({
@@ -451,7 +451,7 @@ it("skips LLM when rule path already produced a contradicts edge", async () => {
 
     expect(llmPort.classifyPair).not.toHaveBeenCalled();
     const contradictsCalls = pathCandidatePort.submitCandidate.mock.calls.filter(
-      (call: any[]) => call[0].relationKind === "contradicts"
+      (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
     );
     expect(contradictsCalls).toHaveLength(1);
   });

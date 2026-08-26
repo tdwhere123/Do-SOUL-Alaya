@@ -25,6 +25,8 @@ export async function raceWithTimeout<T>(
   timeoutMs: number
 ): Promise<T | false> {
   let timeout: ReturnType<typeof setTimeout> | null = null;
+  // Abandoned work that rejects after timeout must not become an unhandledRejection.
+  promise.catch(() => undefined);
 
   try {
     return await Promise.race([

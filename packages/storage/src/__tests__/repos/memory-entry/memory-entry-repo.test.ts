@@ -6,6 +6,7 @@ import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/sqlite
 import {
   createMemoryCreatedEventInput,
   createMemoryEntry,
+  createMemoryUpdatedEventInput,
   createRepo,
   trackedDatabases
 } from "./memory-entry-repo-fixture.js";
@@ -117,6 +118,80 @@ describe("SqliteMemoryEntryRepo", () => {
 
     await expect(repo.findById(entry.object_id)).resolves.toBeNull();
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(0);
+  });
+
+  it("updateWithinTransaction commits EventLog-first then the row atomically", async () => {
+    const { repo, database } = await createRepo();
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+    const order: string[] = [];
+
+    const updated = repo.updateWithinTransaction(
+      entry.object_id,
+      { content: "Updated content", updated_at: "2026-03-21T01:00:00.000Z" },
+      {
+        beforeUpdate: () => {
+          order.push("event_log");
+          eventLogRepo.append(createMemoryUpdatedEventInput(entry));
+        },
+        afterUpdate: () => {
+          order.push("after");
+        }
+      }
+    );
+
+    expect(updated.content).toBe("Updated content");
+    expect(order).toEqual(["event_log", "after"]);
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({ content: "Updated content" });
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toHaveLength(1);
+  });
+
+  it("updateWithinTransaction rolls back EventLog and row when the co-write throws", async () => {
+    const { repo, database } = await createRepo();
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+
+    expect(() =>
+      repo.updateWithinTransaction(
+        entry.object_id,
+        { content: "Updated content", updated_at: "2026-03-21T01:00:00.000Z" },
+        {
+          beforeUpdate: () => {
+            eventLogRepo.append(createMemoryUpdatedEventInput(entry));
+          },
+          afterUpdate: () => {
+            throw new Error("co-write failed");
+          }
+        }
+      )
+    ).toThrow("co-write failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({ content: entry.content });
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toEqual([]);
+  });
+
+  it("updateWithinTransaction does not mutate the row when the EventLog-first callback throws", async () => {
+    const { repo, database } = await createRepo();
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const entry = createMemoryEntry();
+    await repo.create(entry);
+
+    expect(() =>
+      repo.updateWithinTransaction(
+        entry.object_id,
+        { content: "Updated content", updated_at: "2026-03-21T01:00:00.000Z" },
+        {
+          beforeUpdate: () => {
+            throw new Error("event append failed");
+          }
+        }
+      )
+    ).toThrow("event append failed");
+
+    await expect(repo.findById(entry.object_id)).resolves.toMatchObject({ content: entry.content });
+    await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toEqual([]);
   });
 
   it("finds memory entries by workspace and ids without duplicates or cross-workspace leakage", async () => {

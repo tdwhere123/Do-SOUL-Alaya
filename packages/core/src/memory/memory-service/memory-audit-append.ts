@@ -23,6 +23,17 @@ export function appendMemoryEventLogSynchronously(
 
 // invariant: audit-inside-transaction seams require a synchronous EventLog
 // append port, otherwise storage mutation could commit without atomic audit.
+export function runEventLogTransaction<T>(
+  eventLogRepo: { transactional?: <U>(fn: () => U) => U },
+  fn: () => T,
+  conflictMessage: string
+): T {
+  if (eventLogRepo.transactional === undefined) {
+    throw new CoreError("CONFLICT", conflictMessage, { subCode: "PORT_UNAVAILABLE" });
+  }
+  return eventLogRepo.transactional(fn);
+}
+
 export function appendAuditEventSynchronously(
   eventLogRepo: MemoryServiceEventLogRepoPort,
   eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">

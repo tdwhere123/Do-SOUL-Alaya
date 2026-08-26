@@ -70,7 +70,8 @@ export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
 export type ProfileInstructionsDriftStatus =
   | "absent"
   | "in_sync"
-  | "drifted";
+  | "drifted"
+  | "error";
 
 export interface ProfileInstructionsDriftReport {
   readonly target: ProfileTarget;

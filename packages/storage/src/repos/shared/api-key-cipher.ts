@@ -107,14 +107,6 @@ function readMachineId(): string {
     return platformMachineId;
   }
 
-  if (keyMaterialOverrideForTests !== null || isCipherTestRuntime()) {
-    // Test-only fallback: hostname is weaker than machine-id. Production must
-    // never run with NODE_ENV=test or VITEST=true — those gates exist solely
-    // so unit tests can derive keys without platform ids; a production process
-    // without platform ids falls through to the durable machine-key-id file.
-    return os.hostname();
-  }
-
   return readOrCreateDurableMachineKeyId();
 }
 
@@ -222,6 +214,3 @@ function resolveMachineKeyIdPath(): string {
   return path.join(configDir, "machine-key-id");
 }
 
-function isCipherTestRuntime(): boolean {
-  return process.env.VITEST === "true" || process.env.NODE_ENV === "test";
-}

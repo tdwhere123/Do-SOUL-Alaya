@@ -36,7 +36,7 @@ function coRecalledCandidate(
 describe("PathRelationProposalService", () => {
   it("mints a PathRelation from submitCandidate", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher, appendManyWithMutation } = createEventPublisher();
@@ -68,7 +68,7 @@ describe("PathRelationProposalService", () => {
 
   it("mints a co_recalled path at attention_only — not a recall-eligible class", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher, appendManyWithMutation } = createEventPublisher();
@@ -90,9 +90,9 @@ describe("PathRelationProposalService", () => {
   });
 
   it("does not double-propose the same pair", async () => {
-    const created: any[] = [];
+    const created: PathRelation[] = [];
     const repo = {
-      create: vi.fn((relation: any) => {
+      create: vi.fn((relation: PathRelation) => {
         created.push(relation);
         return relation;
       }),
@@ -120,7 +120,7 @@ describe("PathRelationProposalService", () => {
       effect_vector: { recall_bias: 0.5 }
     } as PathRelation;
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
         async () => [existing]
       )
@@ -138,7 +138,7 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired shrinks the counter for stale sub-threshold pairs", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -181,7 +181,7 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired keys on updated_at: a re-incremented pair refreshes and survives", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -225,7 +225,7 @@ describe("PathRelationProposalService", () => {
 
   it("evictExpired keeps fresh sub-threshold pairs when ttl has not elapsed", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -261,7 +261,7 @@ describe("PathRelationProposalService", () => {
 
   it("seeds the co-usage path at the co_recalled profile (0.3 / attention_only / +recall_bias)", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();

@@ -54,7 +54,8 @@ async function emitCanonicalSignalEnvelope(signal: CandidateMemorySignal): Promi
     }),
     queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
       rows.filter((entry) => entry.entity_type === entityType && entry.entity_id === entityId)
-    )
+    ),
+    transactional: <T>(fn: () => T) => fn()
   };
   const signalRepo = {
     create: vi.fn(async (candidate: CandidateMemorySignal) => {
@@ -69,7 +70,17 @@ async function emitCanonicalSignalEnvelope(signal: CandidateMemorySignal): Promi
       const next = { ...prior, signal_state: signalState };
       signals.set(signalId, next);
       return next;
-    })
+    }),
+    updateStateInCurrentTransaction: (
+      signalId: string,
+      signalState: CandidateMemorySignal["signal_state"]
+    ) => {
+      const prior = signals.get(signalId);
+      if (prior === undefined) throw new Error("missing signal");
+      const next = { ...prior, signal_state: signalState };
+      signals.set(signalId, next);
+      return next;
+    }
   };
   const signalService = new SignalService({
     eventLogRepo,

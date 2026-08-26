@@ -65,6 +65,19 @@ export async function runOperation(
         claimFormRepo: runtime.claimFormRepo,
         pathReadPorts: runtime.recallPathReadPorts
       });
+    case "snapshot.beginDeferred":
+      runtime.database.connection.exec("BEGIN DEFERRED");
+      return null;
+    case "snapshot.commit":
+      if (runtime.database.connection.inTransaction) {
+        runtime.database.connection.exec("COMMIT");
+      }
+      return null;
+    case "snapshot.rollback":
+      if (runtime.database.connection.inTransaction) {
+        runtime.database.connection.exec("ROLLBACK");
+      }
+      return null;
     case "close":
       runtime.database.close();
       runtime.closed = true;

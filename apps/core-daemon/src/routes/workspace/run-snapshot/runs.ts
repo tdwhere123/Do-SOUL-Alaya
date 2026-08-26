@@ -246,7 +246,12 @@ async function deleteRun(context: Context, services: RunRouteServices): Promise<
   await assertRunWorkspace(services, runId);
   const run = await services.runService.delete(runId);
   clearRunLocalState(services, runId);
-  await services.governanceLeaseService?.release(runId).catch(() => undefined);
+  await services.governanceLeaseService?.release(runId).catch((error) => {
+    logRunRouteWarning(services.warn, "run-delete lease release failed", {
+      runId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  });
   return context.json({ success: true, data: run }, 200);
 }
 

@@ -136,7 +136,7 @@ export async function callAlayaMcpMemoryTool(
     output: result.output
   };
   return {
-    content: [{ type: "text", text: JSON.stringify(payload.output) }],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload
   };
 }

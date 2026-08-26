@@ -127,30 +127,26 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
     );
   });
 
-  it("ignores MCP runtime config when the JSON envelope is not an object", () => {
-    const warn = vi.fn();
-
-    const configs = parseDaemonMcpServerRuntimeConfigs(JSON.stringify(["not", "an", "object"]), warn);
-
-    expect(configs).toEqual({});
-    expect(warn).toHaveBeenCalledWith(
-      "failed to parse ALAYA_MCP_SERVER_CONFIG_JSON; ignoring MCP runtime config",
-      expect.objectContaining({ error: expect.anything() })
+  it("throws when MCP runtime config JSON is invalid", () => {
+    expect(() => parseDaemonMcpServerRuntimeConfigs("{not-json", vi.fn())).toThrow(
+      /ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON/
     );
   });
 
-  it("ignores MCP tool catalog when the JSON envelope is not an object", () => {
-    const warn = vi.fn();
+  it("throws when the MCP runtime config JSON envelope is not an object", () => {
+    expect(() => parseDaemonMcpServerRuntimeConfigs(JSON.stringify(["not", "an", "object"]), vi.fn()))
+      .toThrow(/ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object/);
+  });
 
-    const snapshot = readDaemonMcpCatalogEnvironment(
-      { ALAYA_MCP_TOOL_CATALOG_JSON: JSON.stringify(42) },
-      warn
-    );
+  it("throws when MCP tool catalog JSON is invalid", () => {
+    expect(() =>
+      readDaemonMcpCatalogEnvironment({ ALAYA_MCP_TOOL_CATALOG_JSON: "{not-json" }, vi.fn())
+    ).toThrow(/ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON/);
+  });
 
-    expect(snapshot.rawToolCatalog.size).toBe(0);
-    expect(warn).toHaveBeenCalledWith(
-      "failed to parse ALAYA_MCP_TOOL_CATALOG_JSON; ignoring MCP discovery catalog",
-      expect.objectContaining({ error: expect.anything() })
-    );
+  it("throws when the MCP tool catalog JSON envelope is not an object", () => {
+    expect(() =>
+      readDaemonMcpCatalogEnvironment({ ALAYA_MCP_TOOL_CATALOG_JSON: JSON.stringify(42) }, vi.fn())
+    ).toThrow(/ALAYA_MCP_TOOL_CATALOG_JSON is not valid JSON/);
   });
 });

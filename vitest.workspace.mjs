@@ -15,22 +15,26 @@ const sharedAlias = {
   "@do-soul/alaya-storage": path.resolve(rootDir, "packages/storage/src/index.ts"),
   "@do-soul/alaya-core": path.resolve(rootDir, "packages/core/src/index.ts"),
   "@do-soul/alaya-soul": path.resolve(rootDir, "packages/soul/src/index.ts"),
-  "@do-soul/alaya-engine-gateway": path.resolve(rootDir, "packages/engine-gateway/src/index.ts")
+  "@do-soul/alaya-engine-gateway": path.resolve(rootDir, "packages/engine-gateway/src/index.ts"),
+  "@do-soul/alaya-eval": path.resolve(rootDir, "packages/eval/src/index.ts")
 };
 
-// see also: apps/bench-runner — bench-runner-only aliases; cross-app import boundary
-// Subpath aliases must come before the bare @do-soul/alaya entry so the more
-// specific keys match first (Vite resolves alias entries in array order).
+function exactPackageAlias(find, replacement) {
+  return {
+    find: new RegExp(`^${find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+    replacement
+  };
+}
+
+const sharedAliasEntries = Object.entries(sharedAlias).map(([find, replacement]) =>
+  exactPackageAlias(find, replacement)
+);
+
+// see also: apps/bench-runner — bench-runner-only aliases; cross-app import boundary.
+// String aliases are prefix matches, so `@do-soul/alaya-eval` would steal
+// `@do-soul/alaya-eval/authority` unless subpaths come first and package
+// entries are exact.
 const benchRunnerAlias = [
-  ...Object.entries(sharedAlias).map(([find, replacement]) => ({ find, replacement })),
-  { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp/server/mcp-server.ts") },
-  { find: "@do-soul/alaya/cli/bridge", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/bridge.ts") },
-  { find: "@do-soul/alaya/cli/register", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/register.ts") },
-  {
-    find: "@do-soul/alaya/recall/bound-execution",
-    replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
-  },
-  { find: "@do-soul/alaya", replacement: path.resolve(rootDir, "apps/core-daemon/src/index.ts") },
   {
     find: "@do-soul/alaya-eval/authority",
     replacement: path.resolve(rootDir, "packages/eval/src/authority.ts")
@@ -39,7 +43,15 @@ const benchRunnerAlias = [
     find: "@do-soul/alaya-eval/internal",
     replacement: path.resolve(rootDir, "packages/eval/src/internal.ts")
   },
-  { find: "@do-soul/alaya-eval", replacement: path.resolve(rootDir, "packages/eval/src/index.ts") }
+  { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp/server/mcp-server.ts") },
+  { find: "@do-soul/alaya/cli/bridge", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/bridge.ts") },
+  { find: "@do-soul/alaya/cli/register", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/register.ts") },
+  {
+    find: "@do-soul/alaya/recall/bound-execution",
+    replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
+  },
+  exactPackageAlias("@do-soul/alaya", path.resolve(rootDir, "apps/core-daemon/src/index.ts")),
+  ...sharedAliasEntries
 ];
 
 function packageProject(name, packageDir, options = {}) {
@@ -51,13 +63,16 @@ function packageProject(name, packageDir, options = {}) {
 
   return defineProject({
     resolve: {
-      alias: sharedAlias
+      alias: sharedAliasEntries
     },
     test: {
       name,
       environment: "node",
       include: [testIncludeGlob(testDir)],
       exclude: ["**/dist/**"],
+      coverage: {
+        include: [`${packageDir}/src/**`]
+      },
       ...options
     }
   });
@@ -72,13 +87,16 @@ function appProject(name, appDir) {
 
   return defineProject({
     resolve: {
-      alias: sharedAlias
+      alias: sharedAliasEntries
     },
     test: {
       name,
       environment: "node",
       include: [testIncludeGlob(testDir)],
-      exclude: ["**/dist/**"]
+      exclude: ["**/dist/**"],
+      coverage: {
+        include: [`${appDir}/src/**`]
+      }
     }
   });
 }
@@ -108,7 +126,10 @@ export default [
         environment: "node",
         setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
         include: [testIncludeGlob(testDir)],
-        exclude: ["**/dist/**"]
+        exclude: ["**/dist/**"],
+        coverage: {
+          include: ["apps/bench-runner/src/**"]
+        }
       }
     });
   })()

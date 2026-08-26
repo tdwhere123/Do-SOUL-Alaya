@@ -38,9 +38,10 @@ import {
   preparePathRelationStatements,
   type PathRelationStatements
 } from "./path-relation-statements.js";
-import type { PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
+import type { PathRelationListResult, PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
 
-export type { PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
+export type { PathRelationListResult, PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
+export { PATH_RELATION_ACTIVE_LIST_HARD_CAP } from "./path-relation-rows.js";
 export {
   PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
@@ -236,7 +237,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     return await findActivePathRelations(this.queryContext(), workspaceId);
   }
 
-  public async findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]> {
+  public async findActiveAll(workspaceId: string): Promise<Readonly<PathRelationListResult>> {
     return await findAllActivePathRelations(this.queryContext(), workspaceId);
   }
 

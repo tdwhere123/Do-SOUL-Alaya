@@ -104,11 +104,16 @@ function createMaterializationMemoryService(
   };
 }
 
+export function isRetainUnroutedFactsEnabled(
+  raw: string | undefined = process.env.ALAYA_RETAIN_UNROUTED_FACTS
+): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
 function readMaterializationRouterOptions() {
   return {
-    retainUnroutedHighConfidenceFacts:
-      process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "0" &&
-      process.env.ALAYA_RETAIN_UNROUTED_FACTS !== "false",
+    retainUnroutedHighConfidenceFacts: isRetainUnroutedFactsEnabled(),
     fullTurnEvidenceExcerpt:
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "0" &&
       process.env.ALAYA_EVIDENCE_FULL_TURN !== "false",

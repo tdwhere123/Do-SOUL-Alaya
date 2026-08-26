@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { RunMode, RunState, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
+import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteSignalRepo } from "../../../repos/signal/signal-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
@@ -111,6 +112,39 @@ describe("SqliteSignalRepo", () => {
       signal_state: "normalized"
     });
     expect(stored.signal_state).toBe("normalized");
+  });
+
+  it("updateStateInCurrentTransaction joins the caller transaction so a later throw rolls back EventLog and state", async () => {
+    const { database, signalRepo } = await createSignalRepo();
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const signal = createSignal();
+    await signalRepo.create(signal);
+
+    expect(() =>
+      eventLogRepo.transactional(() => {
+        eventLogRepo.append({
+          event_type: "soul.signal.triaged",
+          entity_type: "candidate_memory_signal",
+          entity_id: signal.signal_id,
+          workspace_id: signal.workspace_id,
+          run_id: signal.run_id,
+          caused_by: "deterministic_rule",
+          payload_json: {
+            signal_id: signal.signal_id,
+            workspace_id: signal.workspace_id,
+            run_id: signal.run_id,
+            triage_result: "accepted"
+          }
+        });
+        signalRepo.updateStateInCurrentTransaction(signal.signal_id, "triaged");
+        throw new Error("row failed after append");
+      })
+    ).toThrow("row failed after append");
+
+    await expect(signalRepo.getById(signal.signal_id)).resolves.toMatchObject({
+      signal_state: "emitted"
+    });
+    await expect(eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id)).resolves.toEqual([]);
   });
 
   it("claims a signal only from the expected workspace and state", async () => {

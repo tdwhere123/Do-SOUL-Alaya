@@ -119,7 +119,7 @@ function createHarness(initialMemories: MemoryEntry[]) {
       }))
     },
     memoryService: {
-      create: vi.fn(async (input: any) => {
+      create: vi.fn(async (input: Parameters<MaterializationRouterDeps["memoryService"]["create"]>[0]) => {
         const objectId = `memory-${++memoryCounter}`;
         const memory = createMemoryEntry({
           object_id: objectId,
@@ -165,13 +165,14 @@ function createHarness(initialMemories: MemoryEntry[]) {
   } as unknown as MaterializationRouterDeps);
   const signalService = new SignalService({
     eventLogRepo: {
-      append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      append: vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
         event_id: `event-${++eventCounter}`,
         created_at: "2026-05-13T00:00:00.000Z",
         revision: eventCounter,
         ...event
       })),
-      queryByEntity: vi.fn(async () => [])
+      queryByEntity: vi.fn(async () => []),
+      transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {
       create: vi.fn(async (signal) => {
@@ -191,7 +192,16 @@ function createHarness(initialMemories: MemoryEntry[]) {
         const updated = { ...current, signal_state: state };
         signalRows.set(signalId, updated);
         return updated;
-      })
+      }),
+      updateStateInCurrentTransaction: (signalId: string, state: SignalState) => {
+        const current = signalRows.get(signalId);
+        if (current === undefined) {
+          throw new Error(`missing signal ${signalId}`);
+        }
+        const updated = { ...current, signal_state: state };
+        signalRows.set(signalId, updated);
+        return updated;
+      }
     },
     runtimeNotifier: {
       notifyEntry: vi.fn(async () => {})

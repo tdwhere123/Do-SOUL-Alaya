@@ -19,6 +19,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    css: false
+    css: false,
+    coverage: {
+      include: ["apps/inspector/web/src/**", "src/**"]
+    }
   }
 });

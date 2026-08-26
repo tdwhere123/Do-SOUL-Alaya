@@ -47,6 +47,7 @@ import {
   measureSync
 } from "./orchestration/recall-phase-latency.js";
 import { finishProjectionPinCleanup } from "./query/projection-pin-lease.js";
+import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { prepareRecallRequest } from "./query/prepare-recall-request.js";
 import { captureRecallRequestTime } from "./query/recall-request-time.js";
 import { applySelectGammaSynthesis } from
@@ -92,7 +93,9 @@ export async function executeRecall(
   const prepared = await prepareRecallRequest(executionContext, params, time);
   let outcome: PreparedRecallOutcome;
   try {
-    outcome = await collectPreparedRecallOutcome(executionContext, params, prepared);
+    outcome = await withRecallReadSnapshot(executionContext.readSnapshot, () =>
+      collectPreparedRecallOutcome(executionContext, params, prepared)
+    );
   } catch (error) {
     finishProjectionPinAfterFailure(prepared, executionContext.warn, error);
   }

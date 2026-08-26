@@ -8,6 +8,7 @@ import {
   ProviderResponseInspectionError,
   type ProviderResponseInspectionReason
 } from "./inspect-response.js";
+import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
 import {
   buildProviderChatRequestInit,
   providerChatCompletionsUrl
@@ -63,11 +64,13 @@ async function postChatCompletion(
   request: ProviderChatCompletionRequest,
   signal: AbortSignal
 ): Promise<Response> {
+  const url = providerChatCompletionsUrl(request.providerUrl);
+  assertAllowedProviderChatUrl(url);
   const fetchImpl = request.fetchImpl ?? fetch;
   // RequestInit must not carry the caller abortSignal; timeout abort would then
   // be indistinguishable from an operator abort.
   return await fetchImpl(
-    providerChatCompletionsUrl(request.providerUrl),
+    url,
     { ...buildProviderChatRequestInit(request), signal }
   );
 }

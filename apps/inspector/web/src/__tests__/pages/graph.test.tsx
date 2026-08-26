@@ -84,6 +84,20 @@ describe("GraphPage (react-force-graph driven)", () => {
     expect(await screen.findByText(/complete/i)).toBeTruthy();
   });
 
+  it("honors server truncated on the inspector graph payload", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        success: true,
+        data: { ...SAMPLE_GRAPH, truncated: true }
+      }), {
+        status: 200
+      })
+    );
+    renderGraphWithEnv();
+    await screen.findByTestId("force-graph-2d");
+    expect(await screen.findByText(/sampled/i)).toBeTruthy();
+  });
+
   // The path plane carries no origin_kind, so the legend now decodes the
   // colours actually rendered: node hue by anchor-derived kind (memory/scope)
   // and edge hue by relation_kind family. No legend entry may decode a colour

@@ -21,6 +21,7 @@ import {
   migrateVerifiedProjectionBindKey
 } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
+import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
@@ -108,6 +109,7 @@ export class StorageDatabase {
       busyTimeoutMs: this.reopenBusyTimeoutMs,
       analysisLimit: 400
     });
+    restrictSqliteFileModes(this.filename);
     bindEmbeddingOverlayIfPresent(database, this.filename);
     this.connection = database;
     this.connectionVersion += 1;
@@ -212,6 +214,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
 
   try {
     configureDatabaseConnection(database, busyTimeoutMs);
+    restrictSqliteFileModes(filename);
     runMigrations(database, temporalMode);
     bindEmbeddingOverlayIfPresent(database, filename);
   } catch (error) {
@@ -268,11 +271,14 @@ function openDatabase(filename: string): SqliteConnection {
   try {
     if (filename !== ":memory:") {
       const directory = path.dirname(filename);
-      fs.mkdirSync(directory, { recursive: true });
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
 
-    return new BetterSqlite3(filename);
+    const database = new BetterSqlite3(filename);
+    restrictSqliteFileModes(filename);
+    return database;
   } catch (error) {
+    if (error instanceof StorageError) throw error;
     throw new StorageError("DATABASE_OPEN_FAILED", `Failed to open database: ${filename}`, error);
   }
 }

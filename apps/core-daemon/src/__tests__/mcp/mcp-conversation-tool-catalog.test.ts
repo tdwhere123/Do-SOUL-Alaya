@@ -30,6 +30,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
+import { restoreProcessEnv } from "../support/restore-process-env.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -235,8 +236,8 @@ describe("daemon conversation tool catalog", () => {
         }
       ]);
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 
@@ -310,8 +311,8 @@ describe("daemon conversation tool catalog", () => {
       expect(catalog.listAllowedServerNames()).toEqual(["github"]);
       expect(catalog.hasTool("mcp__filesystem__read_file")).toBe(false);
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 
@@ -370,8 +371,8 @@ describe("daemon conversation tool catalog", () => {
         message: "External MCP tool mcp__filesystem__read_file has no active daemon runtime binding."
       });
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 });

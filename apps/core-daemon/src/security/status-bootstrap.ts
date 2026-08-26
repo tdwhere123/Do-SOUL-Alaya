@@ -37,6 +37,7 @@ export interface SecurityStatusBootstrapDependencies {
   readonly bootstrappingRecordRepo?: WorkspaceServiceDependencies["bootstrappingRecordRepo"];
   readonly workspaceCreationMutation?: WorkspaceCreationMutation;
   readonly workspaceEnsureMutation?: WorkspaceEnsureMutation;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 export interface SecurityStatusBootstrapServices {
@@ -81,7 +82,8 @@ export function createSecurityStatusBootstrapServices(
     workspaceService: withSecurityStatusWorkspaceService(
       rawWorkspaceService,
       securityStatusService,
-      deps.workspaceEnsureMutation
+      deps.workspaceEnsureMutation,
+      deps.warn
     )
   };
 }
@@ -94,7 +96,8 @@ export function withSecurityStatusWorkspaceService(
     SecurityStatusService,
     "initializeWorkspace" | "recordInitializationFailure"
   >,
-  workspaceEnsureMutation?: WorkspaceEnsureMutation
+  workspaceEnsureMutation?: WorkspaceEnsureMutation,
+  warn?: (message: string, meta: Record<string, unknown>) => void
 ): WorkspaceService {
   return new Proxy(workspaceService, {
     get(target, property, receiver) {
@@ -104,7 +107,8 @@ export function withSecurityStatusWorkspaceService(
           await initializeWorkspaceNonfatally(
             securityStatusService,
             workspace.workspace_id,
-            "create"
+            "create",
+            warn
           );
           return workspace;
         };
@@ -119,7 +123,8 @@ export function withSecurityStatusWorkspaceService(
           await initializeWorkspaceNonfatally(
             securityStatusService,
             workspace.workspace_id,
-            "ensure"
+            "ensure",
+            warn
           );
           return workspace;
         };
@@ -133,7 +138,8 @@ export function withSecurityStatusWorkspaceService(
               await initializeWorkspaceNonfatally(
                 securityStatusService,
                 workspace.workspace_id,
-                "list"
+                "list",
+                warn
               );
             })
           );
@@ -147,7 +153,8 @@ export function withSecurityStatusWorkspaceService(
           await initializeWorkspaceNonfatally(
             securityStatusService,
             workspace.workspace_id,
-            "get_by_id"
+            "get_by_id",
+            warn
           );
           return workspace;
         };
@@ -170,7 +177,8 @@ async function initializeWorkspaceNonfatally(
     "initializeWorkspace" | "recordInitializationFailure"
   >,
   workspaceId: string,
-  operation: SecurityWorkspaceInitOperation
+  operation: SecurityWorkspaceInitOperation,
+  warn?: (message: string, meta: Record<string, unknown>) => void
 ): Promise<void> {
   try {
     await securityStatusService.initializeWorkspace(workspaceId);
@@ -182,7 +190,8 @@ async function initializeWorkspaceNonfatally(
       securityStatusService,
       workspaceId,
       operation,
-      error
+      error,
+      warn
     );
   }
 }
@@ -191,7 +200,8 @@ async function recordInitializationFailureSafely(
   securityStatusService: Pick<SecurityStatusService, "recordInitializationFailure">,
   workspaceId: string,
   operation: SecurityWorkspaceInitOperation,
-  error: unknown
+  error: unknown,
+  warn?: (message: string, meta: Record<string, unknown>) => void
 ): Promise<void> {
   try {
     await securityStatusService.recordInitializationFailure(
@@ -200,8 +210,13 @@ async function recordInitializationFailureSafely(
       inferInitializationFailureReason(error),
       inferInitializationFailureCode(error)
     );
-  } catch {
+  } catch (recordError) {
     // Preserve non-fatal bootstrap semantics even when the witness event cannot be recorded.
+    warn?.("security initialization failure could not be recorded", {
+      workspace: workspaceId,
+      operation,
+      error: recordError instanceof Error ? recordError.message : String(recordError)
+    });
   }
 }
 

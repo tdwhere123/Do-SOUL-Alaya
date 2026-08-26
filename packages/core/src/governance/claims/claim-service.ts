@@ -13,7 +13,6 @@ import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
 import {
-  assertNoAdditionalEventInputs,
   collectAdditionalEvents,
   createClaimCreatedEventInput,
   createLifecycleChangedEventInput,
@@ -79,14 +78,7 @@ export class ClaimService {
   }
 
   public async create(input: ClaimFormInput): Promise<Readonly<ClaimForm>> {
-    const creation = this.buildClaimCreationContext(input, this.now());
-    if (
-      creation.canonicalizationPlan !== undefined &&
-      this.dependencies.eventPublisher !== undefined
-    ) {
-      return await this.createClaimAtomically(creation);
-    }
-    return await this.createClaimWithEventLog(creation);
+    return await this.createClaimAtomically(this.buildClaimCreationContext(input, this.now()));
   }
 
   public async transitionLifecycle(
@@ -187,28 +179,16 @@ export class ClaimService {
       occurredAt
     );
     const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
-    const syncStatusUpdate = this.dependencies.claimFormRepo.updateStatusSync;
-
-    if (this.canApplyAtomicLifecycleTransition(syncStatusUpdate, deferredNotificationEvents)) {
-      return await this.applyAtomicLifecycleTransition(
-        existing,
-        newState,
-        occurredAt,
-        eventInput,
-        additionalEventInputs,
-        auditComposition.additionalEventsSink,
-        auditComposition.effectDecisionReceipt,
-        syncStatusUpdate!
-      );
-    }
-
-    assertNoAdditionalEventInputs(additionalEventInputs);
-    return await this.applyNonAtomicLifecycleTransition(
+    this.assertAtomicLifecycleAvailable(deferredNotificationEvents);
+    return await this.applyAtomicLifecycleTransition(
       existing,
       newState,
       occurredAt,
       eventInput,
-      deferredNotificationEvents
+      additionalEventInputs,
+      auditComposition.additionalEventsSink,
+      auditComposition.effectDecisionReceipt,
+      this.requireStatusUpdateSync()
     );
   }
 
@@ -289,38 +269,11 @@ export class ClaimService {
   private async createClaimAtomically(
     creation: ClaimCreationContext
   ): Promise<Readonly<ClaimForm>> {
-    const canonicalizationPlan = this.requireCanonicalizationPlan(creation.canonicalizationPlan);
+    const canonicalizationEvents = creation.canonicalizationPlan?.eventInputs ?? [];
     return await this.requireEventPublisher().appendManyWithMutation(
-      [...canonicalizationPlan.eventInputs, creation.claimCreatedEventInput],
+      [...canonicalizationEvents, creation.claimCreatedEventInput],
       () => this.dependencies.claimFormRepo.create(creation.claim)
     );
-  }
-
-  private async createClaimWithEventLog(
-    creation: ClaimCreationContext
-  ): Promise<Readonly<ClaimForm>> {
-    const appendedEvents = await this.appendCanonicalizationEvents(creation.canonicalizationPlan);
-    const createdEvent = await this.dependencies.eventLogRepo.append(creation.claimCreatedEventInput);
-    const created = await this.dependencies.claimFormRepo.create(creation.claim);
-    for (const event of [...appendedEvents, createdEvent]) {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-    return created;
-  }
-
-  private async appendCanonicalizationEvents(
-    canonicalizationPlan: ClaimCanonicalizationPlan | undefined
-  ): Promise<EventLogEntry[]> {
-    const appendedEvents: EventLogEntry[] = [];
-    if (canonicalizationPlan === undefined) {
-      return appendedEvents;
-    }
-
-    for (const eventInput of canonicalizationPlan.eventInputs) {
-      appendedEvents.push(await this.dependencies.eventLogRepo.append(eventInput));
-    }
-
-    return appendedEvents;
   }
 
   private parseLifecycleTransition(
@@ -398,15 +351,30 @@ export class ClaimService {
     return contested;
   }
 
-  private canApplyAtomicLifecycleTransition(
-    syncStatusUpdate: ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"],
+  private assertAtomicLifecycleAvailable(
     deferredNotificationEvents?: EventLogEntry[]
-  ): boolean {
-    return (
-      this.dependencies.eventPublisher !== undefined &&
-      syncStatusUpdate !== undefined &&
-      deferredNotificationEvents === undefined
-    );
+  ): void {
+    this.requireEventPublisher();
+    this.requireStatusUpdateSync();
+    if (deferredNotificationEvents !== undefined) {
+      throw new CoreError(
+        "CONFLICT",
+        "Deferred claim notification is incompatible with atomic EventLog-first transitions"
+      );
+    }
+  }
+
+  private requireStatusUpdateSync(): NonNullable<
+    ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"]
+  > {
+    const syncStatusUpdate = this.dependencies.claimFormRepo.updateStatusSync;
+    if (syncStatusUpdate === undefined) {
+      throw new CoreError(
+        "CONFLICT",
+        "Synchronous claim status CAS is required for atomic claim operations"
+      );
+    }
+    return syncStatusUpdate;
   }
 
   private async applyAtomicLifecycleTransition(
@@ -451,41 +419,10 @@ export class ClaimService {
     return this.dependencies.effectDecisionStore;
   }
 
-  private requireCanonicalizationPlan(
-    plan: ClaimCanonicalizationPlan | undefined
-  ): ClaimCanonicalizationPlan {
-    if (plan === undefined) {
-      throw new CoreError("CONFLICT", "Canonicalization plan is required for atomic claim creation");
-    }
-    return plan;
-  }
-
   private requireSlotService(): NonNullable<ClaimServiceDependencies["slotService"]> {
     if (this.dependencies.slotService === undefined) {
       throw new CoreError("CONFLICT", "Slot service is required for claim activation");
     }
     return this.dependencies.slotService;
-  }
-
-  private async applyNonAtomicLifecycleTransition(
-    existing: Readonly<ClaimForm>,
-    newState: ClaimLifecycleStateType,
-    occurredAt: string,
-    eventInput: EventPublisherInput,
-    deferredNotificationEvents?: EventLogEntry[]
-  ): Promise<Readonly<ClaimForm>> {
-    const updated = await this.dependencies.claimFormRepo.updateStatus(
-      existing.object_id,
-      newState,
-      occurredAt,
-      existing.claim_status
-    );
-    const event = await this.dependencies.eventLogRepo.append(eventInput);
-    if (deferredNotificationEvents !== undefined) {
-      deferredNotificationEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-    return updated;
   }
 }

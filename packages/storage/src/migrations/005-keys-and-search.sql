@@ -31,7 +31,10 @@ BEFORE INSERT ON path_relations
 WHEN EXISTS (
   SELECT 1
   FROM temporal_schema_state
-  WHERE state_id = 1 AND temporal_projection_selected = 1
+  WHERE state_id = 1 AND (
+    temporal_projection_selected = 1
+    OR temporal_projection_selection_required = 1
+  )
 )
 BEGIN
   SELECT RAISE(ABORT, 'Legacy path relation writes are disabled after temporal projection selection.');
@@ -42,7 +45,10 @@ BEFORE UPDATE ON path_relations
 WHEN EXISTS (
   SELECT 1
   FROM temporal_schema_state
-  WHERE state_id = 1 AND temporal_projection_selected = 1
+  WHERE state_id = 1 AND (
+    temporal_projection_selected = 1
+    OR temporal_projection_selection_required = 1
+  )
 )
 BEGIN
   SELECT RAISE(ABORT, 'Legacy path relation writes are disabled after temporal projection selection.');
@@ -53,7 +59,10 @@ BEFORE DELETE ON path_relations
 WHEN EXISTS (
   SELECT 1
   FROM temporal_schema_state
-  WHERE state_id = 1 AND temporal_projection_selected = 1
+  WHERE state_id = 1 AND (
+    temporal_projection_selected = 1
+    OR temporal_projection_selection_required = 1
+  )
 )
 BEGIN
   SELECT RAISE(ABORT, 'Legacy path relation writes are disabled after temporal projection selection.');

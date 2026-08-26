@@ -141,6 +141,16 @@ export interface MemoryEntryRepo {
       readonly afterCreate?: () => void;
     }
   ): Readonly<MemoryEntry>;
+  // invariant: callbacks and row update share one synchronous SQLite transaction.
+  updateWithinTransaction(
+    objectId: string,
+    fields: MemoryEntryRepoUpdateFields,
+    callbacks: {
+      readonly beforeUpdate?: () => void;
+      readonly afterUpdate?: () => void;
+    },
+    workspaceId?: string
+  ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   // invariant (§7): synchronous read for the single-transaction karma path.
   findByIdSync?(objectId: string): Readonly<MemoryEntry> | null;

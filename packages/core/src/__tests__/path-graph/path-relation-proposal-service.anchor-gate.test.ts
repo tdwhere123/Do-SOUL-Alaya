@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EventLogEntry } from "@do-soul/alaya-protocol";
+import type { EventLogEntry, PathRelation } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
   type CoUsageCounterPort,
@@ -60,7 +60,7 @@ function buildHarness(
   const events: EventLogEntry[] = [];
   const recordPathRelationFailure = options.recordPathRelationFailure ?? vi.fn();
   const warn = vi.fn();
-  const repoCreate = vi.fn((relation: any) => relation);
+  const repoCreate = vi.fn((relation: PathRelation) => relation);
   const appendManyWithMutation = vi.fn(
     async <T,>(
       eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],

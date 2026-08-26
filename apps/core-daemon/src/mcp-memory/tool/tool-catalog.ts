@@ -42,7 +42,7 @@ export interface AlayaMemoryToolDefinition {
 
 const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself. Results may carry `pending_incomplete` / `unfinishedness_bias` advisory fields from path manifestation, plus optional `staged_warnings` where each warning names `target_object_id`, `kind` (low_confidence / contradiction_pending / supersede_candidate / evidence_missing / policy_violation), `severity` (info / warning / blocking), the producing `policy`, a one-line `summary`, and `resolution_options` an agent may pick from. Older agents that do not understand additive fields can ignore them.",
+    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself. This is not a read-only tool: a qualifying `recent_turn` / query enqueues a Garden POST_TURN_EXTRACT side-effect. Results may carry `pending_incomplete` / `unfinishedness_bias` advisory fields from path manifestation, plus optional `staged_warnings` where each warning names `target_object_id`, `kind` (low_confidence / contradiction_pending / supersede_candidate / evidence_missing / policy_violation), `severity` (info / warning / blocking), the producing `policy`, a one-line `summary`, and `resolution_options` an agent may pick from. Older agents that do not understand additive fields can ignore them.",
   "soul.open_pointer":
     "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
   "soul.emit_candidate_signal":
@@ -142,7 +142,7 @@ const writeAnnotation = Object.freeze({
 
 const annotationByToolName: Record<AlayaMemoryToolName, AlayaMemoryToolDefinition["annotations"]> =
   Object.freeze({
-    "soul.recall": readOnlyAnnotation,
+    "soul.recall": writeAnnotation,
     "soul.open_pointer": readOnlyAnnotation,
     "soul.emit_candidate_signal": writeAnnotation,
     "soul.propose_memory_update": writeAnnotation,

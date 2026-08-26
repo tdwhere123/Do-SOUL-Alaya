@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { useLocation, useSearchParams, type SetURLSearchParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useSearchParams,
+  type NavigateFunction,
+  type SetURLSearchParams
+} from "react-router-dom";
 import {
   getInspectorToken,
   setInspectorToken,
@@ -22,6 +28,7 @@ const redeemInFlight = new Map<string, Promise<string | null>>();
 
 export function useInspectorLaunchState(): InspectorLaunchState {
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -32,9 +39,9 @@ export function useInspectorLaunchState(): InspectorLaunchState {
 
   useEffect(() => {
     let cancelled = false;
-    void bootstrapInspectorSession(readLaunchParams(searchParams), {
+    void bootstrapInspectorSession(readLaunchParams(searchParams, location.hash), {
       cancelled: () => cancelled,
-      clearLaunch: () => clearLaunchQueryParam(setSearchParams),
+      clearLaunch: () => clearLaunchParams(setSearchParams, navigate, location.hash),
       setAuthError,
       setReady
     });
@@ -43,7 +50,7 @@ export function useInspectorLaunchState(): InspectorLaunchState {
       cancelled = true;
       setUnauthorizedHandler(null);
     };
-  }, [location.search, searchParams, setSearchParams]);
+  }, [location.hash, location.search, navigate, searchParams, setSearchParams]);
 
   return {
     authError,
@@ -143,18 +150,47 @@ async function performRedeem(code: string): Promise<string | null> {
   return typeof body.token === "string" && body.token.trim().length > 0 ? body.token : null;
 }
 
-function readLaunchParams(searchParams: URLSearchParams): {
+function readLaunchParams(searchParams: URLSearchParams, hash: string): {
   readonly launchCode: string | null;
   readonly workspaceId: string | null;
 } {
+  const fragment = readFragmentParams(hash);
   return {
-    launchCode: searchParams.get("launch"),
-    workspaceId: searchParams.get("workspaceId")
+    launchCode: firstNonEmpty(fragment.get("launch")),
+    workspaceId: firstNonEmpty(searchParams.get("workspaceId"), fragment.get("workspaceId"))
   };
+}
+
+function readFragmentParams(hash: string): URLSearchParams {
+  const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
+  return new URLSearchParams(trimmed);
+}
+
+function firstNonEmpty(...values: Array<string | null>): string | null {
+  for (const value of values) {
+    const trimmed = value?.trim() ?? "";
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
 }
 
 function launchWorkspaceId(value: string | null): string | null {
   return value?.trim().length ? value : null;
+}
+
+function clearLaunchParams(
+  setSearchParams: SetURLSearchParams,
+  navigate: NavigateFunction,
+  hash: string
+): void {
+  clearLaunchQueryParam(setSearchParams);
+  const fragment = readFragmentParams(hash);
+  if (!fragment.has("launch")) {
+    return;
+  }
+  fragment.delete("launch");
+  const next = fragment.toString();
+  navigate({ hash: next.length === 0 ? "" : `#${next}` }, { replace: true });
 }
 
 function clearLaunchQueryParam(setSearchParams: SetURLSearchParams): void {

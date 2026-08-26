@@ -84,10 +84,11 @@ async function executeInspect(
       return launchResult.result;
     }
     launch = launchResult.launch;
-    ctx.stdout.write(`${launch.url}\n`);
-    await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
+    const opened = await maybeOpenInspectorUrl(args.open, launch.url, deps, ctx);
+    const printedUrl = opened ? inspectorUrlWithoutLaunchCode(launch.url) : launch.url;
+    ctx.stdout.write(`${printedUrl}\n`);
     await waitForChildExitOrSignal(launch.child);
-    return { exitCode: ALAYA_SYSEXITS.OK, json: { url: launch.url, port: args.port } };
+    return { exitCode: ALAYA_SYSEXITS.OK, json: { url: printedUrl, port: args.port } };
   } catch (error) {
     launch?.child.kill("SIGTERM");
     ctx.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -351,7 +352,13 @@ function applyInspectOption(
 }
 
 function buildInspectorUrl(port: number, workspaceId: string, launchCode: string): string {
-  return `http://127.0.0.1:${port}/?workspaceId=${encodeURIComponent(workspaceId)}&launch=${encodeURIComponent(launchCode)}`;
+  return `http://127.0.0.1:${port}/?workspaceId=${encodeURIComponent(workspaceId)}#launch=${encodeURIComponent(launchCode)}`;
+}
+
+function inspectorUrlWithoutLaunchCode(url: string): string {
+  const parsed = new URL(url);
+  parsed.hash = "";
+  return parsed.toString();
 }
 
 function buildInspectorEnv(daemonUrl: string, daemonRequestAuth?: DaemonRequestAuth): NodeJS.ProcessEnv {
@@ -367,13 +374,17 @@ async function maybeOpenInspectorUrl(
   url: string,
   deps: InspectCommandDependencies,
   ctx: AlayaCliContext
-): Promise<void> {
+): Promise<boolean> {
   if (!open) {
-    return;
+    return false;
   }
-  await (deps.openUrl ?? defaultOpenUrl)(url).catch((error) => {
+  try {
+    await (deps.openUrl ?? defaultOpenUrl)(url);
+    return true;
+  } catch (error) {
     ctx.stderr.write(`could not open browser automatically; copy the printed URL manually (${describeInspectError(error)})\n`);
-  });
+    return false;
+  }
 }
 
 async function stopStartedInspectorDaemon(

@@ -578,7 +578,9 @@ already reflects them.
 
 Alaya uses the local ONNX bi-encoder as a recall supplement by default. It
 never decides durable truth and never downloads weights from the recall path.
-Fetch the model once before starting the daemon:
+`@huggingface/transformers` is a required dependency of `@do-soul/alaya-core`;
+prefetch the ONNX model once before starting the daemon so recall never
+fetches weights from the network:
 
 ```bash
 node scripts/fetch-local-embedding-model.mjs

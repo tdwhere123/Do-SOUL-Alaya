@@ -147,7 +147,8 @@ async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundatio
     pathRelationRepo: input.pathRelationRepo,
     bootstrappingRecordRepo: input.bootstrappingRecordRepo,
     workspaceCreationMutation: createFieldProjectionWorkspaceBirthMutation(input.fieldComposition),
-    workspaceEnsureMutation: createFieldProjectionWorkspaceEnsureMutation(input.fieldComposition, now)
+    workspaceEnsureMutation: createFieldProjectionWorkspaceEnsureMutation(input.fieldComposition, now),
+    warn: input.warnLogger.warn
   });
   return {
     environmentStatusService,

@@ -5,11 +5,11 @@ import { createDependencies, createEventLogHistory, createMemoryEntry } from "./
 import { firstDefined, mockCallAt } from "../helpers/defined.js";
 
 describe("MemoryService", () => {
-it("writes soul.memory.updated after persistence and before runtime notification with computed revision", async () => {
+it("writes soul.memory.updated before persistence and runtime notification with computed revision", async () => {
     const order: string[] = [];
     const existing = createMemoryEntry();
 
-    const updateAppendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+    const updateAppendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
       order.push("event_log");
       return {
         event_id: "event-updated",
@@ -34,8 +34,13 @@ it("writes soul.memory.updated after persistence and before runtime notification
         findByRunId: vi.fn(async () => []),
         findByDimension: vi.fn(async () => []),
         findByScopeClass: vi.fn(async () => []),
-        update: vi.fn(async (_objectId, fields) => {
+        update: vi.fn(async () => {
+          throw new Error("plain update should not be used");
+        }),
+        updateWithinTransaction: vi.fn((_objectId, fields, callbacks) => {
+          callbacks.beforeUpdate?.();
           order.push("repo_update");
+          callbacks.afterUpdate?.();
           return Object.freeze({
             ...existing,
             content: fields.content ?? existing.content,
@@ -66,13 +71,39 @@ it("writes soul.memory.updated after persistence and before runtime notification
       "manual_update"
     );
 
-    expect(order).toEqual(["repo_update", "event_log", "notify"]);
+    expect(order).toEqual(["event_log", "repo_update", "notify"]);
     expect(updated.content).toBe("Updated content");
     expect(updated.storage_tier).toBe(StorageTier.COLD);
 
     const emitted = firstDefined(mockCallAt(updateAppendSpy, 0));
     expect(emitted).not.toHaveProperty("revision");
     expect(emitted.event_type).toBe("soul.memory.updated");
+  });
+
+it("throws CONFLICT when the update transaction port is missing", async () => {
+    const { dependencies } = createDependencies({
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => entry),
+        findById: vi.fn(async () => createMemoryEntry()),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => createMemoryEntry()),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+    const service = new MemoryService(dependencies);
+
+    await expect(
+      service.update(createMemoryEntry().object_id, { content: "Updated content" }, "manual_update")
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Memory update transaction port is not available"
+    });
   });
 
 it("updates memory through the workspace-scoped repo path", async () => {

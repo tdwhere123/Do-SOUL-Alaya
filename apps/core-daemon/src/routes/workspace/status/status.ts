@@ -1,4 +1,5 @@
 import { AlayaStatusSchema, type AlayaStatus } from "@do-soul/alaya-protocol";
+import { getSqliteWriteQueuePort } from "@do-soul/alaya-storage";
 import type { Hono } from "hono";
 
 export interface StatusRouteServices {
@@ -9,6 +10,7 @@ export interface StatusRouteServices {
     listEnrolledToolIds(): readonly string[];
   };
   readonly clock?: () => string;
+  readonly probeDatabase?: () => boolean;
 }
 
 export function registerStatusRoutes(app: Hono, services: StatusRouteServices): void {
@@ -24,7 +26,10 @@ export function buildAlayaStatus(services: StatusRouteServices): AlayaStatus {
     daemon: {
       ready: services.startupStepsProvider().includes("http-app"),
       startup_steps: services.startupStepsProvider(),
-      principal_coding_engine_available: services.principalCodingEngineAvailableProvider()
+      principal_coding_engine_available: services.principalCodingEngineAvailableProvider(),
+      uptime_s: Math.max(0, process.uptime()),
+      db_reachable: services.probeDatabase?.() ?? false,
+      write_queue_depth: getSqliteWriteQueuePort()?.pendingCount() ?? 0
     },
     mcp: {
       enrolled_tools: services.mcp.listEnrolledToolIds().length,

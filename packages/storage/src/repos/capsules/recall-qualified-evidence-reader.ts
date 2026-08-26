@@ -16,6 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import { parseNullableJsonColumn } from "../shared/parse-json-column.js";
 import { parseEvidenceCapsuleRow } from "./evidence-capsule-mappers.js";
 import type {
   EvidenceSearchMatch,
@@ -300,21 +301,21 @@ function readSignal(row: StoredSignalRow): Readonly<CandidateMemorySignal> | nul
     signal_kind: row.signal_kind,
     object_kind: row.object_kind,
     scope_hint: row.scope_hint,
-    domain_tags: parseJson(row.domain_tags_json),
+    domain_tags: parseJson(row.domain_tags_json, "domain_tags_json"),
     confidence: row.confidence,
-    evidence_refs: parseJson(row.evidence_refs_json),
-    source_memory_refs: parseJson(row.source_memory_refs_json),
-    supersedes_refs: parseJson(row.supersedes_refs_json),
-    exception_to_refs: parseJson(row.exception_to_refs_json),
-    contradicts_refs: parseJson(row.contradicts_refs_json),
-    incompatible_with_refs: parseJson(row.incompatible_with_refs_json),
-    raw_payload: parseJson(row.raw_payload_json),
-    source_observation: parseJson(row.source_observation_json),
+    evidence_refs: parseJson(row.evidence_refs_json, "evidence_refs_json"),
+    source_memory_refs: parseJson(row.source_memory_refs_json, "source_memory_refs_json"),
+    supersedes_refs: parseJson(row.supersedes_refs_json, "supersedes_refs_json"),
+    exception_to_refs: parseJson(row.exception_to_refs_json, "exception_to_refs_json"),
+    contradicts_refs: parseJson(row.contradicts_refs_json, "contradicts_refs_json"),
+    incompatible_with_refs: parseJson(row.incompatible_with_refs_json, "incompatible_with_refs_json"),
+    raw_payload: parseJson(row.raw_payload_json, "raw_payload_json"),
+    source_observation: parseJson(row.source_observation_json, "source_observation_json"),
     signal_state: row.signal_state,
     created_at: row.created_at,
     ...(row.source_delivery_ids_json === null
       ? {}
-      : { source_delivery_ids: parseJson(row.source_delivery_ids_json) })
+      : { source_delivery_ids: parseJson(row.source_delivery_ids_json, "source_delivery_ids_json") })
   });
   return parsed.success && parsed.data.signal_state === "materialized"
     ? parsed.data
@@ -411,7 +412,9 @@ function matchesMaterialization(
   identity: Readonly<Pick<CandidateMemorySignal, "signal_id" | "workspace_id" | "run_id">>
 ): boolean {
   if (candidate.signalId === null) return false;
-  const payload = SoulSignalMaterializedPayloadSchema.safeParse(parseJson(row.payload_json));
+  const payload = SoulSignalMaterializedPayloadSchema.safeParse(
+    parseJson(row.payload_json, "payload_json")
+  );
   if (!payload.success) return false;
   const created = payload.data.created_objects;
   const matchingEvidence = created.filter((object) =>
@@ -431,13 +434,8 @@ function matchesMaterialization(
     matchingEvidence.length === 1;
 }
 
-function parseJson(value: string | null): unknown {
-  if (value === null) return null;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return null;
-  }
+function parseJson(value: string | null, fieldName: string): unknown {
+  return parseNullableJsonColumn(value, fieldName);
 }
 
 function sha256(value: string): string {

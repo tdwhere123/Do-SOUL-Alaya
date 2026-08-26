@@ -136,9 +136,12 @@ describe("SurfaceDriftService", () => {
         order.push("repo_delete");
       })
     });
-    const appendManyWithMutationSpy = vi.fn(async (inputs: any, mutate: any) => {
+    const appendManyWithMutationSpy = vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
       order.push("event_log");
-      const entries = inputs.map((input: any) => createEventLogEntry(input));
+      const entries = inputs.map((input) => createEventLogEntry(input));
       return mutate(entries);
     });
     const service = new SurfaceDriftService({
@@ -179,8 +182,11 @@ describe("SurfaceDriftService", () => {
       findActiveById: vi.fn(async () => null),
       delete: vi.fn()
     });
-    const appendManyWithMutationSpy = vi.fn(async (inputs: any, mutate: any) => {
-      const entries = inputs.map((input: any) => createEventLogEntry(input));
+    const appendManyWithMutationSpy = vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+      const entries = inputs.map((input) => createEventLogEntry(input));
       return mutate(entries);
     });
     const service = new SurfaceDriftService({
@@ -210,8 +216,11 @@ describe("SurfaceDriftService", () => {
       leaseRepo: repo,
       eventPublisher: createEventPublisher({
         publish: publishSpy,
-        appendManyWithMutation: vi.fn(async (inputs: any, mutate: any) => {
-          const entries = inputs.map((input: any) => createEventLogEntry(input));
+        appendManyWithMutation: vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+          const entries = inputs.map((input) => createEventLogEntry(input));
           return mutate(entries);
         })
       })
@@ -253,8 +262,11 @@ describe("SurfaceDriftService", () => {
           publish: vi.fn(async () => {
             throw new Error("witness publish failed");
           }),
-          appendManyWithMutation: vi.fn(async (inputs: any, mutate: any) => {
-            const entries = inputs.map((input: any) => createEventLogEntry(input));
+          appendManyWithMutation: vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+            const entries = inputs.map((input) => createEventLogEntry(input));
             return mutate(entries);
           })
         })
@@ -301,8 +313,11 @@ describe("SurfaceDriftService", () => {
       leaseRepo: repo,
       eventPublisher: createEventPublisher({
         publish: publishSpy,
-        appendManyWithMutation: vi.fn(async (inputs: any, mutate: any) => {
-          const entries = inputs.map((input: any) => createEventLogEntry(input));
+        appendManyWithMutation: vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+          const entries = inputs.map((input) => createEventLogEntry(input));
           mutate(entries);
           throw new EventPublisherPropagationError(
             propagatedReleaseEntry,
@@ -322,8 +337,11 @@ describe("SurfaceDriftService", () => {
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease())
     });
-    const appendManyWithMutationSpy = vi.fn(async (inputs: any, mutate: any) => {
-      const entries = inputs.map((input: any) => createEventLogEntry(input));
+    const appendManyWithMutationSpy = vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+      const entries = inputs.map((input) => createEventLogEntry(input));
       return mutate(entries);
     });
     const service = new SurfaceDriftService({
@@ -420,8 +438,11 @@ describe("SurfaceDriftService", () => {
         })
       }),
       eventPublisher: createEventPublisher({
-        appendManyWithMutation: vi.fn(async (inputs: any, mutate: any) => {
-          const entries = inputs.map((input: any) => createEventLogEntry(input));
+        appendManyWithMutation: vi.fn(async (
+      inputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+      mutate: (entries: readonly EventLogEntry[]) => unknown
+    ) => {
+          const entries = inputs.map((input) => createEventLogEntry(input));
           return mutate(entries);
         })
       })

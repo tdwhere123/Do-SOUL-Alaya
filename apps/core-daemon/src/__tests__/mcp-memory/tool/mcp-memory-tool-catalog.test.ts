@@ -18,7 +18,9 @@ describe("mcp memory tool catalog", () => {
   it("pins read-only annotations to read-only tools only", () => {
     const byName = new Map(listAlayaMemoryTools().map((tool) => [tool.name, tool] as const));
 
-    expect(byName.get("soul.recall")?.annotations.readOnlyHint).toBe(true);
+    expect(byName.get("soul.recall")?.annotations.readOnlyHint).toBe(false);
+    expect(byName.get("soul.recall")?.description).toContain("POST_TURN_EXTRACT");
+    expect(byName.get("soul.recall")?.description).toContain("not a read-only tool");
     expect(byName.get("soul.open_pointer")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("soul.explore_graph")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("garden.list_pending_tasks")?.annotations.readOnlyHint).toBe(true);
