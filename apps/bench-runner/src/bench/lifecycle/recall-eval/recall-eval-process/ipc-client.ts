@@ -94,6 +94,7 @@ export class RecallEvalPagerIpcSession {
   private nextId = 0;
   private childEpoch = 0;
   private closing = false;
+  private recycling = false;
   private openPayload: unknown | undefined;
   private readonly selectionArtifacts = new RecallEvalSelectionArtifactCollector();
   private readonly pending = new Map<number, PendingIpcRequest>();
@@ -145,9 +146,28 @@ export class RecallEvalPagerIpcSession {
   public async close(
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
-    const child = this.child;
-    if (child === null) return this.selectionArtifacts.finalize();
+    if (this.child === null) return this.selectionArtifacts.finalize();
     this.closing = true;
+    await this.releaseAttachedChild(timeoutMs);
+    return this.selectionArtifacts.finalize();
+  }
+
+  // invariant: pager child does not outlive a question (long-lived mmap SIGBUS).
+  public async recycle(
+    timeoutMs: number = this.defaultTimeoutMs
+  ): Promise<void> {
+    if (this.child === null) return;
+    this.recycling = true;
+    try {
+      await this.releaseAttachedChild(timeoutMs);
+    } finally {
+      this.recycling = false;
+    }
+  }
+
+  private async releaseAttachedChild(timeoutMs: number): Promise<void> {
+    const child = this.child;
+    if (child === null) return;
     try {
       await this.closeAttachedChild(timeoutMs);
     } catch (error) {
@@ -156,7 +176,6 @@ export class RecallEvalPagerIpcSession {
     } finally {
       this.reapChild(child, this.exitError !== null);
     }
-    return this.selectionArtifacts.finalize();
   }
 
   private async ensureOpened(timeoutMs: number): Promise<void> {
@@ -263,8 +282,8 @@ export class RecallEvalPagerIpcSession {
   ): void {
     if (epoch !== this.childEpoch) return;
     this.child = null;
-    // Session close() exit 0/SIGTERM must not fail-close the in-flight close.
-    if (this.closing && isCleanPagerExit(code, exitSignal)) {
+    // Session close()/recycle() exit 0/SIGTERM must not fail-close the in-flight close.
+    if ((this.closing || this.recycling) && isCleanPagerExit(code, exitSignal)) {
       resolvePendingAsSuccess(this.pending);
       return;
     }

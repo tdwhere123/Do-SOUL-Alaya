@@ -63,6 +63,20 @@ describe("recall-eval pager IPC isolation", () => {
     expect(counted.pids[0]).toBe(session.pid);
   });
 
+  it("spawns a new child for each recycled question", async () => {
+    const counted = countingHost();
+    const session = openSession(undefined, counted.host);
+    await session.open({});
+    await session.recall({ questionId: "q1" });
+    await session.recycle();
+    await session.recall({ questionId: "q2" });
+    await session.recycle();
+    expect(counted.pids).toHaveLength(2);
+    expect(new Set(counted.pids).size).toBe(2);
+    await session.close();
+    expect(counted.pids).toHaveLength(2);
+  });
+
   it("fail-closes when the child exits mid-request", async () => {
     const counted = countingHost();
     const session = openSession(undefined, counted.host);
@@ -146,6 +160,47 @@ describe("recall-eval pager IPC isolation", () => {
     expect(artifact.binding.record_count).toBe(2);
     const childRoots = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
     expect(childRoots).toHaveLength(1);
+    for (const childRoot of childRoots) {
+      expect(() => accessSync(childRoot)).toThrow();
+    }
+    await disposeRecallEvalSelectionBoundaryArtifact(artifact);
+    expect(() => accessSync(artifact.rootPath)).toThrow();
+  });
+
+  it("assembles recycled per-question selection records in evaluated order", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pager-selection-recycle-test-"));
+    roots.push(root);
+    const selectionRootLogPath = join(root, "roots.log");
+    const counted = countingHost();
+    const session = openSession(undefined, counted.host);
+    await session.open({
+      selectionBoundaryFixture: capturedBoundary(),
+      selectionRootLogPath
+    });
+    await session.recall({ questionId: "question-2" });
+    await session.recycle();
+    await session.recall({ questionId: "question-1" });
+    await session.recycle();
+    const artifact = await session.close() as RecallEvalSelectionBoundaryArtifact;
+    const verified = await verifyLongMemEvalSelectionBoundaryArtifact(
+      artifact.sourcePath
+    );
+    expect(verified).toEqual({
+      recordCount: 2,
+      questionCount: 2,
+      questionIdDigest: computeLongMemEvalQuestionIdDigest([
+        "question-2", "question-1"
+      ])
+    });
+    const records = gunzipSync(readFileSync(artifact.sourcePath))
+      .toString("utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { question_id: string });
+    expect(records.map((record) => record.question_id)).toEqual([
+      "question-2", "question-1"
+    ]);
+    expect(counted.pids).toHaveLength(2);
+    const childRoots = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
+    expect(childRoots).toHaveLength(2);
     for (const childRoot of childRoots) {
       expect(() => accessSync(childRoot)).toThrow();
     }
