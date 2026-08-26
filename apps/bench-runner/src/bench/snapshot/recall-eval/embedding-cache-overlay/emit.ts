@@ -45,6 +45,10 @@ export async function emitEmbeddingCacheOverlay(input: {
       source: input.source,
       ...(input.now === undefined ? {} : { now: input.now })
     });
+    if (counts.memory + counts.evidence === 0) {
+      // An empty sidecar would fail-open into per-question ONNX warmup.
+      throw new Error("embedding cache overlay emit produced no vectors");
+    }
     return await sealEmbeddingCacheOverlay({
       stagingPath: paths.stagingPath,
       receiptPath: paths.receiptPath,

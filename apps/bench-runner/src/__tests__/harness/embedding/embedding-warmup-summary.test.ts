@@ -115,81 +115,7 @@ describe("readEmbeddingWarmupSummary", () => {
 
   it("counts overlay-bound vectors as warm without durable embedding rows", async () => {
     const dataDir = await createEmbeddingWarmupTempDir("embedding-warmup-overlay-");
-    const databasePath = join(dataDir, "alaya.db");
-    const overlayPath = join(dataDir, "overlay.sqlite");
-    const content = `Embedding warmup source for ${READY_MEMORY_ID}.`;
-    const database = initDatabase({ filename: databasePath });
-    try {
-      const workspaceRepo = new SqliteWorkspaceRepo(database);
-      const runRepo = new SqliteRunRepo(database);
-      const memoryRepo = new SqliteMemoryEntryRepo(database);
-      await workspaceRepo.create({
-        workspace_id: "workspace-1",
-        name: "workspace one",
-        root_path: "/tmp/workspace-1",
-        workspace_kind: WorkspaceKind.LOCAL_REPO,
-        default_engine_binding: null,
-        default_engine_class: "conversation_engine",
-        workspace_state: WorkspaceState.ACTIVE
-      });
-      await runRepo.create({
-        run_id: "run-1",
-        workspace_id: "workspace-1",
-        title: "run one",
-        goal: null,
-        run_mode: RunMode.CHAT,
-        engine_binding_id: null,
-        engine_class: null,
-        run_state: RunState.IDLE,
-        current_surface_id: null
-      });
-      await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
-    } finally {
-      database.close();
-    }
-
-    const overlay = new BetterSqlite3(overlayPath);
-    overlay.exec(`
-      CREATE TABLE memory_embeddings (
-        object_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
-        content_hash TEXT NOT NULL, provider_kind TEXT NOT NULL,
-        model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
-        dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
-        vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
-      CREATE TABLE evidence_recall_embeddings (
-        workspace_id TEXT NOT NULL, owner_object_id TEXT NOT NULL,
-        document_identity TEXT NOT NULL, content_hash TEXT NOT NULL,
-        document_role TEXT NOT NULL, provider_kind TEXT NOT NULL,
-        model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
-        dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
-        vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-        PRIMARY KEY (workspace_id, owner_object_id, document_identity, document_role)
-      );
-    `);
-    overlay.prepare(`
-      INSERT INTO memory_embeddings (
-        object_id, workspace_id, content_hash, provider_kind, model_id,
-        schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(
-      READY_MEMORY_ID,
-      "workspace-1",
-      hashContent(content),
-      "openai",
-      "text-embedding-3-small",
-      1,
-      1,
-      validEmbeddingBlob(1),
-      "2026-06-01T00:00:00.000Z",
-      "2026-06-01T00:00:00.000Z"
-    );
-    overlay.close();
-    writeEmbeddingOverlayBind({
-      databaseFilename: databasePath,
-      overlayFilename: "overlay.sqlite",
-      overlaySha256: createHash("sha256").update(readFileSync(overlayPath)).digest("hex")
-    });
+    await plantOverlayReadyWorkspace(dataDir);
 
     const summary = await readEmbeddingWarmupSummary({
       dataDir,
@@ -205,6 +131,35 @@ describe("readEmbeddingWarmupSummary", () => {
     expect(summary.ready_count).toBe(1);
     expect(summary.expected_count).toBe(1);
     expect(summary.missing_object_ids).toEqual([]);
+  });
+
+  it("drains with pass_count=0 when overlay rows already make the cache identity-ready", async () => {
+    const dataDir = await createEmbeddingWarmupTempDir("embedding-warmup-overlay-drain-");
+    await plantOverlayReadyWorkspace(dataDir);
+    let passes = 0;
+
+    const result = await drainEmbeddingWarmupPasses({
+      maxPasses: 4,
+      maxStallPasses: 4,
+      runPass: async () => {
+        passes += 1;
+      },
+      readSummary: async (passCount) => await readEmbeddingWarmupSummary({
+        dataDir,
+        workspaceId: "workspace-1",
+        objectIds: [READY_MEMORY_ID],
+        providerKind: "openai",
+        modelId: "text-embedding-3-small",
+        schemaVersion: 1,
+        expectedDimensions: 1,
+        passCount
+      })
+    });
+
+    expect(passes).toBe(0);
+    expect(result.summary.pass_count).toBe(0);
+    expect(result.summary.ready_count).toBe(1);
+    expect(result.summary.ready_rate).toBe(1);
   });
 
   it("treats a stale content hash as missing so a backfill pass repairs it", async () => {
@@ -324,3 +279,81 @@ describe("readEmbeddingWarmupSummary", () => {
   });
 
 });
+
+async function plantOverlayReadyWorkspace(dataDir: string): Promise<void> {
+  const databasePath = join(dataDir, "alaya.db");
+  const overlayPath = join(dataDir, "overlay.sqlite");
+  const content = `Embedding warmup source for ${READY_MEMORY_ID}.`;
+  const database = initDatabase({ filename: databasePath });
+  try {
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const runRepo = new SqliteRunRepo(database);
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    await workspaceRepo.create({
+      workspace_id: "workspace-1",
+      name: "workspace one",
+      root_path: "/tmp/workspace-1",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      default_engine_class: "conversation_engine",
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    await runRepo.create({
+      run_id: "run-1",
+      workspace_id: "workspace-1",
+      title: "run one",
+      goal: null,
+      run_mode: RunMode.CHAT,
+      engine_binding_id: null,
+      engine_class: null,
+      run_state: RunState.IDLE,
+      current_surface_id: null
+    });
+    await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
+  } finally {
+    database.close();
+  }
+
+  const overlay = new BetterSqlite3(overlayPath);
+  overlay.exec(`
+    CREATE TABLE memory_embeddings (
+      object_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+      content_hash TEXT NOT NULL, provider_kind TEXT NOT NULL,
+      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
+      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
+      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE evidence_recall_embeddings (
+      workspace_id TEXT NOT NULL, owner_object_id TEXT NOT NULL,
+      document_identity TEXT NOT NULL, content_hash TEXT NOT NULL,
+      document_role TEXT NOT NULL, provider_kind TEXT NOT NULL,
+      model_id TEXT NOT NULL, schema_version INTEGER NOT NULL,
+      dimensions INTEGER NOT NULL, embedding_blob BLOB NOT NULL,
+      vector_valid INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, owner_object_id, document_identity, document_role)
+    );
+  `);
+  overlay.prepare(`
+    INSERT INTO memory_embeddings (
+      object_id, workspace_id, content_hash, provider_kind, model_id,
+      schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(
+    READY_MEMORY_ID,
+    "workspace-1",
+    hashContent(content),
+    "openai",
+    "text-embedding-3-small",
+    1,
+    1,
+    validEmbeddingBlob(1),
+    "2026-06-01T00:00:00.000Z",
+    "2026-06-01T00:00:00.000Z"
+  );
+  overlay.close();
+  writeEmbeddingOverlayBind({
+    databaseFilename: databasePath,
+    overlayFilename: "overlay.sqlite",
+    overlaySha256: createHash("sha256").update(readFileSync(overlayPath)).digest("hex")
+  });
+}

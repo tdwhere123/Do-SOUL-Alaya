@@ -25,6 +25,8 @@ import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { sha256File } from "../snapshot/integrity.js";
 import { missLedgerContentIdentity } from "./miss-ledger-authority.js";
 import { recordedQueryCacheFileSha256 } from "./run-state.js";
+import { resolveTreatmentOverlayReceipt } from
+  "../snapshot/recall-eval/embedding-cache-overlay/ensure.js";
 
 export async function runProductionRecallPhase(
   context: DiagnosticLoopPhaseContext,
@@ -80,13 +82,36 @@ async function executeRecallEvaluation(
     ...(context.request.limit === undefined ? {} : { limit: context.request.limit }),
     ...(context.request.offset === undefined ? {} : { offset: context.request.offset }),
     ...(context.request.dataDir === undefined ? {} : { dataDir: context.request.dataDir }),
-    ...(arm === "control" || context.request.embeddingCacheOverlayReceiptPath === undefined
-      ? {}
-      : {
-          embeddingCacheOverlayReceiptPath: context.request.embeddingCacheOverlayReceiptPath
-        }),
+    ...await treatmentOverlayEvalOptions(context, arm, prepared.snapshot),
     ...treatmentRecallCacheOptions(context, arm)
   });
+}
+
+async function treatmentOverlayEvalOptions(
+  context: DiagnosticLoopPhaseContext,
+  arm: "control" | "treatment",
+  snapshotDbPath: string
+): Promise<Pick<
+  Parameters<typeof runRecallEval>[0],
+  "embeddingCacheOverlayReceiptPath"
+>> {
+  if (arm === "control") return {};
+  try {
+    return {
+      embeddingCacheOverlayReceiptPath: await resolveTreatmentOverlayReceipt({
+        snapshotDbPath,
+        ...(context.request.embeddingCacheOverlayReceiptPath === undefined
+          ? {}
+          : { receiptPathOverride: context.request.embeddingCacheOverlayReceiptPath })
+      })
+    };
+  } catch (error) {
+    throw fail(
+      "treatment_recall",
+      "infrastructure",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
 }
 
 function treatmentRecallCacheOptions(
