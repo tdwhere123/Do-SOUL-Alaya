@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { doctorAuditCheckStatus, readDoctorAuditSnapshot } from "../../cli/doctor/doctor-audit.js";
+import { restoreProcessEnv } from "../support/restore-process-env.js";
 
 const ORIGINAL_MCP = process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
 const ORIGINAL_RETAIN = process.env.ALAYA_RETAIN_UNROUTED_FACTS;
 
 afterEach(() => {
-  restoreEnv("ALAYA_MCP_SERVER_CONFIG_JSON", ORIGINAL_MCP);
-  restoreEnv("ALAYA_RETAIN_UNROUTED_FACTS", ORIGINAL_RETAIN);
+  restoreProcessEnv("ALAYA_MCP_SERVER_CONFIG_JSON", ORIGINAL_MCP);
+  restoreProcessEnv("ALAYA_RETAIN_UNROUTED_FACTS", ORIGINAL_RETAIN);
 });
 
 describe("doctor audit snapshot", () => {
@@ -22,11 +23,3 @@ describe("doctor audit snapshot", () => {
     );
   });
 });
-
-function restoreEnv(name: string, original: string | undefined): void {
-  if (original === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = original;
-}

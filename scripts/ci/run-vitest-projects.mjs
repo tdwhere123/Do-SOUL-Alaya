@@ -30,26 +30,28 @@ const hasCoverageIncludeArg = extraArgs.some(
 );
 const hasCoverageThresholdArg = extraArgs.some((arg) => arg.startsWith("--coverage.thresholds."));
 
+// Floors sit 3 points under isolated json-summary so a drop in one package
+// cannot hide behind a stronger sibling. engine-gateway was already pinned.
 const PROJECT_COVERAGE = {
   "@do-soul/alaya-protocol": {
     include: "packages/protocol/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 88, lines: 89, functions: 81, branches: 72
   },
   "@do-soul/alaya-graph-algorithms": {
     include: "packages/graph-algorithms/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 78, lines: 79, functions: 83, branches: 69
   },
   "@do-soul/alaya-storage": {
     include: "packages/storage/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 72, lines: 72, functions: 82, branches: 63
   },
   "@do-soul/alaya-core": {
     include: "packages/core/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 85, lines: 86, functions: 90, branches: 77
   },
   "@do-soul/alaya-soul": {
     include: "packages/soul/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 88, lines: 89, functions: 92, branches: 82
   },
   "@do-soul/alaya-engine-gateway": {
     include: "packages/engine-gateway/src/**",
@@ -57,19 +59,19 @@ const PROJECT_COVERAGE = {
   },
   "@do-soul/alaya-eval": {
     include: "packages/eval/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 83, lines: 85, functions: 91, branches: 80
   },
   "@do-soul/alaya-core-daemon": {
     include: "apps/core-daemon/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 75, lines: 76, functions: 81, branches: 66
   },
   "@do-soul/alaya-inspector": {
     include: "apps/inspector/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 77, lines: 80, functions: 87, branches: 60
   },
   "@do-soul/alaya-inspector-web": {
     include: "apps/inspector/web/src/**",
-    statements: 40, lines: 40, functions: 30, branches: 20
+    statements: 79, lines: 80, functions: 82, branches: 66
   },
   "@do-soul/alaya-bench-runner": {
     include: "apps/bench-runner/src/**",

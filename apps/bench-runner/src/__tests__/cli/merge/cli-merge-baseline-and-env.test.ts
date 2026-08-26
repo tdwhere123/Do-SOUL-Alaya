@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -136,7 +136,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       "utf8"
     );
 
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -311,7 +311,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -342,7 +342,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -379,7 +379,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",

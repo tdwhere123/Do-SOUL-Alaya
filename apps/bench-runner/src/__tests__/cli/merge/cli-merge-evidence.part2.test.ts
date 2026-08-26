@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import { runMergeLongMemEvalCommand } from "../../../cli/merge/command/merge-command.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
 import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
@@ -137,7 +137,7 @@ describe("merge-longmemeval evidence bundle", () => {
       ...drifted,
       runtime: { ...drifted.runtime, paired_env: { ALAYA_RECALL_CONF_RHO_PATH: "drift" } }
     });
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "identity"),
       "--shards", shardA, shardB
     ])).toBe(2);
@@ -147,7 +147,7 @@ describe("merge-longmemeval evidence bundle", () => {
       ...mismatched,
       execution: { ...mismatched.execution, evaluated_count: 2 }
     });
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "execution"),
       "--shards", shardA, shardB
     ])).toBe(2);
@@ -173,7 +173,7 @@ describe("merge-longmemeval evidence bundle", () => {
       }
     }));
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       "--shards", shard
     ])).toBe(1);
@@ -218,7 +218,7 @@ describe("merge-longmemeval evidence bundle", () => {
     })), makeShardDiagnostics({ questions: [question("question-1")] }));
     await writeProvenance(shard, provenance(0, 1));
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       "--shards", shard
     ])).toBe(1);

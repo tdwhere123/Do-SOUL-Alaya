@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { KpiPayload } from "@do-soul/alaya-eval";
 
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from "./cli-merge-validations-fixture.js";
 
@@ -64,7 +64,7 @@ describe("merge-longmemeval validations", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -101,7 +101,7 @@ describe("merge-longmemeval validations", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -138,7 +138,7 @@ describe("merge-longmemeval validations", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -175,7 +175,7 @@ describe("merge-longmemeval validations", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -220,7 +220,7 @@ describe("merge-longmemeval validations", () => {
       })
     );
     const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",

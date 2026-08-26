@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture
@@ -109,7 +109,7 @@ describe("merge-longmemeval full-gold KPI", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-full-gold");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",
@@ -183,7 +183,7 @@ describe("merge-longmemeval full-gold KPI", () => {
     );
 
     const historyRoot = path.join(tmpRoot, "history-full-gold-mismatch");
-    const exitCode = await runCli([
+    const exitCode = await runMergeCli(tmpRoot, [
       "merge-longmemeval",
       "--variant",
       "s",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { runCli } from "../../../cli/index.js";
 
 const STATIC_IDS = [
   "legacy-hit", "q-a", "q-b", "q-binding", "q-bundle", "q-collide",
@@ -45,7 +46,36 @@ export const MERGE_TEST_DATASET_SHA256 = createHash("sha256")
   .update(MERGE_TEST_DATASET_CONTENTS, "utf8")
   .digest("hex");
 
+const createdByRoot = new Map<string, Awaited<ReturnType<typeof writeMergeDatasetSource>>>();
+
 export async function createMergeDatasetSource(root: string): Promise<{
+  readonly sourcePath: string;
+  readonly checksumSourcePath: string;
+  readonly cliArgs: readonly string[];
+}> {
+  const cached = createdByRoot.get(root);
+  if (cached !== undefined) return cached;
+  const created = await writeMergeDatasetSource(root);
+  createdByRoot.set(root, created);
+  return created;
+}
+
+export async function runMergeCli(
+  datasetRoot: string,
+  argv: readonly string[]
+): Promise<number> {
+  if (argv.includes("--data-dir") || argv.includes("--pinned-meta-root")) {
+    return runCli(argv);
+  }
+  const dataset = await createMergeDatasetSource(datasetRoot);
+  const shardIndex = argv.indexOf("--shards");
+  const prefixed = shardIndex === -1
+    ? [...argv, ...dataset.cliArgs]
+    : [...argv.slice(0, shardIndex), ...dataset.cliArgs, ...argv.slice(shardIndex)];
+  return runCli(prefixed);
+}
+
+async function writeMergeDatasetSource(root: string): Promise<{
   readonly sourcePath: string;
   readonly checksumSourcePath: string;
   readonly cliArgs: readonly string[];

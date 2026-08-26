@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runCli } from "../../../cli/index.js";
+import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
 import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 import { buildQuestionDiagnosticFixture } from "../../longmemeval/diagnostics/gold-diagnostic-fixture.js";
@@ -46,7 +46,7 @@ describe("merge-longmemeval compact diagnostics", () => {
     await writeCompactShard(shardB, rowsB, artifactB);
 
     const historyRoot = path.join(root, "history");
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", historyRoot,
       "--shards", shardA, shardB
     ])).toBe(1);

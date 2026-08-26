@@ -47,11 +47,12 @@ const CAP_ENV = "ALAYA_RECALL_CONF_FLOOD_CAP";
 
 const databases = new Set<StorageDatabase>();
 
-afterEach(() => {
+    afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
   delete process.env[SLICE_ENV];
   delete process.env[CAP_ENV];
+  delete process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY;
   resetCoreConfigForTests();
 });
 
@@ -301,10 +302,13 @@ function createRecallService(
   const dependencies: RecallServiceDependencies = {
     now: () => "2026-07-10T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    defaultPolicyDecorator: (policy) => ({
-      ...policy,
-      fine_assessment: { ...policy.fine_assessment, delivery_path: "legacy" }
-    }),
+    defaultPolicyDecorator: (policy) => {
+      process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY = "1";
+      return {
+        ...policy,
+        fine_assessment: { ...policy.fine_assessment, delivery_path: "legacy" }
+      };
+    },
     sha256: fieldContractSha256,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WORKSPACE_ID),
     memoryRepo: {

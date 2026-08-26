@@ -53,12 +53,11 @@ export default defineConfig({
         "bin/**"
       ],
       // Per-project include + floors live in scripts/ci/run-vitest-projects.mjs.
-      // This root floor is only the mixed-workspace fallback; it must beat the
-      // old diluted 13% branch gate.
+      // Mixed fallback must not sit below the old diluted 42/42 statements/lines.
       thresholds: {
         perFile: false,
-        statements: 40,
-        lines: 40,
+        statements: 42,
+        lines: 42,
         functions: 30,
         branches: 20
       }

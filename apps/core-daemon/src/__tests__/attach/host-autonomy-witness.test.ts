@@ -14,8 +14,10 @@ import { describe, expect, it } from "vitest";
 // autonomous tool-selection behaviour the *recording* ages out and a fresh one
 // is exported; the assertions below stay the same.
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const fixtureDir = path.join(repoRoot, "docs/archive/v0.3-historical/v0.3.0/host-autonomy-fixtures/claude-code-live");
+const fixtureDir = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures/claude-code-live"
+);
 
 interface FixtureEvent {
   readonly event_type: string;

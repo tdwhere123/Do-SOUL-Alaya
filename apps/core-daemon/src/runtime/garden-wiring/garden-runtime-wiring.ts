@@ -1,10 +1,9 @@
 import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
-  AnswersWithEdgeProducerService,
+  type AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
   DEFAULT_ANSWER_OVERLAP_BAR,
   GardenBacklogTelemetryService,
-  HqAnswerOverlapPairSource,
   rebuildCountersFromEventLog,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
@@ -19,7 +18,7 @@ import {
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import type { WarnLogger } from "../daemon/lifecycle/daemon-runtime-helpers.js";
-import { createOptionalMemoryHqRepo, recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
+import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
 import {
   resolvePersistedGardenLastPassAt
 } from "./garden-compute-support.js";
@@ -92,8 +91,10 @@ type GardenRuntimeWiringInput = Readonly<{
     | "embeddingRecallService"
     | "conflictDetectionService"
     | "edgeClassifyQueueRepoHolder"
-    | "relationAssertionAdmissionPort"
-  >;
+  > &
+  Readonly<{
+    readonly answersWithCrystallizer?: AnswersWithEdgeProducerService;
+  }>;
 
 export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput) {
   const forgetTombstoneAuthority = createForgetTombstoneAuthority(input);
@@ -109,7 +110,7 @@ export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput)
   });
   const legacyPathCandidateRejectionPort = createGardenLegacyPathCandidateRejectionPort(input.warnLogger.warn);
   const coherenceCrystallizer = createCoherenceCrystallizer(input, legacyPathCandidateRejectionPort);
-  const answersWithCrystallizer = createAnswersWithCrystallizer(input);
+  const answersWithCrystallizer = input.answersWithCrystallizer;
   const gardenRuntime = createGardenSchedulerRuntime(
     input,
     gardenDataPorts,
@@ -189,26 +190,12 @@ function createCoherenceCrystallizer(
   });
 }
 
-// invariant: answers_with crystallizer is always-on when the HQ repo is
-// present; null hqRepo means no assertion admission.
-function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
-  const hqRepo = createOptionalMemoryHqRepo(input.database);
-  if (hqRepo === null) {
-    return undefined;
-  }
-  return new AnswersWithEdgeProducerService({
-    pairSource: new HqAnswerOverlapPairSource(hqRepo),
-    assertionPort: input.relationAssertionAdmissionPort,
-    warn: input.warnLogger.warn
-  });
-}
-
 function createGardenSchedulerRuntime(
   input: GardenRuntimeWiringInput,
   gardenDataPorts: ReturnType<typeof createGardenDataPorts>,
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
   coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
-  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
+  answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
   return createGardenRuntime({
     databaseConnection: input.database.connection,
@@ -248,7 +235,7 @@ function createGardenSchedulerRuntime(
 function createGardenEnrichmentPorts(
   input: GardenRuntimeWiringInput,
   coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
-  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
+  answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
   const coherenceEdgeProducerPort = createCoherenceEdgeProducerPort(
     coherenceCrystallizer,
@@ -353,7 +340,7 @@ function createCoherenceEdgeProducerPort(
 }
 
 function createAnswersWithEdgeProducerPort(
-  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>,
+  answersWithCrystallizer: AnswersWithEdgeProducerService | undefined,
   memoryEntryRepo: GardenRuntimeWiringInput["memoryEntryRepo"]
 ) {
   if (answersWithCrystallizer === undefined) {

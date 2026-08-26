@@ -8,13 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { collectReleaseHardGates, type KpiPayload } from "@do-soul/alaya-eval";
 
-import { runCli } from "../../../cli/index.js";
-
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from "./cli-merge-validations-fixture.js";
 
 import { setupShard } from "./cli-merge-evidence-fixture.js";
 
-import { createMergeDatasetSource } from "./cli-merge-dataset-fixture.js";
+import { createMergeDatasetSource, runMergeCli } from "./cli-merge-dataset-fixture.js";
 
 import {
   withEligibleMeasurementContract,
@@ -64,7 +62,7 @@ async function verifyMalformedQuestionCountRejected(): Promise<void> {
     })
   );
 
-  const exitCode = await runCli([
+  const exitCode = await runMergeCli(tmpRoot, [
     "merge-longmemeval",
     "--variant",
     "s",
@@ -85,7 +83,7 @@ async function verifyMissingPointerRejected(): Promise<void> {
   await mkdir(path.join(shard, "public"), { recursive: true });
 
   const historyRoot = path.join(tmpRoot, "history-no-pointer");
-  const exitCode = await runCli([
+  const exitCode = await runMergeCli(tmpRoot, [
     "merge-longmemeval",
     "--variant",
     "s",
@@ -137,7 +135,7 @@ async function verifyDuplicateQuestionIdsRejected(): Promise<void> {
   await writeDuplicateDiagnosticsShard(shardA, "a");
   await writeDuplicateDiagnosticsShard(shardB, "b");
 
-  const exitCode = await runCli([
+  const exitCode = await runMergeCli(tmpRoot, [
     "merge-longmemeval",
     "--variant",
     "s",
@@ -192,7 +190,7 @@ async function verifyCustomPinnedDatasetSource(): Promise<void> {
   const historyRoot = path.join(tmpRoot, "history-baseline");
   await writeCustomPinnedHistory(historyRoot);
 
-  const exitCode = await runCli([
+  const exitCode = await runMergeCli(tmpRoot, [
     "merge-longmemeval",
     "--variant",
     "s",
@@ -323,7 +321,7 @@ async function readMergedTaxonomyDiagnostics(
 async function verifyTaxonomyDistributionMerged(): Promise<void> {
   const [shardA, shardB, shardLegacy] = await prepareTaxonomyShards();
   const historyRoot = path.join(tmpRoot, "history-taxonomy");
-  const exitCode = await runCli([
+  const exitCode = await runMergeCli(tmpRoot, [
     "merge-longmemeval",
     "--variant",
     "s",

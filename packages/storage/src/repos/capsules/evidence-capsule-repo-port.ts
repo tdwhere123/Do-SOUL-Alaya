@@ -71,6 +71,11 @@ export interface EvidenceCapsuleRepo {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>>;
+  updateHealthInCurrentTransaction(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Readonly<EvidenceCapsule>;
   // see also: memory_content_fts -- parallel raw FTS surface
   searchByKeyword?(
     workspaceId: string,

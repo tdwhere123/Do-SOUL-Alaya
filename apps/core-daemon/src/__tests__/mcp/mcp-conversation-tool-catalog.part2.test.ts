@@ -30,6 +30,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
+import { restoreProcessEnv } from "../support/restore-process-env.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -163,8 +164,8 @@ describe("daemon conversation tool catalog", () => {
         message: "External MCP tool mcp__filesystem__read_file is no longer exposed by daemon runtime server filesystem."
       });
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 
@@ -220,8 +221,8 @@ describe("daemon conversation tool catalog", () => {
         message: "External MCP tool mcp__filesystem__read_file is no longer exposed by daemon runtime server filesystem."
       });
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 
@@ -278,8 +279,8 @@ describe("daemon conversation tool catalog", () => {
         })
       ).rejects.toThrow(/Invalid input for tools\.read_file/);
     } finally {
-      process.env.ALAYA_ALLOWED_MCP_SERVERS = originalAllowedServers;
-      process.env.ALAYA_MCP_TOOL_CATALOG_JSON = originalToolCatalog;
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
 

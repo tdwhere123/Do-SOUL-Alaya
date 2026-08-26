@@ -3,7 +3,6 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runCli } from "../../../cli/index.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
 import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
 // @ts-expect-error The executable replay verifier is intentionally outside package declarations.
@@ -21,7 +20,7 @@ import {
   roots,
   setupShard
 } from "./cli-merge-evidence-fixture.js";
-import { createMergeDatasetSource } from "./cli-merge-dataset-fixture.js";
+import { createMergeDatasetSource, runMergeCli } from "./cli-merge-dataset-fixture.js";
 
 afterEach(cleanupRoots);
 
@@ -34,7 +33,7 @@ describe("merge-longmemeval evidence bundle", () => {
     const dataset = await createMergeDatasetSource(root);
     await setupShard(shard, "q-1", 0);
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       "--concurrency", "1",
       ...dataset.cliArgs,
@@ -84,7 +83,7 @@ describe("merge-longmemeval evidence bundle", () => {
       }
     }), makeShardDiagnostics({ questions: [question("q-b")] }));
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "history"),
       "--shards", shardA, shardB
     ])).toBe(2);
@@ -100,7 +99,7 @@ describe("merge-longmemeval evidence bundle", () => {
     await setupShard(shardA, "q-a", 0);
     await setupShard(shardB, "q-b", 1);
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       ...dataset.cliArgs,
       "--shards", shardB, shardA
@@ -154,7 +153,7 @@ describe("merge-longmemeval evidence bundle", () => {
     await setupShard(shardA, "q-a", 0);
     await setupShard(shardB, "q-b", 2);
 
-    expect(await runCli([
+    expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "history"),
       "--shards", shardB, shardA
     ])).toBe(2);

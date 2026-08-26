@@ -26,6 +26,7 @@ import {
 import { createDaemonServiceFoundation } from "./runtime/daemon/wiring/daemon-service-foundation.js";
 import { resolveCoreDaemonFilesDirectory } from "./runtime/daemon/support/files-data-dir.js";
 import { finalizeDaemonRuntimeFromWiring } from "./runtime/daemon/lifecycle/finalize-daemon-runtime-wiring.js";
+import { createAnswersWithCrystallizer } from "./runtime/garden-wiring/garden-answers-with-crystallizer.js";
 import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
 import { openDaemonDatabase } from "./runtime/startup/database.js";
@@ -238,7 +239,11 @@ async function buildGardenWiring(
     pathRelationRepo: repositories.pathRelationRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
-    relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
+    answersWithCrystallizer: createAnswersWithCrystallizer({
+      database: bootstrap.database,
+      relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
+      warn: bootstrap.warnLogger.warn
+    }),
     configService: runtimeWiring.coreWiring.configService,
     officialGardenProvider: runtimeWiring.coreWiring.officialGardenProvider,
     localHeuristicsProvider: runtimeWiring.coreWiring.localHeuristicsProvider,

@@ -40,6 +40,36 @@ export function createEvidenceInput(
   };
 }
 
+export function createStoredEvidence(
+  overrides: Partial<EvidenceCapsule> = {}
+): EvidenceCapsule {
+  return Object.freeze({
+    object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-03-20T00:00:00.000Z",
+    updated_at: "2026-03-20T00:00:00.000Z",
+    created_by: "user_action",
+    evidence_kind: "tool_output",
+    semantic_anchor: {
+      topic: "build",
+      keywords: ["pnpm", "build"],
+      summary: "Build output"
+    },
+    event_anchor: null,
+    physical_anchor: null,
+    evidence_health_state: EvidenceHealthState.VERIFIED,
+    gist: "Evidence gist",
+    excerpt: "Evidence excerpt",
+    source_hash: "sha256:abc",
+    run_id: "run-1",
+    workspace_id: "workspace-1",
+    surface_id: null,
+    ...overrides
+  });
+}
+
 export function createCreationHarness(
   dependencies: Partial<EvidenceServiceDependencies> & {
     readonly deleteById?: Mock<(objectId: string) => Promise<void>>;
@@ -74,6 +104,9 @@ export function createCreationHarness(
       findByWorkspaceId: vi.fn(async () => []),
       findByHealth: vi.fn(async () => []),
       updateHealth: vi.fn(async () => {
+        throw new Error("not used");
+      }),
+      updateHealthInCurrentTransaction: vi.fn(() => {
         throw new Error("not used");
       })
     },

@@ -450,29 +450,35 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     health: EvidenceHealthState,
     updatedAt: string
   ): Promise<Readonly<EvidenceCapsule>> {
+    return this.updateHealthInCurrentTransaction(objectId, health, updatedAt);
+  }
+
+  public updateHealthInCurrentTransaction(
+    objectId: string,
+    health: EvidenceHealthState,
+    updatedAt: string
+  ): Readonly<EvidenceCapsule> {
     const parsedHealth = parseEvidenceHealthState(health);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-
     try {
       const result = this.statements.updateHealthStatement.run(parsedHealth, parsedUpdatedAt, objectId);
-
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found.`);
       }
-
-      const capsule = await this.findById(objectId);
-
+      const capsule = parseOptionalRow(
+        this.statements.findByIdStatement.get(objectId),
+        EvidenceCapsuleRowParser,
+        "evidence capsule row"
+      );
       if (capsule === null) {
         throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found after update.`);
       }
-
       return capsule;
     } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", `Failed to update evidence health for ${objectId}.`, error);
+      throw wrapEvidenceCapsuleQueryError(
+        `Failed to update evidence health for ${objectId}.`,
+        error
+      );
     }
   }
 }

@@ -98,6 +98,9 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
       findByTopicKey: vi.fn(async () => []),
       updateStatus: vi.fn(async (_objectId, status, updatedAt) =>
         Object.freeze(createSynthesisCapsule({ synthesis_status: status, updated_at: updatedAt }))
+      ),
+      updateStatusInCurrentTransaction: vi.fn((_objectId, status, updatedAt) =>
+        Object.freeze(createSynthesisCapsule({ synthesis_status: status, updated_at: updatedAt }))
       )
     },
     evidenceService: {
@@ -270,7 +273,7 @@ describe("SynthesisService", () => {
           order.push("event_query");
           return createEventLogHistory(3);
         }),
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           order.push("event_log");
           return {
             event_id: "event-status",
@@ -278,14 +281,19 @@ describe("SynthesisService", () => {
             revision: 0,
             ...event
           };
-        })
+        }),
+        transactional: <T>(fn: () => T) => fn()
       },
       synthesisCapsuleRepo: {
         create: vi.fn(async (capsule) => capsule),
+        createInCurrentTransaction: vi.fn((capsule) => capsule),
         findById: vi.fn(async () => existing),
         findByWorkspaceId: vi.fn(async () => []),
         findByTopicKey: vi.fn(async () => []),
-        updateStatus: vi.fn(async (_objectId, status, updatedAt) => {
+        updateStatus: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        updateStatusInCurrentTransaction: vi.fn((_objectId, status, updatedAt) => {
           order.push("repo_update");
           return Object.freeze({ ...existing, synthesis_status: status, updated_at: updatedAt });
         })
@@ -307,6 +315,91 @@ describe("SynthesisService", () => {
 
     expect(order).toEqual(["event_log", "repo_update", "notify"]);
     expect(updated.synthesis_status).toBe(SynthesisStatus.STABLE);
+  });
+
+  it("rolls back the EventLog row when synthesis status update throws", async () => {
+    const events: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const notify = vi.fn();
+    const existing = createSynthesisCapsule({ synthesis_status: SynthesisStatus.WORKING });
+    const { dependencies } = createDependencies({
+      eventLogRepo: {
+        queryByEntity: vi.fn(async () => []),
+        append: vi.fn((event) => {
+          events.push(event);
+          return {
+            event_id: "event-status",
+            created_at: "2026-03-21T02:00:00.000Z",
+            revision: 0,
+            ...event
+          };
+        }),
+        transactional: <T>(fn: () => T) => {
+          const start = events.length;
+          try {
+            return fn();
+          } catch (error) {
+            events.length = start;
+            throw error;
+          }
+        }
+      },
+      synthesisCapsuleRepo: {
+        create: vi.fn(async (capsule) => capsule),
+        createInCurrentTransaction: vi.fn((capsule) => capsule),
+        findById: vi.fn(async () => existing),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByTopicKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        updateStatusInCurrentTransaction: vi.fn(() => {
+          throw new Error("row failed");
+        })
+      },
+      runtimeNotifier: { notifyEntry: notify }
+    });
+
+    const service = new SynthesisService(dependencies);
+    await expect(
+      service.transitionStatus(
+        existing.object_id,
+        SynthesisStatus.STABLE,
+        "stabilized",
+        TransitionCausedBy.REVIEW
+      )
+    ).rejects.toThrow("row failed");
+    expect(events).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("rejects status transition when the in-transaction update port is missing", async () => {
+    const notify = vi.fn();
+    const existing = createSynthesisCapsule({ synthesis_status: SynthesisStatus.WORKING });
+    const { dependencies } = createDependencies({
+      synthesisCapsuleRepo: {
+        create: vi.fn(async (capsule) => capsule),
+        createInCurrentTransaction: vi.fn((capsule) => capsule),
+        findById: vi.fn(async () => existing),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByTopicKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => existing)
+      },
+      runtimeNotifier: { notifyEntry: notify }
+    });
+
+    const service = new SynthesisService(dependencies);
+    await expect(
+      service.transitionStatus(
+        existing.object_id,
+        SynthesisStatus.STABLE,
+        "stabilized",
+        TransitionCausedBy.REVIEW
+      )
+    ).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT"
+    });
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("rejects reverse status transition", async () => {

@@ -21,6 +21,7 @@ import {
   initDatabase
 } from "@do-soul/alaya-storage";
 import { createRuntimeNotifier } from "../../../runtime/daemon/support/runtime-notifier.js";
+import { createGardenRuntimeWiring } from "../../../runtime/garden-wiring/garden-runtime-wiring.js";
 import { createPathRelationRuntime } from "../../../runtime/recall-materialization/recall-materialization-path-relation.js";
 
 afterEach(() => {
@@ -28,7 +29,14 @@ afterEach(() => {
 });
 
 describe("Garden temporal relation runtime", () => {
-  it("exposes a nomination port and never holds RelationAssertionAdmissionPort on Garden wiring", async () => {
+  it("does not accept RelationAssertionAdmissionPort on Garden wiring", () => {
+    type GardenWiringInput = Parameters<typeof createGardenRuntimeWiring>[0];
+    type Leak = Extract<keyof GardenWiringInput, "relationAssertionAdmissionPort">;
+    const closed: [Leak] extends [never] ? true : false = true;
+    expect(closed).toBe(true);
+  });
+
+  it("exposes a nomination port for Garden temporal relations", async () => {
     const database = initDatabase({ filename: ":memory:" });
     let pathRelationEvictionTimer: NodeJS.Timeout | null = null;
     try {
