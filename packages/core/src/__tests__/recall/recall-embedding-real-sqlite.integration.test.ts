@@ -24,6 +24,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 import { hashMemoryContent } from "../embedding-recall/embedding-recall-test-helpers.js";
 import {
   REAL_SQLITE_TEST_RUN_ID,
@@ -139,6 +140,7 @@ function buildRecallService(params: {
   });
 
   const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
+    defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
       fieldContractSha256,

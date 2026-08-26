@@ -41,6 +41,7 @@ import type { RecallEvalQuestionResult } from "../recall-eval-contract.js";
 
 export interface RecallEvalOneQuestionInput {
   readonly daemon: BenchDaemonHandle;
+  readonly workspace?: BenchWorkspaceHandle;
   readonly question: LongMemEvalSnapshotQuestion;
   readonly turnIndex: number;
   readonly embeddingMode: BenchEmbeddingMode;
@@ -53,6 +54,9 @@ export interface RecallEvalOneQuestionInput {
 export async function recallEvalOneQuestion(
   input: RecallEvalOneQuestionInput
 ): Promise<RecallEvalQuestionResult> {
+  if (input.workspace !== undefined) {
+    return recallEvalAttachedQuestion(input, input.workspace);
+  }
   const workspace = await input.daemon.attachWorkspace({
     workspaceId: input.question.workspaceId,
     runId: input.question.runId

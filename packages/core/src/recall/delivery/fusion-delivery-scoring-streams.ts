@@ -9,7 +9,10 @@ import {
 import { normalizeEvidenceText } from "../scoring/query-evidence-scoring.js";
 import { resolveRecallCandidateSemanticActivation } from
   "../scoring/activation/candidate-semantic-activation-context.js";
-import { scorePreferenceProfileAlignment } from "../scoring/preference-fusion-scoring.js";
+import {
+  scorePreferenceProfileAlignment,
+  scoreSelfReferenceAlignment
+} from "../scoring/preference-fusion-scoring.js";
 import {
   parseQueryTimeWindow,
   scoreTemporalEventTime,
@@ -195,14 +198,5 @@ function scoreSubjectAlignment(
   queryProbes: Readonly<RecallQueryProbes>
 ): number {
   const preferenceScore = scorePreferenceProfileAlignment(entry, queryProbes);
-  if (!queryProbes.subject_hints.includes("self_reference")) return preferenceScore;
-  const content = normalizeEvidenceText(entry.content);
-  if (content.length === 0) return preferenceScore;
-  const explicitSelf = /\b(?:i|i'm|i've|i'd|i'll|me|my|mine|we|we're|we've|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(content);
-  const userFramed = /\b(?:the user|user|operator|principal)\b/iu.test(content);
-  if (!explicitSelf && !userFramed) return preferenceScore;
-  const genericAssistant =
-    /\b(?:as an ai|i (?:do not|don't) have|i can help|here are|you can|you could|you should|there are many|some suggestions|popular (?:ones|options))\b/iu.test(content);
-  const baseScore = explicitSelf ? 1 : 0.55;
-  return Math.max(preferenceScore, clamp01(genericAssistant ? baseScore * 0.25 : baseScore));
+  return Math.max(preferenceScore, scoreSelfReferenceAlignment(entry, queryProbes));
 }

@@ -1,5 +1,6 @@
 import {
   EvidenceCapsuleSchema,
+  OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
   type EvidenceCapsule,
@@ -38,6 +39,7 @@ export async function createEvidenceCapsule(input: Readonly<{
       searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
       factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
       semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
+      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
     ): Promise<Readonly<EvidenceCapsule>>;
   };
   readonly eventLogRepo: {
@@ -65,7 +67,8 @@ export async function createEvidenceCapsule(input: Readonly<{
     evidence,
     formation.searchProjections,
     formation.factFrameCapture,
-    formation.semanticFormation
+    formation.semanticFormation,
+    formation.semanticCompleteness
   );
   await admitOptionalFieldFormation(input, created, formation);
   await input.runtimeNotifier.notifyEntry(event);
@@ -125,7 +128,9 @@ function planOptionalFormation(
     return planEvidenceFormation({
       evidence,
       searchProjections: [],
-      semanticFactorProposal: input.semanticFactorProposal
+      ...(input.semanticFactorProposal === undefined ? {} : {
+        semanticFactorProposal: OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION
+      })
     });
   }
 }

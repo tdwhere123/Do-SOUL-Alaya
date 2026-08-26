@@ -1,18 +1,18 @@
-import type { FineAssessmentSelectionBoundaryPendingCapture } from
+import type { FineAssessmentDiagnosticCapture } from
   "@do-soul/alaya-core";
 import type { BenchRecallOptions } from "../../../harness/daemon.js";
 import type { RecallEvalQuestionResult } from "./recall-eval-contract.js";
 
 export function createCandidateActivationCapture(enabled: boolean): Readonly<{
-  observer: BenchRecallOptions["selectionBoundaryObserver"];
+  observer: BenchRecallOptions["diagnosticObserver"];
   attach(result: RecallEvalQuestionResult): RecallEvalQuestionResult;
 }> {
   let entries: readonly (readonly [string, unknown])[] | undefined;
-  const observer = enabled ? (capture: FineAssessmentSelectionBoundaryPendingCapture) => {
-    entries = capture.params.supplementaryData
+  const observer = enabled ? (capture: FineAssessmentDiagnosticCapture) => {
+    entries = capture.supplementaryData
       .openSemanticFactorCandidateActivationsByCandidateKey === undefined
       ? []
-      : [...capture.params.supplementaryData
+      : [...capture.supplementaryData
         .openSemanticFactorCandidateActivationsByCandidateKey.entries()];
     return undefined;
   } : undefined;

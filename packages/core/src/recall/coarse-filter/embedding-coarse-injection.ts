@@ -29,6 +29,7 @@ type EmbeddingCoarseInjectionResult = Readonly<{
   readonly providerDegradationReason: string | null;
   readonly workspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
   readonly requestScoreSnapshot?: Readonly<EmbeddingRecallRequestScoreSnapshot>;
+  readonly observationNeighbors?: Readonly<EmbeddingWorkspaceNeighborResult>;
 }>;
 
 type EmbeddingCoarseInjectionParams = {
@@ -189,15 +190,16 @@ async function collectEmbeddingNeighbors(
   const maxNeighbors = Math.max(request.maxSupplement, request.injectionCap);
   const embedQueryText = request.queryText;
   if (typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function") {
-    return embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
+    const neighbors = await embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
       workspaceId: params.workspaceId,
       runId: params.runId,
       queryText: embedQueryText,
       excludeObjectIds: request.poolObjectIds,
       maxNeighbors
     });
+    return await attachPoolEmbeddingObservations(params, request, neighbors);
   }
-  return Object.freeze({
+  const neighbors = Object.freeze({
     hits: await embeddingRecallService.collectWorkspaceNeighbors!({
       workspaceId: params.workspaceId,
       runId: params.runId,
@@ -210,6 +212,30 @@ async function collectEmbeddingNeighbors(
     query_embedding_status: "provider_not_requested" as const,
     query_embedding_degradation_reason: null
   });
+  return await attachPoolEmbeddingObservations(params, request, neighbors);
+}
+
+async function attachPoolEmbeddingObservations(
+  params: EmbeddingCoarseInjectionParams,
+  request: Readonly<{ readonly queryText: string; readonly poolObjectIds: readonly string[] }>,
+  neighbors: Readonly<EmbeddingWorkspaceNeighborResult>
+): Promise<Readonly<EmbeddingWorkspaceNeighborResult>> {
+  const scorePool = params.dependencies.embeddingRecallService?.scorePoolCandidates;
+  if (scorePool === undefined || request.poolObjectIds.length === 0) return neighbors;
+  const scores = await scorePool.call(params.dependencies.embeddingRecallService, {
+    workspaceId: params.workspaceId,
+    runId: params.runId,
+    queryText: request.queryText,
+    objectIds: request.poolObjectIds
+  });
+  const contentById = new Map(selectLocalMemoryPoolCandidates(params.poolCandidates)
+    .map(({ entry }) => [entry.object_id, entry.content] as const));
+  const poolHits = [...scores].map(([object_id, normalized_similarity]) => Object.freeze({
+    object_id,
+    normalized_similarity,
+    content_hash: hashMemoryContent(contentById.get(object_id) ?? "")
+  }));
+  return Object.freeze({ ...neighbors, hits: Object.freeze([...neighbors.hits, ...poolHits]) });
 }
 
 async function loadEmbeddingNeighborEntries(
@@ -266,14 +292,14 @@ function buildEmbeddingInjectionResult(
   }
   return Object.freeze({
     candidates: Object.freeze([...admission.candidates]),
-    similarityScores: Object.freeze(Object.fromEntries(admission.candidates.map((candidate) => [
-      candidate.entry.object_id,
-      similarityByObjectId.get(candidate.entry.object_id) ?? 0
+    similarityScores: Object.freeze(Object.fromEntries(neighborResult.hits.map((hit) => [
+      hit.object_id, hit.normalized_similarity
     ] as const))),
     embeddingInferenceCalls: neighborResult.embedding_inference_calls,
     embeddingProviderStatus: neighborResult.query_embedding_status ?? null,
     providerDegradationReason: neighborResult.query_embedding_degradation_reason ?? null,
-    workspaceScan
+    workspaceScan,
+    observationNeighbors: neighborResult
   });
 }
 
@@ -334,7 +360,8 @@ function emptyEmbeddingCoarseInjectionWithProvider(
     embeddingInferenceCalls: result.embedding_inference_calls,
     embeddingProviderStatus: result.query_embedding_status ?? null,
     providerDegradationReason: result.query_embedding_degradation_reason ?? null,
-    workspaceScan: readWorkspaceScanDiagnostics(result)
+    workspaceScan: readWorkspaceScanDiagnostics(result),
+    observationNeighbors: result
   });
 }
 

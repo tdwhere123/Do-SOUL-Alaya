@@ -39,6 +39,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "../recall/recall-service-test-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -126,6 +127,7 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
     }));
 
     const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       testOnlyAllowInMemoryFieldQuerySession: true,
       fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
       now: () => "2026-05-16T00:00:00.000Z",
@@ -241,6 +243,7 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
       }
     };
     const recallService = new RecallService({
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       testOnlyAllowInMemoryFieldQuerySession: true,
       fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
       now: () => "2026-05-16T00:00:00.000Z",

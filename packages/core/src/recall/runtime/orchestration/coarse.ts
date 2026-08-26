@@ -14,7 +14,7 @@ import {
 import { collectSupplementaryData } from "../../supplements/supplementary-data.js";
 import type {
   CoarseRecallCandidate,
-  RecallCandidateDiagnostic,
+  RecallFineAssessmentCandidateDiagnostic,
   RecallDegradationReason,
   RecallEvidenceProjectionMatchReceipt,
   RecallGraphExpansionDiagnostics,
@@ -108,7 +108,7 @@ export type AssessCoarseFilterParams = Readonly<{
 export type AssessCoarseFilterResult = Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
 }>;
 

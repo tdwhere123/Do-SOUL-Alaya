@@ -6,6 +6,7 @@ import type {
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type {
+  FineAssessmentDiagnosticCapture,
   FineAssessmentSelectionBoundaryPendingCapture,
   NodeStrategy,
   RecallDiagnosticCapture
@@ -35,6 +36,9 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
+  readonly diagnosticObserver?: (
+    capture: FineAssessmentDiagnosticCapture
+  ) => undefined;
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -56,6 +60,9 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
+  readonly diagnosticObserver?: (
+    capture: FineAssessmentDiagnosticCapture
   ) => undefined;
 }>;
 
@@ -85,6 +92,9 @@ export async function invokeBoundRecall<TRecallResult>(
     ...(params.selectionBoundaryObserver === undefined
       ? {}
       : { selectionBoundaryObserver: params.selectionBoundaryObserver }),
+    ...(params.diagnosticObserver === undefined
+      ? {}
+      : { diagnosticObserver: params.diagnosticObserver }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

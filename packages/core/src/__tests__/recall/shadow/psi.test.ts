@@ -229,14 +229,14 @@ describe("psiQ D0 §4.3", () => {
 
   it("D0-F36 candidate-N/A versus unavailable is incomparable, not skip", () => {
     const unavailablePref = subjectComponent("preference", {
-      state: "producer_unavailable"
+      state: "not_observed", reason: "not_run"
     });
     const self = subjectComponent("self_reference", { state: "observed", value: 0.7 });
     expect(combineSubjectComponentEnvelopes([unavailablePref, self]).state)
-      .toBe("producer_unavailable");
+      .toBe("not_observed");
     const obs = field({
       A: view({
-        subject_preference: subjectObs({ state: "producer_unavailable" }, [
+        subject_preference: subjectObs({ state: "not_observed", reason: "not_run" }, [
           unavailablePref,
           self
         ])
@@ -413,20 +413,19 @@ describe("psiQ D0 §4.3", () => {
       named_consumer: "h_event"
     });
     const missing = subjectComponent("preference", {
-      state: "required_but_missing",
-      witnesses: COMPLETE_WITNESSES
+      state: "required_but_missing", witnesses: COMPLETE_WITNESSES
     });
+    expect(() => subjectObs(missing.envelope, [missing]))
+      .toThrow(/authority state mismatch/u);
     const obs = field({
       A: view({ subject_preference: subjectObs(negative.envelope, [negative]) }),
       B: view({
         subject_preference: subjectObs({ state: "not_observed", reason: "not_run" }, [
           subjectComponent("preference", { state: "not_observed", reason: "not_run" })
         ])
-      }),
-      C: view({ subject_preference: subjectObs(missing.envelope, [missing]) })
+      })
     });
     expect(() => psiQ("A", "B", obs, SUBJ)).toThrow(ShadowContractError);
-    expect(() => psiQ("C", "B", obs, SUBJ)).toThrow(/illegal pointwise state/u);
   });
 
   it("empty applicable subject set is not_applicable, never a vacuous max", () => {

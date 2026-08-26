@@ -16,7 +16,7 @@ import type {
 } from "./diagnostics/stage-status.js";
 import type {
   FineAssessmentPrunedCandidateDiagnostic,
-  RecallCandidateDiagnostic,
+  RecallFineAssessmentCandidateDiagnostic,
   RecallFusionBreakdown
 } from "./diagnostics/fusion-candidate-diagnostics.js";
 import type {
@@ -49,11 +49,13 @@ export type {
   RecallFloodH1TransitionCounts
 } from "./diagnostics/flood-diagnostics.js";
 export type {
+  CanonicalD0CandidateDiagnostic,
   FineAssessmentPrunedCandidateDiagnostic,
   RecallAdmissionAttemptDiagnostic,
   RecallAdmissionDiagnosticPass,
   RecallCandidateAnswerFeatures,
   RecallCandidateDiagnostic,
+  RecallFineAssessmentCandidateDiagnostic,
   RecallSelectGammaDecisionDiagnostic,
   RecallConformantAxis,
   RecallFusionBreakdown,
@@ -105,6 +107,9 @@ export interface RecallGraphExpansionDiagnostics {
 }
 
 export interface RecallDiagnostics {
+  readonly d0_receipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  >;
   readonly query_probes: {
     readonly normalized_query: string | null;
     readonly subject_hints: readonly string[];
@@ -206,7 +211,7 @@ export interface RecallDiagnostics {
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
   // Empty unless diagnosticCapture requested per-candidate flood/fusion dumps.
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
-  readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly candidates: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
   readonly fine_assessment_pruned_candidates:
     readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[];
   // Per-recall token instrument; emitted on both normal and degraded paths to keep bench coverage at 100% without synthetic zero samples.

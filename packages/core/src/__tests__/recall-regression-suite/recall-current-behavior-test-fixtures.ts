@@ -24,6 +24,8 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fieldSearchFromScalar } from
   "../recall/fixtures/keyword-field-fixture.js";
+import { withFineDeliveryPath } from
+  "../recall/recall-service-test-fixtures.js";
 
 export const WS = "workspace-regression";
 export const NOW = "2026-05-18T00:00:00.000Z";
@@ -127,6 +129,7 @@ export function deps(
       ),
       now: () => NOW,
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       memoryRepo: {
         findByWorkspaceId,
         findByDimension: async (_workspaceId, dimension) =>

@@ -2,6 +2,7 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { collectEmbeddingCoarseInjection } from
   "../../../recall/coarse-filter/embedding-coarse-injection.js";
+import { hashMemoryContent } from "../../../embedding-recall/helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallServiceEmbeddingRecallPort
@@ -55,6 +56,47 @@ describe("embedding coarse-injection logical identity", () => {
     expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledWith(
       expect.objectContaining({ excludeObjectIds: [] })
     );
+  });
+
+  it("excludes a full lexical pool from bounded admission while observing every E0 member", async () => {
+    const pool = Array.from({ length: 5 }, (_, index) => candidate(createMemoryEntry({
+      object_id: `pool-${index}`,
+      content: `lexical pool ${index}`
+    }), "workspace_local", "memory_entry"));
+    const external = createMemoryEntry({ object_id: "embedding-only", content: "external neighbor" });
+    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
+      hits: Object.freeze([{
+        object_id: external.object_id,
+        normalized_similarity: 0.9,
+        content_hash: hashMemoryContent(external.content)
+      }]),
+      embedding_inference_calls: 1,
+      query_embedding_cache_hit: false
+    }));
+    const scorePoolCandidates = vi.fn(async () => new Map(
+      pool.map(({ entry }, index) => [entry.object_id, 0.8 - index * 0.01] as const)
+    ));
+    const service = {
+      collectWorkspaceNeighborsWithMetadata,
+      scorePoolCandidates,
+      querySupplement: vi.fn(emptySupplement)
+    } satisfies RecallServiceEmbeddingRecallPort;
+    const params = buildParams(pool, service, external);
+    const result = await collectEmbeddingCoarseInjection({
+      ...params,
+      dependencies: {
+        ...params.dependencies,
+        memoryRepo: { ...params.dependencies.memoryRepo, findByIds: vi.fn(async () => [external]) }
+      }
+    });
+
+    expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      excludeObjectIds: pool.map(({ entry }) => entry.object_id),
+      maxNeighbors: 5
+    }));
+    expect(result.candidates.map(({ entry }) => entry.object_id)).toEqual([external.object_id]);
+    expect(result.observationNeighbors?.hits.map(({ object_id }) => object_id))
+      .toEqual([external.object_id, ...pool.map(({ entry }) => entry.object_id)]);
   });
 });
 

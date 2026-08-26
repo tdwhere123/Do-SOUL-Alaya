@@ -35,6 +35,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 
 // Recall scoring must read per-memory inbound graph support from SQLite (the
 // unified path plane), not from a constant or process-local cache.
@@ -196,6 +197,7 @@ function createServiceWithPathGraphSupport(input: {
   });
 
   const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
+    defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
       fieldContractSha256,

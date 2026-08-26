@@ -1,4 +1,5 @@
 import {
+  evidenceFactFrameGraphIsComplete,
   groundOpenSemanticFactorGraph,
   type CandidateMemorySignal,
   type OpenSemanticFactorFormationProposal,
@@ -15,7 +16,7 @@ import {
 } from "../../official-api/semantic-factor-projection.js";
 
 export const GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID =
-  "garden_source_bound_open_semantic_factor_v3";
+  "garden_source_bound_open_semantic_factor_v5";
 
 export type OpenSemanticFactorFormationEligibility = Readonly<
   | {
@@ -63,7 +64,15 @@ function classifySourceBoundGraph(
   if (assertion === null || !hasGroundedAssertionReceipt(rawPayload, assertion)) {
     return rejected("source_grounding_rejected");
   }
-  const grounded = groundOpenSemanticFactorGraph(inspected.graph, assertion);
+  if (!evidenceFactFrameGraphIsComplete({
+    source_text: assertion,
+    fact_frame: rawPayload.fact_frame,
+    graph: inspected.graph
+  })) {
+    return rejected("semantic_factor_graph_invalid_structure");
+  }
+  const graph = inspected.graph;
+  const grounded = groundOpenSemanticFactorGraph(graph, assertion);
   if (grounded === null || grounded.source_kind !== "evidence") {
     return rejected("semantic_factor_graph_not_source_grounded");
   }
@@ -73,7 +82,7 @@ function classifySourceBoundGraph(
       schema_version: 1 as const,
       producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
       source_text: assertion,
-      graph: inspected.graph
+      graph
     })
   });
 }

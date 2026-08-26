@@ -18,6 +18,7 @@ describe("omitted delivery_path executeRecall", () => {
     const prepare = vi.spyOn(fineAssessment, "prepareFineAssessment");
     const assess = vi.spyOn(fineAssessment, "fineAssess");
     const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
+    const diagnosticObserver = vi.fn(() => undefined);
     const memory = createMemoryEntry({
       object_id: "memory-canonical",
       content: "I take yoga classes at Serenity Yoga."
@@ -33,7 +34,8 @@ describe("omitted delivery_path executeRecall", () => {
         display_name: "Where do I take yoga classes?"
       },
       workspaceId: "workspace-1",
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticObserver
     });
 
     expect(result.delivery_path).toBe("canonical");
@@ -43,5 +45,36 @@ describe("omitted delivery_path executeRecall", () => {
     expect(assess).toHaveBeenCalled();
     expect(prepare).not.toHaveBeenCalled();
     expect(gammaWalk).not.toHaveBeenCalled();
+    expect(diagnosticObserver).toHaveBeenCalledOnce();
+    expect(diagnosticObserver.mock.calls[0]?.[0].result.ranking_authority)
+      .toBe("d0_prefix");
+  });
+
+  it("fails closed duplicate live candidates with one exact diagnostic row", async () => {
+    const memory = createMemoryEntry({
+      object_id: "memory-duplicate",
+      content: "I take yoga classes at Serenity Yoga."
+    });
+    const { dependencies } = createDependencies([memory]);
+    const service = new RecallService({
+      ...dependencies,
+      defaultPolicyDecorator: (policy) => policy,
+      testOnlyTransformCoarseCandidates: (candidates) =>
+        candidates[0] === undefined ? candidates : [candidates[0], candidates[0]]
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "invalid_state" });
+    expect(result.diagnostics?.candidates).toHaveLength(1);
+    expect(result.diagnostics?.d0_receipt?.dispositions).toHaveLength(1);
+    expect(result.diagnostics?.candidates[0]?.candidate_key)
+      .toBe(result.diagnostics?.d0_receipt?.dispositions[0]?.candidate_key);
   });
 });

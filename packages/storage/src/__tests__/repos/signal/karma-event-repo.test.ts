@@ -37,7 +37,7 @@ describe("SqliteKarmaEventRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(9);
+    expect(migration?.version).toBe(10);
   });
 
   it("exposes the karma_events.run_id column", async () => {
@@ -47,7 +47,7 @@ describe("SqliteKarmaEventRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(9);
+    expect(migration?.version).toBe(10);
 
     const columns = database.connection
       .prepare("PRAGMA table_info(karma_events)")

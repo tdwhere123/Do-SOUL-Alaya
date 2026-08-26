@@ -11,7 +11,10 @@ import type {
   FieldProjectionAdmissionMode,
   RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
-import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
+import type {
+  FineAssessmentDiagnosticCapture,
+  FineAssessmentSelectionBoundaryPendingCapture
+} from "@do-soul/alaya-core";
 import type { BenchRecallWeightOverrides } from "../recall/recall-weight-overrides.js";
 import type { SeedObjectKind } from "../seeding/seed-rotation.js";
 import type {
@@ -85,6 +88,9 @@ export interface BenchRecallOptions {
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
+  readonly diagnosticObserver?: (
+    capture: FineAssessmentDiagnosticCapture
   ) => undefined;
 }
 

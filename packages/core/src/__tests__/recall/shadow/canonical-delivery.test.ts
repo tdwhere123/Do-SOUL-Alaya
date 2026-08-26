@@ -13,6 +13,7 @@ import * as selection from "../../../recall/delivery/fine-assessment-selection.j
 import * as gamma from "../../../recall/delivery/select-gamma/select-gamma.js";
 import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
+import { captureFineAssessmentMembership } from "../../../recall/runtime/orchestration/recall-fine-assessment.js";
 import type {
   CoarseRecallCandidate,
   KeywordSearchLaneReceipt,
@@ -35,7 +36,14 @@ import {
 } from "../../../recall/shadow/integrate.js";
 import * as walk from "../../../recall/shadow/walk.js";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
-import { createMemoryEntry, withFineDeliveryPath } from "../recall-service-test-fixtures.js";
+import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
+import {
+  compositionForValues,
+  evidenceCandidate,
+  extraCandidate,
+  fieldCandidates as createFieldCandidates,
+  x0Captures
+} from "./canonical-delivery-fixtures.js";
 import {
   embeddingObserved,
   field,
@@ -68,8 +76,19 @@ describe("C0 reversible delivery cutover", () => {
     expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
     expect(result.candidates.every((candidate) => candidate.relevance_score === 0)).toBe(true);
     expect(result.diagnostics).toHaveLength(result.candidates.length);
-    expect(result.diagnostics.every((diagnostic) => diagnostic.relevance_score === 0)).toBe(true);
-    expect(result.diagnostics.every((diagnostic) => diagnostic.score_factors.relevance === 0)).toBe(true);
+    expect(result.diagnostics[0]).toMatchObject({
+      ranking_authority: "d0_prefix",
+      legacy_selection: {
+        fusion: "not_applicable",
+        deep_head: "not_applicable",
+        coverage: "not_applicable"
+      }
+    });
+    expect(result.diagnostics[0]).not.toHaveProperty("fused_score");
+    expect(result.diagnostics[0]).not.toHaveProperty("per_stream_rank");
+    expect(result.diagnostics[0]).not.toHaveProperty("rank_after_coverage_selector");
+    expect(result.diagnostics.every((diagnostic) =>
+      "legacy_selection" in diagnostic)).toBe(true);
   });
 
   it("publishes embedding_similarity as a diagnostic factor without ranking", () => {
@@ -94,8 +113,8 @@ describe("C0 reversible delivery cutover", () => {
     };
     expect(result.candidates.map((candidate) => candidate.score_factors?.embedding_similarity))
       .toEqual(result.candidates.map((candidate) => scores[candidate.object_id as keyof typeof scores]));
-    expect(result.diagnostics.map((diagnostic) => diagnostic.score_factors.embedding_similarity))
-      .toEqual(result.candidates.map((candidate) => candidate.score_factors?.embedding_similarity));
+    expect(result.diagnostics.every((diagnostic) =>
+      !("score_factors" in diagnostic))).toBe(true);
   });
 
   it("does not import legacy stages into canonical delivery", () => {
@@ -159,6 +178,34 @@ describe("C0 reversible delivery cutover", () => {
       .toEqual(["cand-a", "cand-b"]);
   });
 
+  it("uses production Values and evidence correlation to change the second choice", () => {
+    const candidates = [
+      evidenceCandidate("cand-a", "evidence-a"),
+      evidenceCandidate("cand-b", "evidence-a"),
+      evidenceCandidate("cand-c", "evidence-c")
+    ];
+    const params = assessParams(candidates, "canonical");
+    const result = fineAssess({
+      ...params,
+      policy: withFineDeliveryPath(policyOf({ max_entries: 3 }), "canonical"),
+      supplementaryData: {
+        ...params.supplementaryData,
+        openSemanticFactorComposition: compositionForValues()
+      }
+    });
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toEqual(["cand-a", "cand-c", "cand-b"]);
+    expect(result.d0_receipt?.gamma.set_utilities.map((utility) => ({
+      key: utility.candidate_key,
+      values: utility.values,
+      cid: utility.cid
+    }))).toMatchObject([
+      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } },
+      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } },
+      { values: { status: "composed" }, cid: { status: "available", grounding: "ref" } }
+    ]);
+  });
+
   it("keeps H_E0 a subset of H_E1 and recovers the E0 prefix after masking embedding", () => {
     const shared = fieldCandidates();
     const extra = extraCandidate("cand-d");
@@ -175,7 +222,7 @@ describe("C0 reversible delivery cutover", () => {
       lanes: inverted,
       embeddingSimilarityScores: { "cand-a": 0.2, "cand-b": 0.3, "cand-c": 0.4 },
       e0Keys,
-      e1Keys: e1KeyList
+      e1Keys: e0Keys
     }));
     const e1 = fineAssess(lexicalAssess([...shared, extra], {
       embedding_enabled: true,
@@ -215,7 +262,7 @@ describe("C0 reversible delivery cutover", () => {
     expect(e0.diagnostics).toHaveLength(e0.candidates.length);
   });
 
-  it("orders canonical prefix from live lane receipts instead of candidate_key", () => {
+  it("orders canonical prefix from the merge-chosen X0 capture", () => {
     const result = fineAssess(lexicalAssess(fieldCandidates(), {
       embedding_enabled: false,
       lanes: porterLanes({
@@ -224,7 +271,7 @@ describe("C0 reversible delivery cutover", () => {
         "cand-a": 0.3
       })
     }));
-    expect(asCaptured(result.shadowTrace).lexical_mapping).toBe("lane_receipts");
+    expect(asCaptured(result.shadowTrace).lexical_mapping).toBe("x0_capture");
     expect(result.candidates.map((candidate) => candidate.object_id))
       .toEqual(["cand-c", "cand-b", "cand-a"]);
     expect(result.ranking_authority).toBe("d0_prefix");
@@ -234,6 +281,13 @@ describe("C0 reversible delivery cutover", () => {
     const result = fineAssess(assessParams(fieldCandidates(), "canonical"));
     const captured = asCaptured(result.shadowTrace);
     expect(result.d0_identity).toEqual(CANONICAL_D0_IDENTITY);
+    expect(result.d0_execution).toEqual({ status: "captured", reason: null });
+    expect(result.d0_receipt?.delivery).toEqual(
+      captured.prefix_proposal.map((candidate_key, index) => ({
+        candidate_key,
+        delivery_rank: index + 1
+      }))
+    );
     expect(captured.algorithm_id).toBe(SHADOW_ALGORITHM_ID);
     expect(captured.version).toBe(SHADOW_ALGORITHM_VERSION);
     expect(captured.digest).toBe(D0_IDENTITY_DIGEST);
@@ -250,11 +304,28 @@ describe("C0 reversible delivery cutover", () => {
     const legacy = fineAssess({ ...params, policy: withFineDeliveryPath(params.policy, "legacy") });
     const closed = fineAssess({ ...params, shadowPsi: cyclic });
     expect(isFailClosedShadowTrace(closed.shadowTrace)).toBe(true);
+    expect(closed.d0_execution).toEqual({
+      status: "fail_closed",
+      reason: "psi_cycle_contract_failure"
+    });
+    expect(closed.d0_receipt?.execution).toEqual(closed.d0_execution);
     expect(closed.candidates).toEqual([]);
     expect(closed.delivery_path).toBe("canonical");
     expect(legacy.candidates.length).toBeGreaterThan(0);
     expect(closed.candidates.map((candidate) => candidate.object_id))
       .not.toEqual(legacy.candidates.map((candidate) => candidate.object_id));
+  });
+
+  it("fail-closes a runner-captured E0 shrink before canonical delivery", () => {
+    const candidates = fieldCandidates().slice(0, 1);
+    const membership = captureFineAssessmentMembership(
+      [keyOf("cand-a"), keyOf("planted-missing")],
+      candidates
+    );
+    const result = fineAssess({ ...assessParams(candidates), ...membership });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
   });
 });
 
@@ -334,21 +405,7 @@ function policyOf(overrides: {
   };
 }
 
-function fieldCandidates(): readonly CoarseRecallCandidate[] {
-  return IDS.map((objectId, index) => extraCandidate(objectId, index));
-}
-
-function extraCandidate(objectId: string, index = 0): CoarseRecallCandidate {
-  return {
-    entry: createMemoryEntry({
-      object_id: objectId,
-      content: `Operator workspace fact ${index}`,
-      activation_score: 0.4 + index * 0.1
-    }),
-    admissionPlanes: ["activation"],
-    firstAdmissionPlane: "activation"
-  };
-}
+function fieldCandidates(): readonly CoarseRecallCandidate[] { return createFieldCandidates(IDS); }
 
 function lexicalAssess(
   candidates: readonly CoarseRecallCandidate[],
@@ -368,6 +425,7 @@ function lexicalAssess(
       max_entries: options.max_entries
     }), "canonical"),
     memoryKeywordLanes: options.lanes,
+    memoryLexicalCaptures: x0Captures(options.lanes),
     e0Keys: options.e0Keys,
     e1Keys: options.e1Keys,
     supplementaryData: supplementaryWithInflow(candidates, {

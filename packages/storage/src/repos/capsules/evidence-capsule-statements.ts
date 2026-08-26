@@ -146,8 +146,9 @@ const CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL = `
         producer_operator_id,
         source_sha256,
         graph_json,
-        capture_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        capture_digest,
+        semantic_completeness_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_EVIDENCE_HEALTH_SQL = `

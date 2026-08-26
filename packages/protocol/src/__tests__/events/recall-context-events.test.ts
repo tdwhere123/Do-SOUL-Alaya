@@ -47,6 +47,12 @@ describe("Phase 3A event schemas", () => {
       total_scanned: 12,
       coarse_filter_count: 8,
       fine_assessment_count: 4,
+      delivery_path: "canonical",
+      ranking_authority: "d0_prefix",
+      d0_execution: {
+        status: "fail_closed",
+        reason: "membership_shrink"
+      },
       workspace_id: "workspace-1",
       occurred_at: validTimestamp
     } as const;

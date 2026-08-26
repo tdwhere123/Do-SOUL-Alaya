@@ -21,6 +21,8 @@ export function liveShapedNegativeReceipt(questionId: string) {
     schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: questionId,
+    ranking_authority: "d0_prefix",
+    d0_receipt_digest: candidateAttribution(false).d0_receipt_digest,
     evidence_chain: { linked: true },
     control_non_exposure: {
       observed: true,

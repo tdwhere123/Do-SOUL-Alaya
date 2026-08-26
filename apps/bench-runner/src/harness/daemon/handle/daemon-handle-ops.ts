@@ -4,7 +4,6 @@ import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
   ControlPlaneObjectKind,
   RetentionPolicy,
-  SoulMemorySearchResponseSchema,
   TaskObjectSurfaceSchema,
   type MemorySearchResult,
   type RecallCandidate,
@@ -23,7 +22,6 @@ import { createBenchSeedProposalReviewer } from "../seed/daemon-seed-review.js";
 import {
   buildBenchDiagnosticRecallPolicy,
   buildBenchMemorySearchResult,
-  buildBenchRecallStrategyMix,
   callMcpTool,
   closeBenchDaemonResources,
   emitBenchContextLensAssembledEvent,
@@ -59,18 +57,15 @@ import {
   notRequestedQueryEmbeddingWarmupSummary,
   resolveBenchEmbeddingModelId,
   resolveBenchEmbeddingSchemaVersion,
-  resolveBenchRecallDegradationReason,
   shouldRunBenchEdgePlane
 } from "./daemon-handle-ops-support.js";
+import { buildBenchRecallResponse } from "./bench-recall-response.js";
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
-import {
-  parseBenchRecallDiagnosticsForRun
-} from "../../recall/recall-diagnostics-schema.js";
+import { parseBenchRecallDiagnosticsForRun } from
+  "../../recall/recall-diagnostics-schema.js";
 import { assertEmbeddingTreatmentDiagnosticsPresent } from "../../embedding/embedding-treatment-activation.js";
-import { createFieldProjectionCheckpointOperation } from
-  "../runtime/daemon-field-projection.js";
-import { createRelationProjectionCheckpointOperation } from
-  "../runtime/daemon-relation-projection.js";
+import { createFieldProjectionCheckpointOperation } from "../runtime/daemon-field-projection.js";
+import { createRelationProjectionCheckpointOperation } from "../runtime/daemon-relation-projection.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -174,6 +169,8 @@ function createBenchRecallOperation(
       ...(opts.selectionBoundaryObserver === undefined
         ? {}
         : { selectionBoundaryObserver: opts.selectionBoundaryObserver }),
+      ...(opts.diagnosticObserver === undefined ? {}
+        : { diagnosticObserver: opts.diagnosticObserver }),
       ...(opts.querySemanticFactorFormationCapture === undefined
         ? {}
         : { querySemanticFactorFormationCapture: opts.querySemanticFactorFormationCapture }),
@@ -462,37 +459,4 @@ async function recordBenchRecallDelivery(
     delivered_at: new Date().toISOString()
   });
   return { deliveryId, deliveredObjects };
-}
-
-function buildBenchRecallResponse(
-  deliveryId: string,
-  results: readonly MemorySearchResult[],
-  recallResult: BenchRecallServiceResult,
-  policy: RecallPolicy
-): SoulMemorySearchResponse & { readonly diagnostics?: unknown } {
-  const response = SoulMemorySearchResponseSchema.parse({
-    delivery_id: deliveryId,
-    protocol_version: 1,
-    results,
-    active_constraints: recallResult.active_constraints,
-    active_constraints_count: recallResult.active_constraints_count,
-    total_count: results.length,
-    strategy_mix: buildBenchRecallStrategyMix(policy, results),
-    degradation_reason: resolveBenchRecallDegradationReason(
-      results,
-      recallResult.degradation_reason
-    ),
-    ...(recallResult.delivery_path === undefined
-      ? {}
-      : { delivery_path: recallResult.delivery_path }),
-    ...(recallResult.ranking_authority === undefined
-      ? {}
-      : { ranking_authority: recallResult.ranking_authority }),
-    ...(recallResult.d0_identity === undefined
-      ? {}
-      : { d0_identity: recallResult.d0_identity })
-  });
-  return recallResult.diagnostics === undefined
-    ? response
-    : { ...response, diagnostics: recallResult.diagnostics };
 }

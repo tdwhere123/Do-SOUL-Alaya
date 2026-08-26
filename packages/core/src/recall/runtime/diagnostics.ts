@@ -8,6 +8,7 @@ import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type {
   RecallCandidateDiagnostic,
+  RecallFineAssessmentCandidateDiagnostic,
   RecallAnswerRerankDiagnostics,
   RecallDegradationReason,
   RecallDiagnostics,
@@ -18,6 +19,10 @@ import type {
   RecallTokenEconomy
 } from "./recall-service-types.js";
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
+import { isLegacyCandidateDiagnostic } from
+  "./diagnostics/finalize-candidate-diagnostics.js";
+export { finalizeRecallCandidateDiagnostics } from
+  "./diagnostics/finalize-candidate-diagnostics.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { QueryConditionParityView } from "./query-condition-parity.js";
 import type { RecallPacketPlanTrace } from
@@ -49,6 +54,9 @@ import type { PinnedProjectionCandidateSelection } from
   "../field/retrieval/projection/pinned-projection-selection.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
+  readonly d0Receipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  >;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;
   readonly queryFactFrameExtraction?: Readonly<RecallQueryFactFrameExtractionCapture>;
@@ -92,7 +100,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly degradationReasons?: readonly RecallDegradationReason[];
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
-  readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly candidates: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
   readonly fineAssessmentPrunedCandidates:
     readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[];
   // Production MCP never reads per-candidate dumps; clone only for diagnosticCapture.
@@ -113,6 +121,7 @@ export function buildRecallDiagnostics(
 ): Readonly<RecallDiagnostics> {
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
+    ...(params.d0Receipt === undefined ? {} : { d0_receipt: params.d0Receipt }),
     query_probes: freezeRecallQueryProbes(params.queryProbes),
     ...buildOptionalQueryDiagnosticFields(params),
     query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
@@ -251,7 +260,7 @@ function buildDegradationDiagnostics(
 }
 
 function buildCandidateEvidenceDiagnostics(
-  candidates: readonly Readonly<RecallCandidateDiagnostic>[],
+  candidates: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[],
   prunedCandidates: readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[],
   includeCandidateEvidence: boolean
 ): Pick<
@@ -347,10 +356,10 @@ function buildEmbeddingWorkspaceScanDiagnostics(
 }
 
 function freezeFusionBreakdown(
-  candidates: readonly Readonly<RecallCandidateDiagnostic>[]
+  candidates: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[]
 ): Readonly<RecallDiagnostics["fusion_breakdown"]> {
   return Object.freeze(
-    candidates.map((candidate) => Object.freeze({
+    candidates.filter(isLegacyCandidateDiagnostic).map((candidate) => Object.freeze({
       candidate_key: candidate.candidate_key,
       object_id: candidate.object_id,
       object_kind: candidate.object_kind,
@@ -386,7 +395,7 @@ export function computeRecallTokenEconomy(params: Readonly<{
   readonly fineEvaluated: number;
   readonly finePrunedCount?: number;
   readonly finePriorityOverflowCount?: number;
-  readonly preBudgetCandidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly preBudgetCandidates: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
   readonly embeddingInferenceCalls: number;
 }>): Readonly<RecallTokenEconomy> {
   let deliveredContextTokensEstimate = 0;
@@ -394,7 +403,9 @@ export function computeRecallTokenEconomy(params: Readonly<{
     deliveredContextTokensEstimate += candidate.token_estimate;
   }
   // Distinct fusion families with any member-stream hit — decorrelated vote surface (~5), not raw lanes.
-  const fusionFamiliesWithHits = countFamiliesWithHits(params.preBudgetCandidates);
+  const fusionFamiliesWithHits = countFamiliesWithHits(
+    params.preBudgetCandidates.filter(isLegacyCandidateDiagnostic)
+  );
   const finePrunedCount = params.finePrunedCount ??
     Math.max(0, params.coarsePoolSize - params.fineEvaluated);
   return Object.freeze({
@@ -409,51 +420,6 @@ export function computeRecallTokenEconomy(params: Readonly<{
     fusion_families_with_hits: fusionFamiliesWithHits,
     embedding_inference_calls: Math.max(0, Math.trunc(params.embeddingInferenceCalls))
   });
-}
-
-export function finalizeRecallCandidateDiagnostics(
-  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[],
-  deliveredCandidates: readonly Readonly<RecallCandidate>[]
-): readonly Readonly<RecallCandidateDiagnostic>[] {
-  const deliveredRankByCandidateKey = new Map<string, number>(
-    deliveredCandidates.map((candidate, index) => [
-      `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`,
-      index + 1
-    ] as const)
-  );
-  return Object.freeze(
-    diagnostics.map((diagnostic) => {
-      const deliveredRank = deliveredRankByCandidateKey.get(diagnostic.candidate_key) ?? null;
-      if (deliveredRank !== null) {
-        return Object.freeze({
-          ...diagnostic,
-          final_rank: deliveredRank,
-          post_rank: deliveredRank,
-          in_final_packet: true,
-          eviction_reason: null,
-          dropped_reason: null,
-          within_budget: true
-        });
-      }
-      if (diagnostic.dropped_reason !== null) {
-        return Object.freeze({
-          ...diagnostic,
-          post_rank: diagnostic.final_rank,
-          in_final_packet: false,
-          eviction_reason: diagnostic.dropped_reason
-        });
-      }
-      return Object.freeze({
-        ...diagnostic,
-        final_rank: null,
-        post_rank: null,
-        in_final_packet: false,
-        eviction_reason: "max_entries" as const,
-        dropped_reason: "max_entries" as const,
-        within_budget: false
-      });
-    })
-  );
 }
 
 export function resolveEmbeddingProviderStatus(

@@ -80,6 +80,7 @@ export interface CoarseStageResult {
   readonly globalCoarseFilter: Awaited<ReturnType<typeof loadGlobalRecallCandidates>>;
   readonly globalRecallClassifications: Parameters<typeof recordGlobalRecallClassificationsSafely>[0]["classifications"];
   readonly combinedCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly e0CandidateKeys: readonly string[];
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
 }
 
@@ -103,12 +104,17 @@ export async function collectCoarseStage(
     prepared,
     lexical.lexicalCoarseCandidates
   );
-  return freezeCoarseStageResult(
+  const result = freezeCoarseStageResult(
     lexical,
     embeddingCoarseInjection,
     performance.now(),
     combineEmbeddingInjection
   );
+  const transform = context.dependencies.testOnlyTransformCoarseCandidates;
+  return transform === undefined ? result : Object.freeze({
+    ...result,
+    combinedCoarseCandidates: Object.freeze([...transform(result.combinedCoarseCandidates)])
+  });
 }
 
 interface LexicalCoarseWithWarm {

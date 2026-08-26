@@ -5,6 +5,8 @@ import type { QuestionStageRow } from
   "../../../../bench/diagnostics/stage-attribution/types.js";
 import { notObservedPhaseLedger } from "./not-observed-ledger.js";
 
+export const FIXTURE_D0_RECEIPT_DIGEST = `sha256:${"d".repeat(64)}`;
+
 export function exposure(
   questionId: string,
   exposureStatus: "exposed" | "not_exercised" | "inconclusive",
@@ -18,6 +20,8 @@ export function exposure(
     schema_version: 4 as const,
     kind: "cached_f3_treatment_exposure" as const,
     question_id: questionId,
+    ranking_authority: "d0_prefix" as const,
+    d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
     evidence_chain: { linked: exposureStatus !== "inconclusive" },
     control_non_exposure: {
       observed: true,
@@ -123,7 +127,8 @@ export function replaceCandidateReceipt(
 }
 
 export function candidateAttribution(exposed: boolean) {
-  if (!exposed) return { entries: [], candidate_keys: [], activated_evidence_ids: [] };
+  if (!exposed) return { d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
+    entries: [], candidate_keys: [], activated_evidence_ids: [] };
   const body = {
     schema_version: 1 as const,
     operator_id: "open_semantic_factor_candidate_activation_v1" as const,
@@ -134,6 +139,7 @@ export function candidateAttribution(exposed: boolean) {
     proposition_match_count: 1
   };
   return {
+    d0_receipt_digest: FIXTURE_D0_RECEIPT_DIGEST,
     entries: [{
       candidate_key: "candidate:f3",
       receipt: { ...body, receipt_digest: digestRecallFieldIdentity(body) }

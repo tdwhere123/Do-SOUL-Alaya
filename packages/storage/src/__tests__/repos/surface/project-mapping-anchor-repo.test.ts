@@ -60,7 +60,7 @@ describe("SqliteProjectMappingAnchorRepo", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'project_mapping_anchors'")
       .all() as ReadonlyArray<{ readonly name: string }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([9]);
+    expect(versions.map((entry) => entry.version)).toEqual([10]);
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_unique");
     expect(indexes.map((entry) => entry.name)).toContain("idx_pma_workspace");
     expect(indexes.map((entry) => entry.name)).not.toContain("idx_pma_global_obj");

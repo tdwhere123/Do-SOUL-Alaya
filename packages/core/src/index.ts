@@ -198,6 +198,8 @@ export { buildSelectGammaPacketObservation } from
   "./recall/delivery/select-gamma/packet-observation.js";
 export { captureSupportSetPacketPlanTrace } from
   "./recall/delivery/packet-plan/packet-plan-trace.js";
+export type { FineAssessmentDiagnosticCapture } from
+  "./recall/delivery/fine-assessment.js";
 export {
   assertFineAssessmentOrderLedgerAttribution,
   buildFineAssessmentOrderLedger,

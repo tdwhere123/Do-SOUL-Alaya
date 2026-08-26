@@ -23,6 +23,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
 
 type TierCascadeFixtureParams = Readonly<{
   readonly hot?: readonly MemoryEntry[];
@@ -125,6 +126,7 @@ function createDependencies(params: TierCascadeFixtureParams = {}): {
   const warnSpy = vi.fn(params.warn ?? (() => undefined));
   return {
     dependencies: {
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       testOnlyAllowInMemoryFieldQuerySession: true,
       fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
         fieldContractSha256,

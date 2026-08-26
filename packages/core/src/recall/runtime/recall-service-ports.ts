@@ -446,4 +446,7 @@ export interface RecallServiceDependencies {
   readonly warn?: RecallServiceWarnPort;
   // Unexpected recall auxiliary failures (not graceful degradations) land here.
   readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
+  readonly testOnlyTransformCoarseCandidates?: (
+    candidates: readonly Readonly<import("./recall-service-results.js").CoarseRecallCandidate>[]
+  ) => readonly Readonly<import("./recall-service-results.js").CoarseRecallCandidate>[];
 }

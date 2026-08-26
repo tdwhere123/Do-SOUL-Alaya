@@ -43,6 +43,8 @@ import {
 } from "./diagnostics-schema-base.js";
 import { OpenSemanticFactorCandidateActivationsSchema } from
   "./field/open-semantic-candidate-activation-schema.js";
+import { CanonicalD0SelectionReceiptSchema } from
+  "../../../harness/recall/d0/d0-receipt-schema.js";
 import { archiveStaleOpenSemanticFactorFields } from
   "./field/open-semantic-factor-archive.js";
 
@@ -361,6 +363,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
     graph_expansion_plane_count_per_edge_type:
       GraphExpansionPlaneCountPerEdgeTypeSchema,
     candidate_pool_complete: z.boolean().default(false),
+    ranking_authority: z.enum(["d0_prefix", "select_gamma"]).nullable().default(null),
+    d0_receipt: CanonicalD0SelectionReceiptSchema.nullable().default(null),
     candidate_pool_count: z.number().int().nonnegative().nullable().default(null),
     fine_pruned_count: z.number().int().nonnegative().nullable().default(null),
     fine_assessment_pruned_candidates: z

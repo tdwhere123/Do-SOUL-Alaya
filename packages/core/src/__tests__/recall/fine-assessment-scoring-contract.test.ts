@@ -69,6 +69,19 @@ describe("fine assessment scoring contract", () => {
       expect(stripped?.flood_potential?.edge_traces).toBeUndefined();
     }
   });
+
+  it("isolates diagnostic observer failures from delivery", () => {
+    const candidates = fieldCandidates(4);
+    const baseline = fineAssess(assessParams(candidates));
+    const observed = fineAssess({
+      ...assessParams(candidates),
+      diagnosticObserver: () => { throw new Error("diagnostic sink unavailable"); }
+    });
+
+    expect(observed.candidates).toEqual(baseline.candidates);
+    expect(observed.diagnostics).toEqual(baseline.diagnostics);
+    expect(observed.ranking_authority).toBe(baseline.ranking_authority);
+  });
 });
 
 function fusionContract(assessed: ReturnType<typeof fineAssess>) {

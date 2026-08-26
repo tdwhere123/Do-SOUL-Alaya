@@ -71,9 +71,16 @@ export function assertUniqueCandidateField(
   for (const candidate of candidates) {
     const key = buildRecallCandidateDedupeKey(candidate);
     if (keys.has(key)) {
-      throw new Error(`duplicate recall candidate field key: ${key}`);
+      throw new DuplicateRecallCandidateFieldError(key);
     }
     keys.add(key);
+  }
+}
+
+export class DuplicateRecallCandidateFieldError extends Error {
+  public constructor(candidateKey: string) {
+    super(`duplicate recall candidate field key: ${candidateKey}`);
+    this.name = "DuplicateRecallCandidateFieldError";
   }
 }
 

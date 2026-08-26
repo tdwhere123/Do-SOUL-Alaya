@@ -45,6 +45,9 @@ import {     OpenSemanticFactorActivationReceiptSchema, OpenSemanticFactorCompat
     "./semantic-factors/open-semantic-factor-diagnostics-schema.js";
 import { KindConstraintAlignmentReceiptSchema } from
     "./semantic-factors/kind-constraint-alignment-schema.js";
+import { CanonicalD0SelectionReceiptSchema } from "./d0/d0-receipt-schema.js";
+import { CanonicalD0CandidateDiagnosticSchema } from
+  "./d0/canonical-d0-candidate-diagnostic-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -331,6 +334,7 @@ const RecallDegradationReasonSchema = z.enum([
 
 export const BenchRecallDiagnosticsSchema = z
   .object({
+    d0_receipt: CanonicalD0SelectionReceiptSchema.optional(),
     query_probes: z
       .object({
         normalized_query: z.string().nullable().default(null),
@@ -443,7 +447,9 @@ export const BenchRecallDiagnosticsSchema = z
           .readonly()
       )
       .readonly(),
-    candidates: z.array(RecallCandidateDiagnosticSchema).readonly(),
+    candidates: z.array(z.union([
+      RecallCandidateDiagnosticSchema, CanonicalD0CandidateDiagnosticSchema
+    ])).readonly(),
     fine_assessment_pruned_candidates:
       z.array(FineAssessmentPrunedCandidateDiagnosticSchema).readonly(),
     // Optional for legacy diagnostics; absent telemetry is dropped from aggregates.

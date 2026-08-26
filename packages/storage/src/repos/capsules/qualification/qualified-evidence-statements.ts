@@ -52,10 +52,21 @@ const FIND_EVIDENCE_ROWS_SQL = `
          semantic_formation.producer_operator_id AS semantic_formation_producer_operator_id,
          semantic_formation.source_sha256 AS semantic_formation_source_sha256,
          semantic_formation.graph_json AS semantic_formation_graph_json,
-         semantic_formation.capture_digest AS semantic_formation_capture_digest
+         semantic_formation.capture_digest AS semantic_formation_capture_digest,
+         semantic_formation.semantic_completeness_json AS semantic_completeness_json,
+         fact_formation.workspace_id AS formation_workspace_id,
+         fact_formation.schema_version AS formation_schema_version,
+         fact_formation.operator_id AS formation_operator_id,
+         fact_formation.status AS formation_status,
+         fact_formation.producer_operator_id AS formation_producer_operator_id,
+         fact_formation.source_hash AS formation_source_hash,
+         fact_formation.fact_frame_json AS formation_fact_frame_json,
+         fact_formation.capture_digest AS formation_capture_digest
   FROM evidence_capsules
   LEFT JOIN evidence_semantic_factor_formations AS semantic_formation
     ON semantic_formation.evidence_object_id = evidence_capsules.object_id
+  LEFT JOIN evidence_fact_frame_formations AS fact_formation
+    ON fact_formation.evidence_object_id = evidence_capsules.object_id
   WHERE evidence_capsules.workspace_id = ?
     AND evidence_capsules.object_id IN (SELECT value FROM json_each(?))
 `;

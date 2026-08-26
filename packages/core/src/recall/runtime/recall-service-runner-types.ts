@@ -13,6 +13,7 @@ import type {
   EvidenceCandidateScoringResult
 } from "../../embedding-recall/embedding-recall-service.js";
 import type {
+  FineAssessmentDiagnosticCapture,
   fineAssess,
   prepareFineAssessment
 } from "../delivery/fine-assessment.js";
@@ -22,7 +23,7 @@ import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js
 import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
-  RecallCandidateDiagnostic,
+  RecallFineAssessmentCandidateDiagnostic,
   RecallAnswerRerankDiagnostics,
   RecallDegradationReason,
   RecallEmbeddingProviderStatus,
@@ -77,6 +78,9 @@ export interface RecallExecutionParams {
   // Observer attachment is observation-only; answer features follow diagnosticCapture.
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
+  ) => undefined;
+  readonly diagnosticObserver?: (
+    capture: FineAssessmentDiagnosticCapture
   ) => undefined;
 }
 
@@ -152,6 +156,6 @@ export interface RecallAssessmentStageResult {
 
 export interface RecallManifestedResult {
   readonly candidates: RecallResult["candidates"];
-  readonly candidateDiagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly candidateDiagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
   readonly manifestationLatencyMs: number;
 }

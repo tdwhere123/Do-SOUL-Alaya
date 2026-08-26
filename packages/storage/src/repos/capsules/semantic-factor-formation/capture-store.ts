@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   verifyOpenSemanticFactorFormationCapture,
+  verifyEvidenceOsfSemanticCompleteness,
   type EvidenceCapsule,
-  type OpenSemanticFactorFormationCapture
+  type EvidenceFactFrameFormationCapture,
+  type OpenSemanticFactorFormationCapture,
+  type EvidenceOsfSemanticCompletenessReceipt
 } from "@do-soul/alaya-protocol";
 
 export type EvidenceSemanticFactorFormationInsertArgs = readonly [
@@ -14,12 +17,15 @@ export type EvidenceSemanticFactorFormationInsertArgs = readonly [
   producerOperatorId: string | null,
   sourceSha256: string | null,
   graphJson: string | null,
-  captureDigest: string
+  captureDigest: string,
+  completenessJson: string | null
 ];
 
 export function prepareSemanticFactorFormationInsert(
   capsule: Readonly<EvidenceCapsule>,
-  capture?: Readonly<OpenSemanticFactorFormationCapture>
+  capture?: Readonly<OpenSemanticFactorFormationCapture>,
+  completeness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
+  factFrame?: Readonly<EvidenceFactFrameFormationCapture>
 ): EvidenceSemanticFactorFormationInsertArgs | null {
   if (capture === undefined) return null;
   const verified = verifyOpenSemanticFactorFormationCapture(capture, sha256);
@@ -30,6 +36,15 @@ export function prepareSemanticFactorFormationInsert(
       verified.source_sha256 !== sourceDigest(capsule.excerpt)) {
     throw new Error("semantic factor formation source does not match its evidence capsule");
   }
+  const certified = completeness === undefined ? null : completeness;
+  if (verified.status === "formed") {
+    if (certified === null || factFrame === undefined || capsule.excerpt === null) {
+      throw new Error("formed semantic capture requires matching completeness certification");
+    }
+    verifyEvidenceOsfSemanticCompleteness({ receipt: certified,
+      source_text: capsule.excerpt, fact_frame: factFrame,
+      semantic_formation: verified, sha256 });
+  }
   return [
     capsule.object_id,
     capsule.workspace_id,
@@ -39,7 +54,8 @@ export function prepareSemanticFactorFormationInsert(
     verified.producer_operator_id,
     verified.source_sha256,
     verified.graph === null ? null : JSON.stringify(verified.graph),
-    verified.capture_digest
+    verified.capture_digest,
+    certified === null ? null : JSON.stringify(certified)
   ];
 }
 

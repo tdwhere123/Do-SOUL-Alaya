@@ -16,10 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
-import {
-  parseEvidenceCapsuleRow,
-  type EvidenceCapsuleRow
-} from "./evidence-capsule-mappers.js";
+import { parseEvidenceCapsuleRow } from "./evidence-capsule-mappers.js";
 import type {
   EvidenceSearchMatch,
   RecallQualifiedEvidence,
@@ -33,73 +30,26 @@ import {
   readQualifiedProjectionIndex,
   type StoredProjectionRow
 } from "./qualification/qualified-evidence-projection.js";
-import {
-  readStoredSemanticFactorFormation,
-  type StoredSemanticFactorFormationColumns
-} from "./qualification/semantic-factor-formation-read.js";
+import { readStoredSemanticFactorFormation } from
+  "./qualification/semantic-factor-formation-read.js";
+import { readStoredFactFrameFormation } from
+  "./qualification/fact-frame-formation-read.js";
 import { matchesVerifiedAssertionReceipt } from
   "./qualification/verified-assertion-receipt-proof.js";
 import {
   prepareQualifiedEvidenceStatements,
   type QualifiedEvidenceStatements
 } from "./qualification/qualified-evidence-statements.js";
+import type {
+  EvidenceCandidate,
+  EvidenceQualificationRow,
+  QualificationInputs,
+  QualifiedEvidenceProof,
+  StoredMaterializationRow,
+  StoredSignalRow
+} from "./qualification/recall-qualified-evidence-types.js";
 
 const QUERY_CHUNK_SIZE = 500;
-
-interface StoredSignalRow {
-  readonly signal_id: string;
-  readonly workspace_id: string;
-  readonly run_id: string;
-  readonly surface_id: string | null;
-  readonly source: string;
-  readonly signal_kind: string;
-  readonly object_kind: string;
-  readonly scope_hint: string | null;
-  readonly domain_tags_json: string;
-  readonly confidence: number;
-  readonly evidence_refs_json: string;
-  readonly source_memory_refs_json: string;
-  readonly supersedes_refs_json: string;
-  readonly exception_to_refs_json: string;
-  readonly contradicts_refs_json: string;
-  readonly incompatible_with_refs_json: string;
-  readonly raw_payload_json: string;
-  readonly source_delivery_ids_json: string | null;
-  readonly source_observation_json: string | null;
-  readonly signal_state: string;
-  readonly created_at: string;
-}
-
-interface StoredMaterializationRow {
-  readonly event_type: string;
-  readonly entity_type: string;
-  readonly entity_id: string;
-  readonly workspace_id: string;
-  readonly run_id: string | null;
-  readonly caused_by: string | null;
-  readonly payload_json: string;
-}
-
-interface EvidenceQualificationRow extends EvidenceCapsuleRow,
-  StoredSemanticFactorFormationColumns {
-  readonly source_signal_id: string | null;
-}
-
-interface EvidenceCandidate {
-  readonly capsule: Readonly<EvidenceCapsule>;
-  readonly signalId: string | null;
-  readonly semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
-}
-
-interface QualificationInputs {
-  readonly candidates: readonly EvidenceCandidate[];
-  readonly signals: ReadonlyMap<string, Readonly<CandidateMemorySignal>>;
-  readonly events: ReadonlyMap<string, readonly StoredMaterializationRow[]>;
-}
-
-interface QualifiedEvidenceProof {
-  readonly turnReceipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null;
-}
 
 export class RecallQualifiedEvidenceReader {
   private readonly statementHolder: RefreshableStatementHolder<QualifiedEvidenceStatements>;
@@ -253,12 +203,10 @@ export class RecallQualifiedEvidenceReader {
     return { candidates, signals, events };
   }
 }
-
 interface EvidenceParseSink {
   readonly strictParse: boolean;
   recordSkip(): void;
 }
-
 function readEvidenceCandidates(
   rows: readonly EvidenceQualificationRow[],
   parse: EvidenceParseSink
@@ -309,10 +257,13 @@ function readSemanticFactorFormation(
   capsule: Readonly<EvidenceCapsule>
 ): Readonly<OpenSemanticFactorFormationCapture> | undefined {
   try {
+    const factFrame = capsule.source_hash === null ? undefined :
+      readStoredFactFrameFormation(row, capsule.workspace_id, capsule.source_hash);
     return readStoredSemanticFactorFormation(
       row,
       capsule.workspace_id,
-      capsule.excerpt
+      capsule.excerpt,
+      factFrame
     );
   } catch (error) {
     throw new EvidenceProjectionIntegrityError(
@@ -328,7 +279,6 @@ function matchesEvidenceEnvelope(capsule: Readonly<EvidenceCapsule>): boolean {
     capsule.evidence_health_state === "verified" &&
     capsule.evidence_kind === "conversation_excerpt";
 }
-
 function readSignals(
   rows: readonly StoredSignalRow[]
 ): ReadonlyMap<string, Readonly<CandidateMemorySignal>> {

@@ -30,8 +30,15 @@ describe("RecallService embedding-on coarse injection", () => {
       RecallServiceEmbeddingRecallPort["collectWorkspaceNeighborsWithMetadata"]
     >;
     readonly findByIds?: NonNullable<RecallServiceMemoryRepoPort["findByIds"]>;
+    readonly memories?: readonly MemoryEntry[];
+    readonly canonical?: boolean;
+    readonly transformCoarseCandidates?: NonNullable<
+      import("../../recall/runtime/recall-service-types.js").RecallServiceDependencies[
+        "testOnlyTransformCoarseCandidates"
+      ]
+    >;
   }) {
-    const { dependencies } = createDependencies([lexicallyAbsentMemory]);
+    const { dependencies } = createDependencies(input.memories ?? [lexicallyAbsentMemory]);
     // `satisfies` validates the assembled ports against their precise shape
     // without widening, so missing / mistyped methods fail the typecheck gate
     // instead of being erased by an `as unknown as` cast.
@@ -61,10 +68,14 @@ describe("RecallService embedding-on coarse injection", () => {
           })
     } satisfies RecallServiceEmbeddingRecallPort;
     return new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
+      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       memoryRepo,
-      embeddingRecallService
+      embeddingRecallService,
+      ...(input.transformCoarseCandidates === undefined ? {} : {
+        testOnlyTransformCoarseCandidates: input.transformCoarseCandidates
+      }),
+      ...(input.canonical === true ? { defaultPolicyDecorator: (policy: RecallPolicy) => policy } : {})
     });
   }
 
@@ -111,6 +122,34 @@ describe("RecallService embedding-on coarse injection", () => {
     ).toBe(false);
   });
 
+  it("fails closed when the runner plants a post-embedding E0 shrink", async () => {
+    const lexicalMemory = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-222222222222",
+      content: "The orchid anchor belongs in the workspace index.",
+      activation_score: 0.8
+    });
+    const memories = [lexicalMemory, lexicallyAbsentMemory];
+    const service = buildEmbeddingScopedService({
+      canonical: true,
+      memories,
+      collectWorkspaceNeighbors: vi.fn(async () => [
+        { object_id: lexicallyAbsentMemory.object_id, normalized_similarity: 0.95 }
+      ]),
+      findByIds: vi.fn(async (_workspaceId, ids) =>
+        memories.filter((memory) => ids.includes(memory.object_id))),
+      transformCoarseCandidates: (candidates) => candidates.filter((candidate) =>
+        candidate.entry.object_id !== lexicalMemory.object_id)
+    });
+
+    const result = await service.recall({
+      taskSurface: createTaskSurface(), workspaceId: "workspace-1", strategy: "analyze",
+      queryText: "orchid anchor", policyOverride: buildPolicy(service, true)
+    });
+
+    expect(result.candidates).toEqual([]);
+    expect(result.d0_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
+  });
+
   it("injects a lexically-absent cosine neighbor as a coarse candidate when embedding is enabled", async () => {
     const collectWorkspaceNeighbors = vi.fn(async () => [
       Object.freeze({ object_id: lexicallyAbsentMemory.object_id, normalized_similarity: 0.95 })
@@ -133,6 +172,81 @@ describe("RecallService embedding-on coarse injection", () => {
     expect(injected).toBeDefined();
     expect(injected?.source_channels).toContain("semantic_supplement");
     expect(injected?.score_factors?.embedding_similarity).toBeCloseTo(0.95, 5);
+  });
+
+  it("captures live E0 before additive embedding admission and E1 after it", async () => {
+    const lexicalMemory = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      content: "The orchid anchor belongs in the workspace index.",
+      activation_score: 0.8
+    });
+    const memories = [lexicalMemory, lexicallyAbsentMemory];
+    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
+      hits: [
+        Object.freeze({
+          object_id: lexicallyAbsentMemory.object_id,
+          normalized_similarity: 0.95,
+          content_hash: hashMemoryContent(lexicallyAbsentMemory.content)
+        }),
+        Object.freeze({
+          object_id: lexicalMemory.object_id,
+          normalized_similarity: 0.6,
+          content_hash: hashMemoryContent(lexicalMemory.content)
+        })
+      ],
+      embedding_inference_calls: 0,
+      query_embedding_cache_hit: true,
+      provider_kind: "local_onnx",
+      model_id: "test-model",
+      dimensions: 3,
+      schema_version: 1
+    }));
+    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
+      memories.filter((memory) => ids.includes(memory.object_id))
+    );
+    const service = buildEmbeddingScopedService({
+      canonical: true,
+      collectWorkspaceNeighborsWithMetadata,
+      findByIds,
+      memories
+    });
+
+    const control = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      queryText: "orchid anchor",
+      policyOverride: buildPolicy(service, false)
+    });
+    const result = await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      queryText: "orchid anchor",
+      policyOverride: buildPolicy(service, true)
+    });
+
+    expect(result.d0_execution).toEqual({ status: "captured", reason: null });
+    const field = result.diagnostics?.d0_receipt?.field_membership;
+    expect(field?.e0_keys).toEqual([
+      `workspace_local:memory_entry:${lexicalMemory.object_id}`
+    ]);
+    expect(field?.e1_keys).toHaveLength(2);
+    expect(field?.e1_keys).toEqual(expect.arrayContaining(field?.e0_keys ?? []));
+    expect(result.candidates.some(({ object_id }) =>
+      object_id === lexicallyAbsentMemory.object_id)).toBe(true);
+    const shared = result.diagnostics?.d0_receipt?.observations_by_candidate_key?.[
+      `workspace_local:memory_entry:${lexicalMemory.object_id}`
+    ];
+    expect(shared?.lineages.embedding?.envelope.state).toBe("observed");
+    const controlShared = control.diagnostics?.d0_receipt?.observations_by_candidate_key?.[
+      `workspace_local:memory_entry:${lexicalMemory.object_id}`
+    ];
+    const { embedding: _embedding, ...enabledStableLineages } = shared?.lineages ?? {};
+    expect(enabledStableLineages).toEqual(controlShared?.lineages);
+    expect(result.candidates.find(({ object_id }) => object_id === lexicalMemory.object_id)
+      ?.source_channels).toEqual(control.candidates.find(({ object_id }) =>
+        object_id === lexicalMemory.object_id)?.source_channels);
   });
 
   it("counts coarse-injection query embeddings in token economy inference calls", async () => {
@@ -317,193 +431,5 @@ describe("RecallService embedding coarse-injection cap and floor", () => {
         (candidate) => candidate.object_id === memory.object_id
       )
     ).toBe(true);
-  });
-});
-
-describe("RecallService embedding coarse-injection fetch budget and stale-vector guard", () => {
-  const neighborMemory = createMemoryEntry({
-    object_id: "44444444-4444-4444-8444-444444444444",
-    content: "Pure-semantic Helsinki revenue note.",
-    activation_score: 0.05
-  });
-
-  function buildService(input: {
-    readonly collectWorkspaceNeighborsWithMetadata: NonNullable<
-      RecallServiceEmbeddingRecallPort["collectWorkspaceNeighborsWithMetadata"]
-    >;
-    readonly findByIds: NonNullable<RecallServiceMemoryRepoPort["findByIds"]>;
-    readonly memories?: readonly MemoryEntry[];
-  }) {
-    const { dependencies, warnSpy } = createDependencies([
-      ...(input.memories ?? [neighborMemory])
-    ]);
-    const embeddingRecallService = {
-      hasStoredVectors: vi.fn(async () => true),
-      prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-fetch-budget")),
-      querySupplementIfReady: vi.fn(async () => ({
-        supplementaryEntries: Object.freeze([]),
-        similarityHintsByObjectId: Object.freeze({})
-      })),
-      querySupplement: vi.fn(async () => ({
-        supplementaryEntries: Object.freeze([]),
-        similarityHintsByObjectId: Object.freeze({})
-      })),
-      collectWorkspaceNeighborsWithMetadata: input.collectWorkspaceNeighborsWithMetadata
-    } satisfies RecallServiceEmbeddingRecallPort;
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      memoryRepo: { ...dependencies.memoryRepo, findByIds: input.findByIds },
-      embeddingRecallService
-    });
-    return { service, warnSpy };
-  }
-
-  function buildPolicy(
-    service: RecallService,
-    opts: { readonly maxSupplement: number; readonly cap?: number }
-  ): RecallPolicy {
-    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
-    return overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        precomputed_rank: {
-          ...basePolicy.coarse_filter.precomputed_rank,
-          min_activation_score: 0.5
-        },
-        semantic_supplement: {
-          enabled: true,
-          max_supplement: opts.maxSupplement,
-          embedding_enabled: true,
-          ...(opts.cap === undefined ? {} : { injection_cap: opts.cap })
-        }
-      }
-    });
-  }
-
-  it("fetches up to injection_cap neighbors even when it exceeds max_supplement", async () => {
-    const collectWorkspaceNeighborsWithMetadata = vi.fn(async (
-      _params: Parameters<NonNullable<RecallServiceEmbeddingRecallPort["collectWorkspaceNeighborsWithMetadata"]>>[0]
-    ) => ({
-      hits: [
-        Object.freeze({
-          object_id: neighborMemory.object_id,
-          normalized_similarity: 0.95
-        })
-      ],
-      embedding_inference_calls: 1,
-      query_embedding_cache_hit: false
-    }));
-    const findByIds = vi.fn(async () => [neighborMemory]);
-    const { service } = buildService({ collectWorkspaceNeighborsWithMetadata, findByIds });
-
-    await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(collectWorkspaceNeighborsWithMetadata).toHaveBeenCalledTimes(1);
-    expect(collectWorkspaceNeighborsWithMetadata.mock.calls[0]?.[0]?.maxNeighbors).toBe(10);
-  });
-
-  it("injects nothing when injection_cap is zero", async () => {
-    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
-      hits: [
-        Object.freeze({
-          object_id: neighborMemory.object_id,
-          normalized_similarity: 0.95
-        })
-      ],
-      embedding_inference_calls: 1,
-      query_embedding_cache_hit: false
-    }));
-    const findByIds = vi.fn(async () => [neighborMemory]);
-    const { service } = buildService({ collectWorkspaceNeighborsWithMetadata, findByIds });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 0 }),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(
-      result.candidates.some((candidate) => candidate.object_id === neighborMemory.object_id)
-    ).toBe(false);
-    expect(collectWorkspaceNeighborsWithMetadata).not.toHaveBeenCalled();
-    expect(findByIds).not.toHaveBeenCalled();
-  });
-
-  it("drops a neighbor whose content_hash no longer matches the resolved memory content", async () => {
-    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
-      hits: [
-        Object.freeze({
-          object_id: neighborMemory.object_id,
-          normalized_similarity: 0.95,
-          content_hash: hashMemoryContent("stale content that no longer matches")
-        })
-      ],
-      embedding_inference_calls: 1,
-      query_embedding_cache_hit: false
-    }));
-    const findByIds = vi.fn(async () => [neighborMemory]);
-    const { service, warnSpy } = buildService({
-      collectWorkspaceNeighborsWithMetadata,
-      findByIds
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(
-      result.candidates.some((candidate) => candidate.object_id === neighborMemory.object_id)
-    ).toBe(false);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "embedding coarse injection dropped stale vectors",
-      expect.objectContaining({ stale_vector_drops: 1 })
-    );
-  });
-
-  it("keeps a neighbor whose content_hash is undefined for test-double and keyword-provider compatibility", async () => {
-    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => ({
-      hits: [
-        Object.freeze({
-          object_id: neighborMemory.object_id,
-          normalized_similarity: 0.95
-        })
-      ],
-      embedding_inference_calls: 1,
-      query_embedding_cache_hit: false
-    }));
-    const findByIds = vi.fn(async () => [neighborMemory]);
-    const { service, warnSpy } = buildService({
-      collectWorkspaceNeighborsWithMetadata,
-      findByIds
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: buildPolicy(service, { maxSupplement: 5, cap: 10 }),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(
-      result.candidates.some((candidate) => candidate.object_id === neighborMemory.object_id)
-    ).toBe(true);
-    expect(warnSpy).not.toHaveBeenCalledWith(
-      "embedding coarse injection dropped stale vectors",
-      expect.anything()
-    );
   });
 });

@@ -44,11 +44,14 @@ function buildReceipt(input: {
   const { control, treatment } = input;
   if (control !== undefined) assertProductPhaseAuthority(control);
   const ledger = assertProductPhaseAuthority(treatment);
-  const evidence = treatmentEvidence(treatment);
+  const d0ReceiptDigest = treatment.d0_receipt?.receipt_digest ?? null;
+  const evidence = treatmentEvidence(treatment, d0ReceiptDigest);
   const body: TreatmentExposureReceiptBody = {
     schema_version: 4,
     kind: "cached_f3_treatment_exposure",
     question_id: treatment.question_id,
+    ranking_authority: treatment.ranking_authority ?? null,
+    d0_receipt_digest: d0ReceiptDigest,
     product_phase_ledger: ledger,
     ...evidence,
     control_non_exposure: controlWitness(control),
@@ -71,16 +74,22 @@ function buildReceipt(input: {
   });
 }
 
-function treatmentEvidence(treatment: LongMemEvalQuestionDiagnostic) {
+function treatmentEvidence(
+  treatment: LongMemEvalQuestionDiagnostic,
+  d0ReceiptDigest: string | null
+) {
   const formation = treatment.query_open_semantic_factor_formation;
   const compatibility = treatment.open_semantic_factor_compatibility_trace;
   const composition = treatment.open_semantic_factor_composition;
   const activation = treatment.open_semantic_factor_activation;
   const candidateEntries = treatment.open_semantic_factor_candidate_activations ?? [];
-  const linksValid = receiptLinksValid(formation, compatibility, composition, activation) &&
-    treatment.open_semantic_factor_candidate_activations !== undefined &&
-    candidateAttributionLinksValid(treatment, candidateEntries);
   const activatedCount = activation?.entries.filter((entry) => entry.activation > 0).length ?? 0;
+  const observedCandidateAttribution =
+    treatment.open_semantic_factor_candidate_activations !== undefined;
+  const linksValid = observedCandidateAttribution && (
+    receiptLinksValid(formation, compatibility, composition, activation) &&
+    candidateAttributionLinksValid(treatment, candidateEntries)
+  );
   return {
     evidence_chain: { linked: linksValid },
     formation: { status: formation?.status ?? null },
@@ -99,16 +108,18 @@ function treatmentEvidence(treatment: LongMemEvalQuestionDiagnostic) {
       status: activation?.status ?? null,
       activated_evidence_count: activatedCount
     },
-    candidate_attribution: candidateAttribution(candidateEntries)
+    candidate_attribution: candidateAttribution(candidateEntries, d0ReceiptDigest)
   };
 }
 
 function candidateAttribution(
   entries: NonNullable<LongMemEvalQuestionDiagnostic[
     "open_semantic_factor_candidate_activations"
-  ]>
+  ]>,
+  d0ReceiptDigest: string | null
 ) {
   return {
+    d0_receipt_digest: d0ReceiptDigest,
     entries,
     candidate_keys: entries.map((entry) => entry.candidate_key),
     activated_evidence_ids: [...new Set(entries.flatMap(

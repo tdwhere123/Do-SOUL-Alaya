@@ -16,9 +16,21 @@ interface EmbeddingTreatmentDiagnostics {
   readonly embedding_workspace_provider_kind?: string;
   readonly embedding_workspace_model_id?: string;
   readonly embedding_workspace_schema_version?: number;
-  readonly candidates: readonly Readonly<{
-    readonly score_factors: Readonly<{ readonly embedding_similarity?: number }>;
-  }>[];
+  readonly d0_receipt?: Readonly<{
+    readonly observations_by_candidate_key: Readonly<Record<string, Readonly<{
+      readonly lineages: Readonly<{
+        readonly embedding?: Readonly<{
+          readonly envelope: Readonly<{ readonly state: string; readonly value?: number }>;
+        }>;
+      }>;
+    }>>> | null;
+  }>;
+  readonly candidates: readonly (
+    | Readonly<{
+      readonly score_factors: Readonly<{ readonly embedding_similarity?: number }>;
+    }>
+    | Readonly<{ readonly ranking_authority: "d0_prefix" }>
+  )[];
 }
 
 export interface BiEncoderTreatmentActivationEvidence {
@@ -96,9 +108,7 @@ function toActivationEvidence(
   return {
     providerState: diagnostics.embedding_provider_status,
     providerDegradationReason: diagnostics.provider_degradation_reason,
-    embeddingSimilarities: diagnostics.candidates.map(
-      (candidate) => candidate.score_factors.embedding_similarity
-    ),
+    embeddingSimilarities: readEmbeddingSimilarities(diagnostics),
     workspaceScannedCount: diagnostics.embedding_workspace_scanned_count,
     workspaceTruncated: diagnostics.embedding_workspace_truncated,
     workspaceProviderKind: diagnostics.embedding_workspace_provider_kind,
@@ -110,9 +120,8 @@ function toActivationEvidence(
 function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void {
   const inactive = diagnostics.embedding_provider_status === "provider_not_requested" &&
     isEvidenceEmbeddingInactive(diagnostics) &&
-    diagnostics.candidates.every(
-      (candidate) => !("embedding_similarity" in candidate.score_factors)
-    ) &&
+    !hasLegacyEmbeddingEvidenceKey(diagnostics) &&
+    readEmbeddingSimilarities(diagnostics).every((similarity) => similarity === undefined) &&
     diagnostics.embedding_workspace_scanned_count === undefined &&
     diagnostics.embedding_workspace_provider_kind === undefined &&
     diagnostics.embedding_workspace_model_id === undefined &&
@@ -120,6 +129,33 @@ function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void
   if (!inactive) {
     throw new Error("bi-encoder control activation failed: embedding work was observed");
   }
+}
+
+function hasLegacyEmbeddingEvidenceKey(
+  diagnostics: EmbeddingTreatmentDiagnostics
+): boolean {
+  if (diagnostics.d0_receipt !== undefined) return false;
+  return diagnostics.candidates.some((candidate) =>
+    "score_factors" in candidate &&
+    "embedding_similarity" in candidate.score_factors
+  );
+}
+
+function readEmbeddingSimilarities(
+  diagnostics: EmbeddingTreatmentDiagnostics
+): readonly (number | undefined)[] {
+  const observations = diagnostics.d0_receipt?.observations_by_candidate_key;
+  if (observations !== undefined && observations !== null) {
+    return Object.values(observations).map((observation) => {
+      const envelope = observation.lineages.embedding?.envelope;
+      return envelope?.state === "observed" ? envelope.value : undefined;
+    });
+  }
+  return diagnostics.candidates.map(
+    (candidate) => "score_factors" in candidate
+      ? candidate.score_factors.embedding_similarity
+      : undefined
+  );
 }
 
 function assertEvidenceEmbeddingTreatmentActive(

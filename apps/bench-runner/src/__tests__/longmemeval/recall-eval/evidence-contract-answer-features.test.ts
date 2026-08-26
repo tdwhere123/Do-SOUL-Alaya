@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { createCanonicalD0SelectionReceipt } from "@do-soul/alaya-protocol";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
 import {
   RecallAnswerSupportObservationSchema,
@@ -18,8 +20,65 @@ import {
 } from "../../../bench/provenance/evidence-manifest.js";
 import { collectPairedEnvironment } from "../../../bench/provenance/run.js";
 import { completeAnswerFeatures, diagnostic } from "./evidence-contract-test-support.js";
+import { canonicalCandidatePoolComplete } from
+  "../../../bench/diagnostics/artifacts/candidate-readers/canonical-candidate-row.js";
 
 describe("LongMemEval evidence contract answer features", () => {
+  it("accepts a complete canonical D0 pool without legacy deep-head evidence", () => {
+    const candidateKey = "workspace_local:memory_entry:gold-a";
+    const receipt = canonicalReceipt(candidateKey);
+    const row = diagnostic({
+      id: "q-canonical-d0",
+      gold: ["gold-a"],
+      recallResult: {
+        ranking_authority: "d0_prefix",
+        diagnostics: {
+          d0_receipt: receipt,
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            fine_pruned_count: 0,
+            fine_evaluated: 1,
+            coarse_pool_size: 1
+          },
+          candidates: [{
+            schema_version: 1,
+            ranking_authority: "d0_prefix",
+            d0_receipt_digest: receipt.receipt_digest,
+            legacy_selection: {
+              fusion: "not_applicable",
+              deep_head: "not_applicable",
+              coverage: "not_applicable"
+            },
+            object_id: "gold-a",
+            object_kind: "memory_entry",
+            candidate_key: candidateKey,
+            origin_plane: "workspace_local",
+            created_at: "2026-07-11T00:00:00.000Z",
+            dimension: "procedure",
+            admission_planes: ["lexical"],
+            plane_first_admitted: "lexical",
+            plane_winning_admission: "lexical",
+            admission_attempts: [],
+            final_rank: 1,
+            post_rank: 1,
+            in_final_packet: true,
+            eviction_reason: null,
+            dropped_reason: null,
+            within_budget: true,
+            source_channels: ["local_lexical"],
+            d0_disposition: receipt.dispositions[0]
+          }]
+        }
+      }
+    });
+
+    expect(row.ranking_authority).toBe("d0_prefix");
+    expect(row.candidate_pool_complete).toBe(true);
+    expect(row.candidates[0]?.answer_features).toBeNull();
+    expect(row.candidates[0]?.deep_head_trace).toBeNull();
+  });
+
   it("roundtrips exact query and candidate answer evidence only with full pools", () => {
     const answerSupport = {
       schema_version: 1,
@@ -273,6 +332,21 @@ describe("LongMemEval evidence contract answer features", () => {
     );
   });
 
+  it("rejects candidate rows mixed across exact D0 receipt instances", () => {
+    const key = "workspace_local:memory_entry:gold-a";
+    const selected = canonicalReceipt(key);
+    const ineligible = canonicalIneligibleReceipt(key);
+    const selectedRow = canonicalRow(selected, key);
+    expect(canonicalCandidatePoolComplete({ receipt: selected, rows: [selectedRow],
+      candidateKeys: [key] })).toBe(true);
+    expect(canonicalCandidatePoolComplete({ receipt: ineligible, rows: [{
+      ...selectedRow, d0_receipt_digest: ineligible.receipt_digest
+    }], candidateKeys: [key] })).toBe(false);
+    expect(canonicalCandidatePoolComplete({ receipt: selected, rows: [{
+      ...selectedRow, final_rank: 2, post_rank: 2
+    }], candidateKeys: [key] })).toBe(false);
+  });
+
   it("preserves synthesis null and empty answer features without fabricating projections", () => {
     const answerFeatures = completeAnswerFeatures({
       content: "A concise synthesis.",
@@ -404,3 +478,73 @@ describe("LongMemEval evidence contract answer features", () => {
   });
 
 });
+
+function canonicalReceipt(candidateKey: string) {
+  return createCanonicalD0SelectionReceipt({
+    schema_version: 1 as const,
+    ranking_authority: "d0_prefix" as const,
+    identity: {
+      algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1" as const,
+      version: "d0.safe-dominance-capture.v1.0.0" as const,
+      digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa" as const
+    },
+    execution: { status: "captured" as const, reason: null },
+    field_membership: {
+      e0_keys: [],
+      e1_keys: [candidateKey],
+      eligible_keys: [candidateKey]
+    },
+    observations_by_candidate_key: { [candidateKey]: { h_gate: "none", lineages: {} } },
+    frontiers: { schema_version: 1, operator_id: "shadow.frontiers.peel_undominated.v1",
+      layers: [{ index: 1, member_keys: [candidateKey] }] },
+    gamma: {
+      set_utilities: [{ schema_version: 1, candidate_key: candidateKey,
+        object_key: "object:gold-a", obligations: [], matches: [],
+        values: { status: "unavailable", values: [] }, cid: { status: "unavailable" },
+        availability: { facility: "not_applicable", values: "unavailable",
+          evidence_identity: "unavailable" } }],
+      decisions: [{ schema_version: 1, candidate_key: candidateKey,
+        capture_reason: "core_undominated", G: { unscaled_remainder: 0, Values_v: 0,
+          evidence_novelty_redundancy: 0 }, G_status: { facility: "not_applicable",
+          values: "unavailable", evidence_identity: "unavailable" },
+        named_novelty: { facility_keys: [], value_pairs: [], content_ids: [] },
+        novelty_core_known_absence: [], max_g_cohort: [candidateKey],
+        equal_g_dominance_rejects: [], deterministic_tail: "candidate_key_code_unit_ascending",
+        unresolved_pointwise_tradeoff: false, h_gate: "none", walk_reject: "none",
+        static_frontier_index: 1 }],
+      rejects: []
+    },
+    dispositions: [{ candidate_key: candidateKey, status: "selected",
+      reason: "selected_by_gamma" }],
+    delivery: [{ candidate_key: candidateKey, delivery_rank: 1 }]
+  }, (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex"));
+}
+
+function canonicalIneligibleReceipt(candidateKey: string) {
+  const selected = canonicalReceipt(candidateKey);
+  const { receipt_digest: _receiptDigest, ...body } = selected;
+  return createCanonicalD0SelectionReceipt({
+    ...body,
+    field_membership: { ...selected.field_membership, eligible_keys: [] },
+    frontiers: { ...selected.frontiers!, layers: [] },
+    gamma: { ...selected.gamma, decisions: [] },
+    dispositions: [{ candidate_key: candidateKey, status: "ineligible",
+      reason: "h_ineligible" }],
+    delivery: []
+  }, (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex"));
+}
+
+function canonicalRow(receipt: ReturnType<typeof canonicalReceipt>, candidateKey: string) {
+  return {
+    schema_version: 1 as const, ranking_authority: "d0_prefix" as const,
+    d0_receipt_digest: receipt.receipt_digest,
+    legacy_selection: { fusion: "not_applicable" as const, deep_head: "not_applicable" as const,
+      coverage: "not_applicable" as const },
+    object_id: "gold-a", object_kind: "memory_entry" as const, candidate_key: candidateKey,
+    origin_plane: "workspace_local" as const, created_at: "2026-07-11T00:00:00.000Z",
+    dimension: "procedure", admission_planes: ["lexical"], plane_first_admitted: "lexical",
+    plane_winning_admission: "lexical", admission_attempts: [], final_rank: 1, post_rank: 1,
+    in_final_packet: true, eviction_reason: null, dropped_reason: null, within_budget: true,
+    source_channels: ["local_lexical"], d0_disposition: receipt.dispositions[0]!
+  };
+}

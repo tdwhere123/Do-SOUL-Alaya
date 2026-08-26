@@ -14,8 +14,14 @@ const SOURCE = "I used Atlas for research.";
 
 describe("open semantic factor formation proposal", () => {
   it("preserves source observation while grounding a separate semantic projection", () => {
+    const frame = { schema_version: 1 as const, slots: [
+      { role: "subject" as const, text: "I" },
+      { role: "relation" as const, text: "used" },
+      { role: "qualifier" as const, text: "Atlas" },
+      { role: "value" as const, text: "research" }
+    ] };
     const [draft] = parseOfficialApiSignals(JSON.stringify({
-      signals: [signalJson(semanticGraph())]
+      signals: [{ ...signalJson(semanticGraph()), fact_frame: frame }]
     }));
     if (draft === undefined) throw new Error("signal fixture must parse");
 
@@ -32,6 +38,7 @@ describe("open semantic factor formation proposal", () => {
     expect(buildOpenSemanticFactorFormationProposal({
       source_assertion: SOURCE,
       source_grounding: grounded.audit,
+      fact_frame: grounded.draft.fact_frame,
       semantic_factor_graph: grounded.draft.semantic_factor_graph
     })).toEqual({
       schema_version: 1,
@@ -40,7 +47,44 @@ describe("open semantic factor formation proposal", () => {
       graph: grounded.draft.semantic_factor_graph
     });
     expect(GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID)
-      .toBe("garden_source_bound_open_semantic_factor_v3");
+      .toBe("garden_source_bound_open_semantic_factor_v5");
+  });
+
+  it("rejects an incomplete provider graph instead of fabricating semantic identity", () => {
+    const frame = {
+      schema_version: 1 as const,
+      slots: [
+        { role: "subject" as const, text: "I" },
+        { role: "relation" as const, text: "used" },
+        { role: "value" as const, text: "Atlas" }
+      ]
+    };
+    const [draft] = parseOfficialApiSignals(JSON.stringify({ signals: [{
+      ...signalJson({
+        ...semanticGraph(),
+        factors: [
+          factor("predicate", "used", 2, 6, "use"),
+          factor("object", "Atlas", 7, 12, "atlas")
+        ],
+        propositions: [{
+          proposition_id: "use-event",
+          predicate_factor_id: "predicate",
+          arguments: [argument(0, "object")]
+        }]
+      }),
+      fact_frame: frame
+    }] }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    if (grounded.status !== "grounded") throw new Error("signal fixture must ground");
+    const proposal = buildOpenSemanticFactorFormationProposal({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      fact_frame: grounded.draft.fact_frame,
+      semantic_factor_graph: grounded.draft.semantic_factor_graph
+    });
+
+    expect(proposal).toBeUndefined();
   });
 
   it("removes a graph whose exact surface is absent from the source", () => {

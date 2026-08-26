@@ -96,7 +96,7 @@ export type ShadowCidReceipt =
   | Readonly<{
       readonly status: "available";
       readonly cid: string;
-      readonly grounding: "evidence" | "gist" | "ref";
+      readonly grounding: "content" | "gist" | "ref";
     }>
   | Readonly<{
       readonly status: "unavailable";
@@ -306,7 +306,7 @@ function parseCidReceipt(
   }
   assertAllowedKeys(input, ["status", "cid", "grounding"]);
   if (typeof input.cid !== "string" ||
-      (input.grounding !== "evidence" && input.grounding !== "gist" &&
+      (input.grounding !== "content" && input.grounding !== "gist" &&
         input.grounding !== "ref")) {
     throw new ShadowContractError("invalid available CID");
   }

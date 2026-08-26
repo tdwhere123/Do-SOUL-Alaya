@@ -17,6 +17,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 import { buildRecallEvidencePack } from "../../recall/runtime/recall-evidence-pack.js";
 
 interface RecallFixture {
@@ -94,6 +95,7 @@ async function recallFixture(fixture: RecallFixture) {
 
 function createDependencies(memories: readonly MemoryEntry[]): RecallServiceDependencies & RecallServiceFieldDeps {
   return {
+    defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
       fieldContractSha256,

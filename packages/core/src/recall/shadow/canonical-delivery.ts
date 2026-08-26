@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
 import {
+  createCanonicalD0SelectionReceipt,
+  CANONICAL_D0_IDENTITY,
   RecallCandidateSchema,
+  type CanonicalD0SelectionReceipt,
   type FineAssessmentConfig,
   type RecallCandidate
 } from "@do-soul/alaya-protocol";
@@ -11,6 +15,7 @@ import type {
 } from "../delivery/fine-assessment.js";
 import {
   assertUniqueCandidateField,
+  DuplicateRecallCandidateFieldError,
   assignManifestation,
   buildRecallCandidateDedupeKey,
   createContentPreview,
@@ -40,12 +45,11 @@ import {
   type ShadowFailClosedTrace,
   type ShadowIntegrateInput
 } from "./integrate.js";
+import { buildProductionSetUtilities } from "./utility/production.js";
+import { ShadowContractError } from "./envelope.js";
 
-export const CANONICAL_D0_IDENTITY = Object.freeze({
-  algorithm_id: SHADOW_ALGORITHM_ID,
-  version: SHADOW_ALGORITHM_VERSION,
-  digest: D0_IDENTITY_DIGEST
-});
+export { CANONICAL_D0_IDENTITY } from "@do-soul/alaya-protocol";
+export type { CanonicalD0SelectionReceipt } from "@do-soul/alaya-protocol";
 
 export function resolveFineAssessmentDeliveryPath(
   config: FineAssessmentConfig
@@ -56,16 +60,29 @@ export function resolveFineAssessmentDeliveryPath(
 export function deliverCanonicalFineAssessment(
   params: FineAssessParams
 ): FineAssessResult {
-  assertUniqueCandidateField(params.candidates);
-  const shadowTrace = captureShadowIntegration(toShadowInput(params));
-  if (isFailClosedShadowTrace(shadowTrace)) {
-    return failClosedCanonicalResult(params, shadowTrace);
+  try {
+    assertUniqueCandidateField(params.candidates);
+    const shadowTrace = captureShadowIntegration(toShadowInput(params));
+    if (isFailClosedShadowTrace(shadowTrace)) {
+      return failClosedCanonicalResult(params, shadowTrace);
+    }
+    const candidates = materializePrefix(params, shadowTrace.prefix_proposal);
+    if (candidates === null) {
+      return failClosedCanonicalResult(params, mappingFailClosed());
+    }
+    return capturedCanonicalResult(params, shadowTrace, candidates);
+  } catch (error) {
+    if (isCanonicalContractError(error)) {
+      return failClosedCanonicalResult(params, mappingFailClosed());
+    }
+    throw error;
   }
-  const candidates = materializePrefix(params, shadowTrace.prefix_proposal);
-  if (candidates === null) {
-    return failClosedCanonicalResult(params, mappingFailClosed());
-  }
-  return capturedCanonicalResult(params, shadowTrace, candidates);
+}
+
+function isCanonicalContractError(error: unknown): boolean {
+  return error instanceof DuplicateRecallCandidateFieldError ||
+    error instanceof ShadowContractError ||
+    (error instanceof Error && error.name === "ZodError");
 }
 
 function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
@@ -81,6 +98,10 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     memoryLexicalCaptures: params.memoryLexicalCaptures,
     e0Keys: params.e0Keys,
     e1Keys: params.e1Keys,
+    utilitiesByKey: buildProductionSetUtilities({
+      candidates: params.candidates,
+      supplementaryData: params.supplementaryData
+    }),
     nowIso: params.now()
   };
 }
@@ -90,10 +111,12 @@ function capturedCanonicalResult(
   shadowTrace: ShadowCapturedTrace,
   candidates: readonly Readonly<RecallCandidate>[]
 ): FineAssessResult {
+  const receipt = capturedD0Receipt(shadowTrace);
   return Object.freeze({
     ...emptyCanonicalShell(params, shadowTrace),
     candidates,
-    diagnostics: buildCanonicalDeliveryDiagnostics(params, candidates)
+    diagnostics: buildCanonicalDeliveryDiagnostics(params, candidates, receipt),
+    d0_receipt: receipt
   });
 }
 
@@ -101,11 +124,125 @@ function failClosedCanonicalResult(
   params: FineAssessParams,
   shadowTrace: ShadowFailClosedTrace
 ): FineAssessResult {
+  const receipt = failClosedD0Receipt(params, shadowTrace);
+  const e1 = new Set(receipt.field_membership.e1_keys);
+  const diagnosticParams = Object.freeze({
+    ...params,
+    candidates: uniqueCandidatesForKeys(params.candidates, e1)
+  });
   return Object.freeze({
     ...emptyCanonicalShell(params, shadowTrace),
     candidates: Object.freeze([]),
-    diagnostics: buildCanonicalDeliveryDiagnostics(params, Object.freeze([]))
+    diagnostics: buildCanonicalDeliveryDiagnostics(
+      diagnosticParams, Object.freeze([]), receipt
+    ),
+    d0_receipt: receipt
   });
+}
+
+function uniqueCandidatesForKeys(
+  candidates: FineAssessParams["candidates"],
+  acceptedKeys: ReadonlySet<string>
+): FineAssessParams["candidates"] {
+  const seen = new Set<string>();
+  return Object.freeze(candidates.filter((candidate) => {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    if (!acceptedKeys.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
+}
+
+function capturedD0Receipt(
+  trace: ShadowCapturedTrace
+): CanonicalD0SelectionReceipt {
+  return createCanonicalD0SelectionReceipt({
+    schema_version: 1,
+    ranking_authority: "d0_prefix" as const,
+    identity: CANONICAL_D0_IDENTITY,
+    execution: Object.freeze({ status: "captured" as const, reason: null }),
+    field_membership: Object.freeze({
+      ...trace.field_membership,
+      eligible_keys: trace.eligible_keys
+    }),
+    observations_by_candidate_key: trace.observations_by_candidate_key,
+    frontiers: trace.frontiers,
+    gamma: Object.freeze({
+      set_utilities: trace.set_utilities,
+      decisions: trace.decisions,
+      rejects: trace.walk_rejects
+    }),
+    dispositions: capturedDispositions(trace),
+    delivery: Object.freeze(trace.prefix_proposal.map((candidate_key, index) =>
+      Object.freeze({ candidate_key, delivery_rank: index + 1 })
+    ))
+  }, sha256);
+}
+
+function failClosedD0Receipt(
+  params: FineAssessParams,
+  trace: ShadowFailClosedTrace
+): CanonicalD0SelectionReceipt {
+  const membership = failClosedMembership(params);
+  const reason = membership.e0_keys.some((key) => !membership.e1_keys.includes(key))
+    ? "membership_shrink" as const
+    : trace.reason;
+  return createCanonicalD0SelectionReceipt({
+    schema_version: 1,
+    ranking_authority: "d0_prefix" as const,
+    identity: CANONICAL_D0_IDENTITY,
+    execution: Object.freeze({ status: "fail_closed" as const, reason }),
+    field_membership: Object.freeze({
+      ...membership,
+      eligible_keys: Object.freeze([])
+    }),
+    observations_by_candidate_key: null,
+    frontiers: null,
+    gamma: Object.freeze({
+      set_utilities: Object.freeze([]),
+      decisions: Object.freeze([]),
+      rejects: Object.freeze([])
+    }),
+    dispositions: Object.freeze(membership.e1_keys.map((candidate_key) =>
+      Object.freeze({ candidate_key, status: "unavailable" as const,
+        reason: "fail_closed_unavailable" as const })
+    )),
+    delivery: Object.freeze([])
+  }, sha256);
+}
+
+function failClosedMembership(params: FineAssessParams): Readonly<{
+  readonly e0_keys: readonly string[];
+  readonly e1_keys: readonly string[];
+}> {
+  const candidateKeys = params.candidates.map(buildRecallCandidateDedupeKey);
+  const e1Keys = [...new Set(params.e1Keys ?? candidateKeys)];
+  return Object.freeze({
+    e0_keys: Object.freeze([...new Set(params.e0Keys ?? e1Keys)]),
+    e1_keys: Object.freeze(e1Keys)
+  });
+}
+
+function capturedDispositions(trace: ShadowCapturedTrace): CanonicalD0SelectionReceipt["dispositions"] {
+  const decisions = new Set(trace.decisions.map(({ candidate_key }) => candidate_key));
+  const rejects = new Map(trace.walk_rejects.map((row) => [row.candidate_key, row.walk_reject]));
+  const eligible = new Set(trace.eligible_keys);
+  return Object.freeze(trace.field_membership.e1_keys.map((candidate_key) => {
+    if (decisions.has(candidate_key)) return Object.freeze({ candidate_key,
+      status: "selected" as const, reason: "selected_by_gamma" as const });
+    const reject = rejects.get(candidate_key);
+    if (reject !== undefined) return Object.freeze({ candidate_key,
+      status: "rejected" as const, reason: reject });
+    if (eligible.has(candidate_key)) {
+      throw new ShadowContractError("captured D0 eligible candidate lacks decision or reject");
+    }
+    return Object.freeze({ candidate_key, status: "ineligible" as const,
+      reason: "h_ineligible" as const });
+  }));
+}
+
+function sha256(preimage: string): string {
+  return createHash("sha256").update(preimage, "utf8").digest("hex");
 }
 
 function emptyCanonicalShell(
@@ -124,7 +261,11 @@ function emptyCanonicalShell(
     shadowTrace,
     delivery_path: "canonical" as const,
     d0_identity: CANONICAL_D0_IDENTITY,
-    ranking_authority: "d0_prefix" as const
+    ranking_authority: "d0_prefix" as const,
+    d0_execution: Object.freeze({
+      status: shadowTrace.kind === "captured" ? "captured" as const : "fail_closed" as const,
+      reason: shadowTrace.kind === "captured" ? null : shadowTrace.reason
+    })
   };
 }
 
@@ -216,5 +357,3 @@ function sourceChannels(
   if (candidate.sourceChannel === undefined) return undefined;
   return Object.freeze([candidate.sourceChannel]);
 }
-
-

@@ -113,6 +113,7 @@ export interface RecallResult {
     readonly digest: string;
   }>;
   readonly ranking_authority?: "d0_prefix" | "select_gamma";
+  readonly d0_execution?: Readonly<import("@do-soul/alaya-protocol").D0Execution>;
 }
 
 export interface RecallSupplementaryData {

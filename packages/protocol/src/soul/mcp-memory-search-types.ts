@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { D0ExecutionSchema } from "./selection/d0/d0-execution.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedLabelSchema,
@@ -164,7 +165,8 @@ export const SoulMemorySearchResponseSchema = z
       algorithm_id: NonEmptyStringSchema,
       version: NonEmptyStringSchema,
       digest: NonEmptyStringSchema
-    }).strict().readonly().optional()
+    }).strict().readonly().optional(),
+    d0_execution: D0ExecutionSchema.optional()
   })
   .strict()
   .readonly();

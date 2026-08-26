@@ -8,6 +8,7 @@ import {
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
 import { resolveFineAssessmentDeliveryPath } from "../../shadow/canonical-delivery.js";
+import { buildRecallCandidateDedupeKey } from "../recall-service-helpers.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import {
   capturesRecallAnswerFeatures,
@@ -78,7 +79,8 @@ export function mergeSnapshotSupplementaryData(
     {
       ...base.supplementaryData,
       ...snapshotEmbeddingObservation(
-        coarse.embeddingCoarseInjection.requestScoreSnapshot?.workspaceNeighbors
+        coarse.embeddingCoarseInjection.requestScoreSnapshot?.workspaceNeighbors ??
+          coarse.embeddingCoarseInjection.observationNeighbors
       )
     },
     embeddingData.supplement.similarityHintsByObjectId,
@@ -213,7 +215,8 @@ export function buildFineAssessParams(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   supplementaryData: FineAssessParams["supplementaryData"],
-  candidates: FineAssessParams["candidates"]
+  candidates: FineAssessParams["candidates"],
+  membership?: Readonly<{ readonly e0Keys: readonly string[] }>
 ): FineAssessParams {
   return {
     workspace_id: params.workspaceId,
@@ -228,11 +231,26 @@ export function buildFineAssessParams(
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver,
+    diagnosticObserver: params.diagnosticObserver,
     generation_id: prepared.queryCondition.generation_id,
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
-    memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures()
+    memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
+    ...(membership === undefined ? {} : captureFineAssessmentMembership(
+      membership.e0Keys,
+      candidates
+    ))
   };
+}
+
+export function captureFineAssessmentMembership(
+  e0Keys: readonly string[],
+  candidates: FineAssessParams["candidates"]
+): Readonly<{ readonly e0Keys: readonly string[]; readonly e1Keys: readonly string[] }> {
+  return Object.freeze({
+    e0Keys: Object.freeze([...e0Keys]),
+    e1Keys: Object.freeze(candidates.map(buildRecallCandidateDedupeKey))
+  });
 }
 
 function buildCoarseAssessmentParams(

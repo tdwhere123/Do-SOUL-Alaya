@@ -1,6 +1,7 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
+import { normalizeEvidenceText } from "./query-evidence-scoring.js";
 import { recallProjectionScoringEnabled } from "./temporal-fusion-scoring.js";
 
 export function scorePreferenceProfileAlignment(
@@ -24,6 +25,21 @@ export function scorePreferenceProfileAlignment(
   return clamp01(
     Math.max(overlap, polarity) + (entry.preference_subject === "operator" ? 0.1 : 0)
   );
+}
+
+export function scoreSelfReferenceAlignment(
+  entry: Readonly<MemoryEntry>,
+  queryProbes: Readonly<RecallQueryProbes>
+): number {
+  if (!queryProbes.subject_hints.includes("self_reference")) return 0;
+  const content = normalizeEvidenceText(entry.content);
+  if (content.length === 0) return 0;
+  const explicitSelf = /\b(?:i|i'm|i've|i'd|i'll|me|my|mine|we|we're|we've|our|ours)\b|(?:我|我的|我们|咱们|咱)/iu.test(content);
+  const userFramed = /\b(?:the user|user|operator|principal)\b/iu.test(content);
+  if (!explicitSelf && !userFramed) return 0;
+  const genericAssistant = /\b(?:as an ai|i (?:do not|don't) have|i can help|here are|you can|you could|you should|there are many|some suggestions|popular (?:ones|options))\b/iu.test(content);
+  const baseScore = explicitSelf ? 1 : 0.55;
+  return clamp01(genericAssistant ? baseScore * 0.25 : baseScore);
 }
 
 export function isTrustedPreferenceProfileOwner(

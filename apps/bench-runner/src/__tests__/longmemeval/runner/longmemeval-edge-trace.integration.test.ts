@@ -157,7 +157,8 @@ describe("LongMemEval edge trace integration", () => {
       taskSurface: taskSurface(),
       workspaceId: WORKSPACE_ID,
       runId: RUN_ID,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
     const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
@@ -240,7 +241,8 @@ function recallInput() {
     taskSurface: taskSurface(),
     workspaceId: WORKSPACE_ID,
     runId: RUN_ID,
-    strategy: "build" as const
+    strategy: "build" as const,
+    diagnosticCapture: "answer_features" as const
   };
 }
 
@@ -299,6 +301,10 @@ function createRecallService(
   const dependencies: RecallServiceDependencies = {
     now: () => "2026-07-10T00:00:00.000Z",
     generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    defaultPolicyDecorator: (policy) => ({
+      ...policy,
+      fine_assessment: { ...policy.fine_assessment, delivery_path: "legacy" }
+    }),
     sha256: fieldContractSha256,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WORKSPACE_ID),
     memoryRepo: {

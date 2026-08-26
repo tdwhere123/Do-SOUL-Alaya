@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-soul";
+import {
+  GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
+import { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
+  "@do-soul/alaya-protocol";
 import { binaryUseEvidenceSemanticGraph } from
   "../../../../../../packages/core/src/__tests__/recall/supplementary-data-test-fixtures.js";
 import { EVIDENCE_ID } from "../../runtime/field/p217-planted-harness.js";
 import {
   assertionSignal,
+  ASSERTION,
   collectLiveSupplement,
   createdEvidenceId,
   f3CaptureJob,
@@ -36,6 +42,31 @@ const QUALIFIED_NEGATIVE_CASES = [
 ] as const;
 
 describe("formation eligibility live producer to consumer path", () => {
+  it("forms a complete Official API fact-frame and graph through sqlite", async () => {
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      extractor: { extract: async () => ({ rawJson: JSON.stringify({ signals: [{
+        signal_kind: "potential_claim", object_kind: "review_scope", confidence: 0.9,
+        matched_text: ASSERTION, evidence_refs: [], source_memory_refs: [],
+        source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 },
+        fact_frame: binaryUseFactFrame(),
+        semantic_factor_graph: binaryUseEvidenceSemanticGraph()
+      }] }) }) },
+      generateSignalId: () => "signal-provider-formed"
+    });
+    const [signal] = await provider.compile(ASSERTION, {
+      workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
+      turn_messages: [{ role: "user", content: ASSERTION,
+        message_id: "message-provider", created_at: "2026-08-26T00:00:00.000Z" }]
+    });
+    if (signal === undefined) throw new Error("provider fixture must compile one signal");
+    const runtime = await openEligibilityRuntime();
+    const received = await runtime.signalService.receiveSignal(signal);
+    const capture = await readQualifiedCapture(runtime.evidenceRepo, createdEvidenceId(received));
+    expect(capture).toMatchObject({ status: "formed",
+      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID });
+  });
+
   it.each(QUALIFIED_NEGATIVE_CASES)(
     "fail-closes $name through sqlite qualification and recall",
     async (testCase) => {
@@ -122,6 +153,7 @@ describe("formation eligibility live producer to consumer path", () => {
     const runtime = await openEligibilityRuntime();
     const received = await runtime.signalService.receiveSignal(
       assertionSignal("signal-formed", {
+        fact_frame: binaryUseFactFrame(),
         semantic_factor_graph: binaryUseEvidenceSemanticGraph()
       })
     );
@@ -140,10 +172,10 @@ describe("formation eligibility live producer to consumer path", () => {
     ]));
     expect(f3CaptureJob(
       runtime.field,
-      GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID
+      EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
     )).toMatchObject({
       status: "succeeded",
-      operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID
+      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
     });
 
     const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
@@ -155,6 +187,17 @@ describe("formation eligibility live producer to consumer path", () => {
     });
   });
 });
+
+function binaryUseFactFrame() {
+  return {
+    schema_version: 1 as const,
+    slots: [
+      { role: "subject" as const, text: "I" },
+      { role: "relation" as const, text: "used" },
+      { role: "value" as const, text: "Atlas" }
+    ]
+  };
+}
 
 function hasGoldAuthorityKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasGoldAuthorityKey);

@@ -72,7 +72,7 @@ describe("Global memory storage repos", () => {
     const globalEntryColumns = getColumnNames(database, "global_memory_entries");
     const recallCacheColumns = getColumnNames(database, "global_memory_recall_cache");
 
-    expect(versions.map((entry) => entry.version)).toEqual([9]);
+    expect(versions.map((entry) => entry.version)).toEqual([10]);
     expect(globalEntryColumns).toEqual([
       "global_object_id",
       "object_kind",

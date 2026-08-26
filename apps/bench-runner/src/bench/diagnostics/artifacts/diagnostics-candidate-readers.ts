@@ -18,8 +18,7 @@ import {
   DiagnosticSelectGammaDecisionSchema,
   DiagnosticQueryProbesSchema
 } from "../schema/diagnostics-schema.js";
-import { RecallDeepHeadTraceSchema } from
-  "../../../harness/recall/answer-trace-schema.js";
+import { RecallDeepHeadTraceSchema } from "../../../harness/recall/answer-trace-schema.js";
 import { readFineAssessmentPrunedClosure } from "../artifacts/diagnostics-fine-pruned-reader.js";
 import { isPreferredCandidateManifestation } from "../candidate-manifestation-order.js";
 import {
@@ -29,10 +28,13 @@ import {
 import type { DiagnosticCandidateIdentityMode } from "../candidate-identity.js";
 import { readCandidateSelectorObservation } from
   "./candidate-selector-observation-reader.js";
-import { CandidateActivationReceiptSchema } from
-  "../../../harness/recall/answer-trace/semantic-activation-schema.js";
+import { CandidateActivationReceiptSchema } from "../../../harness/recall/answer-trace/semantic-activation-schema.js";
 import { readDiagnosticLabelArray } from
   "./candidate-readers/source-label-reader.js";
+import { canonicalCandidatePoolComplete, isCanonicalD0CandidateRow } from
+  "./candidate-readers/canonical-candidate-row.js";
+import { readDiagnosticCandidateSource } from
+  "./candidate-readers/candidate-source.js";
 export { buildObjectIdentityKey } from "../candidate-identity.js";
 
 const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
@@ -50,8 +52,10 @@ interface FusionBreakdownDiagnostic {
 export function readCandidates(
   diagnostics: Readonly<Record<string, unknown>>
 ): ReadCandidateDiagnosticsResult {
-  const source = readCandidateSource(diagnostics);
-  const fusionBreakdown = readFusionBreakdownDiagnostics(diagnostics.fusion_breakdown);
+  const source = readDiagnosticCandidateSource(diagnostics);
+  const fusionBreakdown = readFusionBreakdownDiagnostics(
+    diagnostics.fusion_breakdown
+  );
   const byObjectId = new Map<string, CandidateDiagnostic>();
   const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
@@ -79,8 +83,13 @@ export function readCandidates(
     diagnostics,
     new Set(byCandidateKey.keys())
   );
+  const d0Complete = canonicalCandidatePoolComplete({
+    receipt: diagnostics.d0_receipt,
+    rows: source?.rows,
+    candidateKeys: byCandidateKey.keys()
+  });
   return {
-    candidatePoolComplete: scoredComplete && pruned.complete,
+    candidatePoolComplete: pruned.complete && (d0Complete ?? scoredComplete),
     candidatePoolCount: pruned.candidatePoolCount,
     finePrunedCount: pruned.finePrunedCount,
     fineAssessmentPrunedCandidates: pruned.candidates,
@@ -93,16 +102,6 @@ export function readCandidates(
   };
 }
 
-function readCandidateSource(diagnostics: Readonly<Record<string, unknown>>): Readonly<{
-  readonly rows: readonly unknown[];
-  readonly mode: DiagnosticCandidateIdentityMode;
-}> | null {
-  const legacy = readArray(diagnostics.candidate_pool) ?? readArray(diagnostics.pool);
-  if (legacy !== null) return { rows: legacy, mode: "legacy" };
-  const strict = readArray(diagnostics.candidates);
-  return strict === null ? null : { rows: strict, mode: "strict" };
-}
-
 function readCandidateRow(
   raw: unknown,
   fusionByCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>,
@@ -113,6 +112,9 @@ function readCandidateRow(
 }> | null {
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
+  if (record.ranking_authority === "d0_prefix" && !isCanonicalD0CandidateRow(record)) {
+    return null;
+  }
   const identity = readDiagnosticCandidateIdentity(record, mode);
   if (identity === null) return null;
   const fusion = matchingFusionBreakdown(

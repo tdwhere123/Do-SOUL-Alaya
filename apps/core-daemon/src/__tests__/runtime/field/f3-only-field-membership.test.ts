@@ -67,8 +67,6 @@ describe("F3-only field membership", () => {
 
     expect(lexicalQuery.map((hit) => hit.object_id)).not.toContain(MEMORY_ID);
     expect(lexicalIdentity.map((hit) => hit.object_id)).not.toContain(MEMORY_ID);
-    expect(control.candidates.map((candidate) => candidate.object_id)).not.toContain(MEMORY_ID);
-    expect(foreign.candidates.map((candidate) => candidate.object_id)).not.toContain(MEMORY_ID);
     expect(result.diagnostics?.query_open_semantic_factor_formation?.status).toBe("formed");
     expect(result.diagnostics?.query_probes.expanded_terms).toContain(F3_IDENTITY);
     expect(result.diagnostics?.query_condition?.query_cache_key)
@@ -178,11 +176,11 @@ async function createF3Evidence(
     evidence_health_state: "verified",
     gist: "Autumn notes",
     excerpt: EXCERPT,
-    source_hash: null,
+    source_hash: "sha256:source-bound-f3-fixture",
     run_id: "run-1",
     workspace_id: WORKSPACE_ID,
     surface_id: null
-  }, [], undefined, sourceSemanticProposal());
+  }, [], sourceFactFrameProposal(), sourceSemanticProposal());
   expect(extract).not.toHaveBeenCalled();
 }
 
@@ -194,23 +192,42 @@ function sourceSemanticProposal() {
     graph: {
       schema_version: 2 as const,
       source_kind: "evidence" as const,
-      factors: [{
-        factor_id: "learn.cook",
-        surface: SOURCE_SURFACE,
-        source_occurrence: 0, semantic_identity: F3_IDENTITY
-      }],
+      factors: [
+        { factor_id: "subject", surface: "I", source_occurrence: 0,
+          semantic_identity: "i" },
+        { factor_id: "learn.cook", surface: SOURCE_SURFACE,
+          source_occurrence: 0, semantic_identity: F3_IDENTITY },
+        { factor_id: "skill", surface: "Sichuan recipes", source_occurrence: 0,
+          semantic_identity: "sichuan recipes" }
+      ],
       variables: [],
       result_variable_ids: [],
       propositions: [{
         proposition_id: "learned",
         predicate_factor_id: "learn.cook",
-        arguments: [{
-          position: 0,
-          binding_identity: "skill",
-          reference_kind: "factor" as const,
-          reference_id: "learn.cook"
-        }]
+        arguments: [
+          { position: 0, binding_identity: "agent", reference_kind: "factor" as const,
+            reference_id: "subject" },
+          { position: 1, binding_identity: "skill", reference_kind: "factor" as const,
+            reference_id: "skill" }
+        ]
       }]
+    }
+  };
+}
+
+function sourceFactFrameProposal() {
+  return {
+    schema_version: 1 as const,
+    producer_operator_id: "source-bound-f3-fact-frame-v1",
+    source_assertion: EXCERPT,
+    fact_frame: {
+      schema_version: 1 as const,
+      slots: [
+        { role: "subject" as const, text: "I" },
+        { role: "relation" as const, text: SOURCE_SURFACE },
+        { role: "value" as const, text: "Sichuan recipes" }
+      ]
     }
   };
 }

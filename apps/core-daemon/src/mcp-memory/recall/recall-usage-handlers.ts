@@ -13,6 +13,7 @@ import {
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
   type ContextDeliveryRecord,
+  type D0Execution,
   type MemoryEntry,
   type RecallCandidate,
   type RecallPolicy,
@@ -87,6 +88,7 @@ export interface RecallUsageHandlerDependencies {
         readonly version: string;
         readonly digest: string;
       }>;
+      readonly d0_execution?: Readonly<D0Execution>;
     }>>;
   };
   readonly trustStateRecorder: {
@@ -284,7 +286,10 @@ function buildRecallResponse(
       : { ranking_authority: recallResult.ranking_authority }),
     ...(recallResult.d0_identity === undefined
       ? {}
-      : { d0_identity: recallResult.d0_identity })
+      : { d0_identity: recallResult.d0_identity }),
+    ...(recallResult.d0_execution === undefined
+      ? {}
+      : { d0_execution: recallResult.d0_execution })
   });
 }
 

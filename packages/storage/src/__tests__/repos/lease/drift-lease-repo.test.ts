@@ -35,7 +35,7 @@ describe("SqliteDriftLeaseRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as Array<{ readonly version: number }>;
 
-    expect(versions.map((row) => row.version)).toEqual([9]);
+    expect(versions.map((row) => row.version)).toEqual([10]);
   });
 
   it("creates indexes for active lookup and expiry cleanup query shapes", async () => {

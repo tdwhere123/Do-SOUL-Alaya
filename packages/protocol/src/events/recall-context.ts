@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { D0ExecutionSchema } from "../soul/selection/d0/d0-execution.js";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SoulContextUsageTrustModeSchema } from "../soul/mcp-types.js";
 
@@ -57,7 +58,8 @@ export const SoulRecallCompletedPayloadSchema = z
       algorithm_id: NonEmptyStringSchema,
       version: NonEmptyStringSchema,
       digest: NonEmptyStringSchema
-    }).readonly().optional()
+    }).readonly().optional(),
+    d0_execution: D0ExecutionSchema.optional()
   })
   .readonly();
 

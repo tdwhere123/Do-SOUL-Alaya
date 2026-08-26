@@ -138,7 +138,8 @@ async function collectPreparedRecallOutcome(
     context,
     params,
     synthesis.selected_evidence,
-    assessment.finalAssessment.diagnostics
+    assessment.finalAssessment.diagnostics,
+    assessment.finalAssessment.d0_receipt
   );
   prepared.projectionPinLease.assertHealthy();
   return Object.freeze({
@@ -294,7 +295,12 @@ async function completeCandidateAssessment(
   const rerank = instantTimedResult(collectAnswerRerankStage(assessment.supplementaryData));
   const delivery = preparedCandidates === null
     ? measureSync(() => fineAssess(buildFineAssessParams(
-      context, params, prepared, assessment.supplementaryData, coarse.combinedCoarseCandidates
+      context,
+      params,
+      prepared,
+      assessment.supplementaryData,
+      coarse.combinedCoarseCandidates,
+      { e0Keys: coarse.e0CandidateKeys }
     )))
     : deliverOrReuseAssessment(
       context, params, prepared, preparedCandidates, rerank.value
@@ -380,7 +386,8 @@ async function manifestCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   selectedCandidates: FineAssessmentResult["candidates"],
-  selectedDiagnostics: FineAssessmentResult["diagnostics"]
+  selectedDiagnostics: FineAssessmentResult["diagnostics"],
+  d0Receipt: FineAssessmentResult["d0_receipt"]
 ): Promise<ManifestedRecallResult> {
   const manifested = await measureAsync(async () => {
     const candidates = await applyManifestationBiasSidecar({
@@ -394,7 +401,7 @@ async function manifestCandidateStage(
     return Object.freeze({
       candidates,
       candidateDiagnostics: capturesRecallAnswerFeatures(params.diagnosticCapture)
-        ? finalizeRecallCandidateDiagnostics(selectedDiagnostics, candidates)
+        ? finalizeRecallCandidateDiagnostics(selectedDiagnostics, candidates, d0Receipt)
         : EMPTY_RECALL_CANDIDATE_DIAGNOSTICS
     });
   });
@@ -460,6 +467,9 @@ async function appendRecallCompletedEvent(
       occurred_at: completedAt,
       delivery_path: assessment.finalAssessment.delivery_path,
       ranking_authority: assessment.finalAssessment.ranking_authority,
+      ...(assessment.finalAssessment.d0_execution === undefined
+        ? {}
+        : { d0_execution: assessment.finalAssessment.d0_execution }),
       ...(assessment.finalAssessment.d0_identity === undefined
         ? {}
         : { d0_identity: assessment.finalAssessment.d0_identity })

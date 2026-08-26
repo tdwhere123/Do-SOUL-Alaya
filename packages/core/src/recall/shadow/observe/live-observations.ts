@@ -1,12 +1,18 @@
 import {
-  FTS_LANE_IDS,
-  type FtsLaneId,
   type MemoryEntry,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { clamp01 } from "../../../shared/clamp.js";
 import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
+import {
+  isTrustedPreferenceProfileOwner,
+  scorePreferenceProfileAlignment,
+  scoreSelfReferenceAlignment
+} from
+  "../../scoring/preference-fusion-scoring.js";
+import { recallProjectionScoringEnabled } from
+  "../../scoring/temporal-fusion-scoring.js";
 import { buildRecallCandidateDedupeKey } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -31,20 +37,6 @@ import {
   type ShadowTemporalEvaluator
 } from "../observations.js";
 import type { ShadowPsiObservationField } from "../psi.js";
-
-const LANE_PRIORITY: Readonly<Record<KeywordLexicalLaneId, number>> = {
-  exact: FTS_LANE_IDS.indexOf("exact"),
-  porter: FTS_LANE_IDS.indexOf("porter"),
-  object_key_porter: FTS_LANE_IDS.indexOf("porter"),
-  trigram: FTS_LANE_IDS.indexOf("trigram"),
-  object_key_trigram: FTS_LANE_IDS.indexOf("trigram")
-};
-const LIVE_EMB_DOMAIN = freezeShadow({
-  provider_kind: "recall.live",
-  model_id: "embeddingSimilarityScores",
-  dimensions: 1,
-  schema_version: 1
-});
 
 export type LiveObservationSource = Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -150,7 +142,9 @@ function liveLineages(
   if (context.applicable.temporal) {
     lineages.temporal = liveTemporal(candidate.entry, context);
   }
-  if (context.applicable.subject_preference) lineages.subject_preference = liveSubject();
+  if (context.applicable.subject_preference) {
+    lineages.subject_preference = liveSubject(candidate.entry, context);
+  }
   return freezeShadow(lineages);
 }
 
@@ -158,8 +152,7 @@ function liveLexical(
   objectId: string,
   context: LiveContext
 ): ShadowPointwiseObservation {
-  const hit = chooseCaptureHit(objectId, context.captures) ??
-    chooseLexicalHit(objectId, context.lanes);
+  const hit = chooseCaptureHit(objectId, context.captures);
   if (hit === null) {
     return parsePointwiseObservation({
       lineage: "lexical",
@@ -211,42 +204,6 @@ function chooseCaptureHit(
   return null;
 }
 
-function chooseLexicalHit(
-  objectId: string,
-  lanes: readonly Readonly<KeywordSearchLaneReceipt>[]
-): LexHit | null {
-  let best: LexHit | null = null;
-  for (const lane of lanes) {
-    if (!isMergeLane(lane.lane)) continue;
-    if (lane.status !== "complete" && lane.status !== "truncated") continue;
-    if (!Number.isInteger(lane.depth) || lane.depth <= 0) continue;
-    for (const observation of lane.observations) {
-      if (observation.object_id !== objectId) continue;
-      if (!Number.isFinite(observation.normalized_rank) || observation.normalized_rank <= 0) {
-        continue;
-      }
-      best = preferLexicalHit(freezeShadow({
-        lane_id: lane.lane,
-        normalized_rank: observation.normalized_rank,
-        list_n: lane.depth,
-        status: lane.status,
-        raw_key_kind: lane.lane === "exact" ? "matched_token_count" as const : "bm25_raw_rank" as const
-      }), best);
-    }
-  }
-  return best;
-}
-
-function preferLexicalHit(candidate: LexHit, current: LexHit | null): LexHit {
-  if (current === null) return candidate;
-  if (candidate.normalized_rank !== current.normalized_rank) {
-    return candidate.normalized_rank > current.normalized_rank ? candidate : current;
-  }
-  const candidatePriority = LANE_PRIORITY[candidate.lane_id] ?? 99;
-  const currentPriority = LANE_PRIORITY[current.lane_id] ?? 99;
-  return candidatePriority < currentPriority ? candidate : current;
-}
-
 function liveEmbedding(
   objectId: string,
   context: LiveContext
@@ -263,6 +220,16 @@ function liveEmbedding(
   }
   const value = clamp01(scores[objectId]!);
   const contentHash = context.contentHashes[objectId];
+  if (context.embeddingDomain === undefined || contentHash === undefined ||
+      contentHash.length === 0) {
+    return parsePointwiseObservation({
+      lineage: "embedding",
+      receipt: "embed.observe.v1",
+      correlation: "dup:embed-max-v1",
+      envelope: { state: "not_observed", reason: "missing_authority" },
+      snapshot: { status: "not_observed", value: null, domain: null, content_hash: null }
+    });
+  }
   return parsePointwiseObservation({
     lineage: "embedding",
     receipt: "embed.observe.v1",
@@ -271,10 +238,8 @@ function liveEmbedding(
     snapshot: {
       status: "observed",
       value,
-      domain: context.embeddingDomain ?? LIVE_EMB_DOMAIN,
-      content_hash: contentHash !== undefined && contentHash.length > 0
-        ? contentHash
-        : `live.embed:${objectId}`
+      domain: context.embeddingDomain,
+      content_hash: contentHash
     }
   });
 }
@@ -317,23 +282,81 @@ function liveTemporal(entry: Readonly<MemoryEntry>, context: LiveContext): Shado
   });
 }
 
-function liveSubject(): ShadowPointwiseObservation {
+function liveSubject(
+  entry: Readonly<MemoryEntry>,
+  context: LiveContext
+): ShadowPointwiseObservation {
+  const components = subjectComponents(entry, context);
+  const applicable = components.filter((component) =>
+    component.envelope.state !== "not_applicable"
+  );
+  const observed = applicable.every((component) => component.envelope.state === "observed");
+  const value = observed
+    ? Math.max(...applicable.map((component) =>
+      component.envelope.state === "observed" ? component.envelope.value : 0
+    ))
+    : null;
   return parsePointwiseObservation({
     lineage: "subject_preference",
     receipt: "subject.observe.v1",
     correlation: "subject.observe.v1",
-    envelope: { state: "not_observed", reason: "not_run" },
+    envelope: value === null
+      ? { state: "not_observed", reason: "not_run" }
+      : { state: "observed", value },
     domain: {
-      query_id: "shadow.live",
-      applicable_component_ids: ["preference"],
-      component_operator_ids: ["scorePreferenceProfileAlignment"]
+      query_id: context.queryId,
+      applicable_component_ids: applicable.map((component) => component.component_id),
+      component_operator_ids: applicable.map((component) => component.operator_id)
     },
-    components: [{
-      component_id: "preference",
-      operator_id: "scorePreferenceProfileAlignment",
-      envelope: { state: "not_observed", reason: "not_run" }
-    }]
+    components
   });
+}
+
+function subjectComponents(entry: Readonly<MemoryEntry>, context: LiveContext) {
+  return ([
+    subjectComponent("preference", "scorePreferenceProfileAlignment",
+      context.probes.dimensions.includes("preference"),
+      () => scorePreferenceProfileAlignment(entry, context.probes), entry, context),
+    subjectComponent("self_reference", "scoreSelfReferenceAlignment",
+      context.probes.subject_hints.includes("self_reference"),
+      () => scoreSelfReferenceAlignment(entry, context.probes), entry, context)
+  ] as const).filter((component) => component.envelope.state !== "not_applicable");
+}
+
+function subjectComponent(
+  component_id: "preference" | "self_reference",
+  operator_id: string,
+  applicable: boolean,
+  score: () => number,
+  entry: Readonly<MemoryEntry>,
+  context: LiveContext
+) {
+  if (!applicable) return freezeShadow({
+    component_id, operator_id, authority_state: "not_applicable" as const,
+    envelope: { state: "not_applicable" as const }
+  });
+  const state = productionSubjectComponentState(component_id, entry);
+  return freezeShadow({
+    component_id,
+    operator_id,
+    authority_state: state === "available" ? "evaluated" as const : state,
+    envelope: state === "available"
+      ? { state: "observed" as const, value: score() }
+      : { state: "not_observed" as const, reason: "not_run" as const }
+  });
+}
+
+function productionSubjectComponentState(
+  component: "preference" | "self_reference",
+  entry: Readonly<MemoryEntry>
+): "available" | "disabled" | "untrusted" | "not_run" {
+  if (!recallProjectionScoringEnabled()) return "disabled";
+  if (!isTrustedPreferenceProfileOwner(entry)) return "untrusted";
+  if (component === "preference" && entry.preference_object == null &&
+      entry.preference_category == null && entry.preference_polarity == null) {
+    return "not_run";
+  }
+  return "available";
 }
 
 function temporalObservation(input: {
@@ -402,8 +425,4 @@ function liveQueryId(probes: Readonly<RecallQueryProbes>): string {
 function parseEventTime(value: string | null | undefined): string | null {
   if (value === null || value === undefined || value.length === 0) return null;
   return Number.isFinite(Date.parse(value)) ? value : null;
-}
-
-function isMergeLane(lane: string): lane is FtsLaneId {
-  return FTS_LANE_IDS.some((id) => id === lane);
 }

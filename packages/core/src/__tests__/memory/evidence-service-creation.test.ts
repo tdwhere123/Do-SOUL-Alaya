@@ -56,7 +56,8 @@ describe("EvidenceService creation", () => {
         status: "formed",
         producer_operator_id: "structured_open_semantic_factor_v1",
         graph: expect.objectContaining({ source_kind: "evidence" })
-      })
+      }),
+      expect.objectContaining({ status: "certified" })
     );
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
   });
@@ -151,6 +152,7 @@ describe("EvidenceService creation", () => {
       created,
       [],
       expect.anything(),
+      expect.anything(),
       expect.anything()
     );
     expect(warn).toHaveBeenCalledWith(
@@ -168,7 +170,7 @@ function semanticGraph(_source: string) {
       factor("actor", "I", 0, 1, "speaker"),
       factor("predicate", "use", 2, 5, "use"),
       factor("object", "Atlas", 6, 11, "atlas"),
-      factor("purpose", "research", 16, 24, "research")
+      factor("purpose", "for research", 12, 24, "research")
     ],
     variables: [],
     result_variable_ids: [],
@@ -178,10 +180,10 @@ function semanticGraph(_source: string) {
       arguments: [
         { position: 0, binding_identity: "agent", reference_kind: "factor" as const,
           reference_id: "actor" },
-        { position: 1, binding_identity: "object", reference_kind: "factor" as const,
-          reference_id: "object" },
-        { position: 2, binding_identity: "purpose", reference_kind: "factor" as const,
-          reference_id: "purpose" }
+        { position: 1, binding_identity: "purpose", reference_kind: "factor" as const,
+          reference_id: "purpose" },
+        { position: 2, binding_identity: "object", reference_kind: "factor" as const,
+          reference_id: "object" }
       ]
     }]
   };

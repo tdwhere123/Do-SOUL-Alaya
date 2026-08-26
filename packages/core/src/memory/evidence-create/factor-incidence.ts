@@ -14,6 +14,11 @@ import {
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import type { FieldFormationStores } from "./field-stores.js";
+import {
+  EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+  verifyEvidenceSemanticCompletenessReceipt,
+  type EvidenceOsfSemanticCompletenessReceipt
+} from "./evidence-semantic-completeness.js";
 
 export function createFactorIncidencePort(input: Readonly<{
   readonly sha256: FieldContractSha256;
@@ -69,13 +74,23 @@ export function persistSemanticFormationReceipt(input: Readonly<{
   readonly evidence_object_id: string;
   readonly recorded_at: string;
   readonly capture: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly factFrame: Parameters<typeof verifyEvidenceSemanticCompletenessReceipt>[0]["factFrame"];
+  readonly sourceText: string;
+  readonly semanticCompleteness: Readonly<EvidenceOsfSemanticCompletenessReceipt>;
 }>): DerivationJobReceipt | null {
   const producer = input.capture.producer_operator_id;
-  if (input.capture.status !== "formed" || producer === null) return null;
+  if (input.capture.status !== "formed" || producer === null ||
+      input.semanticCompleteness.status !== "certified") return null;
+  verifyEvidenceSemanticCompletenessReceipt({
+    receipt: input.semanticCompleteness,
+    sourceText: input.sourceText,
+    factFrame: input.factFrame,
+    semanticFormation: input.capture
+  });
   const evidenceIds = Object.freeze([input.evidence_object_id]);
   const identityInput = {
     purpose: "f3_semantic_capture",
-    operator_id: producer,
+    operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
     input_evidence_ids: evidenceIds
   };
   return input.incidence.nominateJob({
@@ -90,7 +105,7 @@ export function persistSemanticFormationReceipt(input: Readonly<{
     workspace_id: input.workspace_id,
     ...identityInput,
     status: "succeeded",
-    disposition: input.capture.capture_digest,
+    disposition: input.semanticCompleteness.receipt_digest,
     recorded_at: input.recorded_at
   });
 }

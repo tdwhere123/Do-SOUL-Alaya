@@ -27,6 +27,10 @@ import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import { emitDeterministicIncidences } from "./factor-emit.js";
 import {
+  certifyEvidenceSemanticCompleteness,
+  type EvidenceOsfSemanticCompletenessReceipt
+} from "./evidence-semantic-completeness.js";
+import {
   persistSemanticFormationReceipt,
   persistDescriptors,
   persistIncidences
@@ -43,6 +47,7 @@ export interface EvidenceFormationPlan {
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
   readonly factFrameCapture: Readonly<EvidenceFactFrameFormationCapture>;
   readonly semanticFormation: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly semanticCompleteness: Readonly<EvidenceOsfSemanticCompletenessReceipt>;
 }
 
 export interface EvidenceFieldFormationPorts {
@@ -91,14 +96,21 @@ function planFormationViews(input: Readonly<{
       : input.factFrameProposalNormalizer,
     ...(input.factFrameProposal === undefined ? {} : { proposal: input.factFrameProposal })
   });
+  const semantic = materializeOpenSemanticFactorFormation({
+    source_kind: "evidence",
+    source_text: input.evidence.excerpt,
+    ...semanticFormationInput(input.semanticFactorProposal)
+  });
+  const certified = certifyEvidenceSemanticCompleteness({
+    sourceText: input.evidence.excerpt ?? "",
+    factFrame: factFrame.capture,
+    semanticFormation: semantic
+  });
   return {
     searchProjections: Object.freeze([...supplied, ...factFrame.searchProjections]),
     factFrameCapture: factFrame.capture,
-    semanticFormation: materializeOpenSemanticFactorFormation({
-      source_kind: "evidence",
-      source_text: input.evidence.excerpt,
-      ...semanticFormationInput(input.semanticFactorProposal)
-    })
+    semanticFormation: certified.semanticFormation,
+    semanticCompleteness: certified.receipt
   };
 }
 
@@ -201,7 +213,9 @@ function persistFactorFormation(
     valid_to: request.valid_to,
     spans: source.spans,
     factFrameSlots: input.views.factFrameCapture.fact_frame?.slots ?? [],
-    semanticSurfaces: semanticSurfacesOf(input.views.semanticFormation)
+    semanticSurfaces: input.views.semanticCompleteness.status === "certified"
+      ? semanticSurfacesOf(input.views.semanticFormation)
+      : []
   });
   persistDescriptors(input.fieldStores, emitted.factors);
   persistIncidences(input.factorIncidence, emitted.incidences);
@@ -211,7 +225,10 @@ function persistFactorFormation(
     workspace_id: input.evidence.workspace_id,
     evidence_object_id: input.evidence.object_id,
     recorded_at: input.evidence.created_at,
-    capture: input.views.semanticFormation
+    capture: input.views.semanticFormation,
+    sourceText: input.evidence.excerpt ?? "",
+    factFrame: input.views.factFrameCapture,
+    semanticCompleteness: input.views.semanticCompleteness
   });
 }
 

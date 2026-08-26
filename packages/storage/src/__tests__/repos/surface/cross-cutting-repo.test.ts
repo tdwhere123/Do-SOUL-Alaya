@@ -51,7 +51,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(9);
+    expect(migration?.version).toBe(10);
   });
 
   it("creates and finds permission by object_id and permission_id", async () => {

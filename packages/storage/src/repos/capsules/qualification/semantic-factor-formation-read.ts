@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import {
+  EvidenceOsfSemanticCompletenessReceiptSchema,
+  verifyEvidenceOsfSemanticCompleteness,
   verifyOpenSemanticFactorFormationCapture,
+  type EvidenceFactFrameFormationCapture,
   type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 
@@ -13,12 +16,14 @@ export interface StoredSemanticFactorFormationColumns {
   readonly semantic_formation_source_sha256: string | null;
   readonly semantic_formation_graph_json: string | null;
   readonly semantic_formation_capture_digest: string | null;
+  readonly semantic_completeness_json: string | null;
 }
 
 export function readStoredSemanticFactorFormation(
   row: Readonly<StoredSemanticFactorFormationColumns>,
   expectedWorkspaceId: string,
-  expectedSourceText: string | null
+  expectedSourceText: string | null,
+  factFrame: Readonly<EvidenceFactFrameFormationCapture> | undefined
 ): Readonly<OpenSemanticFactorFormationCapture> | undefined {
   if (row.semantic_formation_operator_id === null) return undefined;
   if (row.semantic_formation_workspace_id !== expectedWorkspaceId) {
@@ -40,7 +45,36 @@ export function readStoredSemanticFactorFormation(
       capture.source_sha256 !== sourceDigest(expectedSourceText)) {
     throw new Error("semantic factor formation source does not match its evidence");
   }
+  if (capture.status === "formed" && !hasCertifiedCompleteness(
+    row, capture, factFrame, expectedSourceText
+  )) {
+    return undefined;
+  }
   return capture;
+}
+
+function hasCertifiedCompleteness(
+  row: Readonly<StoredSemanticFactorFormationColumns>,
+  capture: Readonly<OpenSemanticFactorFormationCapture>,
+  factFrame: Readonly<EvidenceFactFrameFormationCapture> | undefined,
+  sourceText: string | null
+): boolean {
+  if (row.semantic_completeness_json === null || factFrame?.status !== "formed" ||
+      sourceText === null) return false;
+  try {
+    verifyEvidenceOsfSemanticCompleteness({
+      receipt: EvidenceOsfSemanticCompletenessReceiptSchema.parse(
+        JSON.parse(row.semantic_completeness_json) as unknown
+      ),
+      source_text: sourceText,
+      fact_frame: factFrame,
+      semantic_formation: capture,
+      sha256
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseGraph(value: string | null): unknown {

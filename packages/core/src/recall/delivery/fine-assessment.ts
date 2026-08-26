@@ -70,6 +70,9 @@ export interface FineAssessParams {
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
+  readonly diagnosticObserver?: (
+    capture: FineAssessmentDiagnosticCapture
+  ) => undefined;
   readonly generation_id?: string;
   readonly condition_digest?: string;
   readonly captureShadowTrace?: boolean;
@@ -80,6 +83,11 @@ export interface FineAssessParams {
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
 }
+
+export type FineAssessmentDiagnosticCapture = Readonly<{
+  readonly supplementaryData: RecallSupplementaryData;
+  readonly result: FineAssessResult;
+}>;
 
 export type FineAssessmentPreparation = Readonly<{
   readonly candidates: readonly FineAssessmentCandidate[];
@@ -92,7 +100,9 @@ export type FineAssessmentPreparation = Readonly<{
 
 export type FineAssessResult = Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly diagnostics: readonly Readonly<
+    import("../runtime/recall-service-types.js").RecallFineAssessmentCandidateDiagnostic
+  >[];
   readonly coverageSelectionObjective: CoverageSelectionObjectiveReceipt;
   readonly fieldRefinementStopCertificate?:
     Readonly<RecallFieldRefinementStopCertificate>;
@@ -110,14 +120,30 @@ export type FineAssessResult = Readonly<{
     readonly digest: string;
   }>;
   readonly ranking_authority: "d0_prefix" | "select_gamma";
+  readonly d0_execution?: Readonly<import("@do-soul/alaya-protocol").D0Execution>;
+  readonly d0_receipt?: Readonly<
+    import("../shadow/canonical-delivery.js").CanonicalD0SelectionReceipt
+  >;
   readonly shadowTrace?: FineAssessmentShadowTrace;
 }>;
 
 export function fineAssess(params: FineAssessParams): FineAssessResult {
-  if (resolveFineAssessmentDeliveryPath(params.policy.fine_assessment) === "canonical") {
-    return deliverCanonicalFineAssessment(params);
+  const result = resolveFineAssessmentDeliveryPath(params.policy.fine_assessment) === "canonical"
+    ? deliverCanonicalFineAssessment(params)
+    : deliverLegacyFineAssessment(params);
+  notifyDiagnosticObserver(params, result);
+  return result;
+}
+
+function notifyDiagnosticObserver(params: FineAssessParams, result: FineAssessResult): void {
+  try {
+    params.diagnosticObserver?.(Object.freeze({
+      supplementaryData: params.supplementaryData,
+      result
+    }));
+  } catch {
+    // Diagnostics are an observation sidecar and cannot own recall delivery.
   }
-  return deliverLegacyFineAssessment(params);
 }
 
 function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult {

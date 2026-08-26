@@ -25,7 +25,7 @@ describe("evidence recall embedding storage", () => {
     seedEvidence(database);
 
     expect(storage.SqliteEvidenceRecallEmbeddingRepo).toBeTypeOf("function");
-    expect(database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").pluck().all()).toEqual([9]);
+    expect(database.connection.prepare("SELECT MAX(version) AS version FROM schema_version").pluck().all()).toEqual([10]);
     expect(await repo.listSourcesByWorkspace("workspace-1")).toEqual([
       expect.objectContaining({
         ownerObjectId: "evidence-1",

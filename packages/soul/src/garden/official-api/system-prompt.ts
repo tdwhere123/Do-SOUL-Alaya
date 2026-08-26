@@ -17,6 +17,12 @@ const ENVELOPE_PROMPT_PARTS = Object.freeze([
   'A signal without semantic_factor_graph is invalid. object_kind is bounded routing metadata only; it is not a semantic role or an ontology.'
 ]);
 
+const CURRENT_ENVELOPE_PROMPT_PARTS = Object.freeze([
+  ...ENVELOPE_PROMPT_PARTS.slice(0, -2),
+  'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", "fact_frame", and "semantic_factor_graph".',
+  'A signal without both a complete fact_frame and semantic_factor_graph is invalid. object_kind is bounded routing metadata only; it is not a semantic role or an ontology.'
+]);
+
 const HISTORICAL_ENVELOPE_PROMPT_PARTS = Object.freeze([
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
@@ -109,6 +115,11 @@ const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ]);
 
+const CURRENT_OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
+  ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
+  'fact_frame and semantic_factor_graph must describe the same complete proposition: one relation/predicate and every explicit participant in identical argument order; never omit either representation.'
+]);
+
 const FINAL_PROMPT_PARTS = Object.freeze([
   "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
   "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
@@ -147,11 +158,11 @@ const HISTORICAL_PROMPT_C3D83273_SHA256 =
   "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
 
 export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
-  ...ENVELOPE_PROMPT_PARTS,
+  ...CURRENT_ENVELOPE_PROMPT_PARTS,
   ...CURRENT_CONFIDENCE_PROMPT_PARTS,
   ...GROUNDED_SIGNAL_PROMPT_PARTS,
   ...DURABLE_PROJECTION_PROMPT_PARTS,
-  ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
+  ...CURRENT_OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
   ...KIND_PROJECTION_PROMPT_PARTS,
   ...FINAL_PROMPT_PARTS
 ]);

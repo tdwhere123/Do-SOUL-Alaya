@@ -10,6 +10,10 @@ import {
   ShadowContractError,
   type ShadowEnvelope
 } from "./envelope.js";
+import {
+  parseSubjectComponent,
+  SUBJECT_COMPONENT_IDS
+} from "./observe/subject-authority.js";
 
 export const SHADOW_LINEAGE_IDS = [
   "lexical", "embedding", "temporal", "subject_preference"
@@ -73,6 +77,7 @@ export type ShadowTemporalEvaluator = Readonly<{
 export type ShadowSubjectComponent = Readonly<{
   readonly component_id: ShadowSubjectComponentId;
   readonly operator_id: string;
+  readonly authority_state: "not_applicable" | "disabled" | "untrusted" | "not_run" | "evaluated";
   readonly envelope: ShadowEnvelope;
 }>;
 export type ShadowLexicalObservation = Readonly<{
@@ -111,9 +116,6 @@ export type ShadowPointwiseObservation =
   | ShadowSubjectObservation;
 
 const LEX_LANE_SET: ReadonlySet<string> = new Set(LEX_LANE_IDS);
-const SUBJECT_COMPONENT_IDS: ReadonlySet<string> = new Set([
-  "preference", "self_reference"
-]);
 
 export function lexDomainsEqual(left: LexDomain, right: LexDomain): boolean {
   return left.lane_id === right.lane_id && left.list_n === right.list_n &&
@@ -378,20 +380,6 @@ function parseSubjectObservation(input: Record<string, unknown>): ShadowSubjectO
     envelope,
     domain: parseSubjDomain(input.domain, components),
     components
-  });
-}
-
-function parseSubjectComponent(input: unknown): ShadowSubjectComponent {
-  const record = requireShadowRecord(input, "subject component");
-  assertAllowedKeys(record, ["component_id", "operator_id", "envelope"]);
-  if (typeof record.component_id !== "string" ||
-      !SUBJECT_COMPONENT_IDS.has(record.component_id)) {
-    throw new ShadowContractError("invalid subject component");
-  }
-  return freezeShadow({
-    component_id: record.component_id as ShadowSubjectComponentId,
-    operator_id: requireNonemptyString(record.operator_id, "operator_id"),
-    envelope: parseShadowEnvelope(record.envelope)
   });
 }
 

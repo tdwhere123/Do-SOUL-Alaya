@@ -21,6 +21,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 import { requireAt } from "../helpers/defined.js";
 
 function createTaskSurface(): TaskObjectSurface {
@@ -110,6 +111,7 @@ function createDependencies(
 
   return {
     dependencies: {
+      defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
       testOnlyAllowInMemoryFieldQuerySession: true,
       fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
         fieldContractSha256,

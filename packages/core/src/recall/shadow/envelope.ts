@@ -25,6 +25,7 @@ export type ShadowNotObservedReason =
   | "missing_event_time"
   | "unparseable_window"
   | "missing_vector"
+  | "missing_authority"
   | "absent_from_list";
 
 export type ShadowRequiredMissingWitnesses = Readonly<{
@@ -90,6 +91,7 @@ const NOT_OBSERVED_REASONS: ReadonlySet<string> = new Set([
   "missing_event_time",
   "unparseable_window",
   "missing_vector",
+  "missing_authority",
   "absent_from_list"
 ]);
 

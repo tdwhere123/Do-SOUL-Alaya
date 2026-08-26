@@ -36,7 +36,7 @@ describe("Memory embedding storage repo", () => {
       .all() as ReadonlyArray<{ readonly version: number }>;
     const columns = getColumnNames(database, "memory_embeddings");
 
-    expect(versions.map((entry) => entry.version)).toEqual([9]);
+    expect(versions.map((entry) => entry.version)).toEqual([10]);
     expect(columns).toEqual([
       "object_id",
       "workspace_id",

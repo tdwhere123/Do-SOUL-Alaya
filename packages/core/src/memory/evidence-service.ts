@@ -59,6 +59,8 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
+      .EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;

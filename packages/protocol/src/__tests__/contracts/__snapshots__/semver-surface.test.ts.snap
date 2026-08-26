@@ -72,7 +72,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#4da2b41
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#64cb79e
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a36fda8|enum=cold_cascade_engaged|no_stored_vectors|provider_failed|provider_missing|provider_unavailable|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,source_observed_at,time_field,until)#c5070a3
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,protocol_version,results,strategy_mix,total_count)#aae5d68
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,d0_execution,d0_identity,degradation_reason,delivery_id,delivery_path,protocol_version,ranking_authority,results,strategy_mix,total_count)#699cd3d
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#e9b7fcd
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#4d23f8a
@@ -191,7 +191,7 @@ evt:project-mapping.ts#SoulProjectMappingStateChangedPayloadSchema(accepted_by,f
 evt:project-mapping.ts#SoulProjectMappingSuggestedPayloadSchema(global_object_id,initial_state,mapping_id,suggested_at,workspace_id)#6034324
 evt:recall-context.ts#SoulContextLensAssembledPayloadSchema(lens_entry_count,occurred_at,run_id,runtime_id,task_surface_ref,total_token_estimate,workspace_id)#25e4bb5
 evt:recall-context.ts#SoulContextUsageReportedPayloadSchema(agent_target,delivery_id,occurred_at,run_id,session_id,trust_mode,usage_state,workspace_id)#ce0afb6
-evt:recall-context.ts#SoulRecallCompletedPayloadSchema(coarse_filter_count,fine_assessment_count,node_strategy,occurred_at,task_surface_ref,total_scanned,workspace_id)#443c9c2
+evt:recall-context.ts#SoulRecallCompletedPayloadSchema(coarse_filter_count,d0_execution,d0_identity,delivery_path,fine_assessment_count,node_strategy,occurred_at,ranking_authority,task_surface_ref,total_scanned,workspace_id)#705cfc4
 evt:recall-context.ts#SoulRecallDeliveredPayloadSchema(agent_target,delivery_id,latency_ms,occurred_at,pointer_count,query_hash,run_id,session_id,workspace_id)#4347223
 evt:recall-context.ts#SoulRecallWeightTransferPayloadSchema(cold_score,occurred_at,recalls_edge_count,recalls_threshold,run_id,transferred_amount,workspace_id)#fd9970e
 evt:recall-context.ts#SoulSingleUsedAnchorPayloadSchema(agent_target,delivery_id,occurred_at,run_id,session_id,used_anchor_object_id,workspace_id)#325bb37

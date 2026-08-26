@@ -322,11 +322,19 @@ describe("resolveMcpDegradationReason", () => {
         algorithm_id: "alaya.recall.shadow.d0.safe-dominance-capture.v1",
         version: "d0.safe-dominance-capture.v1.0.0",
         digest: "8f287df50610b28a3b40921b9bce765164794d6d4afd17c246e6807e768773fa"
+      },
+      d0_execution: {
+        status: "fail_closed",
+        reason: "psi_cycle_contract_failure"
       }
     });
     expect(parsed.ranking_authority).toBe("d0_prefix");
     expect(parsed.delivery_path).toBe("canonical");
     expect(parsed.results).toEqual([]);
+    expect(parsed.d0_execution).toEqual({
+      status: "fail_closed",
+      reason: "psi_cycle_contract_failure"
+    });
   });
 
   it("emits schema-valid SoulMemorySearchResponse degradation_reason values", () => {

@@ -9,8 +9,56 @@ import type { LongMemEvalQuestionDiagnostic } from
   "../../../../../bench/diagnostics/schema/diagnostics-types.js";
 import type { QuestionStageRow } from
   "../../../../../bench/diagnostics/stage-attribution/types.js";
+import { controlCanaryDiagnostics, passingTreatmentCanaryDiagnostics } from
+  "../../../diagnostic-loop/gate7-canary-arm-diagnostics.js";
 
 describe("treatment exposure receipt v4", () => {
+  it("distinguishes observed empty canonical attribution from a missing receipt", () => {
+    const treatment = passingTreatmentCanaryDiagnostics()[1]!;
+    const questionId = treatment.question_id;
+    const control = controlCanaryDiagnostics()[1]!;
+    expect(treatment.open_semantic_factor_candidate_activations).toEqual([]);
+    expect(treatment.open_semantic_factor_compatibility_trace?.query_capture_digest)
+      .toBe(treatment.query_open_semantic_factor_formation?.capture_digest);
+    expect(treatment.open_semantic_factor_composition?.compatibility_trace_digest)
+      .toBe(treatment.open_semantic_factor_compatibility_trace?.trace_digest);
+    expect(treatment.open_semantic_factor_activation?.composition_receipt_digest)
+      .toBe(treatment.open_semantic_factor_composition?.receipt_digest);
+    const [observed] = buildTreatmentExposureReceipts({
+      control: [control], treatment: [treatment],
+      controlStages: [stage(questionId, false)],
+      treatmentStages: [stage(questionId, false)]
+    });
+    const missingTreatment = { ...treatment } as Record<string, unknown>;
+    delete missingTreatment.open_semantic_factor_candidate_activations;
+    const [missing] = buildTreatmentExposureReceipts({
+      control: [control], treatment: [missingTreatment as LongMemEvalQuestionDiagnostic],
+      controlStages: [stage(questionId, false)],
+      treatmentStages: [stage(questionId, false)]
+    });
+
+    expect(observed?.exposure_status).toBe("not_exercised");
+    expect(observed?.evidence_chain.linked).toBe(true);
+    expect(missing?.exposure_status).toBe("inconclusive");
+    expect(missing?.evidence_chain.linked).toBe(false);
+  });
+
+  it("makes canonical exposure inconclusive without its instance D0 digest", () => {
+    const treatment = {
+      ...passingTreatmentCanaryDiagnostics()[1]!,
+      ranking_authority: "d0_prefix" as const
+    };
+    const control = controlCanaryDiagnostics()[1]!;
+    const questionId = treatment.question_id;
+    const [receipt] = buildTreatmentExposureReceipts({
+      control: [control], treatment: [treatment],
+      controlStages: [stage(questionId, false)],
+      treatmentStages: [stage(questionId, false)]
+    });
+    expect(receipt?.d0_receipt_digest).toBeNull();
+    expect(receipt?.exposure_status).toBe("inconclusive");
+  });
+
   it("observes delivered Top-5 churn when both truncated pools still have a final ranking", () => {
     const control = arm({
       questionId: "q3",
@@ -322,6 +370,28 @@ describe("treatment exposure receipt v4", () => {
       membership_delta: {
         ...body.membership_delta,
         added_candidate_keys: ["candidate:c", "candidate:a"]
+      }
+    } as never);
+
+    expect(() => assertTreatmentExposureReceipt(resealed))
+      .toThrow(/treatment exposure receipt/u);
+  });
+
+  it("rejects candidate attribution bound to another D0 receipt instance", () => {
+    const [original] = buildTreatmentExposureReceipts({
+      control: [],
+      treatment: [arm({ questionId: "q-mixed-d0", poolComplete: true, topFive: [] })],
+      controlStages: [stage("q-mixed-d0", false)],
+      treatmentStages: [stage("q-mixed-d0", false)]
+    });
+    const { receipt_digest: _digest, ...body } = original!;
+    const resealed = sealTreatmentExposureReceipt({
+      ...body,
+      ranking_authority: "d0_prefix",
+      d0_receipt_digest: `sha256:${"a".repeat(64)}`,
+      candidate_attribution: {
+        ...body.candidate_attribution,
+        d0_receipt_digest: `sha256:${"b".repeat(64)}`
       }
     } as never);
 

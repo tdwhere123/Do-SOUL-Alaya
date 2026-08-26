@@ -159,11 +159,13 @@ describe("shadow observations", () => {
     const negative: ShadowSubjectComponent = {
       component_id: "preference",
       operator_id: "scorePreferenceProfileAlignment",
+      authority_state: "evaluated",
       envelope: { state: "observed_negative", named_consumer: "h_event" }
     };
     const unknown: ShadowSubjectComponent = {
       component_id: "self_reference",
       operator_id: "scoreSubjectAlignment",
+      authority_state: "not_run",
       envelope: { state: "not_observed", reason: "not_run" }
     };
     expect(combineSubjectComponentEnvelopes([negative, unknown]).state)
@@ -184,11 +186,13 @@ describe("shadow observations", () => {
     const preference: ShadowSubjectComponent = {
       component_id: "preference",
       operator_id: "scorePreferenceProfileAlignment",
+      authority_state: "not_run",
       envelope: { state: "not_observed", reason: "not_run" }
     };
     const selfRef: ShadowSubjectComponent = {
       component_id: "self_reference",
       operator_id: "scoreSubjectAlignment",
+      authority_state: "evaluated",
       envelope: { state: "observed", value: 1 }
     };
     expect(combineSubjectComponentEnvelopes([preference, selfRef]).state)
@@ -201,11 +205,13 @@ describe("shadow observations", () => {
     const selfRef: ShadowSubjectComponent = {
       component_id: "self_reference",
       operator_id: "scoreSubjectAlignment",
+      authority_state: "evaluated",
       envelope: { state: "observed", value: 0.55 }
     };
     const off: ShadowSubjectComponent = {
       component_id: "preference",
       operator_id: "scorePreferenceProfileAlignment",
+      authority_state: "not_applicable",
       envelope: { state: "not_applicable" }
     };
     const parsed = subject({ state: "observed", value: 0.55 }, [off, selfRef]);

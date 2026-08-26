@@ -168,12 +168,19 @@ export function subjectComponent(
   componentId: ShadowSubjectComponent["component_id"],
   envelope: unknown
 ): ShadowSubjectComponent {
+  const parsedEnvelope = parseShadowEnvelope(envelope);
   return {
     component_id: componentId,
     operator_id: componentId === "preference"
       ? "scorePreferenceProfileAlignment"
       : "scoreSubjectAlignment",
-    envelope: parseShadowEnvelope(envelope)
+    authority_state: parsedEnvelope.state === "observed" ||
+      parsedEnvelope.state === "observed_negative"
+      ? "evaluated"
+      : parsedEnvelope.state === "not_applicable"
+        ? "not_applicable"
+        : parsedEnvelope.state === "producer_unavailable" ? "untrusted" : "not_run",
+    envelope: parsedEnvelope
   };
 }
 

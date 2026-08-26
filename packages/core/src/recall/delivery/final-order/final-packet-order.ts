@@ -6,16 +6,16 @@ import {
   buildRecallBudgetState,
   buildRecallCandidateSelectionKey
 } from "../../runtime/recall-candidate-builder.js";
-import type { RecallCandidateDiagnostic } from
+import type { RecallFineAssessmentCandidateDiagnostic } from
   "../../runtime/recall-service-types.js";
 
 export function materializeFinalPacket(
   candidates: readonly Readonly<RecallCandidate>[],
-  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[],
+  diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[],
   budgets: Readonly<RecallPolicy>["fine_assessment"]["budgets"]
 ): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
 }> {
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
@@ -38,9 +38,9 @@ export function materializeFinalPacket(
 }
 
 function updateFinalRanks(
-  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[],
+  diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[],
   finalRankByKey: ReadonlyMap<string, number>
-): readonly Readonly<RecallCandidateDiagnostic>[] {
+): readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[] {
   return Object.freeze(diagnostics.map((row) => {
     const finalRank = finalRankByKey.get(row.candidate_key) ?? null;
     return Object.freeze({ ...row, final_rank: finalRank, post_rank: finalRank });

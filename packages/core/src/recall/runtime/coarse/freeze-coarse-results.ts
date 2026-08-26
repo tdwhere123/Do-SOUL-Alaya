@@ -1,4 +1,5 @@
 import type { CoarseRecallCandidate } from "../recall-service-types.js";
+import { buildRecallCandidateDedupeKey } from "../recall-service-helpers.js";
 
 export function freezeLexicalCoarseWithWarm<TLexical extends {
   readonly recallPhaseStart: number;
@@ -62,6 +63,7 @@ export function freezeCoarseStageResult<
   readonly globalCoarseFilter: TLexical["globalCoarseFilter"];
   readonly globalRecallClassifications: TLexical["globalRecallClassifications"];
   readonly combinedCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly e0CandidateKeys: readonly string[];
   readonly embeddingCoarseInjection: TInjection;
 }> {
   return Object.freeze({
@@ -75,6 +77,9 @@ export function freezeCoarseStageResult<
     combinedCoarseCandidates: combineEmbeddingInjection(
       lexical.lexicalCoarseCandidates,
       embeddingCoarseInjection.candidates
+    ),
+    e0CandidateKeys: Object.freeze(
+      lexical.lexicalCoarseCandidates.map(buildRecallCandidateDedupeKey)
     ),
     embeddingCoarseInjection
   });

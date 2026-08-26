@@ -33,6 +33,7 @@ import {
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
 
 
 const databases = new Set<StorageDatabase>();
@@ -236,6 +237,7 @@ function buildRecallService(params: {
   );
 
   const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
+    defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
     testOnlyAllowInMemoryFieldQuerySession: true,
     fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WS),
     now: () => "2026-05-16T00:00:00.000Z",

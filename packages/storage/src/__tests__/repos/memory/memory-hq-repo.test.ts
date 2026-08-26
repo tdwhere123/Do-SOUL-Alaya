@@ -87,7 +87,7 @@ describe("Memory HQ storage repo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .all() as ReadonlyArray<{ readonly version: number }>;
 
-    expect(versions.map((entry) => entry.version)).toEqual([9]);
+    expect(versions.map((entry) => entry.version)).toEqual([10]);
     expect(getColumnNames(database, "memory_hq")).toEqual([
       "object_id",
       "workspace_id",

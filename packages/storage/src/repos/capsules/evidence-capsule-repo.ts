@@ -142,6 +142,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
     factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
     semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
+      .EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
     const formationInsert = prepareFactFrameFormationInsert(
@@ -151,7 +153,9 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     );
     const semanticFormationInsert = prepareSemanticFactorFormationInsert(
       parsedCapsule,
-      semanticFactorFormation
+      semanticFactorFormation,
+      semanticCompleteness,
+      factFrameFormation
     );
 
     try {

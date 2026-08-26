@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
+  EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
   buildAssociativeFactKeyProjections,
+  evidenceOsfSemanticCompletenessPreimage,
   evidenceFactFrameFormationCapturePreimage,
   groundOpenSemanticFactorGraph,
   openSemanticFactorFormationCapturePreimage,
@@ -10,6 +12,7 @@ import {
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
   type EvidenceFactFrameFormationCaptureBody,
+  type EvidenceOsfSemanticCompletenessReceipt,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationCaptureBody
 } from "@do-soul/alaya-protocol";
@@ -85,7 +88,9 @@ describe("verified assertion evidence qualification", () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("cccccccc-1111-4111-8111-cccccccccccc");
     const semanticFormation = semanticFactorFormationCapture();
-    await repo.create(capsule, [], undefined, semanticFormation);
+    const factFrame = factFrameFormationCapture(capsule);
+    await repo.create(capsule, buildAssociativeFactKeyProjections(FACT_FRAME), factFrame, semanticFormation,
+      semanticCompletenessReceipt(factFrame, semanticFormation));
     await persistAssertionProof(database, capsule);
 
     await expect(repo.findRecallQualifiedByIds(
@@ -117,10 +122,33 @@ describe("verified assertion evidence qualification", () => {
     expect(semanticFormation.status).toBe("rejected");
   });
 
+  it("does not qualify a legacy formed graph without a completeness receipt", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("cccccccc-4444-4444-8444-cccccccccccc");
+    const factFrame = factFrameFormationCapture(capsule);
+    const semantic = semanticFactorFormationCapture();
+    await repo.create(capsule, buildAssociativeFactKeyProjections(FACT_FRAME), factFrame,
+      semantic, semanticCompletenessReceipt(factFrame, semantic));
+    database.connection.prepare(`
+      UPDATE evidence_semantic_factor_formations
+      SET semantic_completeness_json = NULL
+      WHERE evidence_object_id = ?
+    `).run(capsule.object_id);
+    await persistAssertionProof(database, capsule);
+
+    const [qualified] = await repo.findRecallQualifiedByIds(
+      "workspace-1", [ownerMatch(capsule.object_id)]
+    );
+    expect(qualified?.semantic_factor_formation).toBeUndefined();
+  });
+
   it("fails closed when the semantic factor formation receipt is corrupt", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("cccccccc-2222-4222-8222-cccccccccccc");
-    await repo.create(capsule, [], undefined, semanticFactorFormationCapture());
+    const factFrame = factFrameFormationCapture(capsule);
+    const semantic = semanticFactorFormationCapture();
+    await repo.create(capsule, buildAssociativeFactKeyProjections(FACT_FRAME), factFrame,
+      semantic, semanticCompletenessReceipt(factFrame, semantic));
     database.connection.prepare(`
       UPDATE evidence_semantic_factor_formations
       SET capture_digest = ?
@@ -340,7 +368,7 @@ function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
       factor("actor", "I", 0, 1, "speaker"),
       factor("predicate", "bought", 2, 8, "buy"),
       factor("object", "my bookshelf", 9, 21, "bookshelf"),
-      factor("source", "IKEA", 27, 31, "ikea")
+      factor("source", "from IKEA", 22, 31, "ikea")
     ],
     variables: [],
     result_variable_ids: [],
@@ -350,10 +378,10 @@ function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
       arguments: [
         { position: 0, binding_identity: "agent", reference_kind: "factor",
           reference_id: "actor" },
-        { position: 1, binding_identity: "object", reference_kind: "factor",
-          reference_id: "object" },
-        { position: 2, binding_identity: "source", reference_kind: "factor",
-          reference_id: "source" }
+        { position: 1, binding_identity: "source", reference_kind: "factor",
+          reference_id: "source" },
+        { position: 2, binding_identity: "object", reference_kind: "factor",
+          reference_id: "object" }
       ]
     }]
   }, ASSERTION);
@@ -367,6 +395,35 @@ function semanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {
     graph
   };
   return digestCapture(body);
+}
+
+function semanticCompletenessReceipt(
+  factFrame: EvidenceFactFrameFormationCapture,
+  semantic: OpenSemanticFactorFormationCapture
+): EvidenceOsfSemanticCompletenessReceipt {
+  const slot = (role: "subject" | "relation" | "value" | "qualifier",
+    surface: string, position: number | null) => ({
+    role, surface,
+    source_span: [ASSERTION.indexOf(surface), ASSERTION.indexOf(surface) + surface.length] as const,
+    position
+  });
+  const body = {
+    schema_version: 1 as const,
+    operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
+    status: "certified" as const,
+    reason_code: "complete" as const,
+    fact_frame_capture_digest: factFrame.capture_digest,
+    semantic_formation_capture_digest: semantic.capture_digest,
+    predicate: slot("relation", "bought", null),
+    arguments: [slot("subject", "I", 0), slot("qualifier", "from IKEA", 1),
+      slot("value", "my bookshelf", 2)],
+    arity: 3
+  };
+  return {
+    ...body,
+    receipt_digest: `sha256:${createHash("sha256")
+      .update(evidenceOsfSemanticCompletenessPreimage(body), "utf8").digest("hex")}`
+  };
 }
 
 function rejectedSemanticFactorFormationCapture(): OpenSemanticFactorFormationCapture {

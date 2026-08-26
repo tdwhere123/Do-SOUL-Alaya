@@ -17,7 +17,7 @@ import {
   type ShadowSetUtilityInput
 } from "./capture.js";
 import { shadowLineageApplicability } from "./demand.js";
-import { freezeShadow } from "./envelope.js";
+import { freezeShadow, ShadowContractError } from "./envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "./frontier-peel.js";
 import type { ShadowFrontierReceipt } from "./frontiers.js";
 import {
@@ -77,11 +77,7 @@ export function shadowC0Seam(
 
 export const SHADOW_C0_SEAM = shadowC0Seam("inactive");
 
-export type ShadowFailClosedReason =
-  | "psi_cycle_contract_failure"
-  | "invalid_state"
-  | "membership_shrink"
-  | "prefix_violation";
+export type ShadowFailClosedReason = import("@do-soul/alaya-protocol").D0ExecutionReason;
 
 export type ShadowIntegrateInput = Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -118,6 +114,12 @@ export type ShadowCapturedTrace = Readonly<{
   readonly admitted_lineages: typeof SHADOW_LINEAGE_IDS;
   readonly relational_o: "excluded";
   readonly eligible_keys: readonly string[];
+  readonly field_membership: Readonly<{
+    readonly e0_keys: readonly string[];
+    readonly e1_keys: readonly string[];
+  }>;
+  readonly observations_by_candidate_key: ShadowPsiObservationField;
+  readonly set_utilities: readonly ShadowSetUtilityInput[];
   readonly frontiers: ShadowFrontierReceipt;
   readonly S_infty: readonly string[];
   readonly prefix_proposal: readonly string[];
@@ -138,8 +140,11 @@ export function captureShadowIntegration(
 ): FineAssessmentShadowTrace {
   try {
     return runShadowIntegration(input);
-  } catch {
-    return failClosed("invalid_state", c0ActivationOf(input));
+  } catch (error) {
+    if (error instanceof ShadowContractError) {
+      return failClosed("invalid_state", c0ActivationOf(input));
+    }
+    throw error;
   }
 }
 
@@ -185,7 +190,7 @@ function resolveObservations(
   if (input.observationField !== undefined) {
     for (const key of keys) {
       if (input.observationField[key] === undefined) {
-        throw new Error("planted observation field missing substrate key");
+        throw new ShadowContractError("planted observation field missing substrate key");
       }
     }
     return input.observationField;
@@ -207,7 +212,7 @@ function honestObservationField(
   });
   for (const key of keys) {
     if (field[key] === undefined) {
-      throw new Error("live observation field missing substrate key");
+      throw new ShadowContractError("live observation field missing substrate key");
     }
   }
   return field;
@@ -276,9 +281,17 @@ function toWalkCandidate(
     token_cost: Number.isFinite(tokens) && tokens > 0 ? tokens : 1,
     dimension: candidate.entry.dimension,
     h_eligible: observations[key]?.h_gate === "none",
-    utility: input.utilitiesByKey?.get(key) ?? emptyUtility(key, objectKey),
+    utility: utilityForCandidate(input, key, objectKey),
     static_frontier_index: indexByKey.get(key) ?? null
   });
+}
+
+function utilityForCandidate(
+  input: ShadowIntegrateInput,
+  candidateKey: string,
+  objectKey: string
+): ShadowSetUtilityInput {
+  return input.utilitiesByKey?.get(candidateKey) ?? emptyUtility(candidateKey, objectKey);
 }
 
 function emptyUtility(candidateKey: string, objectKey: string): ShadowSetUtilityInput {
@@ -348,6 +361,19 @@ function assembleCaptured(
     admitted_lineages: SHADOW_LINEAGE_IDS,
     relational_o: "excluded" as const,
     eligible_keys: Object.freeze([...eligible]),
+    field_membership: freezeShadow({
+      e0_keys: Object.freeze([...(input.e0Keys ?? input.candidates.map(
+        buildRecallCandidateDedupeKey
+      ))]),
+      e1_keys: Object.freeze([...(input.e1Keys ?? input.candidates.map(
+        buildRecallCandidateDedupeKey
+      ))])
+    }),
+    observations_by_candidate_key: observations,
+    set_utilities: Object.freeze(input.candidates.map((candidate) => {
+      const key = buildRecallCandidateDedupeKey(candidate);
+      return utilityForCandidate(input, key, buildRecallLogicalObjectKey(candidate));
+    })),
     frontiers,
     S_infty: walked.S_infty,
     prefix_proposal: prefixSK(walked.S_infty, k),

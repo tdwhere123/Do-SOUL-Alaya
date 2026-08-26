@@ -149,9 +149,11 @@ function readWarmReceipt(
 }
 
 function observerFields(
-  first: Parameters<typeof combineSelectionBoundaryObservers>[0],
-  second: Parameters<typeof combineSelectionBoundaryObservers>[1]
+  selection: Parameters<typeof combineSelectionBoundaryObservers>[0],
+  diagnostic: ReturnType<typeof createCandidateActivationCapture>["observer"]
 ) {
-  const observer = combineSelectionBoundaryObservers(first, second);
-  return observer === undefined ? {} : { selectionBoundaryObserver: observer };
+  return {
+    ...(selection === undefined ? {} : { selectionBoundaryObserver: selection }),
+    ...(diagnostic === undefined ? {} : { diagnosticObserver: diagnostic })
+  };
 }
