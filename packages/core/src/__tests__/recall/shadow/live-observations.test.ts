@@ -164,6 +164,50 @@ describe("live shadow observations", () => {
     });
   });
 
+  it("projects direct evidence semantic scores as the candidate embedding observation", () => {
+    const domain = Object.freeze({
+      provider_kind: "local_onnx",
+      model_id: "model",
+      dimensions: 384,
+      schema_version: 1
+    });
+    const candidateKey = "workspace_local:evidence_capsule:cand-a";
+    const field = buildLiveObservationField(liveInput({
+      query: "operator workspace",
+      embedding_enabled: true,
+      objectKind: "evidence_capsule",
+      embeddingObservationDomain: domain,
+      evidenceSemanticActivationsByCandidateKey: new Map([[candidateKey, {
+        schema_version: 1,
+        operator_id: "evidence_document_max_v1",
+        state: "observed",
+        score: 0.73,
+        winner: {
+          score: 0.73,
+          evidenceObjectId: "cand-a",
+          documentIdentity: "owner",
+          contentHash: "evidence-hash",
+          projection: null
+        },
+        observations: [{
+          score: 0.73,
+          evidenceObjectId: "cand-a",
+          documentIdentity: "owner",
+          contentHash: "evidence-hash",
+          projection: null
+        }],
+        observation_completeness: "complete",
+        missing_channel_policy: "no_op"
+      }]])
+    }));
+    const embedding = field[candidateKey]?.lineages.embedding;
+    expect(embedding?.envelope).toEqual({ state: "observed", value: 0.73 });
+    expect(embedding && "snapshot" in embedding ? embedding.snapshot : null).toMatchObject({
+      domain,
+      content_hash: "evidence-hash"
+    });
+  });
+
   it("fails closed when an embedding score lacks its authoritative domain or hash", () => {
     const missing = buildLiveObservationField(liveInput({
       query: "operator workspace",
@@ -278,6 +322,9 @@ function liveInput(options: {
   readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
   readonly embeddingObservationDomain?: RecallSupplementaryData["embeddingObservationDomain"];
   readonly embeddingContentHashByObjectId?: Readonly<Record<string, string>>;
+  readonly evidenceSemanticActivationsByCandidateKey?:
+    RecallSupplementaryData["evidenceSemanticActivationsByCandidateKey"];
+  readonly objectKind?: CoarseRecallCandidate["objectKind"];
   readonly embedding_enabled?: boolean;
   readonly nowIso?: string;
   readonly eventTime?: string;
@@ -287,7 +334,7 @@ function liveInput(options: {
 }) {
   const ids = options.ids ?? ["cand-a"];
   const candidates = ids.map((objectId) =>
-    candidateOf(objectId, options.eventTime, options.entryOverrides));
+    candidateOf(objectId, options.eventTime, options.entryOverrides, options.objectKind));
   const policy = buildDefaultPolicy({
     strategy: "build",
     taskSurfaceRef: "task-surface-1",
@@ -312,7 +359,8 @@ function liveInput(options: {
       options.ftsRanks,
       options.embeddingSimilarityScores,
       options.embeddingObservationDomain,
-      options.embeddingContentHashByObjectId
+      options.embeddingContentHashByObjectId,
+      options.evidenceSemanticActivationsByCandidateKey
       ),
       ...(options.subjectHints === undefined ? {} : {
         queryProbes: {
@@ -337,7 +385,8 @@ function subjectIds(field: ReturnType<typeof buildLiveObservationField>) {
 function candidateOf(
   objectId: string,
   eventTime?: string,
-  overrides: Partial<MemoryEntry> = {}
+  overrides: Partial<MemoryEntry> = {},
+  objectKind?: CoarseRecallCandidate["objectKind"]
 ): CoarseRecallCandidate {
   return {
     entry: createMemoryEntry({
@@ -346,6 +395,7 @@ function candidateOf(
       ...overrides,
       ...(eventTime === undefined ? {} : { event_time_start: eventTime })
     }),
+    ...(objectKind === undefined ? {} : { objectKind }),
     admissionPlanes: ["activation"],
     firstAdmissionPlane: "activation"
   };
@@ -379,7 +429,9 @@ function supplementaryData(
   ftsRanks: Readonly<Record<string, number>> = {},
   embeddingSimilarityScores: Readonly<Record<string, number>> = {},
   embeddingObservationDomain?: RecallSupplementaryData["embeddingObservationDomain"],
-  embeddingContentHashByObjectId?: Readonly<Record<string, string>>
+  embeddingContentHashByObjectId?: Readonly<Record<string, string>>,
+  evidenceSemanticActivationsByCandidateKey:
+    RecallSupplementaryData["evidenceSemanticActivationsByCandidateKey"] = new Map()
 ): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes(query),
@@ -402,7 +454,7 @@ function supplementaryData(
     ...(embeddingContentHashByObjectId === undefined
       ? {}
       : { embeddingContentHashByObjectId }),
-    evidenceSemanticActivationsByCandidateKey: new Map(),
+    evidenceSemanticActivationsByCandidateKey,
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

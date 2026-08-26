@@ -19,6 +19,7 @@ import type {
   KeywordLexicalLaneId,
   KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
+  RecallEvidenceSemanticActivationReceipt,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
 import {
@@ -52,6 +53,9 @@ type LiveContext = Readonly<{
   readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly captures: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly scores: Readonly<Record<string, number>>;
+  readonly evidenceActivations: RecallSupplementaryData[
+    "evidenceSemanticActivationsByCandidateKey"
+  ];
   readonly embeddingDomain: LiveObservationSource["supplementaryData"]["embeddingObservationDomain"];
   readonly contentHashes: Readonly<Record<string, string>>;
   readonly probes: Readonly<RecallQueryProbes>;
@@ -117,6 +121,8 @@ function liveContext(input: LiveObservationSource): LiveContext {
     lanes: input.memoryKeywordLanes ?? Object.freeze([]),
     captures: input.memoryLexicalCaptures ?? Object.freeze([]),
     scores: input.supplementaryData.embeddingSimilarityScores,
+    evidenceActivations:
+      input.supplementaryData.evidenceSemanticActivationsByCandidateKey,
     embeddingDomain: input.supplementaryData.embeddingObservationDomain,
     contentHashes: input.supplementaryData.embeddingContentHashByObjectId ?? Object.freeze({}),
     probes,
@@ -137,7 +143,7 @@ function liveLineages(
     lineages.lexical = liveLexical(candidate.entry.object_id, context);
   }
   if (context.applicable.embedding) {
-    lineages.embedding = liveEmbedding(candidate.entry.object_id, context);
+    lineages.embedding = liveEmbedding(candidate, context);
   }
   if (context.applicable.temporal) {
     lineages.temporal = liveTemporal(candidate.entry, context);
@@ -205,11 +211,21 @@ function chooseCaptureHit(
 }
 
 function liveEmbedding(
-  objectId: string,
+  candidate: Readonly<CoarseRecallCandidate>,
   context: LiveContext
 ): ShadowPointwiseObservation {
-  const scores = context.scores;
-  if (!Object.hasOwn(scores, objectId) || !Number.isFinite(scores[objectId])) {
+  const objectId = candidate.entry.object_id;
+  const objectScore = Object.hasOwn(context.scores, objectId) &&
+    Number.isFinite(context.scores[objectId])
+    ? context.scores[objectId]
+    : undefined;
+  const evidence = strongestEvidenceEmbedding(
+    context.evidenceActivations.get(buildRecallCandidateDedupeKey(candidate))
+  );
+  const useEvidence = evidence !== null &&
+    (objectScore === undefined || evidence.score >= objectScore);
+  const score = useEvidence ? evidence.score : objectScore;
+  if (score === undefined) {
     return parsePointwiseObservation({
       lineage: "embedding",
       receipt: "embed.observe.v1",
@@ -218,8 +234,8 @@ function liveEmbedding(
       snapshot: { status: "not_observed", value: null, domain: null, content_hash: null }
     });
   }
-  const value = clamp01(scores[objectId]!);
-  const contentHash = context.contentHashes[objectId];
+  const value = clamp01(score);
+  const contentHash = useEvidence ? evidence.contentHash : context.contentHashes[objectId];
   if (context.embeddingDomain === undefined || contentHash === undefined ||
       contentHash.length === 0) {
     return parsePointwiseObservation({
@@ -242,6 +258,20 @@ function liveEmbedding(
       content_hash: contentHash
     }
   });
+}
+
+function strongestEvidenceEmbedding(
+  receipt: Readonly<RecallEvidenceSemanticActivationReceipt> | undefined
+): Readonly<{ score: number; contentHash: string | undefined }> | null {
+  if (receipt === undefined) return null;
+  let strongest: Readonly<{ score: number; contentHash: string | undefined }> | null = null;
+  for (const observation of receipt.observations) {
+    if (!Number.isFinite(observation.score)) continue;
+    if (strongest === null || observation.score > strongest.score) {
+      strongest = { score: observation.score, contentHash: observation.contentHash };
+    }
+  }
+  return strongest;
 }
 
 function liveTemporal(entry: Readonly<MemoryEntry>, context: LiveContext): ShadowPointwiseObservation {
