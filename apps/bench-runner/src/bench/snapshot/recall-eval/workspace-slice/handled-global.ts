@@ -27,6 +27,7 @@ export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = 
   relation_assertions: COPY_ALL,
   relation_assertion_resolution_current: COPY_ALL,
   relation_assertion_quarantine: COPY_ALL,
+  relation_assertion_evidence: COPY_ALL,
   relation_path_projections: COPY_ALL,
   global_memory_entries: COPY_ALL,
   reconciliation_leases: COPY_NONE,
@@ -35,12 +36,6 @@ export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = 
     parentTable: "proposals",
     parentKey: "proposal_id",
     childKey: "proposal_id"
-  }),
-  relation_assertion_evidence: Object.freeze({
-    action: "copy_via_fk" as const,
-    parentTable: "relation_assertions",
-    parentKey: "assertion_id",
-    childKey: "assertion_id"
   }),
   trust_usage_proof: Object.freeze({
     action: "copy_via_fk" as const,

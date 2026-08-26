@@ -120,6 +120,17 @@ function plantOneWorkspaceProjection(
     CLOCK
   );
   database.connection.prepare(`
+    INSERT INTO relation_assertion_evidence (
+      assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
+    ) VALUES (?, ?, ?, ?, ?)
+  `).run(
+    `assertion-${pathId}`,
+    `evidence-${pathId}`,
+    "signal_ingested",
+    `event-${pathId}`,
+    CLOCK
+  );
+  database.connection.prepare(`
     INSERT INTO relation_path_projections (
       generation, path_id, assertion_id, workspace_id, projection_json
     ) VALUES (?, ?, ?, ?, ?)
