@@ -43,6 +43,7 @@ export type { BenchFastPragmaResult } from "./daemon/daemon-support.js";
 export { BENCH_DAEMON_MANAGED_ENV_KEYS } from "./daemon/daemon-environment.js";
 import { createBenchDaemonOps } from "./daemon/handle/daemon-handle-ops.js";
 import { initializeBenchDaemon } from "./daemon/daemon-startup.js";
+import { reloadBenchWorkingDatabase } from "./daemon/runtime/daemon-db-pragmas.js";
 import {
   createBenchDaemonConfigDirectoryLease,
   type BenchDaemonConfigDirectoryLease
@@ -220,7 +221,8 @@ function buildBenchDaemonHandle(
       await queryTokenMetrics(state.dataDir, state.activeContext.workspaceId),
     queryEdgeProposalKpiRows: async () =>
       await queryEdgeProposalKpiRows(state.dataDir, state.activeContext.workspaceId),
-    attachWorkspace
+    attachWorkspace,
+    reloadWorkingDatabase: () => reloadBenchWorkingDatabase(state.dataDir)
   };
 }
 
