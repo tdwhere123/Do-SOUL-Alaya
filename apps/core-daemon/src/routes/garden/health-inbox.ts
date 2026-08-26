@@ -56,7 +56,7 @@ export function registerHealthInboxRoutes(
         data: {
           workspace_id: workspaceId,
           groups: rows,
-          total_count: rows.length
+          returned_count: rows.length
         }
       },
       200

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveStoredFilePath } from "@do-soul/alaya-core";
@@ -24,7 +24,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     readFile: vi.fn(),
     writeFile: vi.fn(),
     unlink: vi.fn(),
-    mkdir: vi.fn()
+    mkdir: vi.fn(),
+    chmod: vi.fn()
   };
 });
 
@@ -32,6 +33,7 @@ const mockedReadFile = vi.mocked(readFile);
 const mockedWriteFile = vi.mocked(writeFile);
 const mockedUnlink = vi.mocked(unlink);
 const mockedMkdir = vi.mocked(mkdir);
+const mockedChmod = vi.mocked(chmod);
 const FILES_DIR = "/data/files";
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -212,7 +214,8 @@ describe("files upload route", () => {
         size_bytes: 5
       }
     });
-    expect(mockedMkdir).toHaveBeenCalledWith(FILES_DIR, { recursive: true });
+    expect(mockedMkdir).toHaveBeenCalledWith(FILES_DIR, { recursive: true, mode: 0o700 });
+    expect(mockedChmod).toHaveBeenCalledWith(FILES_DIR, 0o700);
     expect(mockedWriteFile).toHaveBeenCalledOnce();
     expect(createWithEvent).toHaveBeenCalledOnce();
     expect(createWithEvent.mock.calls[0]?.[0]).toMatchObject({
@@ -425,6 +428,29 @@ describe("files download route", () => {
     await expect(response.json()).resolves.toEqual({
       success: false,
       error: "File not found"
+    });
+  });
+
+  it("returns 500 when workspace lookup fails for a reason other than NOT_FOUND", async () => {
+    const app = new Hono();
+    registerFileRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async () => {
+          throw new Error("sqlite busy");
+        })
+      },
+      runService: { getById: vi.fn() },
+      fileRepo: { findById: vi.fn(async () => makeRecord()) } as never,
+      eventLogRepo: { append: createAuditEventLogAppend() },
+      runtimeNotifier: { notifyEntry: vi.fn() },
+      filesDirectory: FILES_DIR
+    });
+
+    const response = await app.request("/files/file-1?workspace_id=ws-1");
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Failed to load workspace"
     });
   });
 

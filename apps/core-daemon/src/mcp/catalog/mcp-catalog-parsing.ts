@@ -72,25 +72,26 @@ export function parseDaemonMcpServerRuntimeConfigs(
     return Object.freeze({});
   }
 
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(rawValue);
-    const envelope = JsonObjectRecordSchema.parse(parsed);
-
-    const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
-    for (const [serverName, rawConfig] of Object.entries(envelope)) {
-      const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
-      if (config !== null) {
-        runtimeConfigs[serverName] = config;
-      }
-    }
-
-    return Object.freeze(runtimeConfigs);
+    parsed = JSON.parse(rawValue);
   } catch (error) {
-    warn("failed to parse ALAYA_MCP_SERVER_CONFIG_JSON; ignoring MCP runtime config", {
-      error
-    });
-    return Object.freeze({});
+    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON", { cause: error });
   }
+  const envelope = JsonObjectRecordSchema.safeParse(parsed);
+  if (!envelope.success) {
+    throw new Error("ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object of server configs");
+  }
+
+  const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
+  for (const [serverName, rawConfig] of Object.entries(envelope.data)) {
+    const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
+    if (config !== null) {
+      runtimeConfigs[serverName] = config;
+    }
+  }
+
+  return Object.freeze(runtimeConfigs);
 }
 
 export function parseAllowedMcpServerNames(rawValue: string | undefined): readonly string[] {

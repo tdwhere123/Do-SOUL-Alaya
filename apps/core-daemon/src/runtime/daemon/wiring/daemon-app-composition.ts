@@ -134,6 +134,7 @@ type CreateCoreDaemonAppInput = Readonly<{
   globalMemoryService?: RouteField<"globalMemory", "globalMemoryService">;
   mcp: RouteField<"status", "mcp">;
   warn: RouteField<"runs", "warn">;
+  probeDatabase?: RouteField<"status", "probeDatabase">;
 }>;
 
 export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType<typeof createApp> {
@@ -359,7 +360,8 @@ function createSoulRouteServices(input: CreateCoreDaemonAppInput) {
     status: {
       startupStepsProvider: () => input.startupSteps.map((step) => step.step),
       principalCodingEngineAvailableProvider: () => input.principalCodingEngineAvailable,
-      mcp: input.mcp
+      mcp: input.mcp,
+      probeDatabase: input.probeDatabase
     }
   };
 }

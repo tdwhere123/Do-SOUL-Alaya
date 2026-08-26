@@ -145,6 +145,20 @@ function formatGardenSecretRefError(error: ResolveSecretError): string {
   }
 }
 
+function readConflictDetectionLlmApiKey(): string | undefined {
+  const secretRef = process.env.ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
+  if (secretRef !== undefined && secretRef.length > 0) {
+    const resolved = resolveSecretRef(secretRef);
+    if ("kind" in resolved) {
+      return undefined;
+    }
+    const value = resolved.value.trim();
+    return value.length > 0 ? value : undefined;
+  }
+  const raw = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  return raw !== undefined && raw.length > 0 ? raw : undefined;
+}
+
 type ConflictDetectionLlmConfig = Readonly<{
   baseUrl: string;
   apiKey: string;
@@ -154,7 +168,7 @@ type ConflictDetectionLlmConfig = Readonly<{
 
 function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
   const baseUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
-  const apiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  const apiKey = readConflictDetectionLlmApiKey();
   if (
     baseUrl === undefined ||
     baseUrl.length === 0 ||

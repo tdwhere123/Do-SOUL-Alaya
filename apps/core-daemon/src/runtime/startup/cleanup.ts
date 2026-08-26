@@ -1,3 +1,5 @@
+import { closeDaemonSqliteWriteQueue } from "./database.js";
+
 type StartupCleanupInput = Readonly<{
   readonly recallReadWorkerClient: Readonly<{ close(): Promise<void> }> | null;
   readonly database: Readonly<{ close(): void }>;
@@ -10,6 +12,7 @@ export async function closeDaemonStartupResourcesAfterFailure(
   input: StartupCleanupInput
 ): Promise<never> {
   await closeWorker(input);
+  await closeWriteQueue(input);
   closeDatabase(input);
   await releaseTemporalLease(input);
   throw input.error;
@@ -21,6 +24,14 @@ async function closeWorker(input: StartupCleanupInput): Promise<void> {
     await input.recallReadWorkerClient.close();
   } catch (error) {
     warnCleanupFailure(input, "recall read worker", error);
+  }
+}
+
+async function closeWriteQueue(input: StartupCleanupInput): Promise<void> {
+  try {
+    await closeDaemonSqliteWriteQueue();
+  } catch (error) {
+    warnCleanupFailure(input, "sqlite write queue", error);
   }
 }
 

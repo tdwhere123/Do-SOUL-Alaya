@@ -28,6 +28,7 @@ export const DAEMON_ONLY_CONFIG_ENV_KEYS = Object.freeze({
   }),
   gardenLlm: Object.freeze({
     conflictApiKey: "ALAYA_CONFLICT_LLM_API_KEY",
+    conflictSecretRef: "ALAYA_CONFLICT_LLM_SECRET_REF",
     conflictModel: "ALAYA_CONFLICT_LLM_MODEL",
     conflictProviderUrl: "ALAYA_CONFLICT_LLM_PROVIDER_URL",
     conflictTimeoutMs: "ALAYA_CONFLICT_LLM_TIMEOUT_MS",

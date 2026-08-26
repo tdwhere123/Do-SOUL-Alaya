@@ -152,7 +152,7 @@ describe("cli inspect", () => {
     const result = await promise;
 
     expect(result.exitCode).toBe(0);
-    expect(stdoutChunks.join("")).toContain("?workspaceId=local_efcd2c3483725c97&launch=");
+    expect(stdoutChunks.join("")).toContain("?workspaceId=local_efcd2c3483725c97#launch=");
     expect(stdoutChunks.join("")).not.toContain("#token=");
   });
 
@@ -200,7 +200,7 @@ describe("cli inspect", () => {
 
       expect(result.exitCode).toBe(0);
       expect(daemon.requests).toEqual(["/workspaces"]);
-      expect(stdoutChunks.join("")).toContain("?workspaceId=ws-http&launch=");
+      expect(stdoutChunks.join("")).toContain("?workspaceId=ws-http#launch=");
       expect(stdoutChunks.join("")).not.toContain("#token=");
     } finally {
       daemon.restore();

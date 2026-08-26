@@ -141,7 +141,15 @@ function createDaemonAppEnvironmentInput(input: FinalizeDaemonRuntimeWiringInput
     filesDirectory: input.filesDirectory,
     env: process.env,
     listServerHardConstraints: input.listServerHardConstraints,
-    warn: input.warnLogger.warn
+    warn: input.warnLogger.warn,
+    probeDatabase: () => {
+      try {
+        input.database.connection.prepare("SELECT 1").get();
+        return true;
+      } catch {
+        return false;
+      }
+    }
   };
 }
 

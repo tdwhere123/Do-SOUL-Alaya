@@ -51,11 +51,11 @@ describe("health-inbox route", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       success: boolean;
-      data: { workspace_id: string; total_count: number; groups: readonly unknown[] };
+      data: { workspace_id: string; returned_count: number; groups: readonly unknown[] };
     };
     expect(body.success).toBe(true);
     expect(body.data.workspace_id).toBe("ws1");
-    expect(body.data.total_count).toBe(5);
+    expect(body.data.returned_count).toBe(5);
     expect(body.data.groups.length).toBe(5);
     expect(getById).toHaveBeenCalledWith("ws1");
     expect(findByWorkspace).toHaveBeenCalledWith("ws1", {

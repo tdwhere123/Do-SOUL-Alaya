@@ -102,6 +102,7 @@ export * from "./soul/conflict-matrix.js";
 export * from "./soul/cross-cutting.js";
 export * from "./soul/project-mapping.js";
 export * from "./soul/garden-tier.js";
+export * from "./soul/garden-extract-constants.js";
 export * from "./soul/health-journal.js";
 export * from "./soul/health-issue-group.js";
 export * from "./soul/constitutional-fragment.js";

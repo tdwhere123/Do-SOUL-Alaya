@@ -277,6 +277,36 @@ describe("withSecurityStatusWorkspaceService", () => {
     await expect(service.list()).resolves.toEqual([workspace]);
     expect(workspaceEnsureMutation).not.toHaveBeenCalled();
   });
+
+  it("warns and continues when recording initialization failure itself fails", async () => {
+    const workspace = sampleWorkspace();
+    const warn = vi.fn();
+    const service = withSecurityStatusWorkspaceService(
+      {
+        create: vi.fn(async () => workspace)
+      } as never,
+      {
+        initializeWorkspace: vi.fn(async () => {
+          throw new Error("zero-day policy store offline");
+        }),
+        recordInitializationFailure: vi.fn(async () => {
+          throw new Error("event log unavailable");
+        })
+      },
+      undefined,
+      warn
+    );
+
+    await expect(service.create({} as never)).resolves.toEqual(workspace);
+    expect(warn).toHaveBeenCalledWith(
+      "security initialization failure could not be recorded",
+      expect.objectContaining({
+        workspace: "workspace-1",
+        operation: "create",
+        error: "event log unavailable"
+      })
+    );
+  });
 });
 
 function sampleWorkspace() {

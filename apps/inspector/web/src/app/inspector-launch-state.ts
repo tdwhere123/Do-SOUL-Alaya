@@ -156,7 +156,7 @@ function readLaunchParams(searchParams: URLSearchParams, hash: string): {
 } {
   const fragment = readFragmentParams(hash);
   return {
-    launchCode: firstNonEmpty(searchParams.get("launch"), fragment.get("launch")),
+    launchCode: firstNonEmpty(fragment.get("launch"), searchParams.get("launch")),
     workspaceId: firstNonEmpty(searchParams.get("workspaceId"), fragment.get("workspaceId"))
   };
 }

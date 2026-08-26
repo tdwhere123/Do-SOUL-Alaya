@@ -7,13 +7,14 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## v0.3.11 — 2026-06-04 (implementation complete; 500q KPI gate pending)
+## v0.3.11 — 2026-06-04 (implementation checkpoint; not a published 500q-gated release)
 
-**Status:** implementation complete. The LongMemEval / LoCoMo 500q KPI gate is
-**PENDING a larger host** (the local 7.6 GB WSL2 box OOMs at 500q). v0.3.11 is
-tagged only after that gate passes. **R@5 -> 90% is not claimed as achieved** —
-the recall fan-in is implemented and code-reviewed, but the R@5 number is
-unmeasured locally and deferred to the R5 gate. See
+**Status:** implementation checkpoint, not a published 500q-gated release.
+The LongMemEval / LoCoMo 500q KPI gate is **PENDING a larger host** (the local
+7.6 GB WSL2 box OOMs at 500q). v0.3.11 is not a published 500q-gated tag.
+**R@5 -> 90% is not claimed as achieved** — the recall fan-in is implemented
+and code-reviewed, but the R@5 number is unmeasured locally and deferred to
+the R5 gate. See
 `docs/archive/v0.3-historical/v0.3.11/reports/v0.3.11-closeout-report.md`.
 
 ### Garden compute — zero-cloud by default

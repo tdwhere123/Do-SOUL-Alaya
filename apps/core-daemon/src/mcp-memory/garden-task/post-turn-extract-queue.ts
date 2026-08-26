@@ -3,6 +3,7 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  POST_TURN_EXTRACT_EXCERPT_MAX_CHARS,
   type ContextDeliveryRecord,
   type SoulMemorySearchRequest,
   type SoulReportContextUsageRequest
@@ -17,7 +18,6 @@ import type {
   RecallUsageToolCallContext
 } from "../recall/recall-usage-handlers.js";
 
-const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 // Auto-extract from a recall turn only when there is enough text for the
 // Garden compute provider to find a durable signal in; a bare keyword query
 // is below this floor and not worth a Garden task.

@@ -1,10 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDaemonStartupResourcesAfterFailure } from "../../../runtime/startup/cleanup.js";
+import * as daemonDatabase from "../../../runtime/startup/database.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("daemon startup cleanup", () => {
-  it("closes the recall worker before the database and temporal lease", async () => {
+  it("closes the recall worker then write-queue before the database and temporal lease", async () => {
     const order: string[] = [];
     const startupError = new Error("garden startup failed");
+    vi.spyOn(daemonDatabase, "closeDaemonSqliteWriteQueue").mockImplementation(async () => {
+      order.push("write-queue");
+    });
 
     await expect(closeDaemonStartupResourcesAfterFailure({
       recallReadWorkerClient: { close: vi.fn(async () => { order.push("worker"); }) },
@@ -14,7 +22,7 @@ describe("daemon startup cleanup", () => {
       error: startupError
     })).rejects.toBe(startupError);
 
-    expect(order).toEqual(["worker", "database", "lease"]);
+    expect(order).toEqual(["worker", "write-queue", "database", "lease"]);
   });
 
   it("continues cleanup and preserves the startup error when cleanup fails", async () => {

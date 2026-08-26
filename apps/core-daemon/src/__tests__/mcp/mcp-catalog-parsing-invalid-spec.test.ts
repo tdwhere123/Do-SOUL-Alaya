@@ -127,16 +127,15 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
     );
   });
 
-  it("ignores MCP runtime config when the JSON envelope is not an object", () => {
-    const warn = vi.fn();
-
-    const configs = parseDaemonMcpServerRuntimeConfigs(JSON.stringify(["not", "an", "object"]), warn);
-
-    expect(configs).toEqual({});
-    expect(warn).toHaveBeenCalledWith(
-      "failed to parse ALAYA_MCP_SERVER_CONFIG_JSON; ignoring MCP runtime config",
-      expect.objectContaining({ error: expect.anything() })
+  it("throws when MCP runtime config JSON is invalid", () => {
+    expect(() => parseDaemonMcpServerRuntimeConfigs("{not-json", vi.fn())).toThrow(
+      /ALAYA_MCP_SERVER_CONFIG_JSON is not valid JSON/
     );
+  });
+
+  it("throws when the MCP runtime config JSON envelope is not an object", () => {
+    expect(() => parseDaemonMcpServerRuntimeConfigs(JSON.stringify(["not", "an", "object"]), vi.fn()))
+      .toThrow(/ALAYA_MCP_SERVER_CONFIG_JSON must be a JSON object/);
   });
 
   it("ignores MCP tool catalog when the JSON envelope is not an object", () => {

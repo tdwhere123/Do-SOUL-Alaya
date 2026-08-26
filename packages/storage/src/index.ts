@@ -7,6 +7,7 @@ export {
   getCurrentSchemaSummary,
   configureSqliteWriteQueuePort,
   getSqliteWriteQueuePort,
+  openReadOnlyDatabase,
   EMBEDDING_OVERLAY_ALIAS,
   EMBEDDING_OVERLAY_BIND_FILENAME,
   bindEmbeddingOverlay,

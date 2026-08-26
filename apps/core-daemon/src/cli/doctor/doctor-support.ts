@@ -6,6 +6,7 @@ import {
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
+import { writeDoctorAuditSummary } from "./doctor-audit.js";
 import type {
   DoctorArgs,
   DoctorBootstrapReconcileSummary,
@@ -150,6 +151,7 @@ export function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorR
   writeDoctorCoreSummary(stream, report);
   writeGardenComputeSummary(stream, report);
   writeRecallGraphSummary(stream, report);
+  writeDoctorAuditSummary(stream, report.audit);
   writeDoctorProfileSummary(stream, report);
 }
 
@@ -354,6 +356,11 @@ function writeDoctorProfileSummary(stream: NodeJS.WritableStream, report: Doctor
       );
     } else if (profile.status === "in_sync") {
       stream.write(`attached profile (${profile.target}): in sync\n`);
+    } else if (profile.status === "error") {
+      stream.write(
+        `attached profile (${profile.target}): ERROR reading profile drift` +
+          `${profile.profile_path.length > 0 ? ` (${profile.profile_path})` : ""}\n`
+      );
     }
     // status === "absent" is silent — the user may have intentionally not
     // attached this target.

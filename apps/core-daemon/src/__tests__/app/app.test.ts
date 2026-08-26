@@ -248,7 +248,7 @@ describe("createApp", () => {
     expect(body.status).toBe("ok");
     expect(body.service).toBe("alaya-core-daemon");
     expect(body.version).toBeUndefined();
-    expect(typeof body.uptime_s).toBe("number");
+    expect(body.uptime_s).toBeUndefined();
   });
 
   it("keeps liveness green while the daemon is draining", async () => {

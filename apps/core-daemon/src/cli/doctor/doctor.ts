@@ -12,6 +12,11 @@ import {
   type GraphHealthSnapshot
 } from "../../services/status/graph-health-service.js";
 import type { BuildInfo } from "../../runtime/daemon/support/build-info.js";
+import {
+  doctorAuditCheckStatus,
+  readDoctorAuditSnapshot,
+  type DoctorAuditSnapshot
+} from "./doctor-audit.js";
 import { doctorArgsSchema, inspectStorage, inspectStorageGrowth, runBootstrapReconcile, writeHumanSummary } from "./doctor-support.js";
 
 const UNKNOWN_BUILD_INFO: BuildInfo = {
@@ -173,7 +178,8 @@ type DoctorCheckName =
   | "provider"
   | "mcp"
   | "garden"
-  | "bootstrap_reconcile";
+  | "bootstrap_reconcile"
+  | "config";
 
 export interface DoctorReport {
   readonly checked_at: string;
@@ -221,6 +227,7 @@ export interface DoctorReport {
     readonly advisory: "ok" | "large" | "unknown";
   }>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
+  readonly audit: DoctorAuditSnapshot;
   // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
   readonly checks: Readonly<Record<DoctorCheckName, DoctorCheckStatus>>;
@@ -284,7 +291,8 @@ async function buildDoctorReport(
     ? await runBootstrapReconcile(deps.reconcileBootstrapPaths, workspaceId)
     : null;
   const attachedProfiles = await readAttachedProfileDrift();
-  const checks = buildDoctorChecks(startup.ready, services, bootstrapReconcileSummary);
+  const audit = readDoctorAuditSnapshot(services.storage.db_path);
+  const checks = buildDoctorChecks(startup.ready, services, bootstrapReconcileSummary, attachedProfiles, audit);
   return {
     checked_at: now(),
     overall: Object.values(checks).every((status) => status === "pass") ? "green" : "degraded",
@@ -309,6 +317,7 @@ async function buildDoctorReport(
     runtime_wiring: services.runtimeWiring,
     storage_growth: services.storageGrowth,
     attached_profiles: attachedProfiles,
+    audit,
     ...(bootstrapReconcileSummary === null ? {} : { bootstrap_reconcile: bootstrapReconcileSummary }),
     checks
   };
@@ -412,7 +421,7 @@ async function readAttachedProfileDrift(): Promise<readonly ProfileInstructionsD
         return {
           target,
           profile_path: "",
-          status: "absent",
+          status: "error",
           attached_preview: null
         } as const satisfies ProfileInstructionsDriftReport;
       }
@@ -423,7 +432,9 @@ async function readAttachedProfileDrift(): Promise<readonly ProfileInstructionsD
 function buildDoctorChecks(
   daemonReady: boolean,
   services: Awaited<ReturnType<typeof readDoctorServices>>,
-  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null
+  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null,
+  attachedProfiles: readonly ProfileInstructionsDriftReport[],
+  audit: DoctorAuditSnapshot
 ): Record<DoctorCheckName, DoctorCheckStatus> {
   return {
     runtime: daemonReady ? "pass" : "fail",
@@ -440,7 +451,12 @@ function buildDoctorChecks(
       services.garden.status === "healthy" && services.gardenCompute.keychain_check?.ok !== false
         ? "pass"
         : "fail",
-    bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary)
+    bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),
+    config:
+      doctorAuditCheckStatus(audit) === "pass" &&
+      attachedProfiles.every((profile) => profile.status !== "error")
+        ? "pass"
+        : "fail"
   };
 }
 

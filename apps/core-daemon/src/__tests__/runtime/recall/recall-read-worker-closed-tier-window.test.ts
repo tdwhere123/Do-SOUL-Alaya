@@ -48,6 +48,10 @@ vi.mock("@do-soul/alaya-storage", async (importOriginal) => {
       connection: { pragma() {} },
       close: hoisted.closeDatabase
     }),
+    openReadOnlyDatabase: () => ({
+      connection: { pragma() {} },
+      close: hoisted.closeDatabase
+    }),
     SqliteMemoryEntryRepo: hoisted.SqliteMemoryEntryRepo,
     SqliteEvidenceCapsuleRepo: hoisted.UnusedRepo,
     SqliteSynthesisCapsuleRepo: hoisted.UnusedRepo,

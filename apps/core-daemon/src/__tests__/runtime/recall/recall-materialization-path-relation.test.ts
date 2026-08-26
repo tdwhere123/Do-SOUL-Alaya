@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("Garden temporal relation runtime", () => {
-  it("exposes only temporal assertion admission", async () => {
+  it("exposes a nomination port and never holds RelationAssertionAdmissionPort on Garden wiring", async () => {
     const database = initDatabase({ filename: ":memory:" });
     let pathRelationEvictionTimer: NodeJS.Timeout | null = null;
     try {
@@ -39,8 +39,6 @@ describe("Garden temporal relation runtime", () => {
         runHotStateService: { apply: async () => undefined },
         runtimeNotifier
       });
-      const pathRelationRepo = new SqlitePathRelationRepo(database);
-      const warn = vi.fn();
       const runtime = createPathRelationRuntime({
         softAssociationPathRepo: {
           create: (relation: unknown) => relation,
@@ -52,36 +50,61 @@ describe("Garden temporal relation runtime", () => {
         eventPublisher,
         memoryEntryRepo: new SqliteMemoryEntryRepo(database),
         pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined },
-        pathRelationRepo,
+        pathRelationRepo: new SqlitePathRelationRepo(database),
         proposalRepo: new SqliteProposalRepo(database),
         relationAssertionRepo: new SqliteRelationAssertionRepo(database),
+        evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
         runtimeNotifier,
-        warn
+        warn: vi.fn()
       } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
       pathRelationEvictionTimer = runtime.pathRelationEvictionTimer;
 
       expect(runtime.temporalRelationAssertionPort.admit).toEqual(expect.any(Function));
+      expect(runtime.pathRelationProposalPort.createPathRelationProposal).toEqual(expect.any(Function));
       expect(runtime).not.toHaveProperty("pathCandidatePort");
-      expect(warn).not.toHaveBeenCalled();
     } finally {
       if (pathRelationEvictionTimer !== null) clearInterval(pathRelationEvictionTimer);
       database.close();
     }
   });
 
-  it.each([
-    ["default", undefined, "admit", false],
-    ["explicit checkpoint", "explicit_checkpoint", "admitDeferredProjection", true]
-  ] as const)("routes %s signal-ref admission through the selected projection path", async (
-    _label,
-    relationProjectionAdmissionMode,
-    expectedMethod,
-    projectionDirty
-  ) => {
+  it("creates a proposal instead of admitting a RelationAssertion", async () => {
     const admit = vi.spyOn(RelationAssertionService.prototype, "admit");
-    const admitDeferred = vi.spyOn(RelationAssertionService.prototype, "admitDeferredProjection");
-    const refresh = vi.spyOn(RelationAssertionService.prototype, "refreshProjection");
-    const harness = await createAdmissionHarness(relationProjectionAdmissionMode);
+    const harness = await createNominationHarness();
+    try {
+      const created = await harness.runtime.temporalRelationAssertionPort.admit({
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        sourceSignalId: "signal-1",
+        evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
+        anchors: {
+          source_anchor: { kind: "object", object_id: "memory-1" },
+          target_anchor: { kind: "object", object_id: "memory-2" }
+        },
+        relationKind: "supports",
+        validity: { kind: "open", valid_from: "2026-07-17T01:02:03.000Z" },
+        sourceEventAnchor: {
+          event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+          event_id: harness.sourceEventId,
+          occurred_at: "2026-07-17T01:02:03.000Z"
+        }
+      });
+
+      expect(admit).not.toHaveBeenCalled();
+      expect(created.object_kind).toBe("proposal");
+      expect(await harness.proposalRepo.countPending("workspace-1")).toBe(1);
+      expect(harness.relationRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
+    } finally {
+      clearInterval(harness.runtime.pathRelationEvictionTimer);
+      harness.database.close();
+    }
+  });
+
+  it("uses evidence capsule source time for proposal validity when it differs from the event-log anchor", async () => {
+    const harness = await createNominationHarness({
+      evidenceOccurredAt: "2026-01-01T00:00:00.000Z"
+    });
+    const createProposal = vi.spyOn(harness.runtime.pathRelationProposalPort, "createPathRelationProposal");
     try {
       await harness.runtime.temporalRelationAssertionPort.admit({
         workspaceId: "workspace-1",
@@ -101,23 +124,16 @@ describe("Garden temporal relation runtime", () => {
         }
       });
 
-      expect(admit).toHaveBeenCalledTimes(expectedMethod === "admit" ? 1 : 0);
-      expect(admitDeferred).toHaveBeenCalledTimes(expectedMethod === "admitDeferredProjection" ? 1 : 0);
-      if (projectionDirty) {
-        await expect(harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))
-          .rejects.toThrow(/requires a refresh/u);
-      } else {
-        expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))
-          .toHaveLength(1);
-      }
-      await expect(harness.runtime.relationProjectionCheckpoint.refresh()).resolves.toBe(
-        relationProjectionAdmissionMode === "explicit_checkpoint"
-      );
-      expect(refresh).toHaveBeenCalledTimes(
-        relationProjectionAdmissionMode === "explicit_checkpoint" ? 1 : 0
-      );
-      expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))
-        .toHaveLength(1);
+      expect(createProposal).toHaveBeenCalledWith(expect.objectContaining({
+        reason: expect.stringContaining('"valid_from":"2026-01-01T00:00:00.000Z"'),
+        proposedPathRelation: expect.objectContaining({
+          constitution: expect.objectContaining({
+            why_this_relation_exists: expect.arrayContaining([
+              expect.stringContaining('"valid_from":"2026-01-01T00:00:00.000Z"')
+            ])
+          })
+        })
+      }));
     } finally {
       clearInterval(harness.runtime.pathRelationEvictionTimer);
       harness.database.close();
@@ -125,14 +141,14 @@ describe("Garden temporal relation runtime", () => {
   });
 });
 
-async function createAdmissionHarness(
-  relationProjectionAdmissionMode: "explicit_checkpoint" | undefined
+async function createNominationHarness(
+  options: { readonly evidenceOccurredAt?: string } = {}
 ) {
   const database = initDatabase({ filename: ":memory:" });
   await new SqliteWorkspaceRepo(database).create({
     workspace_id: "workspace-1",
-    name: "relation assertion wiring test",
-    root_path: "/tmp/relation-assertion-wiring-test",
+    name: "relation nomination wiring test",
+    root_path: "/tmp/relation-nomination-wiring-test",
     workspace_kind: WorkspaceKind.LOCAL_REPO,
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
@@ -140,7 +156,7 @@ async function createAdmissionHarness(
   await new SqliteRunRepo(database).create({
     run_id: "run-1",
     workspace_id: "workspace-1",
-    title: "relation assertion wiring test",
+    title: "relation nomination wiring test",
     goal: null,
     run_mode: RunMode.CHAT,
     engine_binding_id: null,
@@ -158,7 +174,11 @@ async function createAdmissionHarness(
     caused_by: "garden",
     payload_json: { source: "test" }
   });
-  await new SqliteEvidenceCapsuleRepo(database).create(evidenceCapsule(sourceEvent.event_id));
+  const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
+  await evidenceRepo.create(evidenceCapsule(
+    sourceEvent.event_id,
+    options.evidenceOccurredAt ?? "2026-07-17T01:02:03.000Z"
+  ));
   const runtimeNotifier = createRuntimeNotifier();
   const eventPublisher = new EventPublisher({
     eventLogRepo,
@@ -166,6 +186,7 @@ async function createAdmissionHarness(
     runtimeNotifier
   });
   const relationRepo = new SqliteRelationAssertionRepo(database);
+  const proposalRepo = new SqliteProposalRepo(database);
   const runtimeInput = {
     softAssociationPathRepo: {
       create: (relation: unknown) => relation,
@@ -178,21 +199,22 @@ async function createAdmissionHarness(
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
     pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined },
     pathRelationRepo: new SqlitePathRelationRepo(database),
-    proposalRepo: new SqliteProposalRepo(database),
+    proposalRepo,
     relationAssertionRepo: relationRepo,
+    evidenceCapsuleRepo: evidenceRepo,
     runtimeNotifier,
-    warn: vi.fn(),
-    ...(relationProjectionAdmissionMode === undefined ? {} : { relationProjectionAdmissionMode })
+    warn: vi.fn()
   } as unknown as Parameters<typeof createPathRelationRuntime>[0];
   return {
     database,
     relationRepo,
+    proposalRepo,
     sourceEventId: sourceEvent.event_id,
     runtime: createPathRelationRuntime(runtimeInput)
   };
 }
 
-function evidenceCapsule(sourceEventId: string): EvidenceCapsule {
+function evidenceCapsule(sourceEventId: string, occurredAt: string): EvidenceCapsule {
   const timestamp = "2026-07-17T01:02:03.000Z";
   return {
     object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
@@ -207,7 +229,7 @@ function evidenceCapsule(sourceEventId: string): EvidenceCapsule {
     event_anchor: {
       event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
       event_id: sourceEventId,
-      occurred_at: timestamp
+      occurred_at: occurredAt
     },
     physical_anchor: null,
     evidence_health_state: "verified",
