@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EvidenceService,
+  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
   RuleBasedQueryFactFrameExtractor,
   SignalService,
   fieldContractSha256
@@ -72,7 +73,8 @@ export async function openEligibilityRuntime(): Promise<EligibilityLiveRuntime> 
     generateObjectId: () => EVIDENCE_ID,
     now: () => CLOCK,
     sha256: fieldContractSha256,
-    fieldStores: field.stores
+    fieldStores: field.stores,
+    factFrameProposalNormalizer: RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER
   });
   const router = new MaterializationRouter({
     evidenceService,

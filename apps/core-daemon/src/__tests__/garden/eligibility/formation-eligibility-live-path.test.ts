@@ -31,6 +31,12 @@ const QUALIFIED_NEGATIVE_CASES = [
     seal: "rejected"
   },
   {
+    name: "incomplete",
+    payload: { semantic_factor_graph: unaryUseEvidenceGraph() },
+    status: "rejected",
+    seal: "rejected"
+  },
+  {
     name: "gold-only",
     payload: {
       gold_semantic_factor_graph: binaryUseEvidenceSemanticGraph(),
@@ -42,14 +48,13 @@ const QUALIFIED_NEGATIVE_CASES = [
 ] as const;
 
 describe("formation eligibility live producer to consumer path", () => {
-  it("forms a complete Official API fact-frame and graph through sqlite", async () => {
+  it("forms a cached Official API graph without a provider fact frame", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
       extractor: { extract: async () => ({ rawJson: JSON.stringify({ signals: [{
         signal_kind: "potential_claim", object_kind: "review_scope", confidence: 0.9,
         matched_text: ASSERTION, evidence_refs: [], source_memory_refs: [],
         source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 },
-        fact_frame: binaryUseFactFrame(),
         semantic_factor_graph: binaryUseEvidenceSemanticGraph()
       }] }) }) },
       generateSignalId: () => "signal-provider-formed"
@@ -222,5 +227,19 @@ function unboundEvidenceGraph() {
       ...graph.factors,
       { factor_id: "unused", surface: "Atlas", semantic_identity: "atlas" }
     ]
+  };
+}
+
+function unaryUseEvidenceGraph() {
+  const graph = binaryUseEvidenceSemanticGraph();
+  return {
+    ...graph,
+    factors: graph.factors.filter(({ factor_id }) => factor_id !== "object"),
+    propositions: [{
+      ...graph.propositions[0]!,
+      arguments: graph.propositions[0]!.arguments.filter(
+        ({ reference_id }) => reference_id !== "object"
+      )
+    }]
   };
 }

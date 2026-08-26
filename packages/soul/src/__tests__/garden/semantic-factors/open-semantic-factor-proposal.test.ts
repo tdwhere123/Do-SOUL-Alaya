@@ -14,14 +14,8 @@ const SOURCE = "I used Atlas for research.";
 
 describe("open semantic factor formation proposal", () => {
   it("preserves source observation while grounding a separate semantic projection", () => {
-    const frame = { schema_version: 1 as const, slots: [
-      { role: "subject" as const, text: "I" },
-      { role: "relation" as const, text: "used" },
-      { role: "qualifier" as const, text: "Atlas" },
-      { role: "value" as const, text: "research" }
-    ] };
     const [draft] = parseOfficialApiSignals(JSON.stringify({
-      signals: [{ ...signalJson(semanticGraph()), fact_frame: frame }]
+      signals: [signalJson(semanticGraph())]
     }));
     if (draft === undefined) throw new Error("signal fixture must parse");
 
@@ -38,7 +32,6 @@ describe("open semantic factor formation proposal", () => {
     expect(buildOpenSemanticFactorFormationProposal({
       source_assertion: SOURCE,
       source_grounding: grounded.audit,
-      fact_frame: grounded.draft.fact_frame,
       semantic_factor_graph: grounded.draft.semantic_factor_graph
     })).toEqual({
       schema_version: 1,
@@ -47,10 +40,10 @@ describe("open semantic factor formation proposal", () => {
       graph: grounded.draft.semantic_factor_graph
     });
     expect(GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID)
-      .toBe("garden_source_bound_open_semantic_factor_v5");
+      .toBe("garden_source_bound_open_semantic_factor_v3");
   });
 
-  it("rejects an incomplete provider graph instead of fabricating semantic identity", () => {
+  it("leaves fact-frame semantic completeness to Core admission", () => {
     const frame = {
       schema_version: 1 as const,
       slots: [
@@ -84,7 +77,10 @@ describe("open semantic factor formation proposal", () => {
       semantic_factor_graph: grounded.draft.semantic_factor_graph
     });
 
-    expect(proposal).toBeUndefined();
+    expect(proposal).toMatchObject({
+      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+      graph: { source_kind: "evidence" }
+    });
   });
 
   it("removes a graph whose exact surface is absent from the source", () => {

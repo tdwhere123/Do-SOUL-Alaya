@@ -227,7 +227,6 @@ export interface OfficialApiSignalParseOptions {
 
 type OfficialApiSignalEntryRejection =
   | "signal_entry_invalid"
-  | "fact_frame_required"
   | "semantic_factor_graph_required";
 type OfficialApiSignalEntryInspection = Readonly<
   | {
@@ -350,12 +349,6 @@ function inspectOfficialApiSignalEntry(
   );
   if (options.requireSemanticFactorGraph === true && semanticProjection.graph === undefined) {
     return { draft: null, rejection: "semantic_factor_graph_required" };
-  }
-  if (options.requireSemanticFactorGraph === true &&
-      !AssociativeFactFrameSchema.safeParse(
-        (candidate as Record<string, unknown>).fact_frame
-      ).success) {
-    return { draft: null, rejection: "fact_frame_required" };
   }
   const temporalProjection = inspectOfficialApiTemporalProjection(
     (candidate as Record<string, unknown>).temporal_projection

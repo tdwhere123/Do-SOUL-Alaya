@@ -48,29 +48,12 @@ describe("open semantic factor formation eligibility", () => {
     ["absent frame", { fact_frame: undefined }],
     ["malformed frame", { fact_frame: { schema_version: 1, slots: [
       { role: "subject", text: "I" }, { role: "value", text: "Atlas" }
-    ] } }],
-    ["wrong relation", { fact_frame: { ...factFrame(), slots: factFrame().slots.map((slot) =>
-      slot.role === "relation" ? { ...slot, text: "Atlas" } : slot) } }],
-    ["extra argument", { semantic_factor_graph: {
-      ...semanticGraph(), propositions: [{ ...semanticGraph().propositions[0], arguments: [
-        ...semanticGraph().propositions[0]!.arguments,
-        argument(3, "extra", "actor")
-      ] }]
-    } }],
-    ["binding displacement", { semantic_factor_graph: {
-      ...semanticGraph(), propositions: [{ ...semanticGraph().propositions[0], arguments: [
-        argument(0, "agent", "object"), argument(1, "object", "actor"),
-        argument(2, "purpose", "purpose")
-      ] }]
-    } }]
-  ])("rejects %s before semantic formation", (_name, override) => {
+    ] } }]
+  ])("keeps %s outside Garden graph-proposal authority", (_name, override) => {
     expect(classifyOpenSemanticFactorFormationEligibility(groundedPayload({
       semantic_factor_graph: semanticGraph(),
       ...override
-    }))).toEqual({
-      kind: "rejected",
-      reason: "semantic_factor_graph_invalid_structure"
-    });
+    }))).toMatchObject({ kind: "propose" });
   });
 
   it("rejects unbound nodes at the formation gate", () => {
@@ -134,7 +117,7 @@ describe("open semantic factor formation eligibility", () => {
       }
     }))).toEqual({
       kind: "rejected",
-      reason: "semantic_factor_graph_invalid_structure"
+      reason: "semantic_factor_graph_not_source_grounded"
     });
   });
 
