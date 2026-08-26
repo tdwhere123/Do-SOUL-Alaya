@@ -10,6 +10,7 @@ import {
   PATH_PLASTICITY_TASK_DEFAULTS,
   resolvePathPlasticitySinceIso,
   resolvePathPlasticityUntilIso,
+  runPathPlasticityWithinBudget,
   type PathPlasticityComputePort,
   type PathPlasticityComputeResult,
   type PathPlasticityPendingPort
@@ -245,3 +246,31 @@ describe("Librarian.path_plasticity_update", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 });
+
+describe("runPathPlasticityWithinBudget", () => {
+  it("does not raise an unhandledRejection when the abandoned operation rejects after timeout", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      let rejectLate: (reason: unknown) => void = () => {};
+      const work = (): Promise<never> =>
+        new Promise<never>((_resolve, reject) => {
+          rejectLate = reject;
+        });
+
+      await expect(runPathPlasticityWithinBudget(
+        () => work(),
+        10,
+        "path_plasticity_update"
+      )).rejects.toThrow(/timed out after 10ms/);
+
+      rejectLate(new Error("late plasticity failure"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+});
+

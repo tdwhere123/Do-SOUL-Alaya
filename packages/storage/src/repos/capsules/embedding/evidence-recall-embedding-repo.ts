@@ -1,6 +1,7 @@
 import { OWNER_GIST_SEMANTIC_DOCUMENT_IDENTITY } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
+import { parseJsonColumn } from "../../shared/parse-json-column.js";
 import {
   decodeValidEmbeddingBlob,
   encodeEmbeddingBlob,
@@ -89,6 +90,7 @@ export class SqliteEvidenceRecallEmbeddingRepo {
       ];
       return Object.freeze(rows.map(parseSource).sort(compareSources));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list evidence embedding sources for workspace ${workspaceId}.`,
@@ -225,12 +227,11 @@ function upsertArgs(record: Readonly<EvidenceRecallEmbeddingRecord>) {
 
 function parseArtifactRef(physicalAnchor: string | null): string | null {
   if (physicalAnchor === null) return null;
-  try {
-    const parsed = JSON.parse(physicalAnchor) as { readonly artifact_ref?: unknown };
-    return nullableNonEmpty(parsed.artifact_ref);
-  } catch {
+  const parsed = parseJsonColumn(physicalAnchor, "physical_anchor");
+  if (typeof parsed !== "object" || parsed === null) {
     return null;
   }
+  return nullableNonEmpty((parsed as { readonly artifact_ref?: unknown }).artifact_ref);
 }
 
 function parseDocumentRole(value: string): "evidence_document" {

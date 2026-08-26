@@ -3,6 +3,7 @@ import {
   type OpenSemanticFactorGraph
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { parseNullableJsonColumn } from "../shared/parse-json-column.js";
 
 export interface StoredObjectKeyEvidenceSource {
   readonly object_id: string;
@@ -92,10 +93,5 @@ function uniqueIds(ids: readonly string[]): readonly string[] {
 }
 
 function parseGraphJson(value: string | null): unknown {
-  if (value === null) return null;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return null;
-  }
+  return parseNullableJsonColumn(value, "graph_json");
 }

@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 
 export interface StoredRecallRoutingKeyProjection {
   readonly owner_id: string;
@@ -56,6 +57,7 @@ export class SqliteRecallRoutingKeyProjectionRepo {
       ) as ProjectionRow[];
       return Object.freeze(rows.map(projectRow));
     } catch (error) {
+      if (error instanceof StorageError) throw error;
       throw new StorageError(
         "QUERY_FAILED",
         "Failed to rebuild recall routing key projections.",
@@ -66,11 +68,11 @@ export class SqliteRecallRoutingKeyProjectionRepo {
 }
 
 function projectRow(row: ProjectionRow): Readonly<StoredRecallRoutingKeyProjection> {
-  const payload = readRecord(row.raw_payload_json);
+  const payload = readRecord(row.raw_payload_json, "raw_payload_json");
   const grounding = readNestedRecord(payload, "source_grounding");
   const preference = readNestedRecord(grounding, "proposed_preference_profile");
   const temporal = readNestedRecord(payload, "temporal_projection");
-  const observation = readRecord(row.source_observation_json);
+  const observation = readRecord(row.source_observation_json, "source_observation_json");
   return Object.freeze({
     owner_id: row.owner_id,
     owner_kind: row.owner_kind,
@@ -97,14 +99,13 @@ function projectRow(row: ProjectionRow): Readonly<StoredRecallRoutingKeyProjecti
   });
 }
 
-function readRecord(value: string | null): Readonly<Record<string, unknown>> {
+function readRecord(value: string | null, fieldName: string): Readonly<Record<string, unknown>> {
   if (!hasText(value)) return Object.freeze({});
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return isRecord(parsed) ? parsed : Object.freeze({});
-  } catch {
-    return Object.freeze({});
+  const parsed = parseJsonColumn(value, fieldName);
+  if (!isRecord(parsed)) {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${fieldName} JSON.`);
   }
+  return parsed;
 }
 
 function readNestedRecord(
@@ -131,21 +132,13 @@ function resolveIndependenceGroup(
 ): string {
   const sourceEventId = readText(observation.source_event_id);
   if (sourceEventId !== null) return `source-event:${sourceEventId}`;
-  const evidenceRef = readTextArray(readJson(row.evidence_refs_json))[0];
+  const evidenceRef = readTextArray(parseJsonColumn(row.evidence_refs_json, "evidence_refs_json"))[0];
   if (evidenceRef !== undefined) return `evidence:${evidenceRef}`;
   const locator = payload.source_locator;
   if (isRecord(locator)) {
     return `source-locator:${row.run_id}:${stableJson(locator)}`;
   }
   return `signal:${row.signal_id}`;
-}
-
-function readJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function stableJson(value: Readonly<Record<string, unknown>>): string {

@@ -1,4 +1,6 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { StorageError } from "../../shared/errors.js";
+import { parseJsonColumn } from "../shared/parse-json-column.js";
 import {
   readObjectKeyEvidenceSources,
   type StoredObjectKeyEvidenceSource
@@ -98,14 +100,11 @@ function groupEvidenceIds(
 
 function parseEvidenceRefJson(value: string | null): readonly string[] {
   if (value === null || value.length === 0) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0)
-      : [];
-  } catch {
-    return [];
+  const parsed = parseJsonColumn(value, "evidence_refs");
+  if (!Array.isArray(parsed)) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate evidence_refs JSON.");
   }
+  return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function uniqueRefs(...groups: readonly (readonly string[])[]): readonly string[] {

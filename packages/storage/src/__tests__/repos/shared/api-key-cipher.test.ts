@@ -71,9 +71,6 @@ describe("api-key-cipher", () => {
   });
 
   it.runIf(hostLinuxMachineId !== null)("reads Linux machine-id when present", () => {
-    vi.stubEnv("VITEST", "");
-    vi.stubEnv("NODE_ENV", "production");
-
     const encrypted = encryptApiKeyAtRest("sk-live-secret-value");
     if (hostLinuxMachineId === null) throw new Error("Linux machine-id fixture is unavailable");
     __setApiKeyCipherKeyMaterialForTests(
@@ -84,8 +81,6 @@ describe("api-key-cipher", () => {
   });
 
   it("creates a durable machine-key-id when platform ids are missing", () => {
-    vi.stubEnv("VITEST", "");
-    vi.stubEnv("NODE_ENV", "production");
     __setPlatformMachineIdForTests(null);
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-machine-key-"));
     temporaryRoots.push(temporaryRoot);

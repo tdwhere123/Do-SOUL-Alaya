@@ -183,7 +183,9 @@ export function rollbackTemporalProjection(
 export function assertLegacyPathRelationWriteAllowed(database: SqliteConnection): void {
   if (!hasTemporalSelectionSchema(database)) return;
   const state = readTemporalSelectionState(database);
-  if (!state.selected) return;
+  // Fresh bootstrap stays writable. Mixed mode — candidate required or already
+  // selected — cannot keep mutating path_relations.
+  if (!state.selected && !state.selectionRequired) return;
   throw new StorageError("CONFLICT", LEGACY_PATH_RELATION_WRITE_BLOCK_MESSAGE);
 }
 

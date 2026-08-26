@@ -1,4 +1,5 @@
 import { StorageError } from "../../shared/errors.js";
+import { parseJsonColumn } from "./parse-json-column.js";
 import { parseNonEmptyString } from "./validators.js";
 
 export interface RowParser<T> {
@@ -137,11 +138,7 @@ export function readJsonColumn(record: Record<string, unknown>, field: string): 
   if (typeof value !== "string") {
     throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
   }
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", `Failed to parse ${field} JSON.`, error);
-  }
+  return parseJsonColumn(value, field);
 }
 
 export function readNullableJsonColumn(record: Record<string, unknown>, field: string): unknown {

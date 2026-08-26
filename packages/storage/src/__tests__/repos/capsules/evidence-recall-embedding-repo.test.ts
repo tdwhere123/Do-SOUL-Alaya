@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { StorageError } from "../../../shared/errors.js";
 import {
   RunMode,
   RunState,
@@ -48,6 +49,19 @@ describe("evidence recall embedding storage", () => {
         content: "Whole turn."
       })
     ]);
+  });
+
+  it("throws VALIDATION_FAILED when a stored physical_anchor is corrupt JSON", async () => {
+    const { database, repo } = await createFixture();
+    seedEvidence(database);
+    database.connection.prepare(
+      "UPDATE evidence_capsules SET physical_anchor = ? WHERE object_id = ?"
+    ).run("{not-json", "evidence-1");
+
+    await expect(repo.listSourcesByWorkspace("workspace-1")).rejects.toThrow(StorageError);
+    await expect(repo.listSourcesByWorkspace("workspace-1")).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
   });
 
   it("loads only exact content and model identities and replaces stale content in place", async () => {
